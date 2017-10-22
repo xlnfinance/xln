@@ -1,0 +1,53 @@
+<html><body>
+
+<script>
+//FYI sandbox="allow-scripts allow-modals" won't bypass it btw
+
+var wframe=false;
+var smoothOrigin = 'http://127.0.0.1:8084'
+wframe=document.createElement('iframe');
+wframe.style.display = 'none'
+wframe.src=smoothOrigin+'/smooth.html'
+document.body.appendChild(wframe)
+
+wpay = function(amount, recipient, invoice, cb){
+  window.addEventListener('message', function listener(e){
+    window.removeEventListener('message', listener)
+    if(e.origin == smoothOrigin){
+      cb(JSON.parse(e.data))
+    }
+  })
+
+  wframe.contentWindow.postMessage({
+    method: 'pay',
+    params: {
+      amount: amount,
+      recipient: recipient,
+      invoice: invoice
+    }
+  }, smoothOrigin)
+}
+
+
+window.onload = function(){
+  donat.onclick = function(){
+    invoice = 'd33db33f'
+    merchant = '@homakov'
+    wpay(100, merchant, invoice, function(data){
+      if(data.status == 'paid'){
+        donat.style['background-color'] = 'gold'
+        setTimeout(()=>{
+          donat.style['background-color'] = ''
+        },500)
+      }
+    })
+  }
+}
+</script>
+
+
+<div id="zone">
+  Some good post. <button id="donat">‎₩</button>
+</div>
+
+</body></html>
