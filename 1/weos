@@ -1,0 +1,3 @@
+# !./node-v8.9.0-darwin-x64/bin/node
+echo "Welcome!";
+node-v8.9.0-darwin-x64/bin/node u.js
