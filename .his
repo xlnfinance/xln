@@ -1,0 +1,517 @@
+//require('repl').start({useGlobal: true})
+// debug REPL .load u.js
+replInstance.eval = myEval //.bind(this);
+*/
+})
+  Me: Me
+Object.assign(replInstance.context, {
+/*
+const _eval = replInstance.eval;
+const replInstance = repl.start({ prompt: '> ' });
+}
+  _eval(preprocess(cmd), context, filename, callback);
+function myEval(cmd, context, filename, callback) {
+}
+  return input;
+  }
+    input = `${asyncWrapper(match[2], match[1])}`;
+  if (match) {
+  const match = input.match(awaitMatcher);
+  // match & transform
+  };
+    return `(function(){ async function _wrap() { return ${assign}${code} } return _wrap();})()`;
+    let assign = binder ? `global.${binder} = ` : '';
+  const asyncWrapper = (code, binder) => {
+  const awaitMatcher = /^(?:\s*(?:(?:let|var|const)\s)?\s*([^=]+)=\s*|^\s*)(await\s[\s\S]*)/;
+function preprocess(input) {
+const babel = require('babel-core');
+const repl = require('repl');
+*/
+});
+  console.log('Set up DNS so .we are served from /apps folder')
+DNSserver.bind(53,'127.0.0.1',function(){
+});
+  }
+    console.log("unknown type ",d)
+  }else{
+    })
+      if(err) console.log(err);
+    DNSserver.send(encoded, 0, encoded.length, rinfo.port, rinfo.address, function (err, bytes) {
+    }, 'answerMessage');
+          }]
+                  rdata:  { target: '127.0.0.1', _type: 'A' }
+                  rttl:   300,
+                  rclass: 1,
+                  rtype:  1,
+                  name:   name,
+            answers: [{
+            question: d.val.question,
+            header: d.val.header,
+    var encoded = protocol.encode({
+    console.log('WeDNS: '+name+' from ' + rinfo.address +':' + rinfo.port);
+//target: '::1', _type: 'AAAA'
+    d.val.header.anCount=1
+    d.val.header.flags.qr=1
+  if(name.endsWith('.we') && (qtype == 1 || qtype == 28)){
+console.log(name)
+  var qtype = d.val.question.type
+  var name = d.val.question.name
+  var d = protocol.decode(buffer, 'queryMessage')
+DNSserver.on('message', function(buffer, rinfo) {
+var DNSserver = require('dgram').createSocket('udp4');
+var protocol = require('./protocol');
+.we domains will be supported later
+/*
+main()
+}
+  initDashboard()
+  me.coordinators = JSON.parse(json)
+  var json = await K.coordinators
+  me = new Me('u'+chosen, 'password')
+  chosen = process.argv[2] ? parseInt(process.argv[2]) : 1
+async function main(){
+}
+  })
+    }, 7000)
+      K.coordinators = JSON.stringify(coords)
+      K.usable_blocks = 0
+      K.total_blocks = 0
+      }
+        })
+          balance: wed(1000)
+          nonce: 0,
+          username: "u"+i,
+          pubkey: Buffer.from(u[i].id.publicKey),
+        User.create({
+        coords.push(bin(u[i].id.publicKey).toString('hex'))
+      for(var i = 0; i< 100;i++){
+      var coords = []
+    setTimeout(a=>{
+    st = new Date(0)
+    }
+      u[i] = new Me("u"+i,'password')
+    for(var i = 0; i< 100;i++){
+    var u = []
+  sequelize.sync({force: true}).then(a =>{
+genesis = a=>{
+// setup init data
+})
+  }
+    return await db.put(name,val)
+  set: async function(target, name, val){
+  },
+    return result
+    }catch(e){return false }
+      var result = await db.get(name)
+    try{
+  get: async function(target, name) {
+K = new Proxy(K, {
+K = []
+db = require('level')('./dblevel')
+User.belongsToMany(Proposal, {through: Vote, as: 'voter'});
+}, opts)
+  kindof: Sequelize.CHAR(1) // approval, denial etc
+  extra: Sequelize.TEXT,
+Vote = sequelize.define('vote', {
+User.belongsToMany(User, {through: Channel, as: 'hub'});
+//me.record.addHub(x, { through: { type: 'channel' }});
+//release on X usable blocks
+}, opts)
+// dispute has last nonce, last agreed_balance
+  kindof: Sequelize.CHAR(1).BINARY
+  settled: Sequelize.BIGINT, // what hub already collateralized
+  balance: Sequelize.BIGINT, // collateral
+  nonce: Sequelize.INTEGER, // for instant withdrawals
+Channel = sequelize.define('channel', {
+}, opts)
+  description: Sequelize.TEXT
+  title: Sequelize.STRING,
+Proposal = sequelize.define('proposal', {
+}, opts);
+  policy: Sequelize.TEXT
+  balance: Sequelize.BIGINT, // mostly to pay taxes
+  nonce: Sequelize.INTEGER,
+  pubkey: Sequelize.CHAR(32).BINARY,
+  username: Sequelize.STRING,
+User = sequelize.define('user', {
+// 2) complementary stats like updatedAt that's useful in exploring and can be deleted safely
+// two kinds of storage: 1) critical database that might be used by code
+}
+  timestamps: false
+opts = {
+});
+  storage: 'db.sqlite'
+  dialect: 'sqlite',
+  timestamps: false,
+sequelize = new Sequelize('database', 'username', 'password', {
+Op = Sequelize.Op;
+Sequelize = require('sequelize');
+// define db
+}
+  return pk;
+  l(`Derived ${pk.toString('hex')} for ${username}:${pw}`)
+  }, 32, username)
+    encoding: 'base64'
+    dkLen: 32,
+    r: 8,
+    p: 1,
+    interruptStep: 1000,
+    N: Math.pow(2, 12),
+  var pk = await require('scrypt').hash(pw, {
+async function derive(username, pw){
+}
+  return ['127.0.0.1', '::ffff:127.0.0.1', '::1'].indexOf(ip) != -1 || ip.indexOf('::ffff:127.0.0.1:') == 0
+isLocalhost=(ip)=>{
+}
+  });
+    }
+      });
+        }
+          }
+            ws.send(JSON.stringify(json))
+            json.confirmation = true
+            // request explicit confirmation
+          }else{
+            }))
+              status: 'paid'
+            ws.send(JSON.stringify({
+            originAllowence[json.proxyOrigin] -= json.params.amount
+            //me.pay('')
+          if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
+          // some Origins are whitelisted for Smooth Payments
+        if(json.method == 'pay'){
+        json = JSON.parse(msg)
+      ws.on('message', msg=>{
+    if(req.headers.origin == 'http://127.0.0.1:8084' && isLocalhost(req.connection.remoteAddress)){
+    // Origin = our proxy, and initiated by this device
+  wss.on('connection', function(ws,req) {
+  console.log('Set up websocket server to accepts commands')
+  var wss = new WebSocket.Server({ port: 8085 });
+  server.listen(8080);
+  console.log('Set up HTTP server at 8080')
+  });
+    //res.setHeader('Content-Type', 'text/html');
+    //res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+      serveStatic("./apps/gov")(req, res, finalhandler(req, res));
+    }else{
+      serveStatic("./apps/"+app_name[1])(req, res, finalhandler(req, res));
+      console.log("serving ./apps/"+app_name[1]);
+    if(app_name){
+    var app_name = req.headers.host.match(/([a-z]+)\.we(:[0-9]+)?/)
+    console.log(req.headers)
+    res.statusCode = 200;
+  var server = http.createServer(function(req, res) {
+  // this serves dashboard HTML page
+  var serveStatic = require('serve-static');
+  var finalhandler = require('finalhandler');
+  initDashboard=a=>{
+}
+  'null': 400
+originAllowence = {
+}
+  })
+    console.log(shasum.digest('hex'))
+  s.on('end', function() {
+  })
+    shasum.update(data)
+  s.on('data', function(data) {
+  s = fs.ReadStream('./db.sqlite')
+  shasum = crypto.createHash('sha256')
+getRootOfTrust=a=>{
+}
+  }
+  getCurrentCoodinator(){
+  }
+    });
+      //now process each tx in block
+      }
+        }
+          return false
+        if(missed_sigs>10){
+        }
+          return false
+          l(`invalid signature for given block. Halt!`)
+        }else{
+          valid_sigs++
+        }else if(nacl.sign.detached.verify(payload, sig, signer.pubkey)){
+          missed_sigs++
+        if(sig == placeholder){
+        var coord_pubkey = list[i]
+        var sig = (block.slice(i * 64, (i+1) * 64))
+      for(var i = 0;i<list.length;i++){
+      var valid_sigs = 0
+      var missed_sigs = 0
+      var placeholder = Buffer.alloc(64,0)
+      // sanctum
+      // if some sig is missing it should be using placeholder
+      var tx_list = block.slice(list.length * 64, block.length)
+      var threshold = list.length / 3
+      var list = this.coordinators
+      // processBlockTx
+    this.nearest.on('message', function(block) {
+    this.nearest.on('open', onopen);
+    this.nearest.on('error', l) // repeat
+    this.nearest = new WebSocket('ws://127.0.0.1:8081');
+    }
+      return true
+    if(this.nearest && this.nearest.readyState == this.nearest.OPEN){
+    // connecting to geo-selected nearest coordinator (lowest latency)
+  findNearest(onopen){
+  }
+    })
+    initService(8082, function(ws, tx){
+  initHub(){
+  }
+    });
+      });
+        }
+          // 3. if not us pass to expected coordinator
+        }else{
+          me.processTx(tx)
+        if(current_coordinator == this.id.publicKey){
+        // 2. is it us?
+        var current_coordinator = fromHex(this.coordinators[Math.floor(ts() / period) % spirits_number])
+        var period = 20
+        var spirits_number = 3
+        // 1. figure out who is current coordinator
+      ws.on('message', tx=>{
+    wss.on('connection', function(ws) {
+    var wss = new WebSocket.Server({ port: 8081 });
+  initCoordinator(){
+  // hubs, run by architects - highly trusted as compromises are painful, high performance
+  // coordinators, run by oracles - moderately trusted, average performance
+  // users - not trusted at all
+  */
+  Now all must be Coordinators as well to maintain the security of the network
+  all Services must be end-to-end encrypted whenever possible
+  message boards, App backends, etc.
+  Box storage (stores WeOS boxes for a fee)
+  Hub (faciliating mediated transfer with delayed settlement)
+  Coordinator (blockchain gatekeepers, they build and share blocks with others)
+  Services are centralized servers that do some job for the network. Most common:
+  There are different types of WeOS Services.
+  /*
+  }
+    return tx;
+    l(`Broadcasting ${tx} to nearest`)
+    this.nearest.send(tx)
+    await me.findNearest()
+    var tx = this.sign(write32(me.record.nonce), concat(write32(methodId), args))
+    // first is omitted parts, second is required
+    me.record = await this.byKey()
+    }
+      case 'vote':
+        args = bin(args)
+      case 'addProposal':
+      case 'settle':
+    switch(method){
+    assert(methodId != -1, "No such method")
+    var methodId = methodMap.indexOf(method)
+  async broadcast(method, args){
+  }
+    return wallet
+    wallet.save()
+    wallet.balance += amount
+    }
+      var wallet = await this.getChannel(userId, hubId)
+    }else{
+      })
+        }
+          balance: 0
+          nonce: 0,
+        defaults: {
+        where: {id: userId},
+      var wallet = await User.findOrBuild({
+    if(hubId == 0){
+  async addBalance(userId, hubId, amount){
+    }
+      ), write32(amount))
+        write32(recipient_id) // hub id
+        write32(methodMap.indexOf('withdraw')),
+        write32(ch.nonce),
+      return me.sign(concat(
+      assert(amount <= ch.balance, "Not enough money in channel")
+      var ch = await me.getChannel(me.record.id, recipient_id)
+    async pay(recipient_id, hub_ids, amount){
+    // masked_id will be added later
+    }
+      return ch[0]
+      })
+        include: { all: true }
+        },
+          settled: 0
+          balance: 0,
+          nonce: 0,
+        defaults:{
+        },
+          kindof: 0
+          hubId: hub_id,
+          userId: user_id,
+        where: {
+      var ch = await Channel.findOrBuild({
+    async getChannel(user_id, hub_id){
+    }
+      }
+        break
+        var amount = args.slice(8, 12).readUInt32BE()
+        var hubId = args.slice(4, 8).readUInt32BE()
+        var userId = args.slice(0, 4).readUInt32BE()
+      case 'addBalance':
+        break
+        signer.save()
+        }
+          ch.save()
+          }
+            ch.settled += amount
+            // hubs increase how much they settled, users don't
+          if(is_hub){
+          ch.balance += amount
+          var ch = await this.getChannel(output_id, hub_id)
+          assert(signer.balance >= output_amount, 'Not enough funds to fill this output')
+          assert((hub_id != 0 || output_id != id), 'No need to explicitly set your node id')
+          var output_amount = args.slice(start, start+=4).readUInt32BE()
+          var hub_id = is_hub ? id : args.slice(start, start+=4).readUInt32BE()
+          // settle is relative and uses current hub. settleUser is absolute
+          var output_id = args.slice(start, start+=4).readUInt32BE()
+        for(var i = 0;i<outputs_num;i++){
+        var outputs_num = args[start]
+        var start = 2+i*input_len
+        // 3. pay to outputs
+        // 2. are there unsettled channels?
+        }
+          await input_ch.save()
+          signer.balance += amount
+          // adding everything to the signer first
+          input_ch.balance -= amount
+          input_ch.nonce += 1
+          assert(input_ch.balance >= amount)
+          amount = amount.readUInt32BE()
+          assert(nacl.sign.detached.verify(input_payload, input.slice(4, 68), input_user.pubkey), "Invalid signature")
+          )
+            amount
+            write32(id), // was it intended to current hub?
+            write32(methodMap.indexOf('withdraw')),
+            write32(input_ch.nonce),
+          var input_payload = concat(
+          var amount = input.slice(68,72)
+          var input_user = await User.findById(input_id)
+          // getting user who signed this input
+          })
+            include: {all: true}
+            },
+              kindof: 0
+              hubId: is_hub ? id : input_id,
+              userId: is_hub ? input_id : id,
+            where: {
+          var input_ch = await Channel.find({
+          var input_id = input.slice(0, 4).readUInt32BE()
+          // you can't withdraw  from non existant channel
+          var input = tx.slice(start, start+input_len)
+          var start = 1+i*input_len
+          // get withdrawal tx
+        for(var i=0;i<args[0];i++){
+        var is_hub = (method == 'settle') ? true : false
+        var start = 1
+        var input_len = 76 // id sig amount
+        // 1. collect all inputs from the channels to this node
+      case 'settleUser':
+      case 'settle':
+      // settle uses relative user_id, settleUser uses absolute hub_id
+      // we use fall-through for methods covered by same code
+        })
+          cron: K.usable_blocks + 100
+          description: toUTF(args),
+        var new_proposal = await Proposal.create({
+      case 'addProposal':
+    switch(method){
+    var method = methodMap[methodId]
+    signer.save()
+    signer.nonce += 1
+    signer.balance -= tax
+    // Validation is over, fee is ours
+    assert(nacl.sign.detached.verify(payload, sig, signer.pubkey), "Invalid signature")
+    var payload = concat(write32(signer.nonce), write32(methodId), args)
+    // we prepend omitted vars to not bloat tx size
+    assert([3].indexOf(methodId) == -1, 'This method is reserved for offchain')
+    assert(methodMap.hasOwnProperty(methodId), 'No such method exposed onchain')
+    assert(signer.balance >= tax, "Not enough balance to cover tx fee")
+    // storage tax is consumed both monthly and
+    // gas tax is for consuming computational resources (optional)
+    var tax = Math.round(0.5 * tx.length)
+    // that seems fair price for bugging the whole world about your tx
+    // btc in 2017 fee is 0.5 cents per byte
+    // size tax is for consuming bandwidth (all tx)
+    // total tax is a sum of
+    var signer = await User.findById(id)
+    var {id, sig, methodId, args} = me.parseTx(tx);
+  async processTx(tx) {
+  }
+    }
+      args: tx.slice(72, tx.length)
+      methodId: tx.slice(68, 72).readUInt32BE(),
+      sig: tx.slice(4, 68),
+      id: tx.slice(0, 4).readUInt32BE(),
+    return {
+    l(`parsing ${tx.length}`)
+  parseTx(tx){
+  }
+    return concat(write32(this.record.id), sig, payload)
+    // return detached id sig
+    // get id for my pubkey and store as big endian in a buffer
+    var sig = nacl.sign.detached(concat(omitted_buf, payload), this.id.secretKey);
+  sign(omitted_buf, payload) {
+  }
+    })
+      where: { pubkey: bin(pk) }
+    return await User.findOne({
+    if(!pk) pk = this.id.publicKey
+  async byKey(pk){
+  }
+    })
+      me.byKey().then(r => me.record = r)
+      // setting current user
+      this.seed = seed;
+      this.id = nacl.sign.keyPair.fromSeed(seed)
+    derive(username,pw).then(seed => {
+    this.pw = E.sha3(pw) // we only store checksum for doublechecks
+    this.username = username
+  constructor(username, pw) {
+class Me {
+]
+'vote'
+'addProposal',
+'withdraw',
+'eval',
+'settleUser',
+'settle',
+methodMap = [
+}
+  return b
+  b.writeUInt32BE(int)
+  var b = Buffer.alloc(4)
+write32 = (int) => {
+}
+  return Buffer.concat(Object.values(arguments));
+concat = function() {
+odd = int => int % 2 == 1;
+fromHex = hex => new Buffer(hex, "hex");
+toUTF = (inp) => Buffer.from(inp).toString()
+wed = d => d * 100 // We dollars to cents
+ts = () => Math.round(new Date/1000)
+bin=(data)=>Buffer.from(data)
+toHex = (inp) => Buffer.from(inp).toString('hex')
+l = console.log
+RLP = require('rlp'); // for future use
+BN = require('bn.js')
+nacl = require('tweetnacl')
+http = require("http");
+request = require("request");
+fs = require("fs");
+WebSocket = require("ws");
+crypto = require("crypto");
+assert = require("assert");
+E = require("ethereumjs-util");
+secp256k1 = require("secp256k1");
+.load u.js
+.load u

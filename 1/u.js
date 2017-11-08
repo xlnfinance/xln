@@ -13,8 +13,12 @@ nacl = require('tweetnacl')
 Sequelize = require('sequelize');
 Op = Sequelize.Op;
 
-wenet_port = 8000
 blocksize = 1048576
+supermajority = 1
+
+base_port = 8000 + (parseInt(process.argv[2] ? process.argv[2] : 1) * 10)
+
+egor = '128.199.242.161'
 
 l = console.log
 toHex = (inp) => Buffer.from(inp).toString('hex')
@@ -163,10 +167,10 @@ class Me {
 
 
 
-    var block_number = await K.total_blocks
+    var block_number = K.total_blocks
     block_number++
-    //await (K.total_blocks = block_number)
-    var prev_hash = await K.prev_hash
+
+    var prev_hash = K.prev_hash
     // block has current height, hash of prev block , ts()
 
     me.precommit = E.rlp.encode([
@@ -250,10 +254,10 @@ class Me {
     switch(method){
       case 'proposeCoordinator':
       case 'proposeHub':
-      case 'proposeDiff':
+      case 'proposePatch':
       case 'proposeCommand':
       case 'addProposal':
-        var execute_on = await K.usable_blocks + 60*24
+        var execute_on = K.usable_blocks + 3 //60*24
         var new_proposal = await Proposal.create({
           change: toUTF(args),
           cron: execute_on
@@ -448,6 +452,15 @@ class Me {
 
         break
       case 'addProposal':
+      case 'proposePatch':
+      /*
+      //1. informal approval - submit a pull request on github to /weos/weos
+      //2. formal approval (one at a time) - create new dir
+      mkdir storage_tax; cp 1/*js $_
+      // make changes, write tests, run tests
+      diff -crB 1 storage_tax
+      patch -p1 -i filename
+*/
         args = bin(args)
         break
 
@@ -551,8 +564,8 @@ class Me {
   // or a new tx from anyone to be added to block or passed to current coordinator
   async processInput(ws, tx){
     // sanity checks 100kb
-    if(tx.length > 100000 || tx.length < 10){
-      l(`invalid input ${tx}`)
+    if(tx.length > 100000){
+      l(`too long input ${(tx).length}`)
       return false
     }
 
@@ -564,6 +577,8 @@ class Me {
     var inputType = inputMap(tx[0])
 
     tx = tx.slice(1)
+
+    l(inputType)
 
 
     if(inputType == 'auth' &&
@@ -660,27 +675,25 @@ class Me {
     var finalblock = block.slice(me.coordinators.length * 64)
 
     l(`Processing a new block, length ${block.length}`)
-
-    var missed_sigs = 0
-    var valid_sigs = 0
+    var total_spirits = 0
 
     for(var i = 0;i<me.coordinators.length;i++){
       var sig = (block.slice(i * 64, (i+1) * 64))
 
       if(sig.equals(Buffer.alloc(64))){
-        missed_sigs++
+
       }else if(nacl.sign.detached.verify(finalblock, sig, me.coordinators[i].pubkey)){
-        valid_sigs++
+        total_spirits += me.coordinators[i].spirits
       }else{
         l(`Invalid signature for a given block. Halt!`)
-        return false
+        //return false
       }
 
 
     }
 
-    if(valid_sigs < 4){
-      l("Not enough valid sigs on a block")
+    if(total_spirits < supermajority){
+      l("Not enough spirits on a block")
       return false
     }
 
@@ -698,42 +711,56 @@ class Me {
 
     assert(methodId == 'block', 'Wrong method for block')
 
-    var expected_prev_hash = (await K.prev_hash)
-    assert(expected_prev_hash == prev_hash, "Must be based on "+expected_prev_hash+' but is using '+prev_hash)
+    assert(K.prev_hash == prev_hash, "Must be based on "+K.prev_hash+' but is using '+prev_hash)
 
-    var new_hash = toHex(E.sha3(finalblock))
-    K.prev_hash = new_hash
+    K.prev_hash = toHex(E.sha3(finalblock))
+    l(`Processed ${block_number} (before ${K.total_blocks}) hash ${K.prev_hash}. Timestamp ${timestamp} Total spirits: ${total_spirits}, tx to process: ${ordered_tx.length}`)
 
-    var expected_block = (await K.total_blocks) + 1
-
-    l(`Processing ${block_number} (${expected_block}) hash ${new_hash}. Timestamp ${timestamp} Valid: ${valid_sigs}, missed: ${missed_sigs}, tx to process: ${ordered_tx.length}`)
-
-    await (K.total_blocks = block_number)
+    K.total_blocks++
 
     if(finalblock.length < blocksize-1000){
-      var usable_blocks = await K.usable_blocks
-      await (K.usable_blocks = usable_blocks+1)
+      K.usable_blocks++
     }
-
-
-
 
     for(var i = 0;i<ordered_tx.length;i++){
       await me.processTx(ordered_tx[i])
     }
 
-    // save final block in blockchain db
-    Block.create({
-      prev_hash: Buffer.from(expected_prev_hash, 'hex'),
-      hash: E.sha3(finalblock),
-      block: block
-    })
+    l("Processing cron and delayed jobs")
 
-    var blocktx = concat(inputMap('block'), block)
-    // send finalblock to all websocket users if we're coordinator
-    if(me.external_wss){
-      me.external_wss.users.forEach(client=>client.send(blocktx))
+    // do cron jobs and delayed tasks
+    var to_execute = Proposal.findAll({where: {
+      cron: K.usable_blocks
+    }})
+
+    // every ten blocks create new installer
+    if(K.total_blocks % 10 == 0){
+      trustlessInstall()
     }
+    if(K.total_blocks % 100 == 0){
+      // increase or decrease bandwidth tax per byte
+    }
+
+
+
+    saveJSON()
+
+    // save final block in blockchain db and broadcast
+    if(me.myCoordinator){
+      Block.create({
+        prev_hash: Buffer.from(K.prev_hash, 'hex'),
+        hash: E.sha3(finalblock),
+        block: block
+      })
+
+      var blocktx = concat(inputMap('block'), block)
+      // send finalblock to all websocket users if we're coordinator
+      if(me.external_wss){
+        me.external_wss.users.forEach(client=>client.send(blocktx))
+      }
+    }
+
+
 
 
   }
@@ -741,6 +768,14 @@ class Me {
 
 
   findNearest(tx){
+    if(me.myCoordinator){
+      // if we are coordinator, just send it to current
+      if(me.current && me.current.socket){
+        me.current.socket.send(tx)
+      }
+
+      return false
+    }
     // connecting to geo-selected nearest coordinator (lowest latency)
     if(me.nearest){
       if(tx) me.nearest.send(tx)
@@ -764,100 +799,29 @@ class Me {
 
 }
 
-/*
-
-
-tar --exclude=./private -zcf ../weos.tar.gz .
-
-shasum -a 256 weos.tar.gz
-
-mkdir u3 && tar -zxf weos.tar.gz -C ./u3
-
-shasum -b -a 256 data/db.sqlite
-
-
-cp u1
-
-
-  shasum = crypto.createHash('sha256')
-  s = fs.ReadStream('./data/db.sqlite')
-  s.on('data', function(data) {
-    shasum.update(data)
-  })
-  s.on('end', function() {
-    console.log(shasum.digest('hex'))
-  })
-
-*/
-
-var sys = require('sys')
-var exec = require('child_process').exec;
-var child;
-
-
 
 trustlessInstall = async a=>{
   tar = require('tar')
-  var blocks = await K.total_blocks
-  var filename = 'WeOS-'+blocks+'-'+me.username+'.tar.gz'
-
+  var filename = 'WeOS-'+K.total_blocks+'-'+me.username+'.tar.gz'
+  l("generating install "+filename)
   tar.c({
       gzip: true,
   		portable: true,
       file: '../'+filename,
       filter: (path,stat)=>{
-        if(['./data/db.leveldb/LOCK','./data/db.leveldb/LOG'].indexOf(path) != -1) return false;
-
+        stat.mtime = null
+        l(path)
+        // disable /private (blocks sqlite, proofs, local config) allow /default_private
+        if(path.match(/(\.DS_Store|private)$/)){
+          l('skipping')
+          return false;
+        }
         return true;
       }
     },
     ['.']
   ).then(_=>{
-    var sys = require('sys')
-    var exec = require('child_process').exec;
-    exec("shasum -a 256 ../"+filename, async (er,out,err)=>{
-      me.record = await me.byKey()
-      var out_hash = out.split(' ')[0]
-      var host = me.myCoordinator.location.split(':')[0]
-      var install_port = 1114
-      var out_location = 'http://'+host+':'+install_port+'/'+filename
-l(`
-# Compare the snippet with other sources, and if exact match paste into Terminal.app
-
-folder=2
-mkdir $folder && cd $folder;
-wget ${out_location}
-if shasum -a 256 ${filename} | grep ${out_hash}; then
-echo "Installing...";
-tar -xzf ${filename};
-node-v8.9.0-darwin-x64/bin/node u.js $folder
-fi`)
-      var serv = http.createServer(function (req, res) {
-        if(req.url != '/'+filename){
-          res.status(404)
-          res.end('None')
-          return false
-        }
-          var stat = fs.statSync('../'+filename);
-          res.writeHeader(200, {"Content-Length": stat.size});
-          var fReadStream = fs.createReadStream('../'+filename);
-          fReadStream.on('data', function (chunk) {
-             if(!res.write(chunk)){
-                 fReadStream.pause();
-             }
-         });
-         fReadStream.on('end', function () {
-            res.end();
-         });
-         res.on("drain", function () {
-            fReadStream.resume();
-         });
-      });
-
-      serv.listen(install_port);
-
-    });
-
+    l("Built CodeState "+filename)
   })
 
 }
@@ -940,7 +904,7 @@ initDashboard=a=>{
   var finalhandler = require('finalhandler');
   var serveStatic = require('serve-static');
 
-  var whitelist_hosts = ['127.0.0.1:'+wenet_port, '0.0.0.0:'+wenet_port]
+  var whitelist_hosts = ['127.0.0.1:'+(base_port+1), '0.0.0.0:'+(base_port+1)]
 
   // this serves dashboard HTML page
   var server = http.createServer(function(req, res) {
@@ -950,6 +914,10 @@ initDashboard=a=>{
     assert(whitelist_hosts.indexOf(req.headers.host)!=-1, 'DNS rebinding attack')
 
     res.statusCode = 200;
+
+
+
+
     var app_name = req.headers.host.match(/([a-z]+)\.we(:[0-9]+)?/)
     if(app_name){
       console.log("serving ./apps/"+app_name[1]);
@@ -962,16 +930,16 @@ initDashboard=a=>{
     //res.setHeader('Content-Type', 'text/html');
   });
 
-  console.log('Set up HTTP server at '+wenet_port)
-  server.listen(wenet_port);
+  console.log('Set up HTTP server at '+(base_port+1))
+  server.listen((base_port+1));
 
-  me.internal_wss = new WebSocket.Server({ port: 8084 });
+  me.internal_wss = new WebSocket.Server({ port: (base_port+3) });
   console.log('Set up websocket server to accepts local commands')
   me.internal_wss.on('connection', function(ws,req) {
     console.log('ws', req.headers)
     // Origin = our proxy, and initiated by this device
     assert(isLocalhost(req.connection.remoteAddress), 'Must be coming from localhost IP')
-    assert(req.headers.host == '127.0.0.1:8084', 'DNS rebinding attack')
+    assert(req.headers.host == '127.0.0.1:'+(base_port+3), 'DNS rebinding attack')
     assert(whitelist_hosts.indexOf(req.headers.origin)!=-1, 'DNS rebinding attack')
 
     ws.send('{"id":0}')
@@ -1016,7 +984,65 @@ initDashboard=a=>{
   });
 
 
-  require('./opn')('http://0.0.0.0:'+wenet_port)
+  var exec = require('child_process').exec;
+  var child;
+  installServer = http.createServer(function (req, res) {
+    l(req.url);
+
+    if(m = req.url.match(/^\/codestate\/([0-9]+)$/)){
+      var filename=`WeOS-${m[1]}-${me.username}.tar.gz`
+
+      require('child_process').exec("shasum -a 256 ../"+filename, async (er,out,err)=>{
+        if(out.length == 0){
+          res.end('This state doesnt exist')
+          return false
+        }
+
+        var out_hash = out.split(' ')[0]
+        var host = me.myCoordinator.location.split(':')[0]
+        var out_location = 'http://'+host+':'+(base_port+2)+'/'+filename
+        res.end(`
+      # Compare this snippet with other sources, and if exact match paste into Terminal.app
+
+      folder=2
+      mkdir $folder
+      cd $folder
+      wget ${out_location}
+      if shasum -a 256 ${filename} | grep ${out_hash}; then
+      tar -xzf ${filename}
+      rm ${filename}
+      node u.js $folder
+      fi`)
+      });
+    }else if(req.url.match(/^\/WeOS-([0-9]+)-(u[0-9]+)\.tar\.gz$/)){
+      var file = '..'+req.url
+      var stat = fs.statSync(file);
+      res.writeHeader(200, {"Content-Length": stat.size});
+      var fReadStream = fs.createReadStream(file);
+      fReadStream.on('data', function (chunk) {
+         if(!res.write(chunk)){
+             fReadStream.pause();
+         }
+     });
+     fReadStream.on('end', function () {
+        res.end();
+     });
+     res.on("drain", function () {
+        fReadStream.resume();
+     });
+   }else{
+     res.end('not found')
+   }
+  });
+
+  installServer.listen(base_port + 2);
+
+  //require('./opn')('http://0.0.0.0:'+(base_port+1))
+
+
+
+
+
 
 }
 
@@ -1046,7 +1072,7 @@ process.on('unhandledRejection', r => console.log(r))
 K = []
 
 main = async (username, login)=>{
-  // define db
+  // this is onchain database - shared among everybody
 
   sequelize = new Sequelize(username, username, 'password', {
     dialect: 'sqlite',
@@ -1054,7 +1080,7 @@ main = async (username, login)=>{
   });
 
 
-  //sequelize = new Sequelize('postgres://homakov:@localhost:5432/dbname');
+  //sequelize = new Sequelize('sqlite://homakov:@localhost:5432/data/db.sqlite');
 
   opts = {
     timestamps: false
@@ -1080,8 +1106,6 @@ main = async (username, login)=>{
     kindof: Sequelize.CHAR(1).BINARY
   }, opts)
 
-  Proposal.belongsTo(User);
-
   Channel = sequelize.define('channel', {
     nonce: Sequelize.INTEGER, // for instant withdrawals
     balance: Sequelize.BIGINT, // collateral
@@ -1093,22 +1117,35 @@ main = async (username, login)=>{
   }, opts)
 
   //me.record.addHub(x, { through: { type: 'channel' }});
-  User.belongsToMany(User, {through: Channel, as: 'hub'});
 
   Vote = sequelize.define('vote', {
     rationale: Sequelize.TEXT,
     approval: Sequelize.BOOLEAN // approval or denial
   }, opts)
 
-  User.belongsToMany(Proposal, {through: Vote, as: 'voter'});
+  Proposal.belongsTo(User);
+
+  User.belongsToMany(User, {through: Channel, as: 'hub'});
+
+  Proposal.belongsToMany(User, {through: Vote, as: 'voters'});
 
 
-  Block = sequelize.define('block', {
+  // this is off-chain private database for blocks and other balance proofs
+
+  offchain = new Sequelize(username, username, 'password', {
+    dialect: 'sqlite',
+    storage: 'private/db.sqlite'
+  });
+
+
+  Block = offchain.define('block', {
     block: Sequelize.CHAR.BINARY,
     hash: Sequelize.CHAR(32).BINARY,
     prev_hash: Sequelize.CHAR(32).BINARY
   }, opts)
 
+
+  /* not deterministic
 
   db = require('level')('data/db.leveldb')
 
@@ -1124,6 +1161,7 @@ main = async (username, login)=>{
       return await db.put(name, JSON.stringify(val))
     }
   })
+  */
 
 
   if(login){
@@ -1131,8 +1169,9 @@ main = async (username, login)=>{
     await me.init(username, 'password')
     me.record = await me.byKey()
 
-    me.coordinators = await K.coordinators
-
+    var json = fs.readFileSync('data/json')
+    K = JSON.parse(json)
+    me.coordinators = JSON.parse(json).coordinators // another object ref
 
     // in json pubkeys are in hex
     me.coordinators.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
@@ -1141,9 +1180,11 @@ main = async (username, login)=>{
     me.myCoordinator = me.coordinators.find(f=>me.id.publicKey.equals(f.pubkey))
 
 
-    var prev_hash = await K.prev_hash
-    me.findNearest(concat(inputMap('sync'), Buffer.from(prev_hash, 'hex')) )
+    var prev_hash = K.prev_hash
 
+    setTimeout(()=>{
+      me.findNearest(concat(inputMap('sync'), Buffer.from(prev_hash, 'hex')) )
+    }, 3000)
 
     // am I coordinator?
     if(me.myCoordinator){
@@ -1165,20 +1206,19 @@ main = async (username, login)=>{
         if(me.id.publicKey.equals(me.current.pubkey)){
           // do we have enough sig or it's time?
           var sigs = []
-          var missed = 0
+          var total_spirits = 0
           me.coordinators.map((c, index)=>{
             if(c.sig){
               sigs[index] = bin(c.sig)
+              total_spirits+=c.spirits
             }else{
               sigs[index] = Buffer.alloc(64)
-              missed++
             }
-            c.sig = false
           })
 
-          if(me.state == 'precommit' && (missed == 0 || now % period > 30)){
-            if(missed > 4){
-              l(`Missed ${missed} sigs, cannot build a block!`)
+          if(me.state == 'precommit' && (total_spirits > 20 || now % period > 30)){
+            if(total_spirits < supermajority){
+              l(`Only have ${total_spirits} spirits, cannot build a block!`)
             }else{
 
               var finalblock = concat(
@@ -1203,6 +1243,10 @@ main = async (username, login)=>{
             }
 
             me.state = 'commit'
+
+            // flush sigs
+
+            me.coordinators.map(c=>c.sig = false)
 
           }else if (me.state == 'await'){
             me.state = 'precommit'
@@ -1251,18 +1295,26 @@ genesis = async ()=>{
       coords.push({
         id: user.id,
         pubkey: bin(u[i].id.publicKey).toString('hex'),
-        location: '0.0.0.0:'+(8020+i),
-        missed_blocks: []
+        location: '0.0.0.0:'+(8000+(i*10)),
+        missed_blocks: [],
+        spirits: 10
       })
     }
+
     coords[0].is_hub = 1
+    coords[0].spirits = 100
+
+
   }
 
-  await (K.total_blocks = 0)
-  await (K.usable_blocks = 0)
-  await (K.prev_hash = toHex(Buffer.alloc(32)))
-  await (K.coordinators = coords)
+  K = {
+    total_blocks: 0,
+    usable_blocks: 0,
+    prev_hash: toHex(Buffer.alloc(32)),
+    coordinators: coords
+  }
 
+  saveJSON()
 
   for(var i = 2; i < 21;i++){
     //require("fs-extra").copy('./data/u1.leveldb', './data/u'+i+'.leveldb')
@@ -1271,7 +1323,9 @@ genesis = async ()=>{
 
 }
 
-
+saveJSON = ()=>{
+  fs.writeFile('data/json', require('./stringify')(K), _=>l('JSON saved'))
+}
 
 if(process.argv[2] == 'genesis'){
   genesis()
@@ -1279,6 +1333,7 @@ if(process.argv[2] == 'genesis'){
   var username = 'u' + (process.argv[2] ? parseInt(process.argv[2]) : 1)
   main(username, true)
 
+  initDashboard()
 
 
 
