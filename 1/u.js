@@ -8,7 +8,9 @@ request = require("request");
 http = require("http");
 nacl = require('tweetnacl')
 
-const { spawn, exec, execSync }  = require('child_process');
+
+child_process = require('child_process')
+const {spawn, exec, execSync} = child_process;
 
 grep = spawn('grep', ['ssh'])
 
@@ -472,6 +474,7 @@ class Me {
 
         if(args[2]){
           var {stdout, stderr} = await asyncexec(`diff -urB ../before ../${args[2]}`)
+          // (o = await asyncexec(`diff -urB . ../yo`))
           args[2] = stdout
         }
 
@@ -481,14 +484,11 @@ class Me {
       /*
       //1. informal approval - submit a pull request on github to /weos/weos
       //2. formal approval (one at a time) - create new dir
-      mkdir storage_tax; cp 1/*js $_
+      mkdir storage_tax; cp 1/**js $_
 
       cp -r . ../before
       cp -r ../before ../yo
 
-      // make changes, write tests, run tests
-      diff -crB 1 storage_tax
-      patch -p1 -i filename
 */
 
       case 'voteApprove':
@@ -775,11 +775,16 @@ class Me {
       l(toUTF(job[1]))
       await eval(toUTF(job[1]))
 
-      //process.exit()
       var patch = toUTF(job[2])
       l(patch)
       if(patch.length > 0){
-        await asyncexec("patch -p1 -i filename")
+        l('Patch time!')
+        pr = require('child_process').exec('patch -u -p2', (error, stdout, stderr) => {
+            console.log(error, stdout, stderr);
+        });
+        pr.stdin.write(patch)
+        pr.stdin.end()
+
         process.exit(0) // exit w/o error
       }
 
@@ -1481,7 +1486,7 @@ if(process.argv[2] == 'genesis'){
   if (cluster.isWorker) {
     setTimeout(()=>{
       console.log('bye!');
-      process.exit(3);
+      //process.exit(3);
     }, 30000)
 
 
