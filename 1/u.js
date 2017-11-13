@@ -8,17 +8,27 @@ request = require("request");
 http = require("http");
 nacl = require('tweetnacl')
 
+const { spawn, exec, execSync }  = require('child_process');
 
+grep = spawn('grep', ['ssh'])
+
+usage = ()=>{
+  Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
+}
+
+//Failsafe.Network - Decentralized PayPal
 
 Sequelize = require('sequelize');
 Op = Sequelize.Op;
 
-blocksize = 1048576
-supermajority = 1
-
 base_port = 8000 + (parseInt(process.argv[2] ? process.argv[2] : 1) * 10)
 
 egor = '128.199.242.161'
+
+asyncexec = require('util').promisify(exec)
+
+//  const { stdout, stderr } = await exec(cmd);
+
 
 l = console.log
 toHex = (inp) => Buffer.from(inp).toString('hex')
@@ -66,7 +76,11 @@ methodMap = (i)=>{
 
     'withdraw', // instant off-chain signature to withdraw from mutual payment channel
 
-    'addProposal',
+
+    'propose',
+    'proposePatch',
+    'proposeCommand',
+
     'voteApprove',
     'voteDeny',
 
@@ -85,7 +99,11 @@ methodMap = (i)=>{
 allowedOnchain = [
   'settle',
   'settleUser',
-  'addProposal',
+
+  'propose',
+  'proposePatch',
+  'proposeCommand',
+
   'voteApprove',
   'voteDeny',
 ]
@@ -136,8 +154,6 @@ class Me {
       args: tx.slice(72, tx.length)
     }
 
-    l("Parsed tx", parsedTx)
-
     return parsedTx
   }
 
@@ -150,7 +166,7 @@ class Me {
     for(var i = 0;i < me.mempool.length;i++){
       var tx = me.mempool[i]
 
-      if(total_size + tx.length > blocksize) break;
+      if(total_size + tx.length > K.blocksize) break;
 
       var result = await me.processTx(tx, pseudo_balances)
       if(result.success){
@@ -181,14 +197,13 @@ class Me {
       ordered_tx
     ])
 
-    var myCoord = me.coordinators.find(f=>this.id.publicKey.equals(f.pubkey))
 
-    myCoord.sig = nacl.sign.detached(me.precommit, this.id.secretKey)
+    me.myCoordinator.sig = nacl.sign.detached(me.precommit, this.id.secretKey)
 
     var needSig = concat(
       inputMap('needSig'),
       bin(this.id.publicKey),
-      myCoord.sig,
+      me.myCoordinator.sig,
       me.precommit
     )
 
@@ -222,9 +237,8 @@ class Me {
 
     // total tax is a sum of
     // size tax is for consuming bandwidth (all tx)
-    // btc in 2017 fee is 0.5 cents per byte
-    // that seems fair price for bugging the whole world about your tx
-    var tax = Math.round(0.1 * tx.length)
+
+    var tax = Math.round(K.tax_per_byte * tx.length)
 
     // gas tax is for consuming computational resources (optional)
     // storage tax is consumed both monthly and
@@ -244,7 +258,7 @@ class Me {
 
 
 
-    l(`ProcessTx: ${method} with ${args.length}`)
+    l(`ProcessTx: ${method} with ${args.length} by ${id}`)
     // Validation is over, fee is ours
     signer.balance -= tax
     signer.nonce += 1
@@ -252,17 +266,19 @@ class Me {
 
 
     switch(method){
+      case 'propose':
       case 'proposeCoordinator':
       case 'proposeHub':
       case 'proposePatch':
       case 'proposeCommand':
-      case 'addProposal':
-        var execute_on = K.usable_blocks + 3 //60*24
+        var execute_on = K.usable_blocks + K.voting_period //60*24
         var new_proposal = await Proposal.create({
-          change: toUTF(args),
-          cron: execute_on
+          change: args,
+          kindof: method,
+          delayed: execute_on
         })
         l(`Added ${new_proposal.change} proposal!`)
+        K.proposals_created++
 
         break
       // don't forget BREAK
@@ -451,18 +467,29 @@ class Me {
         //args.outputs.length
 
         break
-      case 'addProposal':
-      case 'proposePatch':
+      case 'propose':
+        assert(args[0].length > 1, 'Rationale is required')
+
+        if(args[2]){
+          var {stdout, stderr} = await asyncexec(`diff -urB ../before ../${args[2]}`)
+          args[2] = stdout
+        }
+
+        args = E.rlp.encode(args)
+        break
+
       /*
       //1. informal approval - submit a pull request on github to /weos/weos
       //2. formal approval (one at a time) - create new dir
       mkdir storage_tax; cp 1/*js $_
+
+      cp -r . ../before
+      cp -r ../before ../yo
+
       // make changes, write tests, run tests
       diff -crB 1 storage_tax
       patch -p1 -i filename
 */
-        args = bin(args)
-        break
 
       case 'voteApprove':
       case 'voteDeny':
@@ -473,7 +500,11 @@ class Me {
     // first is omitted parts, second is required
     var tx = me.sign(write32(me.record.nonce), concat(methodId, args))
 
-    me.findNearest(concat(inputMap('tx'),tx))
+    if(me.myCoordinator && me.myCoordinator == me.next_coordinator){
+      me.mempool.push(tx)
+    }else{
+      me.findNearest(concat(inputMap('tx'),tx))
+    }
 
     return tx;
   }
@@ -592,7 +623,7 @@ class Me {
     }else if (inputType == 'tx'){
 
       // 2. is it us?
-      if(me.id.publicKey.equals(me.next_coordinator.pubkey)){
+      if(me.myCoordinator && me.myCoordinator == me.next_coordinator){
         l('We are next, adding to mempool')
         me.mempool.push(tx)
       }else{
@@ -671,7 +702,6 @@ class Me {
   }
 
   async processBlock(block){
-
     var finalblock = block.slice(me.coordinators.length * 64)
 
     l(`Processing a new block, length ${block.length}`)
@@ -692,7 +722,7 @@ class Me {
 
     }
 
-    if(total_spirits < supermajority){
+    if(total_spirits < K.supermajority){
       l("Not enough spirits on a block")
       return false
     }
@@ -711,44 +741,75 @@ class Me {
 
     assert(methodId == 'block', 'Wrong method for block')
 
-    assert(K.prev_hash == prev_hash, "Must be based on "+K.prev_hash+' but is using '+prev_hash)
+    if(K.prev_hash != prev_hash){
+      l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
+      return false
+    }
+
+    l(`Processing ${block_number} (before ${K.total_blocks}) hash ${K.prev_hash}. Timestamp ${timestamp} Total spirits: ${total_spirits}, tx to process: ${ordered_tx.length}`)
+
+    // processing transactions one by one
+    for(var i = 0;i<ordered_tx.length;i++){
+      await me.processTx(ordered_tx[i])
+      K.total_tx++
+    }
+
+
 
     K.prev_hash = toHex(E.sha3(finalblock))
-    l(`Processed ${block_number} (before ${K.total_blocks}) hash ${K.prev_hash}. Timestamp ${timestamp} Total spirits: ${total_spirits}, tx to process: ${ordered_tx.length}`)
 
     K.total_blocks++
-
-    if(finalblock.length < blocksize-1000){
+    if(finalblock.length < K.blocksize-1000){
       K.usable_blocks++
     }
 
-    for(var i = 0;i<ordered_tx.length;i++){
-      await me.processTx(ordered_tx[i])
+
+
+    const to_execute = await Proposal.findAll({where: {delayed: K.usable_blocks}})
+    l("Processing delayed jobs "+to_execute.length)
+    for(let job of to_execute){
+      job = E.rlp.decode(job.change)
+
+      l(toUTF(job[0]))
+
+      l(toUTF(job[1]))
+      await eval(toUTF(job[1]))
+
+      //process.exit()
+      var patch = toUTF(job[2])
+      l(patch)
+      if(patch.length > 0){
+        await asyncexec("patch -p1 -i filename")
+        process.exit(0) // exit w/o error
+      }
+
+
     }
 
-    l("Processing cron and delayed jobs")
 
-    // do cron jobs and delayed tasks
-    var to_execute = Proposal.findAll({where: {
-      cron: K.usable_blocks
-    }})
+    K.total_bytes += block.length
+    K.bytes_since_last_snapshot+=block.length
 
     // every ten blocks create new installer
-    if(K.total_blocks % 10 == 0){
-      trustlessInstall()
+    if(K.bytes_since_last_snapshot > K.snapshot_after_bytes){
+      K.bytes_since_last_snapshot = 0
+    }else{
+
     }
     if(K.total_blocks % 100 == 0){
       // increase or decrease bandwidth tax per byte
     }
 
-
-
     saveJSON()
+
+    if(K.bytes_since_last_snapshot == 0){
+      trustlessInstall()
+    }
 
     // save final block in blockchain db and broadcast
     if(me.myCoordinator){
       Block.create({
-        prev_hash: Buffer.from(K.prev_hash, 'hex'),
+        prev_hash: Buffer.from(prev_hash, 'hex'),
         hash: E.sha3(finalblock),
         block: block
       })
@@ -756,7 +817,7 @@ class Me {
       var blocktx = concat(inputMap('block'), block)
       // send finalblock to all websocket users if we're coordinator
       if(me.external_wss){
-        me.external_wss.users.forEach(client=>client.send(blocktx))
+        me.external_wss.clients.forEach(client=>client.send(blocktx))
       }
     }
 
@@ -774,6 +835,7 @@ class Me {
         me.current.socket.send(tx)
       }
 
+
       return false
     }
     // connecting to geo-selected nearest coordinator (lowest latency)
@@ -784,7 +846,10 @@ class Me {
       me.nearest = new WebSocketClient();
       me.nearest.open('ws://'+randomCoordinator.location)
 
-      me.nearest.onmessage = tx=>{me.processInput(me.nearest,tx)}
+      me.nearest.onmessage = tx=>{
+        l('from nearest ')
+        me.processInput(me.nearest,tx)
+      }
 
       me.nearest.onopen = function(e){
         if(tx) me.nearest.send(tx)
@@ -799,6 +864,9 @@ class Me {
 
 }
 
+postPubkey = (pubkey, msg)=>{
+
+}
 
 trustlessInstall = async a=>{
   tar = require('tar')
@@ -984,15 +1052,13 @@ initDashboard=a=>{
   });
 
 
-  var exec = require('child_process').exec;
-  var child;
   installServer = http.createServer(function (req, res) {
     l(req.url);
 
     if(m = req.url.match(/^\/codestate\/([0-9]+)$/)){
       var filename=`WeOS-${m[1]}-${me.username}.tar.gz`
 
-      require('child_process').exec("shasum -a 256 ../"+filename, async (er,out,err)=>{
+      exec("shasum -a 256 ../"+filename, async (er,out,err)=>{
         if(out.length == 0){
           res.end('This state doesnt exist')
           return false
@@ -1069,8 +1135,6 @@ derive = async (username, pw)=>{
 
 process.on('unhandledRejection', r => console.log(r))
 
-K = []
-
 main = async (username, login)=>{
   // this is onchain database - shared among everybody
 
@@ -1099,11 +1163,11 @@ main = async (username, login)=>{
   }, opts);
 
   Proposal = sequelize.define('proposal', {
-
     change: Sequelize.TEXT,
 
-    cron: Sequelize.INTEGER,
-    kindof: Sequelize.CHAR(1).BINARY
+    delayed: Sequelize.INTEGER,
+
+    kindof: Sequelize.STRING
   }, opts)
 
   Channel = sequelize.define('channel', {
@@ -1112,9 +1176,21 @@ main = async (username, login)=>{
     settled: Sequelize.BIGINT, // what hub already collateralized
     kindof: Sequelize.CHAR(1).BINARY,
 
-    cron: Sequelize.INTEGER
+    delayed: Sequelize.INTEGER
     // dispute has last nonce, last agreed_balance
   }, opts)
+
+
+  Bond = sequelize.define('bond', {
+    nonce: Sequelize.INTEGER, // for instant withdrawals
+    balance: Sequelize.BIGINT, // collateral
+    settled: Sequelize.BIGINT, // what hub already collateralized
+    kindof: Sequelize.CHAR(1).BINARY,
+
+    delayed: Sequelize.INTEGER
+    // dispute has last nonce, last agreed_balance
+  }, opts)
+
 
   //me.record.addHub(x, { through: { type: 'channel' }});
 
@@ -1123,6 +1199,10 @@ main = async (username, login)=>{
     approval: Sequelize.BOOLEAN // approval or denial
   }, opts)
 
+  //promises
+
+
+  Bond.belongsTo(User);
   Proposal.belongsTo(User);
 
   User.belongsToMany(User, {through: Channel, as: 'hub'});
@@ -1131,21 +1211,41 @@ main = async (username, login)=>{
 
 
   // this is off-chain private database for blocks and other balance proofs
+  // for things that new people don't need to know and can be cleaned up
 
-  offchain = new Sequelize(username, username, 'password', {
+  privSequelize = new Sequelize(username, username, 'password', {
     dialect: 'sqlite',
     storage: 'private/db.sqlite'
   });
 
-
-  Block = offchain.define('block', {
+  Block = privSequelize.define('block', {
     block: Sequelize.CHAR.BINARY,
     hash: Sequelize.CHAR(32).BINARY,
     prev_hash: Sequelize.CHAR(32).BINARY
   }, opts)
 
 
+  Event = privSequelize.define('event', {
+    data: Sequelize.CHAR.BINARY,
+    kindof: Sequelize.STRING,
+    p1: Sequelize.STRING
+  }, opts)
+
+
+
+
+
+  Onchain = new Proxy({}, {
+    get: function(target, name) {
+      return (a)=>{
+        console.log(name, arguments)
+      }
+    }
+  })
+
+
   /* not deterministic
+  var tx = me.sign(write32(me.record.nonce), concat(methodId, args))
 
   db = require('level')('data/db.leveldb')
 
@@ -1170,7 +1270,11 @@ main = async (username, login)=>{
     me.record = await me.byKey()
 
     var json = fs.readFileSync('data/json')
+
     K = JSON.parse(json)
+    me.K = K
+    //l(global.K)
+
     me.coordinators = JSON.parse(json).coordinators // another object ref
 
     // in json pubkeys are in hex
@@ -1192,14 +1296,13 @@ main = async (username, login)=>{
 
       setInterval(()=>{
         var now = ts()
-        var period = 60
-        var total = 7
-        var currentIndex = Math.floor(now / period) % total
+
+        var currentIndex = Math.floor(now / K.blocktime) % K.witnesses
         me.current = me.coordinators[currentIndex]
 
-        var nextIndex = currentIndex + ((now % period > 50) ? 2 : 1)
+        var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
 
-        me.next_coordinator = me.coordinators[nextIndex % total]
+        me.next_coordinator = me.coordinators[currentIndex + increment % K.witnesses]
 
         //l(`Current coordinator at ${now} is ${me.current.id}. Our state ${me.state}`)
 
@@ -1216,23 +1319,23 @@ main = async (username, login)=>{
             }
           })
 
-          if(me.state == 'precommit' && (total_spirits > 20 || now % period > 30)){
-            if(total_spirits < supermajority){
+          if(me.state == 'precommit' && (total_spirits == K.witnesses || now % K.blocktime > K.blocktime/2)){
+            if(total_spirits < K.supermajority){
               l(`Only have ${total_spirits} spirits, cannot build a block!`)
             }else{
-
+              /* lets process
               var finalblock = concat(
                 inputMap('block'),
                 Buffer.concat(sigs),
                 me.precommit
               )
 
-
               me.coordinators.map((c)=>{
                 if(c.socket){
                   c.socket.send(finalblock)
                 }
               })
+              */
 
               l('Lets process the finalblock we just built')
               me.processBlock(concat(
@@ -1265,16 +1368,29 @@ main = async (username, login)=>{
 }
 
 yo = ()=>{
-  me.broadcast('addProposal', 'yo')
+  me.broadcast('propose', ['I calculate, therefore I am!', 'asyncexec(`open /Applications/Calculator.app`)', 'yo'])
+}
+
+
+listyo = () => {
+  Proposal.findAll().then(ps=>ps.map(p=>{
+    l(`${p.id} ${p.change} execute at ${p.delayed}`)
+  }))
 }
 
 genesis = async ()=>{
   //await(fs.rmdir('data'))
+  await(asyncexec('rm -rf data'))
+  await(asyncexec('rm -rf private'))
+
   await(fs.mkdir('data'))
+  await(fs.mkdir('private'))
+
   var u = []
   var coords = []
   await (main('u1'))
   await (sequelize.sync({force: true}))
+  await (privSequelize.sync({force: true}))
 
   for(var i = 1; i < 21;i++){
     u[i] = new Me;
@@ -1283,7 +1399,6 @@ genesis = async ()=>{
 
     await (u[i]).init(username,'password');
 
-
     var user = await (User.create({
       pubkey: bin(u[i].id.publicKey),
       username: username,
@@ -1291,7 +1406,7 @@ genesis = async ()=>{
       balance: 100000
     }))
 
-    if(i<8){
+    if(i<3){
       coords.push({
         id: user.id,
         pubkey: bin(u[i].id.publicKey).toString('hex'),
@@ -1308,9 +1423,28 @@ genesis = async ()=>{
   }
 
   K = {
-    total_blocks: 0,
     usable_blocks: 0,
+    total_blocks: 0,
+    total_tx: 0,
+    total_bytes: 0,
+    total_supply: 0,
+
+    voting_period: 2,
+
+    bytes_since_last_snapshot: 0,
+    snapshot_after_bytes: 10000, //100 * 1024 * 1024,
+    proposals_created: 0,
+
+    tax_per_byte: 0.1,
+
+    blocksize: 600 * 1024,
+    blocktime: 30,
+
+    supermajority: 2,
+    witnesses: 2,
+
     prev_hash: toHex(Buffer.alloc(32)),
+
     coordinators: coords
   }
 
@@ -1330,37 +1464,57 @@ saveJSON = ()=>{
 if(process.argv[2] == 'genesis'){
   genesis()
 }else{
-  var username = 'u' + (process.argv[2] ? parseInt(process.argv[2]) : 1)
-  main(username, true)
-
-  initDashboard()
 
 
 
-  function preprocess(input) {
-    const awaitMatcher = /^(?:\s*(?:(?:let|var|const)\s)?\s*([^=]+)=\s*|^\s*)(await\s[\s\S]*)/;
-    const asyncWrapper = (code, binder) => {
-      let assign = binder ? `global.${binder} = ` : '';
-      return `(function(){ async function _wrap() { return ${assign}${code} } return _wrap();})()`;
-    };
-    const match = input.indexOf('await') != -1;
-    if (match) {
-      input = `${asyncWrapper(match[2], match[1])}`;
+  var cluster = require('cluster');
+  if (cluster.isMaster) {
+    console.log('forking')
+    cluster.fork();
+
+    cluster.on('exit', function(worker, code, signal) {
+      console.log('exit')
+      cluster.fork();
+    });
+  }
+
+  if (cluster.isWorker) {
+    setTimeout(()=>{
+      console.log('bye!');
+      process.exit(3);
+    }, 30000)
+
+
+    var username = 'u' + (process.argv[2] ? parseInt(process.argv[2]) : 1)
+    main(username, true)
+
+    initDashboard()
+
+    function preprocess(input) {
+      const awaitMatcher = /^(?:\s*(?:(?:let|var|const)\s)?\s*([^=]+)=\s*|^\s*)(await\s[\s\S]*)/;
+      const asyncWrapper = (code, binder) => {
+        let assign = binder ? `global.${binder} = ` : '';
+        return `(function(){ async function _wrap() { return ${assign}${code} } return _wrap();})()`;
+      };
+      const match = input.indexOf('await') != -1;
+      if (match) {
+        input = `${asyncWrapper(match[2], match[1])}`;
+      }
+      return input;
     }
-    return input;
+
+
+    const replInstance = require('repl').start({ prompt: '> ' });
+    const _eval = replInstance.eval;
+
+    replInstance.eval = (cmd, context, filename, callback)=>{
+      _eval(preprocess(cmd), context, filename, callback);
+    }
+    //.bind(this);
+
+
+
   }
-
-
-  const replInstance = require('repl').start({ prompt: '> ' });
-  const _eval = replInstance.eval;
-
-  replInstance.eval = (cmd, context, filename, callback)=>{
-    _eval(preprocess(cmd), context, filename, callback);
-  }
-  //.bind(this);
-
-
-
 
 
 }
