@@ -1,0 +1,372 @@
+<html>
+
+<body>
+<style>
+  body {
+
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
+    }
+
+#plotnext{
+  height: 40px;
+}
+.left{display: inline-block; border: 1px; float:left;
+}
+.right{display: inline-block; border: 1px; float:right;}
+
+
+
+
+
+.circle {
+  margin: 1px; display: inline-block;
+  border-radius: 50%;
+  width: 50px;
+  height: 20px;
+  border: 1px solid black;
+  position: inline;
+}
+
+.uchannel{background: yellow;}
+.hchannel{background: red;}
+.ucredit{background: none }
+.hcredit{background: none }
+
+.empty{background: none; border: none;}
+
+
+</style>
+<script src="js/identicon.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/jdenticon@1.7.2"></script>
+
+<script type="text/javascript" src="js/bigi.min.js"></script>
+<script type="text/javascript" src="js/bitcoinjs.min.js"></script>
+<script type="text/javascript" src="js/main.js"></script>
+<script type="text/javascript" src="js/scryptasync.js"></script>
+<script type="text/javascript" src="js/nacl.js"></script>
+<script type="text/javascript" src="js/utils.js"></script>
+<script type="text/javascript" src="js/bowser.js"></script>
+
+<script>
+ownerBalance = 0
+state = {}
+
+lock = false
+
+function brick(amount, type){
+  if(amount==0) return `<div class="circle ${type}">&nbsp;</div>`
+  return `<div class="circle ${type}">$${amount}</div>`
+}
+
+function toImg(hash){
+  hash = Benc(nacl.hash(Udec(hash)))
+  return '<img width=16 src="data:image/png;base64,'+new Identicon(hash,100).toString()+'">';
+}
+
+to_ratio = function(t){
+  return Math.round(t*100)
+}
+
+render = function(msg){
+  //if(lock) return false;
+
+  lock = true;
+  for(id in state){
+    u = getUser(id)
+    if(u.index < -5){
+      ownerBalance += u.amount
+      u.capacity -= u.amount
+      u.amount = 0
+    }
+  }
+  for(id in state){
+    u = getUser(id)
+    if(u.index > 5){
+      if(ownerBalance >= u.bond){
+        ownerBalance -= u.bond;
+        u.capacity += u.bond
+        u.bond = 0
+      }else{
+        u.bond -= ownerBalance
+        u.capacity += ownerBalance
+        ownerBalance = 0
+      }
+    }
+  }
+
+
+  st=Object.values(state).sort((a,b)=>{
+    [a,b]=[getUser(a.name).index,getUser(b.name).index]
+
+    return a>b;
+  })
+
+
+  table = ''
+  var hubs = 0
+  var owes = 0
+  for(id in st){
+    id = st[id].name
+    var u = getUser(id)
+    var bricks = ''
+    request_rebalance = ''
+
+    if(u.bond > 50){
+      request_rebalance = "<b><span title='Too much in bonds. Request a payment channel'>&#9888;</span></b>"
+    }
+
+      //left+=brick(u.amount-u.capacity, 'ucredit')
+
+      bricks+=brick(u.capacity-u.amount, 'uchannel')
+
+            owes += u.bond
+            bricks+=brick(u.bond, 'hcredit')
+
+      hubs += u.amount
+      bricks+=brick(u.amount, 'hchannel')
+
+
+    table += `<div class="right"> ${id} ${request_rebalance} ${bricks} </div><br><br>`
+
+
+    }
+  anim.innerHTML= `Hub balance: ${ownerBalance}. ${hubs} ins ${owes} outs<br>`+table+` </table>`
+
+
+  lock = false;
+  return hubs;
+}
+
+
+
+function ts(){
+  return Math.round(new Date())
+}
+
+function avg(matrix, now){
+  var from = now - 100 //matrix[0][0]
+  var area = 0
+  for(var i = 0;i<matrix.length;i++){
+    var this_point = matrix[i]
+    var next_point = matrix[i+1]
+
+    if(next_point){
+      if(this_point[0] < from){
+        if(next_point[0] > from){
+          period_from = from
+        }else{
+          continue;
+        }
+      }else{
+        period_from = this_point[0]
+      }
+
+      period_to = next_point[0]
+    }else{
+      period_from = this_point[0]
+      period_to = now
+    }
+    area += (period_to - period_from) * this_point[1]
+  }
+  return area / (now - from)
+}
+
+function snapshot(id){
+  u = getUser(id)
+  u.history.push([ts(),  u.index])
+}
+
+//from external addr
+function deposit(id, amount){
+  var user = getUser(id)
+  user.capacity += amount
+  snapshot(id)
+
+  render('Deposited from outside '+amount+' BTC to '+id)
+}
+
+
+function deduct(user, amount){
+  u = getUser(user)
+
+  if(u.bond > 0){
+    if(u.bond > amount){
+      u.bond -= amount;
+      return true;
+    }else{
+      amount -= u.bond
+      u.bond = 0
+    }
+  }
+  left = u.capacity - u.amount
+
+  if(left > 0 && left >= amount){
+    u.amount += amount
+  }else{
+    return false; //not enough
+  }
+
+
+}
+
+function getUser(user){
+  if(!state[user]) state[user] = {
+    bond: 0,      //stored in bonds
+    amount: 0,    //amount given to hub
+    capacity: 0,  //total capacity
+    name: user,
+    gold: 0,
+    history: []
+  }
+
+  u = state[user]
+  u.total = (u.capacity - u.amount) + u.bond
+
+  u.index = u.bond > 0 ? u.bond : -u.amount
+  return u
+}
+
+function add(id, amount){
+  u = getUser(id)
+
+
+  left = u.capacity - u.amount
+
+  if(u.amount > 0){
+    if(u.amount > amount){
+      u.amount -= amount;
+      return true;
+    }else{
+      amount -= u.amount
+      u.amount = 0
+    }
+  }
+
+  // bonds can be added without limits
+  u.bond += amount;
+}
+
+function send(from, to, amount){
+  if(getUser(from).total < amount) return false
+  deduct(from, amount)
+  add(to, amount)
+
+  snapshot(from)
+  snapshot(to)
+
+  render()
+}
+
+getDigit=function(upto){
+  return Math.round(Math.random()*upto)
+}
+
+randomUser=function(){
+  all = Object.keys(state)
+  return all[getDigit(all.length-1)]
+}
+
+function randomName(){
+  return names[getDigit(names.length-1)]
+}
+
+total_users=20
+demo=(()=>{
+  if(lock) return false
+  lock = true;
+
+
+  if(getDigit(10) < 3){
+    user = randomName()
+    // no need to deposit more if have enough
+    if(getUser(user).total < 10){
+      deposit(user, getDigit(5))
+    }
+  }else{
+    var from = randomUser()
+    var to = randomName()
+    amount = getDigit(6)
+    while(from==to){
+      var to = randomName()
+    }
+
+    if(from!=to){
+      var b=getUser(from).total
+      if(b<amount) amount = b
+      send(from, to, amount)
+    }
+  }
+
+  lock = false;
+})
+
+
+steps=[
+()=>{
+  deposit("Alice",20);
+  deposit('John', 15)
+  deposit('Carol', 15)
+
+  info.innerHTML = `<p>These are payment channels with Hub. Everyone is free to take their money back whenever they wants. There's no custodian risk for senders.</p>
+
+  <p>However, she'd have to wait for a delay period so the blockchain would make sure we won't show any evidence that there are newer payments.</p>`
+},
+()=>{
+  info.innerHTML = `<p>To withdraw money from a payment channel one needs to show a cryptographic proof of balance signed by counter-party. .</p>`
+},
+
+()=>{
+  send('Alice', 'Rental agency', 4)
+  info.innerHTML = `
+  <p>Alice is sender, agency is receiver</p>
+  `
+},
+()=>{ send('Alice', "Coffee Shop", 3) },
+()=>{ send("Alice", "Laundry", 2) },
+()=>{ send('John', "Coffee Shop", 5) },
+()=>{ send("John", "Laundry", 5) },
+()=>{ send('John', 'Rental agency', 2) },
+()=>{
+  send('Alice', "Coffee Shop", 2)
+  info.innerHTML = `<p>See a Warning sign next to some peers? That means they hold too much money on bonds, and it's time to redeem the promises for real "failsafe" payment channels.</p>
+
+  <p>Peers can manually request the hub to do that, but after certain balance the hub automatically does it for them. <b>It's in hub's best interest to hold as little funds as possible</b> </p>
+
+  <p>It's called <b>a rebalance</b>: the system closes old/stale red bricks (<b>commitments we received from the peers over time, they are risky for us and we want to get rid of them</b>) and puts them in the place of yellow bricks (bonds). </p>
+
+  <p>This happens once in a while and there are non-trivial algorithms to guess the right peers to close channels with (net spenders) and right peers who will need channels the most (net receivers), but for the sake of simplicity this demo will just rebalance all peers at once. The channels have been settled onchain and now no one risks their funds anymore. Click Next one last time to run a random simulation of Failsafe Network that rebalances whenever hub controls over 50 coins. The real hub is smarter than that, but you get the idea.</p>`
+},
+()=>{
+  plotnext.style['display'] = 'none'
+  setInterval(demo, 200)
+}
+
+
+]
+
+
+window.onload = function(){
+  plotnext.onclick = function(){
+    steps.shift()()
+  }
+}
+
+names="Alice Bob Carol Restaurant Waiter AcmeCorp John Dave".split(' ')
+</script>
+
+<center >
+<div id=anim style="min-height:250px;"></div>
+
+<!--<img style="width:100px" src=miner.gif>-->
+
+<p><button id="plotnext">Next Slide</button></p>
+<div style="max-width:600px" id=info> <p> Cryptocurrencies are slow and expensive to move due to blocksize limits and transaction confirmations. How can we improve that without giving up control to custodian central authorities?</p>
+
+<p> Most popular idea here is <b>unexpiring bidirectional payment channels</b>, that allow two parties to create a multisig-like wallet on-chain and then instantly send money back and forth off-chain.</p>
+
+Payment channels can truly scale blockchains to tx/second of Visa as they scale linearly.</div>
+
+</center>
+
+</body></html>

@@ -1,0 +1,37 @@
+diff -Naur ./cl.js ../yo/cl.js
+--- ./cl.js	2017-11-13 09:42:34.000000000 +0900
++++ ../yo/cl.js	1970-01-01 09:00:00.000000000 +0900
+@@ -1,15 +0,0 @@
+-var cluster = require('cluster');
+-if (cluster.isMaster) {
+-  console.log('forking')
+-  cluster.fork();
+-
+-  cluster.on('exit', function(worker, code, signal) {
+-    console.log('exit')
+-    cluster.fork();
+-  });
+-}
+-
+-if (cluster.isWorker) {
+-  setTimeout(()=>{console.log(333);process.exit();}, 4000)
+-setInterval(()=>{console.log(new Date)}, 1000)
+-}
+diff -Naur ./wiki/pow.md ../yo/wiki/pow.md
+--- ./wiki/pow.md	2017-11-13 04:39:27.000000000 +0900
++++ ../yo/wiki/pow.md	2017-11-13 20:41:08.000000000 +0900
+@@ -6,10 +6,10 @@
+ 
+ 
+ 
+-planned patches
+-
+-0 proposals
+ 1. USD and assets, hubs, payment channels
++
+ 2. companies and stock, 4 bytes asset type
++
+ 3. name service
+-4. 
++
++4. web of trust API

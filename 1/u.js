@@ -8,11 +8,12 @@ request = require("request");
 http = require("http");
 nacl = require('tweetnacl')
 
+diff2html = require("diff2html").Diff2Html
+//diff2html.getPrettyHtmlFromDiff(f)
 
 child_process = require('child_process')
 const {spawn, exec, execSync} = child_process;
 
-grep = spawn('grep', ['ssh'])
 
 usage = ()=>{
   Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
@@ -80,8 +81,6 @@ methodMap = (i)=>{
 
 
     'propose',
-    'proposePatch',
-    'proposeCommand',
 
     'voteApprove',
     'voteDeny',
@@ -103,8 +102,6 @@ allowedOnchain = [
   'settleUser',
 
   'propose',
-  'proposePatch',
-  'proposeCommand',
 
   'voteApprove',
   'voteDeny',
@@ -269,10 +266,6 @@ class Me {
 
     switch(method){
       case 'propose':
-      case 'proposeCoordinator':
-      case 'proposeHub':
-      case 'proposePatch':
-      case 'proposeCommand':
         var execute_on = K.usable_blocks + K.voting_period //60*24
         var new_proposal = await Proposal.create({
           change: args,
@@ -451,6 +444,10 @@ class Me {
     return wallet
   }
 
+  async mint(amount, target){
+
+  }
+
 
 
 
@@ -473,23 +470,13 @@ class Me {
         assert(args[0].length > 1, 'Rationale is required')
 
         if(args[2]){
-          var {stdout, stderr} = await asyncexec(`diff -urB ../before ../${args[2]}`)
-          // (o = await asyncexec(`diff -urB . ../yo`))
-          args[2] = stdout
+          //diff -urB . ../yo
+          args[2] = fs.readFileSync('../'+args[2])
         }
 
         args = E.rlp.encode(args)
         break
 
-      /*
-      //1. informal approval - submit a pull request on github to /weos/weos
-      //2. formal approval (one at a time) - create new dir
-      mkdir storage_tax; cp 1/**js $_
-
-      cp -r . ../before
-      cp -r ../before ../yo
-
-*/
 
       case 'voteApprove':
       case 'voteDeny':
@@ -543,11 +530,10 @@ class Me {
 
 
   /*
-  There are different types of WeOS Services.
   Services are centralized servers that do some job for the network. Most common:
   Coordinator (blockchain gatekeepers, they build and share blocks with others)
   Hub (faciliating mediated transfer with delayed settlement)
-  Box storage (stores WeOS boxes for a fee)
+  Box storage
   message boards, App backends, etc.
   all Services must be end-to-end encrypted whenever possible
 
@@ -778,14 +764,14 @@ class Me {
       var patch = toUTF(job[2])
       l(patch)
       if(patch.length > 0){
-        l('Patch time!')
-        pr = require('child_process').exec('patch -u -p2', (error, stdout, stderr) => {
+        me.request_reload = true
+        var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
             console.log(error, stdout, stderr);
         });
+        l('Patch time!')
         pr.stdin.write(patch)
         pr.stdin.end()
 
-        process.exit(0) // exit w/o error
       }
 
 
@@ -811,6 +797,7 @@ class Me {
       trustlessInstall()
     }
 
+
     // save final block in blockchain db and broadcast
     if(me.myCoordinator){
       Block.create({
@@ -826,6 +813,9 @@ class Me {
       }
     }
 
+    if(me.request_reload){
+      process.exit(0) // exit w/o error
+    }
 
 
 
@@ -875,18 +865,17 @@ postPubkey = (pubkey, msg)=>{
 
 trustlessInstall = async a=>{
   tar = require('tar')
-  var filename = 'WeOS-'+K.total_blocks+'-'+me.username+'.tar.gz'
+  var filename = 'Failsafe-'+K.total_blocks+'-'+me.username+'.tar.gz'
   l("generating install "+filename)
   tar.c({
       gzip: true,
   		portable: true,
       file: '../'+filename,
       filter: (path,stat)=>{
-        stat.mtime = null
-        l(path)
+        stat.mtime = null // must be deterministic
         // disable /private (blocks sqlite, proofs, local config) allow /default_private
-        if(path.match(/(\.DS_Store|private)$/)){
-          l('skipping')
+        if(path.match(/(\.DS_Store|private)/)){
+          l('skipping '+path)
           return false;
         }
         return true;
@@ -894,7 +883,7 @@ trustlessInstall = async a=>{
     },
     ['.']
   ).then(_=>{
-    l("Built CodeState "+filename)
+    l("Snapshot "+filename)
   })
 
 }
@@ -981,24 +970,28 @@ initDashboard=a=>{
 
   // this serves dashboard HTML page
   var server = http.createServer(function(req, res) {
-    console.log(req.headers)
     // only allow downloading before
     assert(isLocalhost(req.connection.remoteAddress), 'Must be coming from localhost IP')
     assert(whitelist_hosts.indexOf(req.headers.host)!=-1, 'DNS rebinding attack')
 
     res.statusCode = 200;
 
+    console.log(req.headers)
 
 
+    /*
+    TODO: Failsafe Domain Name Service
 
     var app_name = req.headers.host.match(/([a-z]+)\.we(:[0-9]+)?/)
     if(app_name){
       console.log("serving ./apps/"+app_name[1]);
 
       serveStatic("./apps/"+app_name[1])(req, res, finalhandler(req, res));
-    }else{
-      serveStatic("./apps/gov")(req, res, finalhandler(req, res));
     }
+      */
+
+    serveStatic("../wallet")(req, res, finalhandler(req, res));
+
     //res.setHeader('Access-Control-Allow-Origin', '*');
     //res.setHeader('Content-Type', 'text/html');
   });
@@ -1061,7 +1054,7 @@ initDashboard=a=>{
     l(req.url);
 
     if(m = req.url.match(/^\/codestate\/([0-9]+)$/)){
-      var filename=`WeOS-${m[1]}-${me.username}.tar.gz`
+      var filename=`Failsafe-${m[1]}-${me.username}.tar.gz`
 
       exec("shasum -a 256 ../"+filename, async (er,out,err)=>{
         if(out.length == 0){
@@ -1085,7 +1078,7 @@ initDashboard=a=>{
       node u.js $folder
       fi`)
       });
-    }else if(req.url.match(/^\/WeOS-([0-9]+)-(u[0-9]+)\.tar\.gz$/)){
+    }else if(req.url.match(/^\/Failsafe-([0-9]+)-(u[0-9]+)\.tar\.gz$/)){
       var file = '..'+req.url
       var stat = fs.statSync(file);
       res.writeHeader(200, {"Content-Length": stat.size});
@@ -1307,7 +1300,7 @@ main = async (username, login)=>{
 
         var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
 
-        me.next_coordinator = me.coordinators[currentIndex + increment % K.witnesses]
+        me.next_coordinator = me.coordinators[ (currentIndex + increment) % K.witnesses]
 
         //l(`Current coordinator at ${now} is ${me.current.id}. Our state ${me.state}`)
 
@@ -1372,8 +1365,23 @@ main = async (username, login)=>{
 
 }
 
+/*
+mkdir storage_tax; cp 1/**js $_
+
+cp -r . ../before
+cp -r ../before ../yo
+
+diff -Naur . ../yo > ../yo.patch
+rm -rf ../before
+rm -rf ../yo
+*/
+
+newpatch = (name)=>{
+
+}
+
 yo = ()=>{
-  me.broadcast('propose', ['I calculate, therefore I am!', 'asyncexec(`open /Applications/Calculator.app`)', 'yo'])
+  return me.broadcast('propose', ['I calculate, therefore I am!', 'asyncexec(`open /Applications/Calculator.app`)', 'yo.patch'])
 }
 
 
@@ -1459,11 +1467,13 @@ genesis = async ()=>{
     //require("fs-extra").copy('./data/u1.leveldb', './data/u'+i+'.leveldb')
     //require("fs-extra").copy('./data/u1.sqlite', './data/u'+i+'.sqlite')
   }
+  process.exit()
 
 }
 
 saveJSON = ()=>{
-  fs.writeFile('data/json', require('./stringify')(K), _=>l('JSON saved'))
+  l('saving JSON')
+  l(fs.writeFileSync('data/json', require('./stringify')(K)))
 }
 
 if(process.argv[2] == 'genesis'){

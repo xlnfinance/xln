@@ -1,0 +1,41 @@
+WeOS Smooth<script>
+var ws = new WebSocket('ws://127.0.0.1:8084')
+ws.onmessage = function(m){
+  var e = JSON.parse(m.data)
+
+  if(e.confirmation){
+    var msg = "Pay $"+e.params.amount+" to "+e.params.recipient+"?"
+    var confirm_start = new Date
+    if(confirm(msg)){
+      // was it authorized click?
+      // must be micropayment, or authorized in sufficent time
+      // otherwise double check for safety
+      var micropayment = (parseInt(e.params.amount) < 1000)
+      if(micropayment || (new Date - confirm_start > 3000) || confirm("Are you sure? "+msg)){
+        ws.send(JSON.stringify({
+          proxyOrigin: e.origin,
+          method: e.method,
+          id: e.id,
+          params: e.params,
+          confirmed: true
+        }))
+      }
+    }
+  }else{
+    parent.postMessage(m.data, '*')
+  }
+}
+
+window.addEventListener('message',function(e){
+  var json = e.data.params
+  console.log(json)
+
+  ws.send(JSON.stringify({
+    proxyOrigin: e.origin,
+    method: e.data.method,
+    id: e.data.id,
+    params: json
+  }))
+
+})
+</script>
