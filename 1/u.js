@@ -1138,7 +1138,8 @@ main = async (username, login)=>{
 
   sequelize = new Sequelize(username, username, 'password', {
     dialect: 'sqlite',
-    storage: 'data/db.sqlite'
+    storage: 'data/db.sqlite',
+	  define: {timestamps: false}
   });
 
 
