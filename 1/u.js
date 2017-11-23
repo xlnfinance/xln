@@ -1139,7 +1139,7 @@ main = async (username, login)=>{
   sequelize = new Sequelize('', '', 'password', {
     dialect: 'sqlite',
     storage: 'data/db.sqlite',
-    define: {timestamps: false}    
+    define: {timestamps: false}
   });
 
   // two kinds of storage: 1) critical database that might be used by code
