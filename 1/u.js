@@ -3,6 +3,10 @@ crypto = require("crypto");
 fs = require("fs")
 http = require("http");
 
+
+// deterministic JSON
+const stringify = require('./stringify')
+
 // from local node_modules
 // brew install node
 
@@ -13,6 +17,8 @@ const BN = require('bn.js')
 nacl = require('tweetnacl')
 WebSocket = require("ws")
 
+const opn = require('../opn')
+
 //diff2html = require("diff2html").Diff2Html
 //diff2html.getPrettyHtmlFromDiff(f)
 
@@ -22,18 +28,11 @@ const {spawn, exec, execSync} = child_process;
 Sequelize = require('sequelize')
 Op = Sequelize.Op;
 
-base_port = 8000 + (parseInt(process.argv[2] ? process.argv[2] : 1) * 10)
+base_port = 7990 + (parseInt(process.argv[2] ? process.argv[2] : 1) * 10)
 
 egor = '128.199.242.161'
 
 asyncexec = require('util').promisify(exec)
-
-
-process.title = 'Failsafe'
-
-usage = ()=>{
-  Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
-}
 
 l = console.log
 toHex = (inp) => Buffer.from(inp).toString('hex')
@@ -57,6 +56,101 @@ write32 = (int) => {
   b.writeUInt32BE(int)
   return b
 }
+
+
+
+
+
+
+// used to authenticate browser sessions to this daemon
+const auth_code = toHex(crypto.randomBytes(32))
+process.title = 'Failsafe'
+usage = ()=>{
+  Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
+}
+
+
+/*
+# The first time 
+
+*/
+
+
+
+
+genesis = async ()=>{
+  //await(fs.rmdir('data'))
+  await(asyncexec('rm -rf data'))
+  await(asyncexec('rm -rf private'))
+
+  await(fs.mkdir('data'))
+  await(fs.mkdir('private'))
+
+  await (main('u1'))
+  await (sequelize.sync({force: true}))
+  await (privSequelize.sync({force: true}))
+
+  me = new Me
+
+  var seed = await derive('u1','password')
+
+  await me.init('u1', seed);
+
+  var user = await (User.create({
+    pubkey: bin(me.id.publicKey),
+    username: me.username,
+    nonce: 0,
+    balance: 100000
+  }))
+
+
+  K = {
+    usable_blocks: 0,
+    total_blocks: 0,
+    total_tx: 0,
+    total_bytes: 0,
+    total_supply: 0,
+
+    voting_period: 2,
+
+    bytes_since_last_snapshot: 0,
+    snapshot_after_bytes: 10000, //100 * 1024 * 1024,
+    proposals_created: 0,
+
+    tax_per_byte: 0.1,
+
+    blocksize: 600 * 1024,
+    blocktime: 30,
+
+    supermajority: 2,
+    witnesses: 2,
+
+    prev_hash: toHex(Buffer.alloc(32))
+  }
+
+  K.members = [
+    {
+      id: user.id,
+      pubkey: bin(me.id.publicKey).toString('hex'),
+      location: '0.0.0.0:'+(8000+(i*10)),
+      missed_blocks: [],
+      shares: 1000
+    }
+  ]
+
+  fs.writeFileSync('data/k.json', stringify(K))
+
+  process.exit()
+}
+
+
+
+
+
+
+
+
+
 
 
 
@@ -113,11 +207,10 @@ allowedOnchain = [
 
 
 class Me {
-  async init(username, pw) {
+  async init(username, seed) {
     this.username = username
-    this.pw = sha3(pw) // we only store checksum for doublechecks
 
-    this.seed = await derive(username,pw)
+    this.seed = seed
     this.id = nacl.sign.keyPair.fromSeed(this.seed)
     this.id.publicKey = bin(this.id.publicKey)
 
@@ -199,16 +292,16 @@ class Me {
     ])
 
 
-    me.myCoordinator.sig = nacl.sign.detached(me.precommit, this.id.secretKey)
+    me.my_member.sig = nacl.sign.detached(me.precommit, this.id.secretKey)
 
     var needSig = concat(
       inputMap('needSig'),
       bin(this.id.publicKey),
-      me.myCoordinator.sig,
+      me.my_member.sig,
       me.precommit
     )
 
-    me.coordinators.map((c)=>{
+    me.members.map((c)=>{
       if(c.socket)
       c.socket.send(needSig)
     })
@@ -489,7 +582,7 @@ class Me {
     // first is omitted parts, second is required
     var tx = me.sign(write32(me.record.nonce), concat(methodId, args))
 
-    if(me.myCoordinator && me.myCoordinator == me.next_coordinator){
+    if(me.my_member && me.my_member == me.next_member){
       me.mempool.push(tx)
     }else{
       me.findNearest(concat(inputMap('tx'),tx))
@@ -533,25 +626,25 @@ class Me {
 
   /*
   Services are centralized servers that do some job for the network. Most common:
-  Coordinator (blockchain gatekeepers, they build and share blocks with others)
+  Member (blockchain gatekeepers, they build and share blocks with others)
   Hub (faciliating mediated transfer with delayed settlement)
   Box storage
   message boards, App backends, etc.
   all Services must be end-to-end encrypted whenever possible
 
-  Now all must be Coordinators as well to maintain the security of the network
+  Now all must be member as well to maintain the security of the network
   */
 
-  // users - not trusted at all
-  // coordinators, run by oracles - moderately trusted, average performance
-  // hubs, run by architects - highly trusted as compromises are painful, high performance
+  // users
+  // members - moderately trusted, average performance
+  // hubs - highly trusted as compromises are painful, high performance
 
-  async initCoordinator(){
-    // each coordinator must have bidirectional sockets ready to all other coordinators
+  async initMember(){
+    // each member must have bidirectional sockets ready to all other member
     me.record = await me.byKey()
 
-    for(var i = 0;i<me.coordinators.length;i++){
-      var c = me.coordinators[i]
+    for(var i = 0;i<me.members.length;i++){
+      var c = me.members[i]
       if(me.id.publicKey.equals(c.pubkey) ){
         var [host, port] = c.location.split(':')
 
@@ -577,10 +670,10 @@ class Me {
 
   // we abstract away from Internet Protocol and imagine anyone just receives input out of nowhere
   // this input is of few different kinds:
-  // it can be from coordinator to another coordinator to persist a socket between them
-  // or it can be a new block received from another coordinator to add a signature
+  // it can be from member to another member to persist a socket between them
+  // or it can be a new block received from another member to add a signature
   // or it can be a fully signed block to be applied
-  // or a new tx from anyone to be added to block or passed to current coordinator
+  // or a new tx from anyone to be added to block or passed to current member
   async processInput(ws, tx){
     // sanity checks 100kb
     if(tx.length > 100000){
@@ -589,9 +682,9 @@ class Me {
     }
 
 
-    // if it's another coordinator, add ws to me.coordinators
+    // if it's another member, add ws to me.members
     // 32 pubkey + 64 sig + 4 of current time
-    let obj, coordinator
+    let obj, member
 
     var inputType = inputMap(tx[0])
 
@@ -602,58 +695,57 @@ class Me {
 
     if(inputType == 'auth' &&
       (obj = me.offchainVerify(tx)) &&
-      (obj.c = me.coordinators.find(f=>f.pubkey.equals(obj.signer))) &&
+      (obj.c = me.members.find(f=>f.pubkey.equals(obj.signer))) &&
       (ts() - 100 < obj.data.readUInt32BE())
     ) {
-      l('Another coordinator connected: '+toHex(obj.signer))
+      l('Another member connected: '+toHex(obj.signer))
       obj.c.socket = ws
       return false
     }else if (inputType == 'tx'){
 
       // 2. is it us?
-      if(me.myCoordinator && me.myCoordinator == me.next_coordinator){
+      if(me.my_member && me.my_member == me.next_member){
         l('We are next, adding to mempool')
         me.mempool.push(tx)
       }else{
-        if(me.next_coordinator.socket){
-          l('passing to next '+me.next_coordinator.id)
-          me.next_coordinator.socket.send(concat(inputMap('tx'),tx))
+        if(me.next_member.socket){
+          l('passing to next '+me.next_member.id)
+          me.next_member.socket.send(concat(inputMap('tx'),tx))
         }else{
-          l('No active socket to current coordinator: '+me.next_coordinator.id)
+          l('No active socket to current member: '+me.next_member.id)
         }
 
       }
     }else if (inputType == 'needSig'){
-      var coord = me.coordinators.find(f=>f.pubkey.equals(tx.slice(0,32)) )
+      var m = me.members.find(f=>f.pubkey.equals(tx.slice(0,32)) )
       var sig = tx.slice(32,96)
       var block = tx.slice(96)
 
       // ensure the block is non repeating
 
-      if(coord && nacl.sign.detached.verify(block, sig, tx.slice(0,32))  ){
-        l(`${coord.id} asks us to sign their block!`)
+      if(m && nacl.sign.detached.verify(block, sig, tx.slice(0,32))  ){
+        l(`${m.id} asks us to sign their block!`)
 
         var signed = concat(
           inputMap('signed'),
           bin(me.id.publicKey),
           nacl.sign.detached(block, me.id.secretKey)
         )
-
-        coord.socket.send(signed)
+        m.socket.send(signed)
       }
 
-      // a coordinator needs your signature
+      // a member needs your signature
 
 
     }else if (inputType == 'signed'){
-      var coord = me.coordinators.find(f=>f.pubkey.equals(tx.slice(0,32)) )
+      var m = me.members.find(f=>f.pubkey.equals(tx.slice(0,32)) )
       var sig = tx.slice(32,96)
 
       assert(me.state == 'precommit', 'Not expecting any sigs')
 
-      if(coord && nacl.sign.detached.verify(me.precommit, sig, tx.slice(0,32))){
-        coord.sig = sig
-        //l(`Received another sig from  ${coord.id}`)
+      if(m && nacl.sign.detached.verify(me.precommit, sig, tx.slice(0,32))){
+        m.sig = sig
+        //l(`Received another sig from  ${m.id}`)
       }else{
         l("this sig doesn't work for our block")
       }
@@ -690,18 +782,18 @@ class Me {
   }
 
   async processBlock(block){
-    var finalblock = block.slice(me.coordinators.length * 64)
+    var finalblock = block.slice(me.members.length * 64)
 
     l(`Processing a new block, length ${block.length}`)
-    var total_spirits = 0
+    var total_shares = 0
 
-    for(var i = 0;i<me.coordinators.length;i++){
+    for(var i = 0;i<me.members.length;i++){
       var sig = (block.slice(i * 64, (i+1) * 64))
 
       if(sig.equals(Buffer.alloc(64))){
 
-      }else if(nacl.sign.detached.verify(finalblock, sig, me.coordinators[i].pubkey)){
-        total_spirits += me.coordinators[i].spirits
+      }else if(nacl.sign.detached.verify(finalblock, sig, me.members[i].pubkey)){
+        total_shares += me.members[i].shares
       }else{
         l(`Invalid signature for a given block. Halt!`)
         //return false
@@ -710,8 +802,8 @@ class Me {
 
     }
 
-    if(total_spirits < K.supermajority){
-      l("Not enough spirits on a block")
+    if(total_shares < K.supermajority){
+      l("Not enough shares on a block")
       return false
     }
 
@@ -734,7 +826,7 @@ class Me {
       return false
     }
 
-    l(`Processing ${block_number} (before ${K.total_blocks}) hash ${K.prev_hash}. Timestamp ${timestamp} Total spirits: ${total_spirits}, tx to process: ${ordered_tx.length}`)
+    l(`Processing ${block_number} (before ${K.total_blocks}) hash ${K.prev_hash}. Timestamp ${timestamp} Total shares: ${total_shares}, tx to process: ${ordered_tx.length}`)
 
     // processing transactions one by one
     for(var i = 0;i<ordered_tx.length;i++){
@@ -793,7 +885,7 @@ class Me {
       // increase or decrease bandwidth tax per byte
     }
 
-    saveJSON()
+    fs.writeFileSync('data/k.json', stringify(K))
 
     if(K.bytes_since_last_snapshot == 0){
       trustlessInstall()
@@ -801,7 +893,7 @@ class Me {
 
 
     // save final block in blockchain db and broadcast
-    if(me.myCoordinator){
+    if(me.my_member){
       Block.create({
         prev_hash: Buffer.from(prev_hash, 'hex'),
         hash: sha3(finalblock),
@@ -809,7 +901,7 @@ class Me {
       })
 
       var blocktx = concat(inputMap('block'), block)
-      // send finalblock to all websocket users if we're coordinator
+      // send finalblock to all websocket users if we're member
       if(me.external_wss){
         me.external_wss.clients.forEach(client=>client.send(blocktx))
       }
@@ -826,8 +918,8 @@ class Me {
 
 
   findNearest(tx){
-    if(me.myCoordinator){
-      // if we are coordinator, just send it to current
+    if(me.my_member){
+      // if we are member, just send it to current
       if(me.current && me.current.socket){
         me.current.socket.send(tx)
       }
@@ -835,13 +927,13 @@ class Me {
 
       return false
     }
-    // connecting to geo-selected nearest coordinator (lowest latency)
+    // connecting to geo-selected nearest member (lowest latency)
     if(me.nearest){
       if(tx) me.nearest.send(tx)
     }else{
-      var randomCoordinator = me.coordinators[Math.floor(Math.random() * me.coordinators.length)]
+      var m = me.members[Math.floor(Math.random() * me.members.length)]
       me.nearest = new WebSocketClient();
-      me.nearest.open('ws://'+randomCoordinator.location)
+      me.nearest.open('ws://'+m.location)
 
       me.nearest.onmessage = tx=>{
         l('from nearest ')
@@ -947,7 +1039,7 @@ WebSocketClient.prototype.reconnect = function(e){
 	var that = this;
 	setTimeout(function(){
     var connected = 0
-    me.coordinators.map(o=>{if(o.socket) connected++})
+    me.members.map(o=>{if(o.socket) connected++})
 		//console.log("WebSocketClient: reconnecting... Have "+connected);
 		that.open(that.url);
 	},this.autoReconnectInterval);
@@ -968,93 +1060,8 @@ initDashboard=async a=>{
   var finalhandler = require('finalhandler');
   var serveStatic = require('serve-static');
 
-  var whitelist_hosts = ['127.0.0.1:'+(base_port+1), '0.0.0.0:'+(base_port+1)]
-
   // this serves dashboard HTML page
   var server = http.createServer(function(req, res) {
-    // only allow downloading before
-    assert(isLocalhost(req.connection.remoteAddress), 'Must be coming from localhost IP')
-    assert(whitelist_hosts.indexOf(req.headers.host)!=-1, 'DNS rebinding attack')
-
-    res.statusCode = 200;
-
-    console.log(req.headers)
-
-
-    /*
-    TODO: Failsafe Domain Name Service
-
-    var app_name = req.headers.host.match(/([a-z]+)\.we(:[0-9]+)?/)
-    if(app_name){
-      console.log("serving ./apps/"+app_name[1]);
-
-      serveStatic("./apps/"+app_name[1])(req, res, finalhandler(req, res));
-    }
-      */
-
-    serveStatic("../wallet")(req, res, finalhandler(req, res));
-
-    //res.setHeader('Access-Control-Allow-Origin', '*');
-    //res.setHeader('Content-Type', 'text/html');
-  });
-
-  console.log('Set up HTTP server at '+(base_port+1))
-  server.listen((base_port+1));
-
-  me.internal_wss = new WebSocket.Server({ port: (base_port+3) });
-  console.log('Set up websocket server to accepts local commands')
-  me.internal_wss.on('connection', function(ws,req) {
-    console.log('ws', req.headers)
-    // Origin = our proxy, and initiated by this device
-    assert(isLocalhost(req.connection.remoteAddress), 'Must be coming from localhost IP')
-    assert(req.headers.host == '127.0.0.1:'+(base_port+3), 'DNS rebinding attack')
-    assert(whitelist_hosts.indexOf(req.headers.origin)!=-1, 'DNS rebinding attack')
-
-    ws.send('{"id":0}')
-
-    ws.on('message', msg=>{
-      json = JSON.parse(msg)
-
-      if(json.method == 'pay'){
-        // some Origins are whitelisted for Smooth Payments
-        if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
-
-          //me.pay('')
-
-          originAllowence[json.proxyOrigin] -= json.params.amount
-
-          ws.send(JSON.stringify({
-            status: 'paid',
-            id: json.id
-          }))
-
-        }else{
-          // request explicit confirmation
-          json.confirmation = true
-          ws.send(JSON.stringify(json))
-        }
-
-      } else if (json.method == 'login'){
-        // Smooth Login
-        var token = JSON.stringify([json.proxyOrigin, me.seed])
-
-        ws.send(JSON.stringify({
-          token: toHex(sha3(token)),
-          id: json.id
-        }))
-
-
-
-      }
-    })
-
-
-  });
-
-
-  installServer = http.createServer(function (req, res) {
-    l(req.url);
-
     if(m = req.url.match(/^\/codestate\/([0-9]+)$/)){
       var filename=`Failsafe-${m[1]}-${me.username}.tar.gz`
 
@@ -1065,8 +1072,8 @@ initDashboard=async a=>{
         }
 
         var out_hash = out.split(' ')[0]
-        var host = me.myCoordinator.location.split(':')[0]
-        var out_location = 'http://'+host+':'+(base_port+2)+'/'+filename
+        var host = me.my_member.location.split(':')[0]
+        var out_location = 'http://'+host+':'+base_port+'/'+filename
         res.end(`
       # Compare this snippet with other sources, and if exact match paste into Terminal.app
 
@@ -1097,27 +1104,84 @@ initDashboard=async a=>{
         fReadStream.resume();
      });
    }else{
-     res.end('not found')
+    serveStatic("../wallet")(req, res, finalhandler(req, res));
    }
+
+
   });
 
-  installServer.listen(base_port + 2);
+  console.log('Set up HTTP server at '+base_port)
+  server.listen(base_port)
 
-  //require('./opn')('http://0.0.0.0:'+(base_port+1))
+  var url = 'http://0.0.0.0:'+base_port+'/#code='+auth_code
+  l("Open "+url+" in your browser to get started")
+  opn(url)
+
+  internal_wss = new WebSocket.Server({ server: server });
+  internal_wss.on('connection', function(ws,req) {
+    console.log('ws', req.headers)
+    // Origin = our proxy, and initiated by this device
+    if(!isLocalhost(req)){
+      // processInput
+
+      return false
+    }
+   
+    ws.send('{"id":0}')
+    ws.on('message', msg=>{
+      json = JSON.parse(msg)
+
+      if(json.method == 'pay'){
+        // some Origins are whitelisted for Smooth Payments
+        if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
+
+          //me.pay('')
+
+          originAllowence[json.proxyOrigin] -= json.params.amount
+
+          ws.send(JSON.stringify({
+            status: 'paid',
+            id: json.id
+          }))
+
+        }else{
+          // request explicit confirmation
+          json.confirmation = true
+          ws.send(JSON.stringify(json))
+        }
+
+      } else if (json.method == 'login'){
+        var token = ''// toHex(nacl.sign(json.proxyOrigin, me.id.privateKey))
+
+        ws.send(JSON.stringify({
+          token: token,
+          id: json.id
+        }))
 
 
 
+      }
+    })
 
+
+  });
 
 
 }
 
-isLocalhost=(ip)=>{
-  return ['127.0.0.1', '::ffff:127.0.0.1', '::1'].indexOf(ip) != -1 || ip.indexOf('::ffff:127.0.0.1:') == 0
+isLocalhost=(req)=>{
+  return auth_code.length==64 && req.headers.cookie.indexOf(auth_code) != -1
+
+  /* + other checks
+  (
+  (['127.0.0.1', '::ffff:127.0.0.1', '::1'].indexOf(req.connection.remoteAddress) != -1 
+    || req.connection.remoteAddress.indexOf('::ffff:127.0.0.1:') == 0) &&
+  req.headers.host=='0.0.0.0'
+  */
 }
 
 derive = async (username, pw)=>{
-  var pk = await require('scrypt').hash(pw, {
+  var seed = await require('scrypt').hash(pw, {
     N: Math.pow(2, 12),
     interruptStep: 1000,
     p: 1,
@@ -1126,9 +1190,9 @@ derive = async (username, pw)=>{
     encoding: 'base64'
   }, 32, username)
 
-  l(`Derived ${pk.toString('hex')} for ${username}:${pw}`)
+  l(`Derived ${seed.toString('hex')} for ${username}:${pw}`)
 
-  return pk;
+  return seed;
 }
 
 main = async (username, login)=>{
@@ -1139,7 +1203,8 @@ main = async (username, login)=>{
   sequelize = new Sequelize('', '', 'password', {
     dialect: 'sqlite',
     storage: 'data/db.sqlite',
-    define: {timestamps: false}
+    define: {timestamps: false},
+    operatorsAliases: false
   });
 
   // two kinds of storage: 1) critical database that might be used by code
@@ -1183,8 +1248,6 @@ main = async (username, login)=>{
     // dispute has last nonce, last agreed_balance
   })
 
-
-  //me.record.addHub(x, { through: { type: 'channel' }});
 
   Vote = sequelize.define('vote', {
     rationale: Sequelize.TEXT,
@@ -1237,43 +1300,30 @@ main = async (username, login)=>{
   })
 
 
-  /* not deterministic
-  var tx = me.sign(write32(me.record.nonce), concat(methodId, args))
 
-  db = require('level')('data/db.leveldb')
-
-  K = new Proxy(K, {
-    get: async function(target, name) {
-      try{
-        var result = await db.get(name)
-        result = JSON.parse(result)
-      }catch(e){return false }
-      return result
-    },
-    set: async function(target, name, val){
-      return await db.put(name, JSON.stringify(val))
-    }
-  })
-  */
+  if(fs.existsSync('private')){
+    var json = fs.readFileSync('private/pk.json')
+    PK = JSON.parse(json)
 
 
-  if(login){
     me = new Me
-    await me.init(username, 'password')
+    await me.init(PK.seed)
     me.record = await me.byKey()
 
-    var json = fs.readFileSync('data/json')
+
+
+    var json = fs.readFileSync('data/k.json')
 
     K = JSON.parse(json)
     me.K = K
 
-    me.coordinators = JSON.parse(json).coordinators // another object ref
+    me.members = JSON.parse(json).members // another object ref
 
     // in json pubkeys are in hex
-    me.coordinators.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
+    me.members.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
 
 
-    me.myCoordinator = me.coordinators.find(f=>me.id.publicKey.equals(f.pubkey))
+    me.my_member = me.members.find(f=>me.id.publicKey.equals(f.pubkey))
 
 
     var prev_hash = K.prev_hash
@@ -1282,38 +1332,38 @@ main = async (username, login)=>{
       me.findNearest(concat(inputMap('sync'), Buffer.from(prev_hash, 'hex')) )
     }, 3000)
 
-    // am I coordinator?
-    if(me.myCoordinator){
-      me.initCoordinator()
+    // am I member?
+    if(me.my_member){
+      me.initMember()
 
       setInterval(()=>{
         var now = ts()
 
         var currentIndex = Math.floor(now / K.blocktime) % K.witnesses
-        me.current = me.coordinators[currentIndex]
+        me.current = me.members[currentIndex]
 
         var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
 
-        me.next_coordinator = me.coordinators[ (currentIndex + increment) % K.witnesses]
+        me.next_member = me.members[ (currentIndex + increment) % K.witnesses]
 
-        //l(`Current coordinator at ${now} is ${me.current.id}. Our state ${me.state}`)
+        //l(`Current member at ${now} is ${me.current.id}. Our state ${me.state}`)
 
         if(me.id.publicKey.equals(me.current.pubkey)){
           // do we have enough sig or it's time?
           var sigs = []
-          var total_spirits = 0
-          me.coordinators.map((c, index)=>{
+          var total_shares = 0
+          me.members.map((c, index)=>{
             if(c.sig){
               sigs[index] = bin(c.sig)
-              total_spirits+=c.spirits
+              total_shares+=c.shares
             }else{
               sigs[index] = Buffer.alloc(64)
             }
           })
 
-          if(me.state == 'precommit' && (total_spirits == K.witnesses || now % K.blocktime > K.blocktime/2)){
-            if(total_spirits < K.supermajority){
-              l(`Only have ${total_spirits} spirits, cannot build a block!`)
+          if(me.state == 'precommit' && (total_shares == K.witnesses || now % K.blocktime > K.blocktime/2)){
+            if(total_shares < K.supermajority){
+              l(`Only have ${total_shares} shares, cannot build a block!`)
             }else{
               /* lets process
               var finalblock = concat(
@@ -1322,7 +1372,7 @@ main = async (username, login)=>{
                 me.precommit
               )
 
-              me.coordinators.map((c)=>{
+              me.members.map((c)=>{
                 if(c.socket){
                   c.socket.send(finalblock)
                 }
@@ -1341,7 +1391,7 @@ main = async (username, login)=>{
 
             // flush sigs
 
-            me.coordinators.map(c=>c.sig = false)
+            me.members.map(c=>c.sig = false)
 
           }else if (me.state == 'await'){
             me.state = 'precommit'
@@ -1385,90 +1435,6 @@ listyo = () => {
   }))
 }
 
-genesis = async ()=>{
-  //await(fs.rmdir('data'))
-  await(asyncexec('rm -rf data'))
-  await(asyncexec('rm -rf private'))
-
-  await(fs.mkdir('data'))
-  await(fs.mkdir('private'))
-
-  var u = []
-  var coords = []
-  await (main('u1'))
-  await (sequelize.sync({force: true}))
-  await (privSequelize.sync({force: true}))
-
-  for(var i = 1; i < 21;i++){
-    u[i] = new Me;
-    var username = "u"+i
-    //fs.mkdir('data/'+username)
-
-    await (u[i]).init(username,'password');
-
-    var user = await (User.create({
-      pubkey: bin(u[i].id.publicKey),
-      username: username,
-      nonce: 0,
-      balance: 100000
-    }))
-
-    if(i<3){
-      coords.push({
-        id: user.id,
-        pubkey: bin(u[i].id.publicKey).toString('hex'),
-        location: '0.0.0.0:'+(8000+(i*10)),
-        missed_blocks: [],
-        spirits: 10
-      })
-    }
-
-    coords[0].is_hub = 1
-    coords[0].spirits = 100
-
-
-  }
-
-  K = {
-    usable_blocks: 0,
-    total_blocks: 0,
-    total_tx: 0,
-    total_bytes: 0,
-    total_supply: 0,
-
-    voting_period: 2,
-
-    bytes_since_last_snapshot: 0,
-    snapshot_after_bytes: 10000, //100 * 1024 * 1024,
-    proposals_created: 0,
-
-    tax_per_byte: 0.1,
-
-    blocksize: 600 * 1024,
-    blocktime: 30,
-
-    supermajority: 2,
-    witnesses: 2,
-
-    prev_hash: toHex(Buffer.alloc(32)),
-
-    coordinators: coords
-  }
-
-  saveJSON()
-
-  for(var i = 2; i < 21;i++){
-    //require("fs-extra").copy('./data/u1.leveldb', './data/u'+i+'.leveldb')
-    //require("fs-extra").copy('./data/u1.sqlite', './data/u'+i+'.sqlite')
-  }
-  process.exit()
-
-}
-
-saveJSON = ()=>{
-  l('saving JSON')
-  l(fs.writeFileSync('data/json', require('./stringify')(K)))
-}
 
 if(process.argv[2] == 'genesis'){
   genesis()
@@ -1518,8 +1484,6 @@ if(process.argv[2] == 'genesis'){
       _eval(preprocess(cmd), context, filename, callback);
     }
     //.bind(this);
-
-
 
   }
 
