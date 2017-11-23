@@ -1,27 +1,25 @@
-secp256k1 = require("secp256k1");
-E = require("ethereumjs-util");
 assert = require("assert");
 crypto = require("crypto");
-WebSocket = require("ws");
-fs = require("fs");
-request = require("request");
+fs = require("fs")
 http = require("http");
-nacl = require('tweetnacl')
 
-diff2html = require("diff2html").Diff2Html
+// from local node_modules
+// brew install node
+
+// npm i tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt
+const keccak = require('keccak')
+const rlp = require('rlp')
+const BN = require('bn.js')
+nacl = require('tweetnacl')
+WebSocket = require("ws")
+
+//diff2html = require("diff2html").Diff2Html
 //diff2html.getPrettyHtmlFromDiff(f)
 
 child_process = require('child_process')
 const {spawn, exec, execSync} = child_process;
 
-
-usage = ()=>{
-  Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
-}
-
-//Failsafe.Network - Decentralized PayPal
-
-Sequelize = require('sequelize');
+Sequelize = require('sequelize')
 Op = Sequelize.Op;
 
 base_port = 8000 + (parseInt(process.argv[2] ? process.argv[2] : 1) * 10)
@@ -30,12 +28,17 @@ egor = '128.199.242.161'
 
 asyncexec = require('util').promisify(exec)
 
-//  const { stdout, stderr } = await exec(cmd);
 
+process.title = 'Failsafe'
+
+usage = ()=>{
+  Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
+}
 
 l = console.log
 toHex = (inp) => Buffer.from(inp).toString('hex')
 bin=(data)=>Buffer.from(data)
+sha3 = (a)=>keccak('keccak256').update(bin(a)).digest()
 ts = () => Math.round(new Date/1000)
 
 wed = d => d * 100 // We dollars to cents
@@ -112,7 +115,7 @@ allowedOnchain = [
 class Me {
   async init(username, pw) {
     this.username = username
-    this.pw = E.sha3(pw) // we only store checksum for doublechecks
+    this.pw = sha3(pw) // we only store checksum for doublechecks
 
     this.seed = await derive(username,pw)
     this.id = nacl.sign.keyPair.fromSeed(this.seed)
@@ -120,7 +123,6 @@ class Me {
 
     this.mempool = []
     this.state = 'await'
-
 
     this.sockets = {}
   }
@@ -188,7 +190,7 @@ class Me {
     var prev_hash = K.prev_hash
     // block has current height, hash of prev block , ts()
 
-    me.precommit = E.rlp.encode([
+    me.precommit = rlp.encode([
       write32(block_number),
       methodMap('block'),
       Buffer.from(prev_hash, 'hex'),
@@ -474,7 +476,7 @@ class Me {
           args[2] = fs.readFileSync('../'+args[2])
         }
 
-        args = E.rlp.encode(args)
+        args = rlp.encode(args)
         break
 
 
@@ -661,7 +663,7 @@ class Me {
     }else if (inputType == 'block'){
       await me.processBlock(tx)
     }else if (inputType == 'chain'){
-      var chain = E.rlp.decode(tx)
+      var chain = rlp.decode(tx)
       for(var i = 0;i<chain.length;i++){
         l(' processing chain with '+i)
         await me.processBlock(chain[i])
@@ -680,7 +682,7 @@ class Me {
           id: { $gte: start}
         }
       }).then(async blocks=>{
-        ws.send(concat(inputMap('chain'), E.rlp.encode(blocks.map(b=>b.block)) ))
+        ws.send(concat(inputMap('chain'), rlp.encode(blocks.map(b=>b.block)) ))
 
       })
 
@@ -718,7 +720,7 @@ class Me {
       methodId,
       prev_hash,
       timestamp,
-      ordered_tx] = E.rlp.decode(finalblock)
+      ordered_tx] = rlp.decode(finalblock)
 
     block_number = block_number.readUInt32BE()
     methodId = methodMap(methodId.readUInt32BE())
@@ -742,7 +744,7 @@ class Me {
 
 
 
-    K.prev_hash = toHex(E.sha3(finalblock))
+    K.prev_hash = toHex(sha3(finalblock))
 
     K.total_blocks++
     if(finalblock.length < K.blocksize-1000){
@@ -754,7 +756,7 @@ class Me {
     const to_execute = await Proposal.findAll({where: {delayed: K.usable_blocks}})
     l("Processing delayed jobs "+to_execute.length)
     for(let job of to_execute){
-      job = E.rlp.decode(job.change)
+      job = rlp.decode(job.change)
 
       l(toUTF(job[0]))
 
@@ -802,7 +804,7 @@ class Me {
     if(me.myCoordinator){
       Block.create({
         prev_hash: Buffer.from(prev_hash, 'hex'),
-        hash: E.sha3(finalblock),
+        hash: sha3(finalblock),
         block: block
       })
 
@@ -961,7 +963,7 @@ WebSocketClient.prototype.onerror = function(e){
 WebSocketClient.prototype.onclose = function(e){	console.log("WebSocketClient: closed",arguments);	}
 
 
-initDashboard=a=>{
+initDashboard=async a=>{
 
   var finalhandler = require('finalhandler');
   var serveStatic = require('serve-static');
@@ -1037,7 +1039,7 @@ initDashboard=a=>{
         var token = JSON.stringify([json.proxyOrigin, me.seed])
 
         ws.send(JSON.stringify({
-          token: toHex(E.sha3(token)),
+          token: toHex(sha3(token)),
           id: json.id
         }))
 
@@ -1129,24 +1131,16 @@ derive = async (username, pw)=>{
   return pk;
 }
 
-
-
-process.on('unhandledRejection', r => console.log(r))
-
 main = async (username, login)=>{
+  initDashboard()
+  
   // this is onchain database - shared among everybody
 
-  sequelize = new Sequelize(username, username, 'password', {
+  sequelize = new Sequelize('', '', 'password', {
     dialect: 'sqlite',
-    storage: 'data/db.sqlite'
+    storage: 'data/db.sqlite',
+    define: {timestamps: false}    
   });
-
-
-  //sequelize = new Sequelize('sqlite://homakov:@localhost:5432/data/db.sqlite');
-
-  opts = {
-    timestamps: false
-  }
 
   // two kinds of storage: 1) critical database that might be used by code
   // 2) complementary stats like updatedAt that's useful in exploring and can be deleted safely
@@ -1158,7 +1152,7 @@ main = async (username, login)=>{
     nonce: Sequelize.INTEGER,
     balance: Sequelize.BIGINT // mostly to pay taxes
 
-  }, opts);
+  });
 
   Proposal = sequelize.define('proposal', {
     change: Sequelize.TEXT,
@@ -1166,7 +1160,7 @@ main = async (username, login)=>{
     delayed: Sequelize.INTEGER,
 
     kindof: Sequelize.STRING
-  }, opts)
+  })
 
   Channel = sequelize.define('channel', {
     nonce: Sequelize.INTEGER, // for instant withdrawals
@@ -1176,7 +1170,7 @@ main = async (username, login)=>{
 
     delayed: Sequelize.INTEGER
     // dispute has last nonce, last agreed_balance
-  }, opts)
+  })
 
 
   Bond = sequelize.define('bond', {
@@ -1187,7 +1181,7 @@ main = async (username, login)=>{
 
     delayed: Sequelize.INTEGER
     // dispute has last nonce, last agreed_balance
-  }, opts)
+  })
 
 
   //me.record.addHub(x, { through: { type: 'channel' }});
@@ -1195,7 +1189,7 @@ main = async (username, login)=>{
   Vote = sequelize.define('vote', {
     rationale: Sequelize.TEXT,
     approval: Sequelize.BOOLEAN // approval or denial
-  }, opts)
+  })
 
   //promises
 
@@ -1211,23 +1205,24 @@ main = async (username, login)=>{
   // this is off-chain private database for blocks and other balance proofs
   // for things that new people don't need to know and can be cleaned up
 
-  privSequelize = new Sequelize(username, username, 'password', {
+  privSequelize = new Sequelize('', '', 'password', {
     dialect: 'sqlite',
-    storage: 'private/db.sqlite'
+    storage: 'private/db.sqlite',
+    define: {timestamps: false}
   });
 
   Block = privSequelize.define('block', {
     block: Sequelize.CHAR.BINARY,
     hash: Sequelize.CHAR(32).BINARY,
     prev_hash: Sequelize.CHAR(32).BINARY
-  }, opts)
+  })
 
 
   Event = privSequelize.define('event', {
     data: Sequelize.CHAR.BINARY,
     kindof: Sequelize.STRING,
     p1: Sequelize.STRING
-  }, opts)
+  })
 
 
 
@@ -1271,7 +1266,6 @@ main = async (username, login)=>{
 
     K = JSON.parse(json)
     me.K = K
-    //l(global.K)
 
     me.coordinators = JSON.parse(json).coordinators // another object ref
 
@@ -1503,8 +1497,6 @@ if(process.argv[2] == 'genesis'){
     var username = 'u' + (process.argv[2] ? parseInt(process.argv[2]) : 1)
     main(username, true)
 
-    initDashboard()
-
     function preprocess(input) {
       const awaitMatcher = /^(?:\s*(?:(?:let|var|const)\s)?\s*([^=]+)=\s*|^\s*)(await\s[\s\S]*)/;
       const asyncWrapper = (code, binder) => {
@@ -1533,6 +1525,10 @@ if(process.argv[2] == 'genesis'){
 
 
 }
+
+
+
+process.on('unhandledRejection', r => console.log(r))
 
 
 
