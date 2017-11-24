@@ -60,34 +60,33 @@
 
         <form class="form-signin">
          
-          <h2>Welcome to Failsafe</h2>
+          <h2>Create Failsafe ID</h2>
 
-          <label for="inputEmail" class="sr-only">Username</label>
-          <input type="text" id="inputEmail" class="form-control" placeholder="Username" required autofocus>
+          <label for="inputUsername" class="sr-only">Username</label>
+          <input type="text" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
+          <br>
+
+          <p>Make sure your password is unique, strong and don't forget it, otherwise access to your account is lost. If in doubt, write it down or email it to yourself. </p>
+
           <label for="inputPassword" class="sr-only">Password</label>
           <input type="password" id="inputPassword" class="form-control" placeholder="Password" required>
 
-         <div class="checkbox">
-          <label>
-            <input type="checkbox" value="remember-me">  I confirm that my password is unique, strong and I won't forget it, otherwise access to my account is lost.
-          </label>
-        </div>
+          <p>There's no password recovery procedure because FN is decentralized and no one can generate your private key without your password.
+          </p>
 
-          <button class="btn btn-lg btn-primary btn-block" type="submit">Log In</button>
+          <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
         </form>
     </div>
 
 
-    ...
-    wallet
 
-
-
-
-    <script src="js/main.js"></script>
     <script src="b/assets/js/vendor/jquery-slim.min.js"></script>
     <script src="b/assets/js/vendor/popper.min.js"></script>
     <script src="b/dist/js/bootstrap.min.js"></script>
+
+    <script src='/js/sdk.js'></script>
+
+    <script src="js/main.js"></script>
 
   </body>
 </html>

@@ -6,5 +6,22 @@ if(hash[1]){
   location.hash=''
 }
 
+l=console.log
+
+$(function(){
+  $('.form-signin').on('submit', f=>{
+
+    W('derive', {
+      username: inputUsername.value, 
+      password: inputPassword.value
+    }).then(r=>l(r))
+
+    return false
+  })
+
+
+
+})
+
 
 

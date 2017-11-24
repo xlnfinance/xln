@@ -59,43 +59,28 @@ How many Mb the blockchain adds per every week you wasn't actively syncing, and 
 
 
 
-Fast and Decentralized
+
+asset
+collateral
+settled
+withdrawal_nonce
+
+
+offchain
+asset
+delta
+nonce
 
 
 
-
-Wh1teR4bbit?
-
-
-
-Initial sync:
-
-Ethereum: 9317 MB per week = 2 hr 35 min
-
-Bitcoin: 1008 per week, 17 min
-
-600 Kb block per 10 min
-WeOS:  9 min (incentivized delivery)
+real delta = delta - settled 
+real balance = collateral + real delta
 
 
+average real delta = over last week, calculated by clients
 
 
-Barely syncable, but not too bad.
+offchain delta
+onchain delta
 
 
-
-3. Anti volatility
-
-https://venturebeat.com/2017/06/17/heres-how-we-start-to-stabilize-bitcoin-ethereum/
-
-
-4. CDN in internet providers
-
-Priority to
-https://bitnodes.21.co/
-
-4. FSD
-
-Random quote from the Internet that I liked:
-
-> When you are young its pretty easy to come to that conclusion. But if you dig a little deeper it won't take long to realize that government is inevitable. There's no way to have no government because an anarchist state will be taken over by brute force in a matter of time and start the government cycle all over again. Money is just a medium of exchange, if we burned it all thered still be goods to trade and such which is just a complicated currency. Money and power are part of the human condition, along with the evils it comes with.

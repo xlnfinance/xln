@@ -155,51 +155,6 @@ function show (el) {
   el.style.display = 'block'
 }
 
-// primarily used for `scope`
-
-toQuery = function (obj) {
-  return Object.keys(obj).reduce(function (a, k) { a.push(k + '=' + encodeURIComponent(obj[k])); return a }, []).join('&')
-}
-
-fromQuery = function (str) {
-  if (typeof str !== 'string' || str === '') return {}
-  var o = {}
-  str.split('&').map(function (pair) {
-    pair = pair.split('=')
-    o[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1])
-  })
-  return o
-}
-
-// to Uint8Array/Base64 and back
-
-Benc = function (str) {
-  return nacl.util.encodeBase64(str)
-}
-
-Bdec = function (str) {
-  return nacl.util.decodeBase64(str)
-}
-
-Uenc = function (str) {
-  return nacl.util.encodeUTF8(str)
-}
-
-Udec = function (str) {
-  return nacl.util.decodeUTF8(str)
-}
-
-// crypto short cuts
-
-hmac = function (secret, message) {
-  return Benc(nacl.auth(Udec(message), Bdec(secret)))
-}
-
-sign = function (message, priv) {
-  return Benc(nacl.sign.detached(Udec(message), Bdec(priv)))
-}
-
-
 timestamp = ()=>{
   return Math.floor(new Date/1000)
 }
@@ -243,32 +198,4 @@ e = function (string) {
   return String(string).replace(/[&<>"'/]/g, function (s) {
     return entityMap[s]
   })
-}
-
-// escaped CSV, JSON would be overhead
-
-csv = function (str) {
-  if (str instanceof Array) {
-    return str.map(function (el) {
-      return el.toString().replace(/[%,]/g, function (f) {
-        return f === '%' ? '%25' : '%2C'
-      })
-    }).join(',')
-  } else {
-    return str.split(',').map(function (el) {
-      return el.replace(/(%25|%2C)/g, function (f) {
-        return f === '%25' ? '%' : ','
-      })
-    })
-  }
-}
-
-getRandomValues = function (num) {
-  return crypto.getRandomValues(new Uint8Array(num))
-}
-
-if(this.module){
-  module.exports = {
-    timestamp: timestamp
-  }
 }

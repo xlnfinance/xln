@@ -28,9 +28,7 @@ const {spawn, exec, execSync} = child_process;
 Sequelize = require('sequelize')
 Op = Sequelize.Op;
 
-base_port = 7990 + (parseInt(process.argv[2] ? process.argv[2] : 1) * 10)
-
-egor = '128.199.242.161'
+base_port = 8000
 
 asyncexec = require('util').promisify(exec)
 
@@ -59,9 +57,6 @@ write32 = (int) => {
 
 
 
-
-
-
 // used to authenticate browser sessions to this daemon
 const auth_code = toHex(crypto.randomBytes(32))
 process.title = 'Failsafe'
@@ -70,15 +65,8 @@ usage = ()=>{
 }
 
 
-/*
-# The first time 
-
-*/
-
-
-
-
-genesis = async ()=>{
+//http://ipinfo.io/ip 
+genesis = async (username, pw, location)=>{
   //await(fs.rmdir('data'))
   await(asyncexec('rm -rf data'))
   await(asyncexec('rm -rf private'))
@@ -86,19 +74,16 @@ genesis = async ()=>{
   await(fs.mkdir('data'))
   await(fs.mkdir('private'))
 
-  await (main('u1'))
   await (sequelize.sync({force: true}))
-  await (privSequelize.sync({force: true}))
+
+  var seed = await derive(username,pw)
 
   me = new Me
-
-  var seed = await derive('u1','password')
-
-  await me.init('u1', seed);
+  await me.init(username, seed);
 
   var user = await (User.create({
     pubkey: bin(me.id.publicKey),
-    username: me.username,
+    username: username,
     nonce: 0,
     balance: 100000
   }))
@@ -119,12 +104,9 @@ genesis = async ()=>{
 
     tax_per_byte: 0.1,
 
-    blocksize: 600 * 1024,
+    blocksize: 6*1024*1024,
     blocktime: 30,
-
-    supermajority: 2,
-    witnesses: 2,
-
+    majority: 1,
     prev_hash: toHex(Buffer.alloc(32))
   }
 
@@ -132,14 +114,13 @@ genesis = async ()=>{
     {
       id: user.id,
       pubkey: bin(me.id.publicKey).toString('hex'),
-      location: '0.0.0.0:'+(8000+(i*10)),
+      location: location,
       missed_blocks: [],
       shares: 1000
     }
   ]
 
   fs.writeFileSync('data/k.json', stringify(K))
-
   process.exit()
 }
 
@@ -802,7 +783,7 @@ class Me {
 
     }
 
-    if(total_shares < K.supermajority){
+    if(total_shares < K.majority){
       l("Not enough shares on a block")
       return false
     }
@@ -1038,8 +1019,8 @@ WebSocketClient.prototype.reconnect = function(e){
         this.instance.removeAllListeners();
 	var that = this;
 	setTimeout(function(){
-    var connected = 0
-    me.members.map(o=>{if(o.socket) connected++})
+    //var connected = 0
+    //me.members.map(o=>{if(o.socket) connected++})
 		//console.log("WebSocketClient: reconnecting... Have "+connected);
 		that.open(that.url);
 	},this.autoReconnectInterval);
@@ -1117,7 +1098,7 @@ initDashboard=async a=>{
   l("Open "+url+" in your browser to get started")
   opn(url)
 
-  internal_wss = new WebSocket.Server({ server: server });
+  internal_wss = new WebSocket.Server({ server: server, maxPayload:  64*1024*1024 });
   internal_wss.on('connection', function(ws,req) {
     console.log('ws', req.headers)
     // Origin = our proxy, and initiated by this device
@@ -1128,22 +1109,36 @@ initDashboard=async a=>{
     }
    
     ws.send('{"id":0}')
-    ws.on('message', msg=>{
+    ws.on('message', async msg=>{
       json = JSON.parse(msg)
 
-      if(json.method == 'pay'){
-        // some Origins are whitelisted for Smooth Payments
-        if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
+      switch(json.method){
+        case 'load':
+          result = me
 
+
+          break
+
+        case 'derive':
+          var seed = await derive(json.params.username, json.params.password)
+
+          me = new Me
+          me.init(json.params.username, seed)
+          me.record = await me.byKey()
+
+          result = {
+            seed: toHex(seed),
+            record: me.record
+          }
+          break
+      }
+
+      if(json.method == 'pay'){
+        if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
           //me.pay('')
 
           originAllowence[json.proxyOrigin] -= json.params.amount
-
-          ws.send(JSON.stringify({
-            status: 'paid',
-            id: json.id
-          }))
-
+          result = 'paid'
         }else{
           // request explicit confirmation
           json.confirmation = true
@@ -1151,16 +1146,19 @@ initDashboard=async a=>{
         }
 
       } else if (json.method == 'login'){
-        var token = ''// toHex(nacl.sign(json.proxyOrigin, me.id.privateKey))
-
-        ws.send(JSON.stringify({
-          token: token,
-          id: json.id
-        }))
-
+        var result = ''// toHex(nacl.sign(json.proxyOrigin, me.id.privateKey))
 
 
       }
+
+
+      ws.send(stringify({
+        result: result,
+        id: json.id
+      }))
+
+
+
     })
 
 
@@ -1195,17 +1193,15 @@ derive = async (username, pw)=>{
   return seed;
 }
 
-main = async (username, login)=>{
-  initDashboard()
-  
   // this is onchain database - shared among everybody
-
-  sequelize = new Sequelize('', '', 'password', {
+  var base_db = {
     dialect: 'sqlite',
     storage: 'data/db.sqlite',
     define: {timestamps: false},
     operatorsAliases: false
-  });
+  }
+
+  sequelize = new Sequelize('', '', 'password', base_db);
 
   // two kinds of storage: 1) critical database that might be used by code
   // 2) complementary stats like updatedAt that's useful in exploring and can be deleted safely
@@ -1268,18 +1264,14 @@ main = async (username, login)=>{
   // this is off-chain private database for blocks and other balance proofs
   // for things that new people don't need to know and can be cleaned up
 
-  privSequelize = new Sequelize('', '', 'password', {
-    dialect: 'sqlite',
-    storage: 'private/db.sqlite',
-    define: {timestamps: false}
-  });
+  base_db.storage = 'private/db.sqlite'
+  privSequelize = new Sequelize('', '', 'password', base_db);
 
   Block = privSequelize.define('block', {
     block: Sequelize.CHAR.BINARY,
     hash: Sequelize.CHAR(32).BINARY,
     prev_hash: Sequelize.CHAR(32).BINARY
   })
-
 
   Event = privSequelize.define('event', {
     data: Sequelize.CHAR.BINARY,
@@ -1291,122 +1283,86 @@ main = async (username, login)=>{
 
 
 
-  Onchain = new Proxy({}, {
-    get: function(target, name) {
-      return (a)=>{
-        console.log(name, arguments)
-      }
-    }
-  })
 
+loggedin = async ()=>{  
 
+  // in json pubkeys are in hex
+  me.members.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
+  me.my_member = me.members.find(f=>me.id.publicKey.equals(f.pubkey))
 
-  if(fs.existsSync('private')){
-    var json = fs.readFileSync('private/pk.json')
-    PK = JSON.parse(json)
+  // am I member?
+  if(me.my_member){
+    me.initMember()
 
+    setInterval(()=>{
+      var now = ts()
 
-    me = new Me
-    await me.init(PK.seed)
-    me.record = await me.byKey()
+      var currentIndex = Math.floor(now / K.blocktime) % K.members.length
+      me.current = me.members[currentIndex]
 
+      var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
 
+      me.next_member = me.members[ (currentIndex + increment) % K.members.length]
 
-    var json = fs.readFileSync('data/k.json')
+      //l(`Current member at ${now} is ${me.current.id}. Our state ${me.state}`)
 
-    K = JSON.parse(json)
-    me.K = K
+      if(me.id.publicKey.equals(me.current.pubkey)){
+        // do we have enough sig or it's time?
+        var sigs = []
+        var total_shares = 0
+        me.members.map((c, index)=>{
+          if(c.sig){
+            sigs[index] = bin(c.sig)
+            total_shares+=c.shares
+          }else{
+            sigs[index] = Buffer.alloc(64)
+          }
+        })
 
-    me.members = JSON.parse(json).members // another object ref
+        if(me.state == 'precommit' && (total_shares == K.members.length || now % K.blocktime > K.blocktime/2)){
+          if(total_shares < K.majority){
+            l(`Only have ${total_shares} shares, cannot build a block!`)
+          }else{
+            /* lets process
+            var finalblock = concat(
+              inputMap('block'),
+              Buffer.concat(sigs),
+              me.precommit
+            )
 
-    // in json pubkeys are in hex
-    me.members.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
+            me.members.map((c)=>{
+              if(c.socket){
+                c.socket.send(finalblock)
+              }
+            })
+            */
 
+            l('Lets process the finalblock we just built')
+            me.processBlock(concat(
+              Buffer.concat(sigs),
+              me.precommit
+            ))
 
-    me.my_member = me.members.find(f=>me.id.publicKey.equals(f.pubkey))
-
-
-    var prev_hash = K.prev_hash
-
-    setTimeout(()=>{
-      me.findNearest(concat(inputMap('sync'), Buffer.from(prev_hash, 'hex')) )
-    }, 3000)
-
-    // am I member?
-    if(me.my_member){
-      me.initMember()
-
-      setInterval(()=>{
-        var now = ts()
-
-        var currentIndex = Math.floor(now / K.blocktime) % K.witnesses
-        me.current = me.members[currentIndex]
-
-        var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
-
-        me.next_member = me.members[ (currentIndex + increment) % K.witnesses]
-
-        //l(`Current member at ${now} is ${me.current.id}. Our state ${me.state}`)
-
-        if(me.id.publicKey.equals(me.current.pubkey)){
-          // do we have enough sig or it's time?
-          var sigs = []
-          var total_shares = 0
-          me.members.map((c, index)=>{
-            if(c.sig){
-              sigs[index] = bin(c.sig)
-              total_shares+=c.shares
-            }else{
-              sigs[index] = Buffer.alloc(64)
-            }
-          })
-
-          if(me.state == 'precommit' && (total_shares == K.witnesses || now % K.blocktime > K.blocktime/2)){
-            if(total_shares < K.supermajority){
-              l(`Only have ${total_shares} shares, cannot build a block!`)
-            }else{
-              /* lets process
-              var finalblock = concat(
-                inputMap('block'),
-                Buffer.concat(sigs),
-                me.precommit
-              )
-
-              me.members.map((c)=>{
-                if(c.socket){
-                  c.socket.send(finalblock)
-                }
-              })
-              */
-
-              l('Lets process the finalblock we just built')
-              me.processBlock(concat(
-                Buffer.concat(sigs),
-                me.precommit
-              ))
-
-            }
-
-            me.state = 'commit'
-
-            // flush sigs
-
-            me.members.map(c=>c.sig = false)
-
-          }else if (me.state == 'await'){
-            me.state = 'precommit'
-            me.processMempool()
           }
 
-        }else{
-          me.state = 'await'
+          me.state = 'commit'
+
+          // flush sigs
+
+          me.members.map(c=>c.sig = false)
+
+        }else if (me.state == 'await'){
+          me.state = 'precommit'
+          me.processMempool()
         }
 
+      }else{
+        me.state = 'await'
+      }
 
-      }, 1000)
-    }
+
+    }, 1000)
   }
-
 }
 
 /*
@@ -1436,11 +1392,7 @@ listyo = () => {
 }
 
 
-if(process.argv[2] == 'genesis'){
-  genesis()
-}else{
-
-
+if(process.argv[2] == 'start'){
 
   var cluster = require('cluster');
   if (cluster.isMaster) {
@@ -1454,42 +1406,41 @@ if(process.argv[2] == 'genesis'){
   }
 
   if (cluster.isWorker) {
+    initDashboard()
+    me = new Me
+    var json = fs.readFileSync('data/k.json')
+    K = JSON.parse(json)
+    me.K = K
+    me.members = JSON.parse(json).members // another object ref
+
     setTimeout(()=>{
-      console.log('bye!');
-      //process.exit(3);
-    }, 30000)
-
-
-    var username = 'u' + (process.argv[2] ? parseInt(process.argv[2]) : 1)
-    main(username, true)
-
-    function preprocess(input) {
-      const awaitMatcher = /^(?:\s*(?:(?:let|var|const)\s)?\s*([^=]+)=\s*|^\s*)(await\s[\s\S]*)/;
-      const asyncWrapper = (code, binder) => {
-        let assign = binder ? `global.${binder} = ` : '';
-        return `(function(){ async function _wrap() { return ${assign}${code} } return _wrap();})()`;
-      };
-      const match = input.indexOf('await') != -1;
-      if (match) {
-        input = `${asyncWrapper(match[2], match[1])}`;
-      }
-      return input;
-    }
-
-
-    const replInstance = require('repl').start({ prompt: '> ' });
-    const _eval = replInstance.eval;
-
-    replInstance.eval = (cmd, context, filename, callback)=>{
-      _eval(preprocess(cmd), context, filename, callback);
-    }
-    //.bind(this);
+      me.findNearest(concat(inputMap('sync'), Buffer.from(K.prev_hash, 'hex')) )
+    }, 3000)
 
   }
-
-
 }
 
+
+function preprocess(input) {
+  const awaitMatcher = /^(?:\s*(?:(?:let|var|const)\s)?\s*([^=]+)=\s*|^\s*)(await\s[\s\S]*)/;
+  const asyncWrapper = (code, binder) => {
+    let assign = binder ? `global.${binder} = ` : '';
+    return `(function(){ async function _wrap() { return ${assign}${code} } return _wrap();})()`;
+  };
+  const match = input.indexOf('await') != -1;
+  if (match) {
+    input = `${asyncWrapper(match[2], match[1])}`;
+  }
+  return input;
+}
+
+
+const replInstance = require('repl').start({ prompt: '> ' });
+const _eval = replInstance.eval;
+
+replInstance.eval = (cmd, context, filename, callback)=>{
+  _eval(preprocess(cmd), context, filename, callback);
+}
 
 
 process.on('unhandledRejection', r => console.log(r))

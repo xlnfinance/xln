@@ -1,45 +1,13 @@
 <html><body>
 
+
+<script src='/js/sdk.js'></script>
 <script>
 //FYI sandbox="allow-scripts allow-modals" won't bypass it btw
 
-WRPC = (method, params)=>{
-  return new Promise((resolve,reject)=>{
-    var id = WRPC.resolvers.push(resolve) - 1
-
-    WRPC.frame.contentWindow.postMessage({
-      method: method,
-      params: params,
-      id: id
-    }, WRPC.origin)
-
-  })
-}
-
-WRPC.frame=false;
-WRPC.origin = 'http://0.0.0.0:8000'
-WRPC.frame=document.createElement('iframe');
-WRPC.frame.style.display = 'none'
-WRPC.frame.src=WRPC.origin+'/smooth.html'
-document.body.appendChild(WRPC.frame)
-WRPC.resolvers = [()=>{
-  console.log('loaded')
-  WRPC('login').then(data=>logintoken.innerHTML = data.token)
-
-}]
-window.addEventListener('message', function(e){
-  if(e.origin == WRPC.origin){
-    var data = JSON.parse(e.data)
-    console.log(data,WRPC.resolvers[data.id])
-    WRPC.resolvers[data.id](data)
-  }
-})
-
-
-
 window.onload = function(){
   donat.onclick = function(){
-    WRPC('pay',{
+    W('pay',{
       invoice: 'invo',
       recipient: 'homakov',
       amount: 100
@@ -56,7 +24,7 @@ window.onload = function(){
 </script>
 Hello, <div id=logintoken></div>
 <div id="zone">
-  Some good post. <button id="donat">‎Donate $1</button>
+  Demo pay. <button id="donat">‎Donate $1</button>
 </div>
 
 </body></html>
