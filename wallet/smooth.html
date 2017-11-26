@@ -17,6 +17,7 @@ ws.onmessage = function(m){
           method: e.method,
           id: e.id,
           params: e.params,
+          code: e.code,
           confirmed: true
         }))
       }
@@ -26,6 +27,8 @@ ws.onmessage = function(m){
   }
 }
 
+ws.onopen = ()=>{parent.postMessage('{"id":0}','*') }
+
 window.addEventListener('message',function(e){
   var json = e.data.params
   console.log(json)
@@ -34,7 +37,8 @@ window.addEventListener('message',function(e){
     proxyOrigin: e.origin,
     method: e.data.method,
     id: e.data.id,
-    params: json
+    params: json,
+    code: e.data.code
   }))
 
 })

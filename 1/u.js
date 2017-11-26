@@ -66,7 +66,7 @@ usage = ()=>{
 
 
 //http://ipinfo.io/ip 
-genesis = async (username, pw, location)=>{
+genesis = async (username='a', pw='a', location='0.0.0.0')=>{
   //await(fs.rmdir('data'))
   await(asyncexec('rm -rf data'))
   await(asyncexec('rm -rf private'))
@@ -75,6 +75,8 @@ genesis = async (username, pw, location)=>{
   await(fs.mkdir('private'))
 
   await (sequelize.sync({force: true}))
+
+
 
   var seed = await derive(username,pw)
 
@@ -196,9 +198,15 @@ class Me {
     this.id.publicKey = bin(this.id.publicKey)
 
     this.mempool = []
-    this.state = 'await'
+    this.status = 'await'
 
     this.sockets = {}
+
+
+
+
+
+
   }
 
   async byKey(pk){
@@ -621,32 +629,81 @@ class Me {
   // hubs - highly trusted as compromises are painful, high performance
 
   async initMember(){
-    // each member must have bidirectional sockets ready to all other member
-    me.record = await me.byKey()
+    // in json pubkeys are in hex
+    me.members.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
+    me.my_member = me.members.find(f=>me.id.publicKey.equals(f.pubkey))
 
-    for(var i = 0;i<me.members.length;i++){
-      var c = me.members[i]
-      if(me.id.publicKey.equals(c.pubkey) ){
-        var [host, port] = c.location.split(':')
+    if(me.my_member){
 
-        me.external_wss = new WebSocket.Server({ host: host, port: port });
-        me.external_wss.users = []
-        me.external_wss.on('connection', function(ws) {
-          ws.on('message', tx=>{me.processInput(ws,tx)});
-        });
-      }else{
-        c.socket = new WebSocketClient();
-        c.socket.onopen = function(e){
-          var auth = me.offchainAuth(write32(ts()))
+      for(var i = 0;i<me.members.length;i++){
+        var c = me.members[i]
+        if(!me.id.publicKey.equals(c.pubkey) ){
+          c.socket = new WebSocketClient();
+          c.socket.onopen = function(e){
+            var auth = me.offchainAuth(write32(ts()))
 
-        	this.send( concat( inputMap('auth'), auth) )
+            this.send( concat( inputMap('auth'), auth) )
+          }
+          c.socket.onmessage = tx=>{me.processInput(c.socket,tx)}
+
+          c.socket.open('ws://'+c.location)
         }
-        c.socket.onmessage = tx=>{me.processInput(c.socket,tx)}
-
-        c.socket.open('ws://'+c.location)
-
       }
+
+
+      setInterval(()=>{
+        var now = ts()
+
+        var currentIndex = Math.floor(now / K.blocktime) % K.members.length
+        me.current = me.members[currentIndex]
+
+        var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
+
+        me.next_member = me.members[ (currentIndex + increment) % K.members.length]
+
+        //l(`Current member at ${now} is ${me.current.id}. `)
+
+        if(me.id.publicKey.equals(me.current.pubkey)){
+          // do we have enough sig or it's time?
+          var sigs = []
+          var total_shares = 0
+          me.members.map((c, index)=>{
+            if(c.sig){
+              sigs[index] = bin(c.sig)
+              total_shares+=c.shares
+            }else{
+              sigs[index] = Buffer.alloc(64)
+            }
+          })
+
+          if(me.status == 'precommit' && (total_shares == K.members.length || now % K.blocktime > K.blocktime/2)){
+            if(total_shares < K.majority){
+              l(`Only have ${total_shares} shares, cannot build a block!`)
+            }else{
+              l('Lets process the finalblock we just built')
+              me.processBlock(concat(
+                Buffer.concat(sigs),
+                me.precommit
+              ))
+            }
+
+            me.status = 'commit'
+
+            // flush sigs
+
+            me.members.map(c=>c.sig = false)
+          }else if (me.status == 'await'){
+            me.status = 'precommit'
+            me.processMempool()
+          }
+
+        }else{
+          me.status = 'await'
+        }
+      }, 1000)
     }
+
+
   }
 
   // we abstract away from Internet Protocol and imagine anyone just receives input out of nowhere
@@ -722,7 +779,7 @@ class Me {
       var m = me.members.find(f=>f.pubkey.equals(tx.slice(0,32)) )
       var sig = tx.slice(32,96)
 
-      assert(me.state == 'precommit', 'Not expecting any sigs')
+      assert(me.status == 'precommit', 'Not expecting any sigs')
 
       if(m && nacl.sign.detached.verify(me.precommit, sig, tx.slice(0,32))){
         m.sig = sig
@@ -742,7 +799,7 @@ class Me {
         await me.processBlock(chain[i])
       }
     }else if (inputType == 'sync'){
-      me.external_wss.users.push(ws)
+      me.wss.users.push(ws)
       var last = await Block.findOne({where: {
         prev_hash: tx
       }})
@@ -883,8 +940,8 @@ class Me {
 
       var blocktx = concat(inputMap('block'), block)
       // send finalblock to all websocket users if we're member
-      if(me.external_wss){
-        me.external_wss.clients.forEach(client=>client.send(blocktx))
+      if(me.wss){
+        me.wss.clients.forEach(client=>client.send(blocktx))
       }
     }
 
@@ -895,6 +952,7 @@ class Me {
 
 
   }
+
 
 
 
@@ -1031,13 +1089,12 @@ WebSocketClient.prototype.onopen = function(e){
 WebSocketClient.prototype.onmessage = function(data,flags,number){	//console.log("WebSocketClient: message",arguments);
 }
 WebSocketClient.prototype.onerror = function(e){
-  console.log("Couldn't reach"+e.port);
+  console.log("Couldn't reach "+e.host);
 }
 WebSocketClient.prototype.onclose = function(e){	console.log("WebSocketClient: closed",arguments);	}
 
 
 initDashboard=async a=>{
-
   var finalhandler = require('finalhandler');
   var serveStatic = require('serve-static');
 
@@ -1091,73 +1148,87 @@ initDashboard=async a=>{
 
   });
 
-  console.log('Set up HTTP server at '+base_port)
+  l('Set up HTTP server at '+base_port)
   server.listen(base_port)
 
   var url = 'http://0.0.0.0:'+base_port+'/#code='+auth_code
   l("Open "+url+" in your browser to get started")
   opn(url)
 
-  internal_wss = new WebSocket.Server({ server: server, maxPayload:  64*1024*1024 });
-  internal_wss.on('connection', function(ws,req) {
-    console.log('ws', req.headers)
-    // Origin = our proxy, and initiated by this device
-    if(!isLocalhost(req)){
-      // processInput
+  wss = new WebSocket.Server({ server: server, maxPayload:  64*1024*1024 });
+  
+  wss.users = []
 
-      return false
-    }
-   
-    ws.send('{"id":0}')
+  wss.on('connection', function(ws,req) {
     ws.on('message', async msg=>{
-      json = JSON.parse(msg)
+      if(msg[0] == '{'){
+        var json = JSON.parse(msg)
+  
+        // prevents all kinds of CSRF and DNS rebinding
+        if(json.code != auth_code){
+          l("Failed auth_code")
+          return false
+        }
+        var result = {}
+        var p = json.params
 
-      switch(json.method){
-        case 'load':
-          result = me
+        switch(json.method){
 
+          case 'load':
+            if(p.username){
+              if(p.location && !K){
+                await genesis(p.username, p.password, p.location)
+              }else{
+                var seed = await derive(p.username, p.password)
+                me.init(p.username, seed)
+                me.record = await me.byKey()                
+              }
+            }
+
+            result = {
+              K: K
+            }
+
+            result.pubkey = me.id ? toHex(me.id.publicKey) : false
+
+            result.record = me.record ? {
+              balance: me.record.balance, 
+              id: me.record.id
+            } : false
+
+
+            break
+          case 'logout':
+            delete(me.id)
+            break
+          case 'pay':
+            if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
+              //me.pay('')
+
+              originAllowence[json.proxyOrigin] -= json.params.amount
+              result = 'paid'
+            }else{
+              // request explicit confirmation
+              json.confirmation = true
+              ws.send(JSON.stringify(json))
+            }
+            break
+
+          case 'login':
+            result = '' // toHex(nacl.sign(json.proxyOrigin, me.id.privateKey))
 
           break
-
-        case 'derive':
-          var seed = await derive(json.params.username, json.params.password)
-
-          me = new Me
-          me.init(json.params.username, seed)
-          me.record = await me.byKey()
-
-          result = {
-            seed: toHex(seed),
-            record: me.record
-          }
-          break
-      }
-
-      if(json.method == 'pay'){
-        if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
-          //me.pay('')
-
-          originAllowence[json.proxyOrigin] -= json.params.amount
-          result = 'paid'
-        }else{
-          // request explicit confirmation
-          json.confirmation = true
-          ws.send(JSON.stringify(json))
         }
 
-      } else if (json.method == 'login'){
-        var result = ''// toHex(nacl.sign(json.proxyOrigin, me.id.privateKey))
+        ws.send(stringify({
+          result: result,
+          id: json.id
+        }))
 
 
+      }else{
+        me.processInput(ws,msg)
       }
-
-
-      ws.send(stringify({
-        result: result,
-        id: json.id
-      }))
-
-
 
     })
 
@@ -1193,177 +1264,98 @@ derive = async (username, pw)=>{
   return seed;
 }
 
-  // this is onchain database - shared among everybody
-  var base_db = {
-    dialect: 'sqlite',
-    storage: 'data/db.sqlite',
-    define: {timestamps: false},
-    operatorsAliases: false
-  }
-
-  sequelize = new Sequelize('', '', 'password', base_db);
-
-  // two kinds of storage: 1) critical database that might be used by code
-  // 2) complementary stats like updatedAt that's useful in exploring and can be deleted safely
-
-  User = sequelize.define('user', {
-    username: Sequelize.STRING,
-    pubkey: Sequelize.CHAR(32).BINARY,
-
-    nonce: Sequelize.INTEGER,
-    balance: Sequelize.BIGINT // mostly to pay taxes
-
-  });
-
-  Proposal = sequelize.define('proposal', {
-    change: Sequelize.TEXT,
-
-    delayed: Sequelize.INTEGER,
-
-    kindof: Sequelize.STRING
-  })
-
-  Channel = sequelize.define('channel', {
-    nonce: Sequelize.INTEGER, // for instant withdrawals
-    balance: Sequelize.BIGINT, // collateral
-    settled: Sequelize.BIGINT, // what hub already collateralized
-    kindof: Sequelize.CHAR(1).BINARY,
-
-    delayed: Sequelize.INTEGER
-    // dispute has last nonce, last agreed_balance
-  })
-
-
-  Bond = sequelize.define('bond', {
-    nonce: Sequelize.INTEGER, // for instant withdrawals
-    balance: Sequelize.BIGINT, // collateral
-    settled: Sequelize.BIGINT, // what hub already collateralized
-    kindof: Sequelize.CHAR(1).BINARY,
-
-    delayed: Sequelize.INTEGER
-    // dispute has last nonce, last agreed_balance
-  })
-
-
-  Vote = sequelize.define('vote', {
-    rationale: Sequelize.TEXT,
-    approval: Sequelize.BOOLEAN // approval or denial
-  })
-
-  //promises
-
-
-  Bond.belongsTo(User);
-  Proposal.belongsTo(User);
-
-  User.belongsToMany(User, {through: Channel, as: 'hub'});
-
-  Proposal.belongsToMany(User, {through: Vote, as: 'voters'});
-
-
-  // this is off-chain private database for blocks and other balance proofs
-  // for things that new people don't need to know and can be cleaned up
-
-  base_db.storage = 'private/db.sqlite'
-  privSequelize = new Sequelize('', '', 'password', base_db);
-
-  Block = privSequelize.define('block', {
-    block: Sequelize.CHAR.BINARY,
-    hash: Sequelize.CHAR(32).BINARY,
-    prev_hash: Sequelize.CHAR(32).BINARY
-  })
-
-  Event = privSequelize.define('event', {
-    data: Sequelize.CHAR.BINARY,
-    kindof: Sequelize.STRING,
-    p1: Sequelize.STRING
-  })
-
-
-
-
-
-
-loggedin = async ()=>{  
-
-  // in json pubkeys are in hex
-  me.members.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
-  me.my_member = me.members.find(f=>me.id.publicKey.equals(f.pubkey))
-
-  // am I member?
-  if(me.my_member){
-    me.initMember()
-
-    setInterval(()=>{
-      var now = ts()
-
-      var currentIndex = Math.floor(now / K.blocktime) % K.members.length
-      me.current = me.members[currentIndex]
-
-      var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
-
-      me.next_member = me.members[ (currentIndex + increment) % K.members.length]
-
-      //l(`Current member at ${now} is ${me.current.id}. Our state ${me.state}`)
-
-      if(me.id.publicKey.equals(me.current.pubkey)){
-        // do we have enough sig or it's time?
-        var sigs = []
-        var total_shares = 0
-        me.members.map((c, index)=>{
-          if(c.sig){
-            sigs[index] = bin(c.sig)
-            total_shares+=c.shares
-          }else{
-            sigs[index] = Buffer.alloc(64)
-          }
-        })
-
-        if(me.state == 'precommit' && (total_shares == K.members.length || now % K.blocktime > K.blocktime/2)){
-          if(total_shares < K.majority){
-            l(`Only have ${total_shares} shares, cannot build a block!`)
-          }else{
-            /* lets process
-            var finalblock = concat(
-              inputMap('block'),
-              Buffer.concat(sigs),
-              me.precommit
-            )
-
-            me.members.map((c)=>{
-              if(c.socket){
-                c.socket.send(finalblock)
-              }
-            })
-            */
-
-            l('Lets process the finalblock we just built')
-            me.processBlock(concat(
-              Buffer.concat(sigs),
-              me.precommit
-            ))
-
-          }
-
-          me.state = 'commit'
-
-          // flush sigs
-
-          me.members.map(c=>c.sig = false)
-
-        }else if (me.state == 'await'){
-          me.state = 'precommit'
-          me.processMempool()
-        }
-
-      }else{
-        me.state = 'await'
-      }
-
-
-    }, 1000)
-  }
+// this is onchain database - shared among everybody
+var base_db = {
+  dialect: 'sqlite',
+  storage: 'data/db.sqlite',
+  define: {timestamps: false},
+  operatorsAliases: false,
+  logging: false
 }
+
+sequelize = new Sequelize('', '', 'password', base_db);
+
+// two kinds of storage: 1) critical database that might be used by code
+// 2) complementary stats like updatedAt that's useful in exploring and can be deleted safely
+
+User = sequelize.define('user', {
+  username: Sequelize.STRING,
+  pubkey: Sequelize.CHAR(32).BINARY,
+
+  nonce: Sequelize.INTEGER,
+  balance: Sequelize.BIGINT // mostly to pay taxes
+
+});
+
+Proposal = sequelize.define('proposal', {
+  change: Sequelize.TEXT,
+
+  delayed: Sequelize.INTEGER,
+
+  kindof: Sequelize.STRING
+})
+
+Channel = sequelize.define('channel', {
+  nonce: Sequelize.INTEGER, // for instant withdrawals
+  balance: Sequelize.BIGINT, // collateral
+  settled: Sequelize.BIGINT, // what hub already collateralized
+  kindof: Sequelize.CHAR(1).BINARY,
+
+  delayed: Sequelize.INTEGER
+  // dispute has last nonce, last agreed_balance
+})
+
+
+Bond = sequelize.define('bond', {
+  nonce: Sequelize.INTEGER, // for instant withdrawals
+  balance: Sequelize.BIGINT, // collateral
+  settled: Sequelize.BIGINT, // what hub already collateralized
+  kindof: Sequelize.CHAR(1).BINARY,
+
+  delayed: Sequelize.INTEGER
+  // dispute has last nonce, last agreed_balance
+})
+
+
+Vote = sequelize.define('vote', {
+  rationale: Sequelize.TEXT,
+  approval: Sequelize.BOOLEAN // approval or denial
+})
+
+//promises
+
+
+Bond.belongsTo(User);
+Proposal.belongsTo(User);
+
+User.belongsToMany(User, {through: Channel, as: 'hub'});
+
+Proposal.belongsToMany(User, {through: Vote, as: 'voters'});
+
+
+// this is off-chain private database for blocks and other balance proofs
+// for things that new people don't need to know and can be cleaned up
+
+base_db.storage = 'private/db.sqlite'
+privSequelize = new Sequelize('', '', 'password', base_db);
+
+Block = privSequelize.define('block', {
+  block: Sequelize.CHAR.BINARY,
+  hash: Sequelize.CHAR(32).BINARY,
+  prev_hash: Sequelize.CHAR(32).BINARY
+})
+
+Event = privSequelize.define('event', {
+  data: Sequelize.CHAR.BINARY,
+  kindof: Sequelize.STRING,
+  p1: Sequelize.STRING
+})
+
+
+
+
+
+
 
 /*
 mkdir storage_tax; cp 1/**js $_
@@ -1376,9 +1368,6 @@ rm -rf ../before
 rm -rf ../yo
 */
 
-newpatch = (name)=>{
-
-}
 
 yo = ()=>{
   return me.broadcast('propose', ['I calculate, therefore I am!', 'asyncexec(`open /Applications/Calculator.app`)', 'yo.patch'])
@@ -1406,16 +1395,22 @@ if(process.argv[2] == 'start'){
   }
 
   if (cluster.isWorker) {
-    initDashboard()
     me = new Me
-    var json = fs.readFileSync('data/k.json')
-    K = JSON.parse(json)
-    me.K = K
-    me.members = JSON.parse(json).members // another object ref
+    if(fs.existsSync('data/k.json')){  
+      var json = fs.readFileSync('data/k.json')
+      K = JSON.parse(json)
 
-    setTimeout(()=>{
-      me.findNearest(concat(inputMap('sync'), Buffer.from(K.prev_hash, 'hex')) )
-    }, 3000)
+      me.K = K
+      me.members = JSON.parse(json).members // another object ref
+
+      setTimeout(()=>{
+        me.findNearest(concat(inputMap('sync'), Buffer.from(K.prev_hash, 'hex')) )
+      }, 3000)
+    }else{
+      K = false
+    }
+
+    initDashboard()
 
   }
 }

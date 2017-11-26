@@ -14,53 +14,45 @@
 
     <!-- Custom styles for this template -->
     <link href="signin.css" rel="stylesheet">
+
+    <script src="https://unpkg.com/vue"></script>
   </head>
 
   <body>
 
-
-    <nav class="navbar navbar-expand-md navbar-dark bg-dark mb-4">
-      <a class="navbar-brand" href="#">FN</a>
-      <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="navbarCollapse">
-        <ul class="navbar-nav mr-auto">
-
-          <li class="nav-item active">
-            <a class="nav-link" href="#">Wallet <span class="sr-only">(current)</span></a>
-          </li>
-
-          <li class="nav-item">
-            <a class="nav-link" href="#">Feed</a>
-          </li>
-
-
-          <li class="nav-item">
-            <a class="nav-link" href="#">Explorer</a>
-          </li>
-
-
-          <li class="nav-item">
-            <a class="nav-link" href="#">Settings</a>
-          </li>
-
-
-
-        </ul>
-        <form class="form-inline mt-2 mt-md-0">
-          <input class="form-control mr-sm-2" type="text" placeholder="Search" aria-label="Search">
-          <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
-        </form>
-      </div>
-    </nav>
+  <div id="app" v-cloak>
 
 
     <div class="container">
+        <br>
+        <h1>Failsafe Network</h1>
+ 
+        <template v-if="pubkey">
 
-        <form class="form-signin">
-         
-          <h2>Create Failsafe ID</h2>
+          <p>Address: <b>{{ pubkey }}</b></p>
+        
+          <template v-if="record">
+            <p>Failsafe ID: {{record.id}}</p>
+            <p>Standalone Balance: ${{commy(record.balance)}}</p>
+          </template>
+
+
+          <p>You can deposit or withdraw funds with our partners:</p>
+          <select>
+            <option v-for="action in actions"></option>
+          </select>
+
+
+
+          <li v-for="tx in transactions">{{tx}}</li>
+
+
+
+          <button @click="logout">Log Out</button>
+
+        </template>
+
+        <form v-else class="form-signin" v-on:submit.prevent="derive">
 
           <label for="inputUsername" class="sr-only">Username</label>
           <input type="text" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
@@ -74,9 +66,17 @@
           <p>There's no password recovery procedure because FN is decentralized and no one can generate your private key without your password.
           </p>
 
+          <template v-if="!K">
+            <p>No members found. Would you like to start private fs? Enter your IP:</p>
+            <input type="text" id="inputLocation" class="form-control" value="0.0.0.0"><br>
+          </template>
+
+
           <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
         </form>
     </div>
+
+</div>
 
 
 
@@ -86,7 +86,7 @@
 
     <script src='/js/sdk.js'></script>
 
-    <script src="js/main.js"></script>
+    <script src="/js/main.js"></script>
 
   </body>
 </html>
