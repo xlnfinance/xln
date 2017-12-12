@@ -1,0 +1,2 @@
+rm -rf private data
+node u start

@@ -21,17 +21,17 @@
 
 .circle {
   margin: 1px; display: inline-block;
-  border-radius: 50%;
-  width: 50px;
-  height: 20px;
+  border-radius: 0%;
+  min-width: 80px;
+  height: 30px;
   border: 1px solid black;
   position: inline;
 }
 
-.uchannel{background: yellow;}
-.hchannel{background: red;}
-.ucredit{background: none }
-.hcredit{background: none }
+.yellow{background: yellow;}
+.red{background: #ffcccb;}
+.blue{background: #87cefa;}
+.green{background: green;}
 
 .empty{background: none; border: none;}
 
@@ -40,24 +40,15 @@
 <script src="js/identicon.js"></script>
 <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/jdenticon@1.7.2"></script>
 
-<script type="text/javascript" src="js/bigi.min.js"></script>
-<script type="text/javascript" src="js/bitcoinjs.min.js"></script>
-<script type="text/javascript" src="js/main.js"></script>
-<script type="text/javascript" src="js/scryptasync.js"></script>
-<script type="text/javascript" src="js/nacl.js"></script>
-<script type="text/javascript" src="js/utils.js"></script>
-<script type="text/javascript" src="js/bowser.js"></script>
+
 
 <script>
 ownerBalance = 0
 state = {}
+maxrisk = 4
 
 lock = false
 
-function brick(amount, type){
-  if(amount==0) return `<div class="circle ${type}">&nbsp;</div>`
-  return `<div class="circle ${type}">$${amount}</div>`
-}
 
 function toImg(hash){
   hash = Benc(nacl.hash(Udec(hash)))
@@ -74,22 +65,22 @@ render = function(msg){
   lock = true;
   for(id in state){
     u = getUser(id)
-    if(u.index < -5){
-      ownerBalance += u.amount
-      u.capacity -= u.amount
-      u.amount = 0
+    if(u.delta < -5){
+      ownerBalance -= u.delta
+      u.collateral += u.delta
+      u.delta = 0
     }
   }
   for(id in state){
     u = getUser(id)
-    if(u.index > 5){
-      if(ownerBalance >= u.bond){
-        ownerBalance -= u.bond;
-        u.capacity += u.bond
-        u.bond = 0
+    if(u.delta > 5){
+      if(ownerBalance >= u.delta){
+        ownerBalance -= u.delta;
+        u.collateral += u.delta
+        u.delta = 0
       }else{
-        u.bond -= ownerBalance
-        u.capacity += ownerBalance
+        u.delta -= ownerBalance
+        u.collateral += ownerBalance
         ownerBalance = 0
       }
     }
@@ -97,7 +88,7 @@ render = function(msg){
 
 
   st=Object.values(state).sort((a,b)=>{
-    [a,b]=[getUser(a.name).index,getUser(b.name).index]
+    [a,b]=[getUser(a.name).delta,getUser(b.name).delta]
 
     return a>b;
   })
@@ -109,22 +100,26 @@ render = function(msg){
   for(id in st){
     id = st[id].name
     var u = getUser(id)
-    var bricks = ''
+
     request_rebalance = ''
 
-    if(u.bond > 50){
-      request_rebalance = "<b><span title='Too much in bonds. Request a payment channel'>&#9888;</span></b>"
+    if(u.delta > 50){
+      request_rebalance = "<b><span title='Positive delta too big. Request a payment channel'>&#9888;</span></b>"
     }
 
-      //left+=brick(u.amount-u.capacity, 'ucredit')
 
-      bricks+=brick(u.capacity-u.amount, 'uchannel')
+      var bricks = "<div class='yellow circle'>"+u.collateral+"</div> "
 
-            owes += u.bond
-            bricks+=brick(u.bond, 'hcredit')
+      if(u.delta < 0){
+        bricks += "<div class='"+((u.delta<-maxrisk)?"blue":"")+" circle'>"+u.delta+'</div>'
+        hubs += u.delta
 
-      hubs += u.amount
-      bricks+=brick(u.amount, 'hchannel')
+      }else{
+        bricks += "<div class='"+((u.delta>maxrisk)?"red":"")+" circle'>+"+u.delta+"</div>"
+        owes += u.delta
+      }
+
+      bricks += " = <div class=circle>"+(u.collateral+u.delta)+"</div>"
 
 
     table += `<div class="right"> ${id} ${request_rebalance} ${bricks} </div><br><br>`
@@ -174,83 +169,44 @@ function avg(matrix, now){
 
 function snapshot(id){
   u = getUser(id)
-  u.history.push([ts(),  u.index])
+  u.history.push([ts(),  u.delta])
 }
 
 //from external addr
 function deposit(id, amount){
   var user = getUser(id)
-  user.capacity += amount
+  user.collateral += amount
   snapshot(id)
 
   render('Deposited from outside '+amount+' BTC to '+id)
 }
 
 
-function deduct(user, amount){
-  u = getUser(user)
-
-  if(u.bond > 0){
-    if(u.bond > amount){
-      u.bond -= amount;
-      return true;
-    }else{
-      amount -= u.bond
-      u.bond = 0
-    }
-  }
-  left = u.capacity - u.amount
-
-  if(left > 0 && left >= amount){
-    u.amount += amount
-  }else{
-    return false; //not enough
-  }
-
-
-}
 
 function getUser(user){
   if(!state[user]) state[user] = {
-    bond: 0,      //stored in bonds
-    amount: 0,    //amount given to hub
-    capacity: 0,  //total capacity
+    delta: 0, 
+    collateral: 0,  //total capacity
     name: user,
-    gold: 0,
     history: []
   }
 
   u = state[user]
-  u.total = (u.capacity - u.amount) + u.bond
+  u.total = u.collateral + u.delta
 
-  u.index = u.bond > 0 ? u.bond : -u.amount
   return u
 }
 
-function add(id, amount){
-  u = getUser(id)
-
-
-  left = u.capacity - u.amount
-
-  if(u.amount > 0){
-    if(u.amount > amount){
-      u.amount -= amount;
-      return true;
-    }else{
-      amount -= u.amount
-      u.amount = 0
-    }
-  }
-
-  // bonds can be added without limits
-  u.bond += amount;
-}
-
+l=console.log
 function send(from, to, amount){
-  if(getUser(from).total < amount) return false
-  deduct(from, amount)
-  add(to, amount)
+
+  if(getUser(from).total < amount){
+    l('Not enough funds')
+    return false
+  } 
+
+  getUser(from).delta -= amount
+  getUser(to).delta += amount
 
   snapshot(from)
   snapshot(to)
@@ -312,36 +268,15 @@ steps=[
 
   <p>However, she'd have to wait for a delay period so the blockchain would make sure we won't show any evidence that there are newer payments.</p>`
 },
-()=>{
-  info.innerHTML = `<p>To withdraw money from a payment channel one needs to show a cryptographic proof of balance signed by counter-party. .</p>`
-},
 
-()=>{
-  send('Alice', 'Rental agency', 4)
-  info.innerHTML = `
-  <p>Alice is sender, agency is receiver</p>
-  `
-},
-()=>{ send('Alice', "Coffee Shop", 3) },
-()=>{ send("Alice", "Laundry", 2) },
-()=>{ send('John', "Coffee Shop", 5) },
-()=>{ send("John", "Laundry", 5) },
-()=>{ send('John', 'Rental agency', 2) },
 ()=>{
   send('Alice', "Coffee Shop", 2)
-  info.innerHTML = `<p>See a Warning sign next to some peers? That means they hold too much money on bonds, and it's time to redeem the promises for real "failsafe" payment channels.</p>
-
-  <p>Peers can manually request the hub to do that, but after certain balance the hub automatically does it for them. <b>It's in hub's best interest to hold as little funds as possible</b> </p>
-
-  <p>It's called <b>a rebalance</b>: the system closes old/stale red bricks (<b>commitments we received from the peers over time, they are risky for us and we want to get rid of them</b>) and puts them in the place of yellow bricks (bonds). </p>
-
-  <p>This happens once in a while and there are non-trivial algorithms to guess the right peers to close channels with (net spenders) and right peers who will need channels the most (net receivers), but for the sake of simplicity this demo will just rebalance all peers at once. The channels have been settled onchain and now no one risks their funds anymore. Click Next one last time to run a random simulation of Failsafe Network that rebalances whenever hub controls over 50 coins. The real hub is smarter than that, but you get the idea.</p>`
+  info.innerHTML = ``
 },
 ()=>{
   plotnext.style['display'] = 'none'
-  setInterval(demo, 200)
+  int=setInterval(demo, 200)
 }
-
 
 ]
 
@@ -358,14 +293,11 @@ names="Alice Bob Carol Restaurant Waiter AcmeCorp John Dave".split(' ')
 <center >
 <div id=anim style="min-height:250px;"></div>
 
-<!--<img style="width:100px" src=miner.gif>-->
 
 <p><button id="plotnext">Next Slide</button></p>
-<div style="max-width:600px" id=info> <p> Cryptocurrencies are slow and expensive to move due to blocksize limits and transaction confirmations. How can we improve that without giving up control to custodian central authorities?</p>
+<div style="max-width:600px" id=info> 
 
-<p> Most popular idea here is <b>unexpiring bidirectional payment channels</b>, that allow two parties to create a multisig-like wallet on-chain and then instantly send money back and forth off-chain.</p>
-
-Payment channels can truly scale blockchains to tx/second of Visa as they scale linearly.</div>
+</div>
 
 </center>
 

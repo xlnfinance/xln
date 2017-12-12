@@ -36,6 +36,10 @@ l = console.log
 toHex = (inp) => Buffer.from(inp).toString('hex')
 bin=(data)=>Buffer.from(data)
 sha3 = (a)=>keccak('keccak256').update(bin(a)).digest()
+
+// TODO: not proper alg
+kmac = (key, msg)=>keccak('keccak256').update(key).update(bin(msg)).digest()
+
 ts = () => Math.round(new Date/1000)
 
 wed = d => d * 100 // We dollars to cents
@@ -66,7 +70,7 @@ usage = ()=>{
 
 
 //http://ipinfo.io/ip 
-genesis = async (username='a', pw='a', location='0.0.0.0')=>{
+genesis = async (opts)=>{
   //await(fs.rmdir('data'))
   await(asyncexec('rm -rf data'))
   await(asyncexec('rm -rf private'))
@@ -76,22 +80,38 @@ genesis = async (username='a', pw='a', location='0.0.0.0')=>{
 
   await (sequelize.sync({force: true}))
 
+  opts = Object.assign({
+    username: 'root', 
+    pw: 'password', 
+    location: '0.0.0.0' // for local tests
+    //infra: 'https://www.digitalocean.com'
+  }, opts)
 
 
-  var seed = await derive(username,pw)
+  l(opts)
+
+  // entity / country / infra 
+
+
+  var seed = await derive(opts.username, opts.pw)
+  delete(opts.pw)
 
   me = new Me
-  await me.init(username, seed);
+  await me.init(opts.username, seed);
 
   var user = await (User.create({
     pubkey: bin(me.id.publicKey),
-    username: username,
+    username: opts.username,
     nonce: 0,
-    balance: 100000
+    balance: 100000,
+    fsb_balance: 1000
   }))
 
 
   K = {
+    //global network pepper to protect derivation from rainbow tables
+    network_name: opts.username, 
+
     usable_blocks: 0,
     total_blocks: 0,
     total_tx: 0,
@@ -104,26 +124,49 @@ genesis = async (username='a', pw='a', location='0.0.0.0')=>{
     snapshot_after_bytes: 10000, //100 * 1024 * 1024,
     proposals_created: 0,
 
+    
     tax_per_byte: 0.1,
+    account_creation_fee: 100,
+
 
     blocksize: 6*1024*1024,
-    blocktime: 30,
+    blocktime: 10,
     majority: 1,
-    prev_hash: toHex(Buffer.alloc(32))
+    prev_hash: toHex(Buffer.alloc(32)),
+
+    assets: [
+      { 
+        ticker: 'FSD',
+        name: "Failsafe Dollar"
+      },
+      {
+        ticker: 'FSB',
+        name: "Bond 2030"
+      }
+    ],
+
+    members: []
   }
 
-  K.members = [
-    {
-      id: user.id,
-      pubkey: bin(me.id.publicKey).toString('hex'),
-      location: location,
-      missed_blocks: [],
-      shares: 1000
-    }
-  ]
+  K.members.push({
+    id: user.id,
 
-  fs.writeFileSync('data/k.json', stringify(K))
-  process.exit()
+    username: opts.username,
+    location: opts.location,
+
+    block_pubkey: me.block_pubkey,
+
+    missed_blocks: [],
+    shares: 1000,
+    hub: "genesis"
+  })
+
+  var json = stringify(K)
+  fs.writeFileSync('data/k.json', json)
+
+  me.K = K
+  me.members = JSON.parse(json).members // another object ref
+
 }
 
 
@@ -157,6 +200,7 @@ methodMap = (i)=>{
     'settle',
     'settleUser',
 
+
     'withdraw', // instant off-chain signature to withdraw from mutual payment channel
 
 
@@ -165,7 +209,10 @@ methodMap = (i)=>{
     'voteApprove',
     'voteDeny',
 
-    'auth' // any kind of off-chain auth signatures between peers
+    'auth', // any kind of off-chain auth signatures between peers
+    'fsd',
+    'fsb',
+
   ]
   if(typeof i == 'string'){
     // buffer friendly
@@ -187,9 +234,25 @@ allowedOnchain = [
   'voteDeny',
 ]
 
+K = false
 
+loadJSON = ()=>{
+  if(fs.existsSync('data')){
+    var json = fs.readFileSync('data/k.json')
+    K = JSON.parse(json)
+
+    me.K = K
+    me.members = JSON.parse(json).members // another object ref
+      
+    setTimeout(()=>{
+      me.findNearest(concat(inputMap('sync'), Buffer.from(K.prev_hash, 'hex')) )
+    }, 3000)
+  }
+}
 
 class Me {
+
+
   async init(username, seed) {
     this.username = username
 
@@ -202,10 +265,8 @@ class Me {
 
     this.sockets = {}
 
-
-
-
-
+    this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
+    this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
 
   }
 
@@ -246,6 +307,8 @@ class Me {
 
     var pseudo_balances = {}
 
+    l("Start mempool processing")
+
     for(var i = 0;i < me.mempool.length;i++){
       var tx = me.mempool[i]
 
@@ -280,20 +343,24 @@ class Me {
       ordered_tx
     ])
 
+    l("Built ordered ",ordered_tx)
 
-    me.my_member.sig = nacl.sign.detached(me.precommit, this.id.secretKey)
 
-    var needSig = concat(
-      inputMap('needSig'),
-      bin(this.id.publicKey),
-      me.my_member.sig,
-      me.precommit
-    )
+    me.my_member.sig = nacl.sign.detached(me.precommit, me.block_keypair.secretKey)
 
-    me.members.map((c)=>{
-      if(c.socket)
-      c.socket.send(needSig)
-    })
+    if(K.majority > 1){
+      var needSig = concat(
+        inputMap('needSig'),
+        bin(this.id.publicKey),
+        me.my_member.sig,
+        me.precommit
+      )
+
+      me.members.map((c)=>{
+        if(c.socket && c != me.my_member)
+        c.socket.send(needSig)
+      })
+    }
 
     return me.precommit
   }
@@ -362,19 +429,21 @@ class Me {
         break
       // don't forget BREAK
       // we use fall-through for methods covered by same code
-      // settle uses relative user_id, settleUser uses absolute hub_id
+      // settle uses relative user_id, users settle for absolute hub_id
       case 'settle':
-      case 'settleUser':
+      case 'settleUser':      
         // 1. collect all inputs from the channels to this node
-        var input_len = 76 // id sig amount
-        var start = 1
 
+        var args = rlp.decode(args)
         var is_hub = (method == 'settle')
 
-        for(var i=0;i<args[0];i++){
+
+        l(args)
+
+
+        for(var i=0;i<args[1].length;i++){
           // get withdrawal tx
-          var start = 1+i*input_len
-          var input = tx.slice(start, start+input_len)
+          var input = args[1][i]
 
           // you can't withdraw  from non existant channel
           var input_id = input.slice(0, 4).readUInt32BE()
@@ -382,7 +451,7 @@ class Me {
             where: {
               userId: is_hub ? input_id : id,
               hubId: is_hub ? id : input_id,
-              kindof: 0
+              assetType: assetType
             },
             include: {all: true}
           })
@@ -412,39 +481,57 @@ class Me {
 
         }
 
-        // 2. are there unsettled channels?
+        // 2. are there enforced channels?
 
         // 3. pay to outputs
-        var start = 2+i*input_len
-        var outputs_num = args[start]
-        for(var i = 0;i<outputs_num;i++){
-          var output_id = args.slice(start, start+=4).readUInt32BE()
 
-          // settle is relative and uses current hub. settleUser is absolute
-          var hub_id = is_hub ? id : args.slice(start, start+=4).readUInt32BE()
+        for(var i = 0;i<args[2].length;i++){
+          l(args[2][i])
 
-          var output_amount = args.slice(start, start+=4).readUInt32BE()
+          var [userId, hubId, amount] = args[2][i]
 
-          assert((hub_id != 0 || output_id != id), 'No need to explicitly set your node id')
-          assert(signer.balance >= output_amount, 'Not enough funds to fill this output')
+          amount = amount.readUIntBE(0, amount.length)
+          hubId = hubId.readUIntBE(0, hubId.length)
 
-          var ch = await this.getChannel(output_id, hub_id)
-          ch.balance += amount
-          if(is_hub){
-            // hubs increase how much they settled, users don't
-            ch.settled += amount
+          if(hubId == undefined){
+            // standalone balance
+
+            var user = await User.findOrBuild({
+              where: (userId.length == 32 ? {pubkey: userId} : {id: userId.readUIntBE(0,userId.length)})
+            })
+            user = user[0]
+
+
+
+            l(user)
+
+            if(user.id){
+              // already exists
+              user.balance += amount
+              signer.balance -= amount
+
+              l('Adding to existing user')
+            }else if(userId.length == 32 && amount > K.account_creation_fee){
+              user.fsb_balance = 0
+              user.nonce = 0
+              l("Created new user")
+
+              user.balance = (amount - K.account_creation_fee)
+              signer.balance -= amount
+
+            }else{
+              l('not enough to cover creation fee')
+              
+              continue
+            }
+
+            await user.save()
+
           }
-          ch.save()
+
         }
 
         signer.save()
-
-        break
-
-      case 'addBalance':
-        var userId = args.slice(0, 4).readUInt32BE()
-        var hubId = args.slice(4, 8).readUInt32BE()
-        var amount = args.slice(8, 12).readUInt32BE()
 
         break
 
@@ -474,25 +561,36 @@ class Me {
 
 
 
-    async getChannel(user_id, hub_id){
-      var ch = await Channel.findOrBuild({
-        where: {
-          userId: user_id,
-          hubId: hub_id,
-          kindof: 0
-        },
-        defaults:{
-          nonce: 0,
-          balance: 0,
-          settled: 0
-        },
-        include: { all: true }
-      })
+    async getChannel(userId, hubId, assetType){
+      if(hubId == 0){
+        var wallet = await User.findOrBuild({
+          where: {id: userId},
+          defaults: {
+            nonce: 0,
+            balance: 0
+          }
+        })
+      }else{
+        var ch = await Channel.findOrBuild({
+          where: {
+            userId: userId,
+            hubId: hubId,
+            assetType: 0
+          },
+          defaults:{
+            nonce: 0,
+            balance: 0,
+            settled: 0
+          },
+          include: { all: true }
+        })
 
-      return ch[0]
+        var wallet = ch[0]
+      }
+      return wallet
     }
 
-    // masked_id will be added later
+
     async pay(recipient_id, hub_ids, amount){
 
       var ch = await me.getChannel(me.record.id, recipient_id)
@@ -528,11 +626,6 @@ class Me {
     return wallet
   }
 
-  async mint(amount, target){
-
-  }
-
-
 
 
   async broadcast(method, args){
@@ -544,10 +637,6 @@ class Me {
       case 'settle':
       case 'settleUser':
 
-        //len, inputs, len, outputs
-
-        //args.inputs.length
-        //args.outputs.length
 
         break
       case 'propose':
@@ -576,6 +665,8 @@ class Me {
     }else{
       me.findNearest(concat(inputMap('tx'),tx))
     }
+
+    l("Just broadcasted ", tx)
 
     return tx;
   }
@@ -630,20 +721,26 @@ class Me {
 
   async initMember(){
     // in json pubkeys are in hex
-    me.members.map(c => c.pubkey = Buffer.from(c.pubkey, 'hex'))
-    me.my_member = me.members.find(f=>me.id.publicKey.equals(f.pubkey))
+    me.record = await me.byKey()
+    if(!me.record) return false
+
+    me.members.map(c =>{
+      c.block_pubkey = Buffer.from(c.block_pubkey, 'hex')
+      if(me.record.id == c.id) me.my_member = c
+    })
 
     if(me.my_member){
 
       for(var i = 0;i<me.members.length;i++){
         var c = me.members[i]
-        if(!me.id.publicKey.equals(c.pubkey) ){
+        if( me.my_member != c ){
           c.socket = new WebSocketClient();
           c.socket.onopen = function(e){
             var auth = me.offchainAuth(write32(ts()))
 
             this.send( concat( inputMap('auth'), auth) )
           }
+
           c.socket.onmessage = tx=>{me.processInput(c.socket,tx)}
 
           c.socket.open('ws://'+c.location)
@@ -661,9 +758,9 @@ class Me {
 
         me.next_member = me.members[ (currentIndex + increment) % K.members.length]
 
-        //l(`Current member at ${now} is ${me.current.id}. `)
+        l(`Current member at ${now} is ${me.current.id}. ${me.status}`)
 
-        if(me.id.publicKey.equals(me.current.pubkey)){
+        if(me.my_member == me.current){
           // do we have enough sig or it's time?
           var sigs = []
           var total_shares = 0
@@ -686,12 +783,12 @@ class Me {
                 me.precommit
               ))
             }
-
-            me.status = 'commit'
-
             // flush sigs
-
             me.members.map(c=>c.sig = false)
+
+            me.status = 'await'
+
+
           }else if (me.status == 'await'){
             me.status = 'precommit'
             me.processMempool()
@@ -700,7 +797,7 @@ class Me {
         }else{
           me.status = 'await'
         }
-      }, 1000)
+      }, 2000)
     }
 
 
@@ -830,7 +927,7 @@ class Me {
 
       if(sig.equals(Buffer.alloc(64))){
 
-      }else if(nacl.sign.detached.verify(finalblock, sig, me.members[i].pubkey)){
+      }else if(nacl.sign.detached.verify(finalblock, sig, me.members[i].block_pubkey)){
         total_shares += me.members[i].shares
       }else{
         l(`Invalid signature for a given block. Halt!`)
@@ -962,8 +1059,6 @@ class Me {
       if(me.current && me.current.socket){
         me.current.socket.send(tx)
       }
-
-
       return false
     }
     // connecting to geo-selected nearest member (lowest latency)
@@ -1142,6 +1237,9 @@ initDashboard=async a=>{
         fReadStream.resume();
      });
    }else{
+
+    if(req.url.startsWith('/a/')) req.url = '/'
+
     serveStatic("../wallet")(req, res, finalhandler(req, res));
    }
 
@@ -1154,6 +1252,11 @@ initDashboard=async a=>{
   var url = 'http://0.0.0.0:'+base_port+'/#code='+auth_code
   l("Open "+url+" in your browser to get started")
   opn(url)
+
+
+  me = new Me
+  loadJSON()
+
 
   wss = new WebSocket.Server({ server: server, maxPayload:  64*1024*1024 });
   
@@ -1170,36 +1273,112 @@ initDashboard=async a=>{
           return false
         }
         var result = {}
+
         var p = json.params
+        l(p)
 
         switch(json.method){
 
           case 'load':
             if(p.username){
               if(p.location && !K){
-                await genesis(p.username, p.password, p.location)
-              }else{
-                var seed = await derive(p.username, p.password)
-                me.init(p.username, seed)
-                me.record = await me.byKey()                
+                await genesis(p.username, p.pw, p.location)
               }
+
+              var seed = await derive(p.username, p.pw)
+              me.init(p.username, seed)
+              me.record = await me.byKey()
+              
+              await me.initMember()
+            
             }
 
-            result = {
-              K: K
+            result = me
+            if(me.id){
+              result.pubkey = toHex(me.id.publicKey)
+
+              //channels = await Channel.find({$where: {userId: me.record.id}})
+
+              result.channels = {
+                FSD: [],
+                FSB: []
+              }
+
             }
 
-            result.pubkey = me.id ? toHex(me.id.publicKey) : false
-
+            
+            /*
             result.record = me.record ? {
               balance: me.record.balance, 
               id: me.record.id
             } : false
+            */
 
 
             break
-          case 'logout':
-            delete(me.id)
+          case 'logout':         
+            me = new Me
+            loadJSON()
+
+
+            break
+
+          case 'settleUser':
+
+            //settle fsd ins outs
+
+            // contacting hubs and collecting instant withdrawals ins
+
+            
+
+
+            var outs = []
+            for(o of p.outs){
+              // split by @
+              if(o.to.length > 0){
+                var to = o.to.split('@')
+
+                var hubId = to[1] ? parseInt(to[1]) : 0
+
+                if(to[0].length == 64){
+                  var userId = Buffer.from(to[0], 'hex')
+
+                  var u = await User.findBy({where: {
+                    pubkey: userId
+                  }})
+
+                  if(u[0]){
+                    userId = u[0].id
+                  }
+
+                }else{
+                  var userId = parseInt(to[0])
+
+                  var u = await User.findById(userId)
+
+                  if(!u){
+                    result.error = "User with short ID "+userId+" doesn't exist."
+                  }
+                }
+
+                if(o.amount.indexOf('.')==-1) o.amount+='.00'
+
+                var amount = parseInt(o.amount.replace(/[^0-9]/g, ''))
+
+                if(amount > 0){
+                  outs.push([userId, hubId, amount])
+                }
+              }
+
+            }
+            if(!result.error){
+              var encoded = rlp.encode([Buffer([p.assetType == 'FSD' ? 0 : 1]), p.ins, outs])
+              me.broadcast('settleUser', encoded)
+              l("Decoded ",rlp.decode(encoded))
+
+              result.pending = true
+            }
+
             break
           case 'pay':
             if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
@@ -1215,7 +1394,8 @@ initDashboard=async a=>{
             break
 
           case 'login':
-            result = '' // toHex(nacl.sign(json.proxyOrigin, me.id.privateKey))
+            // sign external domain
+            result = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
 
           break
         }
@@ -1280,10 +1460,12 @@ sequelize = new Sequelize('', '', 'password', base_db);
 
 User = sequelize.define('user', {
   username: Sequelize.STRING,
+
   pubkey: Sequelize.CHAR(32).BINARY,
 
   nonce: Sequelize.INTEGER,
-  balance: Sequelize.BIGINT // mostly to pay taxes
+  balance: Sequelize.BIGINT, // mostly to pay taxes
+  fsb_balance: Sequelize.BIGINT // standalone bond 2030
 
 });
 
@@ -1297,9 +1479,12 @@ Proposal = sequelize.define('proposal', {
 
 Channel = sequelize.define('channel', {
   nonce: Sequelize.INTEGER, // for instant withdrawals
+
+
   balance: Sequelize.BIGINT, // collateral
   settled: Sequelize.BIGINT, // what hub already collateralized
-  kindof: Sequelize.CHAR(1).BINARY,
+
+  assetType: Sequelize.CHAR(1).BINARY,
 
   delayed: Sequelize.INTEGER
   // dispute has last nonce, last agreed_balance
@@ -1351,6 +1536,7 @@ Event = privSequelize.define('event', {
   p1: Sequelize.STRING
 })
 
+privSequelize.sync({force: true})
 
 
 
@@ -1382,10 +1568,8 @@ listyo = () => {
 
 
 if(process.argv[2] == 'start'){
-
   var cluster = require('cluster');
   if (cluster.isMaster) {
-    console.log('forking')
     cluster.fork();
 
     cluster.on('exit', function(worker, code, signal) {
@@ -1395,23 +1579,7 @@ if(process.argv[2] == 'start'){
   }
 
   if (cluster.isWorker) {
-    me = new Me
-    if(fs.existsSync('data/k.json')){  
-      var json = fs.readFileSync('data/k.json')
-      K = JSON.parse(json)
-
-      me.K = K
-      me.members = JSON.parse(json).members // another object ref
-
-      setTimeout(()=>{
-        me.findNearest(concat(inputMap('sync'), Buffer.from(K.prev_hash, 'hex')) )
-      }, 3000)
-    }else{
-      K = false
-    }
-
     initDashboard()
-
   }
 }
 
