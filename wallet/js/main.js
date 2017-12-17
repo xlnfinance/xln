@@ -14,7 +14,7 @@ W.onready(()=>{
 
   setInterval(function(){
     W('load').then(render)
-  }, 3000)      
+  }, 3000)
 
 
   var methods = {
@@ -22,6 +22,17 @@ W.onready(()=>{
       console.log(args)
       W(method, args).then(render)
       return false
+    },
+    settle: ()=>{
+      var total = app.outs.reduce((k,v)=>k+parseFloat(v.amount.length==0 ? '0' : v.amount), 0)
+
+      if(confirm("Total outputs "+total)){
+        app.call('settleUser', {
+          assetType: 0,
+          ins: app.ins,
+          outs: app.outs
+        })
+      }
     },
     derive: f=>{
       var data = {
@@ -87,26 +98,50 @@ W.onready(()=>{
     methods: methods,
     template: `
     <div>
-      <template v-if="pubkey">
-        <p>ID: <b>{{ pubkey }}</b></p>
+      <p v-if="false">Current asset: <select v-model="assetType">
+        <option v-for="asset in K.assets" v-bind:value="asset.ticker">
+         {{asset.ticker}} ({{ asset.name }})
+        </option>
+      </select></p>
 
-        <p>Transact in: <select v-model="assetType"  >
-          <option v-for="asset in K.assets" v-bind:value="asset.ticker">
-           {{asset.ticker}} ({{ asset.name }})
-          </option>
-        </select></p>
+      <template v-if="pubkey">
+        <h5>Hello, <b>{{username}}</b>! Your ID is <b>{{record ? record.id : pubkey}}</b></h5>
+        
+      <p class="lead">Send through the hub – perfect for everyday transfers:</p>
+        
+      <h1 style="display:inline-block">Balance: \${{commy(collateral + last_delta)}}</h1><small>= {{commy(collateral)}} (collateral) {{last_delta > 0 ? "+ "+commy(last_delta) : "- "+commy(-last_delta)}} (delta)</small> 
+      <p>
+
+      <div v-if="hub_total>0" class="progress" style="max-width:800px">
+        <div class="progress-bar" v-bind:style="{ width: Math.round(hub_failsafe*100/(last_delta<0?collateral:hub_total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+          Insured {{commy(hub_failsafe)}}
+        </div>
+        <div v-if="last_delta<0" v-bind:style="{ width: Math.round(-last_delta*100/collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+          Spent {{commy(last_delta)}}
+        </div>
+        <div v-if="last_delta>0" v-bind:style="{ width: Math.round(last_delta*100/hub_total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+          Risky +{{commy(last_delta)}}
+        </div>
+      </div>
+      </p>
+
+
+        <p>
+          <input style="width:800px" type="text" class="form-control small-input" v-model="off_to" placeholder="ID">
+          <input style="width:200px" type="number" class="form-control small-input" v-model="off_amount" placeholder="Amount">
+        </p>
+
+        <button type="button" class="btn btn-success" @click="call('send', {off_to, off_amount})">Instant Send</button>\
+
+
+
+        <p v-if="my_member">You're member with {{my_member.shares}} shares and advertised location at {{my_member.location}}.</p>
+
+        <hr><br><br>
 
         <template v-if="record">
-          <p>Short ID: {{record.id}}</p>
-          <p>FSD balance: {{commy(record.balance)}}</p>
-          <p>FSB balance: {{commy(record.fsb_balance)}}</p>
-          <p>Settle on-chain:</p>
-
-          <p>Inputs:</p>
-          Channels
-
-
-          <p>Outputs:</p>
+          <p class="lead">Settle globally – slow, expensive, perfect for large transactions:</p>
+          <p>Standalone balance: <b>\${{commy(record.balance)}}</b></p>
 
           <p v-for="out in outs">
             <input style="width:800px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
@@ -115,13 +150,12 @@ W.onready(()=>{
        
           <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add output</button>\
 
-          <p>Total amount of inputs: {{commy(record.balance)}}</p>
-          <p>Total amount of outputs: {{outs.reduce((k,v)=>k+parseFloat(v.amount.length==0 ? '0' : v.amount), 0)}}</p>
 
-          <button type="button" class="btn btn-warning" @click="call('settleUser',{assetType, ins, outs})">Settle</button>
+
+          <button type="button" class="btn btn-warning" @click="settle()">Settle Globally</button>
           <transition name="fade" mode="in-out">
             <b v-if="pending">
-            On-chain transaction is broadcasted. Please wait up to 30 minutes.
+            Global transaction is broadcasted. Please wait for it to be confirmed.
             </b>
           </transition>
 
@@ -129,19 +163,11 @@ W.onready(()=>{
 
         </template>
 
-<hr>
-        Send/receive off-chain 
 
-        <p>@sf</p>
-        <p>
-
-          Hub balance is $2,332 which is sum of collateral and delta: 2,000+332
-
-        </p>
-        <p v-if="my_member">You're member with {{my_member.shares}} shares and advertised location at {{my_member.location}}.</p>
-
-        <button @click="call('logout')">Log Out</button>
+        <button type="button" class="btn btn-danger" @click="call('logout')">Log Out</button>
       </template>
+
+
       <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw, location})">
 
         <label for="inputUsername" class="sr-only">Username</label>

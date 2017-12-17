@@ -10,7 +10,7 @@ const stringify = require('./stringify')
 // from local node_modules
 // brew install node
 
-// npm i tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt
+// npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt
 const keccak = require('keccak')
 const rlp = require('rlp')
 const BN = require('bn.js')
@@ -27,12 +27,11 @@ const {spawn, exec, execSync} = child_process;
 
 Sequelize = require('sequelize')
 Op = Sequelize.Op;
-
-base_port = 8000
-
 asyncexec = require('util').promisify(exec)
 
 l = console.log
+d = ()=>{}
+
 toHex = (inp) => Buffer.from(inp).toString('hex')
 bin=(data)=>Buffer.from(data)
 sha3 = (a)=>keccak('keccak256').update(bin(a)).digest()
@@ -72,11 +71,8 @@ usage = ()=>{
 //http://ipinfo.io/ip 
 genesis = async (opts)=>{
   //await(fs.rmdir('data'))
-  await(asyncexec('rm -rf data'))
-  await(asyncexec('rm -rf private'))
-
+  await(asyncexec('rm -rf private data'))
   await(fs.mkdir('data'))
-  await(fs.mkdir('private'))
 
   await (sequelize.sync({force: true}))
 
@@ -86,6 +82,7 @@ genesis = async (opts)=>{
     location: '0.0.0.0' // for local tests
     //infra: 'https://www.digitalocean.com'
   }, opts)
+
 
 
   l(opts)
@@ -103,8 +100,8 @@ genesis = async (opts)=>{
     pubkey: bin(me.id.publicKey),
     username: opts.username,
     nonce: 0,
-    balance: 100000,
-    fsb_balance: 1000
+    balance: 100000000,
+    fsb_balance: 10000
   }))
 
 
@@ -120,7 +117,8 @@ genesis = async (opts)=>{
 
     voting_period: 2,
 
-    bytes_since_last_snapshot: 0,
+    bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
+    last_snapshot_height: 0,
     snapshot_after_bytes: 10000, //100 * 1024 * 1024,
     proposals_created: 0,
 
@@ -145,7 +143,8 @@ genesis = async (opts)=>{
       }
     ],
 
-    members: []
+    members: [],
+    hubs: []
   }
 
   K.members.push({
@@ -157,16 +156,20 @@ genesis = async (opts)=>{
     block_pubkey: me.block_pubkey,
 
     missed_blocks: [],
-    shares: 1000,
-    hub: "genesis"
+    shares: 300,
+
+    hubId: 1,
+    hub: "proto"
   })
+
+
 
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)
 
   me.K = K
   me.members = JSON.parse(json).members // another object ref
-
+  process.exit(0)
 }
 
 
@@ -183,7 +186,7 @@ genesis = async (opts)=>{
 // used just for convenience in parsing
 inputMap = (i)=>{
   // up to 256 input types for websockets
-  var map = ['tx', 'auth', 'needSig', 'signed', 'block', 'chain', 'sync']
+  var map = ['tx', 'auth', 'needSig', 'signed', 'block', 'chain', 'sync', 'mediate']
   if(typeof i == 'string'){
     // buffer friendly
     return Buffer([map.indexOf(i)])
@@ -202,6 +205,7 @@ methodMap = (i)=>{
 
 
     'withdraw', // instant off-chain signature to withdraw from mutual payment channel
+    'delta',    // delayed balance proof
 
 
     'propose',
@@ -212,6 +216,7 @@ methodMap = (i)=>{
     'auth', // any kind of off-chain auth signatures between peers
     'fsd',
     'fsb',
+
 
   ]
   if(typeof i == 'string'){
@@ -245,7 +250,7 @@ loadJSON = ()=>{
     me.members = JSON.parse(json).members // another object ref
       
     setTimeout(()=>{
-      me.findNearest(concat(inputMap('sync'), Buffer.from(K.prev_hash, 'hex')) )
+      me.sendMember(concat(inputMap('sync'), Buffer.from(K.prev_hash, 'hex')) )
     }, 3000)
   }
 }
@@ -307,7 +312,7 @@ class Me {
 
     var pseudo_balances = {}
 
-    l("Start mempool processing")
+    d("Start mempool processing")
 
     for(var i = 0;i < me.mempool.length;i++){
       var tx = me.mempool[i]
@@ -343,7 +348,7 @@ class Me {
       ordered_tx
     ])
 
-    l("Built ordered ",ordered_tx)
+    d("Built ordered ",ordered_tx)
 
 
     me.my_member.sig = nacl.sign.detached(me.precommit, me.block_keypair.secretKey)
@@ -493,11 +498,20 @@ class Me {
           amount = amount.readUIntBE(0, amount.length)
           hubId = hubId.readUIntBE(0, hubId.length)
 
+          // is pubkey or id
+          if(userId.length != 32) userId = userId.readUIntBE(0, userId.length)
+
+
           if(hubId == undefined){
             // standalone balance
+  
+            if(userId == signer.id){
+              l("Can't settle to your own balance")
+              continue
+            }
 
             var user = await User.findOrBuild({
-              where: (userId.length == 32 ? {pubkey: userId} : {id: userId.readUIntBE(0,userId.length)})
+              where: (userId instanceof Buffer ? {pubkey: userId} : {id: userId})
             })
             user = user[0]
 
@@ -526,6 +540,29 @@ class Me {
             }
 
             await user.save()
+
+          }else{
+            var ch = await Channel.findOrBuild({
+              where: {
+                userId: userId,
+                hubId: hubId,
+                assetType: 0
+              },
+              defaults:{
+                nonce: 0,
+                balance: 0,
+                settled: 0
+              },
+              include: { all: true }
+            })
+
+            ch[0].balance += amount
+
+            if(is_hub) ch[0].settled += amount
+
+            signer.balance -= amount
+            await ch[0].save()
+
 
           }
 
@@ -561,7 +598,7 @@ class Me {
 
 
 
-    async getChannel(userId, hubId, assetType){
+    async getChannel(userId, hubId){
       if(hubId == 0){
         var wallet = await User.findOrBuild({
           where: {id: userId},
@@ -663,7 +700,7 @@ class Me {
     if(me.my_member && me.my_member == me.next_member){
       me.mempool.push(tx)
     }else{
-      me.findNearest(concat(inputMap('tx'),tx))
+      me.sendMember(concat(inputMap('tx'),tx))
     }
 
     l("Just broadcasted ", tx)
@@ -758,7 +795,7 @@ class Me {
 
         me.next_member = me.members[ (currentIndex + increment) % K.members.length]
 
-        l(`Current member at ${now} is ${me.current.id}. ${me.status}`)
+        //l(`Current member at ${now} is ${me.current.id}. ${me.status}`)
 
         if(me.my_member == me.current){
           // do we have enough sig or it's time?
@@ -775,9 +812,10 @@ class Me {
 
           if(me.status == 'precommit' && (total_shares == K.members.length || now % K.blocktime > K.blocktime/2)){
             if(total_shares < K.majority){
-              l(`Only have ${total_shares} shares, cannot build a block!`)
+              d(`Only have ${total_shares} shares, cannot build a block!`)
             }else{
-              l('Lets process the finalblock we just built')
+              d('Lets process the finalblock we just built')
+              
               me.processBlock(concat(
                 Buffer.concat(sigs),
                 me.precommit
@@ -913,13 +951,18 @@ class Me {
 
       })
 
+    }else if (inputType == 'mediate'){
+
+      l("Mediating transfer to ")
+
     }
+
   }
 
   async processBlock(block){
     var finalblock = block.slice(me.members.length * 64)
 
-    l(`Processing a new block, length ${block.length}`)
+    d(`Processing a new block, length ${block.length}`)
     var total_shares = 0
 
     for(var i = 0;i<me.members.length;i++){
@@ -981,7 +1024,9 @@ class Me {
 
 
     const to_execute = await Proposal.findAll({where: {delayed: K.usable_blocks}})
-    l("Processing delayed jobs "+to_execute.length)
+    
+    //l("Processing delayed jobs "+to_execute.length)
+    
     for(let job of to_execute){
       job = rlp.decode(job.change)
 
@@ -1010,9 +1055,10 @@ class Me {
     K.total_bytes += block.length
     K.bytes_since_last_snapshot+=block.length
 
-    // every ten blocks create new installer
+    // every x blocks create new installer
     if(K.bytes_since_last_snapshot > K.snapshot_after_bytes){
       K.bytes_since_last_snapshot = 0
+      K.last_snapshot_height = K.total_blocks
     }else{
 
     }
@@ -1053,7 +1099,7 @@ class Me {
 
 
 
-  findNearest(tx){
+  sendMember(tx, memberIndex=0){
     if(me.my_member){
       // if we are member, just send it to current
       if(me.current && me.current.socket){
@@ -1062,23 +1108,23 @@ class Me {
       return false
     }
     // connecting to geo-selected nearest member (lowest latency)
-    if(me.nearest){
-      if(tx) me.nearest.send(tx)
-    }else{
-      var m = me.members[Math.floor(Math.random() * me.members.length)]
-      me.nearest = new WebSocketClient();
-      me.nearest.open('ws://'+m.location)
+    var m = me.members[memberIndex]
+    if(m.socket) m.socket.send(tx)
 
-      me.nearest.onmessage = tx=>{
-        l('from nearest ')
-        me.processInput(me.nearest,tx)
-      }
+    m.socket = new WebSocketClient()
 
-      me.nearest.onopen = function(e){
-        if(tx) me.nearest.send(tx)
-      }
-
+    m.socket.onmessage = tx=>{
+      l('from member ')
+      me.processInput(m.socket,tx)
     }
+
+    m.socket.onopen = function(e){
+      m.socket.send(tx)
+    }
+
+    m.socket.open('ws://'+m.location)
+
+  
   }
 
 
@@ -1093,12 +1139,12 @@ postPubkey = (pubkey, msg)=>{
 
 trustlessInstall = async a=>{
   tar = require('tar')
-  var filename = 'Failsafe-'+K.total_blocks+'-'+me.username+'.tar.gz'
+  var filename = 'Failsafe-'+K.total_blocks+'.tar.gz'
   l("generating install "+filename)
   tar.c({
       gzip: true,
   		portable: true,
-      file: '../'+filename,
+      file: 'private/'+filename,
       filter: (path,stat)=>{
         stat.mtime = null // must be deterministic
         // disable /private (blocks sqlite, proofs, local config) allow /default_private
@@ -1195,10 +1241,12 @@ initDashboard=async a=>{
 
   // this serves dashboard HTML page
   var server = http.createServer(function(req, res) {
-    if(m = req.url.match(/^\/codestate\/([0-9]+)$/)){
-      var filename=`Failsafe-${m[1]}-${me.username}.tar.gz`
+    if(req.url == '/install'){
+      var filename=`Failsafe-${K.last_snapshot_height}.tar.gz`
 
-      exec("shasum -a 256 ../"+filename, async (er,out,err)=>{
+
+
+      exec("shasum -a 256 private/"+filename, async (er,out,err)=>{
         if(out.length == 0){
           res.end('This state doesnt exist')
           return false
@@ -1208,20 +1256,19 @@ initDashboard=async a=>{
         var host = me.my_member.location.split(':')[0]
         var out_location = 'http://'+host+':'+base_port+'/'+filename
         res.end(`
-      # Compare this snippet with other sources, and if exact match paste into Terminal.app
-
-      folder=2
-      mkdir $folder
-      cd $folder
-      wget ${out_location}
-      if shasum -a 256 ${filename} | grep ${out_hash}; then
-      tar -xzf ${filename}
-      rm ${filename}
-      node u.js $folder
-      fi`)
+# Compare this snippet with other sources, and if there's exact match paste into Terminal.app
+folder=${base_port+1}
+mkdir $folder
+cd $folder
+curl ${out_location} -o ${filename};if shasum -a 256 ${filename} | grep ${out_hash}; then
+  tar -xzf ${filename}
+  rm ${filename}
+  node u.js start $folder
+fi
+`)
       });
-    }else if(req.url.match(/^\/Failsafe-([0-9]+)-(u[0-9]+)\.tar\.gz$/)){
-      var file = '..'+req.url
+    }else if(req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)){
+      var file = 'private'+req.url
       var stat = fs.statSync(file);
       res.writeHeader(200, {"Content-Length": stat.size});
       var fReadStream = fs.createReadStream(file);
@@ -1239,6 +1286,11 @@ initDashboard=async a=>{
    }else{
 
     if(req.url.startsWith('/a/')) req.url = '/'
+
+    if(req.url.startsWith('/js/sdk.js')){
+
+
+    }
 
     serveStatic("../wallet")(req, res, finalhandler(req, res));
    }
@@ -1268,69 +1320,76 @@ initDashboard=async a=>{
         var json = JSON.parse(msg)
   
         // prevents all kinds of CSRF and DNS rebinding
+        // strong coupling between the console and the browser client
         if(json.code != auth_code){
           l("Failed auth_code")
           return false
         }
+
         var result = {}
 
         var p = json.params
-        l(p)
-
+        
         switch(json.method){
-
           case 'load':
             if(p.username){
               if(p.location && !K){
-                await genesis(p.username, p.pw, p.location)
+                await genesis({username, pw, location} = p)
               }
 
               var seed = await derive(p.username, p.pw)
               me.init(p.username, seed)
-              me.record = await me.byKey()
               
               await me.initMember()
-            
             }
-
-            result = me
-            if(me.id){
-              result.pubkey = toHex(me.id.publicKey)
-
-              //channels = await Channel.find({$where: {userId: me.record.id}})
-
-              result.channels = {
-                FSD: [],
-                FSB: []
-              }
-
-            }
-
-            
-            /*
-            result.record = me.record ? {
-              balance: me.record.balance, 
-              id: me.record.id
-            } : false
-            */
-
 
             break
           case 'logout':         
             me = new Me
             loadJSON()
-
+            result.pubkey = false
 
             break
+
+          case 'send':
+
+            var hubId = 1
+
+            var amount = parseInt(parseFloat(p.off_amount)*100)
+
+            var delta = await Delta.findOrBuild({
+              where: {
+                counterpartyId: hubId,
+                myId: bin(me.id.publicKey)
+              }, defaults: {
+                delta: 0
+              }
+            })
+
+            delta[0].delta -= amount
+
+            args = rlp.encode([delta.nonce, delta[0].delta])
+
+            var tx = me.sign(write32(hubId), concat(methodMap('delta', args)))
+
+            var body = stringify({
+              to: p.off_to
+            })
+
+            //mediate to, 
+
+
+            me.sendMember(tx)
+
+            await delta[0].save()
+
+          break
 
           case 'settleUser':
 
             //settle fsd ins outs
 
             // contacting hubs and collecting instant withdrawals ins
-
-            
-
 
             var outs = []
             for(o of p.outs){
@@ -1343,12 +1402,13 @@ initDashboard=async a=>{
                 if(to[0].length == 64){
                   var userId = Buffer.from(to[0], 'hex')
 
-                  var u = await User.findBy({where: {
+                  // maybe this pubkey is already registred?
+                  var u = await User.findOne({where: {
                     pubkey: userId
                   }})
 
-                  if(u[0]){
-                    userId = u[0].id
+                  if(u){
+                    userId = u.id
                   }
 
                 }else{
@@ -1400,6 +1460,47 @@ initDashboard=async a=>{
           break
         }
 
+
+
+        result.K = K
+
+        if(me.id){
+          result.record = await me.byKey()
+
+          result.pubkey = toHex(me.id.publicKey)
+
+          //defaults
+          result.collateral = 0
+          result.last_delta = 0
+          if(result.record){
+            var ch = await Channel.find({where: {
+              userId: me.record.id,
+              assetType: 0
+            }})
+
+            if(ch) result.collateral = ch.balance
+          }
+
+          var delta = await Delta.find({
+            where: {
+              counterpartyId: 1,
+              myId: bin(me.id.publicKey)
+            }
+          })
+          if(delta) result.last_delta = delta.delta
+
+          result.hub_total = result.collateral + result.last_delta
+
+          if(result.last_delta >= 0){
+            result.hub_failsafe = result.collateral
+          }else{
+            result.hub_failsafe = result.collateral + result.last_delta
+          }
+        }
+
+
+
+
         ws.send(stringify({
           result: result,
           id: json.id
@@ -1431,7 +1532,7 @@ isLocalhost=(req)=>{
 
 derive = async (username, pw)=>{
   var seed = await require('scrypt').hash(pw, {
-    N: Math.pow(2, 12),
+    N: Math.pow(2, 16),
     interruptStep: 1000,
     p: 1,
     r: 8,
@@ -1521,23 +1622,41 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'});
 // this is off-chain private database for blocks and other balance proofs
 // for things that new people don't need to know and can be cleaned up
 
-base_db.storage = 'private/db.sqlite'
-privSequelize = new Sequelize('', '', 'password', base_db);
+fs.mkdir('private').then(a=>{
 
-Block = privSequelize.define('block', {
-  block: Sequelize.CHAR.BINARY,
-  hash: Sequelize.CHAR(32).BINARY,
-  prev_hash: Sequelize.CHAR(32).BINARY
+
+    
+  base_db.storage = 'private/db.sqlite'
+  privSequelize = new Sequelize('', '', 'password', base_db);
+
+  Block = privSequelize.define('block', {
+    block: Sequelize.CHAR.BINARY,
+    hash: Sequelize.CHAR(32).BINARY,
+    prev_hash: Sequelize.CHAR(32).BINARY
+  })
+
+  // stored signed deltas
+  Delta = privSequelize.define('delta', {
+    counterpartyId: Sequelize.CHAR(32).BINARY,
+    myId: Sequelize.CHAR(32).BINARY,
+    sig: Sequelize.CHAR(64).BINARY,
+    nonce: Sequelize.INTEGER,
+    delta: Sequelize.INTEGER
+  })
+
+
+
+
+  Event = privSequelize.define('event', {
+    data: Sequelize.CHAR.BINARY,
+    kindof: Sequelize.STRING,
+    p1: Sequelize.STRING
+  })
+
+  privSequelize.sync({force: false})
+
+
 })
-
-Event = privSequelize.define('event', {
-  data: Sequelize.CHAR.BINARY,
-  kindof: Sequelize.STRING,
-  p1: Sequelize.STRING
-})
-
-privSequelize.sync({force: true})
-
 
 
 
@@ -1568,7 +1687,8 @@ listyo = () => {
 
 
 if(process.argv[2] == 'start'){
-  var cluster = require('cluster');
+  var cluster = require('cluster')
+  base_port = process.argv[3] ? process.argv[3] : 8000
   if (cluster.isMaster) {
     cluster.fork();
 

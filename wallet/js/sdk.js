@@ -21,10 +21,10 @@ if(hash[1]){
 }
 
 W.frame=false;
-W.origin = 'http://0.0.0.0:8000'
+W.origin = 'http://0.0.0.0:'+location.port
 W.frame=document.createElement('iframe');
 W.frame.style.display = 'none'
-W.frame.src=W.origin+'/smooth.html'
+W.frame.src=W.origin+'/sdk.html'
 document.body.appendChild(W.frame)
 W.onready = fn => {
   if(W.ready == true){

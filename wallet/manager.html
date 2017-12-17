@@ -266,7 +266,11 @@ steps=[
 
   info.innerHTML = `<p>These are payment channels with Hub. Everyone is free to take their money back whenever they wants. There's no custodian risk for senders.</p>
 
-  <p>However, she'd have to wait for a delay period so the blockchain would make sure we won't show any evidence that there are newer payments.</p>`
+  <p>However, she'd have to wait for a delay period so the blockchain would make sure we won't show any evidence that there are newer payments.</p>
+
+<p>Collateral (visible on chain) + signed delta (off chain) = current off chain balance</p>
+
+  `
 },
 
 ()=>{
@@ -275,7 +279,7 @@ steps=[
 },
 ()=>{
   plotnext.style['display'] = 'none'
-  int=setInterval(demo, 200)
+  int=setInterval(demo, 2000)
 }
 
 ]
@@ -296,7 +300,6 @@ names="Alice Bob Carol Restaurant Waiter AcmeCorp John Dave".split(' ')
 
 <p><button id="plotnext">Next Slide</button></p>
 <div style="max-width:600px" id=info> 
-
 </div>
 
 </center>
