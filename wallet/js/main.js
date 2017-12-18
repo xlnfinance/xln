@@ -44,10 +44,7 @@ W.onready(()=>{
       W('load', data).then(render)
       return false
     },
-    logout: async f=>{
-      await W('logout')
-      location.reload()
-    },
+
 
     commy: (b,dot=true)=>{
       b = b.toString()
@@ -67,8 +64,29 @@ W.onready(()=>{
       if(str.indexOf('.') == -1) str += '.00'
 
       return parseInt(str.replace(/[^0-9]/g,''))
-    }
+    },
 
+    timeAgo: (time)=>{
+      var units = [
+        { name: "second", limit: 60, in_seconds: 1 },
+        { name: "minute", limit: 3600, in_seconds: 60 },
+        { name: "hour", limit: 86400, in_seconds: 3600  },
+        { name: "day", limit: 604800, in_seconds: 86400 },
+        { name: "week", limit: 2629743, in_seconds: 604800  },
+        { name: "month", limit: 31556926, in_seconds: 2629743 },
+        { name: "year", limit: null, in_seconds: 31556926 }
+      ];
+      var diff = (new Date() - new Date(time*1000)) / 1000;
+      if (diff < 5) return "now";
+      
+      var i = 0, unit;
+      while (unit = units[i++]) {
+        if (diff < unit.limit || !unit.limit){
+          var diff =  Math.floor(diff / unit.in_seconds);
+          return diff + " " + unit.name + (diff>1 ? "s" : "") + " ago";
+        }
+      };
+    }
 
   }
 
@@ -85,7 +103,7 @@ W.onready(()=>{
 
       pw: 'password',
       username: 'root',
-      location: '0.0.0.0',
+      location: '0.0.0.0:8000',
 
       channels: {},
 
@@ -107,24 +125,24 @@ W.onready(()=>{
       <template v-if="pubkey">
         <h5>Hello, <b>{{username}}</b>! Your ID is <b>{{record ? record.id : pubkey}}</b></h5>
         
-      <p class="lead">Send through the hub – perfect for everyday transfers:</p>
-        
-      <h1 style="display:inline-block">Balance: \${{commy(collateral + last_delta)}}</h1><small>= {{commy(collateral)}} (collateral) {{last_delta > 0 ? "+ "+commy(last_delta) : "- "+commy(-last_delta)}} (delta)</small> 
+      <p class="lead">Send and receive money through the hub:</p>  
+        <h1 style="display:inline-block">Balance: \${{commy(collateral + last_delta)}}</h1><small v-if="hub_total>0">= {{commy(collateral)}} (collateral) {{last_delta > 0 ? "+ "+commy(last_delta) : "- "+commy(-last_delta)}} (delta)</small> 
       <p>
 
-      <div v-if="hub_total>0" class="progress" style="max-width:800px">
-        <div class="progress-bar" v-bind:style="{ width: Math.round(hub_failsafe*100/(last_delta<0?collateral:hub_total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
-          Insured {{commy(hub_failsafe)}}
-        </div>
-        <div v-if="last_delta<0" v-bind:style="{ width: Math.round(-last_delta*100/collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
-          Spent {{commy(last_delta)}}
-        </div>
-        <div v-if="last_delta>0" v-bind:style="{ width: Math.round(last_delta*100/hub_total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
-          Risky +{{commy(last_delta)}}
-        </div>
-      </div>
-      </p>
 
+      <div v-if="hub_total>0">
+        <div class="progress" style="max-width:800px">
+          <div class="progress-bar" v-bind:style="{ width: Math.round(hub_failsafe*100/(last_delta<0?collateral:hub_total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+            Insured {{commy(hub_failsafe)}}
+          </div>
+          <div v-if="last_delta<0" v-bind:style="{ width: Math.round(-last_delta*100/collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+            Spent {{commy(last_delta)}}
+          </div>
+          <div v-if="last_delta>0" v-bind:style="{ width: Math.round(last_delta*100/hub_total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+            Risky +{{commy(last_delta)}}
+          </div>
+        </div>
+        </p>
 
         <p>
           <input style="width:800px" type="text" class="form-control small-input" v-model="off_to" placeholder="ID">
@@ -132,6 +150,7 @@ W.onready(()=>{
         </p>
 
         <button type="button" class="btn btn-success" @click="call('send', {off_to, off_amount})">Instant Send</button>\
+      </div>
 
 
 
@@ -140,7 +159,7 @@ W.onready(()=>{
         <hr><br><br>
 
         <template v-if="record">
-          <p class="lead">Settle globally – slow, expensive, perfect for large transactions:</p>
+          <p class="lead">Or settle globally (slow, expensive, but more secure):</p>
           <p>Standalone balance: <b>\${{commy(record.balance)}}</b></p>
 
           <p v-for="out in outs">
@@ -148,11 +167,10 @@ W.onready(()=>{
             <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
           </p>
        
-          <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add output</button>\
-
-
+          <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add output</button>
 
           <button type="button" class="btn btn-warning" @click="settle()">Settle Globally</button>
+
           <transition name="fade" mode="in-out">
             <b v-if="pending">
             Global transaction is broadcasted. Please wait for it to be confirmed.
@@ -163,8 +181,13 @@ W.onready(()=>{
 
         </template>
 
+     <hr>
 
-        <button type="button" class="btn btn-danger" @click="call('logout')">Log Out</button>
+      <button type="button" class="btn btn-info" @click="call('sync')">Sync (Height {{K.total_blocks}}, {{timeAgo(K.ts)}})</button>
+
+      <button type="button" class="btn btn-danger" @click="call('logout')">Log Out</button>
+
+
       </template>
 
 

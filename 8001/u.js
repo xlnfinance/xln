@@ -6,6 +6,11 @@ http = require("http");
 
 // deterministic JSON
 const stringify = require('./stringify')
+
+// from local node_modules
+// brew install node
+
+// npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt
 const keccak = require('keccak')
 const rlp = require('rlp')
 const BN = require('bn.js')
@@ -127,8 +132,6 @@ genesis = async (opts)=>{
     majority: 1,
     prev_hash: toHex(Buffer.alloc(32)),
 
-    ts: 0,
-
     assets: [
       { 
         ticker: 'FSD',
@@ -211,7 +214,6 @@ methodMap = (i)=>{
     'voteDeny',
 
     'auth', // any kind of off-chain auth signatures between peers
-
     'fsd',
     'fsb',
 
@@ -708,11 +710,9 @@ class Me {
   // this is off-chain for any kind of p2p authentication
   // no need to optimize for bandwidth
   // so full pubkey is used instead of id and JSON is used as payload
-  offchainAuth(){
-    var msg = write32(ts())
+  offchainAuth(msg){
     var to_sign = concat(write32(0), methodMap('auth'), msg )
     return concat(
-      inputMap('auth'),
       bin(this.id.publicKey),
       nacl.sign.detached(to_sign, this.id.secretKey),
       msg
@@ -754,14 +754,11 @@ class Me {
   // members - moderately trusted, average performance
   // hubs - highly trusted as compromises are painful, high performance
 
-  async connect(){
+  async initMember(){
     // in json pubkeys are in hex
     me.record = await me.byKey()
 
     l('initing mems')
-    
-    me.sendMember(me.offchainAuth(), 0)
-    
 
     me.members.map(c =>{
       c.block_pubkey = Buffer.from(c.block_pubkey, 'hex')
@@ -774,8 +771,16 @@ class Me {
       for(var i = 0;i<me.members.length;i++){
         var c = me.members[i]
         if( me.my_member != c ){
-          // we need to have connections ready to all members
-          me.sendMember(me.offchainAuth(), i)
+          c.socket = new WebSocketClient();
+          c.socket.onopen = function(e){
+            var auth = me.offchainAuth(write32(ts()))
+
+            this.send( concat( inputMap('auth'), auth) )
+          }
+
+          c.socket.onmessage = tx=>{me.processInput(c.socket,tx)}
+
+          c.socket.open('ws://'+c.location)
         }
       }
 
@@ -863,16 +868,11 @@ class Me {
 
     if(inputType == 'auth' &&
       (obj = me.offchainVerify(tx)) &&
+      (obj.c = me.members.find(f=>f.pubkey.equals(obj.signer))) &&
       (ts() - 100 < obj.data.readUInt32BE())
     ) {
-      l('Someone connected: '+toHex(obj.signer))
-
-      wss.users[obj.signer] = ws
-
-      if(var m = me.members.find(f=>f.pubkey.equals(obj.signer))){
-        m.socket = ws        
-      }
-
+      l('Another member connected: '+toHex(obj.signer))
+      obj.c.socket = ws
       return false
     }else if (inputType == 'tx'){
 
@@ -998,9 +998,6 @@ class Me {
     prev_hash = prev_hash.toString('hex')
 
     assert(methodId == 'block', 'Wrong method for block')
-    assert(finalblock.length <= K.blocksize, 'Invalid block')
-    assert(timestamp > K.ts, 'New block from the past')
-
 
     if(K.prev_hash != prev_hash){
       l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
@@ -1016,7 +1013,7 @@ class Me {
     }
 
 
-    K.ts = timestamp
+
     K.prev_hash = toHex(sha3(finalblock))
 
     K.total_blocks++
@@ -1102,34 +1099,32 @@ class Me {
 
 
 
-  sendMember(tx, memberIndex){
-    if(memberIndex){
-        // if we are member, just send it to current
-          // connecting to geo-selected nearest member (lowest latency)
-      var m = me.members[memberIndex]
-      if(m.socket){
-        m.socket.send(tx)
-      }else{
-        m.socket = new WebSocketClient()
-
-        m.socket.onmessage = tx=>{
-          l('from member ')
-          me.processInput(m.socket,tx)
-        }
-
-        m.socket.onopen = function(e){
-          l("Sending to member ", tx)
-          m.socket.send(tx)
-        }
-
-        m.socket.open('ws://'+m.location)
-      }
-      
-    }else{
+  sendMember(tx, memberIndex=0){
+    if(me.my_member){
+      // if we are member, just send it to current
       if(me.current && me.current.socket){
         me.current.socket.send(tx)
       }
       return false
+    }
+    // connecting to geo-selected nearest member (lowest latency)
+    var m = me.members[memberIndex]
+    if(m.socket){
+      m.socket.send(tx)
+    }else{
+      m.socket = new WebSocketClient()
+
+      m.socket.onmessage = tx=>{
+        l('from member ')
+        me.processInput(m.socket,tx)
+      }
+
+      m.socket.onopen = function(e){
+        l("Sending to member ", tx)
+        m.socket.send(tx)
+      }
+
+      m.socket.open('ws://'+m.location)
     }
 
   
@@ -1264,11 +1259,6 @@ initDashboard=async a=>{
         var host = me.my_member.location.split(':')[0]
         var out_location = 'http://'+host+':'+base_port+'/'+filename
         res.end(`
-
-# Install locally 
-# brew install node
-# npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt
-
 # Compare this snippet with other sources, and if there's exact match paste into Terminal.app
 
 id=${base_port+1}
@@ -1361,8 +1351,7 @@ fi
               var seed = await derive(p.username, p.pw)
               me.init(p.username, seed)
               
-              await me.connect()
-
+              await me.initMember()
             }
 
             break
@@ -1400,7 +1389,7 @@ fi
             //mediate to, 
 
 
-            me.sendMember(tx, 0)
+            me.sendMember(tx)
 
             await delta[0].save()
 
