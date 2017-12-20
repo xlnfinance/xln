@@ -47,6 +47,7 @@ W.onready(()=>{
 
 
     commy: (b,dot=true)=>{
+
       b = b.toString()
       if(dot){
         if(b.length==1){
@@ -116,6 +117,7 @@ W.onready(()=>{
     methods: methods,
     template: `
     <div>
+      {{location.hash}}
       <p v-if="false">Current asset: <select v-model="assetType">
         <option v-for="asset in K.assets" v-bind:value="asset.ticker">
          {{asset.ticker}} ({{ asset.name }})
@@ -126,20 +128,20 @@ W.onready(()=>{
         <h5>Hello, <b>{{username}}</b>! Your ID is <b>{{record ? record.id : pubkey}}</b></h5>
         
       <p class="lead">Send and receive money through the hub:</p>  
-        <h1 style="display:inline-block">Balance: \${{commy(collateral + last_delta)}}</h1><small v-if="hub_total>0">= {{commy(collateral)}} (collateral) {{last_delta > 0 ? "+ "+commy(last_delta) : "- "+commy(-last_delta)}} (delta)</small> 
+        <h1 style="display:inline-block">Balance: \${{commy(ch.total)}}</h1><small v-if="ch.total>0">= {{commy(ch.collateral)}} (collateral) {{ch.delta > 0 ? "+ "+commy(ch.delta) : "- "+commy(-ch.delta)}} (delta)</small> 
       <p>
 
 
-      <div v-if="hub_total>0">
-        <div class="progress" style="max-width:800px">
-          <div class="progress-bar" v-bind:style="{ width: Math.round(hub_failsafe*100/(last_delta<0?collateral:hub_total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
-            Insured {{commy(hub_failsafe)}}
+      <div v-if="ch.total>0">
+        <div class="progress" style="max-width:1000px">
+          <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.delta<0?collateral:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+            Insured {{commy(ch.failsafe)}}
           </div>
-          <div v-if="last_delta<0" v-bind:style="{ width: Math.round(-last_delta*100/collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+          <div v-if="ch.delta<0" v-bind:style="{ width: Math.round(-ch.delta*100/collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
             Spent {{commy(last_delta)}}
           </div>
-          <div v-if="last_delta>0" v-bind:style="{ width: Math.round(last_delta*100/hub_total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
-            Risky +{{commy(last_delta)}}
+          <div v-if="ch.delta>0" v-bind:style="{ width: Math.round(ch.delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+            Risky +{{commy(ch.delta)}}
           </div>
         </div>
         </p>
@@ -213,6 +215,14 @@ W.onready(()=>{
 
         <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
       </form>
+
+      <br><br>
+
+      <pre v-if="K">
+        Blocks: {{K.total_blocks}}
+        Total bytes: {{K.total_bytes}}
+      </pre>
+
     </div>
      ` 
    })

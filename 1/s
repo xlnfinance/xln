@@ -1,2 +1,2 @@
-rm -rf private data
+rm -rf private data ../8001
 node u start
