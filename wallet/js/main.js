@@ -3,7 +3,9 @@ l=console.log
 
 render = r=>{
   l('Rendering ',r)
-  if(r.error) alert(r.error)
+
+  if(r.alert) notyf.alert(r.alert)
+  if(r.confirm) notyf.confirm(r.confirm)
 
   Object.assign(app, r)
 }
@@ -16,6 +18,8 @@ W.onready(()=>{
     W('load').then(render)
   }, 3000)
 
+  notyf = new Notyf({delay:4000})
+
 
   var methods = {
     call: function(method, args){
@@ -26,7 +30,7 @@ W.onready(()=>{
     settle: ()=>{
       var total = app.outs.reduce((k,v)=>k+parseFloat(v.amount.length==0 ? '0' : v.amount), 0)
 
-      if(confirm("Total outputs "+total)){
+      if(confirm("Total outputs: "+total+". Do you want to broadcast your transaction?")){
         app.call('settleUser', {
           assetType: 0,
           ins: app.ins,
@@ -45,6 +49,14 @@ W.onready(()=>{
       return false
     },
 
+    go: (path)=>{
+      if(path==''){
+        history.pushState("/", null, '/');
+      }else{
+        location.hash = "#"+path
+      }
+      app.tab = path
+    },
 
     commy: (b,dot=true)=>{
 
@@ -87,6 +99,10 @@ W.onready(()=>{
           return diff + " " + unit.name + (diff>1 ? "s" : "") + " ago";
         }
       };
+    },
+
+    faucet: a=>{
+
     }
 
   }
@@ -97,7 +113,7 @@ W.onready(()=>{
     el: '#app',
     data(){ return {
       assetType: 'FSD',
-      pending: false,
+
       pubkey: false,
       K: false,
       my_member: false,
@@ -110,14 +126,72 @@ W.onready(()=>{
 
       record: false,
 
+      tab: location.hash.substr(1),
+
+      install_snippet: false,
+
       ins: [],
-      outs: [{to:'', amount:''}]
+      outs: [{to:'', amount:''}],
+
+      proposal: ['Minting our marketing budget','await me.mint(0, 1, 1, 100000)','']
 
     } },
     methods: methods,
     template: `
-    <div>
-      {{location.hash}}
+<div>
+  <nav class="navbar navbar-expand-md navbar-dark bg-dark mb-4">
+    <a class="navbar-brand" href="#">Failsafe</a>
+    <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+
+    <div class="collapse navbar-collapse" id="navbarCollapse">
+      <ul class="navbar-nav mr-auto">
+
+        <li class="nav-item" v-bind:class="{ active: tab=='' }">
+          <a class="nav-link" @click="go('')">Wallet</a>
+        </li>
+
+        <li class="nav-item" v-bind:class="{ active: tab=='network' }">
+          <a class="nav-link" @click="go('network')">Network</a>
+        </li>
+
+        <li class="nav-item"  v-bind:class="{ active: tab=='install' }">
+          <a class="nav-link" @click="go('install')">Install</a>
+        </li>
+
+        <li class="nav-item"  v-bind:class="{ active: tab=='exchange' }">
+          <a class="nav-link" @click="go('exchange')">Exchange</a>
+        </li>
+
+        <li class="nav-item"  v-bind:class="{ active: tab=='gov' }">
+          <a class="nav-link" @click="go('gov')">Governance</a>
+        </li>
+
+        <li class="nav-item"  v-bind:class="{ active: tab=='wiki' }">
+          <a class="nav-link" @click="go('wiki')">Wiki</a>
+        </li>
+
+
+
+      </ul>
+
+
+      <button type="button" class="btn btn-info" @click="call('sync')">Sync (Height {{K.total_blocks}}, {{timeAgo(K.ts)}})</button>
+  &nbsp;     <button v-if="pubkey" type="button" class="btn btn-danger" @click="call('logout')">Log Out</button>
+
+    </div>
+  </nav>
+
+
+  <div class="container">
+
+
+
+
+
+    <div v-if="tab==''">
       <p v-if="false">Current asset: <select v-model="assetType">
         <option v-for="asset in K.assets" v-bind:value="asset.ticker">
          {{asset.ticker}} ({{ asset.name }})
@@ -153,42 +227,38 @@ W.onready(()=>{
 
         <button type="button" class="btn btn-success" @click="call('send', {off_to, off_amount})">Instant Send</button>\
       </div>
+      <div v-else>
+      </div>
 
 
 
-        <p v-if="my_member">You're member with {{my_member.shares}} shares and advertised location at {{my_member.location}}.</p>
-
-        <hr><br><br>
 
         <template v-if="record">
+        <br><br><br>
+
+          <hr style="margin-left: 0;text-align: left;width: 80%;" />
+
+
           <p class="lead">Or settle globally (slow, expensive, but more secure):</p>
+
           <p>Standalone balance: <b>\${{commy(record.balance)}}</b></p>
+          <small>Currently there's only one hub. So to deposit to someone's channel with hub use their_ID@1</small>
 
           <p v-for="out in outs">
             <input style="width:800px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
             <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
           </p>
        
+          <p>
           <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add output</button>
-
           <button type="button" class="btn btn-warning" @click="settle()">Settle Globally</button>
+          </p>
 
-          <transition name="fade" mode="in-out">
-            <b v-if="pending">
-            Global transaction is broadcasted. Please wait for it to be confirmed.
-            </b>
-          </transition>
+
 
 
 
         </template>
-
-     <hr>
-
-      <button type="button" class="btn btn-info" @click="call('sync')">Sync (Height {{K.total_blocks}}, {{timeAgo(K.ts)}})</button>
-
-      <button type="button" class="btn btn-danger" @click="call('logout')">Log Out</button>
-
 
       </template>
 
@@ -216,15 +286,78 @@ W.onready(()=>{
         <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
       </form>
 
-      <br><br>
+    </div>
 
-      <pre v-if="K">
-        Blocks: {{K.total_blocks}}
-        Total bytes: {{K.total_bytes}}
-      </pre>
+    <div v-else-if="tab=='network'">
+      <h2>Network stats</h2>
+      <p>Total blocks: {{K.total_blocks}}</p>
+      <p>Of which usable blocks: {{K.total_blocks}}</p>
+      <p>Last block received {{timeAgo(K.ts)}}</p>
+      <p>Network created {{timeAgo(K.created_at)}}</p>
+      <p>FSD Market Cap {{timeAgo(K.assets[0].total_supply)}}</p>
+
+      <h2>Board of Members</h2>
+      <p v-for="m in K.members">{{m.username}} ({{m.location}}) - <b>{{m.shares}}</b></p>
+
+
 
     </div>
-     ` 
+
+    <div v-else-if="tab=='install'">
+    <h3>Currently only macOS/Linux are supported</h3>
+  <p>1. This is a Developer Preview. In the future one command will be enough, but right now the process is quite manual. First, make sure you have Node.js installed: run <b>brew install node</b> in console if not.</p>
+  <p>2. Then install required npm modules: <b>npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt</b></p>
+  <p>3. Compare this snippet with other sources, and if there's exact match paste into Terminal.app: </p>
+  <p><b>{{install_snippet}}</b></p>
+    </div>
+
+    <div v-else-if="tab=='exchange'">
+    <h3>Deposit / Withdraw / Exchange</h3>
+    <p>Very soon you will be able to deposit and withdraw to your wallet with major payment methods (such as credit cards, wire transfers and Bitcoin) right here, on this page. However, on testnet, use this complimentary faucet for free money (it does some mining):</p>
+
+    <button class="btn btn-success" @click="faucet">Give me a dollar!</button>
+
+    </div>
+
+
+    <div v-else-if="tab=='gov'">
+      <h3>Governance</h3>
+      <div class="form-group">
+        <label for="comment">Description:</label>
+        <textarea class="form-control" v-model="proposal[0]" rows="2" id="comment"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="comment">Execute (optional):</label>
+        <textarea class="form-control" v-model="proposal[1]" rows="2" id="comment"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="comment">Patch (optional):</label>
+        <textarea class="form-control" v-model="proposal[2]"  rows="2" id="comment"></textarea>
+      </div>
+
+      <button @click="call('propose', proposal)" class="btn btn-warning">Propose</button>
+
+
+
+      <div v-for="p in proposals">
+        {{p[0]}}
+        
+        
+      </div>
+    </div>
+
+
+
+    <div v-else-if="tab=='wiki'">
+      <h3>Wiki</h3>
+      <p><a href="https://github.com/failsafenetwork/failsafe">Currently here</a></p>
+    </div>
+
+  </div>
+</div>
+` 
    })
 
 

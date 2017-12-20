@@ -41,6 +41,8 @@ r = function(a){
   }
 }
 
+readInt = (i)=>i.readUIntBE(0, i.length)
+
 toHex = (inp) => Buffer.from(inp).toString('hex')
 bin=(data)=>Buffer.from(data)
 sha3 = (a)=>keccak('keccak256').update(bin(a)).digest()
@@ -120,7 +122,6 @@ genesis = async (opts)=>{
     total_blocks: 0,
     total_tx: 0,
     total_bytes: 0,
-    total_supply: 0,
 
     voting_period: 2,
 
@@ -141,14 +142,18 @@ genesis = async (opts)=>{
 
     ts: 0,
 
+    created_at: ts(),
+
     assets: [
       { 
         ticker: 'FSD',
-        name: "Failsafe Dollar"
+        name: "Failsafe Dollar",
+        total_supply: user.balance
       },
       {
         ticker: 'FSB',
-        name: "Bond 2030"
+        name: "Bond 2030",
+        total_supply: user.fsb_balance
       }
     ],
 
@@ -302,6 +307,26 @@ trustlessInstall = async a=>{
 
 }
 
+installSnippets = {}
+installSnippet = async (i)=>{
+  if(installSnippets[i]){
+    return installSnippets[i]
+  }else{
+    var filename=`Failsafe-${i}.tar.gz`
+    exec("shasum -a 256 private/"+filename, async (er,out,err)=>{
+      if(out.length == 0){
+        l('This state doesnt exist')
+        return false
+      }
+
+      var out_hash = out.split(' ')[0]
+      var host = me.my_member.location.split(':')[0]
+      var out_location = 'http://'+host+':'+base_port+'/'+filename
+      installSnippets[i] = `id=${base_port+1};f=${filename};mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f;if shasum -a 256 $f | grep ${out_hash}; then; tar -xzf $f && rm $f; node u.js start $id; fi`
+    return installSnippets[i];
+    })
+  }
+}
 
 originAllowence = {
   'null': 400,
@@ -317,37 +342,9 @@ initDashboard=async a=>{
 
   // this serves dashboard HTML page
   var server = http.createServer(function(req, res) {
-    if(req.url == '/install'){
-      var filename=`Failsafe-${K.last_snapshot_height}.tar.gz`
+    
 
-
-
-      exec("shasum -a 256 private/"+filename, async (er,out,err)=>{
-        if(out.length == 0){
-          res.end('This state doesnt exist')
-          return false
-        }
-
-        var out_hash = out.split(' ')[0]
-        var host = me.my_member.location.split(':')[0]
-        var out_location = 'http://'+host+':'+base_port+'/'+filename
-        res.end(`
-
-# Install locally 
-# brew install node
-# npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt
-
-# Compare this snippet with other sources, and if there's exact match paste into Terminal.app
-
-id=${base_port+1}
-f=${filename}
-mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f;if shasum -a 256 $f | grep ${out_hash}; then
-  tar -xzf $f && rm $f
-  node u.js start $id
-fi
-`)
-      });
-    }else if(req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)){
+    if(req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)){
       var file = 'private'+req.url
       var stat = fs.statSync(file);
       res.writeHeader(200, {"Content-Length": stat.size});
@@ -413,7 +410,7 @@ fi
         if(true || json.code == auth_code){
           switch(json.method){
             case 'sync':
-              l("Syncing the chain")
+              result.confirm = "Syncing the chain..."
               sync()
 
               break
@@ -425,6 +422,8 @@ fi
 
                 var seed = await derive(p.username, p.pw)
                 me.init(p.username, seed)
+
+                result.confirm = "Welcome!"
                 
                 await me.connect()
 
@@ -456,7 +455,7 @@ fi
                 if(mediate_to){
                   mediate_to = mediate_to.pubkey
                 }else{
-                  result.error = "Not found"
+                  result.alert = "This user ID is not found"
                   break
                 }
               }
@@ -522,7 +521,7 @@ fi
                 me.broadcast('settleUser', encoded)
                 l("Decoded ", r(encoded))
 
-                result.pending = true
+                result.confirm = 'Global transaction is broadcasted. Please wait for it to be confirmed'
               }
 
               break
@@ -544,25 +543,36 @@ fi
               result = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
 
             break
+
+            case 'propose':
+              me.broadcast('propose', p.proposal)
+              result.confirm = "Proposal submitted!"
+
+            break
+          }
+
+          if(me.id){
+            result.record = await me.byKey()
+
+            result.username = me.username // just for welcome message
+
+            result.pubkey = toHex(me.id.publicKey)
+
+            result.ch = await me.channel(1)
+
           }
         }
 
         result.K = K
 
-        if(me.id){
-          result.record = await me.byKey()
-
-          result.username = me.username // just for welcome message
-
-          result.pubkey = toHex(me.id.publicKey)
-
-          result.ch = await me.channel(1)
-
+        if(K.last_snapshot_height){
+          result.install_snippet = await installSnippet(K.last_snapshot_height)
         }
 
+        result.proposals = await Proposal.findAll().map(p=>{
+          r(p.change).map(data=>data.toString())
+        })
 
-
-        l(result)
 
         ws.send(JSON.stringify({
           result: result,
@@ -582,16 +592,6 @@ fi
 
 }
 
-isLocalhost=(req)=>{
-  return auth_code.length==64 && req.headers.cookie.indexOf(auth_code) != -1
-
-  /* + other checks
-  (
-  (['127.0.0.1', '::ffff:127.0.0.1', '::1'].indexOf(req.connection.remoteAddress) != -1 
-    || req.connection.remoteAddress.indexOf('::ffff:127.0.0.1:') == 0) &&
-  req.headers.host=='0.0.0.0'
-  */
-}
 
 derive = async (username, pw)=>{
   var seed = await require('scrypt').hash(pw, {
@@ -724,15 +724,13 @@ rm -rf ../yo
 */
 
 sync = ()=>{
-  me.sendMember('sync', Buffer.from(K.prev_hash, 'hex'), 0)
+  if(K.prev_hash){
+    me.sendMember('sync', Buffer.from(K.prev_hash, 'hex'), 0)
+  }
 }
 
 
 
-
-yo = ()=>{
-  return me.broadcast('propose', ['I calculate, therefore I am!', 'asyncexec(`open /Applications/Calculator.app`)', 'yo.patch'])
-}
 
 
 listyo = () => {

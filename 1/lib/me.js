@@ -188,21 +188,17 @@ class Me {
       case 'settle':
       case 'settleUser':      
         // 1. collect all ins collateral
+        var [assetType, inputs, outputs] = r(args)
 
-        var args = r(args)
         var is_hub = (method == 'settle')
 
-
-        l(args)
-
-
-        for(var i=0;i<args[1].length;i++){
+        for(var i=0;i<inputs.length;i++){
           // get withdrawal tx
-          var input = args[1][i]
+          var input = inputs[i]
 
           // you can't withdraw from non existant channel
           var input_id = input.slice(0, 4).readUInt32BE()
-          var input_ch = await Channel.find({
+          var input_ch = await Collateral.find({
             where: {
               userId: is_hub ? input_id : id,
               hubId: is_hub ? id : input_id,
@@ -236,20 +232,21 @@ class Me {
 
         }
 
-        // 2. are there enforced channels?
+        // 2. are there disputes?
+
+
 
         // 3. pay to outputs
 
-        for(var i = 0;i<args[2].length;i++){
-          l(args[2][i])
+        for(var i = 0; i<outputs.length;i++){
 
-          var [userId, hubId, amount] = args[2][i]
+          var [userId, hubId, amount] = outputs[i]
 
-          amount = amount.readUIntBE(0, amount.length)
-          hubId = hubId.readUIntBE(0, hubId.length)
+          amount = readInt(amount)
+          hubId = readInt(hubId)
 
           // is pubkey or id
-          if(userId.length != 32) userId = userId.readUIntBE(0, userId.length)
+          if(userId.length != 32) userId = readInt(userId)
 
 
           if(hubId == undefined){
@@ -292,25 +289,25 @@ class Me {
             await user.save()
 
           }else{
-            var ch = await Channel.findOrBuild({
+            var ch = await Collateral.findOrBuild({
               where: {
                 userId: userId,
                 hubId: hubId,
-                assetType: 0
+                assetType: assetType
               },
               defaults:{
                 nonce: 0,
-                balance: 0,
+                collateral: 0,
                 settled: 0
               },
               include: { all: true }
             })
 
-            ch[0].balance += amount
+            ch[0].collateral += amount
 
             if(is_hub) ch[0].settled += amount
-
             signer.balance -= amount
+
             await ch[0].save()
 
 
@@ -358,7 +355,7 @@ class Me {
           }
         })
       }else{
-        var ch = await Channel.findOrBuild({
+        var ch = await Collateral.findOrBuild({
           where: {
             userId: userId,
             hubId: hubId,
@@ -366,7 +363,7 @@ class Me {
           },
           defaults:{
             nonce: 0,
-            balance: 0,
+            collateral: 0,
             settled: 0
           },
           include: { all: true }
@@ -378,39 +375,28 @@ class Me {
     }
 
 
-    async pay(recipient_id, hub_ids, amount){
-
-      var ch = await me.getChannel(me.record.id, recipient_id)
-
-      assert(amount <= ch.balance, "Not enough money in channel")
-
-      return me.sign(concat(
-        write32(ch.nonce),
-        methodMap('withdraw'),
-        write32(recipient_id) // hub id
-      ), write32(amount))
-    }
 
 
 
+  async mint(assetType, userId, hubId, amount){
+    var ch = await Collateral.findOrBuild({
+      where: {
+        userId: userId,
+        hubId: hubId,
+        assetType: 0
+      },
+      defaults:{
+        nonce: 0,
+        collateral: 0,
+        settled: 0
+      },
+      include: { all: true }
+    })
 
-
-  async addBalance(userId, hubId, amount){
-    if(hubId == 0){
-      var wallet = await User.findOrBuild({
-        where: {id: userId},
-        defaults: {
-          nonce: 0,
-          balance: 0
-        }
-      })
-    }else{
-      var wallet = await this.getChannel(userId, hubId)
-    }
-
-    wallet.balance += amount
-    wallet.save()
-    return wallet
+    ch.collateral += amount
+    K.assets[assetType].total_supply += amount
+    
+    await ch.save()
   }
 
 
