@@ -1,0 +1,38 @@
+diff -Naur before/lib/me.js after/lib/me.js
+--- before/lib/me.js	2017-12-21 00:39:29.000000000 +0700
++++ after/lib/me.js	2017-12-21 00:43:13.000000000 +0700
+@@ -703,20 +703,16 @@
+       var [delta, to] = r(tx)
+       l("Mediating transfer to ", delta, to)
+ 
+-
+-
+       if(wss.users[to]){
+         wss.users[to].send(concat(
+           inputMap('receive'),
+           me.sign(to, r([
+-            123
+-
+-            ]))
++            44
++          ]))
+         ))
+ 
+       }else{
+         l('no ws to that user')
+-
+       }
+ 
+     }else if (inputType == 'receive'){
+diff -Naur before/u.js after/u.js
+--- before/u.js	2017-12-21 00:39:29.000000000 +0700
++++ after/u.js	2017-12-21 00:43:18.000000000 +0700
+@@ -31,8 +31,6 @@
+ 
+ 
+ l = console.log
+-
+-
+ d = ()=>{}
+ 
+ r = function(a){

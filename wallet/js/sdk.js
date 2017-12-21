@@ -21,7 +21,7 @@ if(hash[1]){
 }
 
 W.frame=false;
-W.origin = 'http://0.0.0.0:'+location.port
+W.origin = location.origin
 W.frame=document.createElement('iframe');
 W.frame.style.display = 'none'
 W.frame.src=W.origin+'/sdk.html'

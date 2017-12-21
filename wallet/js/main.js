@@ -22,8 +22,19 @@ W.onready(()=>{
 
 
   var methods = {
+    hljs: hljs.highlight,
+
+    ivoted:(voters)=>{
+      return voters.find(v=>v.id == app.record.id)
+    },
+
     call: function(method, args){
-      console.log(args)
+      if(method == 'vote'){
+        args.rationale = prompt("Why?")
+        if(!args.rationale) return false
+      }
+
+
       W(method, args).then(render)
       return false
     },
@@ -120,7 +131,7 @@ W.onready(()=>{
 
       pw: 'password',
       username: 'root',
-      location: '0.0.0.0:8000',
+      location: '128.199.242.161:8000',
 
       channels: {},
 
@@ -133,7 +144,9 @@ W.onready(()=>{
       ins: [],
       outs: [{to:'', amount:''}],
 
-      proposal: ['Minting our marketing budget','await me.mint(0, 1, 1, 100000)','']
+
+
+      proposal: ['Mint $1000 FSD to 1@1',`await me.mint(0, 1, 1, 100000)`,'']
 
     } },
     methods: methods,
@@ -188,9 +201,6 @@ W.onready(()=>{
   <div class="container">
 
 
-
-
-
     <div v-if="tab==''">
       <p v-if="false">Current asset: <select v-model="assetType">
         <option v-for="asset in K.assets" v-bind:value="asset.ticker">
@@ -242,7 +252,7 @@ W.onready(()=>{
           <p class="lead">Or settle globally (slow, expensive, but more secure):</p>
 
           <p>Standalone balance: <b>\${{commy(record.balance)}}</b></p>
-          <small>Currently there's only one hub. So to deposit to someone's channel with hub use their_ID@1</small>
+          <small>Currently there's only one hub <b>@1</b>. So to deposit to someone's channel with hub use their_ID@1</small>
 
           <p v-for="out in outs">
             <input style="width:800px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
@@ -279,7 +289,7 @@ W.onready(()=>{
 
         <template v-if="!K">
           <p>No members found. Would you like to start private fs? Enter your IP:</p>
-          <input v-model="location" type="text" id="inputLocation" class="form-control" value="0.0.0.0"><br>
+          <input v-model="location" type="text" id="inputLocation" class="form-control"><br>
         </template>
 
 
@@ -289,12 +299,28 @@ W.onready(()=>{
     </div>
 
     <div v-else-if="tab=='network'">
+      <h2>Current network settings</h2>
+      <p>Blocktime: {{K.blocktime}}</p>
+      <p>Blocksize: {{K.blocksize}}</p>
+      <p>Account creation fee: \${{commy(K.account_creation_fee)}}</p>
+
       <h2>Network stats</h2>
       <p>Total blocks: {{K.total_blocks}}</p>
       <p>Of which usable blocks: {{K.total_blocks}}</p>
       <p>Last block received {{timeAgo(K.ts)}}</p>
+      
       <p>Network created {{timeAgo(K.created_at)}}</p>
-      <p>FSD Market Cap {{timeAgo(K.assets[0].total_supply)}}</p>
+
+      <p>FSD Market Cap \${{ commy(K.assets[0].total_supply) }}</p>
+      <p>FSB Market Cap \${{ commy(K.assets[1].total_supply) }}</p>
+
+      <p>Transactions: {{K.total_tx}}</p>
+      <p>Transactions bytes: {{K.total_tx_bytes}}</p>
+
+
+      <h2>Governance stats</h2>
+
+      <p>Proposals created: {{K.proposals_created}}</p>
 
       <h2>Board of Members</h2>
       <p v-for="m in K.members">{{m.username}} ({{m.location}}) - <b>{{m.shares}}</b></p>
@@ -304,19 +330,18 @@ W.onready(()=>{
     </div>
 
     <div v-else-if="tab=='install'">
-    <h3>Currently only macOS/Linux are supported</h3>
-  <p>1. This is a Developer Preview. In the future one command will be enough, but right now the process is quite manual. First, make sure you have Node.js installed: run <b>brew install node</b> in console if not.</p>
-  <p>2. Then install required npm modules: <b>npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt</b></p>
-  <p>3. Compare this snippet with other sources, and if there's exact match paste into Terminal.app: </p>
-  <p><b>{{install_snippet}}</b></p>
+        <h3>Currently only macOS/Linux are supported</h3>
+      <p>1. This is a Developer Preview. In the future one command will be enough, but right now the process is quite manual. First, make sure you have Node.js installed: run <b>brew install node</b> in console if not.</p>
+      <p>2. Then install required npm modules: <b>npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt</b></p>
+      <p>3. Compare this snippet with other sources, and if there's exact match paste into Terminal.app: </p>
+      <p><b>{{install_snippet}}</b></p>
     </div>
 
     <div v-else-if="tab=='exchange'">
-    <h3>Deposit / Withdraw / Exchange</h3>
-    <p>Very soon you will be able to deposit and withdraw to your wallet with major payment methods (such as credit cards, wire transfers and Bitcoin) right here, on this page. However, on testnet, use this complimentary faucet for free money (it does some mining):</p>
+      <h3>Deposit / Withdraw / Exchange</h3>
+      <p>Very soon you will be able to deposit and withdraw to your wallet with major payment methods (such as credit cards, wire transfers and Bitcoin) right here, on this page. However, on testnet, use this complimentary faucet for free money (it does some mining):</p>
 
-    <button class="btn btn-success" @click="faucet">Give me a dollar!</button>
-
+      <button class="btn btn-success" @click="faucet">Give me a dollar!</button>
     </div>
 
 
@@ -328,31 +353,59 @@ W.onready(()=>{
       </div>
 
       <div class="form-group">
-        <label for="comment">Execute (optional):</label>
+        <label for="comment">Code to execute (optional):</label>
         <textarea class="form-control" v-model="proposal[1]" rows="2" id="comment"></textarea>
       </div>
 
       <div class="form-group">
-        <label for="comment">Patch (optional):</label>
-        <textarea class="form-control" v-model="proposal[2]"  rows="2" id="comment"></textarea>
+        <label for="comment">Path to .patch (optional):</label>
+        <input class="form-control" v-model="proposal[2]" placeholder="after.patch" rows="2" id="comment"></input>
+        <small>1. Prepare two directories <b>rm -rf before after && cp -r 1 before && cp -r before after</b>
+        <br>2. Edit code in "after", test it, then <b>diff -Naur before after > after.patch</b></small>
       </div>
 
-      <button @click="call('propose', proposal)" class="btn btn-warning">Propose</button>
+      <p><button @click="call('propose', proposal)" class="btn btn-warning">Propose</button></p>
 
 
 
       <div v-for="p in proposals">
-        {{p[0]}}
-        
-        
+        <h4>#{{p.id}}: {{p.desc}}</h4>
+        <small>Proposed by {{p.user.username}}</small>
+
+        <pre><code class="javascript hljs" v-html="hljs('javascript',p.code).value"></code></pre>
+
+        <div v-if="p.patch">
+          <hr>
+          <pre style="line-height:15px; font-size:12px;"><code class="diff hljs"  v-html="hljs('diff',p.patch).value"></code></pre>
+        </div>
+
+        <p v-for="u in p.voters">
+          <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by {{u.username}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
+        </p>
+
+        <small>To be executed in {{p.delayed - K.usable_blocks}} blocks</small>
+        <div v-if="record">
+          <p v-if="!ivoted(p.voters)">
+            <button @click="call('vote', {approve: true, id: p.id})" class="btn btn-success">Approve</button>
+            <button @click="call('vote', {approve: false, id: p.id})" class="btn btn-danger">Deny</button>
+          </p>
+
+        </div>
+
       </div>
+
+
     </div>
-
-
 
     <div v-else-if="tab=='wiki'">
       <h3>Wiki</h3>
       <p><a href="https://github.com/failsafenetwork/failsafe">Currently here</a></p>
+    </div>
+
+
+    <div v-else-if="tab=='names'">
+      <h3>Failsafe Names </h3>
+      <p>By the end of 2018 you will be able to register a domain name and local DNS resolver will seamlessly load "name.fs" in the browser</p>
     </div>
 
   </div>

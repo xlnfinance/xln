@@ -72,6 +72,7 @@ write32 = (int) => {
 // used to authenticate browser sessions to this daemon
 const auth_code = toHex(crypto.randomBytes(32))
 process.title = 'Failsafe'
+
 usage = ()=>{
   Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
 }
@@ -80,15 +81,16 @@ usage = ()=>{
 //http://ipinfo.io/ip 
 genesis = async (opts)=>{
   //await(fs.rmdir('data'))
-  await(asyncexec('rm -rf private data'))
-  await(fs.mkdir('data'))
+
+  l("Start genesis")
+
 
   await (sequelize.sync({force: true}))
 
   opts = Object.assign({
     username: 'root', 
     pw: 'password', 
-    location: '0.0.0.0:8000' // for local tests
+    location: location.host // for local tests
     //infra: 'https://www.digitalocean.com'
   }, opts)
 
@@ -123,7 +125,9 @@ genesis = async (opts)=>{
     total_tx: 0,
     total_bytes: 0,
 
-    voting_period: 2,
+    total_tx_bytes: 0,
+
+    voting_period: 10,
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
@@ -131,7 +135,9 @@ genesis = async (opts)=>{
     proposals_created: 0,
 
     
-    tax_per_byte: 0.1,
+    tax_per_byte: 2,
+
+
     account_creation_fee: 100,
 
 
@@ -183,7 +189,8 @@ genesis = async (opts)=>{
 
   me.K = K
   me.members = JSON.parse(json).members // another object ref
-  process.exit(0)
+
+  l('Done')
 }
 
 
@@ -261,7 +268,7 @@ allowedOnchain = [
 K = false
 
 loadJSON = ()=>{
-  if(fs.existsSync('data')){
+  if(fs.existsSync('data/k.json')){
     var json = fs.readFileSync('data/k.json')
     K = JSON.parse(json)
 
@@ -322,7 +329,7 @@ installSnippet = async (i)=>{
       var out_hash = out.split(' ')[0]
       var host = me.my_member.location.split(':')[0]
       var out_location = 'http://'+host+':'+base_port+'/'+filename
-      installSnippets[i] = `id=${base_port+1};f=${filename};mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f;if shasum -a 256 $f | grep ${out_hash}; then; tar -xzf $f && rm $f; node u.js start $id; fi`
+      installSnippets[i] = `id=${base_port+1};f=${filename};mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f;if shasum -a 256 $f | grep ${out_hash}; then tar -xzf $f && rm $f; node u.js start $id; fi`
     return installSnippets[i];
     })
   }
@@ -362,12 +369,6 @@ initDashboard=async a=>{
      });
    }else{
 
-    if(req.url.startsWith('/a/')) req.url = '/'
-
-    if(req.url.startsWith('/js/sdk.js')){
-
-
-    }
 
     serveStatic("../wallet")(req, res, finalhandler(req, res));
    }
@@ -387,9 +388,7 @@ initDashboard=async a=>{
   me = new Me
   loadJSON()
 
-
-  setTimeout(sync, 60*1000)
-
+  //setInterval(sync, 60000)
 
   wss = new WebSocket.Server({ server: server, maxPayload:  64*1024*1024 });
   
@@ -407,7 +406,7 @@ initDashboard=async a=>{
         // strong coupling between the console and the browser client
           
 
-        if(true || json.code == auth_code){
+        if(json.code == auth_code){
           switch(json.method){
             case 'sync':
               result.confirm = "Syncing the chain..."
@@ -418,6 +417,7 @@ initDashboard=async a=>{
               if(p.username){
                 if(p.location && !K){
                   await genesis({username, pw, location} = p)
+
                 }
 
                 var seed = await derive(p.username, p.pw)
@@ -442,12 +442,6 @@ initDashboard=async a=>{
 
               var amount = parseInt(parseFloat(p.off_amount)*100)
 
-              var ch = await me.channel(hubId)
-
-              ch.delta.delta -= amount
-
-              args = r([ch.delta.nonce, ch.delta.delta])
-
               if(p.off_to.length == 64){
                 var mediate_to = Buffer.from(p.off_to, 'hex')
               }else{
@@ -459,14 +453,12 @@ initDashboard=async a=>{
                   break
                 }
               }
-              l("Sending money to ", mediate_to)
 
-              me.sendMember('mediate', r([
-                me.sign(write32(hubId), r([methodMap('delta', args)]) ),
-                mediate_to
-              ]), 0)
 
-              await ch.delta.save()
+
+              me.payChannel(hubId, amount, mediate_to)
+              result.confirm = `Sent ${amount} to ${mediate_to.toString('hex')}`
+
 
             break
 
@@ -502,7 +494,7 @@ initDashboard=async a=>{
                     var u = await User.findById(userId)
 
                     if(!u){
-                      result.error = "User with short ID "+userId+" doesn't exist."
+                      result.alert = "User with short ID "+userId+" doesn't exist."
                     }
                   }
 
@@ -516,12 +508,15 @@ initDashboard=async a=>{
                 }
 
               }
-              if(!result.error){
-                var encoded = r([Buffer([p.assetType == 'FSD' ? 0 : 1]), p.ins, outs])
-                me.broadcast('settleUser', encoded)
-                l("Decoded ", r(encoded))
 
+              if(!result.alert){
+                var encoded = r([Buffer([p.assetType == 'FSD' ? 0 : 1]), p.ins, outs])
+                
+                me.broadcast('settleUser', encoded)
+                
                 result.confirm = 'Global transaction is broadcasted. Please wait for it to be confirmed'
+
+
               }
 
               break
@@ -545,8 +540,14 @@ initDashboard=async a=>{
             break
 
             case 'propose':
-              me.broadcast('propose', p.proposal)
+              me.broadcast('propose', p)
               result.confirm = "Proposal submitted!"
+
+            break
+
+            case 'vote':
+              me.broadcast(p.approve ? 'voteApprove' : 'voteDeny', r([p.id, p.rationale]) ) 
+              result.confirm = "You voted! Good job!"
 
             break
           }
@@ -563,16 +564,19 @@ initDashboard=async a=>{
           }
         }
 
-        result.K = K
+        if(K){
 
-        if(K.last_snapshot_height){
-          result.install_snippet = await installSnippet(K.last_snapshot_height)
+          result.K = K
+
+          if(me.my_member && K.last_snapshot_height){
+            result.install_snippet = await installSnippet(K.last_snapshot_height)
+          }
+
+          result.proposals = await Proposal.findAll({
+            order: [['id','DESC']], 
+            include: {all: true}
+          })
         }
-
-        result.proposals = await Proposal.findAll().map(p=>{
-          r(p.change).map(data=>data.toString())
-        })
-
 
         ws.send(JSON.stringify({
           result: result,
@@ -595,9 +599,9 @@ initDashboard=async a=>{
 
 derive = async (username, pw)=>{
   var seed = await require('scrypt').hash(pw, {
-    N: Math.pow(2, 16),
+    N: Math.pow(2, 18),
     interruptStep: 1000,
-    p: 1,
+    p: 3,
     r: 8,
     dkLen: 32,
     encoding: 'base64'
@@ -634,7 +638,9 @@ User = sequelize.define('user', {
 });
 
 Proposal = sequelize.define('proposal', {
-  change: Sequelize.TEXT,
+  desc: Sequelize.TEXT,
+  code: Sequelize.TEXT,
+  patch: Sequelize.TEXT,
 
   delayed: Sequelize.INTEGER,
 
@@ -711,18 +717,6 @@ privSequelize.sync({force: false})
 
 
 
-
-/*
-mkdir storage_tax; cp 1/**js $_
-
-cp -r . ../before
-cp -r ../before ../yo
-
-diff -Naur . ../yo > ../yo.patch
-rm -rf ../before
-rm -rf ../yo
-*/
-
 sync = ()=>{
   if(K.prev_hash){
     me.sendMember('sync', Buffer.from(K.prev_hash, 'hex'), 0)
@@ -733,11 +727,6 @@ sync = ()=>{
 
 
 
-listyo = () => {
-  Proposal.findAll().then(ps=>ps.map(p=>{
-    l(`${p.id} ${p.change} execute at ${p.delayed}`)
-  }))
-}
 
 
 if(process.argv[2] == 'start'){

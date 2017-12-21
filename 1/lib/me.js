@@ -9,6 +9,8 @@ class Me {
   async init(username, seed) {
     this.username = username
 
+    this.is_hub = false
+
     this.seed = seed
     this.id = nacl.sign.keyPair.fromSeed(this.seed)
     this.id.publicKey = bin(this.id.publicKey)
@@ -173,12 +175,19 @@ class Me {
     switch(method){
       case 'propose':
         var execute_on = K.usable_blocks + K.voting_period //60*24
+        var args = r(args)
+
         var new_proposal = await Proposal.create({
-          change: args,
+          desc: args[0].toString(),
+          code: args[1].toString(),
+          patch: args[2].toString(),
           kindof: method,
-          delayed: execute_on
+          delayed: execute_on,
+          userId: signer.id
         })
-        l(`Added ${new_proposal.change} proposal!`)
+
+        l(`Added new proposal!`)
+
         K.proposals_created++
 
         break
@@ -321,13 +330,16 @@ class Me {
 
       case 'voteApprove':
       case 'voteDeny':
+        var [proposalId, rationale] = r(args)
         var vote = await Vote.findOrBuild({
           where: {
             userId: id,
-            proposalId: args.slice(0, 4).readUInt32BE()
+            proposalId: readInt(proposalId)
           }
         })
         vote = vote[0]
+
+        vote.rationale = rationale.toString()
         vote.approval = method == 'voteApprove'
 
         await vote.save()
@@ -379,7 +391,7 @@ class Me {
 
 
   async mint(assetType, userId, hubId, amount){
-    var ch = await Collateral.findOrBuild({
+    var ch = (await Collateral.findOrBuild({
       where: {
         userId: userId,
         hubId: hubId,
@@ -391,7 +403,7 @@ class Me {
         settled: 0
       },
       include: { all: true }
-    })
+    }))[0]
 
     ch.collateral += amount
     K.assets[assetType].total_supply += amount
@@ -426,7 +438,7 @@ class Me {
 
       case 'voteApprove':
       case 'voteDeny':
-        args = write32(args)
+
         break
     }
 
@@ -478,20 +490,7 @@ class Me {
 
 
 
-  /*
-  Services are centralized servers that do some job for the network. Most common:
-  Member (blockchain gatekeepers, they build and share blocks with others)
-  Hub (faciliating mediated transfer with delayed settlement)
-  Box storage
-  message boards, App backends, etc.
-  all Services must be end-to-end encrypted whenever possible
 
-  Now all must be member as well to maintain the security of the network
-  */
-
-  // users
-  // members - moderately trusted, average performance
-  // hubs - highly trusted as compromises are painful, high performance
 
   async connect(){
     // in json pubkeys are in hex
@@ -505,8 +504,12 @@ class Me {
     me.members.map(c =>{
       c.block_pubkey = Buffer.from(c.block_pubkey, 'hex')
       //l(c.block_pubkey)
-      if(me.record && me.record.id == c.id) me.my_member = c
+      if(me.record && me.record.id == c.id){
+        me.my_member = c
+        me.is_hub = me.my_member.is_hub
+      }
     })
+
 
     if(me.my_member){
 
@@ -693,45 +696,42 @@ class Me {
       var [delta, to] = r(tx)
       l("Mediating transfer to ", delta, to)
 
-
-
       if(wss.users[to]){
         wss.users[to].send(concat(
           inputMap('receive'),
           me.sign(to, r([
-            123
-
-            ]))
+            44
+          ]))
         ))
 
       }else{
         l('no ws to that user')
-
       }
-
-    }else if (inputType == 'receive'){
-  
-      //nacl.sign.detached.verify
-       
-      l("Received ", tx)
-
-      let delta = await Delta.findOrBuild({
-        where: {
-          counterpartyId: 1
-        }, defaults: {
-          delta: 0
-        }
-      })
-
-      delta[0].delta += 123
-
-      await delta[0].save
-
 
     }
 
   }
 
+  async payChannel(who, amount, mediate_to){
+    var ch = await me.channel(who)
+
+    if(me.is_hub){
+
+    }else{
+      ch.delta.delta -= amount
+
+    }
+
+    args = r([ch.delta.nonce, ch.delta.delta])
+
+
+    me.sendMember('mediate', r([
+      me.sign(write32(hubId), r([methodMap('delta', args)]) ),
+      mediate_to
+    ]), 0)
+
+    await ch.delta.save()
+  }
 
   async channel(counterparty){
     var r = {
@@ -741,36 +741,47 @@ class Me {
       total: 0
     }
 
-    if(me.my_member && me.my_member.is_hub){
+    if(me.is_hub){
+      var clause = {
+        userId: counterparty,
+        hubId: 
+      }
+
+      var ch = await Collateral.find({where: clause})
+      if(ch) r.collateral = ch.collateral
 
     }else{
+      var clause = {
+        userId: me.record.id,
+        hubId: counterparty
+      }
+
       if(me.record){
-        var ch = await Collateral.find({where: {
-          userId: me.record.id,
-          hubId: counterparty
-        }})
+        var ch = await Collateral.find({where: clause})
 
         if(ch) r.collateral = ch.collateral
       }
 
-      var delta = await Delta.find({
-        where: {
-          hubId: 1,
-          userId: bin(me.id.publicKey)
-        }
-      })
-      if(delta) r.delta = delta.delta
-
-      r.total = r.collateral + r.delta
-
-      if(r.delta >= 0){
-        r.failsafe = r.collateral
-      }else{
-        r.failsafe = r.collateral + r.delta
-      }
-
-
     }
+
+    var delta = await Delta.find({
+      where: {
+        hubId: 1,
+        userId: bin(me.id.publicKey)
+      }
+    })
+    if(delta) r.delta = delta.delta
+
+    r.total = r.collateral + r.delta
+
+    if(r.delta >= 0){
+      r.failsafe = r.collateral
+    }else{
+      r.failsafe = r.collateral + r.delta
+    }
+
+
+  
     return r
   }
 
@@ -831,6 +842,7 @@ class Me {
     for(var i = 0;i<ordered_tx.length;i++){
       await me.processTx(ordered_tx[i])
       K.total_tx++
+      K.total_tx_bytes+=ordered_tx[i].length
     }
 
 
@@ -844,19 +856,19 @@ class Me {
 
 
 
-    const to_execute = await Proposal.findAll({where: {delayed: K.usable_blocks}})
+    const to_execute = await Proposal.findAll({
+      where: {delayed: K.usable_blocks},
+      include: {all: true}
+    })
     
-    //l("Processing delayed jobs "+to_execute.length)
-    
+
     for(let job of to_execute){
-      job = r(job.change)
 
-      l(toUTF(job[0]))
+      l("Evaling "+job.code)
 
-      l(toUTF(job[1]))
-      await eval(toUTF(job[1]))
+      l(await eval(`(async function() { ${job.code} })()`))
 
-      var patch = toUTF(job[2])
+      var patch = job.patch
       l(patch)
       if(patch.length > 0){
         me.request_reload = true
@@ -868,7 +880,6 @@ class Me {
         pr.stdin.end()
 
       }
-
 
     }
 

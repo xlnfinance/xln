@@ -1,5 +1,5 @@
 WeOS Smooth<script>
-var ws = new WebSocket('ws://0.0.0.0:'+location.port)
+var ws = new WebSocket('ws://'+location.host)
 ws.onmessage = function(m){
   var e = JSON.parse(m.data)
 
