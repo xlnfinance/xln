@@ -8,7 +8,10 @@ http = require("http");
 const stringify = require('./lib/stringify')
 const keccak = require('keccak')
 const BN = require('bn.js')
+
 nacl = require('tweetnacl')
+ec = nacl.sign.detached
+
 WebSocket = require("ws")
 rlp = require('rlp')
 
@@ -131,20 +134,22 @@ genesis = async (opts)=>{
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 10000, //100 * 1024 * 1024,
+    snapshot_after_bytes: 1024*1024, //every MB
     proposals_created: 0,
 
     
-    tax_per_byte: 2,
+    tax_per_byte: 3, // the 
+    members_tax_per_byte: 0.1, // the 
 
 
     account_creation_fee: 100,
 
+    blocksize: 200000,
+    blocktime: 30,
 
-    blocksize: 6*1024*1024,
-    blocktime: 10,
-    majority: 1,
+
     prev_hash: toHex(Buffer.alloc(32)),
+
 
     ts: 0,
 
@@ -164,6 +169,9 @@ genesis = async (opts)=>{
     ],
 
     members: [],
+    total_shares: 300,
+    majority: 1,
+
     hubs: []
   }
 
@@ -178,8 +186,11 @@ genesis = async (opts)=>{
     missed_blocks: [],
     shares: 300,
 
-    hubId: 1,
-    hub: "proto"
+    hub: {
+      name: '1',
+      soft_limit: 100000,
+      hard_limit: 10000000
+    }
   })
 
 
@@ -380,15 +391,15 @@ initDashboard=async a=>{
 
   server.listen(base_port).on('error', l)
 
-  var url = 'http://0.0.0.0:'+base_port+'/#code='+auth_code
+  var url = 'http://0.0.0.0:'+base_port+'/#auth_code='+auth_code
   l("Open "+url+" in your browser to get started")
-  //opn(url)
+  opn(url)
 
 
   me = new Me
   loadJSON()
 
-  //setInterval(sync, 60000)
+  setInterval(sync, 30000)
 
   wss = new WebSocket.Server({ server: server, maxPayload:  64*1024*1024 });
   
@@ -406,7 +417,9 @@ initDashboard=async a=>{
         // strong coupling between the console and the browser client
           
 
-        if(json.code == auth_code){
+        if(json.auth_code == auth_code){
+          me.browser = ws
+
           switch(json.method){
             case 'sync':
               result.confirm = "Syncing the chain..."
@@ -438,15 +451,9 @@ initDashboard=async a=>{
 
             case 'send':
 
-              var hubId = 1
+              var hubId = K.members[0].id
 
               var amount = parseInt(parseFloat(p.off_amount)*100)
-
-              var ch = await me.channel(hubId)
-
-              ch.delta.delta -= amount
-
-              args = r([ch.delta.nonce, ch.delta.delta])
 
               if(p.off_to.length == 64){
                 var mediate_to = Buffer.from(p.off_to, 'hex')
@@ -459,14 +466,14 @@ initDashboard=async a=>{
                   break
                 }
               }
-              l("Sending money to ", mediate_to)
 
-              me.sendMember('mediate', r([
-                me.sign(write32(hubId), r([methodMap('delta', args)]) ),
-                mediate_to
-              ]), 0)
+              var [status, error] = await me.payChannel(hubId, amount, mediate_to)
+              if(error){
+                result.alert = error
+              }else{
+                result.confirm = `Sent \$${p.off_amount} to ${p.off_to}!`
+              }
 
-              await ch.delta.save()
 
             break
 
@@ -567,10 +574,21 @@ initDashboard=async a=>{
 
             result.pubkey = toHex(me.id.publicKey)
 
-            result.ch = await me.channel(1)
+            result.is_hub = me.is_hub
+            if(me.is_hub){
+              result.channels = await Delta.find({where: {
+                hubId: 1
+              }})
+
+            }else{
+              result.ch = await me.channel(1)
+            }
 
           }
         }
+
+
+
 
         if(K){
 
@@ -757,7 +775,7 @@ if(process.argv[2] == 'start'){
 }
 
 
-
+process.on('unhandledRejection', r => console.log(r))
 
 require('repl').start('> ')
 

@@ -8,15 +8,15 @@ W = (method, params={})=>{
       method: method,
       params: params,
       id: id,
-      code: localStorage.code
+      auth_code: localStorage.auth_code
     }, W.origin)
 
   })
 }
 
-var hash = location.hash.split('code=')
+var hash = location.hash.split('auth_code=')
 if(hash[1]){
-  localStorage.code = hash[1].replace(/[^a-z0-9]/g,'')
+  localStorage.auth_code = hash[1].replace(/[^a-z0-9]/g,'')
   history.replaceState(null,null,'/')
 }
 
@@ -42,11 +42,8 @@ W.resolvers = [()=>{
 window.addEventListener('message', function(e){
   if(e.origin == W.origin){
     var data = JSON.parse(e.data)
-    console.log(data,W.resolvers[data.id])
-    if(data.error){
-      alert(data.error)
-    }else{
-      W.resolvers[data.id](data.result)
-    }
+
+    W.resolvers[data.id](data.result)
+    
   }
 })

@@ -357,35 +357,6 @@ class Me {
 
 
 
-    async getChannel(userId, hubId){
-      if(hubId == 0){
-        var wallet = await User.findOrBuild({
-          where: {id: userId},
-          defaults: {
-            nonce: 0,
-            balance: 0
-          }
-        })
-      }else{
-        var ch = await Collateral.findOrBuild({
-          where: {
-            userId: userId,
-            hubId: hubId,
-            assetType: 0
-          },
-          defaults:{
-            nonce: 0,
-            collateral: 0,
-            settled: 0
-          },
-          include: { all: true }
-        })
-
-        var wallet = ch[0]
-      }
-      return wallet
-    }
-
 
 
 
@@ -506,7 +477,7 @@ class Me {
       //l(c.block_pubkey)
       if(me.record && me.record.id == c.id){
         me.my_member = c
-        me.is_hub = me.my_member.is_hub
+        me.is_hub = me.my_member.hub
       }
     })
 
@@ -547,7 +518,7 @@ class Me {
             }
           })
 
-          if(me.status == 'precommit' && (total_shares == K.members.length || now % K.blocktime > K.blocktime/2)){
+          if(me.status == 'precommit' && (now % K.blocktime > K.blocktime-20)){
             if(total_shares < K.majority){
               d(`Only have ${total_shares} shares, cannot build a block!`)
             }else{
@@ -564,7 +535,7 @@ class Me {
             me.status = 'await'
 
 
-          }else if (me.status == 'await'){
+          }else if (me.status == 'await' && (now % K.blocktime < K.blocktime-20) ){
             me.status = 'precommit'
             me.processMempool()
           }
@@ -693,84 +664,189 @@ class Me {
       })
 
     }else if (inputType == 'mediate'){
-      var [delta, to] = r(tx)
-      l("Mediating transfer to ", delta, to)
+      var [pubkey, sig, body, mediate_to] = r(tx)
 
-      if(wss.users[to]){
-        wss.users[to].send(concat(
-          inputMap('receive'),
-          me.sign(to, r([
-            44
-          ]))
-        ))
+      if(ec.verify(body, sig, pubkey)){
 
-      }else{
-        l('no ws to that user')
+        var [method, counterparty, nonce, negative, delta] = r(body)
+
+        assert(readInt(method) == readInt(methodMap('delta')))
+        l(counterparty,  bin(me.id.publicKey))
+        assert(counterparty == bin(me.id.publicKey))
+
+        delta = negative.equals(Buffer.alloc(0)) ? readInt(delta) : -readInt(delta)
+
+
+        var ch = await me.channel(pubkey)
+
+        assert(readInt(nonce) == ch.delta_record.nonce+1)
+
+
+        if(me.is_hub){
+          var amount = ch.delta_record.delta - delta
+
+          l(`Sent ${amount} out of  ${ch.total}`)
+
+          assert(amount > 0)
+          assert(amount <= ch.total) // max amount is limited by collateral
+
+          ch.delta_record.delta = delta
+          ch.delta_record.nonce = nonce
+          ch.delta_record.sig = sig
+
+          await ch.delta_record.save()
+
+          await me.payChannel(mediate_to, amount)
+
+        }else{
+          // for users, delta of deltas is reversed
+          var amount = delta - ch.delta_record.delta
+          l(amount)
+          assert(amount > 0)
+
+          l(`${amount} received payment of from who ${delta}`)
+
+          var ch = await me.channel(1)
+          ch.delta_record.delta = delta
+
+          await ch.delta_record.save()
+
+          if(me.browser){
+            me.browser.send(JSON.stringify({
+              result: {ch: await me.channel(1)},
+              id: 1
+            }))
+          }
+
+        }
+
       }
-
     }
 
   }
 
   async payChannel(who, amount, mediate_to){
+    l(`Paying ${who} - ${amount} to mediate ${mediate_to}`)
+
     var ch = await me.channel(who)
 
     if(me.is_hub){
+      ch.delta_record.delta += amount
+      ch.delta_record.nonce++
+
+      let negative = ch.delta_record.delta < 0 ? 1 : null
+
+      var body = r([
+        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta)
+      ])
+
+      var sig = ec(body, me.id.secretKey)
+      var tx = concat(inputMap('mediate'), r([
+        bin(me.id.publicKey), bin(sig), body, 0
+      ]))
+
+      if(wss.users[who]){
+        wss.users[who].send(tx)
+      }else{
+        l(`not online, deliver later? ${tx}`)
+      }
+
+      await ch.delta_record.save()
 
     }else{
-      ch.delta.delta -= amount
+      if(amount > ch.total){
+        return [false, "Not enough funds"]
+      }
 
+      ch.delta_record.delta -= amount
+      ch.delta_record.nonce++
+
+      let negative = ch.delta_record.delta < 0 ? 1 : null
+
+      var u = await User.findById(who)
+
+      var body =r([
+        methodMap('delta'), u.pubkey, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta)
+      ])
+
+      var sig = ec(body, me.id.secretKey)
+
+      me.sendMember('mediate', r([bin(me.id.publicKey), bin(sig), body, mediate_to]), 0)
+
+      await ch.delta_record.save()
     }
 
-    args = r([ch.delta.nonce, ch.delta.delta])
+    return [true, false]
 
-
-    me.sendMember('mediate', r([
-      me.sign(write32(hubId), r([methodMap('delta', args)]) ),
-      mediate_to
-    ]), 0)
-
-    await ch.delta.save()
   }
 
   async channel(counterparty){
     var r = {
       collateral: 0,
+      settled: 0,
+
       delta: 0,
       failsafe: 0,
       total: 0
     }
 
     if(me.is_hub){
-      var clause = {
-        userId: counterparty,
-        hubId: 
-      }
+      var user = await me.byKey(counterparty)
 
-      var ch = await Collateral.find({where: clause})
-      if(ch) r.collateral = ch.collateral
+      if(user){
 
-    }else{
-      var clause = {
-        userId: me.record.id,
-        hubId: counterparty
-      }
-
-      if(me.record){
-        var ch = await Collateral.find({where: clause})
+        var ch = await Collateral.find({where: {
+          userId: user.id,
+          hubId: 1
+        }})
 
         if(ch) r.collateral = ch.collateral
+
       }
+
+
+      var delta = await Delta.findOrBuild({
+        where: {
+          hubId: 1,
+          userId: counterparty
+        },defaults: {
+          delta: 0,
+          nonce: 0
+        }
+      })
+
+    }else{
+
+      if(me.record){
+        var ch = await Collateral.find({where: {
+          userId: me.record.id,
+          hubId: counterparty
+        }})
+
+        if(ch){
+          r.collateral = ch.collateral
+          r.settled = ch.settled
+        }
+      }else{
+      }
+
+      var delta = await Delta.findOrBuild({
+        where: {
+          hubId: counterparty,
+          userId: bin(me.id.publicKey)
+        },defaults: {
+          delta: 0,
+          nonce: 0
+        }
+      })
 
     }
 
-    var delta = await Delta.find({
-      where: {
-        hubId: 1,
-        userId: bin(me.id.publicKey)
-      }
-    })
-    if(delta) r.delta = delta.delta
+
+    if(delta[0]){
+      r.delta = delta[0].delta
+      r.delta_record = delta[0]
+    }
 
     r.total = r.collateral + r.delta
 
@@ -779,8 +855,6 @@ class Me {
     }else{
       r.failsafe = r.collateral + r.delta
     }
-
-
   
     return r
   }
@@ -950,6 +1024,9 @@ class Me {
       }
 
       m.socket.onopen = function(e){
+        if(me.id)
+        m.socket.send(concat(inputMap('auth'), me.offchainAuth()))
+
         l("Sending to member ", tx)
         m.socket.send(tx)
       }

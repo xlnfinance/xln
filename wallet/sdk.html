@@ -17,7 +17,7 @@ ws.onmessage = function(m){
           method: e.method,
           id: e.id,
           params: e.params,
-          code: e.code,
+          auth_code: e.auth_code,
           confirmed: true
         }))
       }
@@ -38,7 +38,7 @@ window.addEventListener('message',function(e){
     method: e.data.method,
     id: e.data.id,
     params: json,
-    code: e.data.code
+    auth_code: e.data.auth_code
   }))
 
 })
