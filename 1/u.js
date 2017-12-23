@@ -3,6 +3,8 @@ crypto = require("crypto");
 fs = require("fs")
 http = require("http");
 
+base_port = process.argv[3] ? process.argv[3] : 8000
+
 
 // deterministic JSON
 const stringify = require('./lib/stringify')
@@ -145,7 +147,7 @@ genesis = async (opts)=>{
     account_creation_fee: 100,
 
     blocksize: 200000,
-    blocktime: 30,
+    blocktime: 10,
 
 
     prev_hash: toHex(Buffer.alloc(32)),
@@ -709,7 +711,7 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'});
 
 if(!fs.existsSync('private')) fs.mkdirSync('private')
 
-base_db.storage = 'private/db.sqlite'
+base_db.storage = 'private/db.sqlite'+base_port
 privSequelize = new Sequelize('', '', 'password', base_db);
 
 Block = privSequelize.define('block', {
@@ -756,7 +758,6 @@ sync = ()=>{
 
 
 if(process.argv[2] == 'start'){
-  base_port = process.argv[3] ? process.argv[3] : 8000
 
   /*
   var cluster = require('cluster')

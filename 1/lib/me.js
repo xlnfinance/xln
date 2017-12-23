@@ -518,7 +518,7 @@ class Me {
             }
           })
 
-          if(me.status == 'precommit' && (now % K.blocktime > K.blocktime-20)){
+          if(me.status == 'precommit' && (now % K.blocktime > K.blocktime-5)){
             if(total_shares < K.majority){
               d(`Only have ${total_shares} shares, cannot build a block!`)
             }else{
@@ -535,7 +535,7 @@ class Me {
             me.status = 'await'
 
 
-          }else if (me.status == 'await' && (now % K.blocktime < K.blocktime-20) ){
+          }else if (me.status == 'await' && (now % K.blocktime < K.blocktime-5) ){
             me.status = 'precommit'
             me.processMempool()
           }
@@ -670,28 +670,36 @@ class Me {
 
         var [method, counterparty, nonce, negative, delta] = r(body)
 
-        assert(readInt(method) == readInt(methodMap('delta')))
-        l(counterparty,  bin(me.id.publicKey))
-        assert(counterparty == bin(me.id.publicKey))
-
+        nonce = readInt(nonce)
+        method = readInt(method)
         delta = negative.equals(Buffer.alloc(0)) ? readInt(delta) : -readInt(delta)
 
+        assert(method == readInt(methodMap('delta')))
 
-        var ch = await me.channel(pubkey)
+        l(counterparty,  bin(me.id.publicKey))
 
-        assert(readInt(nonce) == ch.delta_record.nonce+1)
+        assert(counterparty.equals(bin(me.id.publicKey)))
 
 
         if(me.is_hub){
+          var ch = await me.channel(pubkey)
+
+          l(nonce, ch.delta_record.nonce+1)
+
+          ch.delta_record.nonce++
+          assert(nonce == ch.delta_record.nonce)
+
+
+
+
           var amount = ch.delta_record.delta - delta
 
-          l(`Sent ${amount} out of  ${ch.total}`)
+          l(`Sent ${amount} out of ${ch.total}`)
 
           assert(amount > 0)
           assert(amount <= ch.total) // max amount is limited by collateral
 
           ch.delta_record.delta = delta
-          ch.delta_record.nonce = nonce
           ch.delta_record.sig = sig
 
           await ch.delta_record.save()
@@ -699,6 +707,11 @@ class Me {
           await me.payChannel(mediate_to, amount)
 
         }else{
+
+          var ch = await me.channel(pubkey)
+          l(nonce, ch.delta_record)
+
+
           // for users, delta of deltas is reversed
           var amount = delta - ch.delta_record.delta
           l(amount)
@@ -706,14 +719,17 @@ class Me {
 
           l(`${amount} received payment of from who ${delta}`)
 
-          var ch = await me.channel(1)
+          ch.delta_record.nonce++
+          assert(nonce == ch.delta_record.nonce)
+
           ch.delta_record.delta = delta
+          ch.delta_record.sig = sig
 
           await ch.delta_record.save()
 
           if(me.browser){
             me.browser.send(JSON.stringify({
-              result: {ch: await me.channel(1)},
+              result: {ch: ch},
               id: 1
             }))
           }
@@ -726,7 +742,7 @@ class Me {
   }
 
   async payChannel(who, amount, mediate_to){
-    l(`Paying ${who} - ${amount} to mediate ${mediate_to}`)
+    l(`Paying ${who.toString('hex')} - ${amount} to mediate ${mediate_to}`)
 
     var ch = await me.channel(who)
 
@@ -751,8 +767,6 @@ class Me {
         l(`not online, deliver later? ${tx}`)
       }
 
-      await ch.delta_record.save()
-
     }else{
       if(amount > ch.total){
         return [false, "Not enough funds"]
@@ -773,8 +787,9 @@ class Me {
 
       me.sendMember('mediate', r([bin(me.id.publicKey), bin(sig), body, mediate_to]), 0)
 
-      await ch.delta_record.save()
     }
+
+    await ch.delta_record.save()
 
     return [true, false]
 
@@ -816,11 +831,13 @@ class Me {
       })
 
     }else{
+      var u = await User.findById(counterparty)
+      var hubId = u.id
 
       if(me.record){
         var ch = await Collateral.find({where: {
           userId: me.record.id,
-          hubId: counterparty
+          hubId: hubId
         }})
 
         if(ch){
@@ -828,11 +845,12 @@ class Me {
           r.settled = ch.settled
         }
       }else{
+
       }
 
       var delta = await Delta.findOrBuild({
         where: {
-          hubId: counterparty,
+          hubId: hubId,
           userId: bin(me.id.publicKey)
         },defaults: {
           delta: 0,
@@ -902,7 +920,8 @@ class Me {
 
     assert(methodId == 'block', 'Wrong method for block')
     assert(finalblock.length <= K.blocksize, 'Invalid block')
-    assert(timestamp > K.ts, 'New block from the past')
+    if(timestamp > K.ts) return false 
+    //, 'New block from the past')
 
 
     if(K.prev_hash != prev_hash){

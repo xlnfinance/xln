@@ -18,7 +18,7 @@ W.onready(()=>{
     // only node users expect updates
     setInterval(function(){
       W('load').then(render)
-    }, 3000)
+    }, 1000)
   }
 
   notyf = new Notyf({delay:4000})
@@ -232,7 +232,7 @@ W.onready(()=>{
           <p>
 
 
-          <div v-if="ch.total>0">
+          <div v-if="ch.total>0 || ch.collateral > 0">
 
             <div class="progress" style="max-width:1000px">
               <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.delta<0?ch.collateral:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
@@ -242,7 +242,7 @@ W.onready(()=>{
                 {{commy(ch.delta)}} (spent)
               </div>
               <div v-if="ch.delta>0" v-bind:style="{ width: Math.round(ch.delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
-                +{{commy(ch.delta)}} (earned)
+                +{{commy(ch.delta)}} (risky)
               </div>
             </div>
 
@@ -273,7 +273,7 @@ W.onready(()=>{
 
           <p class="lead">Or settle globally (slow, expensive, but more secure):</p>
 
-          <p>Standalone balance: <b>\${{commy(record.balance)}}</b></p>
+          <p>Global balance: <b>\${{commy(record.balance)}}</b></p>
           <small>Currently there's only one hub <b>@1</b>. So to deposit to someone's channel with hub use their_ID@1</small>
 
           <p v-for="out in outs">
