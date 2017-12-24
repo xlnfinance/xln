@@ -642,7 +642,6 @@ class Me {
     }else if (inputType == 'chain'){
       var chain = r(tx)
       for(var i = 0;i<chain.length;i++){
-        l(' processing chain with '+i)
         await me.processBlock(chain[i])
       }
     }else if (inputType == 'sync'){
@@ -678,16 +677,17 @@ class Me {
 
         l(counterparty,  bin(me.id.publicKey))
 
-        assert(counterparty.equals(bin(me.id.publicKey)))
-
 
         if(me.is_hub){
+          assert(readInt(counterparty) == 1)
+
           var ch = await me.channel(pubkey)
 
           l(nonce, ch.delta_record.nonce+1)
 
           ch.delta_record.nonce++
-          assert(nonce == ch.delta_record.nonce)
+          assert(nonce >= ch.delta_record.nonce)
+          //assert(nonce == ch.delta_record.nonce)
 
 
 
@@ -707,17 +707,23 @@ class Me {
           await me.payChannel(mediate_to, amount)
 
         }else{
+          // is it for us?
+          assert(counterparty.equals(bin(me.id.publicKey)))
 
-          var ch = await me.channel(pubkey)
-          l(nonce, ch.delta_record)
+          var hub = await User.findById(1)
+          l(hub, hub.pubkey, pubkey)
+          assert(hub.pubkey.equals(pubkey))
+
+          var ch = await me.channel(1)
+          l('nonc', nonce, ch.delta_record)
 
 
           // for users, delta of deltas is reversed
           var amount = delta - ch.delta_record.delta
-          l(amount)
+
           assert(amount > 0)
 
-          l(`${amount} received payment of from who ${delta}`)
+          l(`${amount} received payment of  ${delta}`)
 
           ch.delta_record.nonce++
           assert(nonce == ch.delta_record.nonce)
@@ -742,7 +748,7 @@ class Me {
   }
 
   async payChannel(who, amount, mediate_to){
-    l(`Paying ${who.toString('hex')} - ${amount} to mediate ${mediate_to}`)
+    l(who, `Paying - ${amount} to mediate ${mediate_to}`)
 
     var ch = await me.channel(who)
 
@@ -777,10 +783,8 @@ class Me {
 
       let negative = ch.delta_record.delta < 0 ? 1 : null
 
-      var u = await User.findById(who)
-
       var body =r([
-        methodMap('delta'), u.pubkey, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta)
+        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta)
       ])
 
       var sig = ec(body, me.id.secretKey)
@@ -831,8 +835,7 @@ class Me {
       })
 
     }else{
-      var u = await User.findById(counterparty)
-      var hubId = u.id
+      var hubId = counterparty
 
       if(me.record){
         var ch = await Collateral.find({where: {
@@ -913,15 +916,19 @@ class Me {
       timestamp,
       ordered_tx] = r(finalblock)
 
-    block_number = block_number.readUInt32BE()
+    block_number = readInt(block_number)
     methodId = methodMap(methodId.readUInt32BE())
-    timestamp = timestamp.readUInt32BE()
+    timestamp = readInt(timestamp)
     prev_hash = prev_hash.toString('hex')
 
     assert(methodId == 'block', 'Wrong method for block')
     assert(finalblock.length <= K.blocksize, 'Invalid block')
-    if(timestamp > K.ts) return false 
-    //, 'New block from the past')
+
+    if(timestamp < K.ts){
+      l('New block from the past')
+      return false 
+    }
+    //, 
 
 
     if(K.prev_hash != prev_hash){

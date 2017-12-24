@@ -3,7 +3,7 @@ crypto = require("crypto");
 fs = require("fs")
 http = require("http");
 
-base_port = process.argv[3] ? process.argv[3] : 8000
+base_port = process.argv[2] ? parseInt(process.argv[2]) : 8000
 
 
 // deterministic JSON
@@ -17,7 +17,7 @@ ec = nacl.sign.detached
 WebSocket = require("ws")
 rlp = require('rlp')
 
-const opn = require('../opn')
+const opn = require('./lib/opn')
 
 //diff2html = require("diff2html").Diff2Html
 //diff2html.getPrettyHtmlFromDiff(f)
@@ -36,7 +36,7 @@ const [Me] = require('./lib/me')
 
 
 l = console.log
-d = ()=>{}
+d = l //()=>{}
 
 r = function(a){
   if(a instanceof Buffer){
@@ -342,7 +342,7 @@ installSnippet = async (i)=>{
       var out_hash = out.split(' ')[0]
       var host = me.my_member.location.split(':')[0]
       var out_location = 'http://'+host+':'+base_port+'/'+filename
-      installSnippets[i] = `id=${base_port+1};f=${filename};mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f;if shasum -a 256 $f | grep ${out_hash}; then tar -xzf $f && rm $f; node u.js start $id; fi`
+      installSnippets[i] = `id=${base_port+1};f=${filename};mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f;if shasum -a 256 $f | grep ${out_hash}; then tar -xzf $f && rm $f; node u.js $id; fi`
     return installSnippets[i];
     })
   }
@@ -383,7 +383,7 @@ initDashboard=async a=>{
    }else{
 
 
-    serveStatic("../wallet")(req, res, finalhandler(req, res));
+    serveStatic("./wallet")(req, res, finalhandler(req, res));
    }
 
 
@@ -453,7 +453,7 @@ initDashboard=async a=>{
 
             case 'send':
 
-              var hubId = K.members[0].id
+              var hubId = 1
 
               var amount = parseInt(parseFloat(p.off_amount)*100)
 
@@ -711,7 +711,7 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'});
 
 if(!fs.existsSync('private')) fs.mkdirSync('private')
 
-base_db.storage = 'private/db.sqlite'+base_port
+base_db.storage = 'private/db'+base_port+'.sqlite'
 privSequelize = new Sequelize('', '', 'password', base_db);
 
 Block = privSequelize.define('block', {
@@ -757,7 +757,9 @@ sync = ()=>{
 
 
 
-if(process.argv[2] == 'start'){
+if(process.argv[2] == 'console'){
+
+}else{
 
   /*
   var cluster = require('cluster')

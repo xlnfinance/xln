@@ -1,4 +1,4 @@
 rm -rf private data ../8001 ../8002 ../8003
 mkdir data
 mkdir private
-node u start
+node u 8000

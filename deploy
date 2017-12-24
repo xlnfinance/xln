@@ -1,4 +1,4 @@
-rsync -a wallet 1 root@failsafe.network:~/ -rv --exclude '.git'
+rsync -a 1 root@failsafe.network:~/ -rv --exclude '.git'
 
 ssh root@failsafe.network <<'ENDSSH'
 killall Failsafe
