@@ -686,7 +686,7 @@ class Me {
           l(nonce, ch.delta_record.nonce+1)
 
           ch.delta_record.nonce++
-          assert(nonce >= ch.delta_record.nonce)
+          assert(nonce >= ch.delta_record.nonce, `${nonce} ${ch.delta_record.nonce}`)
           //assert(nonce == ch.delta_record.nonce)
 
 
@@ -726,7 +726,7 @@ class Me {
           l(`${amount} received payment of  ${delta}`)
 
           ch.delta_record.nonce++
-          assert(nonce == ch.delta_record.nonce)
+          assert(nonce >= ch.delta_record.nonce)
 
           ch.delta_record.delta = delta
           ch.delta_record.sig = sig

@@ -1,5 +1,4 @@
 rm -rf private data ../8001 ../8002 ../8003
 mkdir data
 mkdir private
-npm i sqlite3 keccak scrypt
 node u 8000

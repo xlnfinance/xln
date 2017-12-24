@@ -15,7 +15,9 @@ W.onready(()=>{
   W('load').then(render)
 
   if(localStorage.auth_code){
-    // only node users expect updates
+    // local node
+    location.hash = '#wallet'
+
     setInterval(function(){
       W('load').then(render)
     }, 1000)
@@ -31,6 +33,12 @@ W.onready(()=>{
       return voters.find(v=>v.id == app.record.id)
     },
 
+    toHexString: (byteArray)=>{
+      return Array.prototype.map.call(byteArray, function(byte) {
+        return ('0' + (byte & 0xFF).toString(16)).slice(-2);
+      }).join('');
+    },
+
     call: function(method, args){
       if(method == 'vote'){
         args.rationale = prompt("Why?")
@@ -44,7 +52,7 @@ W.onready(()=>{
     settle: ()=>{
       var total = app.outs.reduce((k,v)=>k+parseFloat(v.amount.length==0 ? '0' : v.amount), 0)
 
-      if(confirm("Total outputs: "+total+". Do you want to broadcast your transaction?")){
+      if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
         app.call('settleUser', {
           assetType: 0,
           ins: app.ins,
@@ -122,20 +130,22 @@ W.onready(()=>{
   }
 
 
+  var wp = app.innerHTML
 
   app = new Vue({
     el: '#app',
     data(){ return {
       auth_code: localStorage.auth_code,
       assetType: 'FSD',
+      whitepaper: wp,
 
       pubkey: false,
       K: false,
       my_member: false,
 
       pw: 'password',
-      username: 'root',
-      location: '128.199.242.161:8000',
+      username: location.port == 8000 ? 'root' : location.port,
+      location: location.host,
 
       channels: {},
 
@@ -150,6 +160,7 @@ W.onready(()=>{
 
       off_to: '1',
       off_amount: '1.00',
+      is_hub: false,
 
 
 
@@ -170,7 +181,11 @@ W.onready(()=>{
       <ul class="navbar-nav mr-auto">
 
         <li class="nav-item" v-bind:class="{ active: tab=='' }">
-          <a class="nav-link" @click="go('')">Wallet</a>
+          <a class="nav-link" @click="go('')">Whitepaper</a>
+        </li>
+
+        <li class="nav-item" v-bind:class="{ active: tab=='wallet' }">
+          <a class="nav-link" @click="go('wallet')">Wallet</a>
         </li>
 
         <li class="nav-item" v-bind:class="{ active: tab=='network' }">
@@ -193,8 +208,8 @@ W.onready(()=>{
           <a class="nav-link" @click="go('wiki')">Wiki</a>
         </li>
 
-        <li class="nav-item"  v-bind:class="{ active: tab=='names' }">
-          <a class="nav-link" @click="go('names')">Names</a>
+        <li class="nav-item"  v-bind:class="{ active: tab=='explorer' }">
+          <a class="nav-link" @click="go('explorer')">Explorer</a>
         </li>
 
 
@@ -210,25 +225,47 @@ W.onready(()=>{
 
 
   <div class="container">
+    <div v-if="tab==''" v-html="whitepaper">
+
+    </div>
+
+    <div v-else-if="tab=='wallet'">
+        <div v-if="is_hub">
+          <h1>Hub Channels</h1>
+          <table class="table table-striped">
+            <thead class="thead-dark">
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Delta</th>
+                <th scope="col">Nonce</th>
+              </tr>
+            </thead>
+            <tbody>
+            
+              <tr v-for="d in deltas">
+                <th scope="row"><small>{{toHexString(d.userId.data)}}</small></th>
+                <td v-bind:class="{ 'error': d.delta < 0, 'warning': d.delta > 0 }">{{commy(d.delta)}}</td>
+                <td>{{d.nonce}}</td>
+              </tr>
+
+            </tbody>
+          </table>
+
+        </div>
 
 
-    <div v-if="tab==''">
-      <p v-if="false">Current asset: <select v-model="assetType">
-        <option v-for="asset in K.assets" v-bind:value="asset.ticker">
-         {{asset.ticker}} ({{ asset.name }})
-        </option>
-      </select></p>
+
+
+
 
       <template v-if="pubkey">
         <h5>Hello, <b>{{username}}</b>! Your ID is <b>{{record ? record.id : pubkey}}</b></h5>
-
-        <div v-if="is_hub">
-          You're a hub.
-        </div>
+        
+        <div v-if="is_hub"></div>
         <div v-else>
             
-          <p class="lead">Send and receive money privately:</p>  
-            <h1 style="display:inline-block">Balance: \${{commy(ch.total)}}</h1><small v-if="ch.total>0">= {{commy(ch.collateral)}} (collateral) {{ch.delta > 0 ? "+ "+commy(ch.delta) : "- "+commy(-ch.delta)}} (delta)</small> 
+          <p class="lead">Send and receive money instantly and privately:</p>  
+            <h1 style="display:inline-block">\${{commy(ch.total)}}</h1><small v-if="ch.total>0">= {{commy(ch.collateral)}} (collateral) {{ch.delta > 0 ? "+ "+commy(ch.delta) : "- "+commy(-ch.delta)}} (delta)</small> 
           <p>
 
 
@@ -363,7 +400,7 @@ W.onready(()=>{
     <div v-else-if="tab=='install'">
         <h3>Currently only macOS/Linux are supported</h3>
       <p>1. This is a Developer Preview. In the future one command will be enough, but right now the process is quite manual. First, make sure you have Node.js installed: run <b>brew install node</b> in console if not.</p>
-      <p>2. Then install required npm modules: <b>npm i tar tweetnacl sequelize ws sqlite3 finalhandler serve-static rlp bn.js keccak scrypt</b></p>
+      <p>2. Then install required npm modules: <b>npm i tar tweetnacl sequelize ws finalhandler serve-static rlp bn.js keccak   scrypt sqlite3</b></p>
       <p>3. Compare this snippet with other sources, and if there's exact match paste into Terminal.app: </p>
       <p><b>{{install_snippet}}</b></p>
     </div>
@@ -433,6 +470,38 @@ W.onready(()=>{
       <p><a href="https://github.com/failsafenetwork/failsafe">Currently here</a></p>
     </div>
 
+
+    <div v-else-if="tab=='explorer'">
+      <h3>Blockchain Explorer</h3>
+
+      <table class="table table-striped">
+        <thead class="thead-dark">
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Pubkey</th>
+            <th scope="col">Username</th>
+            <th scope="col">Global Balance</th>
+
+            <th scope="col">Collateral @1</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <tr v-for="u in users">
+            <th scope="row">{{u.id}}</th>
+            <td><small>{{toHexString(u.pubkey.data)}}</small></td>
+            <td>{{u.username}}</td>
+            <td>{{commy(u.balance)}}</td>
+            
+            <td>{{commy(u.hub[0] ? u.hub[0].collateral.collateral : 0)}}</td>
+          </tr>
+
+        </tbody>
+      </table>
+
+
+
+    </div>
 
     <div v-else-if="tab=='names'">
       <h3>Failsafe Names </h3>

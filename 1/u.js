@@ -2,6 +2,7 @@ assert = require("assert");
 crypto = require("crypto");
 fs = require("fs")
 http = require("http");
+os = require('os')
 
 base_port = process.argv[2] ? parseInt(process.argv[2]) : 8000
 
@@ -151,6 +152,8 @@ genesis = async (opts)=>{
 
 
     prev_hash: toHex(Buffer.alloc(32)),
+
+    risk: 10000, // how much can a user lose if hub is insolvent? $100 
 
 
     ts: 0,
@@ -362,8 +365,6 @@ initDashboard=async a=>{
 
   // this serves dashboard HTML page
   var server = http.createServer(function(req, res) {
-    
-
     if(req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)){
       var file = 'private'+req.url
       var stat = fs.statSync(file);
@@ -407,6 +408,8 @@ initDashboard=async a=>{
   
   wss.users = {}
 
+  wss.on('error',function(err){ console.error(err)})
+
   wss.on('connection', function(ws,req) {
     ws.on('message', async msg=>{
       if(msg[0] == '{'){
@@ -420,7 +423,7 @@ initDashboard=async a=>{
           
 
         if(json.auth_code == auth_code){
-          me.browser = ws
+          //me.browser = ws
 
           switch(json.method){
             case 'sync':
@@ -578,10 +581,7 @@ initDashboard=async a=>{
 
             result.is_hub = me.is_hub
             if(me.is_hub){
-              result.channels = await Delta.find({where: {
-                hubId: 1
-              }})
-
+              
             }else{
               result.ch = await me.channel(1)
             }
@@ -590,12 +590,32 @@ initDashboard=async a=>{
         }
 
 
-
-
-        if(K){
+        if(K){ // already initialized
 
           result.K = K
 
+          if(me.is_hub){
+            result.risky_deltas = await Delta.findAll({
+              order: [['delta','DESC']], 
+              where: {
+                hubId: 1,
+                delta: {
+                  [Sequelize.Op.gte]: K.risk
+                }
+            }})
+
+            result.spent_deltas = await Delta.findAll({
+              order: [['delta']], 
+              where: {
+                hubId: 1,
+                delta: {
+                  [Sequelize.Op.lte]: -K.risk
+                }
+            }})
+
+            result.deltas = result.risky_deltas.concat(result.spent_deltas)
+
+          }
           if(me.my_member && K.last_snapshot_height){
             result.install_snippet = await installSnippet(K.last_snapshot_height)
           }
@@ -604,6 +624,8 @@ initDashboard=async a=>{
             order: [['id','DESC']], 
             include: {all: true}
           })
+
+          result.users = await User.findAll({include: {all: true}})
         }
 
         ws.send(JSON.stringify({
@@ -626,7 +648,7 @@ initDashboard=async a=>{
 
 
 derive = async (username, pw)=>{
-  var seed = await require('scrypt').hash(pw, {
+  var seed = await require('./scrypt_'+os.platform()).hash(pw, {
     N: Math.pow(2, 18),
     interruptStep: 1000,
     p: 3,
@@ -641,8 +663,11 @@ derive = async (username, pw)=>{
 }
 
 // this is onchain database - shared among everybody
+var sq = require('path').resolve(__dirname, 'sqlite3_'+os.platform())
+l(sq)
 var base_db = {
   dialect: 'sqlite',
+  //dialectModulePath: 'sqlite3',
   storage: 'data/db.sqlite',
   define: {timestamps: false},
   operatorsAliases: false,

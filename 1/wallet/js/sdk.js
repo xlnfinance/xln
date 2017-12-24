@@ -17,7 +17,7 @@ W = (method, params={})=>{
 var hash = location.hash.split('auth_code=')
 if(hash[1]){
   localStorage.auth_code = hash[1].replace(/[^a-z0-9]/g,'')
-  history.replaceState(null,null,'/')
+  history.replaceState(null,null,'/#wallet')
 }
 
 W.frame=false;
