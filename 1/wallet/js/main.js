@@ -16,7 +16,7 @@ W.onready(()=>{
 
   if(localStorage.auth_code){
     // local node
-    location.hash = '#wallet'
+    if(location.hash=='') location.hash = '#wallet'
 
     setInterval(function(){
       W('load').then(render)
@@ -52,13 +52,13 @@ W.onready(()=>{
     settle: ()=>{
       var total = app.outs.reduce((k,v)=>k+parseFloat(v.amount.length==0 ? '0' : v.amount), 0)
 
-      if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
+      //if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
         app.call('settleUser', {
           assetType: 0,
           ins: app.ins,
           outs: app.outs
         })
-      }
+      //}
     },
     derive: f=>{
       var data = {
@@ -145,7 +145,7 @@ W.onready(()=>{
 
       pw: 'password',
       username: location.port == 8000 ? 'root' : location.port,
-      location: location.host,
+      location: '128.199.242.161:8000',
 
       channels: {},
 
@@ -230,33 +230,6 @@ W.onready(()=>{
     </div>
 
     <div v-else-if="tab=='wallet'">
-        <div v-if="is_hub">
-          <h1>Hub Channels</h1>
-          <table class="table table-striped">
-            <thead class="thead-dark">
-              <tr>
-                <th scope="col">ID</th>
-                <th scope="col">Delta</th>
-                <th scope="col">Nonce</th>
-              </tr>
-            </thead>
-            <tbody>
-            
-              <tr v-for="d in deltas">
-                <th scope="row"><small>{{toHexString(d.userId.data)}}</small></th>
-                <td v-bind:class="{ 'error': d.delta < 0, 'warning': d.delta > 0 }">{{commy(d.delta)}}</td>
-                <td>{{d.nonce}}</td>
-              </tr>
-
-            </tbody>
-          </table>
-
-        </div>
-
-
-
-
-
 
       <template v-if="pubkey">
         <h5>Hello, <b>{{username}}</b>! Your ID is <b>{{record ? record.id : pubkey}}</b></h5>
@@ -368,7 +341,7 @@ W.onready(()=>{
       <p>Blocksize: {{K.blocksize}} bytes</p>
       <p>Account creation fee (pubkey registration): \${{commy(K.account_creation_fee)}}</p>
 
-      <p>Average onchain fee: \${{commy(K.tax_per_byte * 83)}} (to short ID) – {{commy(K.tax_per_byte * 115)}} (to pubkey)</p>
+      <p>Average onchain fee: \${{commy(K.tax * 83)}} (to short ID) – {{commy(K.tax * 115)}} (to pubkey)</p>
 
       <h2>Hubs & topology</h2>
       <p>Soft risk limit: \${{commy(K.members[0].hub.soft_limit)}}</p>
@@ -399,10 +372,11 @@ W.onready(()=>{
 
     <div v-else-if="tab=='install'">
         <h3>Currently only macOS/Linux are supported</h3>
-      <p>1. This is a Developer Preview. In the future one command will be enough, but right now the process is quite manual. First, make sure you have Node.js installed: run <b>brew install node</b> in console if not.</p>
-      <p>2. Then install required npm modules: <b>npm i tar tweetnacl sequelize ws finalhandler serve-static rlp bn.js keccak   scrypt sqlite3</b></p>
-      <p>3. Compare this snippet with other sources, and if there's exact match paste into Terminal.app: </p>
-      <p><b>{{install_snippet}}</b></p>
+        <p>1. Install <a href="https://nodejs.org/en/download/">Node.js</a></p>
+        <p>2. Copy-paste this snippet to your text editor:</p>
+        <pre><b>{{install_snippet}}</b></pre>
+        <p>3. (optional) Compare our snippet with snippets from other sources for better security in case our website is compromised: ...</p>
+        <p>4. If there's exact match paste the snippet into Terminal.app</p>
     </div>
 
     <div v-else-if="tab=='exchange'">
@@ -438,7 +412,7 @@ W.onready(()=>{
 
       <div v-for="p in proposals">
         <h4>#{{p.id}}: {{p.desc}}</h4>
-        <small>Proposed by {{p.user.username}}</small>
+        <small>Proposed by #{{p.user.id}}</small>
 
         <pre><code class="javascript hljs" v-html="hljs('javascript',p.code).value"></code></pre>
 
@@ -448,10 +422,11 @@ W.onready(()=>{
         </div>
 
         <p v-for="u in p.voters">
-          <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by {{u.username}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
+          <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by #{{u.id}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
         </p>
 
-        <small>To be executed in {{p.delayed - K.usable_blocks}} blocks</small>
+        <small>To be executed at {{p.delayed}} usable block</small>
+
         <div v-if="record">
           <p v-if="!ivoted(p.voters)">
             <button @click="call('vote', {approve: true, id: p.id})" class="btn btn-success">Approve</button>
@@ -472,14 +447,34 @@ W.onready(()=>{
 
 
     <div v-else-if="tab=='explorer'">
-      <h3>Blockchain Explorer</h3>
+      <div v-if="is_hub">
+        <h1>Offchain Channels</h1>
+        <table class="table table-striped">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">Delta</th>
+              <th scope="col">Nonce</th>
+            </tr>
+          </thead>
+          <tbody>
+          
+            <tr v-for="d in deltas">
+              <th scope="row"><small>{{toHexString(d.userId.data)}}</small></th>
+              <td  v-bind:class="{ 'error': d.delta < 0, 'warning': d.delta > 0 }">{{commy(d.delta)}}</td>
+              <td>{{d.nonce}}</td>
+            </tr>
 
+          </tbody>
+        </table>
+      </div>
+
+      <h1>Onchain Explorer</h1>
       <table class="table table-striped">
         <thead class="thead-dark">
           <tr>
             <th scope="col">ID</th>
             <th scope="col">Pubkey</th>
-            <th scope="col">Username</th>
             <th scope="col">Global Balance</th>
 
             <th scope="col">Collateral @1</th>
@@ -490,7 +485,6 @@ W.onready(()=>{
           <tr v-for="u in users">
             <th scope="row">{{u.id}}</th>
             <td><small>{{toHexString(u.pubkey.data)}}</small></td>
-            <td>{{u.username}}</td>
             <td>{{commy(u.balance)}}</td>
             
             <td>{{commy(u.hub[0] ? u.hub[0].collateral.collateral : 0)}}</td>

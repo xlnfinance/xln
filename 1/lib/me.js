@@ -142,13 +142,11 @@ class Me {
     if(!nacl.sign.detached.verify(payload, sig, signer.pubkey))
     return {error:"Invalid signature"}
 
-    // total tax is a sum of
-    // size tax is for consuming bandwidth (all tx)
 
-    var tax = Math.round(K.tax_per_byte * tx.length)
 
-    // gas tax is for consuming computational resources (optional)
-    // storage tax is consumed both monthly and
+    var tax = Math.round(K.tax * tx.length)
+
+
     if(signer.balance < tax)
     return {error: "Not enough balance to cover tx fee"}
 
@@ -201,13 +199,10 @@ class Me {
 
         var is_hub = (method == 'settle')
 
-        for(var i=0;i<inputs.length;i++){
-          // get withdrawal tx
-          var input = inputs[i]
+        for(let input of inputs){
+          var [pubkey, body, sig] = r(input)
 
-          // you can't withdraw from non existant channel
-          var input_id = input.slice(0, 4).readUInt32BE()
-          var input_ch = await Collateral.find({
+          var ch = await Collateral.find({
             where: {
               userId: is_hub ? input_id : id,
               hubId: is_hub ? id : input_id,
@@ -255,52 +250,67 @@ class Me {
           hubId = readInt(hubId)
 
           // is pubkey or id
-          if(userId.length != 32) userId = readInt(userId)
+          //if(userId.length != 32) userId = readInt(userId)
+
+          if(amount > signer.balance) continue
 
 
-          if(hubId == undefined){
-            // standalone balance
-  
-            if(userId == signer.id){
-              l("Can't settle to your own balance")
-              continue
-            }
 
+          if(userId.length == 32){
             var user = await User.findOrBuild({
-              where: (userId instanceof Buffer ? {pubkey: userId} : {id: userId})
+              where: {pubkey: userId},
+              defaults: {
+                fsb_balance: 0,
+                nonce: 0
+              }
             })
             user = user[0]
+          }else{
+            var user = await User.findById(readInt(userId))
+          }
 
 
 
-            l(user)
 
-            if(user.id){
+          if(user.id){
+
+            if(hubId == undefined){
+              // can't settle to own global balance
+              if(user.id == signer.id) continue
+
+              l('Adding to existing user')
               // already exists
               user.balance += amount
               signer.balance -= amount
+            }else{
 
-              l('Adding to existing user')
-            }else if(userId.length == 32 && amount > K.account_creation_fee){
-              user.fsb_balance = 0
-              user.nonce = 0
-              l("Created new user")
+            }
+          }else{
 
+            l("Created new user")
+
+            if(hubId == undefined){
+              if(amount < K.account_creation_fee) continue
               user.balance = (amount - K.account_creation_fee)
               signer.balance -= amount
-
             }else{
-              l('not enough to cover creation fee')
-              
-              continue
+              var fee = (K.standalone_balance+K.account_creation_fee)
+              if(amount < fee) continue
+
+              user.balance = K.standalone_balance
+              amount -= fee
+              signer.balance -= fee
+
             }
 
-            await user.save()
+          }
 
-          }else{
+          await user.save()
+
+          if(hubId){
             var ch = await Collateral.findOrBuild({
               where: {
-                userId: userId,
+                userId: user.id,
                 hubId: hubId,
                 assetType: assetType
               },
@@ -319,12 +329,11 @@ class Me {
 
             await ch[0].save()
 
-
           }
 
         }
 
-        signer.save()
+        await signer.save()
 
         break
 
@@ -344,10 +353,8 @@ class Me {
 
         await vote.save()
         l(`Voted ${vote.approval} for ${vote.proposalId}`)
-
+        
         break
-
-
       }
 
       signer.save()
@@ -394,6 +401,7 @@ class Me {
       case 'settleUser':
 
 
+        var confirm = "Settled globally!"
         break
       case 'propose':
         assert(args[0].length > 1, 'Rationale is required')
@@ -404,17 +412,22 @@ class Me {
         }
 
         args = r(args)
-        break
 
+        var confirm = "Proposal submitted!"
+        break
 
       case 'voteApprove':
       case 'voteDeny':
+
+        var confirm = "You voted!"
 
         break
     }
 
     // first is omitted parts, second is required
     var tx = me.sign(write32(me.record.nonce), concat(methodId, args))
+
+    confirm += ` Tx size ${tx.length}b, fee ${tx.length * K.tax}.`
 
     if(me.my_member && me.my_member == me.next_member){
       me.mempool.push(tx)
@@ -424,7 +437,7 @@ class Me {
 
     l("Just broadcasted ", tx)
 
-    return tx;
+    return confirm;
   }
 
 
@@ -459,95 +472,48 @@ class Me {
     }
   }
 
-
-
-
-
-  async connect(){
+  async start(){
     // in json pubkeys are in hex
     me.record = await me.byKey()
 
-    l('initing mems')
-    
-    me.sendMember('auth', me.offchainAuth(), 0)
-    
-
-    me.members.map(c =>{
-      c.block_pubkey = Buffer.from(c.block_pubkey, 'hex')
-      //l(c.block_pubkey)
-      if(me.record && me.record.id == c.id){
-        me.my_member = c
+    for(var m of me.members){
+      m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
+      if(me.record && me.record.id == m.id){
+        me.my_member = m
         me.is_hub = me.my_member.hub
       }
-    })
+    }
+    l("Set up sync")
+    setInterval(sync, 30000)
 
-
+    
     if(me.my_member){
 
-      for(var i = 0;i<me.members.length;i++){
-        var c = me.members[i]
-        if( me.my_member != c ){
+      setInterval(require('../private/member'), 2000)
+
+      l('generate install snippet')
+      setInterval(()=>{installSnippet(K.last_snapshot_height)}, 30000)
+
+      for(var m of me.members){
+        if( me.my_member != m ){
           // we need to have connections ready to all members
           me.sendMember('auth', me.offchainAuth(), i)
         }
       }
 
-
-      setInterval(()=>{
-        var now = ts()
-
-        var currentIndex = Math.floor(now / K.blocktime) % K.members.length
-        me.current = me.members[currentIndex]
-
-        var increment =  (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
-
-        me.next_member = me.members[ (currentIndex + increment) % K.members.length]
-
-        //l(`Current member at ${now} is ${me.current.id}. ${me.status}`)
-
-        if(me.my_member == me.current){
-          // do we have enough sig or it's time?
-          var sigs = []
-          var total_shares = 0
-          me.members.map((c, index)=>{
-            if(c.sig){
-              sigs[index] = bin(c.sig)
-              total_shares+=c.shares
-            }else{
-              sigs[index] = Buffer.alloc(64)
-            }
-          })
-
-          if(me.status == 'precommit' && (now % K.blocktime > K.blocktime-5)){
-            if(total_shares < K.majority){
-              d(`Only have ${total_shares} shares, cannot build a block!`)
-            }else{
-              d('Lets process the finalblock we just built')
-              
-              me.processBlock(concat(
-                Buffer.concat(sigs),
-                me.precommit
-              ))
-            }
-            // flush sigs
-            me.members.map(c=>c.sig = false)
-
-            me.status = 'await'
-
-
-          }else if (me.status == 'await' && (now % K.blocktime < K.blocktime-5) ){
-            me.status = 'precommit'
-            me.processMempool()
-          }
-
-        }else{
-          me.status = 'await'
-        }
-      }, 2000)
+      if(me.is_hub) setInterval(require('../private/hub'), 30000)
+    }else{
+      // keep connection to hub open
+      me.sendMember('auth', me.offchainAuth(), 0)
     }
 
 
   }
+
+
+
+
+
 
   // we abstract away from Internet Protocol and imagine anyone just receives input out of nowhere
   // this input is of few different kinds:
@@ -562,16 +528,13 @@ class Me {
       return false
     }
 
-    // if it's another member, add ws to me.members
-    // 32 pubkey + 64 sig + 4 of current time
     let obj, member
 
     var inputType = inputMap(tx[0])
 
     tx = tx.slice(1)
 
-    l(inputType)
-
+    l('New input received '+inputType)
 
     if(inputType == 'auth' &&
       (obj = me.offchainVerify(tx)) &&
@@ -636,7 +599,6 @@ class Me {
       }
 
 
-
     }else if (inputType == 'block'){
       await me.processBlock(tx)
     }else if (inputType == 'chain'){
@@ -667,10 +629,12 @@ class Me {
 
       if(ec.verify(body, sig, pubkey)){
 
-        var [method, counterparty, nonce, negative, delta] = r(body)
+        var [method, counterparty, nonce, negative, delta, sent_at] = r(body)
 
         nonce = readInt(nonce)
         method = readInt(method)
+        sent_at = readInt(sent_at)
+
         delta = negative.equals(Buffer.alloc(0)) ? readInt(delta) : -readInt(delta)
 
         assert(method == readInt(methodMap('delta')))
@@ -700,7 +664,7 @@ class Me {
           assert(amount <= ch.total) // max amount is limited by collateral
 
           ch.delta_record.delta = delta
-          ch.delta_record.sig = sig
+          ch.delta_record.sig = r([pubkey, sig, body]) //raw delta
 
           await ch.delta_record.save()
 
@@ -729,7 +693,7 @@ class Me {
           assert(nonce >= ch.delta_record.nonce)
 
           ch.delta_record.delta = delta
-          ch.delta_record.sig = sig
+          ch.delta_record.sig = r([pubkey, sig, body]) //raw delta
 
           await ch.delta_record.save()
 
@@ -759,7 +723,7 @@ class Me {
       let negative = ch.delta_record.delta < 0 ? 1 : null
 
       var body = r([
-        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta)
+        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
       ])
 
       var sig = ec(body, me.id.secretKey)
@@ -774,7 +738,7 @@ class Me {
       }
 
     }else{
-      if(amount > ch.total){
+      if(amount < 0 || amount > ch.total){
         return [false, "Not enough funds"]
       }
 
@@ -784,7 +748,7 @@ class Me {
       let negative = ch.delta_record.delta < 0 ? 1 : null
 
       var body =r([
-        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta)
+        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
       ])
 
       var sig = ec(body, me.id.secretKey)
@@ -954,36 +918,6 @@ class Me {
       K.usable_blocks++
     }
 
-
-
-    const to_execute = await Proposal.findAll({
-      where: {delayed: K.usable_blocks},
-      include: {all: true}
-    })
-    
-
-    for(let job of to_execute){
-
-      l("Evaling "+job.code)
-
-      l(await eval(`(async function() { ${job.code} })()`))
-
-      var patch = job.patch
-      l(patch)
-      if(patch.length > 0){
-        me.request_reload = true
-        var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
-            console.log(error, stdout, stderr);
-        });
-        l('Patch time!')
-        pr.stdin.write(patch)
-        pr.stdin.end()
-
-      }
-
-    }
-
-
     K.total_bytes += block.length
     K.bytes_since_last_snapshot+=block.length
 
@@ -994,9 +928,56 @@ class Me {
     }else{
 
     }
+
+
+    // cron jobs
     if(K.total_blocks % 100 == 0){
-      // increase or decrease bandwidth tax per byte
     }
+
+    // executing proposals that are due
+    let to_execute = await Proposal.findAll({
+      where: {delayed: K.usable_blocks},
+      include: {all: true}
+    })
+
+    for(let job of to_execute){
+      var total_shares = 0
+      for(let v of job.voters){
+        var voter = K.members.find(m=>m.id==v.id)
+        if(v.vote.approval){
+          total_shares += voter.shares
+        }else{
+
+        }
+      }
+
+      if(total_shares < K.majority) continue
+
+      l("Evaling "+job.code)
+
+      l(await eval(`(async function() { ${job.code} })()`))
+
+      var patch = job.patch
+
+      if(patch.length > 0){
+        me.request_reload = true
+        var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
+            console.log(error, stdout, stderr);
+        });
+        pr.stdin.write(patch)
+        pr.stdin.end()
+
+        l('Patch applied! Restarting...')
+      }
+
+    }
+
+
+
+
+
+
+    // block processing is over, saving current K
 
     fs.writeFileSync('data/k.json', stringify(K))
 
@@ -1007,7 +988,7 @@ class Me {
 
     // save final block in blockchain db and broadcast
     if(me.my_member){
-      Block.create({
+      await Block.create({
         prev_hash: Buffer.from(prev_hash, 'hex'),
         hash: sha3(finalblock),
         block: block

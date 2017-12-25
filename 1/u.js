@@ -15,7 +15,8 @@ const BN = require('bn.js')
 nacl = require('tweetnacl')
 ec = nacl.sign.detached
 
-WebSocket = require("ws")
+ws = require("uws")
+
 rlp = require('rlp')
 
 const opn = require('./lib/opn')
@@ -31,7 +32,7 @@ Op = Sequelize.Op;
 asyncexec = require('util').promisify(exec)
 
 
-const [Me] = require('./lib/me')
+var [Me] = require('./lib/me')
 
 
 
@@ -86,7 +87,6 @@ usage = ()=>{
 
 //http://ipinfo.io/ip 
 genesis = async (opts)=>{
-  //await(fs.rmdir('data'))
 
   l("Start genesis")
 
@@ -96,7 +96,7 @@ genesis = async (opts)=>{
   opts = Object.assign({
     username: 'root', 
     pw: 'password', 
-    location: location.host // for local tests
+    location: '0.0.0.0:8000' // for local tests
     //infra: 'https://www.digitalocean.com'
   }, opts)
 
@@ -141,14 +141,13 @@ genesis = async (opts)=>{
     proposals_created: 0,
 
     
-    tax_per_byte: 3, // the 
-    members_tax_per_byte: 0.1, // the 
-
+    tax: 3,
 
     account_creation_fee: 100,
+    standalone_balance: 500, // keep $5 on your own balance for onchain tx fees
 
     blocksize: 200000,
-    blocktime: 10,
+    blocktime: 30,
 
 
     prev_hash: toHex(Buffer.alloc(32)),
@@ -207,6 +206,8 @@ genesis = async (opts)=>{
   me.members = JSON.parse(json).members // another object ref
 
   l('Done')
+  process.exit(0)
+
 }
 
 
@@ -317,7 +318,7 @@ trustlessInstall = async a=>{
         stat.mtime = null // must be deterministic
         // disable /private (blocks sqlite, proofs, local config) allow /default_private
         if(path.match(/(\.DS_Store|private)/)){
-          l('skipping '+path)
+          //l('skipping '+path)
           return false;
         }
         return true;
@@ -325,30 +326,40 @@ trustlessInstall = async a=>{
     },
     ['.']
   ).then(_=>{
-    l("Snapshot "+filename)
+
+    l("Snapshot made: "+filename)
+    
+    installSnippet(K.total_blocks)
+
   })
 
 }
 
+
 installSnippets = {}
 installSnippet = async (i)=>{
-  if(installSnippets[i]){
-    return installSnippets[i]
-  }else{
-    var filename=`Failsafe-${i}.tar.gz`
-    exec("shasum -a 256 private/"+filename, async (er,out,err)=>{
-      if(out.length == 0){
-        l('This state doesnt exist')
-        return false
-      }
+  var filename=`Failsafe-${i}.tar.gz`
+  var cmd = "shasum -a 256 private/"+filename
+  l(cmd)
+  exec(cmd, async (er,out,err)=>{
+    if(out.length == 0){
+      l('This state doesnt exist')
+      return false
+    }
 
-      var out_hash = out.split(' ')[0]
-      var host = me.my_member.location.split(':')[0]
-      var out_location = 'http://'+host+':'+base_port+'/'+filename
-      installSnippets[i] = `id=${base_port+1};f=${filename};mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f;if shasum -a 256 $f | grep ${out_hash}; then tar -xzf $f && rm $f; node u.js $id; fi`
-    return installSnippets[i];
-    })
-  }
+    var out_hash = out.split(' ')[0]
+    var host = me.my_member.location.split(':')[0]
+    var out_location = 'http://'+host+':'+base_port+'/'+filename
+    installSnippets[i] = `id=${base_port+1}
+f=${filename}
+mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f
+if [ ! -x /usr/bin/sha256sum ]; then alias sha256sum="shasum -a 256";fi
+if sha256sum $f | grep ${out_hash}; then tar -xzf $f && rm $f
+./install
+node u.js ${base_port+1}
+fi`
+
+  })
 }
 
 originAllowence = {
@@ -402,9 +413,8 @@ initDashboard=async a=>{
   me = new Me
   loadJSON()
 
-  setInterval(sync, 30000)
-
-  wss = new WebSocket.Server({ server: server, maxPayload:  64*1024*1024 });
+  
+  wss = new ws.Server({ server: server, maxPayload:  64*1024*1024 });
   
   wss.users = {}
 
@@ -435,7 +445,6 @@ initDashboard=async a=>{
               if(p.username){
                 if(p.location && !K){
                   await genesis({username, pw, location} = p)
-
                 }
 
                 var seed = await derive(p.username, p.pw)
@@ -443,8 +452,7 @@ initDashboard=async a=>{
 
                 result.confirm = "Welcome!"
                 
-                await me.connect()
-
+                await me.start()
               }
 
               break
@@ -532,11 +540,7 @@ initDashboard=async a=>{
               if(!result.alert){
                 var encoded = r([Buffer([p.assetType == 'FSD' ? 0 : 1]), p.ins, outs])
                 
-                me.broadcast('settleUser', encoded)
-                
-                result.confirm = 'Global transaction is broadcasted. Please wait for it to be confirmed'
-
-
+                result.confirm = await me.broadcast('settleUser', encoded)
               }
 
               break
@@ -560,14 +564,13 @@ initDashboard=async a=>{
             break
 
             case 'propose':
-              me.broadcast('propose', p)
-              result.confirm = "Proposal submitted!"
+              result.confirm = await me.broadcast('propose', p)
+              
 
             break
 
             case 'vote':
-              me.broadcast(p.approve ? 'voteApprove' : 'voteDeny', r([p.id, p.rationale]) ) 
-              result.confirm = "You voted! Good job!"
+              result.confirm = await me.broadcast(p.approve ? 'voteApprove' : 'voteDeny', r([p.id, p.rationale]) ) 
 
             break
           }
@@ -579,9 +582,8 @@ initDashboard=async a=>{
 
             result.pubkey = toHex(me.id.publicKey)
 
-            result.is_hub = me.is_hub
             if(me.is_hub){
-              
+
             }else{
               result.ch = await me.channel(1)
             }
@@ -591,6 +593,7 @@ initDashboard=async a=>{
 
 
         if(K){ // already initialized
+          result.is_hub = me.is_hub
 
           result.K = K
 
@@ -616,8 +619,9 @@ initDashboard=async a=>{
             result.deltas = result.risky_deltas.concat(result.spent_deltas)
 
           }
+
           if(me.my_member && K.last_snapshot_height){
-            result.install_snippet = await installSnippet(K.last_snapshot_height)
+            result.install_snippet = installSnippets[K.last_snapshot_height]
           }
 
           result.proposals = await Proposal.findAll({
@@ -644,6 +648,9 @@ initDashboard=async a=>{
   });
 
 
+
+
+
 }
 
 
@@ -665,6 +672,7 @@ derive = async (username, pw)=>{
 // this is onchain database - shared among everybody
 var sq = require('path').resolve(__dirname, 'sqlite3_'+os.platform())
 l(sq)
+
 var base_db = {
   dialect: 'sqlite',
   //dialectModulePath: 'sqlite3',
@@ -750,7 +758,7 @@ Delta = privSequelize.define('delta', {
   userId: Sequelize.CHAR(32).BINARY,
   hubId: Sequelize.INTEGER,
 
-  sig: Sequelize.CHAR(64).BINARY,
+  sig: Sequelize.TEXT,
 
   nonce: Sequelize.INTEGER,
 
@@ -764,8 +772,6 @@ Event = privSequelize.define('event', {
   kindof: Sequelize.STRING,
   p1: Sequelize.STRING
 })
-
-privSequelize.sync({force: false})
 
 
 
@@ -784,7 +790,11 @@ sync = ()=>{
 
 if(process.argv[2] == 'console'){
 
+}else if(process.argv[2] == 'genesis'){
+  genesis({location: '128.199.242.161:8000'})
 }else{
+
+  privSequelize.sync({force: false})
 
   /*
   var cluster = require('cluster')

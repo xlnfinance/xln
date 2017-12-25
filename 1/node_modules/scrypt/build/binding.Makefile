@@ -3,4 +3,4 @@
 export builddir_name ?= ./build/.
 .PHONY: all
 all:
-	$(MAKE) copied_files scrypt_wrapper scrypt_lib scrypt
+	$(MAKE) scrypt_wrapper copied_files scrypt_lib scrypt

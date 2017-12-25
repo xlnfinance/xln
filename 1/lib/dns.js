@@ -2,13 +2,12 @@ var protocol = require('./protocol');
 var server = require('dgram').createSocket('udp6');
 var named=require('node-named')
 
-global.zz=3
 
 server.on('message', function(buffer, rinfo) {
   var d = protocol.decode(buffer, 'queryMessage')
   var name = d.val.question.name
   console.log('requesting '+name+' server got from ' + rinfo.address +':' + rinfo.port);
-  if(name.endsWith('.we')){
+  if(name.endsWith('.fs')){
     d.val.header.flags.qr=1
     d.val.header.anCount=1
 

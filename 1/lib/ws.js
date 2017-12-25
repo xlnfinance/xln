@@ -5,7 +5,7 @@ function WebSocketClient(){
 }
 WebSocketClient.prototype.open = function(url){
   this.url = url;
-  this.instance = new WebSocket(this.url);
+  this.instance = new ws(this.url);
   this.instance.on('open',()=>{
     this.onopen();
   });
