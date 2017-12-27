@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 assert = require("assert");
 crypto = require("crypto");
 fs = require("fs")
@@ -424,6 +426,7 @@ initDashboard=async a=>{
                 //me.pay('')
 
                 originAllowence[json.proxyOrigin] -= json.params.amount
+                await me.payChannel(1, parseInt(json.params.amount), Buffer.from(json.params.recipient, 'hex'))
                 result = 'paid'
               }else{
                 // request explicit confirmation
@@ -470,7 +473,10 @@ initDashboard=async a=>{
           result.K = K
 
           if(me.is_hub){
-            result.deltas = await (require('./private/hub')(true))
+            var h = require('./private/hub')
+            h = await h()
+            result.deltas = h.channels
+            result.solvency = h.solvency
           }
 
           if(me.my_member && K.last_snapshot_height){

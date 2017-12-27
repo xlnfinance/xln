@@ -7,9 +7,9 @@
 
 window.onload = function(){
   donat.onclick = function(){
-    W('pay',{
-      invoice: 'invo',
-      recipient: 'homakov',
+    FS('pay',{
+      invoice: 'invoice',
+      recipient: pubkey.value,
       amount: 100
     }).then(data=>{
       if(data.status == 'paid'){
@@ -22,9 +22,9 @@ window.onload = function(){
   }
 }
 </script>
-Hello, <div id=logintoken></div>
+
 <div id="zone">
-  Demo pay. <button id="donat">‎Donate $1</button>
+Donate to <input id="pubkey" type="text"> <button id="donat">‎Donate $1</button>
 </div>
 
 </body></html>

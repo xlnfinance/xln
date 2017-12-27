@@ -35,8 +35,6 @@ class Me {
 
     var pseudo_balances = {}
 
-    d("Start mempool processing")
-
     for(var i = 0;i < me.mempool.length;i++){
       var tx = me.mempool[i]
 
@@ -476,7 +474,16 @@ class Me {
         }
       }
 
-      if(me.is_hub) setInterval(require('../private/hub'), 30000)
+      if(me.is_hub){
+        setInterval(async ()=>{
+          var h = await (require('../private/hub')())
+
+          if(h.ins.length > 0 && h.outs.length > 0){
+            await me.broadcast('settle', r([0, h.ins, h.outs]))
+          }
+          
+      }, 30000)
+      }
     }else{
       // keep connection to hub open
       me.sendMember('auth', me.offchainAuth(), 0)
@@ -521,6 +528,23 @@ class Me {
       l('Someone connected: '+toHex(obj.signer))
 
       wss.users[obj.signer] = ws
+
+      if(me.is_hub){ 
+        // offline delivery if missed
+        var ch = await me.channel(obj.signer)
+        let negative = ch.delta_record.delta < 0 ? 1 : null
+
+        var body = r([
+          methodMap('delta'), obj.signer, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
+        ])
+
+        var sig = ec(body, me.id.secretKey)
+        var tx = concat(inputMap('mediate'), r([
+          bin(me.id.publicKey), bin(sig), body, 0
+        ]))
+        wss.users[obj.signer].send(tx)
+      }
+
 
       var m = me.members.find(f=>f.block_pubkey.equals(obj.signer))
       if(m){
@@ -588,24 +612,26 @@ class Me {
       var last = await Block.findOne({where: {
         prev_hash: tx
       }})
-      var start = last ? last.id : 1
 
-      l("Sharing blocks since "+start)
+      if(last){
+        l("Sharing blocks since "+last.id)
 
-      var blocks = await Block.findAll({
-        where: {
-          id: {[Sequelize.Op.gte]: start}
+        var blocks = await Block.findAll({
+          where: {
+            id: {[Sequelize.Op.gte]: last.id}
+          }
+        })
+
+        var blockmap = []
+
+        for(var b of blocks){
+          blockmap.push(b.block)
         }
-      })
 
-      var blockmap = []
-
-      for(var b of blocks){
-        blockmap.push(b.block)
+        ws.send(concat(inputMap('chain'), r(blockmap)))
+      }else{
+        l("Wrong chain?")
       }
-      l(blockmap)
-
-      ws.send(concat(inputMap('chain'), r(blockmap)))
 
     }else if (inputType == 'mediate'){
       var [pubkey, sig, body, mediate_to] = r(tx)
@@ -646,7 +672,7 @@ class Me {
           assert(counterparty.equals(bin(me.id.publicKey)))
 
           var hub = await User.findById(1)
-          l(hub, hub.pubkey, pubkey)
+
           assert(hub.pubkey.equals(pubkey))
 
           var ch = await me.channel(1)

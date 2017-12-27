@@ -13,15 +13,15 @@ render = r=>{
 
 
 
-W.onready(()=>{
-  W('load').then(render)
+FS.onready(()=>{
+  FS('load').then(render)
 
   if(localStorage.auth_code){
     // local node
     if(location.hash=='') location.hash = '#wallet'
 
     setInterval(function(){
-      W('load').then(render)
+      FS('load').then(render)
     }, 1000)
   }
 
@@ -51,7 +51,7 @@ W.onready(()=>{
       }
 
 
-      W(method, args).then(render)
+      FS(method, args).then(render)
       return false
     },
     settle: ()=>{
@@ -72,7 +72,7 @@ W.onready(()=>{
       }
 
 
-      W('load', data).then(render)
+      FS('load', data).then(render)
       return false
     },
 
@@ -190,19 +190,11 @@ W.onready(()=>{
           <a class="nav-link" @click="go('')">Whitepaper</a>
         </li>
 
-        <li class="nav-item" v-bind:class="{ active: tab=='wallet' }">
+        <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
           <a class="nav-link" @click="go('wallet')">Wallet</a>
         </li>
 
-        <li class="nav-item" v-bind:class="{ active: tab=='network' }">
-          <a class="nav-link" @click="go('network')">Network</a>
-        </li>
-
-        <li class="nav-item"  v-bind:class="{ active: tab=='install' }">
-          <a class="nav-link" @click="go('install')">Install</a>
-        </li>
-
-        <li class="nav-item"  v-bind:class="{ active: tab=='exchange' }">
+        <li v-if="auth_code" class="nav-item"  v-bind:class="{ active: tab=='exchange' }">
           <a class="nav-link" @click="go('exchange')">Exchange</a>
         </li>
 
@@ -210,8 +202,20 @@ W.onready(()=>{
           <a class="nav-link" @click="go('gov')">Governance</a>
         </li>
 
+
+
+        <li class="nav-item"  v-bind:class="{ active: tab=='install' }">
+          <a class="nav-link" @click="go('install')">Install</a>
+        </li>
+
         <li class="nav-item"  v-bind:class="{ active: tab=='wiki' }">
           <a class="nav-link" @click="go('wiki')">Wiki</a>
+        </li>
+
+
+
+        <li class="nav-item" v-bind:class="{ active: tab=='network' }">
+          <a class="nav-link" @click="go('network')">Network</a>
         </li>
 
         <li class="nav-item"  v-bind:class="{ active: tab=='explorer' }">
@@ -223,7 +227,7 @@ W.onready(()=>{
       </ul>
 
 
-      <button type="button" class="btn btn-info" @click="call('sync')">Sync (Height {{K.total_blocks}}, {{timeAgo(K.ts)}})</button>
+      <button type="button" class="btn btn-info" @click="call('sync')">Sync (Block {{K.total_blocks}}, {{timeAgo(K.ts)}})</button>
   &nbsp;     <button v-if="pubkey" type="button" class="btn btn-danger" @click="call('logout')">Log Out</button>
 
     </div>
@@ -479,6 +483,7 @@ W.onready(()=>{
           </tbody>
         </table>
       </div>
+      <p>Solvency: {{solvency}}</p>
 
       <h1>Onchain</h1>
       <table class="table table-striped">
@@ -489,7 +494,8 @@ W.onready(()=>{
             <th scope="col">Pubkey</th>
             <th scope="col">Global Balance</th>
 
-            <th scope="col">Collateral + Settled</th>
+            <th scope="col">Collateral</th>
+            <th scope="col">Settled</th>
           </tr>
         </thead>
         <tbody>
@@ -498,10 +504,12 @@ W.onready(()=>{
             <th v-html="icon(toHexString(u.pubkey.data),30)"></th>
 
             <th scope="row">{{u.id}}</th>
-            <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}...</small></td>
+            <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}..</small></td>
             <td>{{commy(u.balance)}}</td>
             
-            <td>{{u.hub[0] ? commy(u.hub[0].collateral.collateral)+" + "+commy(u.hub[0].collateral.settled) : "0 + 0"}}</td>
+            <td>{{commy(u.hub[0] ? u.hub[0].collateral.collateral : 0)}}</td>
+            <td>{{commy(u.hub[0] ? u.hub[0].collateral.settled : 0)}}</td>
+
           </tr>
 
         </tbody>

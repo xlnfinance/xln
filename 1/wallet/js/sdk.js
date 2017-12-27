@@ -1,15 +1,15 @@
 
 
-W = (method, params={})=>{
+FS = (method, params={})=>{
   return new Promise((resolve,reject)=>{
-    var id = W.resolvers.push(resolve) - 1
+    var id = FS.resolvers.push(resolve) - 1
 
-    W.frame.contentWindow.postMessage({
+    FS.frame.contentWindow.postMessage({
       method: method,
       params: params,
       id: id,
       auth_code: localStorage.auth_code
-    }, W.origin)
+    }, FS.origin)
 
   })
 }
@@ -20,30 +20,30 @@ if(hash[1]){
   history.replaceState(null,null,'/#wallet')
 }
 
-W.frame=false;
-W.origin = location.origin
-W.frame=document.createElement('iframe');
-W.frame.style.display = 'none'
-W.frame.src=W.origin+'/sdk.html'
-document.body.appendChild(W.frame)
-W.onready = fn => {
-  if(W.ready == true){
+FS.frame=false;
+FS.origin = location.origin
+FS.frame=document.createElement('iframe');
+FS.frame.style.display = 'none'
+FS.frame.src=FS.origin+'/sdk.html'
+document.body.appendChild(FS.frame)
+FS.onready = fn => {
+  if(FS.ready == true){
     fn()
   }else{
-    W.ready = fn
+    FS.ready = fn
   }
 }
-W.resolvers = [()=>{
-  if(W.ready){
-    W.ready()
-    W.ready = true
+FS.resolvers = [()=>{
+  if(FS.ready){
+    FS.ready()
+    FS.ready = true
   }
 }]
 window.addEventListener('message', function(e){
-  if(e.origin == W.origin){
+  if(e.origin == FS.origin){
     var data = JSON.parse(e.data)
 
-    W.resolvers[data.id](data.result)
+    FS.resolvers[data.id](data.result)
     
   }
 })

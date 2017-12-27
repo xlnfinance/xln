@@ -95,39 +95,10 @@ How many Mb the blockchain adds per every week you wasn't actively syncing, and 
 
 
 
-asset
-collateral
-settled
-withdrawal_nonce
-
-
-offchain
-asset
-delta
-nonce
-
-
-
-real delta = delta - settled 
-real balance = collateral + real delta
-
-
-average real delta = over last week, calculated by clients
-
-
-offchain delta
-onchain delta
 
 
 
 
-
-
-
-
-
-
-PoW is not environmentally unfriendly, it's insecure.
 
 
 
@@ -141,13 +112,6 @@ PoW is not environmentally unfriendly, it's insecure.
 
 
 
-
-base58?
-/*
-require('bs58').encode(Buffer.from('ce3d0cf37445be0dac864df98686504fdeca15c09ed09861e6902d3b53956724', 'hex'))
-
-require('bs58').decode('Et4ynzi2iReyUdJCsq3zRffnhDbEhWszVDy1WxKqWqiK').toString('hex')
-*/
 
 
 

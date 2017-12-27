@@ -1,6 +1,4 @@
-module.exports = async function(dry_run = false){
-  l("Matching senders and receivers...")
-
+module.exports = async function(){
   var hubId = 1
 
   var deltas = await Delta.findAll({where: {hubId: hubId}})
@@ -10,8 +8,12 @@ module.exports = async function(dry_run = false){
 
   var channels = []
 
+  var solvency = 0
+
   for(var d of deltas){
     var ch = await me.channel(d.userId)
+
+    solvency += ch.delta
 
     if(ch.delta < -K.risk){
       ins.push(d.sig)
@@ -26,11 +28,13 @@ module.exports = async function(dry_run = false){
     }
   }
 
-  if(dry_run) return channels
-
-  if(ins.length > 0 && outs.length > 0){
-    l('Found matches ', ins, outs)
-    await me.broadcast('settle', r([0, ins, outs]))
+  return {
+    channels: channels,
+    solvency: solvency,
+    ins: ins,
+    outs: outs
   }
+
+
 
 }
