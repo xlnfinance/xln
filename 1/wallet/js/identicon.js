@@ -140,13 +140,6 @@
 
             var s = this.getDump();
 
-            // If the current browser supports the Base64 encoding
-            // function, then offload the that to the browser as it
-            // will be done in native code.
-            if ((typeof window.btoa !== 'undefined') && (window.btoa !== null)) {
-                return window.btoa(s);
-            }
-
             var ch = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
             var c1, c2, c3, e1, e2, e3, e4;
             var l = s.length;
@@ -212,6 +205,10 @@
     }
 
 })();
+
+
+
+
 
 
 /**

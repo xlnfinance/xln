@@ -2,5 +2,7 @@ rm -rf private/db* private/Failsafe-* data ../8001 ../8002 ../8003
 mkdir data
 mkdir private
 
-node fs genesis 128.199.242.161:8000
-node fs 8000
+node fs genesis 0.0.0.0:8000
+ttab node fs 8000
+ttab node fs 8001
+ttab node fs 8002

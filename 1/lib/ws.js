@@ -1,3 +1,4 @@
+//oldws = require('ws')
 
 function WebSocketClient(){
   this.number = 0;  // Message number

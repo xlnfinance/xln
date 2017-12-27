@@ -12,7 +12,7 @@ const stringify = require('./lib/stringify')
 const keccak = require('keccak')
 const BN = require('bn.js')
 
-nacl = require('tweetnacl')
+nacl = require('./lib/nacl')
 ec = nacl.sign.detached
 
 ws = require("uws")
@@ -32,7 +32,7 @@ Op = Sequelize.Op;
 asyncexec = require('util').promisify(exec)
 
 
-var [Me] = require('./lib/me')
+Me = require('./lib/me').Me
 
 
 
@@ -85,137 +85,6 @@ usage = ()=>{
 }
 
 
-//http://ipinfo.io/ip 
-genesis = async (opts)=>{
-
-  l("Start genesis")
-
-
-  await (sequelize.sync({force: true}))
-
-  opts = Object.assign({
-    username: 'root', 
-    pw: 'password', 
-    location: '0.0.0.0:8000' // for local tests
-    //infra: 'https://www.digitalocean.com'
-  }, opts)
-
-
-
-  l(opts)
-
-  // entity / country / infra 
-
-
-  var seed = await derive(opts.username, opts.pw)
-  delete(opts.pw)
-
-  me = new Me
-  await me.init(opts.username, seed);
-
-  var user = await (User.create({
-    pubkey: bin(me.id.publicKey),
-    username: opts.username,
-    nonce: 0,
-    balance: 100000000,
-    fsb_balance: 10000
-  }))
-
-
-  K = {
-    //global network pepper to protect derivation from rainbow tables
-    network_name: opts.username, 
-
-    usable_blocks: 0,
-    total_blocks: 0,
-    total_tx: 0,
-    total_bytes: 0,
-
-    total_tx_bytes: 0,
-
-    voting_period: 10,
-
-    bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
-    last_snapshot_height: 0,
-    snapshot_after_bytes: 1024*1024, //every MB
-    proposals_created: 0,
-
-    
-    tax: 3,
-
-    account_creation_fee: 100,
-    standalone_balance: 500, // keep $5 on your own balance for onchain tx fees
-
-    blocksize: 200000,
-    blocktime: 30,
-
-
-    prev_hash: toHex(Buffer.alloc(32)),
-
-    risk: 10000, // how much can a user lose if hub is insolvent? $100 
-
-
-    ts: 0,
-
-    created_at: ts(),
-
-    assets: [
-      { 
-        ticker: 'FSD',
-        name: "Failsafe Dollar",
-        total_supply: user.balance
-      },
-      {
-        ticker: 'FSB',
-        name: "Bond 2030",
-        total_supply: user.fsb_balance
-      }
-    ],
-
-    members: [],
-    total_shares: 300,
-    majority: 1,
-
-    hubs: []
-  }
-
-  K.members.push({
-    id: user.id,
-
-    username: opts.username,
-    location: opts.location,
-
-    block_pubkey: me.block_pubkey,
-
-    missed_blocks: [],
-    shares: 300,
-
-    hub: {
-      name: '1',
-      soft_limit: 100000,
-      hard_limit: 10000000
-    }
-  })
-
-
-
-  var json = stringify(K)
-  fs.writeFileSync('data/k.json', json)
-
-  me.K = K
-  me.members = JSON.parse(json).members // another object ref
-
-  l('Done')
-  process.exit(0)
-
-}
-
-
-
-
-
-
-
 
 
 
@@ -240,6 +109,8 @@ inputMap = (i)=>{
 // enumerator of all methods and tx types in the system
 methodMap = (i)=>{
   var map = [
+    'placeholder',
+
     'block',
 
     'settle',
@@ -259,13 +130,12 @@ methodMap = (i)=>{
 
     'fsd',
     'fsb',
-
-
   ]
+
   if(typeof i == 'string'){
     // buffer friendly
     assert(map.indexOf(i) != -1, "No such method")
-    return write32(map.indexOf(i))
+    return map.indexOf(i)
   }else{
     return map[i]
   }
@@ -317,7 +187,7 @@ trustlessInstall = async a=>{
       filter: (path,stat)=>{
         stat.mtime = null // must be deterministic
         // disable /private (blocks sqlite, proofs, local config) allow /default_private
-        if(path.match(/(\.DS_Store|private)/)){
+        if(path.match(/(\.DS_Store|private|node_modules|test)/)){
           //l('skipping '+path)
           return false;
         }
@@ -340,7 +210,7 @@ installSnippets = {}
 installSnippet = async (i)=>{
   var filename=`Failsafe-${i}.tar.gz`
   var cmd = "shasum -a 256 private/"+filename
-  l(cmd)
+
   exec(cmd, async (er,out,err)=>{
     if(out.length == 0){
       l('This state doesnt exist')
@@ -354,9 +224,8 @@ installSnippet = async (i)=>{
 f=${filename}
 mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f
 if [ ! -x /usr/bin/sha256sum ]; then alias sha256sum="shasum -a 256";fi
-if sha256sum $f | grep ${out_hash}; then tar -xzf $f && rm $f
-./install
-node u.js ${base_port+1}
+if sha256sum $f | grep ${out_hash}; then
+  tar -xzf $f && rm $f && ./install && node fs.js ${base_port+1}
 fi`
 
   })
@@ -368,7 +237,7 @@ originAllowence = {
 }
 
 
-
+me = false
 
 initDashboard=async a=>{
   var finalhandler = require('finalhandler');
@@ -420,9 +289,15 @@ initDashboard=async a=>{
 
   wss.on('error',function(err){ console.error(err)})
 
-  wss.on('connection', function(ws,req) {
+  wss.on('connection', function(ws) {
     ws.on('message', async msg=>{
-      if(msg[0] == '{'){
+       // uws requires explicit conversion
+      if(msg[0] != '{'){ //{
+        me.processInput(ws, msg)
+      
+      }else{
+        msg = bin(msg).toString()
+
         var result = {}
 
         var json = JSON.parse(msg)
@@ -538,7 +413,7 @@ initDashboard=async a=>{
               }
 
               if(!result.alert){
-                var encoded = r([Buffer([p.assetType == 'FSD' ? 0 : 1]), p.ins, outs])
+                var encoded = r([0, p.ins, outs])
                 
                 result.confirm = await me.broadcast('settleUser', encoded)
               }
@@ -581,12 +456,9 @@ initDashboard=async a=>{
             result.username = me.username // just for welcome message
 
             result.pubkey = toHex(me.id.publicKey)
+            
 
-            if(me.is_hub){
-
-            }else{
-              result.ch = await me.channel(1)
-            }
+            if(!me.is_hub) result.ch = await me.channel(1)
 
           }
         }
@@ -598,26 +470,7 @@ initDashboard=async a=>{
           result.K = K
 
           if(me.is_hub){
-            result.risky_deltas = await Delta.findAll({
-              order: [['delta','DESC']], 
-              where: {
-                hubId: 1,
-                delta: {
-                  [Sequelize.Op.gte]: K.risk
-                }
-            }})
-
-            result.spent_deltas = await Delta.findAll({
-              order: [['delta']], 
-              where: {
-                hubId: 1,
-                delta: {
-                  [Sequelize.Op.lte]: -K.risk
-                }
-            }})
-
-            result.deltas = result.risky_deltas.concat(result.spent_deltas)
-
+            result.deltas = await (require('./private/hub')(true))
           }
 
           if(me.my_member && K.last_snapshot_height){
@@ -638,8 +491,6 @@ initDashboard=async a=>{
         }))
 
 
-      }else{
-        me.processInput(ws,msg)
       }
 
     })
@@ -656,9 +507,9 @@ initDashboard=async a=>{
 
 derive = async (username, pw)=>{
   var seed = await require('./scrypt_'+os.platform()).hash(pw, {
-    N: Math.pow(2, 18),
+    N: Math.pow(2, 16),
     interruptStep: 1000,
-    p: 3,
+    p: 2,
     r: 8,
     dkLen: 32,
     encoding: 'base64'
@@ -670,9 +521,6 @@ derive = async (username, pw)=>{
 }
 
 // this is onchain database - shared among everybody
-var sq = require('path').resolve(__dirname, 'sqlite3_'+os.platform())
-l(sq)
-
 var base_db = {
   dialect: 'sqlite',
   //dialectModulePath: 'sqlite3',
@@ -715,7 +563,7 @@ Collateral = sequelize.define('collateral', {
   collateral: Sequelize.BIGINT, // collateral
   settled: Sequelize.BIGINT, // what hub already collateralized
 
-  assetType: Sequelize.CHAR(1).BINARY,
+  assetType: Sequelize.INTEGER,
 
   delayed: Sequelize.INTEGER
   // dispute has last nonce, last agreed_balance
@@ -762,6 +610,8 @@ Delta = privSequelize.define('delta', {
 
   nonce: Sequelize.INTEGER,
 
+  instant_until: Sequelize.INTEGER,
+
   delta: Sequelize.INTEGER
 })
 
@@ -791,7 +641,7 @@ sync = ()=>{
 if(process.argv[2] == 'console'){
 
 }else if(process.argv[2] == 'genesis'){
-  genesis({location: '128.199.242.161:8000'})
+  require('./private/genesis')({location: process.argv[3]})
 }else{
 
   privSequelize.sync({force: false})

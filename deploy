@@ -1,4 +1,4 @@
-rsync 1 root@failsafe.network:~/ -rv --exclude '.git'
+rsync 1 root@failsafe.network:~/ -rv --exclude '.git' --exclude '1/node_modules'
 
 ssh root@failsafe.network <<'ENDSSH'
 killall Failsafe

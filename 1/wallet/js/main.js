@@ -11,6 +11,8 @@ render = r=>{
 }
 
 
+
+
 W.onready(()=>{
   W('load').then(render)
 
@@ -27,6 +29,9 @@ W.onready(()=>{
 
 
   var methods = {
+    icon: (h, s)=>{
+      return '<img width='+s+' height='+s+' src="data:image/png;base64,' + (new Identicon(h.toString(), s).toString()) + '">'
+    },
     hljs: hljs.highlight,
 
     ivoted:(voters)=>{
@@ -170,7 +175,8 @@ W.onready(()=>{
     methods: methods,
     template: `
 <div>
-  <nav class="navbar navbar-expand-md navbar-dark bg-dark mb-4">
+  <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
+
     <a class="navbar-brand" href="#">Failsafe</a>
     <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
       <span class="navbar-toggler-icon"></span>
@@ -232,8 +238,11 @@ W.onready(()=>{
     <div v-else-if="tab=='wallet'">
 
       <template v-if="pubkey">
+
         <h5>Hello, <b>{{username}}</b>! Your ID is <b>{{record ? record.id : pubkey}}</b></h5>
         
+        <div v-html="icon(pubkey,160)"></div>
+
         <div v-if="is_hub"></div>
         <div v-else>
             
@@ -246,13 +255,13 @@ W.onready(()=>{
 
             <div class="progress" style="max-width:1000px">
               <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.delta<0?ch.collateral:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
-                {{commy(ch.failsafe)}} (secured)
+                {{commy(ch.failsafe)}} (insured)
               </div>
               <div v-if="ch.delta<0" v-bind:style="{ width: Math.round(-ch.delta*100/ch.collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
                 {{commy(ch.delta)}} (spent)
               </div>
               <div v-if="ch.delta>0" v-bind:style="{ width: Math.round(ch.delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
-                +{{commy(ch.delta)}} (risky)
+                +{{commy(ch.delta)}} (uninsured)
               </div>
             </div>
 
@@ -264,7 +273,7 @@ W.onready(()=>{
             </p>
 
             <button type="button" class="btn btn-success" @click="call('send', {off_to, off_amount})">Instant Send</button>\
-            <button type="button" class="btn btn-warning" @click="call('requestCollateral')">Request Collateral</button>\
+
             <button type="button" class="btn btn-danger" @click="call('takeEverything')">Take Everything</button>\
 
         </div>
@@ -374,9 +383,9 @@ W.onready(()=>{
         <h3>Currently only macOS/Linux are supported</h3>
         <p>1. Install <a href="https://nodejs.org/en/download/">Node.js</a></p>
         <p>2. Copy-paste this snippet to your text editor:</p>
-        <pre><b>{{install_snippet}}</b></pre>
+        <pre><code>{{install_snippet}}</code></pre>
         <p>3. (optional) Compare our snippet with snippets from other sources for better security in case our website is compromised: ...</p>
-        <p>4. If there's exact match paste the snippet into Terminal.app</p>
+        <p>4. If there's exact match paste the snippet into <kbd>Terminal.app</kbd></p>
     </div>
 
     <div v-else-if="tab=='exchange'">
@@ -448,11 +457,12 @@ W.onready(()=>{
 
     <div v-else-if="tab=='explorer'">
       <div v-if="is_hub">
-        <h1>Offchain Channels</h1>
+        <h1>Offchain</h1>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
-              <th scope="col">ID</th>
+              <th scope="col">Icon</th>
+              <th scope="col">Pubkey</th>
               <th scope="col">Delta</th>
               <th scope="col">Nonce</th>
             </tr>
@@ -460,34 +470,38 @@ W.onready(()=>{
           <tbody>
           
             <tr v-for="d in deltas">
-              <th scope="row"><small>{{toHexString(d.userId.data)}}</small></th>
-              <td  v-bind:class="{ 'error': d.delta < 0, 'warning': d.delta > 0 }">{{commy(d.delta)}}</td>
-              <td>{{d.nonce}}</td>
+              <th v-html="icon(toHexString(d.delta_record.userId.data),30)"></th>
+              <th scope="row"><small>{{toHexString(d.delta_record.userId.data).substr(0,10)}}...</small></th>
+              <td v-bind:style="{ 'color': 'black', 'background-color': d.delta < 0 ? '#5ed679' : '#ff6e7c' }">{{commy(d.delta)}}</td>
+              <td>{{d.delta_record.nonce}}</td>
             </tr>
 
           </tbody>
         </table>
       </div>
 
-      <h1>Onchain Explorer</h1>
+      <h1>Onchain</h1>
       <table class="table table-striped">
         <thead class="thead-dark">
           <tr>
+            <th scope="col">Icon</th>
             <th scope="col">ID</th>
             <th scope="col">Pubkey</th>
             <th scope="col">Global Balance</th>
 
-            <th scope="col">Collateral @1</th>
+            <th scope="col">Collateral + Settled</th>
           </tr>
         </thead>
         <tbody>
 
           <tr v-for="u in users">
+            <th v-html="icon(toHexString(u.pubkey.data),30)"></th>
+
             <th scope="row">{{u.id}}</th>
-            <td><small>{{toHexString(u.pubkey.data)}}</small></td>
+            <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}...</small></td>
             <td>{{commy(u.balance)}}</td>
             
-            <td>{{commy(u.hub[0] ? u.hub[0].collateral.collateral : 0)}}</td>
+            <td>{{u.hub[0] ? commy(u.hub[0].collateral.collateral)+" + "+commy(u.hub[0].collateral.settled) : "0 + 0"}}</td>
           </tr>
 
         </tbody>
