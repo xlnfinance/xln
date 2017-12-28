@@ -65,6 +65,8 @@ module.exports = async (opts)=>{
 
 
 
+
+
   K = {
     //global network pepper to protect derivation from rainbow tables
     network_name: opts.username, 
@@ -96,6 +98,10 @@ module.exports = async (opts)=>{
     prev_hash: toHex(crypto.randomBytes(32)), //toHex(Buffer.alloc(32)),
 
     risk: 10000, // how much can a user lose if hub is insolvent? $100 
+
+    hub_fee_base: 1, // a fee per payment
+    hub_fee: 0.001, // 10 basis points
+
 
 
     ts: 0,

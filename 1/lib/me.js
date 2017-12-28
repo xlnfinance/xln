@@ -1,5 +1,6 @@
 WebSocketClient = require('./ws')
 stringify = require('./stringify')
+Tx = require('./tx')
 
 class Me {
   async init(username, seed) {
@@ -40,7 +41,7 @@ class Me {
 
       if(total_size + tx.length > K.blocksize) break;
 
-      var result = await me.processTx(tx, pseudo_balances)
+      var result = await Tx.processTx(tx, pseudo_balances)
       if(result.success){
         ordered_tx.push(tx)
         total_size += tx.length
@@ -93,279 +94,6 @@ class Me {
     return me.precommit
   }
 
-  async processTx(tx, pseudo_balances) {
-    var [id, sig, methodId, args] = r(tx)
-    methodId = readInt(methodId)
-
-    var signer = await User.findById(readInt(id))
-
-    if(!signer)
-    return {error: "This user doesn't exist"}
-
-
-    // we prepend omitted vars to not bloat tx size
-    var payload = r([signer.nonce, methodId, args])
-
-    if(!ec.verify(payload, sig, signer.pubkey))
-    return {error:"Invalid signature"}
-
-
-
-    var method = methodMap(methodId)
-
-    if(allowedOnchain.indexOf(method) == -1)
-    return {error: 'No such method exposed onchain'}
-
-
-
-
-
-    var tax = Math.round(K.tax * tx.length)
-
-
-    if(signer.balance < tax)
-    return {error: "Not enough balance to cover tx fee"}
-
-
-    // This is precommit, so no need to apply tx and change db
-    if(pseudo_balances){
-      if(pseudo_balances[signer.id]){
-        return {error: 'Only one tx per block per account currently allowed'}
-      }else{
-        pseudo_balances[signer.id] = true
-        return {success: true}
-      }
-    }
-
-
-
-    l(`ProcessTx: ${method} with ${args.length} by ${id}`)
-    // Validation is over, fee is ours
-    signer.balance -= tax
-    signer.nonce += 1
-    //signer.save()
-
-    args = r(args)
-
-    switch(method){
-      case 'propose':
-        var execute_on = K.usable_blocks + K.voting_period //60*24
-
-        var new_proposal = await Proposal.create({
-          desc: args[0].toString(),
-          code: args[1].toString(),
-          patch: args[2].toString(),
-          kindof: method,
-          delayed: execute_on,
-          userId: signer.id
-        })
-
-        l(`Added new proposal!`)
-
-        K.proposals_created++
-
-        break
-      // don't forget BREAK
-      // we use fall-through for methods covered by same code
-      // settle uses relative user_id, users settle for absolute hub_id
-      case 'settle':
-      case 'settleUser':      
-        // 1. collect all ins collateral
-        var [assetType, inputs, outputs] = args
-
-        var is_hub = (method == 'settle')
-
-        for(let input of inputs){
-          var [pubkey, sig, body] = r(input)
-
-          assert(is_hub) // only hubs have inputs now
-
-          if(ec.verify(body, sig, pubkey)){
-            var [counterparty, nonce, delta, instant_until] = me.parseDelta(body)
-
-            var user = await me.byKey(pubkey)
-
-            var ch = await Collateral.find({
-              where: {
-                userId: user.id,
-                hubId: 1,
-                assetType: 0
-              },
-              include: {all: true}
-            })
-
-            //inverse delta to amount
-            var amount = -(ch.settled + delta)
-
-            if(readInt(counterparty) != 1){l("Wrong hub"); continue}
-            if(nonce <= ch.nonce){l("Wrong nonce"); continue}
-            if(amount <= 0){l("Must be over 0"); continue}
-            if(ch.collateral < amount){l("Invalid amount"); continue}
-
-            ch.nonce = nonce
-            ch.collateral -= amount
-            ch.settled += amount
-
-            // adding everything to the signer first
-            signer.balance += amount
-            await ch.save()
-          }
-
-        }
-
-        // 2. are there disputes?
-
-
-
-        // 3. pay to outputs
-
-        for(var i = 0; i<outputs.length;i++){
-
-          var [userId, hubId, amount] = outputs[i]
-
-          var originalAmount = readInt(amount)
-          amount = readInt(amount)
-          hubId = readInt(hubId)
-
-          // is pubkey or id
-          //if(userId.length != 32) userId = readInt(userId)
-
-          if(amount > signer.balance) continue
-
-
-
-          if(userId.length == 32){
-            var user = await User.findOrBuild({
-              where: {pubkey: userId},
-              defaults: {
-                fsb_balance: 0,
-                nonce: 0
-              }
-            })
-            user = user[0]
-          }else{
-            var user = await User.findById(readInt(userId))
-          }
-
-
-
-
-          if(user.id){
-
-            if(hubId == undefined){
-              // can't settle to own global balance
-              if(user.id == signer.id) continue
-
-              l('Adding to existing user')
-              // already exists
-              user.balance += amount
-              signer.balance -= amount
-            }else{
-
-            }
-          }else{
-
-            l("Created new user")
-
-            if(hubId == undefined){
-              if(amount < K.account_creation_fee) continue
-              user.balance = (amount - K.account_creation_fee)
-              signer.balance -= amount
-            }else{
-              var fee = (K.standalone_balance+K.account_creation_fee)
-              if(amount < fee) continue
-
-              user.balance = K.standalone_balance
-              amount -= fee
-              signer.balance -= fee
-
-            }
-
-          }
-
-          await user.save()
-
-          if(hubId){
-            var ch = await Collateral.findOrBuild({
-              where: {
-                userId: user.id,
-                hubId: hubId,
-                assetType: 0
-              },
-              defaults:{
-                nonce: 0,
-                collateral: 0,
-                settled: 0
-              },
-              include: { all: true }
-            })
-
-            ch[0].collateral += amount
-
-            if(is_hub) ch[0].settled -= originalAmount
-            signer.balance -= amount
-
-            await ch[0].save()
-
-          }
-
-        }
-
-        await signer.save()
-
-        break
-
-      case 'voteApprove':
-      case 'voteDeny':
-        var [proposalId, rationale] = args
-        var vote = await Vote.findOrBuild({
-          where: {
-            userId: id,
-            proposalId: readInt(proposalId)
-          }
-        })
-        vote = vote[0]
-
-        vote.rationale = rationale.toString()
-        vote.approval = method == 'voteApprove'
-
-        await vote.save()
-        l(`Voted ${vote.approval} for ${vote.proposalId}`)
-
-        break
-      }
-
-      signer.save()
-
-      return {success: true}
-    }
-
-
-
-
-
-
-
-  async mint(assetType, userId, hubId, amount){
-    var ch = (await Collateral.findOrBuild({
-      where: {
-        userId: userId,
-        hubId: hubId,
-        assetType: 0
-      },
-      defaults:{
-        nonce: 0,
-        collateral: 0,
-        settled: 0
-      },
-      include: { all: true }
-    }))[0]
-
-    ch.collateral += amount
-    K.assets[assetType].total_supply += amount
-    
-    await ch.save()
-  }
 
 
 
@@ -453,7 +181,6 @@ class Me {
     me.record = await me.byKey()
 
     for(var m of me.members){
-      m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
       if(me.record && me.record.id == m.id){
         me.my_member = m
         me.is_hub = me.my_member.hub
@@ -482,16 +209,14 @@ class Me {
             await me.broadcast('settle', r([0, h.ins, h.outs]))
           }
           
-      }, 30000)
+        }, K.blocktime)
       }
     }else{
       // keep connection to hub open
       me.sendMember('auth', me.offchainAuth(), 0)
 
-
       l("Set up sync")
-      //setInterval(sync, 30000)
-
+      setInterval(sync, 60000)
     }
 
 
@@ -510,8 +235,8 @@ class Me {
   // or a new tx from anyone to be added to block or passed to current member
   async processInput(ws, tx){
     tx = bin(tx)
-    // sanity checks 100kb
-    if(tx.length > 100000){
+    // sanity checks 100mb
+    if(tx.length > 100000000){
       l(`too long input ${(tx).length}`)
       return false
     }
@@ -665,7 +390,9 @@ class Me {
 
           await ch.delta_record.save()
 
-          await me.payChannel(mediate_to, amount)
+          var fee = K.hub_fee_base + Math.round(amount * K.hub_fee)
+
+          await me.payChannel(mediate_to, amount - fee)
 
         }else{
           // is it for us?
@@ -679,6 +406,8 @@ class Me {
 
           // for users, delta of deltas is reversed
           var amount = delta - ch.delta_record.delta
+
+          l(amount)
 
           assert(amount > 0)
 
@@ -747,6 +476,8 @@ class Me {
       }else{
         l(`not online, deliver later? ${tx}`)
       }
+  
+      await ch.delta_record.save()
 
     }else{
       if(amount < 0 || amount > ch.total){
@@ -765,10 +496,11 @@ class Me {
       var sig = ec(body, me.id.secretKey)
 
       me.sendMember('mediate', r([bin(me.id.publicKey), bin(sig), body, mediate_to]), 0)
+      // todo: ensure delivery
+  
+      await ch.delta_record.save()
 
     }
-
-    await ch.delta_record.save()
 
     return [true, false]
 
@@ -919,7 +651,7 @@ class Me {
 
     // processing transactions one by one
     for(var i = 0;i<ordered_tx.length;i++){
-      await me.processTx(ordered_tx[i])
+      await Tx.processTx(ordered_tx[i])
       K.total_tx++
       K.total_tx_bytes+=ordered_tx[i].length
     }

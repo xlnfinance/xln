@@ -1,30 +1,31 @@
 #!/usr/bin/env node
 
+//system
 assert = require("assert");
-crypto = require("crypto");
 fs = require("fs")
 http = require("http");
 os = require('os')
+ws = require("uws")
+opn = require('./lib/opn')
+
+//crypto
+crypto = require("crypto");
+scrypt = require('scrypt') // require('./scrypt_'+os.platform())
+keccak = require('keccak')
+nacl = require('./lib/nacl')
+ec = nacl.sign.detached
+
+//encoders
+BN = require('bn.js')
+stringify = require('./lib/stringify')
+rlp = require('rlp')
+
+
+
 
 base_port = process.argv[2] ? parseInt(process.argv[2]) : 8000
 
 
-// deterministic JSON
-const stringify = require('./lib/stringify')
-const keccak = require('keccak')
-const BN = require('bn.js')
-
-nacl = require('./lib/nacl')
-ec = nacl.sign.detached
-
-ws = require("uws")
-
-rlp = require('rlp')
-
-const opn = require('./lib/opn')
-
-//diff2html = require("diff2html").Diff2Html
-//diff2html.getPrettyHtmlFromDiff(f)
 
 child_process = require('child_process')
 const {spawn, exec, execSync} = child_process;
@@ -61,20 +62,13 @@ kmac = (key, msg)=>keccak('keccak256').update(key).update(bin(msg)).digest()
 
 ts = () => Math.round(new Date/1000)
 
-toUTF = (inp) => Buffer.from(inp).toString()
 
 
-fromHex = hex => new Buffer(hex, "hex");
-odd = int => int % 2 == 1;
+
 concat = function() {
   return Buffer.concat(Object.values(arguments));
 }
 
-write32 = (int) => {
-  var b = Buffer.alloc(4)
-  b.writeUInt32BE(int)
-  return b
-}
 
 
 
@@ -163,7 +157,11 @@ loadJSON = ()=>{
 
     me.K = K
     me.members = JSON.parse(json).members // another object ref
-      
+    
+    me.members.map(f=>{
+      f.block_pubkey = Buffer.from(f.block_pubkey,'hex')
+    })
+
     
   }
 }
@@ -172,11 +170,6 @@ loadJSON = ()=>{
 
 
 
-
-
-postPubkey = (pubkey, msg)=>{
-
-}
 
 trustlessInstall = async a=>{
   tar = require('tar')
@@ -320,16 +313,12 @@ initDashboard=async a=>{
               break
             case 'load':
               if(p.username){
-                if(p.location && !K){
-                  await genesis({username, pw, location} = p)
-                }
-
                 var seed = await derive(p.username, p.pw)
                 me.init(p.username, seed)
 
-                result.confirm = "Welcome!"
-                
                 await me.start()
+                
+                result.confirm = "Welcome!"                
               }
 
               break
@@ -337,6 +326,13 @@ initDashboard=async a=>{
               me.id = false
               result.pubkey = false
 
+              break
+
+            case 'takeEverything':
+
+              var ch = await me.channel(1)
+              await me.broadcast('settleUser', r([ 0, [ch.sig], [] ]))
+              result.confirm = "Started a dispute onchain. Please wait a delay period to get your money back."
               break
 
             case 'send':
@@ -512,7 +508,7 @@ initDashboard=async a=>{
 
 
 derive = async (username, pw)=>{
-  var seed = await require('./scrypt_'+os.platform()).hash(pw, {
+  var seed = await scrypt.hash(pw, {
     N: Math.pow(2, 16),
     interruptStep: 1000,
     p: 2,

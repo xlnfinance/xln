@@ -11,7 +11,7 @@ render = r=>{
 }
 
 
-
+FS.resolvers.push(render)
 
 FS.onready(()=>{
   FS('load').then(render)
@@ -150,7 +150,7 @@ FS.onready(()=>{
 
       pw: 'password',
       username: location.port == 8000 ? 'root' : location.port,
-      location: '128.199.242.161:8000',
+
 
       channels: {},
 
@@ -164,12 +164,12 @@ FS.onready(()=>{
       outs: [{to:'', amount:''}],
 
       off_to: '1',
-      off_amount: '1.00',
+      off_amount: '25.00',
       is_hub: false,
 
 
 
-      proposal: ['Mint $1000 FSD to 1@1',`await me.mint(0, 1, 1, 100000)`,'']
+      proposal: ['Mint $1000 FSD to 1@1',`await Tx.mint(0, 1, 1, 100000)`,'']
 
     } },
     methods: methods,
@@ -318,7 +318,7 @@ FS.onready(()=>{
       </template>
 
 
-      <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw, location})">
+      <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
 
         <label for="inputUsername" class="sr-only">Username</label>
         <input v-model="username" type="text" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
@@ -332,10 +332,7 @@ FS.onready(()=>{
         <p>There's no password recovery procedure because FN is decentralized and no one can generate your private key without your password.
         </p>
 
-        <template v-if="!K">
-          <p>No members found. Would you like to start private fs? Enter your IP:</p>
-          <input v-model="location" type="text" id="inputLocation" class="form-control"><br>
-        </template>
+
 
 
         <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
@@ -483,7 +480,7 @@ FS.onready(()=>{
           </tbody>
         </table>
       </div>
-      <p>Solvency: {{solvency}}</p>
+      <p>Risk limit: \${{commy(K.risk)}}, settled every {{K.blocktime}} seconds. Hub solvency: \${{commy(solvency)}}</p>
 
       <h1>Onchain</h1>
       <table class="table table-striped">

@@ -1,7 +1,5 @@
 # Failsafe - instant decentralized payments
 
-Here's a project I've been working on for last 7 months, and while it's still in quite early stage, I'd like to share details and the prototype to hear some advice.
-
 Failsafe is a combination of different concepts. First and foremost it's the payment network of value transfers anything-to-anything, what Bitcoin wanted to become.
 
 Our vision is to provide decentralization, scalability and stability, with no compromises in any of them.

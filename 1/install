@@ -1,1 +1,1 @@
-npm i tar tweetnacl sequelize finalhandler serve-static rlp bn.js keccak sqlite3 uws
+npm i tar scrypt tweetnacl sequelize finalhandler serve-static rlp bn.js keccak sqlite3 uws

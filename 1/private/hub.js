@@ -15,11 +15,11 @@ module.exports = async function(){
 
     solvency += ch.delta
 
-    if(ch.delta < -K.risk){
+    if(ch.delta <= -K.risk){
       ins.push(d.sig)
       channels.push(ch)
 
-    }else if(ch.delta > K.risk){
+    }else if(ch.delta >= K.risk){
       outs.push([d.userId, hubId, ch.delta])
       channels.push(ch)
 
