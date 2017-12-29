@@ -128,6 +128,8 @@ module.exports = {
 
 
         // 3. pay to outputs
+
+        // we want outputs to pay for their own rebalance
         var reimbursed = 0
         var reimburse_tax = 1 + Math.floor(tax / outputs.length)
 
@@ -212,12 +214,16 @@ module.exports = {
               include: { all: true }
             })
 
-            ch[0].collateral += (amount - reimburse_tax)
+            ch[0].collateral += amount
 
-            if(is_hub) ch[0].settled -= originalAmount
+            if(is_hub){
+              ch[0].collateral -= reimburse_tax
+              reimbursed += reimburse_tax
+  
+              ch[0].settled -= originalAmount
+            }
             signer.balance -= amount
 
-            reimbursed += reimburse_tax
 
             await ch[0].save()
 
@@ -225,7 +231,7 @@ module.exports = {
 
         }
 
-        await signer.save()
+        signer.balance += reimbursed
 
         break
 

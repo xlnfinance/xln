@@ -1,0 +1,18 @@
+cd 1
+rm -rf private/db* private/Failsafe-* data ../8001 ../8002 ../8003 ../8004 ../8005
+mkdir data
+mkdir private
+
+node fs genesis 0.0.0.0:8000
+
+cd ..
+
+cp -r 1 8001
+cp -r 1 8002
+cp -r 1 8003
+cp -r 1 8004
+cp -r 1 8005
+
+ttab "cd 8001; node fs 8001"
+ttab "cd 8002; node fs 8002"
+cd 1; node fs 8000
