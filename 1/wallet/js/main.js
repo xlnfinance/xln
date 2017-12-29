@@ -85,6 +85,13 @@ FS.onready(()=>{
       app.tab = path
     },
 
+    deltaColor:(d)=>{
+      if(d < -app.K.risk) return '#ff6e7c'
+      if(d > app.K.risk) return '#5ed679'
+      
+      return ''
+    },
+
     commy: (b,dot=true)=>{
 
       b = b.toString()
@@ -458,6 +465,8 @@ FS.onready(()=>{
 
     <div v-else-if="tab=='explorer'">
       <div v-if="is_hub">
+        <p>Risk limit: \${{commy(K.risk)}}, settled every 20 seconds. Solvency: \${{commy(solvency)}}</p>
+
         <h1>Offchain</h1>
         <table class="table table-striped">
           <thead class="thead-dark">
@@ -473,14 +482,13 @@ FS.onready(()=>{
             <tr v-for="d in deltas">
               <th v-html="icon(toHexString(d.delta_record.userId.data),30)"></th>
               <th scope="row"><small>{{toHexString(d.delta_record.userId.data).substr(0,10)}}...</small></th>
-              <td v-bind:style="{ 'color': 'black', 'background-color': d.delta < 0 ? '#5ed679' : '#ff6e7c' }">{{commy(d.delta)}}</td>
+              <td v-bind:style="{ 'color': 'black', 'background-color': deltaColor(d.delta) }">{{commy(d.delta)}}</td>
               <td>{{d.delta_record.nonce}}</td>
             </tr>
 
           </tbody>
         </table>
       </div>
-      <p>Risk limit: \${{commy(K.risk)}}, settled every {{K.blocktime}} seconds. Hub solvency: \${{commy(solvency)}}</p>
 
       <h1>Onchain</h1>
       <table class="table table-striped">

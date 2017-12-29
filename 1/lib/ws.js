@@ -1,4 +1,4 @@
-//oldws = require('ws')
+normalws = require('ws')
 
 function WebSocketClient(){
   this.number = 0;  // Message number
@@ -6,7 +6,7 @@ function WebSocketClient(){
 }
 WebSocketClient.prototype.open = function(url){
   this.url = url;
-  this.instance = new ws(this.url);
+  this.instance = new normalws(this.url);
   this.instance.on('open',()=>{
     this.onopen();
   });

@@ -10,7 +10,8 @@ opn = require('./lib/opn')
 
 //crypto
 crypto = require("crypto");
-scrypt = require('scrypt') // require('./scrypt_'+os.platform())
+//scrypt = require('scrypt') // require('./scrypt_'+os.platform())
+
 keccak = require('keccak')
 nacl = require('./lib/nacl')
 ec = nacl.sign.detached
@@ -317,7 +318,7 @@ initDashboard=async a=>{
                 me.init(p.username, seed)
 
                 await me.start()
-                
+
                 result.confirm = "Welcome!"                
               }
 
@@ -508,18 +509,35 @@ initDashboard=async a=>{
 
 
 derive = async (username, pw)=>{
-  var seed = await scrypt.hash(pw, {
-    N: Math.pow(2, 16),
-    interruptStep: 1000,
-    p: 2,
-    r: 8,
-    dkLen: 32,
-    encoding: 'base64'
-  }, 32, username)
 
-  l(`Derived ${seed.toString('hex')} for ${username}:${pw}`)
+  return new Promise((resolve,reject)=>{
+    require('./lib/scrypt')(pw, username, {
+        N: Math.pow(2, 16),
+        r: 8,
+        p: 2,
+        dkLen: 32,
+        encoding: 'binary'
+    }, (r)=>{
+      r = bin(r)
+      l(`Derived ${r.toString('hex')} for ${username}:${pw}`)
+      resolve(r)
+    });
 
-  return seed;
+/*
+    var seed = await scrypt.hash(pw, {
+      N: Math.pow(2, 16),
+      interruptStep: 1000,
+      p: 2,
+      r: 8,
+      dkLen: 32,
+      encoding: 'binary'
+    }, 32, username)
+
+
+    return seed;*/
+
+  })
+
 }
 
 // this is onchain database - shared among everybody
@@ -594,7 +612,7 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'});
 
 if(!fs.existsSync('private')) fs.mkdirSync('private')
 
-base_db.storage = 'private/db'+base_port+'.sqlite'
+base_db.storage = 'private/db.sqlite'
 privSequelize = new Sequelize('', '', 'password', base_db);
 
 Block = privSequelize.define('block', {

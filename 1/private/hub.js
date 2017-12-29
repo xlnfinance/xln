@@ -8,21 +8,21 @@ module.exports = async function(){
 
   var channels = []
 
-  var solvency = 0
+  me.record = await me.byKey()
+
+  var solvency = me.record.balance
 
   for(var d of deltas){
     var ch = await me.channel(d.userId)
 
-    solvency += ch.delta
+    solvency -= ch.delta
+    
+    channels.push(ch)
 
     if(ch.delta <= -K.risk){
       ins.push(d.sig)
-      channels.push(ch)
-
     }else if(ch.delta >= K.risk){
       outs.push([d.userId, hubId, ch.delta])
-      channels.push(ch)
-
     }else{
       //l("This is low delta ", ch)
     }

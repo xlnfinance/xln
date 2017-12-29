@@ -209,7 +209,7 @@ class Me {
             await me.broadcast('settle', r([0, h.ins, h.outs]))
           }
           
-        }, K.blocktime)
+        }, 20000)
       }
     }else{
       // keep connection to hub open
@@ -257,17 +257,19 @@ class Me {
       if(me.is_hub){ 
         // offline delivery if missed
         var ch = await me.channel(obj.signer)
-        let negative = ch.delta_record.delta < 0 ? 1 : null
+        if(ch.delta_record.id){
+          let negative = ch.delta_record.delta < 0 ? 1 : null
 
-        var body = r([
-          methodMap('delta'), obj.signer, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
-        ])
+          var body = r([
+            methodMap('delta'), obj.signer, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
+          ])
 
-        var sig = ec(body, me.id.secretKey)
-        var tx = concat(inputMap('mediate'), r([
-          bin(me.id.publicKey), bin(sig), body, 0
-        ]))
-        wss.users[obj.signer].send(tx)
+          var sig = ec(body, me.id.secretKey)
+          var tx = concat(inputMap('mediate'), r([
+            bin(me.id.publicKey), bin(sig), body, 0
+          ]))
+          wss.users[obj.signer].send(tx)
+        }
       }
 
 
@@ -404,10 +406,10 @@ class Me {
 
           var ch = await me.channel(1)
 
-          // for users, delta of deltas is reversed
-          var amount = delta - ch.delta_record.delta
+          l(delta, ch.delta_record.delta)
 
-          l(amount)
+          // for users, delta of deltas is reversed
+          var amount = parseInt(delta - ch.delta_record.delta)
 
           assert(amount > 0)
 
@@ -540,6 +542,7 @@ class Me {
           userId: counterparty
         },defaults: {
           delta: 0,
+          instant_until: 0,
           nonce: 0
         }
       })
@@ -574,11 +577,8 @@ class Me {
 
     }
 
-
-    if(delta[0]){
-      r.delta += delta[0].delta 
-      r.delta_record = delta[0]
-    }
+    r.delta += delta[0].delta 
+    r.delta_record = delta[0]
 
 
     r.total = r.collateral + r.delta

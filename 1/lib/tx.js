@@ -46,7 +46,8 @@ module.exports = {
 
 
     l(`ProcessTx: ${method} with ${args.length} by ${id}`)
-    // Validation is over, fee is ours
+
+    // Validation is over, fee is ours. Can be reimbursed by outputs.
     signer.balance -= tax
     signer.nonce += 1
     //signer.save()
@@ -127,6 +128,8 @@ module.exports = {
 
 
         // 3. pay to outputs
+        var reimbursed = 0
+        var reimburse_tax = 1 + Math.floor(tax / outputs.length)
 
         for(var i = 0; i<outputs.length;i++){
 
@@ -209,10 +212,12 @@ module.exports = {
               include: { all: true }
             })
 
-            ch[0].collateral += amount
+            ch[0].collateral += (amount - reimburse_tax)
 
             if(is_hub) ch[0].settled -= originalAmount
             signer.balance -= amount
+
+            reimbursed += reimburse_tax
 
             await ch[0].save()
 
