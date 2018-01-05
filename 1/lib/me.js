@@ -193,7 +193,7 @@ class Me {
 
     if(this.my_member){
 
-      setInterval(require('../private/member'), 2000)
+      setInterval(require('./member'), 2000)
 
 
       for(var m of this.members){
@@ -205,7 +205,7 @@ class Me {
 
       if(this.is_hub){
         setInterval(async ()=>{
-          var h = await (require('../private/hub')())
+          var h = await (require('./hub')())
 
           if(h.ins.length > 0 || h.outs.length > 0){
             await this.broadcast('settle', r([0, h.ins, h.outs]))

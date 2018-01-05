@@ -209,7 +209,7 @@ cache = async (i)=>{
     cached_result.K = K
 
     if(me.is_hub){
-      var h = require('./private/hub')
+      var h = require('./lib/hub')
       h = await h()
       cached_result.deltas = h.channels
       cached_result.solvency = h.solvency
@@ -686,7 +686,7 @@ if(process.argv[2] == 'console'){
   city()
 
 }else if(process.argv[2] == 'genesis'){
-  require('./private/genesis')({location: process.argv[3]})
+  require('./lib/genesis')({location: process.argv[3]})
 }else{
 
   privSequelize.sync({force: false})
