@@ -1,5 +1,8 @@
+
 module.exports = {
   processTx: async function processTx(tx, pseudo_balances) {
+    //l('new ', r(tx, true))
+
     var [id, sig, methodId, args] = r(tx)
     methodId = readInt(methodId)
 
@@ -49,8 +52,7 @@ module.exports = {
 
     // Validation is over, fee is ours. Can be reimbursed by outputs.
     signer.balance -= tax
-    signer.nonce += 1
-    //signer.save()
+    K.collected_tax += tax
 
     args = r(args)
 
@@ -83,38 +85,67 @@ module.exports = {
         var is_hub = (method == 'settle')
 
         for(let input of inputs){
-          var [pubkey, sig, body] = r(input)
+          if(input.length == 1){
+            //var pubkey = input
+            var no_delta = true
+          }else{
+            var no_delta = false
+            l(input)
+            var [pubkey, sig, body] = input
 
-          //assert(is_hub) // only hubs have inputs now
+          }
 
-          if(ec.verify(body, sig, pubkey)){
-            var [counterparty, nonce, delta, instant_until] = me.parseDelta(body)
+          l(body, sig, pubkey)
 
-            var user = await me.byKey(pubkey)
+          if(no_delta || ec.verify(body, sig, pubkey)){
+            var [counterparty, nonce, delta, instant_until] = no_delta ? [signer.pubkey, 0, 0, 0] : me.parseDelta(body)
 
             var ch = await Collateral.find({
               where: {
-                userId: is_hub ? user.id : signer.id,
-                hubId: is_hub ? 1 : 1,
+                userId: is_hub ? (await me.byKey(pubkey)).id : signer.id,
+                hubId: 1,
                 assetType: 0
               },
               include: {all: true}
             })
 
-            //inverse delta to amount
-            var amount = -(ch.settled + delta)
 
-            if(readInt(counterparty) != 1){l("Wrong hub"); continue}
-            if(nonce <= ch.nonce){l("Wrong nonce"); continue}
-            if(amount <= 0){l("Must be over 0"); continue}
-            if(ch.collateral < amount){l("Invalid amount"); continue}
+            if(is_hub){
+              //inverse delta to amount
+              var amount = -(ch.settled + delta)
+              if(readInt(counterparty) != 1){l("Wrong hub"); continue}
+
+              //if(nonce < ch.nonce){l("Wrong nonce"); continue}
+              if(amount <= 0){l("Must be over 0"); continue}
+              if(ch.collateral < amount){
+                // we don't allow users to pay below collateral yet
+                l(`Invalid amount ${ch.collateral} vs ${amount}`); 
+                continue
+              }
+
+              ch.settled += amount
+            }else{
+              var amount = ch.collateral + ch.settled + delta
+              l(ch.collateral, ch.settled, delta)
+              l(counterparty, signer.pubkey)
+
+              if(!signer.pubkey.equals(counterparty)){l("Wrong counterparty of delta proof"); continue}              
+
+              if(amount <= 0){l("Must be over 0"); continue}
+
+              if(ch.collateral < amount){
+                amount = ch.collateral
+                // the rest goes to debt
+              }
+
+
+            }
 
             // if instant_until too late...
 
             ch.nonce = nonce
             ch.collateral -= amount
 
-            if(is_hub) ch.settled += amount
 
             // adding everything to the signer first
             signer.balance += amount
@@ -128,6 +159,8 @@ module.exports = {
 
 
         // 3. pay to outputs
+
+        // we want outputs to pay for their own rebalance
         var reimbursed = 0
         var reimburse_tax = 1 + Math.floor(tax / outputs.length)
 
@@ -137,6 +170,9 @@ module.exports = {
 
           var originalAmount = readInt(amount)
           amount = readInt(amount)
+
+          l('outputs ', amount, originalAmount)
+
           hubId = readInt(hubId)
 
           // is pubkey or id
@@ -144,13 +180,10 @@ module.exports = {
 
           if(amount > signer.balance) continue
 
-
-
           if(userId.length == 32){
             var user = await User.findOrBuild({
               where: {pubkey: userId},
               defaults: {
-                fsb_balance: 0,
                 nonce: 0
               }
             })
@@ -182,9 +215,10 @@ module.exports = {
             if(hubId == undefined){
               if(amount < K.account_creation_fee) continue
               user.balance = (amount - K.account_creation_fee)
+
               signer.balance -= amount
             }else{
-              var fee = (K.standalone_balance+K.account_creation_fee)
+              var fee = (K.standalone_balance + K.account_creation_fee)
               if(amount < fee) continue
 
               user.balance = K.standalone_balance
@@ -192,6 +226,9 @@ module.exports = {
               signer.balance -= fee
 
             }
+
+            K.collected_tax += K.account_creation_fee
+
 
           }
 
@@ -212,12 +249,16 @@ module.exports = {
               include: { all: true }
             })
 
-            ch[0].collateral += (amount - reimburse_tax)
+            ch[0].collateral += amount
 
-            if(is_hub) ch[0].settled -= originalAmount
+            if(is_hub){
+              ch[0].collateral -= reimburse_tax
+              reimbursed += reimburse_tax
+  
+              ch[0].settled -= originalAmount
+            }
             signer.balance -= amount
 
-            reimbursed += reimburse_tax
 
             await ch[0].save()
 
@@ -225,7 +266,7 @@ module.exports = {
 
         }
 
-        await signer.save()
+        signer.balance += reimbursed
 
         break
 
@@ -249,6 +290,8 @@ module.exports = {
         break
     }
 
+    signer.nonce += 1
+    
     await signer.save()
 
     return {success: true}

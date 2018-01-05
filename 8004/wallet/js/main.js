@@ -2,8 +2,6 @@
 l=console.log
 
 render = r=>{
-  l('Rendering ',r)
-
   if(r.alert) notyf.alert(r.alert)
   if(r.confirm) notyf.confirm(r.confirm)
 
@@ -86,15 +84,16 @@ FS.onready(()=>{
     },
 
     deltaColor:(d)=>{
-      if(d < -app.K.risk) return '#ff6e7c'
-      if(d > app.K.risk) return '#5ed679'
+      if(d <= -app.K.risk) return '#ff6e7c'
+      if(d >= app.K.risk) return '#5ed679'
       
       return ''
     },
 
     commy: (b,dot=true)=>{
+      let prefix = b < 0 ? '-' : ''
 
-      b = b.toString()
+      b = Math.abs(b).toString()
       if(dot){
         if(b.length==1){
           b='0.0'+b
@@ -105,7 +104,7 @@ FS.onready(()=>{
           b = b.slice(0,insert_dot_at) + '.' + b.slice(insert_dot_at)
         }
       }
-      return b.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+      return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
     },
     uncommy: str=>{
       if(str.indexOf('.') == -1) str += '.00'
@@ -133,10 +132,6 @@ FS.onready(()=>{
           return diff + " " + unit.name + (diff>1 ? "s" : "") + " ago";
         }
       };
-    },
-
-    faucet: a=>{
-
     }
 
   }
@@ -155,9 +150,8 @@ FS.onready(()=>{
       K: false,
       my_member: false,
 
-      pw: 'password',
-      username: location.port == 8000 ? 'root' : location.port,
-
+      pw: '',
+      username: '',
 
       channels: {},
 
@@ -170,8 +164,8 @@ FS.onready(()=>{
       ins: [],
       outs: [{to:'', amount:''}],
 
-      off_to: '1',
-      off_amount: '25.00',
+      off_to: '',
+      off_amount: '',
       is_hub: false,
 
 
@@ -184,7 +178,7 @@ FS.onready(()=>{
 <div>
   <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
 
-    <a class="navbar-brand" href="#">Failsafe</a>
+    <a class="navbar-brand" href="#">[Failsafe]</a>
     <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
       <span class="navbar-toggler-icon"></span>
     </button>
@@ -201,9 +195,6 @@ FS.onready(()=>{
           <a class="nav-link" @click="go('wallet')">Wallet</a>
         </li>
 
-        <li v-if="auth_code" class="nav-item"  v-bind:class="{ active: tab=='exchange' }">
-          <a class="nav-link" @click="go('exchange')">Exchange</a>
-        </li>
 
         <li class="nav-item"  v-bind:class="{ active: tab=='gov' }">
           <a class="nav-link" @click="go('gov')">Governance</a>
@@ -215,20 +206,20 @@ FS.onready(()=>{
           <a class="nav-link" @click="go('install')">Install</a>
         </li>
 
-        <li class="nav-item"  v-bind:class="{ active: tab=='wiki' }">
-          <a class="nav-link" @click="go('wiki')">Wiki</a>
-        </li>
 
 
-
-        <li class="nav-item" v-bind:class="{ active: tab=='network' }">
-          <a class="nav-link" @click="go('network')">Network</a>
+        <li v-if="is_hub" class="nav-item"  v-bind:class="{ active: tab=='solvency' }">
+          <a class="nav-link" @click="go('solvency')">Offchain Explorer</a>
         </li>
 
         <li class="nav-item"  v-bind:class="{ active: tab=='explorer' }">
           <a class="nav-link" @click="go('explorer')">Explorer</a>
         </li>
 
+
+        <li class="nav-item" v-bind:class="{ active: tab=='network' }">
+          <a class="nav-link" @click="go('network')">Network Stats</a>
+        </li>
 
 
       </ul>
@@ -254,25 +245,26 @@ FS.onready(()=>{
         
         <div v-html="icon(pubkey,160)"></div>
 
-        <div v-if="is_hub"></div>
+        <div v-if="is_hub">You're hub.</div>
         <div v-else>
             
           <p class="lead">Send and receive money instantly and privately:</p>  
-            <h1 style="display:inline-block">\${{commy(ch.total)}}</h1><small v-if="ch.total>0">= {{commy(ch.collateral)}} (collateral) {{ch.delta > 0 ? "+ "+commy(ch.delta) : "- "+commy(-ch.delta)}} (delta)</small> 
+            <h1 style="display:inline-block">\${{commy(ch.total)}}</h1><small v-if="ch.total>0">= {{commy(ch.collateral)}} insurance {{ch.settled_delta > 0 ? "+ "+commy(ch.settled_delta)+" uninsured" : "- "+commy(-ch.settled_delta)+" spent"}}</small> 
           <p>
 
+          <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
 
           <div v-if="ch.total>0 || ch.collateral > 0">
 
             <div class="progress" style="max-width:1000px">
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.delta<0?ch.collateral:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.settled_delta<0?ch.collateral:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
                 {{commy(ch.failsafe)}} (insured)
               </div>
-              <div v-if="ch.delta<0" v-bind:style="{ width: Math.round(-ch.delta*100/ch.collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
-                {{commy(ch.delta)}} (spent)
+              <div v-if="ch.settled_delta<0" v-bind:style="{ width: Math.round(-ch.settled_delta*100/ch.collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+                {{commy(ch.settled_delta)}} (spent)
               </div>
-              <div v-if="ch.delta>0" v-bind:style="{ width: Math.round(ch.delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
-                +{{commy(ch.delta)}} (uninsured)
+              <div v-if="ch.settled_delta>0" v-bind:style="{ width: Math.round(ch.settled_delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+                +{{commy(ch.settled_delta)}} (uninsured)
               </div>
             </div>
 
@@ -331,16 +323,10 @@ FS.onready(()=>{
         <input v-model="username" type="text" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
         <br>
 
-        <p>Make sure your password is unique, strong and don't forget it, otherwise access to your account is lost. If in doubt, write it down or email it to yourself. </p>
+        <p>Make sure your password is unique, strong and you won't forget it, otherwise access to your account is lost. If in doubt, write it down or email it to yourself - <b>password recovery is impossible.</b></p>
 
         <label for="inputPassword" class="sr-only">Password</label>
         <input v-model="pw" type="password" id="inputPassword" class="form-control" placeholder="Password" required>
-
-        <p>There's no password recovery procedure because FN is decentralized and no one can generate your private key without your password.
-        </p>
-
-
-
 
         <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
       </form>
@@ -363,6 +349,11 @@ FS.onready(()=>{
       <h2>Hubs & topology</h2>
       <p>Soft risk limit: \${{commy(K.members[0].hub.soft_limit)}}</p>
       <p>Hard risk limit: \${{commy(K.members[0].hub.hard_limit)}}</p>
+
+
+      <h2>Snapshots</h2>
+      <p>Bytes until next snapshot: {{K.snapshot_after_bytes-K.bytes_since_last_snapshot}}</p>
+      <p>Last snapshot at block # : {{K.last_snapshot_height}}</p>
 
 
       <h2>Network stats</h2>
@@ -392,17 +383,10 @@ FS.onready(()=>{
         <p>1. Install <a href="https://nodejs.org/en/download/">Node.js</a></p>
         <p>2. Copy-paste this snippet to your text editor:</p>
         <pre><code>{{install_snippet}}</code></pre>
-        <p>3. (optional) Compare our snippet with snippets from other sources for better security in case our website is compromised: ...</p>
+        <p>3. (optional) Compare our snippet with snippets from other sources for better security: Failsafe.someshop.com/#install, Failsafe.trustedsite.com...</p>
         <p>4. If there's exact match paste the snippet into <kbd>Terminal.app</kbd></p>
+        <p>Or use <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">direct link</a>, run <kbd>./install && node fs 8000</kbd> (to bind to 8000 port)</p>
     </div>
-
-    <div v-else-if="tab=='exchange'">
-      <h3>Deposit / Withdraw / Exchange</h3>
-      <p>Very soon you will be able to deposit and withdraw to your wallet with major payment methods (such as credit cards, wire transfers and Bitcoin) right here, on this page. However, on testnet, use this complimentary faucet for free money (it does some mining):</p>
-
-      <button class="btn btn-success" @click="faucet">Give me a dollar!</button>
-    </div>
-
 
     <div v-else-if="tab=='gov'">
       <h3>Governance</h3>
@@ -457,24 +441,37 @@ FS.onready(()=>{
 
     </div>
 
-    <div v-else-if="tab=='wiki'">
-      <h3>Wiki</h3>
-      <p><a href="https://github.com/failsafenetwork/failsafe">Currently here</a></p>
-    </div>
 
 
-    <div v-else-if="tab=='explorer'">
+    <div v-else-if="tab=='solvency'">
+
       <div v-if="is_hub">
-        <p>Risk limit: \${{commy(K.risk)}}, settled every 20 seconds. Solvency: \${{commy(solvency)}}</p>
+        <p>This is testnet-only hub introspection page to demonstrate how failsafe payment channels work. On mainnet all internal deltas are private and eventually zkSnark-hidden even from the hub itself.</p>
 
-        <h1>Offchain</h1>
+
+
+
+        <p>Risk limit: \${{commy(K.risk)}}</p>
+        <p>Rebalance every {{K.blocktime*2}} seconds.</p>
+        <p>Solvency: \${{commy(solvency)}}</p>
+
+        <h1>Channel Explorer</h1>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
               <th scope="col">Icon</th>
               <th scope="col">Pubkey</th>
-              <th scope="col">Delta</th>
+
               <th scope="col">Nonce</th>
+              <th scope="col">Collateral</th>
+              <th scope="col">Settled</th>
+
+              <th scope="col">Delta (offchain)</th>
+              <th scope="col">Settled + Delta</th>
+              <th scope="col">Total</th>
+              <th scope="col">Nonce</th>
+
+
             </tr>
           </thead>
           <tbody>
@@ -482,15 +479,28 @@ FS.onready(()=>{
             <tr v-for="d in deltas">
               <th v-html="icon(toHexString(d.delta_record.userId.data),30)"></th>
               <th scope="row"><small>{{toHexString(d.delta_record.userId.data).substr(0,10)}}...</small></th>
-              <td v-bind:style="{ 'color': 'black', 'background-color': deltaColor(d.delta) }">{{commy(d.delta)}}</td>
+
+              <td>{{d.nonce}}</td>
+              <td>{{commy(d.collateral)}}</td>
+              <td>{{commy(d.settled)}}</td>
+              <td>{{commy(d.delta_record.delta)}}</td>
+
+              <td v-bind:style="{ 'color': 'black', 'background-color': deltaColor(d.settled_delta) }">{{commy(d.settled_delta)}}</td>
+
+              <td>{{commy(d.total)}}</td>
               <td>{{d.delta_record.nonce}}</td>
+
             </tr>
 
           </tbody>
         </table>
       </div>
 
-      <h1>Onchain</h1>
+    </div>
+
+
+    <div v-else-if="tab=='explorer'">
+      <h1>Blockchain Explorer</h1>
       <table class="table table-striped">
         <thead class="thead-dark">
           <tr>
@@ -499,6 +509,7 @@ FS.onready(()=>{
             <th scope="col">Pubkey</th>
             <th scope="col">Global Balance</th>
 
+            <th scope="col">Nonce</th>
             <th scope="col">Collateral</th>
             <th scope="col">Settled</th>
           </tr>
@@ -511,6 +522,8 @@ FS.onready(()=>{
             <th scope="row">{{u.id}}</th>
             <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}..</small></td>
             <td>{{commy(u.balance)}}</td>
+
+            <td>{{u.nonce}}</td>
             
             <td>{{commy(u.hub[0] ? u.hub[0].collateral.collateral : 0)}}</td>
             <td>{{commy(u.hub[0] ? u.hub[0].collateral.settled : 0)}}</td>

@@ -9,12 +9,11 @@ module.exports = async (opts)=>{
 
   opts = Object.assign({
     username: 'root', 
-    pw: 'password', 
     location: '0.0.0.0:8000' // for local tests
     //infra: 'https://www.digitalocean.com'
   }, opts)
 
-
+  opts.pw = toHex(crypto.randomBytes(16))
 
   l(opts)
 
@@ -31,7 +30,7 @@ module.exports = async (opts)=>{
     pubkey: bin(me.id.publicKey),
     username: opts.username,
     nonce: 0,
-    balance: 10000,
+    balance: 100000000000,
     fsb_balance: 10000
   }))
   
@@ -82,11 +81,11 @@ module.exports = async (opts)=>{
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 1024*1024, //every MB
+    snapshot_after_bytes: 100000, 
     proposals_created: 0,
 
     
-    tax: 3,
+    tax: 2,
 
     account_creation_fee: 100,
     standalone_balance: 500, // keep $5 on your own balance for onchain tx fees
@@ -102,6 +101,9 @@ module.exports = async (opts)=>{
     hub_fee_base: 1, // a fee per payment
     hub_fee: 0.001, // 10 basis points
 
+
+
+    collected_tax: 0,
 
 
     ts: 0,

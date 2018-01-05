@@ -93,7 +93,7 @@ inputMap = (i)=>{
   var map = [
   'tx', 'auth', 'needSig', 'signed', 
   'block', 'chain', 'sync', 
-  'mediate', 'receive'
+  'mediate', 'receive', 'faucet'
   ]
   if(typeof i == 'string'){
     // buffer friendly
@@ -195,36 +195,60 @@ trustlessInstall = async a=>{
 
     l("Snapshot made: "+filename)
     
-    installSnippet(K.total_blocks)
-
   })
 
 }
 
 
-installSnippets = {}
-installSnippet = async (i)=>{
-  var filename=`Failsafe-${i}.tar.gz`
-  var cmd = "shasum -a 256 private/"+filename
+cached_result = {}
 
-  exec(cmd, async (er,out,err)=>{
-    if(out.length == 0){
-      l('This state doesnt exist')
-      return false
+cache = async (i)=>{
+  if(K){ // already initialized
+    cached_result.is_hub = me.is_hub
+
+    cached_result.K = K
+
+    if(me.is_hub){
+      var h = require('./private/hub')
+      h = await h()
+      cached_result.deltas = h.channels
+      cached_result.solvency = h.solvency
     }
 
-    var out_hash = out.split(' ')[0]
-    var host = me.my_member.location.split(':')[0]
-    var out_location = 'http://'+host+':'+base_port+'/'+filename
-    installSnippets[i] = `id=${base_port+1}
-f=${filename}
-mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f
-if [ ! -x /usr/bin/sha256sum ]; then alias sha256sum="shasum -a 256";fi
-if sha256sum $f | grep ${out_hash}; then
-  tar -xzf $f && rm $f && ./install && node fs.js ${base_port+1}
-fi`
+    cached_result.proposals = await Proposal.findAll({
+      order: [['id','DESC']], 
+      include: {all: true}
+    })
 
-  })
+    cached_result.users = await User.findAll({include: {all: true}})
+  }
+
+
+  if(me.my_member && K.last_snapshot_height){
+    var filename=`Failsafe-${K.last_snapshot_height}.tar.gz`
+    var cmd = "shasum -a 256 private/"+filename
+
+    exec(cmd, async (er,out,err)=>{
+      if(out.length == 0){
+        l('This state doesnt exist')
+        return false
+      }
+
+      var out_hash = out.split(' ')[0]
+      var host = me.my_member.location.split(':')[0]
+      var out_location = 'http://'+host+':'+base_port+'/'+filename
+      cached_result.install_snippet = `id=${base_port+1}
+  f=${filename}
+  mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f
+  if [ ! -x /usr/bin/sha256sum ]; then alias sha256sum="shasum -a 256";fi
+  if sha256sum $f | grep ${out_hash}; then
+    tar -xzf $f && rm $f && ./install && node fs.js ${base_port+1}
+  fi`
+
+    })
+
+  }
+
 }
 
 originAllowence = {
@@ -318,6 +342,7 @@ initDashboard=async a=>{
                 me.init(p.username, seed)
 
                 await me.start()
+                await cache()
 
                 result.confirm = "Welcome!"                
               }
@@ -332,7 +357,8 @@ initDashboard=async a=>{
             case 'takeEverything':
 
               var ch = await me.channel(1)
-              await me.broadcast('settleUser', r([ 0, [ch.sig], [] ]))
+              // post last available signed delta
+              await me.broadcast('settleUser', r([ 0, [ch.delta_record.sig ? ch.delta_record.sig : 1], [] ]) )
               result.confirm = "Started a dispute onchain. Please wait a delay period to get your money back."
               break
 
@@ -418,6 +444,11 @@ initDashboard=async a=>{
               }
 
               break
+            case 'faucet':
+              me.sendMember('faucet', bin(me.id.publicKey), 0)
+              result.confirm = "Faucet triggered. Check your wallet!"
+
+              break
             case 'pay':
               if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
                 //me.pay('')
@@ -434,7 +465,7 @@ initDashboard=async a=>{
 
             case 'login':
               // sign external domain
-              result = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
+              result.token = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
 
             break
 
@@ -443,6 +474,7 @@ initDashboard=async a=>{
               
 
             break
+
 
             case 'vote':
               result.confirm = await me.broadcast(p.approve ? 'voteApprove' : 'voteDeny', r([p.id, p.rationale]) ) 
@@ -463,30 +495,7 @@ initDashboard=async a=>{
           }
         }
 
-
-        if(K){ // already initialized
-          result.is_hub = me.is_hub
-
-          result.K = K
-
-          if(me.is_hub){
-            var h = require('./private/hub')
-            h = await h()
-            result.deltas = h.channels
-            result.solvency = h.solvency
-          }
-
-          if(me.my_member && K.last_snapshot_height){
-            result.install_snippet = installSnippets[K.last_snapshot_height]
-          }
-
-          result.proposals = await Proposal.findAll({
-            order: [['id','DESC']], 
-            include: {all: true}
-          })
-
-          result.users = await User.findAll({include: {all: true}})
-        }
+        Object.assign(result, cached_result)
 
         ws.send(JSON.stringify({
           result: result,
@@ -655,10 +664,26 @@ sync = ()=>{
 
 
 
+city = async ()=>{
 
+  var u = []
+  for(var i = 0;i<1000;i++){
+    u[i] = new Me
+    var b = Buffer.alloc(32)
+    b.writeInt32BE(i)
+    u[i].init('u'+i, b)
+  }
+
+  l('Ready')
+
+
+}
 
 
 if(process.argv[2] == 'console'){
+
+}else if(process.argv[2] == 'city'){
+  city()
 
 }else if(process.argv[2] == 'genesis'){
   require('./private/genesis')({location: process.argv[3]})

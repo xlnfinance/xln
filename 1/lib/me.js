@@ -36,15 +36,14 @@ class Me {
 
     var pseudo_balances = {}
 
-    for(var i = 0;i < me.mempool.length;i++){
-      var tx = me.mempool[i]
+    for(var candidate of me.mempool){
+      if(total_size + candidate.length > K.blocksize) break;
 
-      if(total_size + tx.length > K.blocksize) break;
 
-      var result = await Tx.processTx(tx, pseudo_balances)
+      var result = await Tx.processTx(candidate, pseudo_balances)
       if(result.success){
-        ordered_tx.push(tx)
-        total_size += tx.length
+        ordered_tx.push(candidate)
+        total_size += candidate.length
       }else{
         l(result.error)
         // punish submitter ip
@@ -143,6 +142,8 @@ class Me {
       me.mempool.push(tx)
     }else{
       me.sendMember('tx', tx)
+
+      l(r(tx))
     }
 
     l("Just broadcasted ", tx)
@@ -178,45 +179,46 @@ class Me {
 
   async start(){
     // in json pubkeys are in hex
-    me.record = await me.byKey()
+    this.record = await this.byKey()
 
-    for(var m of me.members){
-      if(me.record && me.record.id == m.id){
-        me.my_member = m
-        me.is_hub = me.my_member.hub
+    for(var m of this.members){
+      if(this.record && this.record.id == m.id){
+        this.my_member = m
+        this.is_hub = this.my_member.hub
       }
     }
-    
-    if(me.my_member){
+   
+    l("start caching")
+    setInterval(cache, 10000)
+
+    if(this.my_member){
 
       setInterval(require('../private/member'), 2000)
 
-      l('generate install snippet')
-      setInterval(()=>{installSnippet(K.last_snapshot_height)}, 30000)
 
-      for(var m of me.members){
-        if( me.my_member != m ){
+      for(var m of this.members){
+        if( this.my_member != m ){
           // we need to have connections ready to all members
-          me.sendMember('auth', me.offchainAuth(), i)
+          this.sendMember('auth', me.offchainAuth(), i)
         }
       }
 
-      if(me.is_hub){
+      if(this.is_hub){
         setInterval(async ()=>{
           var h = await (require('../private/hub')())
 
-          if(h.ins.length > 0 && h.outs.length > 0){
-            await me.broadcast('settle', r([0, h.ins, h.outs]))
+          if(h.ins.length > 0 || h.outs.length > 0){
+            await this.broadcast('settle', r([0, h.ins, h.outs]))
           }
           
-        }, 20000)
+        }, K.blocktime*2000)
       }
     }else{
       // keep connection to hub open
-      me.sendMember('auth', me.offchainAuth(), 0)
+      this.sendMember('auth', this.offchainAuth(), 0)
 
       l("Set up sync")
-      setInterval(sync, 60000)
+      setInterval(sync, K.blocktime*1000)
     }
 
 
@@ -241,15 +243,14 @@ class Me {
       return false
     }
 
-    let obj, member
-
     var inputType = inputMap(tx[0])
 
     tx = tx.slice(1)
 
     l('New input: '+inputType)
 
-    if(inputType == 'auth' && (obj=me.offchainVerify(tx))){
+    if(inputType == 'auth'){
+      let obj = me.offchainVerify(tx)
       l('Someone connected: '+toHex(obj.signer))
 
       wss.users[obj.signer] = ws
@@ -283,8 +284,9 @@ class Me {
 
       // 2. is it us?
       if(me.my_member && me.my_member == me.next_member){
-        l('We are next, adding to mempool')
-        me.mempool.push(tx)
+        l('We are next, adding to mempool :', r(tx))
+
+        me.mempool.push(bin(tx))
       }else{
         if(me.next_member.socket){
           l('passing to next '+me.next_member.id)
@@ -313,6 +315,10 @@ class Me {
 
       // a member needs your signature
 
+
+    }else if (inputType == 'faucet'){
+
+      await me.payChannel(tx, Math.round(Math.random() * 4000))
 
     }else if (inputType == 'signed'){
       var [pubkey, sig] = r(tx)
@@ -346,7 +352,8 @@ class Me {
         var blocks = await Block.findAll({
           where: {
             id: {[Sequelize.Op.gte]: last.id}
-          }
+          },
+          limit: 100
         })
 
         var blockmap = []
@@ -368,6 +375,7 @@ class Me {
         var [counterparty, nonce, delta, instant_until] = me.parseDelta(body)
 
 
+
         if(me.is_hub){
           assert(readInt(counterparty) == 1)
 
@@ -375,24 +383,25 @@ class Me {
 
           l(nonce, ch.delta_record.nonce+1)
 
-          ch.delta_record.nonce++
           assert(nonce >= ch.delta_record.nonce, `${nonce} ${ch.delta_record.nonce}`)
+          ch.delta_record.nonce++
           //assert(nonce == ch.delta_record.nonce)
 
+          l('delta ', ch.delta_record.delta, delta)
 
           var amount = ch.delta_record.delta - delta
 
           l(`Sent ${amount} out of ${ch.total}`)
 
-          assert(amount > 0)
-          assert(amount <= ch.total) // max amount is limited by collateral
+          assert(amount > 0 && amount <= ch.total, `Got ${amount} is limited by collateral ${ch.total}`)
 
           ch.delta_record.delta = delta
           ch.delta_record.sig = r([pubkey, sig, body]) //raw delta
 
           await ch.delta_record.save()
 
-          var fee = K.hub_fee_base + Math.round(amount * K.hub_fee)
+          var fee = Math.round(amount * K.hub_fee)
+          if(fee == 0) fee = K.hub_fee_base
 
           await me.payChannel(mediate_to, amount - fee)
 
@@ -510,8 +519,15 @@ class Me {
 
   async channel(counterparty){
     var r = {
+      // onchain fields
       collateral: 0,
-      delta: 0,
+      settled: 0,
+      nonce: 0,
+      
+      // offchain delta_record
+
+      // for convenience
+      settled_delta: 0,
       failsafe: 0,
       total: 0
     }
@@ -530,9 +546,9 @@ class Me {
 
         if(ch){
           r.collateral = ch.collateral
-          r.delta = ch.settled
+          r.settled = ch.settled
+          r.nonce = ch.nonce
         }
-
       }
 
 
@@ -558,7 +574,8 @@ class Me {
 
         if(ch){
           r.collateral = ch.collateral
-          r.delta = ch.settled
+          r.settled = ch.settled
+          r.nonce = ch.nonce
         }
       }else{
 
@@ -577,16 +594,17 @@ class Me {
 
     }
 
-    r.delta += delta[0].delta 
+
     r.delta_record = delta[0]
 
+    r.settled_delta = r.settled + r.delta_record.delta
 
-    r.total = r.collateral + r.delta
+    r.total = r.collateral + r.settled_delta
 
-    if(r.delta >= 0){
+    if(r.settled_delta >= 0){
       r.failsafe = r.collateral
     }else{
-      r.failsafe = r.collateral + r.delta
+      r.failsafe = r.collateral + r.settled_delta
     }
   
     return r
@@ -718,8 +736,6 @@ class Me {
       }
 
     }
-
-
 
 
 

@@ -11,7 +11,6 @@ cp -r 1 8001
 cp -r 1 8002
 cp -r 1 8003
 cp -r 1 8004
-cp -r 1 8005
 
 ttab "cd 8001; node fs 8001"
 ttab "cd 8002; node fs 8002"

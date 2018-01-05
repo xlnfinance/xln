@@ -1,7 +1,12 @@
 rsync 1 root@failsafe.network:~/ -rv --exclude '.git' --exclude '1/node_modules'
 
 ssh root@failsafe.network <<'ENDSSH'
-killall Failsafe
-#nginx -s reload
-cd 1 && ./s 
+  killall Failsafe
+  cd 1
+  rm -rf private/db* private/Failsafe-* data
+  mkdir data
+  mkdir private
+
+  node fs genesis 128.199.242.161:8000 && node fs 8000
+  
 ENDSSH

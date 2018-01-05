@@ -15,14 +15,14 @@ module.exports = async function(){
   for(var d of deltas){
     var ch = await me.channel(d.userId)
 
-    solvency -= ch.delta
+    solvency -= ch.settled_delta
     
     channels.push(ch)
 
-    if(ch.delta <= -K.risk){
-      ins.push(d.sig)
-    }else if(ch.delta >= K.risk){
-      outs.push([d.userId, hubId, ch.delta])
+    if(ch.settled_delta <= -K.risk){
+      ins.push(r(d.sig))
+    }else if(ch.settled_delta >= K.risk){
+      outs.push([d.userId, hubId, ch.settled_delta])
     }else{
       //l("This is low delta ", ch)
     }
@@ -34,7 +34,6 @@ module.exports = async function(){
     ins: ins,
     outs: outs
   }
-
 
 
 }
