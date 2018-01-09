@@ -91,7 +91,7 @@ module.exports = {
           }else{
             var no_delta = false
             l(input)
-            var [pubkey, sig, body] = input
+            var [pubkey, sig, body] = r(input)
 
           }
 
@@ -192,7 +192,7 @@ module.exports = {
             var user = await User.findById(readInt(userId))
           }
 
-
+          var is_me = me.id && me.id.publicKey.equals(user.pubkey)
 
 
           if(user.id){
@@ -212,6 +212,8 @@ module.exports = {
 
             l("Created new user")
 
+
+
             if(hubId == undefined){
               if(amount < K.account_creation_fee) continue
               user.balance = (amount - K.account_creation_fee)
@@ -225,7 +227,21 @@ module.exports = {
               amount -= fee
               signer.balance -= fee
 
+
+
+
+              if(is_me){
+                History.create({
+                  userId: me.pubkey,
+                  hubId: 1,
+                  desc: "Account creation fee, minimum global balance",
+                  amount: -fee
+                })
+              }
+
+
             }
+
 
             K.collected_tax += K.account_creation_fee
 
@@ -254,8 +270,21 @@ module.exports = {
             if(is_hub){
               ch[0].collateral -= reimburse_tax
               reimbursed += reimburse_tax
-  
+
               ch[0].settled -= originalAmount
+
+              if(is_me){
+                var c = await me.channel(1)
+                History.create({
+                  userId: me.pubkey,
+                  hubId: 1,
+                  desc: "Rebalance fee",
+                  amount: -reimburse_tax,
+                  settled_delta: ch[0].settled + c.delta_record.delta
+
+                }) 
+              }
+  
             }
             signer.balance -= amount
 

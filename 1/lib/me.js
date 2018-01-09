@@ -16,6 +16,7 @@ class Me {
     this.status = 'await'
 
     this.sockets = {}
+    this.intervals = []
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
@@ -189,11 +190,11 @@ class Me {
     }
    
     l("start caching")
-    setInterval(cache, 10000)
+    me.intervals.push(setInterval(cache, 1000))
 
     if(this.my_member){
 
-      setInterval(require('./member'), 2000)
+      me.intervals.push(setInterval(require('./member'), 2000))
 
 
       for(var m of this.members){
@@ -204,21 +205,21 @@ class Me {
       }
 
       if(this.is_hub){
-        setInterval(async ()=>{
+        me.intervals.push(setInterval(async ()=>{
           var h = await (require('./hub')())
 
           if(h.ins.length > 0 || h.outs.length > 0){
             await this.broadcast('settle', r([0, h.ins, h.outs]))
           }
           
-        }, K.blocktime*2000)
+        }, K.blocktime*2000))
       }
     }else{
       // keep connection to hub open
       this.sendMember('auth', this.offchainAuth(), 0)
 
       l("Set up sync")
-      setInterval(sync, K.blocktime*1000)
+      me.intervals.push(setInterval(sync, K.blocktime*1000))
     }
 
 
@@ -431,6 +432,16 @@ class Me {
           ch.delta_record.sig = r([pubkey, sig, body]) //raw delta
 
           await ch.delta_record.save()
+          var ch = await me.channel(1)
+
+          History.create({
+            userId: me.pubkey,
+            hubId: hub.id,
+            desc: "Received",
+            amount: amount,
+            settled_delta: ch.settled_delta,
+            balance: ch.total + amount
+          })
 
           if(me.browser){
             me.browser.send(JSON.stringify({
@@ -438,6 +449,7 @@ class Me {
               id: 1
             }))
           }
+          
 
         }
 
@@ -510,6 +522,15 @@ class Me {
       // todo: ensure delivery
   
       await ch.delta_record.save()
+
+      History.create({
+        userId: me.pubkey,
+        hubId: 1,
+        desc: "Sent to "+mediate_to.toString('hex'),
+        amount: -amount,
+        settled_delta: ch.settled_delta - amount,
+        balance: ch.total - amount
+      })
 
     }
 
@@ -700,12 +721,12 @@ class Me {
     }
 
     // executing proposals that are due
-    let to_execute = await Proposal.findAll({
+    let jobs = await Proposal.findAll({
       where: {delayed: K.usable_blocks},
       include: {all: true}
     })
 
-    for(let job of to_execute){
+    for(let job of jobs){
       var total_shares = 0
       for(let v of job.voters){
         var voter = K.members.find(m=>m.id==v.id)
@@ -734,6 +755,8 @@ class Me {
 
         l('Patch applied! Restarting...')
       }
+
+      await job.destroy()
 
     }
 

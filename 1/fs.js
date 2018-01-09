@@ -221,6 +221,11 @@ cache = async (i)=>{
     })
 
     cached_result.users = await User.findAll({include: {all: true}})
+
+    cached_result.history = await History.findAll({
+      order: [['id','desc']], 
+      include: {all: true}
+    })
   }
 
 
@@ -240,8 +245,8 @@ cache = async (i)=>{
       cached_result.install_snippet = `id=${base_port+1}
 f=${filename}
 mkdir $id && cd $id && curl http://${host}:${base_port}/$f -o $f
-if [ ! -x /usr/bin/sha256sum ]; then alias sha256sum="shasum -a 256";fi
-if sha256sum $f | grep ${out_hash}; then
+
+if [[ -x /usr/bin/sha256sum ]] && sha256sum $f || shasum -a 256 $f | grep ${out_hash}; then
   tar -xzf $f && rm $f && ./install && node fs.js ${base_port+1}
 fi`
 
@@ -251,10 +256,6 @@ fi`
 
 }
 
-originAllowence = {
-  'null': 400,
-  'http://127.0.0.1:8000': 500
-}
 
 
 me = false
@@ -328,7 +329,7 @@ initDashboard=async a=>{
           
 
         if(json.auth_code == auth_code){
-          //me.browser = ws
+          me.browser = ws
 
           switch(json.method){
             case 'sync':
@@ -350,6 +351,7 @@ initDashboard=async a=>{
               break
             case 'logout':         
               me.id = false
+              me.intervals.map(clearInterval)
               result.pubkey = false
 
               break
@@ -450,9 +452,7 @@ initDashboard=async a=>{
 
               break
             case 'pay':
-              if(json.confirmed || originAllowence[json.proxyOrigin] >= json.params.amount){
-                //me.pay('')
-
+              if(json.confirmed){
                 originAllowence[json.proxyOrigin] -= json.params.amount
                 await me.payChannel(1, parseInt(json.params.amount), Buffer.from(json.params.recipient, 'hex'))
                 result = 'paid'
@@ -463,11 +463,6 @@ initDashboard=async a=>{
               }
               break
 
-            case 'login':
-              // sign external domain
-              result.token = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
-
-            break
 
             case 'propose':
               result.confirm = await me.broadcast('propose', p)
@@ -480,6 +475,13 @@ initDashboard=async a=>{
               result.confirm = await me.broadcast(p.approve ? 'voteApprove' : 'voteDeny', r([p.id, p.rationale]) ) 
 
             break
+
+
+            // Extra features: Failsafe Login
+            case 'login':
+              result.token = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
+            break
+
           }
 
           if(me.id){
@@ -641,8 +643,37 @@ Delta = privSequelize.define('delta', {
 
   instant_until: Sequelize.INTEGER,
 
-  delta: Sequelize.INTEGER
+  delta: Sequelize.INTEGER,
+
+
+//history
+  amount: Sequelize.INTEGER,
+  balance: Sequelize.INTEGER,
+  desc: Sequelize.TEXT,
+  date: Sequelize.DATE
 })
+
+
+
+
+History = privSequelize.define('history', {
+  userId: Sequelize.CHAR(32).BINARY,
+  hubId: Sequelize.INTEGER,
+
+
+  settled_delta: Sequelize.INTEGER,
+  
+  amount: Sequelize.INTEGER,
+  balance: Sequelize.INTEGER,
+  desc: Sequelize.TEXT,
+
+  date: { type: Sequelize.DATE, defaultValue: Sequelize.NOW },
+
+})
+
+
+
+
 
 
 

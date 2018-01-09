@@ -42,8 +42,6 @@ FS.resolvers = [()=>{
 window.addEventListener('message', function(e){
   if(e.origin == FS.origin){
     var data = JSON.parse(e.data)
-
     FS.resolvers[data.id](data.result)
-    
   }
 })

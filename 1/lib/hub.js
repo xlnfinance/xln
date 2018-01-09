@@ -20,7 +20,7 @@ module.exports = async function(){
     channels.push(ch)
 
     if(ch.settled_delta <= -K.risk){
-      ins.push(r(d.sig))
+      ins.push(d.sig)
     }else if(ch.settled_delta >= K.risk){
       outs.push([d.userId, hubId, ch.settled_delta])
     }else{

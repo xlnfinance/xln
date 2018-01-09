@@ -60,7 +60,7 @@ window.onload = function(){
     FS('pay',{
       invoice: 'invoice',
       recipient: pubkey.value,
-      amount: 100
+      amount: 1
     }).then(data=>{
       if(data.status == 'paid'){
         donat.style['background-color'] = 'gold'
@@ -74,7 +74,8 @@ window.onload = function(){
 </script>
 
 <div id="zone">
-Donate to <input id="pubkey" type="text"> <button id="donat">‎Donate $1</button>
+  <p><input id="pubkey" placeholder="ID"></p>
+<img width="200px" src="./fs.png" id="donat">‎
 </div>
 
 </body></html>
