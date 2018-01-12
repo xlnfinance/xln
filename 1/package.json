@@ -1,0 +1,27 @@
+{
+  "name": "failsafe",
+  "version": "1.0.0",
+  "description": "",
+  "main": "fs.js",
+  "dependencies": {
+    "bn.js": "4.11.8",
+    "finalhandler": "1.1.0",
+    "keccak": "1.4.0",
+    "redlock": "3.1.0",
+    "rlp": "2.0.0",
+    "scrypt": "6.0.3",
+    "sequelize": "4.28.6",
+    "serve-static": "1.13.1",
+    "sqlite3": "^3.1.13",
+    "tar": "4.2.0",
+    "tweetnacl": "1.0.0",
+    "uws": "9.14.0",
+    "ws": "3.2.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
