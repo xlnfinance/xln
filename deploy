@@ -1,0 +1,13 @@
+rsync . root@failsafe.network:~/ -rv --exclude '.git' --exclude 'node_modules'
+
+ssh root@failsafe.network <<'ENDSSH'
+killall Failsafe
+
+rm -rf private/db* private/Failsafe-* data
+mkdir data
+mkdir private
+
+node fs genesis wss://failsafe.network:8000
+
+ENDSSH
+

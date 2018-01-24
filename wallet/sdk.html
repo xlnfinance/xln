@@ -1,0 +1,40 @@
+Failsafe SDK proxy<script>
+var ws = new WebSocket((location.protocol == 'http:' ? 'ws://' : 'wss://')+location.host)
+ws.onmessage = function(m){
+  var e = JSON.parse(m.data)
+
+  parent.postMessage(m.data, '*')
+}
+
+ws.onopen = ()=>{parent.postMessage('{"id":0}','*') }
+
+window.addEventListener('message',function(e){
+  var json = e.data.params
+
+  // special clause for 1click payments
+  if(e.data.method == 'pay'){
+    var msg = "Send $"+(json.amount/100)+"?"
+    var confirm_start = new Date
+    if(!confirm(msg)) return false
+    // was it authorized click?
+    // must be micropayment, or authorized in sufficent time
+    // otherwise double check for safety
+    var micropayment = (parseInt(json.amount) < 1000)
+    if(micropayment || (new Date - confirm_start > 2000) || confirm("Are you sure? "+msg)){
+    
+    }else{
+      return false
+    }
+  }
+
+  ws.send(JSON.stringify({
+    proxyOrigin: e.origin,
+    method: e.data.method,
+    id: e.data.id,
+    params: json,
+    auth_code: localStorage.auth_code,
+    confirmed: true
+  }))
+
+})
+</script>
