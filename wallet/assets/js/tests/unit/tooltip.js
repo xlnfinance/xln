@@ -31,8 +31,7 @@ $(function () {
     $el.bootstrapTooltip()
     try {
       $el.bootstrapTooltip('noMethod')
-    }
-    catch (err) {
+    } catch (err) {
       assert.strictEqual(err.message, 'No method named "noMethod"')
     }
   })
@@ -159,7 +158,6 @@ $(function () {
     assert.ok($.contains($('.tooltip').get(0), title), 'title node moved, not copied')
   })
 
-
   QUnit.test('should respect custom classes', function (assert) {
     assert.expect(2)
     var $tooltip = $('<a href="#" rel="tooltip" title="Another tooltip"/>')
@@ -191,8 +189,7 @@ $(function () {
 
     try {
       $('<div title="tooltip title" style="display: none"/>').bootstrapTooltip('show')
-    }
-    catch (err) {
+    } catch (err) {
       assert.strictEqual(err.message, 'Please use show on visible elements')
       done()
     }
@@ -366,10 +363,10 @@ $(function () {
   QUnit.test('should add position class before positioning so that position-specific styles are taken into account', function (assert) {
     assert.expect(2)
     var done = assert.async()
-    var styles = '<style>'
-      + '.bs-tooltip-right { white-space: nowrap; }'
-      + '.bs-tooltip-right .tooltip-inner { max-width: none; }'
-      + '</style>'
+    var styles = '<style>' +
+      '.bs-tooltip-right { white-space: nowrap; }' +
+      '.bs-tooltip-right .tooltip-inner { max-width: none; }' +
+      '</style>'
     var $styles = $(styles).appendTo('head')
 
     var $container = $('<div/>').appendTo('#qunit-fixture')
@@ -456,11 +453,11 @@ $(function () {
     assert.expect(1)
     var done = assert.async()
 
-    var containerHTML = '<div id="test">'
-        + '<p style="margin-top: 200px">'
-        + '<a href="#" title="very very very very very very very long tooltip">Hover me</a>'
-        + '</p>'
-        + '</div>'
+    var containerHTML = '<div id="test">' +
+        '<p style="margin-top: 200px">' +
+        '<a href="#" title="very very very very very very very long tooltip">Hover me</a>' +
+        '</p>' +
+        '</div>'
 
     var $container = $(containerHTML)
       .css({
@@ -484,8 +481,7 @@ $(function () {
         var $tooltip = $($(this).data('bs.tooltip').tip)
         if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
           assert.ok(Math.round($tooltip.offset().top + $tooltip.outerHeight()) <= Math.round($(this).offset().top))
-        }
-        else {
+        } else {
           assert.ok(Math.round($tooltip.offset().top + $tooltip.outerHeight()) >= Math.round($(this).offset().top))
         }
         done()
@@ -623,7 +619,6 @@ $(function () {
         assert.ok(!$($tooltip.data('bs.tooltip').tip).is('.show'), '200ms: tooltip removed')
         done()
       }, 200)
-
     }, 0)
 
     $tooltip.trigger('mouseenter')
@@ -712,7 +707,7 @@ $(function () {
     var tooltip = $el.data('bs.tooltip')
     var $tooltip = $(tooltip.getTipElement())
 
-    function showingTooltip() { return $tooltip.hasClass('show') || tooltip._hoverState === 'show' }
+    function showingTooltip () { return $tooltip.hasClass('show') || tooltip._hoverState === 'show' }
 
     var tests = [
         ['mouseenter', 'mouseleave'],
@@ -751,7 +746,7 @@ $(function () {
     var tooltip = $el.data('bs.tooltip')
     var $tooltip = $(tooltip.getTipElement())
 
-    function showingTooltip() { return $tooltip.hasClass('show') || tooltip._hoverState === 'show' }
+    function showingTooltip () { return $tooltip.hasClass('show') || tooltip._hoverState === 'show' }
 
     $el.trigger('click')
     assert.ok(showingTooltip(), 'tooltip is faded in')

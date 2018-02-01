@@ -1,11 +1,13 @@
 
-l=console.log
-ts=()=>Math.round(new Date/1000)
+l = console.log
+ts = () => Math.round(new Date() / 1000)
 
-renderRisk=(hist)=>{
-  if(hist.length == 0) return false
+renderRisk = (hist) => {
+  if (hist.length == 0) return false
 
-  if(!window.riskchart){
+  var precision = 100 // devide time by 
+
+  if (!window.riskchart) {
     window.riskchart = new Chart(riskcanvas.getContext('2d'), {
       type: 'line',
       data: {
@@ -13,16 +15,16 @@ renderRisk=(hist)=>{
         datasets: [{
           label: 'Settled Delta',
           steppedLine: true,
-          data: [{x: ts(), y: 0}],
+          data: [{x: Math.round(new Date/precision), y: 0}],
           borderColor: 'rgb(255, 99, 132)',
           backgroundColor: 'rgb(255, 99, 132)'
         }]
       },
       options: {
-        //responsive: true,
+        // responsive: true,
         title: {
           display: true,
-          text: 'Risk analytics',
+          text: 'Risk analytics'
         },
         scales: {
           xAxes: [{
@@ -45,236 +47,226 @@ renderRisk=(hist)=>{
 
   var last = d.pop()
 
-
   var hist = hist.slice().reverse().slice(d.length)
 
-
-  for(h of hist){
-    var date = Date.parse(h.date)
-    var y = h.settled_delta/100
-
+  for (h of hist) {
     d.push({
-      x: date/1000,
-      y: y
+      x: Math.round(Date.parse(h.date)/precision),
+      y: h.settled_delta/100
     })
   }
 
   // keep it updated
   d.push({
-    x: ts(),
-    y: d[d.length-1].y
+    x: Math.round(new Date/precision),
+    y: d[d.length - 1].y
   })
-
 
   window.riskchart.update()
 }
 
-render = r=>{
-  if(r.alert) notyf.alert(r.alert)
-  if(r.confirm) notyf.confirm(r.confirm)
+render = r => {
+  if (r.alert) notyf.alert(r.alert)
+  if (r.confirm) notyf.confirm(r.confirm)
 
   Object.assign(app, r)
   app.$forceUpdate()
 
-  if(r.history && window.riskcanvas){
+  if (r.history && window.riskcanvas) {
     renderRisk(r.history)
-  } 
+  }
 }
-
 
 FS.resolvers.push(render)
 
-FS.onready(()=>{
+FS.onready(() => {
   FS('load').then(render)
 
-  if(localStorage.auth_code){
+  if (localStorage.auth_code) {
     // local node
-    if(location.hash=='') location.hash = '#wallet'
+    if (location.hash == '') location.hash = '#wallet'
 
-    setInterval(function(){
+    setInterval(function () {
       FS('load').then(render)
     }, 5000)
-
   }
 
-  notyf = new Notyf({delay:4000})
-
+  notyf = new Notyf({delay: 4000})
 
   var methods = {
-    icon: (h, s)=>{
-      return '<img width='+s+' height='+s+' src="data:image/png;base64,' + (new Identicon(h.toString(), s).toString()) + '">'
+    icon: (h, s) => {
+      return '<img width=' + s + ' height=' + s + ' src="data:image/png;base64,' + (new Identicon(h.toString(), s).toString()) + '">'
     },
     hljs: hljs.highlight,
 
-    ivoted:(voters)=>{
-      return voters.find(v=>v.id == app.record.id)
+    ivoted: (voters) => {
+      return voters.find(v => v.id == app.record.id)
     },
 
-    toHexString: (byteArray)=>{
-      return Array.prototype.map.call(byteArray, function(byte) {
-        return ('0' + (byte & 0xFF).toString(16)).slice(-2);
-      }).join('');
+    toHexString: (byteArray) => {
+      return Array.prototype.map.call(byteArray, function (byte) {
+        return ('0' + (byte & 0xFF).toString(16)).slice(-2)
+      }).join('')
     },
 
-    call: function(method, args){
-      if(method == 'vote'){
-        args.rationale = prompt("Why?")
-        if(!args.rationale) return false
+    call: function (method, args) {
+      if (method == 'vote') {
+        args.rationale = prompt('Why?')
+        if (!args.rationale) return false
       }
-
 
       FS(method, args).then(render)
       return false
     },
-    settle: ()=>{
-      var total = app.outs.reduce((k,v)=>k+parseFloat(v.amount.length==0 ? '0' : v.amount), 0)
+    settle: () => {
+      var total = app.outs.reduce((k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount), 0)
 
-      //if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
-        app.call('settleUser', {
-          assetType: 0,
-          ins: app.ins,
-          outs: app.outs
-        })
-      //}
+      // if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
+      app.call('settleUser', {
+        assetType: 0,
+        ins: app.ins,
+        outs: app.outs
+      })
+      // }
     },
-    derive: f=>{
+    derive: f => {
       var data = {
-        username: inputUsername.value, 
+        username: inputUsername.value,
         password: inputPassword.value
       }
-
 
       FS('load', data).then(render)
       return false
     },
 
-    off_amount_full: ()=>{
+    off_amount_full: () => {
       var before = app.uncommy(app.off_amount)
       var fee = Math.round(before / 999)
-      if(fee == 0) fee = 1
+      if (fee == 0) fee = 1
       return app.commy(before + fee)
     },
 
-    dispute: ()=>{
+    dispute: () => {
       var fee = app.commy(app.K.standalone_balance)
-      if(app.record){
-        if(app.record.balance >= app.K.standalone_balance){
-          if(confirm("Transaction fee is $"+fee+". Proceed and start onchain dispute?")){
+      if (app.record) {
+        if (app.record.balance >= app.K.standalone_balance) {
+          if (confirm('Transaction fee is $' + fee + '. Proceed and start onchain dispute?')) {
             app.call('takeEverything')
           }
-        }else{
-          alert("You don't have enough global balance. You need at least "+fee)
+        } else {
+          alert("You don't have enough global balance. You need at least " + fee)
         }
-      }else{
-        alert("You are not registred onchain yet. Ensure to receive at list $"+app.commy(K.risk)+", or be registred by other users.")
+      } else {
+        alert('You are not registred onchain yet. Ensure to receive at list $' + app.commy(K.risk) + ', or be registred by other users.')
       }
     },
 
-    go: (path)=>{
-      if(path==''){
-        history.pushState("/", null, '/');
-      }else{
-        location.hash = "#"+path
+    go: (path) => {
+      if (path == '') {
+        history.pushState('/', null, '/')
+      } else {
+        location.hash = '#' + path
       }
       app.tab = path
     },
 
-    deltaColor:(d)=>{
-      if(d <= -app.K.risk) return '#ff6e7c'
-      if(d >= app.K.risk) return '#5ed679'
-      
+    deltaColor: (d) => {
+      if (d <= -app.K.risk) return '#ff6e7c'
+      if (d >= app.K.risk) return '#5ed679'
+
       return ''
     },
 
-    commy: (b,dot=true)=>{
+    commy: (b, dot = true) => {
       let prefix = b < 0 ? '-' : ''
 
       b = Math.abs(b).toString()
-      if(dot){
-        if(b.length==1){
-          b='0.0'+b
-        }else if(b.length==2){
-          b='0.'+b
-        }else{
+      if (dot) {
+        if (b.length == 1) {
+          b = '0.0' + b
+        } else if (b.length == 2) {
+          b = '0.' + b
+        } else {
           var insert_dot_at = b.length - 2
-          b = b.slice(0,insert_dot_at) + '.' + b.slice(insert_dot_at)
+          b = b.slice(0, insert_dot_at) + '.' + b.slice(insert_dot_at)
         }
       }
-      return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+      return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     },
-    uncommy: str=>{
-      if(str.indexOf('.') == -1) str += '.00'
+    uncommy: str => {
+      if (str.indexOf('.') == -1) str += '.00'
 
-      return parseInt(str.replace(/[^0-9]/g,''))
+      return parseInt(str.replace(/[^0-9]/g, ''))
     },
 
-    timeAgo: (time)=>{
+    timeAgo: (time) => {
       var units = [
-        { name: "second", limit: 60, in_seconds: 1 },
-        { name: "minute", limit: 3600, in_seconds: 60 },
-        { name: "hour", limit: 86400, in_seconds: 3600  },
-        { name: "day", limit: 604800, in_seconds: 86400 },
-        { name: "week", limit: 2629743, in_seconds: 604800  },
-        { name: "month", limit: 31556926, in_seconds: 2629743 },
-        { name: "year", limit: null, in_seconds: 31556926 }
-      ];
-      var diff = (new Date() - new Date(time*1000)) / 1000;
-      if (diff < 5) return "now";
-      
-      var i = 0, unit;
+        { name: 'second', limit: 60, in_seconds: 1 },
+        { name: 'minute', limit: 3600, in_seconds: 60 },
+        { name: 'hour', limit: 86400, in_seconds: 3600 },
+        { name: 'day', limit: 604800, in_seconds: 86400 },
+        { name: 'week', limit: 2629743, in_seconds: 604800 },
+        { name: 'month', limit: 31556926, in_seconds: 2629743 },
+        { name: 'year', limit: null, in_seconds: 31556926 }
+      ]
+      var diff = (new Date() - new Date(time * 1000)) / 1000
+      if (diff < 5) return 'now'
+
+      var i = 0, unit
       while (unit = units[i++]) {
-        if (diff < unit.limit || !unit.limit){
-          var diff =  Math.floor(diff / unit.in_seconds);
-          return diff + " " + unit.name + (diff>1 ? "s" : "") + " ago";
+        if (diff < unit.limit || !unit.limit) {
+          var diff = Math.floor(diff / unit.in_seconds)
+          return diff + ' ' + unit.name + (diff > 1 ? 's' : '') + ' ago'
         }
       };
     }
 
   }
 
-
   var wp = app.innerHTML
 
   app = new Vue({
     el: '#app',
-    data(){ return {
-      auth_code: localStorage.auth_code,
-      assetType: 'FSD',
-      whitepaper: wp,
+    data () {
+      return {
+        auth_code: localStorage.auth_code,
+        assetType: 'FSD',
+        whitepaper: wp,
 
-      pubkey: false,
-      K: false,
-      my_member: false,
+        pubkey: false,
+        K: false,
+        my_member: false,
 
-      pw: '',
-      username: '',
+        pw: '',
+        username: '',
 
-      channels: {},
+        channels: {},
 
-      record: false,
+        record: false,
 
-      tab: location.hash.substr(1),
+        tab: location.hash.substr(1),
 
-      install_snippet: false,
+        install_snippet: false,
 
-      ins: [],
-      outs: [{to:'', amount:''}],
+        ins: [],
+        outs: [{to: '', amount: ''}],
 
-      off_to: '',
-      off_amount: '',
-      is_hub: false,
+        off_to: '',
+        off_amount: '',
+        is_hub: false,
 
-      history: [],
+        history: [],
 
-      proposal: ['Mint $1000 FSD to 1@1',`await Tx.mint(0, 1, 1, 100000)`,'']
+        proposal: ['Mint $1000 FSD to 1@1', `await Tx.mint(0, 1, 1, 100000)`, '']
 
-    } },
+      }
+    },
     methods: methods,
     template: `
 <div>
   <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
 
-    <a class="navbar-brand" href="#">[Failsafe]</a>
+    <a class="navbar-brand" href="#">Failsafe</a>
     <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
       <span class="navbar-toggler-icon"></span>
     </button>
@@ -327,9 +319,18 @@ FS.onready(()=>{
 
       </ul>
 
+          
+  <span>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span>
+  &nbsp;     
 
-      <button type="button" class="btn btn-info" @click="call('sync')">Sync (Block {{K.total_blocks}}, {{timeAgo(K.ts)}})</button>
-  &nbsp;     <button v-if="pubkey" type="button" class="btn btn-danger" @click="call('logout')">Log Out</button>
+  <div v-if="pubkey">
+  <button type="button" class="btn btn-info" @click="call('sync')">Sync</button>
+  &nbsp;     
+  <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out 
+  </button>
+    &nbsp; 
+  <span v-html="icon(pubkey,32)"></span>
+  </div>
 
     </div>
   </nav>
@@ -354,18 +355,18 @@ FS.onready(()=>{
 
 
           <h1 style="display:inline-block">\${{commy(ch.total)}}</h1>
-          <small v-if="ch.total>0">= {{commy(ch.collateral)}} insurance {{ch.settled_delta > 0 ? "+ "+commy(ch.settled_delta)+" uninsured" : "- "+commy(-ch.settled_delta)+" spent"}}</small> 
+          <small v-if="ch.total>0">= {{commy(ch.insurance)}} insurance {{ch.settled_delta > 0 ? "+ "+commy(ch.settled_delta)+" uninsured" : "- "+commy(-ch.settled_delta)+" spent"}}</small> 
           
 
           <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
 
-          <div v-if="ch.total>0 || ch.collateral > 0">
+          <div v-if="ch.total>0 || ch.insurance > 0">
 
             <div class="progress" style="max-width:1000px">
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.settled_delta<0?ch.collateral:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.settled_delta<0?ch.insurance:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
                 {{commy(ch.failsafe)}} (insured)
               </div>
-              <div v-if="ch.settled_delta<0" v-bind:style="{ width: Math.round(-ch.settled_delta*100/ch.collateral)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+              <div v-if="ch.settled_delta<0" v-bind:style="{ width: Math.round(-ch.settled_delta*100/ch.insurance)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
                 {{commy(ch.settled_delta)}} (spent)
               </div>
               <div v-if="ch.settled_delta>0" v-bind:style="{ width: Math.round(ch.settled_delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
@@ -408,7 +409,7 @@ FS.onready(()=>{
         </thead>
         <tbody>
           <tr v-for="h in history">
-            <td>{{h.date}}</td>
+            <td>{{ new Date(h.date).toLocaleString() }}</td>
             <td>{{h.desc}}</td>
             <td>{{commy(h.amount)}}</td>
             <td v-if="h.balance>0">{{commy(h.balance)}}</td>
@@ -597,7 +598,7 @@ FS.onready(()=>{
 
               <th scope="col">Nonces (onchain/offchain)</th>
 
-              <th scope="col">Collateral</th>
+              <th scope="col">Insurance</th>
 
               <th scope="col">Settled+Delta</th>
 
@@ -612,7 +613,7 @@ FS.onready(()=>{
               <th scope="row"><small>{{toHexString(d.delta_record.userId.data).substr(0,10)}}...</small></th>
 
               <td>{{d.nonce}}/{{d.delta_record.nonce}}</td>
-              <td>{{commy(d.collateral)}}</td>
+              <td>{{commy(d.insurance)}}</td>
 
               <td v-bind:style="{'background-color': deltaColor(d.settled_delta) }">{{commy(d.settled_delta)}}</td>
 
@@ -638,7 +639,7 @@ FS.onready(()=>{
             <th scope="col">Global Balance</th>
 
             <th scope="col">Nonce</th>
-            <th scope="col">Collateral</th>
+            <th scope="col">Insurance</th>
             <th scope="col">Settled</th>
           </tr>
         </thead>
@@ -653,8 +654,8 @@ FS.onready(()=>{
 
             <td>{{u.nonce}}</td>
             
-            <td>{{commy(u.hub[0] ? u.hub[0].collateral.collateral : 0)}}</td>
-            <td>{{commy(u.hub[0] ? u.hub[0].collateral.settled : 0)}}</td>
+            <td>{{commy(u.hub[0] ? u.hub[0].insurance.insurance : 0)}}</td>
+            <td>{{commy(u.hub[0] ? u.hub[0].insurance.settled : 0)}}</td>
 
           </tr>
 
@@ -672,11 +673,8 @@ FS.onready(()=>{
 
   </div>
 </div>
-` 
-   })
-
-
-
+`
+  })
 })
 
 /*
@@ -684,10 +682,3 @@ FS.onready(()=>{
 <p id="decentText"></p>
 <canvas id="decentChart"></canvas>
 */
-
-
-
-
-
-
-

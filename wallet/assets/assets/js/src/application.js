@@ -16,7 +16,6 @@
   'use strict'
 
   $(function () {
-
     // Tooltip and popover demos
     $('.tooltip-demo').tooltip({
       selector: '[data-toggle="tooltip"]',

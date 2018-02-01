@@ -2,43 +2,42 @@
 axios = require('axios')
 l = console.log
 crypto = require('crypto')
-rand = ()=>crypto.randomBytes(32).toString('hex')
+rand = () => crypto.randomBytes(32).toString('hex')
 
 Cookies = require('cookies')
 
 users = {}
 
-commy = (b,dot=true)=>{
+commy = (b, dot = true) => {
   let prefix = b < 0 ? '-' : ''
 
   b = Math.abs(b).toString()
-  if(dot){
-    if(b.length==1){
-      b='0.0'+b
-    }else if(b.length==2){
-      b='0.'+b
-    }else{
+  if (dot) {
+    if (b.length == 1) {
+      b = '0.0' + b
+    } else if (b.length == 2) {
+      b = '0.' + b
+    } else {
       var insert_dot_at = b.length - 2
-      b = b.slice(0,insert_dot_at) + '.' + b.slice(insert_dot_at)
+      b = b.slice(0, insert_dot_at) + '.' + b.slice(insert_dot_at)
     }
   }
-  return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-require('http').createServer((req,res)=>{
+require('http').createServer((req, res) => {
+  cookies = new Cookies(req, res)
 
-  cookies = new Cookies(req,res)
-  
   res.status = 200
 
-  var id = cookies.get('id') 
+  var id = cookies.get('id')
 
-  if(req.url == '/'){
-    if(!id){
+  if (req.url == '/') {
+    if (!id) {
       id = rand()
       cookies.set('id', id)
     }
-    if(!users[id]) users[id] = 0
+    if (!users[id]) users[id] = 0
 
     res.end(`
     <h1>Failsafe Demo</h1>
@@ -141,45 +140,37 @@ window.onload = function(){
 
 
       `)
-  }else if(req.url == '/init'){
+  } else if (req.url == '/init') {
     var queryData = ''
-    req.on('data', function(data) { queryData += data })
+    req.on('data', function (data) { queryData += data })
 
-    req.on('end', function() {
+    req.on('end', function () {
       var p = JSON.parse(queryData)
 
-      if(p.invoice){
+      if (p.invoice) {
         l(p.invoice)
         axios.post('http://0.0.0.0:8002/invoice', {
           invoice: p.invoice
-        }).then(r=>{ 
+        }).then(r => {
           l('got invoice', r)
-          if(r.data.status == 'paid'){
+          if (r.data.status == 'paid') {
             users[id] += r.data.amount
-          }else{
+          } else {
             console.log('Expired')
           }
-          res.end(JSON.stringify({status: 'paid'})) 
+          res.end(JSON.stringify({status: 'paid'}))
         })
-
-      }else{ 
+      } else {
         l(req.url)
         axios.post('http://0.0.0.0:8002/invoice', {
           amount: p.amount,
           extra: 'uid'
-        }).then(r=>{ 
-          res.end(JSON.stringify(r.data)) 
+        }).then(r => {
+          res.end(JSON.stringify(r.data))
         })
       }
-
-
     })
-
-
-
-  }else{
-    l('Not found '+req.url)
+  } else {
+    l('Not found ' + req.url)
   }
-
-
 }).listen(3010)

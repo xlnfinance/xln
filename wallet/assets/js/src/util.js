@@ -6,8 +6,6 @@
  */
 
 const Util = (($) => {
-
-
   /**
    * ------------------------------------------------------------------------
    * Private TransitionEnd Helpers
@@ -19,26 +17,26 @@ const Util = (($) => {
   const MAX_UID = 1000000
 
   const TransitionEndEvent = {
-    WebkitTransition : 'webkitTransitionEnd',
-    MozTransition    : 'transitionend',
-    OTransition      : 'oTransitionEnd otransitionend',
-    transition       : 'transitionend'
+    WebkitTransition: 'webkitTransitionEnd',
+    MozTransition: 'transitionend',
+    OTransition: 'oTransitionEnd otransitionend',
+    transition: 'transitionend'
   }
 
   // shoutout AngusCroll (https://goo.gl/pxwQGp)
-  function toType(obj) {
+  function toType (obj) {
     return {}.toString.call(obj).match(/\s([a-zA-Z]+)/)[1].toLowerCase()
   }
 
-  function isElement(obj) {
+  function isElement (obj) {
     return (obj[0] || obj).nodeType
   }
 
-  function getSpecialTransitionEndEvent() {
+  function getSpecialTransitionEndEvent () {
     return {
       bindType: transition.end,
       delegateType: transition.end,
-      handle(event) {
+      handle (event) {
         if ($(event.target).is(this)) {
           return event.handleObj.handler.apply(this, arguments) // eslint-disable-line prefer-rest-params
         }
@@ -47,7 +45,7 @@ const Util = (($) => {
     }
   }
 
-  function transitionEndTest() {
+  function transitionEndTest () {
     if (window.QUnit) {
       return false
     }
@@ -65,7 +63,7 @@ const Util = (($) => {
     return false
   }
 
-  function transitionEndEmulator(duration) {
+  function transitionEndEmulator (duration) {
     let called = false
 
     $(this).one(Util.TRANSITION_END, () => {
@@ -81,7 +79,7 @@ const Util = (($) => {
     return this
   }
 
-  function setTransitionEndSupport() {
+  function setTransitionEndSupport () {
     transition = transitionEndTest()
 
     $.fn.emulateTransitionEnd = transitionEndEmulator
@@ -90,7 +88,6 @@ const Util = (($) => {
       $.event.special[Util.TRANSITION_END] = getSpecialTransitionEndEvent()
     }
   }
-
 
   /**
    * --------------------------------------------------------------------------
@@ -102,7 +99,7 @@ const Util = (($) => {
 
     TRANSITION_END: 'bsTransitionEnd',
 
-    getUID(prefix) {
+    getUID (prefix) {
       do {
         // eslint-disable-next-line no-bitwise
         prefix += ~~(Math.random() * MAX_UID) // "~~" acts like a faster Math.floor() here
@@ -110,7 +107,7 @@ const Util = (($) => {
       return prefix
     },
 
-    getSelectorFromElement(element) {
+    getSelectorFromElement (element) {
       let selector = element.getAttribute('data-target')
       if (!selector || selector === '#') {
         selector = element.getAttribute('href') || ''
@@ -124,25 +121,25 @@ const Util = (($) => {
       }
     },
 
-    reflow(element) {
+    reflow (element) {
       return element.offsetHeight
     },
 
-    triggerTransitionEnd(element) {
+    triggerTransitionEnd (element) {
       $(element).trigger(transition.end)
     },
 
-    supportsTransitionEnd() {
+    supportsTransitionEnd () {
       return Boolean(transition)
     },
 
-    typeCheckConfig(componentName, config, configTypes) {
+    typeCheckConfig (componentName, config, configTypes) {
       for (const property in configTypes) {
         if (configTypes.hasOwnProperty(property)) {
           const expectedTypes = configTypes[property]
-          const value         = config[property]
-          const valueType     = value && isElement(value) ?
-                                'element' : toType(value)
+          const value = config[property]
+          const valueType = value && isElement(value)
+                                ? 'element' : toType(value)
 
           if (!new RegExp(expectedTypes).test(valueType)) {
             throw new Error(
@@ -158,7 +155,6 @@ const Util = (($) => {
   setTransitionEndSupport()
 
   return Util
-
 })(jQuery)
 
 export default Util

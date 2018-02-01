@@ -4,8 +4,10 @@ ssh root@failsafe.network <<'ENDSSH'
 killall Failsafe
 
 rm -rf private/db* private/Failsafe-* data
+
 mkdir data
 mkdir private
+./install
 
 node fs genesis wss://failsafe.network:8000
 

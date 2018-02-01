@@ -5,7 +5,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Private
+# Private dir and Onchain data dir
 private
 data
 

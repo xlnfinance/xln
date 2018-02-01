@@ -1,4 +1,4 @@
-module.exports = async function(){
+module.exports = async function () {
   var hubId = 1
 
   var deltas = await Delta.findAll({where: {hubId: hubId}})
@@ -12,19 +12,19 @@ module.exports = async function(){
 
   var solvency = me.record.balance
 
-  for(var d of deltas){
+  for (var d of deltas) {
     var ch = await me.channel(d.userId)
 
     solvency -= ch.settled_delta
-    
+
     channels.push(ch)
 
-    if(ch.settled_delta <= -K.risk){
+    if (ch.settled_delta <= -K.risk) {
       ins.push(d.sig)
-    }else if(ch.settled_delta >= K.risk){
+    } else if (ch.settled_delta >= K.risk) {
       outs.push([d.userId, hubId, ch.settled_delta])
-    }else{
-      //l("This is low delta ", ch)
+    } else {
+      // l("This is low delta ", ch)
     }
   }
 
@@ -34,6 +34,4 @@ module.exports = async function(){
     ins: ins,
     outs: outs
   }
-
-
 }

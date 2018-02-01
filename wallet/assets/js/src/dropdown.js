@@ -2,7 +2,6 @@
 
 import Util from './util'
 
-
 /**
  * --------------------------------------------------------------------------
  * Bootstrap (v4.0.0-beta): dropdown.js
@@ -11,7 +10,6 @@ import Util from './util'
  */
 
 const Dropdown = (($) => {
-
   /**
    * Check for Popper dependency
    * Popper - https://popper.js.org
@@ -26,66 +24,65 @@ const Dropdown = (($) => {
    * ------------------------------------------------------------------------
    */
 
-  const NAME                     = 'dropdown'
-  const VERSION                  = '4.0.0-beta'
-  const DATA_KEY                 = 'bs.dropdown'
-  const EVENT_KEY                = `.${DATA_KEY}`
-  const DATA_API_KEY             = '.data-api'
-  const JQUERY_NO_CONFLICT       = $.fn[NAME]
-  const ESCAPE_KEYCODE           = 27 // KeyboardEvent.which value for Escape (Esc) key
-  const SPACE_KEYCODE            = 32 // KeyboardEvent.which value for space key
-  const TAB_KEYCODE              = 9 // KeyboardEvent.which value for tab key
-  const ARROW_UP_KEYCODE         = 38 // KeyboardEvent.which value for up arrow key
-  const ARROW_DOWN_KEYCODE       = 40 // KeyboardEvent.which value for down arrow key
+  const NAME = 'dropdown'
+  const VERSION = '4.0.0-beta'
+  const DATA_KEY = 'bs.dropdown'
+  const EVENT_KEY = `.${DATA_KEY}`
+  const DATA_API_KEY = '.data-api'
+  const JQUERY_NO_CONFLICT = $.fn[NAME]
+  const ESCAPE_KEYCODE = 27 // KeyboardEvent.which value for Escape (Esc) key
+  const SPACE_KEYCODE = 32 // KeyboardEvent.which value for space key
+  const TAB_KEYCODE = 9 // KeyboardEvent.which value for tab key
+  const ARROW_UP_KEYCODE = 38 // KeyboardEvent.which value for up arrow key
+  const ARROW_DOWN_KEYCODE = 40 // KeyboardEvent.which value for down arrow key
   const RIGHT_MOUSE_BUTTON_WHICH = 3 // MouseEvent.which value for the right button (assuming a right-handed mouse)
-  const REGEXP_KEYDOWN           = new RegExp(`${ARROW_UP_KEYCODE}|${ARROW_DOWN_KEYCODE}|${ESCAPE_KEYCODE}`)
+  const REGEXP_KEYDOWN = new RegExp(`${ARROW_UP_KEYCODE}|${ARROW_DOWN_KEYCODE}|${ESCAPE_KEYCODE}`)
 
   const Event = {
-    HIDE             : `hide${EVENT_KEY}`,
-    HIDDEN           : `hidden${EVENT_KEY}`,
-    SHOW             : `show${EVENT_KEY}`,
-    SHOWN            : `shown${EVENT_KEY}`,
-    CLICK            : `click${EVENT_KEY}`,
-    CLICK_DATA_API   : `click${EVENT_KEY}${DATA_API_KEY}`,
-    KEYDOWN_DATA_API : `keydown${EVENT_KEY}${DATA_API_KEY}`,
-    KEYUP_DATA_API   : `keyup${EVENT_KEY}${DATA_API_KEY}`
+    HIDE: `hide${EVENT_KEY}`,
+    HIDDEN: `hidden${EVENT_KEY}`,
+    SHOW: `show${EVENT_KEY}`,
+    SHOWN: `shown${EVENT_KEY}`,
+    CLICK: `click${EVENT_KEY}`,
+    CLICK_DATA_API: `click${EVENT_KEY}${DATA_API_KEY}`,
+    KEYDOWN_DATA_API: `keydown${EVENT_KEY}${DATA_API_KEY}`,
+    KEYUP_DATA_API: `keyup${EVENT_KEY}${DATA_API_KEY}`
   }
 
   const ClassName = {
-    DISABLED  : 'disabled',
-    SHOW      : 'show',
-    DROPUP    : 'dropup',
-    MENURIGHT : 'dropdown-menu-right',
-    MENULEFT  : 'dropdown-menu-left'
+    DISABLED: 'disabled',
+    SHOW: 'show',
+    DROPUP: 'dropup',
+    MENURIGHT: 'dropdown-menu-right',
+    MENULEFT: 'dropdown-menu-left'
   }
 
   const Selector = {
-    DATA_TOGGLE   : '[data-toggle="dropdown"]',
-    FORM_CHILD    : '.dropdown form',
-    MENU          : '.dropdown-menu',
-    NAVBAR_NAV    : '.navbar-nav',
-    VISIBLE_ITEMS : '.dropdown-menu .dropdown-item:not(.disabled)'
+    DATA_TOGGLE: '[data-toggle="dropdown"]',
+    FORM_CHILD: '.dropdown form',
+    MENU: '.dropdown-menu',
+    NAVBAR_NAV: '.navbar-nav',
+    VISIBLE_ITEMS: '.dropdown-menu .dropdown-item:not(.disabled)'
   }
 
   const AttachmentMap = {
-    TOP       : 'top-start',
-    TOPEND    : 'top-end',
-    BOTTOM    : 'bottom-start',
-    BOTTOMEND : 'bottom-end'
+    TOP: 'top-start',
+    TOPEND: 'top-end',
+    BOTTOM: 'bottom-start',
+    BOTTOMEND: 'bottom-end'
   }
 
   const Default = {
-    placement   : AttachmentMap.BOTTOM,
-    offset      : 0,
-    flip        : true
+    placement: AttachmentMap.BOTTOM,
+    offset: 0,
+    flip: true
   }
 
   const DefaultType = {
-    placement   : 'string',
-    offset      : '(number|string)',
-    flip        : 'boolean'
+    placement: 'string',
+    offset: '(number|string)',
+    flip: 'boolean'
   }
-
 
   /**
    * ------------------------------------------------------------------------
@@ -94,40 +91,38 @@ const Dropdown = (($) => {
    */
 
   class Dropdown {
-
-    constructor(element, config) {
-      this._element  = element
-      this._popper   = null
-      this._config   = this._getConfig(config)
-      this._menu     = this._getMenuElement()
+    constructor (element, config) {
+      this._element = element
+      this._popper = null
+      this._config = this._getConfig(config)
+      this._menu = this._getMenuElement()
       this._inNavbar = this._detectNavbar()
 
       this._addEventListeners()
     }
 
-
     // getters
 
-    static get VERSION() {
+    static get VERSION () {
       return VERSION
     }
 
-    static get Default() {
+    static get Default () {
       return Default
     }
 
-    static get DefaultType() {
+    static get DefaultType () {
       return DefaultType
     }
 
     // public
 
-    toggle() {
+    toggle () {
       if (this._element.disabled || $(this._element).hasClass(ClassName.DISABLED)) {
         return
       }
 
-      const parent   = Dropdown._getParentFromElement(this._element)
+      const parent = Dropdown._getParentFromElement(this._element)
       const isActive = $(this._menu).hasClass(ClassName.SHOW)
 
       Dropdown._clearMenus()
@@ -137,7 +132,7 @@ const Dropdown = (($) => {
       }
 
       const relatedTarget = {
-        relatedTarget : this._element
+        relatedTarget: this._element
       }
       const showEvent = $.Event(Event.SHOW, relatedTarget)
 
@@ -174,7 +169,7 @@ const Dropdown = (($) => {
         .trigger($.Event(Event.SHOWN, relatedTarget))
     }
 
-    dispose() {
+    dispose () {
       $.removeData(this._element, DATA_KEY)
       $(this._element).off(EVENT_KEY)
       this._element = null
@@ -185,7 +180,7 @@ const Dropdown = (($) => {
       this._popper = null
     }
 
-    update() {
+    update () {
       this._inNavbar = this._detectNavbar()
       if (this._popper !== null) {
         this._popper.scheduleUpdate()
@@ -194,7 +189,7 @@ const Dropdown = (($) => {
 
     // private
 
-    _addEventListeners() {
+    _addEventListeners () {
       $(this._element).on(Event.CLICK, (event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -202,7 +197,7 @@ const Dropdown = (($) => {
       })
     }
 
-    _getConfig(config) {
+    _getConfig (config) {
       const elementData = $(this._element).data()
       if (elementData.placement !== undefined) {
         elementData.placement = AttachmentMap[elementData.placement.toUpperCase()]
@@ -224,7 +219,7 @@ const Dropdown = (($) => {
       return config
     }
 
-    _getMenuElement() {
+    _getMenuElement () {
       if (!this._menu) {
         const parent = Dropdown._getParentFromElement(this._element)
         this._menu = $(parent).find(Selector.MENU)[0]
@@ -232,7 +227,7 @@ const Dropdown = (($) => {
       return this._menu
     }
 
-    _getPlacement() {
+    _getPlacement () {
       const $parentDropdown = $(this._element).parent()
       let placement = this._config.placement
 
@@ -248,19 +243,19 @@ const Dropdown = (($) => {
       return placement
     }
 
-    _detectNavbar() {
+    _detectNavbar () {
       return $(this._element).closest('.navbar').length > 0
     }
 
-    _getPopperConfig() {
+    _getPopperConfig () {
       const popperConfig = {
-        placement : this._getPlacement(),
-        modifiers : {
-          offset : {
-            offset : this._config.offset
+        placement: this._getPlacement(),
+        modifiers: {
+          offset: {
+            offset: this._config.offset
           },
-          flip : {
-            enabled : this._config.flip
+          flip: {
+            enabled: this._config.flip
           }
         }
       }
@@ -276,7 +271,7 @@ const Dropdown = (($) => {
 
     // static
 
-    static _jQueryInterface(config) {
+    static _jQueryInterface (config) {
       return this.each(function () {
         let data = $(this).data(DATA_KEY)
         const _config = typeof config === 'object' ? config : null
@@ -295,7 +290,7 @@ const Dropdown = (($) => {
       })
     }
 
-    static _clearMenus(event) {
+    static _clearMenus (event) {
       if (event && (event.which === RIGHT_MOUSE_BUTTON_WHICH ||
         event.type === 'keyup' && event.which !== TAB_KEYCODE)) {
         return
@@ -303,10 +298,10 @@ const Dropdown = (($) => {
 
       const toggles = $.makeArray($(Selector.DATA_TOGGLE))
       for (let i = 0; i < toggles.length; i++) {
-        const parent        = Dropdown._getParentFromElement(toggles[i])
-        const context       = $(toggles[i]).data(DATA_KEY)
+        const parent = Dropdown._getParentFromElement(toggles[i])
+        const context = $(toggles[i]).data(DATA_KEY)
         const relatedTarget = {
-          relatedTarget : toggles[i]
+          relatedTarget: toggles[i]
         }
 
         if (!context) {
@@ -319,8 +314,8 @@ const Dropdown = (($) => {
         }
 
         if (event && (event.type === 'click' &&
-            /input|textarea/i.test(event.target.tagName) || event.type === 'keyup' && event.which === TAB_KEYCODE)
-            && $.contains(parent, event.target)) {
+            /input|textarea/i.test(event.target.tagName) || event.type === 'keyup' && event.which === TAB_KEYCODE) &&
+            $.contains(parent, event.target)) {
           continue
         }
 
@@ -345,7 +340,7 @@ const Dropdown = (($) => {
       }
     }
 
-    static _getParentFromElement(element) {
+    static _getParentFromElement (element) {
       let parent
       const selector = Util.getSelectorFromElement(element)
 
@@ -356,7 +351,7 @@ const Dropdown = (($) => {
       return parent || element.parentNode
     }
 
-    static _dataApiKeydownHandler(event) {
+    static _dataApiKeydownHandler (event) {
       if (!REGEXP_KEYDOWN.test(event.which) || /button/i.test(event.target.tagName) && event.which === SPACE_KEYCODE ||
          /input|textarea/i.test(event.target.tagName)) {
         return
@@ -369,12 +364,11 @@ const Dropdown = (($) => {
         return
       }
 
-      const parent   = Dropdown._getParentFromElement(this)
+      const parent = Dropdown._getParentFromElement(this)
       const isActive = $(parent).hasClass(ClassName.SHOW)
 
       if (!isActive && (event.which !== ESCAPE_KEYCODE || event.which !== SPACE_KEYCODE) ||
            isActive && (event.which === ESCAPE_KEYCODE || event.which === SPACE_KEYCODE)) {
-
         if (event.which === ESCAPE_KEYCODE) {
           const toggle = $(parent).find(Selector.DATA_TOGGLE)[0]
           $(toggle).trigger('focus')
@@ -406,9 +400,7 @@ const Dropdown = (($) => {
 
       items[index].focus()
     }
-
   }
-
 
   /**
    * ------------------------------------------------------------------------
@@ -417,7 +409,7 @@ const Dropdown = (($) => {
    */
 
   $(document)
-    .on(Event.KEYDOWN_DATA_API, Selector.DATA_TOGGLE,  Dropdown._dataApiKeydownHandler)
+    .on(Event.KEYDOWN_DATA_API, Selector.DATA_TOGGLE, Dropdown._dataApiKeydownHandler)
     .on(Event.KEYDOWN_DATA_API, Selector.MENU, Dropdown._dataApiKeydownHandler)
     .on(`${Event.CLICK_DATA_API} ${Event.KEYUP_DATA_API}`, Dropdown._clearMenus)
     .on(Event.CLICK_DATA_API, Selector.DATA_TOGGLE, function (event) {
@@ -429,22 +421,20 @@ const Dropdown = (($) => {
       e.stopPropagation()
     })
 
-
   /**
    * ------------------------------------------------------------------------
    * jQuery
    * ------------------------------------------------------------------------
    */
 
-  $.fn[NAME]             = Dropdown._jQueryInterface
+  $.fn[NAME] = Dropdown._jQueryInterface
   $.fn[NAME].Constructor = Dropdown
-  $.fn[NAME].noConflict  = function () {
+  $.fn[NAME].noConflict = function () {
     $.fn[NAME] = JQUERY_NO_CONFLICT
     return Dropdown._jQueryInterface
   }
 
   return Dropdown
-
 })(jQuery)
 
 export default Dropdown

@@ -12,7 +12,7 @@
 (function () {
   'use strict'
 
-  function emulatedIEMajorVersion() {
+  function emulatedIEMajorVersion () {
     var groups = /MSIE ([0-9.]+)/.exec(window.navigator.userAgent)
     if (groups === null) {
       return null
@@ -22,7 +22,7 @@
     return ieMajorVersion
   }
 
-  function actualNonEmulatedIEMajorVersion() {
+  function actualNonEmulatedIEMajorVersion () {
     // Detects the actual version of IE in use, even if it's in an older-IE emulation mode.
     // IE JavaScript conditional compilation docs: https://msdn.microsoft.com/library/121hztk3%28v=vs.94%29.aspx
     // @cc_on docs: https://msdn.microsoft.com/library/8ka90k2e%28v=vs.94%29.aspx

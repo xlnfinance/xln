@@ -31,8 +31,7 @@ $(function () {
     $el.bootstrapPopover()
     try {
       $el.bootstrapPopover('noMethod')
-    }
-    catch (err) {
+    } catch (err) {
       assert.strictEqual(err.message, 'No method named "noMethod"')
     }
   })
@@ -137,7 +136,6 @@ $(function () {
     assert.strictEqual($('.popover .popover-body').html(), '¯\\_(ツ)_/¯', 'content inserted')
     assert.ok(!$.contains($('.popover').get(0), content), 'content node copied, not moved')
   })
-
 
   QUnit.test('should not duplicate HTML object', function (assert) {
     assert.expect(6)
@@ -331,8 +329,7 @@ $(function () {
 
     try {
       $('<div data-toggle="popover" data-title="some title" data-content="@Johann-S" style="display: none"/>').bootstrapPopover('show')
-    }
-    catch (err) {
+    } catch (err) {
       assert.strictEqual(err.message, 'Please use show on visible elements')
       done()
     }

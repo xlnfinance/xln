@@ -27,7 +27,7 @@ RegExp.quoteReplacement = function (string) {
 
 var DRY_RUN = false
 
-function walkAsync(directory, excludedDirectories, fileCallback, errback) {
+function walkAsync (directory, excludedDirectories, fileCallback, errback) {
   if (excludedDirectories.has(path.parse(directory).base)) {
     return
   }
@@ -44,12 +44,10 @@ function walkAsync(directory, excludedDirectories, fileCallback, errback) {
           return
         }
         if (stats.isSymbolicLink()) {
-          return
-        }
-        else if (stats.isDirectory()) {
+
+        } else if (stats.isDirectory()) {
           process.nextTick(walkAsync, filepath, excludedDirectories, fileCallback, errback)
-        }
-        else if (stats.isFile()) {
+        } else if (stats.isFile()) {
           process.nextTick(fileCallback, filepath)
         }
       })
@@ -57,7 +55,7 @@ function walkAsync(directory, excludedDirectories, fileCallback, errback) {
   })
 }
 
-function replaceRecursively(directory, excludedDirectories, allowedExtensions, original, replacement) {
+function replaceRecursively (directory, excludedDirectories, allowedExtensions, original, replacement) {
   original = new RegExp(RegExp.quote(original), 'g')
   replacement = RegExp.quoteReplacement(replacement)
   var updateFile = !DRY_RUN ? function (filepath) {
@@ -67,8 +65,7 @@ function replaceRecursively(directory, excludedDirectories, allowedExtensions, o
   } : function (filepath) {
     if (allowedExtensions.has(path.parse(filepath).ext)) {
       console.log('FILE: ' + filepath)
-    }
-    else {
+    } else {
       console.log('EXCLUDED:' + filepath)
     }
   }
@@ -79,7 +76,7 @@ function replaceRecursively(directory, excludedDirectories, allowedExtensions, o
   })
 }
 
-function main(args) {
+function main (args) {
   if (args.length !== 2) {
     console.error('USAGE: change-version old_version new_version')
     console.error('Got arguments:', args)

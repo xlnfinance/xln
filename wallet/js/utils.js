@@ -18,12 +18,9 @@ function show (el) {
   el.style.display = 'block'
 }
 
-timestamp = ()=>{
-  return Math.floor(new Date/1000)
+timestamp = () => {
+  return Math.floor(new Date() / 1000)
 }
-
-
-
 
 screen = function (label) {
   // show($('.container'))
@@ -37,9 +34,8 @@ screen = function (label) {
   }
 }
 
-
 logout = function () {
-  if(confirm('You will not lose any data, but you will have to enter same email & password to log in this profile again')) {
+  if (confirm('You will not lose any data, but you will have to enter same email & password to log in this profile again')) {
     localStorage.clear()
     location.hash = ''
     location.reload()
