@@ -100,8 +100,8 @@ methodMap = (i) => {
 
     'block',
 
-    'settle',
-    'settleUser',
+    'rebalanceHub',
+    'rebalanceUser',
 
     'withdraw', // instant off-chain signature to withdraw from mutual payment channel
     'delta',    // delayed balance proof
@@ -127,8 +127,8 @@ methodMap = (i) => {
 }
 
 allowedOnchain = [
-  'settle',
-  'settleUser',
+  'rebalanceHub',
+  'rebalanceUser',
 
   'propose',
 
@@ -344,6 +344,10 @@ initDashboard = async a => {
   if (base_port != 443) opn(url)
 
   me = new Me()
+  me.processQueue()
+
+
+
   loadJSON()
 
   setTimeout(async () => {
@@ -357,11 +361,15 @@ initDashboard = async a => {
     }
   }, 200)
 
+
+
   localwss = new ws.Server({ server: server, maxPayload: 64 * 1024 * 1024 })
 
   localwss.on('error', function (err) { console.error(err) })
   localwss.on('connection', function (ws) {
-    ws.on('message', (msg) => { require('./src/rpc')(ws, msg) })
+    ws.on('message', (msg) => {
+      me.queue.push(['internal_rpc', ws, msg]) 
+    })
   })
 }
 
@@ -435,7 +443,7 @@ Insurance = sequelize.define('insurance', {
   nonce: Sequelize.INTEGER, // for instant withdrawals
 
   insurance: Sequelize.BIGINT, // insurance
-  settled: Sequelize.BIGINT, // what hub already insuranceized
+  rebalanced: Sequelize.BIGINT, // what hub already insuranceized
 
   assetType: Sequelize.INTEGER,
 
@@ -496,7 +504,7 @@ History = privSequelize.define('history', {
   userId: Sequelize.CHAR(32).BINARY,
   hubId: Sequelize.INTEGER,
 
-  settled_delta: Sequelize.INTEGER,
+  rebalanced_delta: Sequelize.INTEGER,
 
   amount: Sequelize.INTEGER,
   balance: Sequelize.INTEGER,
@@ -514,7 +522,7 @@ Event = privSequelize.define('event', {
 
 sync = () => {
   if (K.prev_hash) {
-    me.sendMember('sync', Buffer.from(K.prev_hash, 'hex'), 0)
+    me.send(K.members[0], 'sync', Buffer.from(K.prev_hash, 'hex'))
   }
 }
 
@@ -539,6 +547,8 @@ if (process.argv[2] == 'console') {
 } else if (process.argv[2] == 'login') {
   setTimeout(async () => {
     var me = new Me()
+    me.processQueue()
+
     var seed = await derive(process.argv[3], process.argv[4])
     await me.init(process.argv[3], seed)
   }, 100)

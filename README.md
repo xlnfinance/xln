@@ -1,28 +1,35 @@
+[![JavaScript Style Guide](https://cdn.rawgit.com/standard/standard/master/badge.svg)](https://github.com/standard/standard)
+
+
 # Failsafe Network
 
-Failsafe is a new blockchain that comes with offchain layer out-of-box - inspired by Lightning and Raiden. The only change we've done is the fix to the liquidity problem - our state channels support transfering promises beyond the collateral (insurance) peers have in a channel onchain, which induces manageable risk and removes scalability caps.
+Failsafe is a new **scalable blockchain** that comes with Lightning-inspired offchain layer out-of-box. It fixes the liquidity problem - Failsafe state channels support transfering beyond the capacity (insurance), which induces manageable risk and removes scalability caps.
 
-Failsafe has no virtual machine for smart contracts and instead uses onchain governance and consensus amendments.
+Failsafe has no virtual machine for smart contracts, instead uses onchain governance and  amendments to implement new functionality.
 
-Failsafe has a native token Failsafe Dollar to pay for transaction fees and hub fees for transfer mediations, but otherwise we aim to support 3rd party issued tokens (just like issuances in Ripple) and uses native currency FSD to pay fees. 
+Failsafe has **a native token FSD to pay for transaction fees** and hub fees for transfer mediations, but the goal is to focus on 3rd party issued tokens (just like issuances in Ripple): **to move bank-backed and government-backed fiat currencies to our blockchain** which ensures fairness and security of first layer yet providing all the needed controls and introspection for financial institutions to remain compliant.
 
-Our final goal is to move bank-backed and government-backed fiat currencies to our blockchain which ensures fairness and security of first layer yet providing all the needed controls and introspection for financial institutions to remain compliant.
+Unlike "fake" bloated blockchains with high tps, in Failsafe the tokens are transfered instantly **offchain through the hubs** and hubs are responsible for rebalancing "insurances" onchain to reduce the collective risk over time. **This allows 1,000,000+ transactions per second with a hub-and-spoke topology of hubs.** It is the same how the Internet topology looks like, and it also has no central point of failure.
 
-Unlike "fake" bloated blockchains with high tps, in Failsafe the tokens are transfered instantly **offchain through the hubs** and hubs are responsible for rebalancing "insurances" onchain to reduce the collective risk over time. **This allows infinite scalability - 1,000,000+ transactions per second with a hub-and-spoke topology of hubs.** It is the same how the Internet topology looks like, and it also has no central point of failure.
+You can think of it as FDIC insurance, but not up to a specific amount of $250k - instead it can be any user-chosen amount, and the rules are seamlessly enforced by the blockchain instead of the government. You can always enforce and take your money from one hub and send to another.
 
-You can think of it as FDIC insurance, but not up to a specific amount of $250k - instead it can be any user-chosen amount, and the rules are enforced by the blockchain instead of the government. You can always enforce and take your money from one hub and send to another.
+## High Level Roadmap
 
-## Roadmap
+Off-chain layers design is a hard problem. Here are some trade-offs to deliver usable product as soon as possible:
 
-* Payments is our priority. Implement SDKs for all major payment platforms and shops.
+* Online payments is the priority. Implement SDKs for all major payment platforms and shops.
 
-* Now supports single asset FSD. Start supporting flexible asset creation and tokens by 2019
+* Point-of-Sale terminal are a long-distance idea. 
 
-* Now supports single hub. Introduce hub creation by anyone and multihub network by 2019
+* Starting with Linux/macOS/Windows clients only. Web clients are insecure and therefore prohibited. Mobile clients are inevitable, but there's no sensible security model for a blockchain to run inside mobile app, so proper mobile full nodes are delayed to ~2020.
+
+* Starting with single asset FSD. Start supporting configurable assets/issuances/tokens by 2019
+
+* Starting with single @1 hub. Introduce hub creation by anyone and multihub network by 2019
 
 * All payments are not hashlocked now (the hub is trusted mediator). By 2019 support hashlocks for high-value transfers.
 
-* Asset exchange (fully trustless and atomic offchain swaps) by 2020
+* Trustless asset exchange (atomic offchain swaps) by 2020
 
 
 ## Simnet

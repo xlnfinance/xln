@@ -1,3 +1,5 @@
+// Internal RPC serves requests made by the wallet (the user's browser) or by the merchant app
+
 module.exports = async (ws, msg) => {
   var result = {}
 
@@ -37,7 +39,7 @@ module.exports = async (ws, msg) => {
 
         var ch = await me.channel(1)
         // post last available signed delta
-        await me.broadcast('settleUser', r([ 0, [ch.delta_record.sig ? ch.delta_record.sig : 1], [] ]))
+        await me.broadcast('rebalanceUser', r([ 0, [ch.delta_record.sig ? ch.delta_record.sig : 1], [] ]))
         result.confirm = 'Started a dispute onchain. Please wait a delay period to get your money back.'
         break
 
@@ -59,7 +61,11 @@ module.exports = async (ws, msg) => {
           }
         }
 
-        var [status, error] = await me.payChannel(hubId, amount, mediate_to)
+        var [status, error] = await me.payChannel(hubId, {
+          amount: amount, 
+          mediate_to: mediate_to
+        })
+
         if (error) {
           result.alert = error
         } else {
@@ -68,10 +74,7 @@ module.exports = async (ws, msg) => {
 
         break
 
-      case 'settleUser':
-
-        // settle fsd ins outs
-
+      case 'rebalanceUser':
         // contacting hubs and collecting instant withdrawals ins
 
         var outs = []
@@ -116,23 +119,22 @@ module.exports = async (ws, msg) => {
         if (!result.alert) {
           var encoded = r([0, p.ins, outs])
 
-          result.confirm = await me.broadcast('settleUser', encoded)
+          result.confirm = await me.broadcast('rebalanceUser', encoded)
         }
 
         break
       case 'faucet':
-        me.sendMember('faucet', bin(me.id.publicKey), 0)
+        me.send(K.members[0], 'faucet', bin(me.id.publicKey))
         result.confirm = 'Faucet triggered. Check your wallet!'
 
         break
       case 'pay':
-        l('paying ', json.params)
+        await me.payChannel(1, {
+          amount: parseInt(json.params.amount),
+          mediate_to: Buffer.from(json.params.recipient, 'hex'),
+          invoice: Buffer.from(json.params.invoice, 'hex')
+        })
 
-        await me.payChannel(1,
-          parseInt(json.params.amount),
-          Buffer.from(json.params.recipient, 'hex'),
-          Buffer.from(json.params.invoice, 'hex')
-          )
         result.status = 'paid'
         break
 

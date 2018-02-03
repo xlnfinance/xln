@@ -2,7 +2,15 @@ WebSocketClient = require('./ws')
 stringify = require('../lib/stringify')
 Tx = require('./tx')
 
+
+RPC = {
+  internal_rpc: require('./internal_rpc'),
+  external_rpc: require('./external_rpc')
+}
+
+
 class Me {
+
   async init (username, seed) {
     this.username = username
 
@@ -15,8 +23,9 @@ class Me {
     this.mempool = []
     this.status = 'await'
 
-    this.sockets = {}
+
     this.users = {}
+
     this.intervals = []
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
@@ -25,6 +34,20 @@ class Me {
     PK.username = username
     PK.seed = seed.toString('hex')
     fs.writeFileSync('private/pk.json', JSON.stringify(PK))
+  }
+
+  async processQueue () {
+    if (!this.queue) this.queue = []
+
+    // first in first out - call rpc with ws and msg
+    var action
+    while( action = this.queue.shift() ){
+      await RPC[action[0]](action[1], action[2])
+    }
+
+    //l("Setting timeout for queue")
+
+    setTimeout(()=>{ me.processQueue() }, 100)
   }
 
   async byKey (pk) {
@@ -75,17 +98,15 @@ class Me {
     me.my_member.sig = ec(me.precommit, me.block_keypair.secretKey)
 
     if (K.majority > 1) {
-      var needSig = concat(
-        inputMap('needSig'),
-        r([
-          bin(this.id.publicKey),
-          me.my_member.sig,
-          me.precommit
-        ])
-      )
+      var needSig = r([
+        bin(this.id.publicKey),
+        me.my_member.sig,
+        me.precommit
+      ])
+      
 
       me.members.map((c) => {
-        if (c.socket && c != me.my_member) { c.socket.send(needSig) }
+        if (c != me.my_member) { me.send(c, 'needSig', needSig) }
       })
     }
 
@@ -98,8 +119,8 @@ class Me {
     me.record = await me.byKey()
 
     switch (method) {
-      case 'settle':
-      case 'settleUser':
+      case 'rebalanceHub':
+      case 'rebalanceUser':
 
         var confirm = 'Broadcasted globally!'
         break
@@ -135,7 +156,7 @@ class Me {
     if (me.my_member && me.my_member == me.next_member) {
       me.mempool.push(tx)
     } else {
-      me.sendMember('tx', tx)
+      me.send(K.members[0], 'tx', tx)
 
       l(r(tx))
     }
@@ -199,7 +220,7 @@ class Me {
 
       me.wss.on('error', function (err) { console.error(err) })
       me.wss.on('connection', function (ws) {
-        ws.on('message', (msg) => { me.processInput(ws, msg) })
+        ws.on('message', (msg) => { me.queue.push(['external_rpc', ws, msg]) })
       })
 
       me.intervals.push(setInterval(require('./member'), 2000))
@@ -207,7 +228,7 @@ class Me {
       for (var m of this.members) {
         if (this.my_member != m) {
           // we need to have connections ready to all members
-          this.sendMember('auth', me.offchainAuth(), i)
+          this.send(m, 'auth', me.offchainAuth())
         }
       }
 
@@ -216,13 +237,13 @@ class Me {
           var h = await (require('./hub')())
 
           if (h.ins.length > 0 || h.outs.length > 0) {
-            await this.broadcast('settle', r([0, h.ins, h.outs]))
+            await this.broadcast('rebalanceHub', r([0, h.ins, h.outs]))
           }
         }, K.blocktime * 1000))
       }
     } else {
       // keep connection to hub open
-      this.sendMember('auth', this.offchainAuth(), 0)
+      this.send(K.members[0], 'auth', this.offchainAuth())
 
       l('Set up sync')
       me.intervals.push(setInterval(sync, K.blocktime * 1000))
@@ -240,221 +261,13 @@ class Me {
     if (checkpoint) {
       // add current balances
       var c = await me.channel(1)
-      attrs.settled_delta = c.settled_delta
+      attrs.rebalanced_delta = c.rebalanced_delta
       attrs.balance = c.total
     }
 
     await History.create(attrs)
   }
 
-  // we abstract away from Internet Protocol and imagine anyone just receives input out of nowhere
-  // this input is of few different kinds:
-  // it can be from member to another member to persist a socket between them
-  // or it can be a new block received from another member to add a signature
-  // or it can be a fully signed block to be applied
-  // or a new tx from anyone to be added to block or passed to current member
-  async processInput (ws, tx) {
-    tx = bin(tx)
-    // sanity checks 100mb
-    if (tx.length > 100000000) {
-      l(`too long input ${(tx).length}`)
-      return false
-    }
-
-    var inputType = inputMap(tx[0])
-    
-    // how many blocks to share at once
-    var sync_limit = 100
-
-    tx = tx.slice(1)
-
-    l('New input: ' + inputType)
-
-    if (inputType == 'auth') {
-      let obj = me.offchainVerify(tx)
-      l('Someone connected: ' + toHex(obj.signer))
-
-      me.users[obj.signer] = ws
-
-      if (me.is_hub) {
-        // offline delivery if missed
-        var ch = await me.channel(obj.signer)
-        if (ch.delta_record.id) {
-          let negative = ch.delta_record.delta < 0 ? 1 : null
-
-          var body = r([
-            methodMap('delta'), obj.signer, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
-          ])
-
-          var sig = ec(body, me.id.secretKey)
-          var tx = concat(inputMap('mediate'), r([
-            bin(me.id.publicKey), bin(sig), body, 0
-          ]))
-          me.users[obj.signer].send(tx)
-        }
-      }
-
-      var m = me.members.find(f => f.block_pubkey.equals(obj.signer))
-      if (m) {
-        m.socket = ws
-      }
-
-      return false
-    } else if (inputType == 'tx') {
-      // 2. is it us?
-      if (me.my_member && me.my_member == me.next_member) {
-        l('We are next, adding to mempool :', r(tx))
-
-        me.mempool.push(bin(tx))
-      } else {
-        if (me.next_member.socket) {
-          l('passing to next ' + me.next_member.id)
-          me.next_member.socket.send(concat(inputMap('tx'), tx))
-        } else {
-          l('No active socket to current member: ' + me.next_member.id)
-        }
-      }
-    } else if (inputType == 'needSig') {
-      var [pubkey, sig, block] = r(tx)
-      var m = me.members.find(f => f.block_pubkey.equals(pubkey))
-
-      // ensure the block is non repeating
-      if (m && ec.verify(block, sig, pubkey)) {
-        l(`${m.id} asks us to sign their block!`)
-
-        m.socket.send(concat(
-          inputMap('signed'),
-          r([
-            bin(me.id.publicKey),
-            ec(block, me.id.secretKey)
-          ])
-        ))
-      }
-
-      // a member needs your signature
-    } else if (inputType == 'faucet') {
-      await me.payChannel(tx, Math.round(Math.random() * 4000))
-    } else if (inputType == 'signed') {
-      var [pubkey, sig] = r(tx)
-
-      var m = me.members.find(f => f.block_pubkey.equals(pubkey))
-
-      assert(me.status == 'precommit', 'Not expecting any sigs')
-
-      if (m && ec.verify(me.precommit, sig, pubkey)) {
-        m.sig = sig
-        // l(`Received another sig from  ${m.id}`)
-      } else {
-        l("this sig doesn't work for our block")
-      }
-    } else if (inputType == 'chain') {
-      var chain = r(tx)
-      for (var block of chain) {
-        await me.processBlock(block)
-      }
-      if (chain.length == sync_limit) {
-        sync()
-      }
-    } else if (inputType == 'sync') {
-      var last = await Block.findOne({where: {
-        prev_hash: tx
-      }})
-
-      if (last) {
-        l('Sharing blocks since ' + last.id)
-
-        var blocks = await Block.findAll({
-          where: {
-            id: {[Sequelize.Op.gte]: last.id}
-          },
-          limit: sync_limit
-        })
-
-        var blockmap = []
-
-        for (var b of blocks) {
-          blockmap.push(b.block)
-        }
-
-        ws.send(concat(inputMap('chain'), r(blockmap)))
-      } else {
-        l("Wrong chain? Can't find " + tx.toString('hex'))
-      }
-    } else if (inputType == 'mediate') {
-      var [pubkey, sig, body, mediate_to, invoice] = r(tx)
-
-      if (ec.verify(body, sig, pubkey)) {
-        var [counterparty, nonce, delta, instant_until] = me.parseDelta(body)
-
-        if (me.is_hub) {
-          assert(readInt(counterparty) == 1)
-
-          var ch = await me.channel(pubkey)
-
-          l(nonce, ch.delta_record.nonce + 1)
-
-          assert(nonce >= ch.delta_record.nonce, `${nonce} ${ch.delta_record.nonce}`)
-          ch.delta_record.nonce++
-          // assert(nonce == ch.delta_record.nonce)
-
-          l('delta ', ch.delta_record.delta, delta)
-
-          var amount = ch.delta_record.delta - delta
-
-          l(`Sent ${amount} out of ${ch.total}`)
-
-          assert(amount > 0 && amount <= ch.total, `Got ${amount} is limited by insurance ${ch.total}`)
-
-          ch.delta_record.delta = delta
-          ch.delta_record.sig = r([pubkey, sig, body]) // raw delta
-
-          await ch.delta_record.save()
-
-          var fee = Math.round(amount * K.hub_fee)
-          if (fee == 0) fee = K.hub_fee_base
-
-          await me.payChannel(mediate_to, amount - fee, false, invoice)
-        } else {
-          // is it for us?
-          assert(counterparty.equals(bin(me.id.publicKey)))
-
-          var hub = await User.findById(1)
-
-          assert(hub.pubkey.equals(pubkey))
-
-          var ch = await me.channel(1)
-
-          l(delta, ch.delta_record.delta)
-
-          // for users, delta of deltas is reversed
-          var amount = parseInt(delta - ch.delta_record.delta)
-
-          assert(amount > 0)
-
-          l(`${amount} received payment of  ${delta}`)
-
-          ch.delta_record.nonce++
-          assert(nonce >= ch.delta_record.nonce)
-
-          l(invoices)
-          if (invoices[toHex(invoice)]) {
-            l('Paid invoice!')
-            invoices[toHex(invoice)].status = 'paid'
-          }
-
-          ch.delta_record.delta = delta
-          ch.delta_record.sig = r([pubkey, sig, body]) // raw delta
-
-          await ch.delta_record.save()
-
-
-          await me.addHistory(amount, 'Received', true)
-
-          react()
-        }
-      }
-    }
-  }
 
   parseDelta (body) {
     var [method, counterparty, nonce, negative, delta, instant_until] = r(body)
@@ -470,56 +283,56 @@ class Me {
     return [counterparty, nonce, delta, instant_until]
   }
 
-  async payChannel (who, amount, mediate_to, invoice) {
-    l(`payChannel ${amount} to ${who}`)
+  async payChannel (counterparty, opts) {
+    if (opts.amount < 100) {
+      return [false, '$1.00 is the minimum amount']
+    }
 
-    var ch = await me.channel(who)
+    l(`payChannel ${counterparty}`, opts)
 
-    if (me.is_hub) {
-      ch.delta_record.delta += amount
-      ch.delta_record.nonce++
+    var ch = await me.channel(counterparty)
 
-      let negative = ch.delta_record.delta < 0 ? 1 : null
+    var new_delta = ch.rebalanced_delta + (me.is_hub ? opts.amount : -opts.amount)
 
-      var body = r([
-        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
-      ])
+    // checking boundaries
+    if (-new_delta > ch.insurance) {
+      return [false, 'Not enough funds']      
+    }
 
-      var sig = ec(body, me.id.secretKey)
-      var tx = concat(inputMap('mediate'), r([
-        bin(me.id.publicKey), bin(sig), body, 0, invoice
-      ]))
+    if (new_delta > K.risk_limit) {
+      return [false, 'Hubs cannot promise over risk limit']
+    }
 
-      if (me.users[who]) {
-        me.users[who].send(tx)
-      } else {
-        l(`not online, deliver later? ${tx}`)
-      }
+    ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
+    ch.delta_record.nonce++
 
-      await ch.delta_record.save()
-    } else {
-      if (amount < 0 || amount > ch.total) {
-        return [false, 'Not enough funds']
-      }
+    let negative = ch.delta_record.delta < 0 ? 1 : null
 
-      ch.delta_record.delta -= amount
-      ch.delta_record.nonce++
+    var newState = r([
+      methodMap('delta'), 
+      counterparty, 
+      ch.delta_record.nonce, 
+      negative, 
+      (negative ? -ch.delta_record.delta : ch.delta_record.delta), 
+      ts()
+    ])
 
-      let negative = ch.delta_record.delta < 0 ? 1 : null
+    var signedState = r([
+      bin(me.id.publicKey), 
+      bin(ec(newState, me.id.secretKey)), 
+      newState, 
+      opts.mediate_to, 
+      opts.invoice
+    ])
 
-      var body = r([
-        methodMap('delta'), who, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
-      ])
+    await ch.delta_record.save()
 
-      var sig = ec(body, me.id.secretKey)
+    // todo: ensure delivery
+    await me.addHistory(-opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '...', true)
 
-      me.sendMember('mediate', r([bin(me.id.publicKey), bin(sig), body, mediate_to, invoice]), 0)
-      // todo: ensure delivery
 
-      await ch.delta_record.save()
-
-      await me.addHistory(-amount, 'Sent to ' + mediate_to.toString('hex').substr(0, 10) + '...', true)
-
+    if (!me.send(counterparty == 1 ? K.members[0] : counterparty, 'mediate', signedState)) {
+      l(`${counterparty} not online, deliver later?`)
     }
 
     return [true, false]
@@ -529,13 +342,13 @@ class Me {
     var r = {
       // onchain fields
       insurance: 0,
-      settled: 0,
+      rebalanced: 0,
       nonce: 0,
 
       // offchain delta_record
 
       // for convenience
-      settled_delta: 0,
+      rebalanced_delta: 0,
       failsafe: 0,
       total: 0
     }
@@ -553,7 +366,7 @@ class Me {
 
         if (ch) {
           r.insurance = ch.insurance
-          r.settled = ch.settled
+          r.rebalanced = ch.rebalanced
           r.nonce = ch.nonce
         }
       }
@@ -580,7 +393,7 @@ class Me {
 
         if (ch) {
           r.insurance = ch.insurance
-          r.settled = ch.settled
+          r.rebalanced = ch.rebalanced
           r.nonce = ch.nonce
         }
       } else {
@@ -602,14 +415,14 @@ class Me {
 
     r.delta_record = delta[0]
 
-    r.settled_delta = r.settled + r.delta_record.delta
+    r.rebalanced_delta = r.rebalanced + r.delta_record.delta
 
-    r.total = r.insurance + r.settled_delta
+    r.total = r.insurance + r.rebalanced_delta
 
-    if (r.settled_delta >= 0) {
+    if (r.rebalanced_delta >= 0) {
       r.failsafe = r.insurance
     } else {
-      r.failsafe = r.insurance + r.settled_delta
+      r.failsafe = r.insurance + r.rebalanced_delta
     }
 
     return r
@@ -663,7 +476,7 @@ class Me {
       return false
     }
 
-    d(`Processing ${block_number} (before ${K.total_blocks}) hash ${K.prev_hash}. Timestamp ${timestamp} Total shares: ${total_shares}, tx to process: ${ordered_tx.length}`)
+    d(`Processing ${block_number}. Total shares: ${total_shares}, tx to process: ${ordered_tx.length}`)
 
     // processing transactions one by one
     for (var i = 0; i < ordered_tx.length; i++) {
@@ -704,10 +517,10 @@ class Me {
     for (let dispute of disputes) {
       l(dispute)
 
-      var settled_delta = dispute.settled + dispute.dispute_delta
+      var rebalanced_delta = dispute.rebalanced + dispute.dispute_delta
 
-      if (settled_delta < 0) {
-        var user_gets = dispute.insurance + settled_delta
+      if (rebalanced_delta < 0) {
+        var user_gets = dispute.insurance + rebalanced_delta
         var hub_gets = dispute.insurance - user_gets
       } else {
         var user_gets = dispute.insurance
@@ -794,34 +607,43 @@ class Me {
     }
   }
 
-  sendMember (method, tx, memberIndex) {
-    if (!memberIndex) memberIndex = 0
-      // if we are member, just send it to current
-      // connecting to geo-selected nearest member (lowest latency)
-
+  send (m, method, tx) {
     tx = concat(inputMap(method), tx)
-
-    var m = me.members[memberIndex]
-    if (m.socket) {
-      m.socket.send(tx)
+    // regular pubkey
+    if (m instanceof Buffer) {
+      if (me.users[m]) {
+        me.users[m].send(tx)
+        return true
+      } else {
+        return false
+      }
     } else {
-      m.socket = new WebSocketClient()
+      // member object
 
-      m.socket.onmessage = tx => {
-        l('from member ')
-        me.processInput(m.socket, bin(tx))
+      if (me.users[m.pubkey]) {
+        me.users[m.pubkey].send(tx)
+      } else {
+        me.users[m.pubkey] = new WebSocketClient()
+
+        me.users[m.pubkey].onmessage = tx => {
+          this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
+        }
+
+        me.users[m.pubkey].onopen = function (e) {
+          if (me.id) { me.users[m.pubkey].send(concat(inputMap('auth'), me.offchainAuth())) }
+
+          l('Sending to member ', tx)
+          me.users[m.pubkey].send(tx)
+        }
+
+        me.users[m.pubkey].open(m.location)
       }
 
-      m.socket.onopen = function (e) {
-        if (me.id) { m.socket.send(concat(inputMap('auth'), me.offchainAuth())) }
-
-        l('Sending to member ', tx)
-        m.socket.send(tx)
-      }
-
-      m.socket.open(m.location)
     }
+
   }
+
+
 }
 
 module.exports = {

@@ -61,13 +61,13 @@ module.exports = {
         break
       // don't forget BREAK
       // we use fall-through for methods covered by same code
-      // settle uses relative user_id, users settle for absolute hub_id
-      case 'settle':
-      case 'settleUser':
+
+      case 'rebalanceHub':
+      case 'rebalanceUser':
         // 1. collect all ins insurance
         var [assetType, inputs, outputs] = args
 
-        var is_hub = (method == 'settle')
+        var is_hub = (method == 'rebalanceHub')
 
         for (let input of inputs) {
           if (input.length == 1) {
@@ -102,7 +102,7 @@ module.exports = {
             } else {
               if (is_hub) {
                 // inverse delta to amount
-                var amount = -(ch.settled + delta)
+                var amount = -(ch.rebalanced + delta)
                 if (readInt(counterparty) != 1) { l('Wrong hub'); continue }
 
                 // if(nonce < ch.nonce){l("Wrong nonce"); continue}
@@ -113,10 +113,10 @@ module.exports = {
                   continue
                 }
 
-                ch.settled += amount
+                ch.rebalanced += amount
               } else {
-                var amount = ch.insurance + ch.settled + delta
-                l(ch.insurance, ch.settled, delta)
+                var amount = ch.insurance + ch.rebalanced + delta
+                l(ch.insurance, ch.rebalanced, delta)
                 l(counterparty, signer.pubkey)
 
                 if (!signer.pubkey.equals(counterparty)) { l('Wrong counterparty of delta proof'); continue }
@@ -230,7 +230,7 @@ module.exports = {
               defaults: {
                 nonce: 0,
                 insurance: 0,
-                settled: 0
+                rebalanced: 0
               },
               include: { all: true }
             })
@@ -241,7 +241,7 @@ module.exports = {
               ch[0].insurance -= reimburse_tax
               reimbursed += reimburse_tax
 
-              ch[0].settled -= originalAmount
+              ch[0].rebalanced -= originalAmount
 
             }
             signer.balance -= amount
@@ -299,7 +299,7 @@ module.exports = {
       defaults: {
         nonce: 0,
         insurance: 0,
-        settled: 0
+        rebalanced: 0
       },
       include: { all: true }
     }))[0]

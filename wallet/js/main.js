@@ -52,7 +52,7 @@ renderRisk = (hist) => {
   for (h of hist) {
     d.push({
       x: Math.round(Date.parse(h.date)/precision),
-      y: h.settled_delta/100
+      y: h.rebalanced_delta/100
     })
   }
 
@@ -118,11 +118,11 @@ FS.onready(() => {
       FS(method, args).then(render)
       return false
     },
-    settle: () => {
+    rebalance: () => {
       var total = app.outs.reduce((k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount), 0)
 
       // if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
-      app.call('settleUser', {
+      app.call('rebalanceUser', {
         assetType: 0,
         ins: app.ins,
         outs: app.outs
@@ -284,8 +284,8 @@ FS.onready(() => {
         </li>
 
 
-        <li v-if="auth_code && record" class="nav-item" v-bind:class="{ active: tab=='settle' }">
-          <a class="nav-link" @click="go('settle')">Settlement</a>
+        <li v-if="auth_code && record" class="nav-item" v-bind:class="{ active: tab=='rebalance' }">
+          <a class="nav-link" @click="go('rebalance')">Settlement</a>
         </li>
 
 
@@ -355,7 +355,7 @@ FS.onready(() => {
 
 
           <h1 style="display:inline-block">\${{commy(ch.total)}}</h1>
-          <small v-if="ch.total>0">= {{commy(ch.insurance)}} insurance {{ch.settled_delta > 0 ? "+ "+commy(ch.settled_delta)+" uninsured" : "- "+commy(-ch.settled_delta)+" spent"}}</small> 
+          <small v-if="ch.total>0">= {{commy(ch.insurance)}} insurance {{ch.rebalanced_delta > 0 ? "+ "+commy(ch.rebalanced_delta)+" uninsured" : "- "+commy(-ch.rebalanced_delta)+" spent"}}</small> 
           
 
           <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
@@ -363,14 +363,14 @@ FS.onready(() => {
           <div v-if="ch.total>0 || ch.insurance > 0">
 
             <div class="progress" style="max-width:1000px">
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.settled_delta<0?ch.insurance:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.rebalanced_delta<0?ch.insurance:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
                 {{commy(ch.failsafe)}} (insured)
               </div>
-              <div v-if="ch.settled_delta<0" v-bind:style="{ width: Math.round(-ch.settled_delta*100/ch.insurance)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
-                {{commy(ch.settled_delta)}} (spent)
+              <div v-if="ch.rebalanced_delta<0" v-bind:style="{ width: Math.round(-ch.rebalanced_delta*100/ch.insurance)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+                {{commy(ch.rebalanced_delta)}} (spent)
               </div>
-              <div v-if="ch.settled_delta>0" v-bind:style="{ width: Math.round(ch.settled_delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
-                +{{commy(ch.settled_delta)}} (uninsured)
+              <div v-if="ch.rebalanced_delta>0" v-bind:style="{ width: Math.round(ch.rebalanced_delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+                +{{commy(ch.rebalanced_delta)}} (uninsured)
               </div>
             </div>
 
@@ -443,7 +443,7 @@ FS.onready(() => {
 
 
 
-    <div v-else-if="tab=='settle'">
+    <div v-else-if="tab=='rebalance'">
       <h1>Global Settlement</h1>
 
       <div class="alert alert-danger" role="alert">
@@ -464,13 +464,17 @@ FS.onready(() => {
    
       <p>
         <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add output</button>
-        <button type="button" class="btn btn-warning" @click="settle()">Settle Globally</button>
+        <button type="button" class="btn btn-warning" @click="rebalance()">Settle Globally</button>
       </p>
 
     </div>
 
 
     <div v-else-if="tab=='network'">
+
+      <h1>Raw K data</h1>
+
+      <pre>{{ JSON.stringify(K, 2, 2) }}</pre>
 
       <h1>Board of Members</h1>
       <p v-for="m in K.members">{{m.username}} ({{m.location}}) <b v-if="m.hubId">[hub]</b> - <b>{{m.shares}} shares</b></p>
@@ -615,7 +619,7 @@ FS.onready(() => {
               <td>{{d.nonce}}/{{d.delta_record.nonce}}</td>
               <td>{{commy(d.insurance)}}</td>
 
-              <td v-bind:style="{'background-color': deltaColor(d.settled_delta) }">{{commy(d.settled_delta)}}</td>
+              <td v-bind:style="{'background-color': deltaColor(d.rebalanced_delta) }">{{commy(d.rebalanced_delta)}}</td>
 
               <td>{{commy(d.total)}}</td>
 
@@ -655,7 +659,7 @@ FS.onready(() => {
             <td>{{u.nonce}}</td>
             
             <td>{{commy(u.hub[0] ? u.hub[0].insurance.insurance : 0)}}</td>
-            <td>{{commy(u.hub[0] ? u.hub[0].insurance.settled : 0)}}</td>
+            <td>{{commy(u.hub[0] ? u.hub[0].insurance.rebalanced : 0)}}</td>
 
           </tr>
 

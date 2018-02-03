@@ -35,7 +35,7 @@ module.exports = async (opts) => {
   me2 = new Me()
   await me2.init('8001', seed2)
 
-  await (User.create({
+  var user2 = await (User.create({
     pubkey: bin(me2.id.publicKey),
     username: '8001',
     nonce: 0,
@@ -43,12 +43,14 @@ module.exports = async (opts) => {
     fsb_balance: 10000
   }))
 
+
+
   await (Insurance.create({
     userId: 2,
     hubId: 1,
     nonce: 0,
     insurance: 500000,
-    settled: 0,
+    rebalanced: 0,
     assetType: 0
   }))
 
@@ -81,7 +83,9 @@ module.exports = async (opts) => {
     // each genesis is randomized
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
 
-    risk: 10000, // how much can a user lose if hub is insolvent? $100
+    risk: 10000, // recommended rebalance limit
+    risk_limit: 10000000, // how much can a user lose if hub is insolvent?
+
     dispute_delay: 5, // in how many blocks disputes are considered final
 
     hub_fee_base: 1, // a fee per payment
@@ -129,6 +133,20 @@ module.exports = async (opts) => {
       soft_limit: 100000,
       hard_limit: 10000000
     }
+  })
+
+  var loc2 = opts.location.split(':')
+
+  K.members.push({
+    id: user2.id,
+
+    username: '8001',
+    location: 'ws:' + loc2[1] + ':' + (parseInt(loc2[2])+1),
+
+    block_pubkey: me2.block_pubkey,
+
+    missed_blocks: [],
+    shares: 10,
   })
 
   var json = stringify(K)

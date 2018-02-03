@@ -57,9 +57,7 @@ WebSocketClient.prototype.reconnect = function (e) {
   this.instance.removeAllListeners()
   var that = this
   setTimeout(function () {
-    // var connected = 0
-    // me.members.map(o=>{if(o.socket) connected++})
-    // console.log("WebSocketClient: reconnecting... Have "+connected);
+
     that.open(that.url)
   }, this.autoReconnectInterval)
 }
