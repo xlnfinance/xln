@@ -14,7 +14,9 @@ crypto = require('crypto')
 
 keccak = require('keccak')
 nacl = require('./lib/nacl')
-ec = nacl.sign.detached
+
+ec = (a,b) => bin(nacl.sign.detached(a,b))
+ec.verify = nacl.sign.detached.verify
 
 // encoders
 BN = require('bn.js')
@@ -64,6 +66,14 @@ parse = (json) => {
     return {}
   }
 }
+
+
+// trick to pack signed int into unsigned int
+packSInt = (num) => (Math.abs(num) * 2) + (num < 0 ? 1 : 0)
+readSInt = (num) => (num % 2 == 1 ? -(num-1)/2 : num/2)
+
+
+
 
 concat = function () {
   return Buffer.concat(Object.values(arguments))
@@ -151,6 +161,7 @@ loadJSON = () => {
     me.members = JSON.parse(json).members // another object ref
 
     me.members.map(f => {
+      f.pubkey = Buffer.from(f.pubkey, 'hex')
       f.block_pubkey = Buffer.from(f.block_pubkey, 'hex')
     })
   }
@@ -498,13 +509,26 @@ Delta = privSequelize.define('delta', {
   balance: Sequelize.INTEGER,
   desc: Sequelize.TEXT,
   date: Sequelize.DATE
+}, {
+  instanceMethods: {
+    getState: function(counterparty) {
+      let negative = ch.delta_record.delta < 0 ? 1 : null
+
+      return [methodMap('delta'), 
+        counterparty, 
+        this.nonce, 
+        negative, 
+        (negative ? -this.delta : this.delta), 
+        ts()]
+    }
+  }
 })
 
 History = privSequelize.define('history', {
   userId: Sequelize.CHAR(32).BINARY,
   hubId: Sequelize.INTEGER,
 
-  rebalanced_delta: Sequelize.INTEGER,
+  rdelta: Sequelize.INTEGER,
 
   amount: Sequelize.INTEGER,
   balance: Sequelize.INTEGER,

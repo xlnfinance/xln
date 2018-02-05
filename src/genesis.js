@@ -111,8 +111,8 @@ module.exports = async (opts) => {
     ],
 
     members: [],
-    total_shares: 300,
-    majority: 1,
+    total_shares: 15,
+    majority: 11,
 
     hubs: []
   }
@@ -123,10 +123,12 @@ module.exports = async (opts) => {
     username: opts.username,
     location: opts.location,
 
+    pubkey: toHex(me.id.publicKey),
     block_pubkey: me.block_pubkey,
 
+
     missed_blocks: [],
-    shares: 300,
+    shares: 10,
 
     hub: {
       name: '1',
@@ -141,12 +143,14 @@ module.exports = async (opts) => {
     id: user2.id,
 
     username: '8001',
-    location: 'ws:' + loc2[1] + ':' + (parseInt(loc2[2])+1),
+    location: 'ws:' + loc2[1] + ':' + (parseInt(loc2[2])+10),
 
+    pubkey: toHex(me2.id.publicKey),
     block_pubkey: me2.block_pubkey,
 
     missed_blocks: [],
-    shares: 10,
+
+    shares: 5,
   })
 
   var json = stringify(K)

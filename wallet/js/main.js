@@ -13,7 +13,7 @@ renderRisk = (hist) => {
       data: {
         labels: [],
         datasets: [{
-          label: 'Settled Delta',
+          label: 'Uninsured/Spent dynamics',
           steppedLine: true,
           data: [{x: Math.round(new Date/precision), y: 0}],
           borderColor: 'rgb(255, 99, 132)',
@@ -52,7 +52,7 @@ renderRisk = (hist) => {
   for (h of hist) {
     d.push({
       x: Math.round(Date.parse(h.date)/precision),
-      y: h.rebalanced_delta/100
+      y: h.rdelta/100
     })
   }
 
@@ -355,7 +355,7 @@ FS.onready(() => {
 
 
           <h1 style="display:inline-block">\${{commy(ch.total)}}</h1>
-          <small v-if="ch.total>0">= {{commy(ch.insurance)}} insurance {{ch.rebalanced_delta > 0 ? "+ "+commy(ch.rebalanced_delta)+" uninsured" : "- "+commy(-ch.rebalanced_delta)+" spent"}}</small> 
+          <small v-if="ch.total>0">= {{commy(ch.insurance)}} insurance {{ch.rdelta > 0 ? "+ "+commy(ch.rdelta)+" uninsured" : "- "+commy(-ch.rdelta)+" spent"}}</small> 
           
 
           <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
@@ -363,14 +363,14 @@ FS.onready(() => {
           <div v-if="ch.total>0 || ch.insurance > 0">
 
             <div class="progress" style="max-width:1000px">
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.rebalanced_delta<0?ch.insurance:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.rdelta<0?ch.insurance:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
                 {{commy(ch.failsafe)}} (insured)
               </div>
-              <div v-if="ch.rebalanced_delta<0" v-bind:style="{ width: Math.round(-ch.rebalanced_delta*100/ch.insurance)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
-                {{commy(ch.rebalanced_delta)}} (spent)
+              <div v-if="ch.rdelta<0" v-bind:style="{ width: Math.round(-ch.rdelta*100/ch.insurance)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+                {{commy(ch.rdelta)}} (spent)
               </div>
-              <div v-if="ch.rebalanced_delta>0" v-bind:style="{ width: Math.round(ch.rebalanced_delta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
-                +{{commy(ch.rebalanced_delta)}} (uninsured)
+              <div v-if="ch.rdelta>0" v-bind:style="{ width: Math.round(ch.rdelta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+                +{{commy(ch.rdelta)}} (uninsured)
               </div>
             </div>
 
@@ -619,7 +619,7 @@ FS.onready(() => {
               <td>{{d.nonce}}/{{d.delta_record.nonce}}</td>
               <td>{{commy(d.insurance)}}</td>
 
-              <td v-bind:style="{'background-color': deltaColor(d.rebalanced_delta) }">{{commy(d.rebalanced_delta)}}</td>
+              <td v-bind:style="{'background-color': deltaColor(d.rdelta) }">{{commy(d.rdelta)}}</td>
 
               <td>{{commy(d.total)}}</td>
 

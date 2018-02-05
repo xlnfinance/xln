@@ -1,14 +1,29 @@
 module.exports = () => {
   var now = ts()
 
-  var currentIndex = Math.floor(now / K.blocktime) % K.members.length
-  me.current = me.members[currentIndex]
+  var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
 
-  var increment = (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
+  var searchIndex = 0
+  for (var i in me.members) {
+    searchIndex += me.members[i].shares
+    
+    if (currentIndex < searchIndex) {
+      me.current = me.members[i]
 
-  me.next_member = me.members[ (currentIndex + increment) % K.members.length]
+      var increment = (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
 
-    // l(`Current member at ${now} is ${me.current.id}. ${me.status}`)
+      if (currentIndex + increment >= searchIndex) {
+        // take next member or rewind back to 0
+        me.next_member = me.members[(i + increment) % K.members.length]
+      } else {
+        // next slot is still theirs
+        me.next_member = me.current
+      }
+      break
+    }
+  }
+
+  //d(`Status ${me.status} at ${now} Current: ${me.current.id}, next: ${me.next_member.id}.`)
 
   if (me.my_member == me.current) {
       // do we have enough sig or it's time?

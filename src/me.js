@@ -61,12 +61,12 @@ class Me {
     var ordered_tx = []
     var total_size = 0
 
-    var pseudo_balances = {}
+    var meta = {dry_run: true}
 
     for (var candidate of me.mempool) {
       if (total_size + candidate.length > K.blocksize) break
 
-      var result = await Tx.processTx(candidate, pseudo_balances)
+      var result = await Tx.processTx(candidate, meta)
       if (result.success) {
         ordered_tx.push(candidate)
         total_size += candidate.length
@@ -99,7 +99,7 @@ class Me {
 
     if (K.majority > 1) {
       var needSig = r([
-        bin(this.id.publicKey),
+        me.my_member.block_pubkey,
         me.my_member.sig,
         me.precommit
       ])
@@ -148,7 +148,7 @@ class Me {
     var to_sign = r([me.record.nonce, methodId, args])
 
     var tx = r([
-      me.record.id, bin(ec(to_sign, me.id.secretKey)), methodId, args
+      me.record.id, ec(to_sign, me.id.secretKey), methodId, args
     ])
 
     confirm += ` Tx size ${tx.length}b, fee ${tx.length * K.tax}.`
@@ -172,7 +172,7 @@ class Me {
   offchainAuth () {
     return r([
       bin(this.id.publicKey),
-      bin(ec(r([0, methodMap('auth')]), this.id.secretKey))
+      ec(r([0, methodMap('auth')]), this.id.secretKey)
     ])
   }
 
@@ -261,7 +261,7 @@ class Me {
     if (checkpoint) {
       // add current balances
       var c = await me.channel(1)
-      attrs.rebalanced_delta = c.rebalanced_delta
+      attrs.rdelta = c.rdelta
       attrs.balance = c.total
     }
 
@@ -270,13 +270,12 @@ class Me {
 
 
   parseDelta (body) {
-    var [method, counterparty, nonce, negative, delta, instant_until] = r(body)
+    var [method, counterparty, nonce, delta, instant_until] = r(body)
 
     nonce = readInt(nonce)
     method = readInt(method)
     instant_until = readInt(instant_until)
-
-    delta = negative.equals(Buffer.alloc(0)) ? readInt(delta) : -readInt(delta)
+    delta = readSInt(readInt(delta))
 
     assert(method == methodMap('delta'))
 
@@ -288,11 +287,9 @@ class Me {
       return [false, '$1.00 is the minimum amount']
     }
 
-    l(`payChannel ${counterparty}`, opts)
-
     var ch = await me.channel(counterparty)
 
-    var new_delta = ch.rebalanced_delta + (me.is_hub ? opts.amount : -opts.amount)
+    var new_delta = ch.rdelta + (me.is_hub ? opts.amount : -opts.amount)
 
     // checking boundaries
     if (-new_delta > ch.insurance) {
@@ -306,20 +303,18 @@ class Me {
     ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
     ch.delta_record.nonce++
 
-    let negative = ch.delta_record.delta < 0 ? 1 : null
 
     var newState = r([
       methodMap('delta'), 
       counterparty, 
       ch.delta_record.nonce, 
-      negative, 
-      (negative ? -ch.delta_record.delta : ch.delta_record.delta), 
+      packSInt(ch.delta_record.delta),
       ts()
     ])
 
     var signedState = r([
       bin(me.id.publicKey), 
-      bin(ec(newState, me.id.secretKey)), 
+      ec(newState, me.id.secretKey), 
       newState, 
       opts.mediate_to, 
       opts.invoice
@@ -328,8 +323,11 @@ class Me {
     await ch.delta_record.save()
 
     // todo: ensure delivery
-    await me.addHistory(-opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '...', true)
+    if (me.is_hub) {
 
+    } else {
+      await me.addHistory(-opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '...', true)
+    }
 
     if (!me.send(counterparty == 1 ? K.members[0] : counterparty, 'mediate', signedState)) {
       l(`${counterparty} not online, deliver later?`)
@@ -348,7 +346,7 @@ class Me {
       // offchain delta_record
 
       // for convenience
-      rebalanced_delta: 0,
+      rdelta: 0,
       failsafe: 0,
       total: 0
     }
@@ -415,14 +413,14 @@ class Me {
 
     r.delta_record = delta[0]
 
-    r.rebalanced_delta = r.rebalanced + r.delta_record.delta
+    r.rdelta = r.rebalanced + r.delta_record.delta
 
-    r.total = r.insurance + r.rebalanced_delta
+    r.total = r.insurance + r.rdelta
 
-    if (r.rebalanced_delta >= 0) {
+    if (r.rdelta >= 0) {
       r.failsafe = r.insurance
     } else {
-      r.failsafe = r.insurance + r.rebalanced_delta
+      r.failsafe = r.insurance + r.rdelta
     }
 
     return r
@@ -431,7 +429,6 @@ class Me {
   async processBlock (block) {
     var finalblock = block.slice(me.members.length * 64)
 
-    d(`Processing a new block, length ${block.length}`)
     var total_shares = 0
 
     for (var i = 0; i < me.members.length; i++) {
@@ -476,11 +473,16 @@ class Me {
       return false
     }
 
-    d(`Processing ${block_number}. Total shares: ${total_shares}, tx to process: ${ordered_tx.length}`)
+    d(`Processing ${block_number}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
+
+    var meta = {
+      inputs_volume: 0,
+      outputs_volume: 0
+    }
 
     // processing transactions one by one
     for (var i = 0; i < ordered_tx.length; i++) {
-      await Tx.processTx(ordered_tx[i])
+      await Tx.processTx(ordered_tx[i], meta)
       K.total_tx++
       K.total_tx_bytes += ordered_tx[i].length
     }
@@ -517,10 +519,10 @@ class Me {
     for (let dispute of disputes) {
       l(dispute)
 
-      var rebalanced_delta = dispute.rebalanced + dispute.dispute_delta
+      var rdelta = dispute.rebalanced + dispute.dispute_delta
 
-      if (rebalanced_delta < 0) {
-        var user_gets = dispute.insurance + rebalanced_delta
+      if (rdelta < 0) {
+        var user_gets = dispute.insurance + rdelta
         var hub_gets = dispute.insurance - user_gets
       } else {
         var user_gets = dispute.insurance
@@ -607,6 +609,8 @@ class Me {
     }
   }
 
+  // a generic interface to send a websocket message to some user or member
+  
   send (m, method, tx) {
     tx = concat(inputMap(method), tx)
     // regular pubkey
@@ -619,6 +623,7 @@ class Me {
       }
     } else {
       // member object
+      l(`Invoking ${method} in member ${m.id}`)
 
       if (me.users[m.pubkey]) {
         me.users[m.pubkey].send(tx)
@@ -632,7 +637,6 @@ class Me {
         me.users[m.pubkey].onopen = function (e) {
           if (me.id) { me.users[m.pubkey].send(concat(inputMap('auth'), me.offchainAuth())) }
 
-          l('Sending to member ', tx)
           me.users[m.pubkey].send(tx)
         }
 

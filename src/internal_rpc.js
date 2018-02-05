@@ -2,15 +2,15 @@
 
 module.exports = async (ws, msg) => {
   var result = {}
-
-  var json = JSON.parse(bin(msg).toString())
-  var p = json.params
+ 
+  var json = parse(bin(msg).toString())
 
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
 
   if (json.auth_code == auth_code) {
     me.browser = ws
+    var p = json.params
 
     switch (json.method) {
       case 'sync':

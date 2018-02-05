@@ -1,6 +1,6 @@
 
 module.exports = {
-  processTx: async function processTx (tx, pseudo_balances) {
+  processTx: async function processTx (tx, meta) {
     // l('new ', r(tx, true))
 
     var [id, sig, methodId, args] = r(tx)
@@ -24,11 +24,11 @@ module.exports = {
     if (signer.balance < tax) { return {error: 'Not enough balance to cover tx fee'} }
 
     // This is precommit, so no need to apply tx and change db
-    if (pseudo_balances) {
-      if (pseudo_balances[signer.id]) {
+    if (meta.dry_run) {
+      if (meta[signer.id]) {
         return {error: 'Only one tx per block per account currently allowed'}
       } else {
-        pseudo_balances[signer.id] = true
+        meta[signer.id] = true
         return {success: true}
       }
     }

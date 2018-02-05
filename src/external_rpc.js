@@ -29,10 +29,8 @@ module.exports = async (ws, msg) => {
       // offline delivery if missed
       var ch = await me.channel(obj.signer)
       if (ch.delta_record.id) {
-        let negative = ch.delta_record.delta < 0 ? 1 : null
-
         var body = r([
-          methodMap('delta'), obj.signer, ch.delta_record.nonce, negative, (negative ? -ch.delta_record.delta : ch.delta_record.delta), ts()
+          methodMap('delta'), obj.signer, ch.delta_record.nonce, packSInt(ch.delta_record.delta), ts()
         ])
 
         var sig = ec(body, me.id.secretKey)
@@ -66,8 +64,8 @@ module.exports = async (ws, msg) => {
       l(`${m.id} asks us to sign their block!`)
 
       me.send(m, 'signed', r([
-          bin(me.id.publicKey),
-          ec(block, me.id.secretKey)
+          me.my_member.block_pubkey,
+          ec(block, me.block_keypair.secretKey)
         ])
       )
     }
