@@ -269,6 +269,9 @@ class Me {
   }
 
 
+
+
+
   parseDelta (body) {
     var [method, counterparty, nonce, delta, instant_until] = r(body)
 
@@ -281,6 +284,10 @@ class Me {
 
     return [counterparty, nonce, delta, instant_until]
   }
+
+
+
+
 
   async payChannel (counterparty, opts) {
     if (opts.amount < 100) {
@@ -298,6 +305,10 @@ class Me {
 
     if (new_delta > K.risk_limit) {
       return [false, 'Hubs cannot promise over risk limit']
+    }
+
+    if (ch.delta_record.status != 'ready') {
+      return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
     }
 
     ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
@@ -319,7 +330,9 @@ class Me {
       opts.mediate_to, 
       opts.invoice
     ])
-
+    
+    ch.delta_record.status = 'await'
+    
     await ch.delta_record.save()
 
     // todo: ensure delivery
@@ -329,7 +342,7 @@ class Me {
       await me.addHistory(-opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '...', true)
     }
 
-    if (!me.send(counterparty == 1 ? K.members[0] : counterparty, 'mediate', signedState)) {
+    if (!me.send(counterparty == 1 ? K.members[0] : counterparty, 'update', signedState)) {
       l(`${counterparty} not online, deliver later?`)
     }
 
@@ -377,7 +390,8 @@ class Me {
         defaults: {
           delta: 0,
           instant_until: 0,
-          nonce: 0
+          nonce: 0,
+          status: 'ready'
         }
       })
     } else {
@@ -406,7 +420,8 @@ class Me {
         defaults: {
           delta: 0,
           instant_until: 0,
-          nonce: 0
+          nonce: 0,
+          status: 'ready'
         }
       })
     }

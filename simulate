@@ -13,4 +13,5 @@ rsync -rv --exclude=private --exclude=.git fs/ 8002
 
 ttab "cd 8001; node fs 8001"
 ttab "cd 8002; node fs 8002"
-ttab "cd fs; node fs 8000"
+
+cd fs; node fs 8000

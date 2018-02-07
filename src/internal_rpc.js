@@ -47,12 +47,12 @@ module.exports = async (ws, msg) => {
 
         var hubId = 1
 
-        var amount = parseInt(parseFloat(p.off_amount) * 100)
+        var amount = parseInt(parseFloat(p.amount) * 100)
 
-        if (p.off_to.length == 64) {
-          var mediate_to = Buffer.from(p.off_to, 'hex')
+        if (p.userId.length == 64) {
+          var mediate_to = Buffer.from(p.userId, 'hex')
         } else {
-          var mediate_to = await User.findById(parseInt(p.off_to))
+          var mediate_to = await User.findById(parseInt(p.userId))
           if (mediate_to) {
             mediate_to = mediate_to.pubkey
           } else {
@@ -63,13 +63,14 @@ module.exports = async (ws, msg) => {
 
         var [status, error] = await me.payChannel(hubId, {
           amount: amount, 
-          mediate_to: mediate_to
+          mediate_to: mediate_to,
+          invoice: p.invoice
         })
 
         if (error) {
           result.alert = error
         } else {
-          result.confirm = `Sent \$${p.off_amount} to ${p.off_to}!`
+          result.confirm = `Sent \$${p.amount} to ${p.userId}!`
         }
 
         break
@@ -128,6 +129,39 @@ module.exports = async (ws, msg) => {
         result.confirm = 'Faucet triggered. Check your wallet!'
 
         break
+
+
+
+
+      case 'invoice':
+        if (p.invoice) {
+          // deep clone
+          var result = Object.assign({}, invoices[p.invoice])
+
+          // prevent race condition attack
+          if (invoices[p.invoice].status == 'paid') { invoices[p.invoice].status = 'archive' }
+        } else {
+          var invoice = toHex(crypto.randomBytes(32))
+
+          invoices[invoice] = {
+            amount: parseInt(p.amount),
+            status: 'pending'
+          }
+
+          me.record = await me.byKey()
+
+          var hubId = 1
+
+          result.new_invoice = [
+            invoices[invoice].amount, 
+            me.record ? me.record.id : toHex(me.id.publicKey),
+            hubId,
+            invoice].join('_')
+
+          result.confirm = 'Invoice Created'
+        }
+      break
+
       case 'pay':
         await me.payChannel(1, {
           amount: parseInt(json.params.amount),
@@ -152,8 +186,14 @@ module.exports = async (ws, msg) => {
         result.token = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
         break
     }
+    
+    // is HTTP response or websocket?
+    if (ws.end) {
+      ws.end(JSON.stringify(result))
+    } else {
+      react(result, json.id)
+    }
 
-    react(result, json.id)
   } else {
     ws.send(JSON.stringify({
       result: Object.assign(result, cached_result),

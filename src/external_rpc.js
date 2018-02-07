@@ -19,6 +19,7 @@ module.exports = async (ws, msg) => {
 
   l('New input: ' + inputType)
 
+  // some socket is authenticating their pubkey 
   if (inputType == 'auth') {
     let obj = me.offchainVerify(msg)
     l('Someone connected: ' + toHex(obj.signer))
@@ -36,7 +37,7 @@ module.exports = async (ws, msg) => {
         var sig = ec(body, me.id.secretKey)
         // share last proof
 
-        me.send(obj.signer, 'mediate', r([
+        me.send(obj.signer, 'update', r([
           bin(me.id.publicKey), bin(sig), body, 0
         ]))
       }
@@ -44,6 +45,10 @@ module.exports = async (ws, msg) => {
 
 
     return false
+
+
+
+  // someone wants tx to be broadcasted
   } else if (inputType == 'tx') {
     // why would we be asked to add tx to block?
     if (!me.my_member) return false
@@ -55,6 +60,11 @@ module.exports = async (ws, msg) => {
     } else {
       me.send(me.next_member, 'tx', msg)
     }
+
+
+
+
+  // another member wants a sig
   } else if (inputType == 'needSig') {
     var [pubkey, sig, block] = r(msg)
     var m = me.members.find(f => f.block_pubkey.equals(pubkey))
@@ -69,12 +79,7 @@ module.exports = async (ws, msg) => {
         ])
       )
     }
-
-    // a member needs your signature
-  } else if (inputType == 'faucet') {
-    await me.payChannel(msg, {
-      amount: Math.round(Math.random() * 6000)
-    })
+  // we provide block sig back
   } else if (inputType == 'signed') {
     var [pubkey, sig] = r(msg)
 
@@ -88,6 +93,19 @@ module.exports = async (ws, msg) => {
     } else {
       l("this sig doesn't work for our block")
     }
+
+
+
+
+  } else if (inputType == 'faucet') {
+    await me.payChannel(msg, {
+      amount: Math.round(Math.random() * 6000)
+    })
+
+
+
+
+
   } else if (inputType == 'chain') {
     var chain = r(msg)
     for (var block of chain) {
@@ -122,7 +140,14 @@ module.exports = async (ws, msg) => {
       l("No blocks to sync after " + msg.toString('hex'))
     }
 
-  } else if (inputType == 'mediate') {
+
+
+
+
+
+
+  // counterparty updates state machine
+  } else if (inputType == 'update') {
     var [pubkey, sig, body, mediate_to, invoice] = r(msg)
 
     if (ec.verify(body, sig, pubkey)) {
@@ -131,7 +156,10 @@ module.exports = async (ws, msg) => {
       if (me.is_hub) {
         assert(readInt(counterparty) == 1)
 
+        
+
         var ch = await me.channel(pubkey)
+
 
         l(nonce, ch.delta_record.nonce + 1)
 
@@ -200,4 +228,6 @@ module.exports = async (ws, msg) => {
       }
     }
   }
+
+
 }

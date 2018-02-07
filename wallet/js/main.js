@@ -199,6 +199,16 @@ FS.onready(() => {
       return parseInt(str.replace(/[^0-9]/g, ''))
     },
 
+    unpackInvoice: () => {
+      var i = app.pay_invoice.split('_')
+      return {
+        amount: i[0],
+        userId: i[2],
+        hubId: i[3],
+        invoice: i[1]
+      }
+    },
+
     timeAgo: (time) => {
       var units = [
         { name: 'second', limit: 60, in_seconds: 1 },
@@ -257,7 +267,11 @@ FS.onready(() => {
 
         history: [],
 
-        proposal: ['Mint $1000 FSD to 1@1', `await Tx.mint(0, 1, 1, 100000)`, '']
+        proposal: ['Mint $1000 FSD to 1@1', `await Tx.mint(0, 1, 1, 100000)`, ''],
+
+
+        new_invoice: '',
+        pay_invoice: ''
 
       }
     },
@@ -344,22 +358,18 @@ FS.onready(() => {
     <div v-else-if="tab=='wallet'">
 
       <template v-if="pubkey">
-        <h5>Hello, <b>{{username}}</b>! Your ID is <b>{{record ? record.id : pubkey}}</b></h5>
-
-        <div v-html="icon(pubkey,160)"></div>
 
 
         <div v-if="is_hub">You're hub.</div>
+
         <div v-else>
+
             
-
-
           <h1 style="display:inline-block">\${{commy(ch.total)}}</h1>
+
+
           <small v-if="ch.total>0">= {{commy(ch.insurance)}} insurance {{ch.rdelta > 0 ? "+ "+commy(ch.rdelta)+" uninsured" : "- "+commy(-ch.rdelta)+" spent"}}</small> 
           
-
-          <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
-
           <div v-if="ch.total>0 || ch.insurance > 0">
 
             <div class="progress" style="max-width:1000px">
@@ -376,25 +386,53 @@ FS.onready(() => {
 
             <br>
 
+
+            <h3>Pay Invoice</h3>
+
             <p><div class="input-group" style="width:400px" >
-              <input type="text" class="form-control small-input" v-model="off_to" placeholder="ID" aria-describedby="basic-addon2">
-              <span class="input-group-addon" id="basic-addon2">@1</span>
+              <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
             </div></p>
 
-              <p><div class="input-group" style="width:400px">
-                <span class="input-group-addon" id="sizing-addon2">$</span>
-                <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
-              </div></p>
+            <div v-if="pay_invoice.length > 0">
+              <p>Amount: {{commy(unpackInvoice().amount)}}</p>
+              <p>Pay to: <b>{{unpackInvoice().userId}}</b> @ {{unpackInvoice().hubId}}</p>
+              <p>Invoice Hash: {{unpackInvoice().invoice}}</p>
+
+              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice())">Pay Invoice</button></p>
+
+            </div>
 
 
-              <p><button type="button" class="btn btn-success" @click="call('send', {off_to: off_to, off_amount: off_amount})">Send</button></p>
+
+            <div class="alert alert-light" role="alert">
+            If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a global dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is still operating and not compromised.
+            </div>
+
+          </div>
 
 
-              <div class="alert alert-light" role="alert">
-              If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a global dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is still operating and not compromised.
-              </div>
 
-        </div>
+
+            <h3>Create invoice</h3>
+
+            <p><div class="input-group" style="width:400px">
+              <span class="input-group-addon" id="sizing-addon2">$</span>
+              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
+            </div></p>
+
+            <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: off_amount})">Request Payment</button></p>
+
+            <p v-if="new_invoice.length > 0"><div class="input-group" style="width:400px">
+              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
+            </div></p>
+
+
+
+           <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
+
+
+
+
       
       <canvas width="100%" id="riskcanvas"></canvas>
 

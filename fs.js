@@ -91,9 +91,20 @@ usage = () => {
 inputMap = (i) => {
   // up to 256 input types for websockets
   var map = [
-    'tx', 'auth', 'needSig', 'signed',
-    'block', 'chain', 'sync',
-    'mediate', 'receive', 'faucet'
+    'tx', // add new tx to block
+    'auth', // i am this pubkey in this socket
+
+    'needSig', // member needs sig of others
+    'signed',  // other members return sigs of block
+
+    'sync', // i want to sync since this prev_hash
+    'chain', // return X blocks since given prev_hash
+
+    'update', // new input to state machine 
+    'receive', 
+
+
+    'faucet'
   ]
   if (typeof i === 'string') {
     // buffer friendly
@@ -256,6 +267,11 @@ react = async (result = {}, id = 1) => {
 
     result.pubkey = toHex(me.id.publicKey)
 
+
+
+    result.invoices = invoices
+
+
     if (!me.is_hub) result.ch = await me.channel(1)
   }
 
@@ -291,38 +307,12 @@ initDashboard = async a => {
       res.on('drain', function () {
         fReadStream.resume()
       })
-    } else if (req.url == '/invoice') {
+    } else if (req.url == '/rpc') {
       var queryData = ''
       req.on('data', function (data) { queryData += data })
 
       req.on('end', function () {
-        queryData = parse(queryData)
-
-        if (queryData.invoice) {
-          // deep clone
-          var result = Object.assign({}, invoices[queryData.invoice])
-
-          // prevent race condition attack
-          if (invoices[queryData.invoice].status == 'paid') { invoices[queryData.invoice].status = 'archive' }
-        } else {
-          var invoice = toHex(crypto.randomBytes(32))
-
-          invoices[invoice] = {
-            amount: parseInt(queryData.amount),
-            assetType: parseInt(queryData.assetType),
-            status: 'pending'
-          }
-
-          var result = {
-            invoice: invoice,
-            recipient: toHex(me.id.publicKey),
-            hubId: 1,
-            amount: invoices[invoice].amount,
-            status: 'pending'
-          }
-        }
-
-        res.end(JSON.stringify(result))
+        me.queue.push(['internal_rpc', res, queryData]) 
       })
     } else {
       serveStatic('./wallet')(req, res, finalhandler(req, res))
@@ -504,6 +494,11 @@ Delta = privSequelize.define('delta', {
 
   delta: Sequelize.INTEGER,
 
+  hashlocks: Sequelize.TEXT,
+  state: Sequelize.TEXT,  // all channels in serialized field
+
+  status: Sequelize.TEXT,
+
 // history
   amount: Sequelize.INTEGER,
   balance: Sequelize.INTEGER,
@@ -517,8 +512,7 @@ Delta = privSequelize.define('delta', {
       return [methodMap('delta'), 
         counterparty, 
         this.nonce, 
-        negative, 
-        (negative ? -this.delta : this.delta), 
+        packSInt(this.delta), 
         ts()]
     }
   }
