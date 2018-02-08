@@ -61,11 +61,16 @@ module.exports = async (ws, msg) => {
           }
         }
 
-        var [status, error] = await me.payChannel(hubId, {
+        var [status, error] = await me.payChannel({
+          counterparty: hubId,
           amount: amount, 
           mediate_to: mediate_to,
-          invoice: p.invoice
+          return_to: ws,
+          invoice: Buffer.from(p.invoice, 'hex')
         })
+
+
+
 
         if (error) {
           result.alert = error
@@ -141,9 +146,12 @@ module.exports = async (ws, msg) => {
           // prevent race condition attack
           if (invoices[p.invoice].status == 'paid') { invoices[p.invoice].status = 'archive' }
         } else {
-          var invoice = toHex(crypto.randomBytes(32))
+
+          var secret = crypto.randomBytes(32)
+          var invoice = toHex(sha3(secret))
 
           invoices[invoice] = {
+            secret: secret,
             amount: parseInt(p.amount),
             status: 'pending'
           }
@@ -163,7 +171,8 @@ module.exports = async (ws, msg) => {
       break
 
       case 'pay':
-        await me.payChannel(1, {
+        await me.payChannel({
+          counterparty: 1,
           amount: parseInt(json.params.amount),
           mediate_to: Buffer.from(json.params.recipient, 'hex'),
           invoice: Buffer.from(json.params.invoice, 'hex')

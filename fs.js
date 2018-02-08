@@ -102,6 +102,7 @@ inputMap = (i) => {
 
     'update', // new input to state machine 
     'receive', 
+    'ack',
 
 
     'faucet'
@@ -126,6 +127,11 @@ methodMap = (i) => {
 
     'withdraw', // instant off-chain signature to withdraw from mutual payment channel
     'delta',    // delayed balance proof
+    'update',   // transitions to state machine + new sig
+    'unlockedPayment', // pay without hashlock
+    'ack',
+
+
 
     'propose',
 
@@ -139,7 +145,6 @@ methodMap = (i) => {
   ]
 
   if (typeof i === 'string') {
-    // buffer friendly
     assert(map.indexOf(i) != -1, 'No such method')
     return map.indexOf(i)
   } else {
@@ -284,7 +289,9 @@ react = async (result = {}, id = 1) => {
 }
 
 me = false
+
 invoices = {}
+purchases = {}
 
 initDashboard = async a => {
   var finalhandler = require('finalhandler')
@@ -481,21 +488,35 @@ Block = privSequelize.define('block', {
   prev_hash: Sequelize.CHAR(32).BINARY
 })
 
-// stored signed deltas
+
 Delta = privSequelize.define('delta', {
+  // between who and who
   userId: Sequelize.CHAR(32).BINARY,
   hubId: Sequelize.INTEGER,
 
-  sig: Sequelize.TEXT,
-
+  // higher nonce is valid
   nonce: Sequelize.INTEGER,
+
 
   instant_until: Sequelize.INTEGER,
 
   delta: Sequelize.INTEGER,
 
   hashlocks: Sequelize.TEXT,
-  state: Sequelize.TEXT,  // all channels in serialized field
+  
+
+  // all channels in serialized field
+  state: {
+    type: Sequelize.TEXT,
+    set (val) { 
+      stringify(this.setDataValue('state')) 
+    },
+    get (val) { 
+      return parse(this.getDataValue('state')) 
+    }
+  },
+
+  sig: Sequelize.TEXT,
 
   status: Sequelize.TEXT,
 
@@ -504,19 +525,15 @@ Delta = privSequelize.define('delta', {
   balance: Sequelize.INTEGER,
   desc: Sequelize.TEXT,
   date: Sequelize.DATE
-}, {
-  instanceMethods: {
-    getState: function(counterparty) {
-      let negative = ch.delta_record.delta < 0 ? 1 : null
-
-      return [methodMap('delta'), 
-        counterparty, 
-        this.nonce, 
-        packSInt(this.delta), 
-        ts()]
-    }
-  }
 })
+
+Delta.prototype.getState = function() {
+  return r([methodMap('delta'), 
+    this.userId,
+    this.hubId, 
+    this.nonce, 
+    packSInt(this.delta)])
+}
 
 History = privSequelize.define('history', {
   userId: Sequelize.CHAR(32).BINARY,

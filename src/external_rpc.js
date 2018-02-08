@@ -21,31 +21,15 @@ module.exports = async (ws, msg) => {
 
   // some socket is authenticating their pubkey 
   if (inputType == 'auth') {
-    let obj = me.offchainVerify(msg)
-    l('Someone connected: ' + toHex(obj.signer))
+    var [pubkey, sig, body] = r(msg)
 
-    me.users[obj.signer] = ws
+    l("authing ",pubkey)
 
-    if (me.is_hub) {
-      // offline delivery if missed
-      var ch = await me.channel(obj.signer)
-      if (ch.delta_record.id) {
-        var body = r([
-          methodMap('delta'), obj.signer, ch.delta_record.nonce, packSInt(ch.delta_record.delta), ts()
-        ])
-
-        var sig = ec(body, me.id.secretKey)
-        // share last proof
-
-        me.send(obj.signer, 'update', r([
-          bin(me.id.publicKey), bin(sig), body, 0
-        ]))
-      }
+    if (ec.verify( r([methodMap('auth')]) , sig, pubkey)) {
+      me.users[pubkey] = ws
+    } else {
+      return false
     }
-
-
-    return false
-
 
 
   // someone wants tx to be broadcasted
@@ -98,8 +82,11 @@ module.exports = async (ws, msg) => {
 
 
   } else if (inputType == 'faucet') {
-    await me.payChannel(msg, {
-      amount: Math.round(Math.random() * 6000)
+    await me.payChannel({
+      counterparty: msg,
+      amount: Math.round(Math.random() * 6000),
+
+      invoice: Buffer([0])
     })
 
 
@@ -146,87 +133,153 @@ module.exports = async (ws, msg) => {
 
 
 
-  // counterparty updates state machine
+
+  } else if (inputType == 'withdraw') {
+
+
+  } else if (inputType == 'ack') {
+    var [pubkey, sig, body] = r(msg)
+    var ch = await me.channel(pubkey)
+
+    var [secret, sig]= r(body)
+
+    if (ec.verify(ch.delta_record.getState(), sig, pubkey)) {
+      ch.delta_record.sig = sig
+      ch.delta_record.status = 'ready'
+
+      await ch.delta_record.save()
+
+      var invoice = toHex(sha3(secret))
+
+      var return_to = purchases[invoice]
+
+      if (!return_to) return false
+
+
+      if (return_to.send) {
+        react({confirm: 'Secret received: '+toHex(secret)+' for invoice '+invoice}) 
+      } else {
+        var return_ch = await me.channel(return_to)
+        me.send(return_to, 'ack', me.envelope(
+          secret, ec(return_ch.delta_record.getState(), me.id.secretKey)
+        ))
+      }
+
+    } else {
+      l("Invalid ACK!")
+    }
+
   } else if (inputType == 'update') {
-    var [pubkey, sig, body, mediate_to, invoice] = r(msg)
+    var [pubkey, sig, body] = r(msg)
+    var ch = await me.channel(pubkey)
 
     if (ec.verify(body, sig, pubkey)) {
-      var [counterparty, nonce, delta, instant_until] = me.parseDelta(body)
+      var [method, transitions, stateSig, newState] = r(body)
 
-      if (me.is_hub) {
-        assert(readInt(counterparty) == 1)
-
-        
-
-        var ch = await me.channel(pubkey)
+      if (readInt(method) != methodMap('update')) {
+        l("Invalid update input")
+        return false
+      }
 
 
-        l(nonce, ch.delta_record.nonce + 1)
 
-        assert(nonce >= ch.delta_record.nonce, `${nonce} ${ch.delta_record.nonce}`)
-        ch.delta_record.nonce++
-        // assert(nonce == ch.delta_record.nonce)
 
-        l('delta ', ch.delta_record.delta, delta)
+      for (var act of transitions) {
+        if (methodMap(act[0]) == 'unlockedPayment') {
 
-        var amount = ch.delta_record.delta - delta
-
-        l(`Sent ${amount} out of ${ch.total}`)
-
-        assert(amount > 0 && amount <= ch.total, `Got ${amount} is limited by insurance ${ch.total}`)
-
-        ch.delta_record.delta = delta
-        ch.delta_record.sig = r([pubkey, sig, body]) // raw delta
-
-        await ch.delta_record.save()
-
-        var fee = Math.round(amount * K.hub_fee)
-        if (fee == 0) fee = K.hub_fee_base
-
-        await me.payChannel(mediate_to, {
-          amount: amount - fee,
-          mediate_to: null, 
-          invoice: invoice
-        })
-      } else {
-        // is it for us?
-        assert(counterparty.equals(bin(me.id.publicKey)))
-
-        var hub = await User.findById(1)
-
-        assert(hub.pubkey.equals(pubkey))
-
-        var ch = await me.channel(1)
-
-        l(delta, ch.delta_record.delta)
-
-        // for users, delta of deltas is reversed
-        var amount = parseInt(delta - ch.delta_record.delta)
-
-        assert(amount > 0)
-
-        l(`${amount} received payment of  ${delta}`)
-
-        ch.delta_record.nonce++
-        assert(nonce >= ch.delta_record.nonce)
-
-        l(invoices)
-        if (invoices[toHex(invoice)]) {
-          l('Paid invoice!')
-          invoices[toHex(invoice)].status = 'paid'
         }
 
-        ch.delta_record.delta = delta
-        ch.delta_record.sig = r([pubkey, sig, body]) // raw delta
+        if (methodMap(act[0]) == 'ack') {
+          if (ec.verify(act[1], ch.delta_record.getState())) {
+            ch.delta_record.sig = act[1]
+            ch.delta_record.status = 'ready'
+            await ch.delta_record.save()
 
-        await ch.delta_record.save()
+            l("ACKed")
+            return false
+          }
 
-
-        await me.addHistory(amount, 'Received', true)
-
-        react()
+        }
       }
-    }
+
+
+
+      var [action, amount, mediate_to, invoice] = transitions[0]
+
+      assert(readInt(action) == methodMap('unlockedPayment'))
+      amount = readInt(amount)
+
+
+      // channel boundaries
+      assert(amount > 100, `Got ${amount} is limited by insurance ${ch.total}`)
+      assert(amount <= (me.is_hub ? ch.total : ch.receivable), "Channel is depleted") 
+
+      ch.delta_record.delta -= me.is_hub ? amount : -amount
+      ch.delta_record.nonce++
+
+      var resultState = ch.delta_record.getState()
+
+      if (!resultState.equals(newState)) l("State mismatch ", resultState, newState)
+
+      if (ec.verify(resultState, stateSig, pubkey)) {
+        ch.delta_record.sig = stateSig 
+
+
+        //l('return ACK')
+
+        if (me.is_hub) {
+          //me.send(pubkey, 'ack', ec(ch.delta_record.getState(), me.id.secretKey))
+         
+
+
+          await ch.delta_record.save()
+
+          var fee = Math.round(amount * K.hub_fee)
+          if (fee == 0) fee = K.hub_fee_base
+
+          await me.payChannel({
+            counterparty: mediate_to,
+            amount: amount - fee,
+            mediate_to: null,
+            return_to: pubkey,
+            invoice: invoice
+          })          
+        } else {
+          await ch.delta_record.save()
+
+          l('looking for ', invoice)
+
+          var paid_invoice = invoices[toHex(invoice)]
+          if (paid_invoice) {
+            l('Paid invoice!', paid_invoice)
+            paid_invoice.status = 'paid'
+
+
+            me.send(pubkey, 'ack', me.envelope(
+              paid_invoice.secret, ec(ch.delta_record.getState(), me.id.secretKey)
+            ))
+    
+          }else {
+            l("No such invoice found. Donation?")
+          }
+
+          await me.addHistory(amount, 'Received', true)
+
+          react()
+
+
+        }
+      }
+      
+    } 
+
+
+
+
+
+
+
+
   }
 
 

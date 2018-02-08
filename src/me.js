@@ -169,25 +169,15 @@ class Me {
   // this is off-chain for any kind of p2p authentication
   // no need to optimize for bandwidth
   // so full pubkey is used instead of id and JSON is used as payload
-  offchainAuth () {
+  envelope () {
+    var msg = r(Object.values(arguments))
     return r([
       bin(this.id.publicKey),
-      ec(r([0, methodMap('auth')]), this.id.secretKey)
-    ])
+      ec(msg, this.id.secretKey),
+      msg
+    ])    
   }
 
-  offchainVerify (token) {
-    var [pubkey, sig] = r(token)
-
-    if (ec.verify(r([0, methodMap('auth')]), sig, pubkey)) {
-      l('verified success! ')
-      return {
-        signer: pubkey
-      }
-    } else {
-      return false
-    }
-  }
 
   async start () {
     await cache()
@@ -228,7 +218,7 @@ class Me {
       for (var m of this.members) {
         if (this.my_member != m) {
           // we need to have connections ready to all members
-          this.send(m, 'auth', me.offchainAuth())
+          this.send(m, 'auth', me.envelope( methodMap('auth') ))
         }
       }
 
@@ -243,7 +233,7 @@ class Me {
       }
     } else {
       // keep connection to hub open
-      this.send(K.members[0], 'auth', this.offchainAuth())
+      this.send(K.members[0], 'auth', this.envelope( methodMap('auth') ))
 
       l('Set up sync')
       me.intervals.push(setInterval(sync, K.blocktime * 1000))
@@ -289,18 +279,18 @@ class Me {
 
 
 
-  async payChannel (counterparty, opts) {
+  async payChannel (opts) {
     if (opts.amount < 100) {
       return [false, '$1.00 is the minimum amount']
     }
 
-    var ch = await me.channel(counterparty)
+    var ch = await me.channel(opts.counterparty)
 
     var new_delta = ch.rdelta + (me.is_hub ? opts.amount : -opts.amount)
 
     // checking boundaries
     if (-new_delta > ch.insurance) {
-      return [false, 'Not enough funds']      
+      return [false, 'Not enough funds']
     }
 
     if (new_delta > K.risk_limit) {
@@ -308,27 +298,29 @@ class Me {
     }
 
     if (ch.delta_record.status != 'ready') {
-      return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
+      //return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
     }
 
     ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
     ch.delta_record.nonce++
 
 
-    var newState = r([
-      methodMap('delta'), 
-      counterparty, 
-      ch.delta_record.nonce, 
-      packSInt(ch.delta_record.delta),
-      ts()
+    var newState = ch.delta_record.getState()
+
+    var body = r([
+      methodMap('update'),
+      // what we do to state
+      [[methodMap('unlockedPayment'), opts.amount, opts.mediate_to, opts.invoice]], 
+      // sign what it turns into
+      ec(newState, me.id.secretKey),
+      // give our state for debug
+      newState
     ])
 
     var signedState = r([
       bin(me.id.publicKey), 
-      ec(newState, me.id.secretKey), 
-      newState, 
-      opts.mediate_to, 
-      opts.invoice
+      ec(body, me.id.secretKey),
+      body
     ])
     
     ch.delta_record.status = 'await'
@@ -342,14 +334,25 @@ class Me {
       await me.addHistory(-opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '...', true)
     }
 
-    if (!me.send(counterparty == 1 ? K.members[0] : counterparty, 'update', signedState)) {
-      l(`${counterparty} not online, deliver later?`)
+    // what do we do when we get the secret
+    if (opts.return_to) purchases[toHex(opts.invoice)] = opts.return_to
+
+    if (!me.send(opts.counterparty == 1 ? K.members[0] : opts.counterparty, 'update', signedState)) {
+      l(`${opts.counterparty} not online, deliver later?`)
     }
 
     return [true, false]
   }
 
   async channel (counterparty) {
+
+    if (!me.is_hub && counterparty != 1) {
+      assert(K.members[0].pubkey == toHex(counterparty))
+      counterparty = 1
+    }
+
+
+
     var r = {
       // onchain fields
       insurance: 0,
@@ -366,71 +369,55 @@ class Me {
 
     me.record = await me.byKey()
 
+    var delta = await Delta.findOrBuild({
+      where: me.is_hub ? {
+        hubId: me.record.id,
+        userId: counterparty
+      } : {
+        hubId: counterparty,
+        userId: bin(me.id.publicKey)
+      },
+      defaults: {
+        delta: 0,
+        instant_until: 0,
+        nonce: 0,
+        status: 'ready',
+        state: '{"locks":[]}'
+      }
+    })
+
+
     if (me.is_hub) {
       var user = await me.byKey(counterparty)
-
       if (user) {
-        var ch = await Insurance.find({where: {
+        var insurance = await Insurance.find({where: {
           userId: user.id,
-          hubId: 1
+          hubId: me.record.id
         }})
-
-        if (ch) {
-          r.insurance = ch.insurance
-          r.rebalanced = ch.rebalanced
-          r.nonce = ch.nonce
-        }
       }
+    } else if (me.record) {
+      var insurance = await Insurance.find({where: {
+        userId: me.record.id,
+        hubId: counterparty
+      }})
+    }
 
-      var delta = await Delta.findOrBuild({
-        where: {
-          hubId: 1,
-          userId: counterparty
-        },
-        defaults: {
-          delta: 0,
-          instant_until: 0,
-          nonce: 0,
-          status: 'ready'
-        }
-      })
-    } else {
-      var hubId = counterparty
-
-      if (me.record) {
-        var ch = await Insurance.find({where: {
-          userId: me.record.id,
-          hubId: hubId
-        }})
-
-        if (ch) {
-          r.insurance = ch.insurance
-          r.rebalanced = ch.rebalanced
-          r.nonce = ch.nonce
-        }
-      } else {
-
-      }
-
-      var delta = await Delta.findOrBuild({
-        where: {
-          hubId: hubId,
-          userId: bin(me.id.publicKey)
-        },
-        defaults: {
-          delta: 0,
-          instant_until: 0,
-          nonce: 0,
-          status: 'ready'
-        }
-      })
+    if (insurance) {
+      r.insurance = insurance.insurance
+      r.rebalanced = insurance.rebalanced
+      r.nonce = insurance.nonce
     }
 
     r.delta_record = delta[0]
 
-    r.rdelta = r.rebalanced + r.delta_record.delta
+    //r.delta_record.state = JSON.parse(r.delta_record.state)
 
+    r.rdelta = r.rebalanced + r.delta_record.delta
     r.total = r.insurance + r.rdelta
+
+    r.state = parse(r.delta_record.state)
+
+    r.receivable = 1000000 - r.rdelta
 
     if (r.rdelta >= 0) {
       r.failsafe = r.insurance
@@ -650,13 +637,17 @@ class Me {
         }
 
         me.users[m.pubkey].onopen = function (e) {
-          if (me.id) { me.users[m.pubkey].send(concat(inputMap('auth'), me.offchainAuth())) }
+          if (me.id) { 
+            me.users[m.pubkey].send(concat(inputMap('auth'), me.envelope( methodMap('auth') ))) 
+          }
 
           me.users[m.pubkey].send(tx)
         }
 
         me.users[m.pubkey].open(m.location)
       }
+
+      return true
 
     }
 

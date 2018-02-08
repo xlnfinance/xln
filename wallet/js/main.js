@@ -202,10 +202,10 @@ FS.onready(() => {
     unpackInvoice: () => {
       var i = app.pay_invoice.split('_')
       return {
-        amount: i[0],
-        userId: i[2],
-        hubId: i[3],
-        invoice: i[1]
+        amount: app.commy(i[0]),
+        userId: i[1],
+        hubId: i[2],
+        invoice: i[3]
       }
     },
 
@@ -364,6 +364,8 @@ FS.onready(() => {
 
         <div v-else>
 
+          <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
+
             
           <h1 style="display:inline-block">\${{commy(ch.total)}}</h1>
 
@@ -394,13 +396,16 @@ FS.onready(() => {
             </div></p>
 
             <div v-if="pay_invoice.length > 0">
-              <p>Amount: {{commy(unpackInvoice().amount)}}</p>
+              <p>Amount: {{unpackInvoice().amount}}</p>
               <p>Pay to: <b>{{unpackInvoice().userId}}</b> @ {{unpackInvoice().hubId}}</p>
               <p>Invoice Hash: {{unpackInvoice().invoice}}</p>
 
               <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice())">Pay Invoice</button></p>
 
             </div>
+
+            <pre>{{JSON.stringify(invoices,2,2)}}</pre>
+
 
 
 
@@ -413,22 +418,19 @@ FS.onready(() => {
 
 
 
-            <h3>Create invoice</h3>
+            <h3>Create Invoice</h3>
 
             <p><div class="input-group" style="width:400px">
               <span class="input-group-addon" id="sizing-addon2">$</span>
               <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
             </div></p>
 
-            <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: off_amount})">Request Payment</button></p>
+            <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">Request Payment</button></p>
 
-            <p v-if="new_invoice.length > 0"><div class="input-group" style="width:400px">
+            <p><div v-show="new_invoice.length > 0" class="input-group" style="width:1000px">
               <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
             </div></p>
 
-
-
-           <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
 
 
 
