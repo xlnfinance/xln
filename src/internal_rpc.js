@@ -8,8 +8,13 @@ module.exports = async (ws, msg) => {
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
 
-  if (json.auth_code == auth_code) {
-    me.browser = ws
+  if (json.auth_code == PK.auth_code) {
+
+    if (ws.send) {
+      // browser session
+      me.browser = ws     
+    }
+
     var p = json.params
 
     switch (json.method) {
@@ -45,9 +50,9 @@ module.exports = async (ws, msg) => {
 
       case 'send':
 
-        var hubId = 1
+        var hubId = parseInt(p.hubId)
 
-        var amount = parseInt(parseFloat(p.amount) * 100)
+        var amount = parseInt(p.amount)
 
         if (p.userId.length == 64) {
           var mediate_to = Buffer.from(p.userId, 'hex')
@@ -61,21 +66,26 @@ module.exports = async (ws, msg) => {
           }
         }
 
+
+
         var [status, error] = await me.payChannel({
           counterparty: hubId,
           amount: amount, 
           mediate_to: mediate_to,
-          return_to: ws,
+          return_to: (obj)=>{
+            l("Returning now")
+            ws.send ? ws.send(JSON.stringify({
+              result: obj,
+              id: json.id
+            })) : ws.end(JSON.stringify(obj))
+          },
           invoice: Buffer.from(p.invoice, 'hex')
         })
-
-
-
 
         if (error) {
           result.alert = error
         } else {
-          result.confirm = `Sent \$${p.amount} to ${p.userId}!`
+          return false
         }
 
         break
@@ -170,16 +180,6 @@ module.exports = async (ws, msg) => {
         }
       break
 
-      case 'pay':
-        await me.payChannel({
-          counterparty: 1,
-          amount: parseInt(json.params.amount),
-          mediate_to: Buffer.from(json.params.recipient, 'hex'),
-          invoice: Buffer.from(json.params.invoice, 'hex')
-        })
-
-        result.status = 'paid'
-        break
 
       case 'propose':
         result.confirm = await me.broadcast('propose', p)

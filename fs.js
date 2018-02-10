@@ -56,6 +56,14 @@ kmac = (key, msg) => keccak('keccak256').update(key).update(bin(msg)).digest()
 
 ts = () => Math.round(new Date() / 1000)
 
+
+afterFees = (amount) => {
+  var fee = Math.round(amount * K.hub_fee)
+  if (fee == 0) fee = K.hub_fee_base
+  return amount - fee
+}
+
+
 parse = (json) => {
   try {
     var o = JSON.parse(json)
@@ -79,8 +87,6 @@ concat = function () {
   return Buffer.concat(Object.values(arguments))
 }
 
-// used to authenticate browser sessions to this daemon
-auth_code = toHex(crypto.randomBytes(32))
 process.title = 'Failsafe'
 
 usage = () => {
@@ -145,7 +151,7 @@ methodMap = (i) => {
   ]
 
   if (typeof i === 'string') {
-    assert(map.indexOf(i) != -1, 'No such method')
+    if (map.indexOf(i) == -1) throw 'No such method'
     return map.indexOf(i)
   } else {
     return map[i]
@@ -166,6 +172,7 @@ allowedOnchain = [
 K = false
 // Private Key value
 PK = {}
+
 
 loadJSON = () => {
   if (fs.existsSync('data/k.json')) {
@@ -345,11 +352,6 @@ initDashboard = async a => {
   l('Set up HTTP server at ' + base_port)
   server.listen(base_port).on('error', l)
 
-  var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + auth_code
-  l('Open ' + url + ' in your browser')
-
-  // only in desktop
-  if (base_port != 443) opn(url)
 
   me = new Me()
   me.processQueue()
@@ -366,8 +368,21 @@ initDashboard = async a => {
 
       await me.init(PK.username, Buffer.from(PK.seed, 'hex'))
       await me.start()
+    } else {
+      // used to authenticate browser sessions to this daemon
+      PK = {
+        auth_code: toHex(crypto.randomBytes(32))
+      }
     }
-  }, 200)
+
+    var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + PK.auth_code
+    l('Open ' + url + ' in your browser')
+
+    // only in desktop
+    if (base_port != 443) opn(url)
+
+
+  }, 100)
 
 
 
@@ -433,7 +448,8 @@ User = sequelize.define('user', {
 
   nonce: Sequelize.INTEGER,
   balance: Sequelize.BIGINT, // mostly to pay taxes
-  fsb_balance: Sequelize.BIGINT // standalone bond 2030
+
+  assets: Sequelize.TEXT
 
 })
 

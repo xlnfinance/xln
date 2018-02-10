@@ -69,7 +69,10 @@ module.exports = async (ws, msg) => {
 
     var m = me.members.find(f => f.block_pubkey.equals(pubkey))
 
-    assert(me.status == 'precommit', 'Not expecting any sigs')
+    if (me.status != 'precommit') {
+      l('Not expecting any sigs')
+      return false
+    }
 
     if (m && ec.verify(me.precommit, sig, pubkey)) {
       m.sig = sig
@@ -155,9 +158,9 @@ module.exports = async (ws, msg) => {
 
       if (!return_to) return false
 
-
-      if (return_to.send) {
-        react({confirm: 'Secret received: '+toHex(secret)+' for invoice '+invoice}) 
+      // ws from browser
+      if (typeof return_to == 'function') {
+        return_to({confirm: 'Payment succeeded', secret: toHex(secret)}) 
       } else {
         var return_ch = await me.channel(return_to)
         me.send(return_to, 'ack', me.envelope(
@@ -206,13 +209,20 @@ module.exports = async (ws, msg) => {
 
       var [action, amount, mediate_to, invoice] = transitions[0]
 
-      assert(readInt(action) == methodMap('unlockedPayment'))
+      if (readInt(action) != methodMap('unlockedPayment')) {
+        return false
+      }
       amount = readInt(amount)
 
+      if (amount < 99) {
+        l("Too low amount")
+        return false
+      }
 
-      // channel boundaries
-      assert(amount > 100, `Got ${amount} is limited by insurance ${ch.total}`)
-      assert(amount <= (me.is_hub ? ch.total : ch.receivable), "Channel is depleted") 
+      if (amount > ch.receivable) {
+        l("Channel is depleted") 
+        return false
+      }
 
       ch.delta_record.delta -= me.is_hub ? amount : -amount
       ch.delta_record.nonce++
@@ -229,17 +239,12 @@ module.exports = async (ws, msg) => {
 
         if (me.is_hub) {
           //me.send(pubkey, 'ack', ec(ch.delta_record.getState(), me.id.secretKey))
-         
-
 
           await ch.delta_record.save()
 
-          var fee = Math.round(amount * K.hub_fee)
-          if (fee == 0) fee = K.hub_fee_base
-
           await me.payChannel({
             counterparty: mediate_to,
-            amount: amount - fee,
+            amount: afterFees(amount),
             mediate_to: null,
             return_to: pubkey,
             invoice: invoice
@@ -250,12 +255,17 @@ module.exports = async (ws, msg) => {
           l('looking for ', invoice)
 
           var paid_invoice = invoices[toHex(invoice)]
-          if (paid_invoice) {
-            l('Paid invoice!', paid_invoice)
+
+          // did we get right amount in right asset?
+          if (paid_invoice && 
+            amount >= afterFees(paid_invoice.amount) &&
+            paid_invoice.status == 'pending') {
+
+            l('Our invoice was paid!', paid_invoice)
             paid_invoice.status = 'paid'
 
-
-            me.send(pubkey, 'ack', me.envelope(
+            l("Acking back to ", pubkey)
+            me.send(K.members[0], 'ack', me.envelope(
               paid_invoice.secret, ec(ch.delta_record.getState(), me.id.secretKey)
             ))
     

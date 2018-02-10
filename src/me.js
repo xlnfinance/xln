@@ -42,7 +42,9 @@ class Me {
     // first in first out - call rpc with ws and msg
     var action
     while( action = this.queue.shift() ){
-      await RPC[action[0]](action[1], action[2])
+      try {
+        await RPC[action[0]](action[1], action[2])
+      }catch(e){ l(e) }
     }
 
     //l("Setting timeout for queue")
@@ -125,7 +127,8 @@ class Me {
         var confirm = 'Broadcasted globally!'
         break
       case 'propose':
-        assert(args[0].length > 1, 'Rationale is required')
+        if (args[0].length <= 1) throw 'Rationale is required'
+    
 
         if (args[2]) {
           // diff -urB . ../yo
@@ -252,7 +255,7 @@ class Me {
       // add current balances
       var c = await me.channel(1)
       attrs.rdelta = c.rdelta
-      attrs.balance = c.total
+      attrs.balance = c.payable
     }
 
     await History.create(attrs)
@@ -270,7 +273,7 @@ class Me {
     instant_until = readInt(instant_until)
     delta = readSInt(readInt(delta))
 
-    assert(method == methodMap('delta'))
+    if (method != methodMap('delta')) return false
 
     return [counterparty, nonce, delta, instant_until]
   }
@@ -280,21 +283,14 @@ class Me {
 
 
   async payChannel (opts) {
+    var ch = await me.channel(opts.counterparty)
+
     if (opts.amount < 100) {
       return [false, '$1.00 is the minimum amount']
     }
 
-    var ch = await me.channel(opts.counterparty)
-
-    var new_delta = ch.rdelta + (me.is_hub ? opts.amount : -opts.amount)
-
-    // checking boundaries
-    if (-new_delta > ch.insurance) {
+    if (opts.amount > ch.payable) {
       return [false, 'Not enough funds']
-    }
-
-    if (new_delta > K.risk_limit) {
-      return [false, 'Hubs cannot promise over risk limit']
     }
 
     if (ch.delta_record.status != 'ready') {
@@ -302,6 +298,7 @@ class Me {
     }
 
     ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
+
     ch.delta_record.nonce++
 
 
@@ -346,12 +343,7 @@ class Me {
 
   async channel (counterparty) {
 
-    if (!me.is_hub && counterparty != 1) {
-      assert(K.members[0].pubkey == toHex(counterparty))
-      counterparty = 1
-    }
-
-
+    if (counterparty != 1 && K.members[0].pubkey == toHex(counterparty)) counterparty = 1
 
     var r = {
       // onchain fields
@@ -413,11 +405,13 @@ class Me {
     //r.delta_record.state = JSON.parse(r.delta_record.state)
 
     r.rdelta = r.rebalanced + r.delta_record.delta
-    r.total = r.insurance + r.rdelta
-
     r.state = parse(r.delta_record.state)
 
-    r.receivable = 1000000 - r.rdelta
+    r.receivable = K.hard_limit - r.rdelta
+    r.payable = r.insurance + r.rdelta
+    
+    // other way around
+    if (me.is_hub) [r.receivable, r.payable] = [r.payable, r.receivable]
 
     if (r.rdelta >= 0) {
       r.failsafe = r.insurance
@@ -461,8 +455,13 @@ class Me {
     timestamp = readInt(timestamp)
     prev_hash = prev_hash.toString('hex')
 
-    assert(readInt(methodId) == methodMap('block'), 'Wrong method for block')
-    assert(finalblock.length <= K.blocksize, 'Invalid block')
+    if (readInt(methodId) != methodMap('block')) {
+      return l('Wrong method for block')
+    }
+
+    if (finalblock.length > K.blocksize) {
+      return l('Invalid block')
+    }
 
     if (timestamp < K.ts) {
       l('New block from the past')

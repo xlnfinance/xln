@@ -26,8 +26,7 @@ module.exports = async (opts) => {
     pubkey: bin(me.id.publicKey),
     username: opts.username,
     nonce: 0,
-    balance: 100000000,
-    fsb_balance: 1000
+    balance: 100000000
   }))
 
   // extra user for demo
@@ -39,8 +38,7 @@ module.exports = async (opts) => {
     pubkey: bin(me2.id.publicKey),
     username: '8001',
     nonce: 0,
-    balance: 500000,
-    fsb_balance: 10000
+    balance: 500000
   }))
 
 
@@ -84,7 +82,8 @@ module.exports = async (opts) => {
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
 
     risk: 10000, // recommended rebalance limit
-    risk_limit: 10000000, // how much can a user lose if hub is insolvent?
+    hard_limit: 1000000, // how much can a user lose if hub is insolvent?
+
 
     dispute_delay: 5, // in how many blocks disputes are considered final
 
@@ -106,7 +105,7 @@ module.exports = async (opts) => {
       {
         ticker: 'FSB',
         name: 'Bond',
-        total_supply: user.fsb_balance
+        total_supply: 0
       }
     ],
 
@@ -131,9 +130,7 @@ module.exports = async (opts) => {
     shares: 10,
 
     hub: {
-      name: '1',
-      soft_limit: 100000,
-      hard_limit: 10000000
+      name: '1'
     }
   })
 
@@ -158,7 +155,8 @@ module.exports = async (opts) => {
 
   fs.writeFileSync('private/pk.json', JSON.stringify({
     username: opts.username,
-    seed: seed.toString('hex')
+    seed: seed.toString('hex'),
+    auth_code: toHex(crypto.randomBytes(32))
   }))
 
   process.exit(0)

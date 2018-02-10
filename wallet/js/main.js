@@ -202,7 +202,7 @@ FS.onready(() => {
     unpackInvoice: () => {
       var i = app.pay_invoice.split('_')
       return {
-        amount: app.commy(i[0]),
+        amount: i[0],
         userId: i[1],
         hubId: i[2],
         invoice: i[3]
@@ -367,21 +367,21 @@ FS.onready(() => {
           <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
 
             
-          <h1 style="display:inline-block">\${{commy(ch.total)}}</h1>
+          <h1 style="display:inline-block">\${{commy(ch.payable)}}</h1>
 
 
-          <small v-if="ch.total>0">= {{commy(ch.insurance)}} insurance {{ch.rdelta > 0 ? "+ "+commy(ch.rdelta)+" uninsured" : "- "+commy(-ch.rdelta)+" spent"}}</small> 
+          <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.rdelta > 0 ? "+ "+commy(ch.rdelta)+" uninsured" : "- "+commy(-ch.rdelta)+" spent"}}</small> 
           
-          <div v-if="ch.total>0 || ch.insurance > 0">
+          <div v-if="ch.payable>0 || ch.insurance > 0">
 
             <div class="progress" style="max-width:1000px">
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/(ch.rdelta<0?ch.insurance:ch.total))+'%', 'background-color':'#5cb85c'}" role="progressbar">
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
                 {{commy(ch.failsafe)}} (insured)
               </div>
-              <div v-if="ch.rdelta<0" v-bind:style="{ width: Math.round(-ch.rdelta*100/ch.insurance)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+              <div v-if="ch.rdelta<0" v-bind:style="{ width: Math.round(-ch.rdelta*100/ch.payable)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
                 {{commy(ch.rdelta)}} (spent)
               </div>
-              <div v-if="ch.rdelta>0" v-bind:style="{ width: Math.round(ch.rdelta*100/ch.total)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+              <div v-if="ch.rdelta>0" v-bind:style="{ width: Math.round(ch.rdelta*100/ch.payable)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
                 +{{commy(ch.rdelta)}} (uninsured)
               </div>
             </div>
@@ -389,14 +389,14 @@ FS.onready(() => {
             <br>
 
 
-            <h3>Pay Invoice</h3>
+            <h3>Pay</h3>
 
             <p><div class="input-group" style="width:400px" >
               <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
             </div></p>
 
             <div v-if="pay_invoice.length > 0">
-              <p>Amount: {{unpackInvoice().amount}}</p>
+              <p>Amount: {{commy(unpackInvoice().amount)}}</p>
               <p>Pay to: <b>{{unpackInvoice().userId}}</b> @ {{unpackInvoice().hubId}}</p>
               <p>Invoice Hash: {{unpackInvoice().invoice}}</p>
 
@@ -404,34 +404,27 @@ FS.onready(() => {
 
             </div>
 
-            <pre>{{JSON.stringify(invoices,2,2)}}</pre>
-
-
-
-
-            <div class="alert alert-light" role="alert">
-            If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a global dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is still operating and not compromised.
-            </div>
 
           </div>
 
 
+          <h3>Receive</h3>
+
+          <p><div class="input-group" style="width:400px">
+            <span class="input-group-addon" id="sizing-addon2">$</span>
+            <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
+          </div></p>
+
+          <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">Request Payment</button></p>
+
+          <p><div v-show="new_invoice.length > 0" class="input-group" style="width:1000px">
+            <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
+          </div></p>
 
 
-            <h3>Create Invoice</h3>
-
-            <p><div class="input-group" style="width:400px">
-              <span class="input-group-addon" id="sizing-addon2">$</span>
-              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
-            </div></p>
-
-            <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">Request Payment</button></p>
-
-            <p><div v-show="new_invoice.length > 0" class="input-group" style="width:1000px">
-              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
-            </div></p>
-
-
+          <div class="alert alert-light" role="alert">
+          If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a global dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is still operating and not compromised.
+          </div>
 
 
 
@@ -494,7 +487,9 @@ FS.onready(() => {
 
       </div>
 
+      <p>Global ID: <b>\${{commy(record.id)}}</b></p>
       <p>Global Balance: <b>\${{commy(record.balance)}}</b></p>
+
       <small>Currently there's only one hub <b>@1</b>. So to deposit to someone's channel with hub use their_ID@1</small>
 
       <p v-for="out in outs">
@@ -528,8 +523,8 @@ FS.onready(() => {
       <p>Average onchain fee: {{commy(K.tax * 83)}} (to short ID) – {{commy(K.tax * 115)}} (to pubkey)</p>
 
       <h2>Hubs & topology</h2>
-      <p>Soft risk limit: {{commy(K.members[0].hub.soft_limit)}}</p>
-      <p>Hard risk limit: {{commy(K.members[0].hub.hard_limit)}}</p>
+      <p>Risk limit: {{commy(K.risk)}}</p>
+      <p>Hard risk limit: {{commy(K.hard_limit)}}</p>
 
 
       <h2>Snapshots</h2>
@@ -628,7 +623,6 @@ FS.onready(() => {
       <div v-if="is_hub">
         <p>Testnet-only private channels explorer.</p>
 
-
         <p>Risk limit: {{commy(K.risk)}}</p>
         <p>Rebalance every {{K.blocktime*2}} seconds.</p>
         <p>Solvency: {{commy(solvency)}}</p>
@@ -646,7 +640,7 @@ FS.onready(() => {
 
               <th scope="col">Settled+Delta</th>
 
-              <th scope="col">Balance</th>
+              <th scope="col">Receivable</th>
 
             </tr>
           </thead>
@@ -661,7 +655,7 @@ FS.onready(() => {
 
               <td v-bind:style="{'background-color': deltaColor(d.rdelta) }">{{commy(d.rdelta)}}</td>
 
-              <td>{{commy(d.total)}}</td>
+              <td>{{commy(d.receivable)}}</td>
 
             </tr>
 
