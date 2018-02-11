@@ -85,15 +85,14 @@ module.exports = async (ws, msg) => {
 
 
   } else if (inputType == 'faucet') {
-    await me.payChannel({
+    var [result, status] = await me.payChannel({
       counterparty: msg,
       amount: Math.round(Math.random() * 6000),
 
       invoice: Buffer([0])
     })
 
-
-
+    l(status)
 
 
   } else if (inputType == 'chain') {
@@ -264,14 +263,15 @@ module.exports = async (ws, msg) => {
             l('Our invoice was paid!', paid_invoice)
             paid_invoice.status = 'paid'
 
-            l("Acking back to ", pubkey)
-            me.send(K.members[0], 'ack', me.envelope(
-              paid_invoice.secret, ec(ch.delta_record.getState(), me.id.secretKey)
-            ))
     
           }else {
             l("No such invoice found. Donation?")
           }
+
+          l("Acking back to ", pubkey)
+          me.send(K.members[0], 'ack', me.envelope(
+            paid_invoice ? paid_invoice.secret : 0, ec(ch.delta_record.getState(), me.id.secretKey)
+          ))
 
           await me.addHistory(amount, 'Received', true)
 

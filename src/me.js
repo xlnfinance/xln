@@ -294,7 +294,7 @@ class Me {
     }
 
     if (ch.delta_record.status != 'ready') {
-      //return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
+      return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
     }
 
     ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)

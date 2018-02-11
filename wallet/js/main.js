@@ -34,7 +34,8 @@ renderRisk = (hist) => {
           }],
           yAxes: [{
             ticks: {
-              suggestedMin: 0,
+              suggestedMin: -100,
+              suggestedMax: 100,
               mirror: true
             }
           }]
@@ -52,7 +53,7 @@ renderRisk = (hist) => {
   for (h of hist) {
     d.push({
       x: Math.round(Date.parse(h.date)/precision),
-      y: h.rdelta/100
+      y: Math.round(h.rdelta/100)
     })
   }
 
@@ -330,6 +331,10 @@ FS.onready(() => {
           <a class="nav-link" @click="go('network')">Network Stats</a>
         </li>
 
+        <li class="nav-item" v-bind:class="{ active: tab=='help' }">
+          <a class="nav-link" @click="go('help')">Help</a>
+        </li>
+
 
       </ul>
 
@@ -355,6 +360,25 @@ FS.onready(() => {
 
     </div>
 
+    <div v-else-if="tab=='help'">
+      <h1>Help</h1>
+
+      <p>To start sending and receiving digital assets in Failsafe you need to add hubs and define trust limits.</p>
+
+      <p><b>Hub</b> is an improved version of a bank: Failsafe hubs do not hold your assets unlike banks. They cannot censor you or modify your balance without your explicit permission (your digital signature). Instead, all assets are stored in trust-less payment channels between users and hubs.</p>
+
+      <p><b>Payment channel</b> is an improved version of a traditional bank account. You can always take your latest balance proof to blockchain and get your money back - the hubs cannot steal or freeze your funds. Payment channel works like a cross-signed state-machine - each action must be authorized by the actor and acknowledged by the other party to become final. The hub and the user act as equals and none of them has any privelege over the other.</p>
+
+      <p><img src="/img/channel.png"></p>
+
+      <p><b>Trust limit</b> defines how much <b>uninsured</b> balance you are willing to accept from this hub. E.g. $10,000 means your wallet will not accept payments after uninsured amount reaching 10000</p>
+
+      <p><b>Insurance</b> is how much collateral is stored in blockchain in a payment channel between you and hub. Ideally, your balance must be around insurance amount - this way 100% of your balance is insured plus you're not subject to expensive on-chain fees.</p>
+
+    </div>
+
+
+
     <div v-else-if="tab=='wallet'">
 
       <template v-if="pubkey">
@@ -364,62 +388,74 @@ FS.onready(() => {
 
         <div v-else>
 
-          <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
 
+
+
+
+
+
+
+          <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
             
           <h1 style="display:inline-block">\${{commy(ch.payable)}}</h1>
 
 
           <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.rdelta > 0 ? "+ "+commy(ch.rdelta)+" uninsured" : "- "+commy(-ch.rdelta)+" spent"}}</small> 
           
-          <div v-if="ch.payable>0 || ch.insurance > 0">
+          <p><div v-if="ch.payable>0 || ch.insurance > 0">
 
             <div class="progress" style="max-width:1000px">
               <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
                 {{commy(ch.failsafe)}} (insured)
               </div>
-              <div v-if="ch.rdelta<0" v-bind:style="{ width: Math.round(-ch.rdelta*100/ch.payable)+'%', 'background-color':'#5bc0de'}"  class="progress-bar progress-bar-striped" role="progressbar">
+              <div v-if="ch.rdelta<0" v-bind:style="{ width: Math.round(-ch.rdelta*100/ch.payable)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
                 {{commy(ch.rdelta)}} (spent)
               </div>
-              <div v-if="ch.rdelta>0" v-bind:style="{ width: Math.round(ch.rdelta*100/ch.payable)+'%', 'background-color':'#f0ad4e'}"   class="progress-bar"  role="progressbar">
+              <div v-if="ch.rdelta>0" v-bind:style="{ width: Math.round(ch.rdelta*100/ch.payable)+'%', 'background-color':'#dc3545'}"   class="progress-bar"  role="progressbar">
                 +{{commy(ch.rdelta)}} (uninsured)
               </div>
             </div>
 
-            <br>
+
+          </div></p>
 
 
-            <h3>Pay</h3>
+          <div class="row">
+            <div class="col-sm-6">
+              <h3>→ Request</h3>
 
-            <p><div class="input-group" style="width:400px" >
-              <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
-            </div></p>
+              <p><div class="input-group" style="width:400px">
+                <span class="input-group-addon" id="sizing-addon2">$</span>
+                <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
+              </div></p>
 
-            <div v-if="pay_invoice.length > 0">
-              <p>Amount: {{commy(unpackInvoice().amount)}}</p>
-              <p>Pay to: <b>{{unpackInvoice().userId}}</b> @ {{unpackInvoice().hubId}}</p>
-              <p>Invoice Hash: {{unpackInvoice().invoice}}</p>
+              <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">Request Payment</button></p>
 
-              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice())">Pay Invoice</button></p>
-
+              <p><div v-show="new_invoice.length > 0" class="input-group" style="width:400px">
+                <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
+              </div></p>
             </div>
 
+            <div class="col-sm-6">
+              <h3>Pay →</h3>
 
+              <p><div class="input-group" style="width:400px" >
+                <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
+              </div></p>
+
+              <div v-if="pay_invoice.length > 0">
+                <p>Amount: {{commy(unpackInvoice().amount)}}</p>
+                <p>Pay to: <b>{{unpackInvoice().userId}}</b> @ {{unpackInvoice().hubId}}</p>
+
+
+                <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice())">Pay Invoice</button></p>
+
+              </div>
+
+            </div>
           </div>
 
 
-          <h3>Receive</h3>
-
-          <p><div class="input-group" style="width:400px">
-            <span class="input-group-addon" id="sizing-addon2">$</span>
-            <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
-          </div></p>
-
-          <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">Request Payment</button></p>
-
-          <p><div v-show="new_invoice.length > 0" class="input-group" style="width:1000px">
-            <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
-          </div></p>
 
 
           <div class="alert alert-light" role="alert">

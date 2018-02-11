@@ -516,6 +516,18 @@ Delta = privSequelize.define('delta', {
 
   instant_until: Sequelize.INTEGER,
 
+  // copied from onchain for convenience
+  insurance: Sequelize.INTEGER,
+  rebalanced: Sequelize.INTEGER,
+
+
+  hub_risks: Sequelize.INTEGER, 
+  hub_trusts: Sequelize.INTEGER, // usually 0
+
+  user_trusts: Sequelize.INTEGER, 
+  user_risks: Sequelize.INTEGER, // user specified risk
+
+
   delta: Sequelize.INTEGER,
 
   hashlocks: Sequelize.TEXT,
