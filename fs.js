@@ -23,7 +23,6 @@ BN = require('bn.js')
 stringify = require('./lib/stringify')
 rlp = require('rlp')
 
-base_port = process.argv[2] ? parseInt(process.argv[2]) : 8000
 
 child_process = require('child_process')
 const {spawn, exec, execSync} = child_process
@@ -33,6 +32,14 @@ Op = Sequelize.Op
 asyncexec = require('util').promisify(exec)
 
 Me = require('./src/me').Me
+
+
+
+RPC = {
+  internal_rpc: require('./src/internal_rpc'),
+  external_rpc: require('./src/external_rpc')
+}
+
 
 l = console.log
 d = l // ()=>{}
@@ -107,7 +114,7 @@ inputMap = (i) => {
     'chain', // return X blocks since given prev_hash
 
     'update', // new input to state machine 
-    'receive', 
+    'withdraw', 
     'ack',
 
 
@@ -601,38 +608,52 @@ city = async () => {
   l('Ready')
 }
 
-if (process.argv[2] == 'console') {
+var argv = require('minimist')(process.argv.slice(2), {
+  string: ['username', 'pw']
+});
 
-} else if (process.argv[2] == 'city') {
-  city()
-} else if (process.argv[2] == 'genesis') {
-  require('./src/genesis')({location: process.argv[3]})
-} else if (process.argv[2] == 'login') {
-  setTimeout(async () => {
-    var me = new Me()
-    me.processQueue()
+base_port = argv.p ? parseInt(argv.p) : 8000;
 
-    var seed = await derive(process.argv[3], process.argv[4])
-    await me.init(process.argv[3], seed)
-  }, 100)
-} else {
-  privSequelize.sync({force: false})
 
-  /*
-  var cluster = require('cluster')
-  if (cluster.isMaster) {
-    cluster.fork();
 
-    cluster.on('exit', function(worker, code, signal) {
-      console.log('exit')
-      //cluster.fork();
-    });
+(async () => {
+
+  if (argv.console) {
+
+  } else if (process.argv[2] == 'city') {
+    city()
+  } else if (argv.genesis) {
+    require('./src/genesis')({location: argv.genesis })
+  } else {
+    if (argv.username) {
+      setTimeout(async () => {
+        me = new Me()
+        me.processQueue()
+
+        var seed = await derive(argv.username, argv.pw)
+        await me.init(argv.username, seed)
+      }, 200)
+    }
+
+    await privSequelize.sync({force: false})
+
+    /*
+    var cluster = require('cluster')
+    if (cluster.isMaster) {
+      cluster.fork();
+
+      cluster.on('exit', function(worker, code, signal) {
+        console.log('exit')
+        //cluster.fork();
+      });
+    }
+
+    if (cluster.isWorker) { */
+    initDashboard()
+    // }
   }
 
-  if (cluster.isWorker) { */
-  initDashboard()
-  // }
-}
+})()
 
 process.on('unhandledRejection', r => console.log(r))
 

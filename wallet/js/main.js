@@ -34,8 +34,8 @@ renderRisk = (hist) => {
           }],
           yAxes: [{
             ticks: {
-              suggestedMin: -100,
-              suggestedMax: 100,
+              suggestedMin: -1000,
+              suggestedMax: 1000,
               mirror: true
             }
           }]
@@ -443,13 +443,11 @@ FS.onready(() => {
                 <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
               </div></p>
 
+              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice())">Pay Invoice</button></p>
+
               <div v-if="pay_invoice.length > 0">
                 <p>Amount: {{commy(unpackInvoice().amount)}}</p>
                 <p>Pay to: <b>{{unpackInvoice().userId}}</b> @ {{unpackInvoice().hubId}}</p>
-
-
-                <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice())">Pay Invoice</button></p>
-
               </div>
 
             </div>

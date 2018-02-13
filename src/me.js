@@ -3,11 +3,6 @@ stringify = require('../lib/stringify')
 Tx = require('./tx')
 
 
-RPC = {
-  internal_rpc: require('./internal_rpc'),
-  external_rpc: require('./external_rpc')
-}
-
 
 class Me {
 
@@ -95,7 +90,7 @@ class Me {
       ordered_tx
     ])
 
-    d('Built ordered ', ordered_tx)
+    d('Mempool result: ', ordered_tx.length)
 
     me.my_member.sig = ec(me.precommit, me.block_keypair.secretKey)
 
@@ -164,7 +159,7 @@ class Me {
       l(r(tx))
     }
 
-    l('Just broadcasted ', tx)
+    l('Just broadcasted: ', method)
 
     return confirm
   }
@@ -285,6 +280,10 @@ class Me {
   async payChannel (opts) {
     var ch = await me.channel(opts.counterparty)
 
+    if (ch.delta_record.status != 'ready') {
+      return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
+    }
+
     if (opts.amount < 100) {
       return [false, '$1.00 is the minimum amount']
     }
@@ -293,9 +292,6 @@ class Me {
       return [false, 'Not enough funds']
     }
 
-    if (ch.delta_record.status != 'ready') {
-      return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
-    }
 
     ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
 

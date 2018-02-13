@@ -88,12 +88,10 @@ module.exports = async (ws, msg) => {
     var [result, status] = await me.payChannel({
       counterparty: msg,
       amount: Math.round(Math.random() * 6000),
-
       invoice: Buffer([0])
     })
 
     l(status)
-
 
   } else if (inputType == 'chain') {
     var chain = r(msg)
@@ -130,13 +128,18 @@ module.exports = async (ws, msg) => {
     }
 
 
-
-
-
-
-
-
   } else if (inputType == 'withdraw') {
+    var [pubkey, sig, body] = r(msg)
+    var ch = await me.channel(pubkey)
+
+    var amount = readInt(body)
+
+    var failsafe = me.is_hub ? ch.failsafe : ch.insurance - ch.failsafe 
+
+    if (amount <= failsafe) {
+      // amount, nonce, parties, asset
+      var input = ec()
+    }
 
 
   } else if (inputType == 'ack') {
@@ -184,28 +187,6 @@ module.exports = async (ws, msg) => {
       }
 
 
-
-
-      for (var act of transitions) {
-        if (methodMap(act[0]) == 'unlockedPayment') {
-
-        }
-
-        if (methodMap(act[0]) == 'ack') {
-          if (ec.verify(act[1], ch.delta_record.getState())) {
-            ch.delta_record.sig = act[1]
-            ch.delta_record.status = 'ready'
-            await ch.delta_record.save()
-
-            l("ACKed")
-            return false
-          }
-
-        }
-      }
-
-
-
       var [action, amount, mediate_to, invoice] = transitions[0]
 
       if (readInt(action) != methodMap('unlockedPayment')) {
@@ -220,6 +201,11 @@ module.exports = async (ws, msg) => {
 
       if (amount > ch.receivable) {
         l("Channel is depleted") 
+        return false
+      }
+
+      if (ch.delta_record.status != 'ready') {
+        l("Channel is not ready") 
         return false
       }
 
