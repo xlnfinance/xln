@@ -49,7 +49,7 @@ module.exports = async (opts) => {
     nonce: 0,
     insurance: 500000,
     rebalanced: 0,
-    assetType: 0
+    asset: 0
   }))
 
   K = {
@@ -82,7 +82,7 @@ module.exports = async (opts) => {
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
 
     risk: 10000, // recommended rebalance limit
-    hard_limit: 1000000, // how much can a user lose if hub is insolvent?
+    hard_limit: 500000, // how much can a user lose if hub is insolvent?
 
 
     dispute_delay: 5, // in how many blocks disputes are considered final
@@ -108,6 +108,9 @@ module.exports = async (opts) => {
         total_supply: 0
       }
     ],
+
+    min_amount: 100,
+    max_amount: 300000,
 
     members: [],
     total_shares: 15,

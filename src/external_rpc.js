@@ -27,6 +27,19 @@ module.exports = async (ws, msg) => {
 
     if (ec.verify( r([methodMap('auth')]) , sig, pubkey)) {
       me.users[pubkey] = ws
+
+      if (me.is_hub) {
+        var ch = await me.channel(pubkey)
+        ch.last_online = new Date()
+
+        if (ch.input_requested_at) {
+          
+        }
+
+
+
+      }
+
     } else {
       return false
     }
@@ -51,7 +64,7 @@ module.exports = async (ws, msg) => {
   // another member wants a sig
   } else if (inputType == 'needSig') {
     var [pubkey, sig, block] = r(msg)
-    var m = me.members.find(f => f.block_pubkey.equals(pubkey))
+    var m = Members.find(f => f.block_pubkey.equals(pubkey))
 
     // ensure the block is non repeating
     if (m && ec.verify(block, sig, pubkey)) {
@@ -67,7 +80,7 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'signed') {
     var [pubkey, sig] = r(msg)
 
-    var m = me.members.find(f => f.block_pubkey.equals(pubkey))
+    var m = Members.find(f => f.block_pubkey.equals(pubkey))
 
     if (me.status != 'precommit') {
       l('Not expecting any sigs')
@@ -87,7 +100,7 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'faucet') {
     var [result, status] = await me.payChannel({
       counterparty: msg,
-      amount: Math.round(Math.random() * 6000),
+      amount: Math.round(Math.random() * 30000),
       invoice: Buffer([0])
     })
 
@@ -128,18 +141,51 @@ module.exports = async (ws, msg) => {
     }
 
 
-  } else if (inputType == 'withdraw') {
+  } else if (inputType == 'withdrawal') {
+    // we received instant withdrawal for rebalance
     var [pubkey, sig, body] = r(msg)
+    if (!ec.verify(body, sig, pubkey)) return false
+
     var ch = await me.channel(pubkey)
 
-    var amount = readInt(body)
 
-    var failsafe = me.is_hub ? ch.failsafe : ch.insurance - ch.failsafe 
+    var input = r([methodMap('withdrawal'), 
+      ch.delta_record.userId,
+      ch.delta_record.hubId, 
+      ch.nonce, 
+      ch.insured])
 
-    if (amount <= failsafe) {
-      // amount, nonce, parties, asset
-      var input = ec()
+    if (input.equals(body)) {
+      l("Equal! save")
     }
+
+
+
+  } else if (inputType == 'withdraw') {
+    // partner asked us for instant withdrawal 
+    var [pubkey, sig, body] = r(msg)
+    if (!ec.verify(body, sig, pubkey)) return false
+
+    var ch = await me.channel(pubkey)
+
+    var amount = readInt(r(body)[0])
+
+    if (amount > ch.insurance - ch.insured) {
+      l(`Peer asks for ${amount} but owns ${ch.insurance - ch.insured}`)
+      return false
+    }
+
+    
+    var input = me.envelope(methodMap('withdrawal'), 
+      ch.delta_record.userId,
+      ch.delta_record.hubId, 
+      ch.nonce, 
+      amount)
+
+    ch.delta_record.withdrawn = amount
+
+
+    me.send(pubkey, 'withdrawal', input)
 
 
   } else if (inputType == 'ack') {
@@ -148,31 +194,29 @@ module.exports = async (ws, msg) => {
 
     var [secret, sig]= r(body)
 
-    if (ec.verify(ch.delta_record.getState(), sig, pubkey)) {
-      ch.delta_record.sig = sig
-      ch.delta_record.status = 'ready'
+    if (!ec.verify(ch.delta_record.getState(), sig, pubkey)) return false
 
-      await ch.delta_record.save()
+    ch.delta_record.sig = sig
+    ch.delta_record.status = 'ready'
 
-      var invoice = toHex(sha3(secret))
+    await ch.delta_record.save()
 
-      var return_to = purchases[invoice]
+    var invoice = toHex(sha3(secret))
 
-      if (!return_to) return false
+    var return_to = purchases[invoice]
 
-      // ws from browser
-      if (typeof return_to == 'function') {
-        return_to({confirm: 'Payment succeeded', secret: toHex(secret)}) 
-      } else {
-        var return_ch = await me.channel(return_to)
-        me.send(return_to, 'ack', me.envelope(
-          secret, ec(return_ch.delta_record.getState(), me.id.secretKey)
-        ))
-      }
+    if (!return_to) return false
 
+    // ws from browser
+    if (typeof return_to == 'function') {
+      return_to({confirm: 'Payment succeeded', secret: toHex(secret)}) 
     } else {
-      l("Invalid ACK!")
+      var return_ch = await me.channel(return_to)
+      me.send(return_to, 'ack', me.envelope(
+        secret, ec(return_ch.delta_record.getState(), me.id.secretKey)
+      ))
     }
+
 
   } else if (inputType == 'update') {
     var [pubkey, sig, body] = r(msg)

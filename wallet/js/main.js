@@ -124,7 +124,7 @@ FS.onready(() => {
 
       // if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
       app.call('rebalanceUser', {
-        assetType: 0,
+        asset: 0,
         ins: app.ins,
         outs: app.outs
       })
@@ -202,11 +202,13 @@ FS.onready(() => {
 
     unpackInvoice: () => {
       var i = app.pay_invoice.split('_')
+
       return {
         amount: i[0],
         userId: i[1],
         hubId: i[2],
-        invoice: i[3]
+        invoice: i[3],
+        trimmedId: i[1].length == 64 ? i[1].substr(0,10)+'...' : i[1]
       }
     },
 
@@ -241,7 +243,7 @@ FS.onready(() => {
     data () {
       return {
         auth_code: localStorage.auth_code,
-        assetType: 'FSD',
+        asset: 'FSD',
         whitepaper: wp,
 
         pubkey: false,
@@ -395,7 +397,7 @@ FS.onready(() => {
 
 
 
-          <p><button class="btn btn-success" @click="call('faucet')">Get $ (testnet faucet)</button></p>
+          <p><button class="btn btn-success" @click="call('faucet')">Testnet Faucet</button></p>
             
           <h1 style="display:inline-block">\${{commy(ch.payable)}}</h1>
 
@@ -405,8 +407,8 @@ FS.onready(() => {
           <p><div v-if="ch.payable>0 || ch.insurance > 0">
 
             <div class="progress" style="max-width:1000px">
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.failsafe*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-                {{commy(ch.failsafe)}} (insured)
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+                {{commy(ch.insured)}} (insured)
               </div>
               <div v-if="ch.rdelta<0" v-bind:style="{ width: Math.round(-ch.rdelta*100/ch.payable)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
                 {{commy(ch.rdelta)}} (spent)
@@ -447,7 +449,8 @@ FS.onready(() => {
 
               <div v-if="pay_invoice.length > 0">
                 <p>Amount: {{commy(unpackInvoice().amount)}}</p>
-                <p>Pay to: <b>{{unpackInvoice().userId}}</b> @ {{unpackInvoice().hubId}}</p>
+                <p>Pay to: <b>{{unpackInvoice().trimmedId}}</b></p>
+                <p>Hub ID: {{unpackInvoice().hubId}}</p>
               </div>
 
             </div>

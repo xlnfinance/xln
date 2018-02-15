@@ -65,7 +65,7 @@ module.exports = {
       case 'rebalanceHub':
       case 'rebalanceUser':
         // 1. collect all ins insurance
-        var [assetType, inputs, outputs] = args
+        var [asset, inputs, outputs] = args
 
         var is_hub = (method == 'rebalanceHub')
 
@@ -87,8 +87,7 @@ module.exports = {
             var ch = await Insurance.find({
               where: {
                 userId: is_hub ? (await me.byKey(pubkey)).id : signer.id,
-                hubId: 1,
-                assetType: 0
+                hubId: 1
               },
               include: {all: true}
             })
@@ -224,8 +223,7 @@ module.exports = {
             var ch = await Insurance.findOrBuild({
               where: {
                 userId: user.id,
-                hubId: hubId,
-                assetType: 0
+                hubId: hubId
               },
               defaults: {
                 nonce: 0,
@@ -289,12 +287,12 @@ module.exports = {
     return {success: true}
   },
 
-  mint: async function mint (assetType, userId, hubId, amount) {
+  mint: async function mint (asset, userId, hubId, amount) {
     var ch = (await Insurance.findOrBuild({
       where: {
         userId: userId,
         hubId: hubId,
-        assetType: 0
+        asset: 0
       },
       defaults: {
         nonce: 0,
@@ -305,7 +303,7 @@ module.exports = {
     }))[0]
 
     ch.insurance += amount
-    K.assets[assetType].total_supply += amount
+    K.assets[asset].total_supply += amount
 
     await ch.save()
   }

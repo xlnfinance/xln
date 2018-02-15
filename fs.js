@@ -83,6 +83,23 @@ parse = (json) => {
 }
 
 
+commy = (b, dot = true) => {
+  let prefix = b < 0 ? '-' : ''
+
+  b = Math.abs(b).toString()
+  if (dot) {
+    if (b.length == 1) {
+      b = '0.0' + b
+    } else if (b.length == 2) {
+      b = '0.' + b
+    } else {
+      var insert_dot_at = b.length - 2
+      b = b.slice(0, insert_dot_at) + '.' + b.slice(insert_dot_at)
+    }
+  }
+  return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
 // trick to pack signed int into unsigned int
 packSInt = (num) => (Math.abs(num) * 2) + (num < 0 ? 1 : 0)
 readSInt = (num) => (num % 2 == 1 ? -(num-1)/2 : num/2)
@@ -115,6 +132,7 @@ inputMap = (i) => {
 
     'update', // new input to state machine 
     'withdraw', 
+    'withdrawal', 
     'ack',
 
 
@@ -138,7 +156,7 @@ methodMap = (i) => {
     'rebalanceHub',
     'rebalanceUser',
 
-    'withdraw', // instant off-chain signature to withdraw from mutual payment channel
+    'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
     'delta',    // delayed balance proof
     'update',   // transitions to state machine + new sig
     'unlockedPayment', // pay without hashlock
@@ -175,27 +193,12 @@ allowedOnchain = [
   'voteDeny'
 ]
 
-// onchain Key value
-K = false
+// globals
+K = false 
+me = false
+Members = false
 // Private Key value
 PK = {}
-
-
-loadJSON = () => {
-  if (fs.existsSync('data/k.json')) {
-    l('Loading K')
-    var json = fs.readFileSync('data/k.json')
-    K = JSON.parse(json)
-
-    me.K = K
-    me.members = JSON.parse(json).members // another object ref
-
-    me.members.map(f => {
-      f.pubkey = Buffer.from(f.pubkey, 'hex')
-      f.block_pubkey = Buffer.from(f.block_pubkey, 'hex')
-    })
-  }
-}
 
 trustlessInstall = async a => {
   tar = require('tar')
@@ -232,10 +235,9 @@ cache = async (i) => {
     cached_result.K = K
 
     if (me.is_hub) {
-      var h = require('./src/hub')
-      h = await h()
-      cached_result.deltas = h.channels
-      cached_result.solvency = h.solvency
+
+      cached_result.deltas = []
+      cached_result.solvency = 0
     }
 
     cached_result.proposals = await Proposal.findAll({
@@ -291,7 +293,7 @@ react = async (result = {}, id = 1) => {
     result.invoices = invoices
 
 
-    if (!me.is_hub) result.ch = await me.channel(1)
+    if (!me.is_hub) result.ch = await me.channel(Members[0].pubkey)
   }
 
   if (me.browser) {
@@ -360,37 +362,35 @@ initDashboard = async a => {
   server.listen(base_port).on('error', l)
 
 
+
+
   me = new Me()
   me.processQueue()
 
+  if (fs.existsSync('private/pk.json')) {
+    PK = JSON.parse(fs.readFileSync('private/pk.json'))
 
-
-  loadJSON()
-
-  setTimeout(async () => {
-    // auto login
-    if (fs.existsSync('private/pk.json')) {
-      PK = JSON.parse(fs.readFileSync('private/pk.json'))
-      l('auto login')
-
-      await me.init(PK.username, Buffer.from(PK.seed, 'hex'))
-      await me.start()
-    } else {
-      // used to authenticate browser sessions to this daemon
-      PK = {
-        auth_code: toHex(crypto.randomBytes(32))
-      }
+  } else {
+    // used to authenticate browser sessions to this daemon
+    PK = {
+      auth_code: toHex(crypto.randomBytes(32))
     }
+  }
 
-    var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + PK.auth_code
-    l('Open ' + url + ' in your browser')
+  if (argv.username) {
+    var seed = await derive(argv.username, argv.pw)
+    await me.init(argv.username, seed)
+  } else if (PK.username) {
+    await me.init(PK.username, Buffer.from(PK.seed, 'hex'))
+  }
 
-    // only in desktop
-    if (base_port != 443) opn(url)
+  await me.start()
 
+  var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + PK.auth_code
+  l('Open ' + url + ' in your browser')
 
-  }, 100)
-
+  // only in desktop
+  if (base_port != 443) opn(url)
 
 
   localwss = new ws.Server({ server: server, maxPayload: 64 * 1024 * 1024 })
@@ -476,7 +476,7 @@ Insurance = sequelize.define('insurance', {
   insurance: Sequelize.BIGINT, // insurance
   rebalanced: Sequelize.BIGINT, // what hub already insuranceized
 
-  assetType: Sequelize.INTEGER,
+  asset: Sequelize.INTEGER,
 
   delayed: Sequelize.INTEGER,
   dispute_is_hub: Sequelize.BOOLEAN, // was it started by hub or user?
@@ -497,8 +497,7 @@ User.belongsToMany(User, {through: Insurance, as: 'hub'})
 
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
-// this is off-chain private database for blocks and other balance proofs
-// for things that new people don't need to know and can be cleaned up
+// OFF-CHAIN database below:
 
 if (!fs.existsSync('private')) fs.mkdirSync('private')
 
@@ -534,8 +533,11 @@ Delta = privSequelize.define('delta', {
   user_trusts: Sequelize.INTEGER, 
   user_risks: Sequelize.INTEGER, // user specified risk
 
+  last_online: Sequelize.DATE,
+
 
   delta: Sequelize.INTEGER,
+  withdrawn: Sequelize.INTEGER,
 
   hashlocks: Sequelize.TEXT,
   
@@ -570,7 +572,23 @@ Delta.prototype.getState = function() {
     packSInt(this.delta)])
 }
 
+
 History = privSequelize.define('history', {
+  userId: Sequelize.CHAR(32).BINARY,
+  hubId: Sequelize.INTEGER,
+
+  rdelta: Sequelize.INTEGER,
+
+  amount: Sequelize.INTEGER,
+  balance: Sequelize.INTEGER,
+  desc: Sequelize.TEXT,
+
+  date: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
+
+})
+
+
+Purchase = privSequelize.define('purchase', {
   userId: Sequelize.CHAR(32).BINARY,
   hubId: Sequelize.INTEGER,
 
@@ -625,17 +643,22 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
   } else if (argv.genesis) {
     require('./src/genesis')({location: argv.genesis })
   } else {
-    if (argv.username) {
-      setTimeout(async () => {
-        me = new Me()
-        me.processQueue()
 
-        var seed = await derive(argv.username, argv.pw)
-        await me.init(argv.username, seed)
-      }, 200)
+    if (fs.existsSync('data/k.json')) {
+      l('Loading K data')
+      var json = fs.readFileSync('data/k.json')
+      K = JSON.parse(json)
+
+      Members = JSON.parse(json).members // another object ref
+
+      Members.map(m => {
+        m.pubkey = Buffer.from(m.pubkey, 'hex')
+        m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
+      })
     }
 
     await privSequelize.sync({force: false})
+
 
     /*
     var cluster = require('cluster')
@@ -657,4 +680,5 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
 
 process.on('unhandledRejection', r => console.log(r))
 
-require('repl').start('> ')
+repl = require('repl').start('> ')
+

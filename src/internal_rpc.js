@@ -42,7 +42,7 @@ module.exports = async (ws, msg) => {
 
       case 'takeEverything':
 
-        var ch = await me.channel(1)
+        var ch = await me.channel(Members[0].pubkey)
         // post last available signed delta
         await me.broadcast('rebalanceUser', r([ 0, [ch.delta_record.sig ? ch.delta_record.sig : 1], [] ]))
         result.confirm = 'Started a dispute onchain. Please wait a delay period to get your money back.'
@@ -50,7 +50,7 @@ module.exports = async (ws, msg) => {
 
       case 'send':
 
-        var hubId = parseInt(p.hubId)
+        // TODO: support batch sends
 
         var amount = parseInt(p.amount)
 
@@ -69,7 +69,7 @@ module.exports = async (ws, msg) => {
 
 
         var [status, error] = await me.payChannel({
-          counterparty: hubId,
+          counterparty: Members[0].pubkey,
           amount: amount, 
           mediate_to: mediate_to,
           return_to: (obj)=>{
@@ -154,8 +154,10 @@ module.exports = async (ws, msg) => {
           var result = Object.assign({}, invoices[p.invoice])
 
           // prevent race condition attack
-          if (invoices[p.invoice].status == 'paid') { invoices[p.invoice].status = 'archive' }
-        } else {
+          if (invoices[p.invoice].status == 'paid') { 
+            invoices[p.invoice].status = 'archive' 
+          }
+        } else if (p.amount) {
 
           var secret = crypto.randomBytes(32)
           var invoice = toHex(sha3(secret))
@@ -163,6 +165,7 @@ module.exports = async (ws, msg) => {
           invoices[invoice] = {
             secret: secret,
             amount: parseInt(p.amount),
+            extra: p.extra,
             status: 'pending'
           }
 
@@ -177,6 +180,7 @@ module.exports = async (ws, msg) => {
             invoice].join('_')
 
           result.confirm = 'Invoice Created'
+        
         }
       break
 
@@ -190,7 +194,7 @@ module.exports = async (ws, msg) => {
 
         break
 
-      // Extra features: Failsafe Login
+      // Login button
       case 'login':
         result.token = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
         break

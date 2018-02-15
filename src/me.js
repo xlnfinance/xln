@@ -102,7 +102,7 @@ class Me {
       ])
       
 
-      me.members.map((c) => {
+      Members.map((c) => {
         if (c != me.my_member) { me.send(c, 'needSig', needSig) }
       })
     }
@@ -183,10 +183,10 @@ class Me {
     // in json pubkeys are in hex
     this.record = await this.byKey()
 
-    for (var m of this.members) {
+    for (var m of Members) {
       if (this.record && this.record.id == m.id) {
         this.my_member = m
-        this.is_hub = this.my_member.hub
+        this.is_hub = !!this.my_member.hub
       }
     }
 
@@ -213,7 +213,7 @@ class Me {
 
       me.intervals.push(setInterval(require('./member'), 2000))
 
-      for (var m of this.members) {
+      for (var m of Members) {
         if (this.my_member != m) {
           // we need to have connections ready to all members
           this.send(m, 'auth', me.envelope( methodMap('auth') ))
@@ -225,7 +225,8 @@ class Me {
           var h = await (require('./hub')())
 
           if (h.ins.length > 0 || h.outs.length > 0) {
-            await this.broadcast('rebalanceHub', r([0, h.ins, h.outs]))
+            l([0, h.ins, h.outs])
+            //await this.broadcast('rebalanceHub', r([0, h.ins, h.outs]))
           }
         }, K.blocktime * 1000))
       }
@@ -248,7 +249,7 @@ class Me {
 
     if (checkpoint) {
       // add current balances
-      var c = await me.channel(1)
+      var c = await me.channel(Members[0].pubkey)
       attrs.rdelta = c.rdelta
       attrs.balance = c.payable
     }
@@ -284,14 +285,19 @@ class Me {
       return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
     }
 
-    if (opts.amount < 100) {
-      return [false, '$1.00 is the minimum amount']
+    if (opts.amount < K.min_amount || opts.amount > K.max_amount) {
+      return [false, `The amount must be between $${commy(K.min_amount)} and $${commy(K.max_amount)}`]
     }
+
 
     if (opts.amount > ch.payable) {
       return [false, 'Not enough funds']
     }
 
+
+    if (opts.mediate_to == bin(me.id.publicKey))  {
+      return [false, 'Cannot pay to your own account']
+    }
 
     ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
 
@@ -330,7 +336,7 @@ class Me {
     // what do we do when we get the secret
     if (opts.return_to) purchases[toHex(opts.invoice)] = opts.return_to
 
-    if (!me.send(opts.counterparty == 1 ? K.members[0] : opts.counterparty, 'update', signedState)) {
+    if (!me.send(opts.counterparty, 'update', signedState)) {
       l(`${opts.counterparty} not online, deliver later?`)
     }
 
@@ -338,36 +344,33 @@ class Me {
   }
 
   async channel (counterparty) {
+    var otherHub = Members.find(m => m.hub && m.pubkey.equals(counterparty))
 
-    if (counterparty != 1 && K.members[0].pubkey == toHex(counterparty)) counterparty = 1
+    // if both parties are hubs, lower id is acting as hub
+    var is_hub = (me.is_hub && otherHub) ? (me.my_member.id < otherHub.id) : me.is_hub
+    
 
     var r = {
-      // onchain fields
+      // default insurance
       insurance: 0,
       rebalanced: 0,
       nonce: 0,
-
-      // offchain delta_record
-
-      // for convenience
-      rdelta: 0,
-      failsafe: 0,
-      total: 0
     }
 
     me.record = await me.byKey()
 
     var delta = await Delta.findOrBuild({
-      where: me.is_hub ? {
+      where: is_hub ? {
         hubId: me.record.id,
         userId: counterparty
       } : {
-        hubId: counterparty,
+        hubId: otherHub.id,
         userId: bin(me.id.publicKey)
       },
       defaults: {
         delta: 0,
         instant_until: 0,
+        withdrawn: 0,
         nonce: 0,
         status: 'ready',
         state: '{"locks":[]}'
@@ -375,7 +378,7 @@ class Me {
     })
 
 
-    if (me.is_hub) {
+    if (is_hub) {
       var user = await me.byKey(counterparty)
       if (user) {
         var insurance = await Insurance.find({where: {
@@ -386,7 +389,7 @@ class Me {
     } else if (me.record) {
       var insurance = await Insurance.find({where: {
         userId: me.record.id,
-        hubId: counterparty
+        hubId: otherHub.id
       }})
     }
 
@@ -398,6 +401,9 @@ class Me {
 
     r.delta_record = delta[0]
 
+    // inputs not in blockchain yet
+    r.insurance -= r.delta_record.withdrawn
+
     //r.delta_record.state = JSON.parse(r.delta_record.state)
 
     r.rdelta = r.rebalanced + r.delta_record.delta
@@ -407,29 +413,29 @@ class Me {
     r.payable = r.insurance + r.rdelta
     
     // other way around
-    if (me.is_hub) [r.receivable, r.payable] = [r.payable, r.receivable]
+    if (is_hub) [r.receivable, r.payable] = [r.payable, r.receivable]
 
     if (r.rdelta >= 0) {
-      r.failsafe = r.insurance
+      r.insured = r.insurance
     } else {
-      r.failsafe = r.insurance + r.rdelta
+      r.insured = me.is_hub ? -r.rdelta : r.insurance + r.rdelta
     }
 
     return r
   }
 
   async processBlock (block) {
-    var finalblock = block.slice(me.members.length * 64)
+    var finalblock = block.slice(Members.length * 64)
 
     var total_shares = 0
 
-    for (var i = 0; i < me.members.length; i++) {
+    for (var i = 0; i < Members.length; i++) {
       var sig = (block.slice(i * 64, (i + 1) * 64))
 
       if (sig.equals(Buffer.alloc(64))) {
 
-      } else if (ec.verify(finalblock, sig, me.members[i].block_pubkey)) {
-        total_shares += me.members[i].shares
+      } else if (ec.verify(finalblock, sig, Members[i].block_pubkey)) {
+        total_shares += Members[i].shares
       } else {
         l(`Invalid signature for a given block. Halt!`)
         // return false
@@ -610,41 +616,49 @@ class Me {
   
   send (m, method, tx) {
     tx = concat(inputMap(method), tx)
+
     // regular pubkey
     if (m instanceof Buffer) {
       if (me.users[m]) {
         me.users[m].send(tx)
         return true
       } else {
-        return false
+        var member = Members.find(f=>f.pubkey.equals(m))
+        if (member) {
+          m = member
+        } else {
+          // not online
+          return false
+        }
       }
+    } 
+
+    // member object
+    l(`Invoking ${method} in member ${m.id}`)
+
+    if (me.users[m.pubkey]) {
+      me.users[m.pubkey].send(tx)
     } else {
-      // member object
-      l(`Invoking ${method} in member ${m.id}`)
+      me.users[m.pubkey] = new WebSocketClient()
 
-      if (me.users[m.pubkey]) {
-        me.users[m.pubkey].send(tx)
-      } else {
-        me.users[m.pubkey] = new WebSocketClient()
-
-        me.users[m.pubkey].onmessage = tx => {
-          this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
-        }
-
-        me.users[m.pubkey].onopen = function (e) {
-          if (me.id) { 
-            me.users[m.pubkey].send(concat(inputMap('auth'), me.envelope( methodMap('auth') ))) 
-          }
-
-          me.users[m.pubkey].send(tx)
-        }
-
-        me.users[m.pubkey].open(m.location)
+      me.users[m.pubkey].onmessage = tx => {
+        this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
       }
 
-      return true
+      me.users[m.pubkey].onopen = function (e) {
+        if (me.id) { 
+          me.users[m.pubkey].send(concat(inputMap('auth'), me.envelope( methodMap('auth') ))) 
+        }
 
+        me.users[m.pubkey].send(tx)
+      }
+
+      me.users[m.pubkey].open(m.location)
     }
+
+    return true
+
+  
 
   }
 

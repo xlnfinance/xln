@@ -74,7 +74,7 @@ require('http').createServer((req, res) => {
 
   <body>
     <main role="main" class="container">
-      <h1 class="mt-5">Failsafe Demo</h1>
+      <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
 
       <p>You're logged in as random user and your balance is simply stored in app's memory.</p>
 
@@ -211,10 +211,10 @@ window.onload = function(){
       if (p.deposit_invoice) {
 
         FS('invoice', {invoice: p.deposit_invoice}, r => {
-          if (r.data.status == 'paid') {
+          if (r.data.status == 'paid' && r.data.extra == id) {
             users[id] += r.data.amount
           } else {
-            console.log('Expired')
+            console.log('Not paid')
           }
           res.end(JSON.stringify({status: 'paid'}))
         })
@@ -224,15 +224,16 @@ window.onload = function(){
           l("Not enough balance")
           return false
         }
+
         users[id] -= p.withdraw_invoice.amount
 
         FS('send', p.withdraw_invoice, r => {
           if (r.data.status == 'paid') {
-
             l("Withdrawn")
           } else {
             console.log('Expired')
           }
+
           res.end(JSON.stringify({status: 'paid'}))
         })
 
@@ -241,7 +242,7 @@ window.onload = function(){
         FS('invoice', {
             amount: p.amount,
             asset: p.asset,
-            extra: 'uid'  
+            extra: id
           }, r => {
           res.end(JSON.stringify(r.data.new_invoice))
         })

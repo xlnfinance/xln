@@ -4,17 +4,17 @@ module.exports = () => {
   var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
 
   var searchIndex = 0
-  for (var i in me.members) {
-    searchIndex += me.members[i].shares
+  for (var i in Members) {
+    searchIndex += Members[i].shares
     
     if (currentIndex < searchIndex) {
-      me.current = me.members[i]
+      me.current = Members[i]
 
       var increment = (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
 
       if (currentIndex + increment >= searchIndex) {
         // take next member or rewind back to 0
-        me.next_member = me.members[(i + increment) % K.members.length]
+        me.next_member = Members[(i + increment) % K.members.length]
       } else {
         // next slot is still theirs
         me.next_member = me.current
@@ -29,7 +29,7 @@ module.exports = () => {
       // do we have enough sig or it's time?
     var sigs = []
     var total_shares = 0
-    me.members.map((c, index) => {
+    Members.map((c, index) => {
       if (c.sig) {
         sigs[index] = bin(c.sig)
         total_shares += c.shares
@@ -50,7 +50,7 @@ module.exports = () => {
           ))
       }
         // flush sigs
-      me.members.map(c => c.sig = false)
+      Members.map(c => c.sig = false)
 
       me.status = 'await'
     } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - 10)) {
