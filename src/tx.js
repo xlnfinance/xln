@@ -69,76 +69,69 @@ module.exports = {
 
         var is_hub = (method == 'rebalanceHub')
 
-        for (let input of inputs) {
-          if (input.length == 1) {
-            // var pubkey = input
-            var no_delta = true
-          } else {
-            var no_delta = false
-            l(input)
-            var [pubkey, sig, body] = r(input)
+        l("Processing inputs ", inputs)
+
+        for (var input of inputs) {
+          var amount = readInt(input[0])
+          var userId = readInt(input[1]) // no pubkey ID is allowed here 
+          var sig = input[2]
+
+          var ins = await Insurance.find({
+            where: is_hub ? {userId: userId, hubId: signer.id} : {userId: signer.id, hubId: userId},
+            include: {all: true}
+          })
+
+          l("Found insurance: ", ins)
+
+          var body = r([methodMap('withdrawal'),
+            ins.userId,
+            ins.hubId,
+            ins.nonce,
+            amount
+          ])
+
+          var partner = await User.findById(userId)
+
+          if (!ec.verify(body, sig, partner.pubkey)) {
+            l("Fake signature by partner")
+            continue
           }
 
-          l(body, sig, pubkey)
+          if (amount > ins.insurance) {
+            l(`Invalid amount ${ins.insurance} vs ${amount}`)
+            continue
+          }
 
-          if (no_delta || ec.verify(body, sig, pubkey)) {
-            var [counterparty, nonce, delta, instant_until] = no_delta ? [signer.pubkey, 0, 0, 0] : me.parseDelta(body)
 
-            var ch = await Insurance.find({
-              where: {
-                userId: is_hub ? (await me.byKey(pubkey)).id : signer.id,
-                hubId: 1
-              },
-              include: {all: true}
-            })
+          ins.insurance -= amount
+          signer.balance += amount
+          if (is_hub) ins.rebalanced += amount
 
-            if (instant_until + 1000 < K.ts) {
-              // not instant? start dispute
+          ins.nonce++
 
-              ch.delayed = K.usable_blocks + K.dispute_delay
-              ch.dispute_delta = delta
-              ch.dispute_is_hub = is_hub
-            } else {
-              if (is_hub) {
-                // inverse delta to amount
-                var amount = -(ch.rebalanced + delta)
-                if (readInt(counterparty) != 1) { l('Wrong hub'); continue }
+          await ins.save()
 
-                // if(nonce < ch.nonce){l("Wrong nonce"); continue}
-                if (amount <= 0) { l('Must be over 0'); continue }
-                if (ch.insurance < amount) {
-                  // we don't allow users to pay below insurance yet
-                  l(`Invalid amount ${ch.insurance} vs ${amount}`)
-                  continue
-                }
+          // was this input related to us?
+          if (me.record) {
 
-                ch.rebalanced += amount
-              } else {
-                var amount = ch.insurance + ch.rebalanced + delta
-                l(ch.insurance, ch.rebalanced, delta)
-                l(counterparty, signer.pubkey)
-
-                if (!signer.pubkey.equals(counterparty)) { l('Wrong counterparty of delta proof'); continue }
-
-                if (amount <= 0) { l('Must be over 0'); continue }
-
-                if (ch.insurance < amount) {
-                  amount = ch.insurance
-                  // the rest goes to debt
-                }
-              }
-
-              ch.insurance -= amount
-
-              // adding input to the signer balance first
-              signer.balance += amount
+            if (me.record.id == userId) {
+              var ch = await me.channel(signer.pubkey)
+              // they planned to withdraw and they did. Nullify hold amount
+              ch.delta_record.their_input_amount = 0
+              await ch.delta_record.save()
             }
 
-            // updating nonce to prevent double spend
-            ch.nonce = nonce
-
-            await ch.save()
+            if (me.record.id == signer.id) {
+              var ch = await me.channel(partner.pubkey)
+              // they planned to withdraw and they did. Nullify hold amount
+              ch.delta_record.our_input_amount = 0
+              ch.delta_record.our_input_sig = null
+              await ch.delta_record.save()         
+            }
           }
+
+
+
         }
 
         // 2. are there disputes?
@@ -149,15 +142,14 @@ module.exports = {
         var reimbursed = 0
         var reimburse_tax = 1 + Math.floor(tax / outputs.length)
 
-        for (var i = 0; i < outputs.length; i++) {
-          var [userId, hubId, amount] = outputs[i]
-
-          var originalAmount = readInt(amount)
-          amount = readInt(amount)
+        for (var d of outputs) {
+          var originalAmount = readInt(d[0])
+          var amount = readInt(d[0])
 
           l('outputs ', amount, originalAmount)
+          var userId = d[1]
 
-          hubId = readInt(hubId)
+          var hubId = readInt(d[2])
 
           // is pubkey or id
           // if(userId.length != 32) userId = readInt(userId)
@@ -280,7 +272,7 @@ module.exports = {
         break
     }
 
-    signer.nonce += 1
+    signer.nonce++
 
     await signer.save()
 

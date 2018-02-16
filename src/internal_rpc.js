@@ -34,9 +34,9 @@ module.exports = async (ws, msg) => {
 
         break
       case 'logout':
-        me.id = false
+        me.id = null
         me.intervals.map(clearInterval)
-        result.pubkey = false
+        result.pubkey = null
 
         break
 
@@ -66,10 +66,12 @@ module.exports = async (ws, msg) => {
           }
         }
 
+        var partner = Members[0].pubkey
+        l("Choosing partner ",partner)
 
 
         var [status, error] = await me.payChannel({
-          counterparty: Members[0].pubkey,
+          partner: partner,
           amount: amount, 
           mediate_to: mediate_to,
           return_to: (obj)=>{

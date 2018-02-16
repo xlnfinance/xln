@@ -131,7 +131,7 @@ inputMap = (i) => {
     'chain', // return X blocks since given prev_hash
 
     'update', // new input to state machine 
-    'withdraw', 
+    'requestWithdraw', 
     'withdrawal', 
     'ack',
 
@@ -158,10 +158,10 @@ methodMap = (i) => {
 
     'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
     'delta',    // delayed balance proof
+
     'update',   // transitions to state machine + new sig
     'unlockedPayment', // pay without hashlock
     'ack',
-
 
 
     'propose',
@@ -211,7 +211,7 @@ trustlessInstall = async a => {
     filter: (path, stat) => {
       stat.mtime = null // must be deterministic
         // disable /private (blocks sqlite, proofs, local config) allow /default_private
-      if (path.match(/(\.DS_Store|private|node_modules|test)/)) {
+      if (path.match(/(\.git|\.DS_Store|private|node_modules|test)/)) {
           // l('skipping '+path)
         return false
       }
@@ -224,7 +224,6 @@ trustlessInstall = async a => {
   })
 }
 
-cached_result = {}
 
 cache = async (i) => {
   if (K) { // already initialized
@@ -235,9 +234,26 @@ cache = async (i) => {
     cached_result.K = K
 
     if (me.is_hub) {
-
       cached_result.deltas = []
       cached_result.solvency = 0
+
+      var deltas = await Delta.findAll({where: {hubId: me.record.id}})
+      var uninsured = 0
+      for (var d of deltas) {
+        var ch = await me.channel(d.userId)
+        if (ch.rdelta > 0) uninsured += ch.rdelta
+      }
+
+      cached_result.history.unshift({
+        date: new Date(),
+        rdelta: uninsured
+      })
+
+    } else {   
+      cached_result.history = await History.findAll({
+        order: [['id', 'desc']],
+        include: {all: true}
+      })
     }
 
     cached_result.proposals = await Proposal.findAll({
@@ -247,10 +263,6 @@ cache = async (i) => {
 
     cached_result.users = await User.findAll({include: {all: true}})
 
-    cached_result.history = await History.findAll({
-      order: [['id', 'desc']],
-      include: {all: true}
-    })
   }
 
   if (me.my_member && K.last_snapshot_height) {
@@ -306,8 +318,15 @@ react = async (result = {}, id = 1) => {
 
 me = false
 
+// now in memory, for simplicity
+cached_result = {
+  history: [{date: new Date, rdelta: 0}]
+}
+
 invoices = {}
 purchases = {}
+
+
 
 initDashboard = async a => {
   var finalhandler = require('finalhandler')
@@ -493,6 +512,8 @@ Vote = sequelize.define('vote', {
 
 Proposal.belongsTo(User)
 
+//User.belongsTo(Insurance, {as: 'hub'})
+
 User.belongsToMany(User, {through: Insurance, as: 'hub'})
 
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
@@ -537,7 +558,11 @@ Delta = privSequelize.define('delta', {
 
 
   delta: Sequelize.INTEGER,
-  withdrawn: Sequelize.INTEGER,
+
+  their_input_amount: Sequelize.INTEGER,
+
+  our_input_amount: Sequelize.INTEGER,
+  our_input_sig: Sequelize.TEXT,
 
   hashlocks: Sequelize.TEXT,
   
@@ -650,11 +675,11 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
       K = JSON.parse(json)
 
       Members = JSON.parse(json).members // another object ref
-
-      Members.map(m => {
+      for (m of Members) {
         m.pubkey = Buffer.from(m.pubkey, 'hex')
-        m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
-      })
+        m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')        
+      }
+
     }
 
     await privSequelize.sync({force: false})

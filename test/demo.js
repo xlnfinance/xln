@@ -10,14 +10,18 @@ users = {}
 
 
 FS_PATH = '/Users/homakov/work/8002'
+FS_RPC = 'http://0.0.0.0:8002/rpc'
+LOCAL_FS_RPC = 'http://0.0.0.0:8001'
+
 if (fs.existsSync(FS_PATH+'/private/pk.json')) {
   auth_code = JSON.parse(fs.readFileSync(FS_PATH+'/private/pk.json')).auth_code
-  l("Auth "+auth_code)
+  l("Auth code to our node: "+auth_code)
 } else {
   throw "No auth"
 }
+
 FS = (method, params, cb) => {
-  axios.post('http://0.0.0.0:8002/rpc', {
+  axios.post(FS_RPC, {
     method: method,
     auth_code: auth_code,
     params: params
@@ -76,11 +80,12 @@ require('http').createServer((req, res) => {
     <main role="main" class="container">
       <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
 
+      <p>Your ID at our bank: ${id}</p>
+      <p>Available Balance: <b>\$${commy(users[id])}</b></p>
       <p>You're logged in as random user and your balance is simply stored in app's memory.</p>
 
-      <p>Bank ID: ${id}</p>
-      <p>Available Balance: \$${commy(users[id])}</p>
 
+     
       <h3>Deposit</h3>
       <p class="form-label-group">
         <input id="amount" placeholder="Amount">
@@ -89,8 +94,13 @@ require('http').createServer((req, res) => {
 
       <h3>Withdraw</h3>
       <p><input type="text" id="withdraw_invoice" placeholder="Paste payment request here"></p>
-      <p><small>To withdraw create a payment request in your Failsafe wallet</small></p>
+      <p><small>To withdraw create a payment request in your Failsafe wallet first</small></p>
       <p><button class="btn btn-success" id="withdraw">Withdraw</button></p>
+     
+
+      <p>Your node (user): ${LOCAL_FS_RPC}.</p>
+      <p>Our node (bank): ${FS_RPC}.</p>
+      <p>auth_code to control our node is read from ${FS_PATH}</p>
 
    </main>
 
@@ -118,7 +128,7 @@ if(hash[1]){
 }
 
 FS.frame=false;
-FS.origin = 'http://0.0.0.0:8001'
+FS.origin = '${LOCAL_FS_RPC}'
 FS.frame=document.createElement('iframe');
 FS.frame.style.display = 'none'
 FS.frame.src=FS.origin+'/sdk.html'
@@ -139,7 +149,6 @@ FS.resolvers = [()=>{
 window.addEventListener('message', function(e){
   if(e.origin == FS.origin){
     var data = JSON.parse(e.data)
-    l(data)
 
     FS.resolvers[data.id](data.result)
     
@@ -249,7 +258,7 @@ window.onload = function(){
       }
     })
   } else {
-    l('Not found ' + req.url)
+
   }
 }).listen(3010)
 

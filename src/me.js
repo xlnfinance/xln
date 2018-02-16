@@ -26,6 +26,8 @@ class Me {
     this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
 
+    this.record = await this.byKey()
+
     PK.username = username
     PK.seed = seed.toString('hex')
     fs.writeFileSync('private/pk.json', JSON.stringify(PK))
@@ -191,7 +193,7 @@ class Me {
     }
 
     l('start caching')
-    me.intervals.push(setInterval(cache, 1000))
+    me.intervals.push(setInterval(cache, 2000))
 
     if (this.my_member) {
       // there's 2nd dedicated websocket server for member/hub commands
@@ -221,14 +223,7 @@ class Me {
       }
 
       if (this.is_hub) {
-        me.intervals.push(setInterval(async () => {
-          var h = await (require('./hub')())
-
-          if (h.ins.length > 0 || h.outs.length > 0) {
-            l([0, h.ins, h.outs])
-            //await this.broadcast('rebalanceHub', r([0, h.ins, h.outs]))
-          }
-        }, K.blocktime * 1000))
+        me.intervals.push(setInterval(require('./hub'), K.blocktime * 1000))
       }
     } else {
       // keep connection to hub open
@@ -262,7 +257,7 @@ class Me {
 
 
   parseDelta (body) {
-    var [method, counterparty, nonce, delta, instant_until] = r(body)
+    var [method, partner, nonce, delta, instant_until] = r(body)
 
     nonce = readInt(nonce)
     method = readInt(method)
@@ -271,7 +266,7 @@ class Me {
 
     if (method != methodMap('delta')) return false
 
-    return [counterparty, nonce, delta, instant_until]
+    return [partner, nonce, delta, instant_until]
   }
 
 
@@ -279,7 +274,7 @@ class Me {
 
 
   async payChannel (opts) {
-    var ch = await me.channel(opts.counterparty)
+    var ch = await me.channel(opts.partner)
 
     if (ch.delta_record.status != 'ready') {
       return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
@@ -336,15 +331,17 @@ class Me {
     // what do we do when we get the secret
     if (opts.return_to) purchases[toHex(opts.invoice)] = opts.return_to
 
-    if (!me.send(opts.counterparty, 'update', signedState)) {
-      l(`${opts.counterparty} not online, deliver later?`)
+    if (!me.send(opts.partner, 'update', signedState)) {
+      l(`${opts.partner} not online, deliver later?`)
     }
 
     return [true, false]
   }
+  
 
-  async channel (counterparty) {
-    var otherHub = Members.find(m => m.hub && m.pubkey.equals(counterparty))
+  // accepts pubkey only
+  async channel (partner) {
+    var otherHub = Members.find(m => m.hub && m.pubkey.equals(partner))
 
     // if both parties are hubs, lower id is acting as hub
     var is_hub = (me.is_hub && otherHub) ? (me.my_member.id < otherHub.id) : me.is_hub
@@ -362,7 +359,7 @@ class Me {
     var delta = await Delta.findOrBuild({
       where: is_hub ? {
         hubId: me.record.id,
-        userId: counterparty
+        userId: partner
       } : {
         hubId: otherHub.id,
         userId: bin(me.id.publicKey)
@@ -370,7 +367,10 @@ class Me {
       defaults: {
         delta: 0,
         instant_until: 0,
-        withdrawn: 0,
+        
+        our_input_amount: 0,
+        their_input_amount: 0,
+
         nonce: 0,
         status: 'ready',
         state: '{"locks":[]}'
@@ -379,7 +379,7 @@ class Me {
 
 
     if (is_hub) {
-      var user = await me.byKey(counterparty)
+      var user = await me.byKey(partner)
       if (user) {
         var insurance = await Insurance.find({where: {
           userId: user.id,
@@ -397,12 +397,11 @@ class Me {
       r.insurance = insurance.insurance
       r.rebalanced = insurance.rebalanced
       r.nonce = insurance.nonce
+
+      r.userId = insurance.userId
     }
 
     r.delta_record = delta[0]
-
-    // inputs not in blockchain yet
-    r.insurance -= r.delta_record.withdrawn
 
     //r.delta_record.state = JSON.parse(r.delta_record.state)
 
@@ -412,14 +411,27 @@ class Me {
     r.receivable = K.hard_limit - r.rdelta
     r.payable = r.insurance + r.rdelta
     
-    // other way around
-    if (is_hub) [r.receivable, r.payable] = [r.payable, r.receivable]
-
     if (r.rdelta >= 0) {
-      r.insured = r.insurance
+      r.insured = r.insurance 
+    } else if (-r.rdelta < r.insurance) {
+      r.insured = r.insurance + r.rdelta
     } else {
-      r.insured = me.is_hub ? -r.rdelta : r.insurance + r.rdelta
+      r.insured = 0
     }
+
+    r.uninsured = r.payable - r.insured
+
+    // view from hub's side of channel
+    if (is_hub) {
+      [r.receivable, r.payable] = [r.payable, r.receivable]
+      r.insured = r.insurance - r.insured
+
+      r.uninsured -= K.hard_limit
+    }
+
+    // inputs not in blockchain yet, so we hold them temporarily
+    r.receivable -= r.delta_record.their_input_amount
+    r.payable -= r.delta_record.our_input_amount
 
     return r
   }

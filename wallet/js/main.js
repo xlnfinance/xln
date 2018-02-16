@@ -13,11 +13,11 @@ renderRisk = (hist) => {
       data: {
         labels: [],
         datasets: [{
-          label: 'Uninsured/Spent dynamics',
+          label: 'Uninsured',
           steppedLine: true,
           data: [{x: Math.round(new Date/precision), y: 0}],
-          borderColor: 'rgb(255, 99, 132)',
-          backgroundColor: 'rgb(255, 99, 132)'
+          borderColor: 'rgb(220, 53, 69)',
+          backgroundColor: 'rgb(220, 53, 69)'
         }]
       },
       options: {
@@ -34,7 +34,7 @@ renderRisk = (hist) => {
           }],
           yAxes: [{
             ticks: {
-              suggestedMin: -1000,
+              suggestedMin: 0,
               suggestedMax: 1000,
               mirror: true
             }
@@ -53,7 +53,8 @@ renderRisk = (hist) => {
   for (h of hist) {
     d.push({
       x: Math.round(Date.parse(h.date)/precision),
-      y: Math.round(h.rdelta/100)
+      // for now we hide the spent dynamics to not confuse the user
+      y: (h.rdelta < 0) ? 0 : Math.round(h.rdelta/100)
     })
   }
 
@@ -89,7 +90,7 @@ FS.onready(() => {
 
     setInterval(function () {
       FS('load').then(render)
-    }, 5000)
+    }, 3000)
   }
 
   notyf = new Notyf({delay: 4000})
@@ -385,17 +386,11 @@ FS.onready(() => {
 
       <template v-if="pubkey">
 
-
-        <div v-if="is_hub">You're hub.</div>
-
+        <div v-if="is_hub">
+          <p>This node is a hub. Total uninsured balances over time:</p>
+              <canvas width="100%" id="riskcanvas"></canvas>
+        </div>
         <div v-else>
-
-
-
-
-
-
-
 
           <p><button class="btn btn-success" @click="call('faucet')">Testnet Faucet</button></p>
             
@@ -425,6 +420,7 @@ FS.onready(() => {
           <div class="row">
             <div class="col-sm-6">
               <h3>→ Request</h3>
+              <p>Receivable: {{commy(ch.receivable)}}</p>
 
               <p><div class="input-group" style="width:400px">
                 <span class="input-group-addon" id="sizing-addon2">$</span>
@@ -440,17 +436,18 @@ FS.onready(() => {
 
             <div class="col-sm-6">
               <h3>Pay →</h3>
+              <p>Payable: {{commy(ch.payable)}}</p>
 
               <p><div class="input-group" style="width:400px" >
                 <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
               </div></p>
 
-              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice())">Pay Invoice</button></p>
+              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice()); pay_invoice='';">Pay Invoice</button></p>
 
               <div v-if="pay_invoice.length > 0">
                 <p>Amount: {{commy(unpackInvoice().amount)}}</p>
                 <p>Pay to: <b>{{unpackInvoice().trimmedId}}</b></p>
-                <p>Hub ID: {{unpackInvoice().hubId}}</p>
+                <p>Receiver's hub: {{unpackInvoice().hubId}}</p>
               </div>
 
             </div>
@@ -463,30 +460,27 @@ FS.onready(() => {
           If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a global dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is still operating and not compromised.
           </div>
 
+          <canvas width="100%" id="riskcanvas"></canvas>
 
-
-      
-      <canvas width="100%" id="riskcanvas"></canvas>
-
-      <table v-if="history.length > 0" class="table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Description</th>
-            <th>Amount</th>
-            <th>Balance</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="h in history">
-            <td>{{ new Date(h.date).toLocaleString() }}</td>
-            <td>{{h.desc}}</td>
-            <td>{{commy(h.amount)}}</td>
-            <td v-if="h.balance>0">{{commy(h.balance)}}</td>
-          </tr>
-        </tbody>
-      </table>
- 
+          <table v-if="history.length > 0" class="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in history.slice(0, 50)">
+                <td>{{ new Date(h.date).toLocaleString() }}</td>
+                <td>{{h.desc}}</td>
+                <td>{{commy(h.amount)}}</td>
+                <td v-if="h.balance>0">{{commy(h.balance)}}</td>
+              </tr>
+            </tbody>
+          </table>
+   
 
       </div>
 

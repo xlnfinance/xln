@@ -99,7 +99,7 @@ module.exports = async (ws, msg) => {
 
   } else if (inputType == 'faucet') {
     var [result, status] = await me.payChannel({
-      counterparty: msg,
+      partner: msg,
       amount: Math.round(Math.random() * 30000),
       invoice: Buffer([0])
     })
@@ -144,24 +144,27 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'withdrawal') {
     // we received instant withdrawal for rebalance
     var [pubkey, sig, body] = r(msg)
-    if (!ec.verify(body, sig, pubkey)) return false
+    if (!ec.verify(body, sig, pubkey)) {
+      l("Invalid withdrawal")
+      return false
+    }
 
     var ch = await me.channel(pubkey)
 
-
     var input = r([methodMap('withdrawal'), 
-      ch.delta_record.userId,
+      ch.userId,
       ch.delta_record.hubId, 
       ch.nonce, 
       ch.insured])
 
     if (input.equals(body)) {
       l("Equal! save")
+      ch.delta_record.our_input_amount = ch.insured
+      ch.delta_record.our_input_sig = sig
+      await ch.delta_record.save()
     }
 
-
-
-  } else if (inputType == 'withdraw') {
+  } else if (inputType == 'requestWithdraw') {
     // partner asked us for instant withdrawal 
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
@@ -170,19 +173,25 @@ module.exports = async (ws, msg) => {
 
     var amount = readInt(r(body)[0])
 
-    if (amount > ch.insurance - ch.insured) {
+    if (ch.delta_record.their_input_amount > 0) {
+      l("Peer already has withdrawal from us")
+      return false
+    }
+
+    if (amount == 0 || amount > ch.insurance - ch.insured) {
       l(`Peer asks for ${amount} but owns ${ch.insurance - ch.insured}`)
       return false
     }
 
     
     var input = me.envelope(methodMap('withdrawal'), 
-      ch.delta_record.userId,
+      ch.userId,
       ch.delta_record.hubId, 
       ch.nonce, 
       amount)
 
-    ch.delta_record.withdrawn = amount
+    ch.delta_record.their_input_amount = amount
+    await ch.delta_record.save()
 
 
     me.send(pubkey, 'withdrawal', input)
@@ -253,6 +262,7 @@ module.exports = async (ws, msg) => {
         return false
       }
 
+
       ch.delta_record.delta -= me.is_hub ? amount : -amount
       ch.delta_record.nonce++
 
@@ -272,7 +282,7 @@ module.exports = async (ws, msg) => {
           await ch.delta_record.save()
 
           await me.payChannel({
-            counterparty: mediate_to,
+            partner: mediate_to,
             amount: afterFees(amount),
             mediate_to: null,
             return_to: pubkey,

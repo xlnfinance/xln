@@ -50,7 +50,7 @@ module.exports = () => {
           ))
       }
         // flush sigs
-      Members.map(c => c.sig = false)
+      Members.map(c => c.sig = null)
 
       me.status = 'await'
     } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - 10)) {
