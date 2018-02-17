@@ -50,7 +50,11 @@ class Me {
   }
 
   async byKey (pk) {
-    if (!pk) pk = this.id.publicKey
+    if (!pk && this.id) {
+      pk = this.id.publicKey
+    } else {
+      return false
+    }
     return await User.findOne({
       where: { pubkey: bin(pk) }
     })
@@ -223,7 +227,7 @@ class Me {
       }
 
       if (this.is_hub) {
-        me.intervals.push(setInterval(require('./hub'), K.blocktime * 1000))
+        me.intervals.push(setInterval(require('./hub'), K.blocktime * 2000))
       }
     } else {
       // keep connection to hub open

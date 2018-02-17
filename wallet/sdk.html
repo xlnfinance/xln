@@ -21,7 +21,7 @@ window.addEventListener('message',function(e){
       // must be micropayment, or authorized in sufficent time
       // otherwise double check for safety
       var micropayment = (parseInt(json.amount) < 10000)
-      if(micropayment || (new Date - confirm_start > 2000) || confirm("Are you sure? "+msg)){
+      if(micropayment || (new Date - confirm_start > 500) || confirm("Are you sure? "+msg)){
       
       }else{
         return false

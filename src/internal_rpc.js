@@ -73,6 +73,8 @@ module.exports = async (ws, msg) => {
         var [status, error] = await me.payChannel({
           partner: partner,
           amount: amount, 
+          execution: p.execution,
+
           mediate_to: mediate_to,
           return_to: (obj)=>{
             l("Returning now")
@@ -81,6 +83,7 @@ module.exports = async (ws, msg) => {
               id: json.id
             })) : ws.end(JSON.stringify(obj))
           },
+
           invoice: Buffer.from(p.invoice, 'hex')
         })
 

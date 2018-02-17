@@ -29,28 +29,8 @@ module.exports = async (opts) => {
     balance: 100000000
   }))
 
-  // extra user for demo
-  var seed2 = await derive('8001', 'password')
-  me2 = new Me()
-  await me2.init('8001', seed2)
-
-  var user2 = await (User.create({
-    pubkey: bin(me2.id.publicKey),
-    username: '8001',
-    nonce: 0,
-    balance: 500000
-  }))
 
 
-
-  await (Insurance.create({
-    userId: 2,
-    hubId: 1,
-    nonce: 0,
-    insurance: 500000,
-    rebalanced: 0,
-    asset: 0
-  }))
 
   K = {
     // global network pepper to protect derivation from rainbow tables
@@ -104,20 +84,39 @@ module.exports = async (opts) => {
       },
       {
         ticker: 'FSB',
-        name: 'Bond',
+        name: 'Failsafe Bond (2030)',
+        total_supply: 0
+      },
+      {
+        ticker: 'ACME',
+        name: 'ACME Company Stock',
+        total_supply: 0
+      },
+      {
+        ticker: 'RURABC',
+        name: 'Ruble (ABC Bank)',
         total_supply: 0
       }
+
+    ],
+
+    hubs: [
+
     ],
 
     min_amount: 100,
     max_amount: 300000,
 
     members: [],
-    total_shares: 15,
-    majority: 11,
+    total_shares: 30,
+    majority: 25,
 
     hubs: []
   }
+
+
+
+
 
   K.members.push({
     id: user.id,
@@ -130,13 +129,30 @@ module.exports = async (opts) => {
 
 
     missed_blocks: [],
-    shares: 10,
+    shares: 30,
 
     hub: {
-      name: '1'
+      handle: 'eu',
+      name: '@eu (Europe)'
     }
   })
 
+
+
+
+
+
+  // extra user for demo
+  var seed2 = await derive('8001', 'password')
+  me2 = new Me()
+  await me2.init('8001', seed2)
+
+  var user2 = await (User.create({
+    pubkey: bin(me2.id.publicKey),
+    username: '8001',
+    nonce: 0,
+    balance: 500000
+  }))
   var loc2 = opts.location.split(':')
 
   K.members.push({
@@ -150,8 +166,57 @@ module.exports = async (opts) => {
 
     missed_blocks: [],
 
-    shares: 5,
+    shares: 0,
   })
+
+
+
+
+
+  // extra user for demo
+  var seed3 = await derive('8003', 'password')
+  me3 = new Me()
+  await me3.init('8003', seed2)
+
+  var user3 = await (User.create({
+    pubkey: bin(me3.id.publicKey),
+    username: '8003',
+    nonce: 0,
+    balance: 500000
+  }))
+  var loc3 = opts.location.split(':')
+
+  K.members.push({
+    id: user3.id,
+
+    username: '8003',
+    location: 'ws:' + loc3[1] + ':' + (parseInt(loc3[2])+12),
+
+    pubkey: toHex(me3.id.publicKey),
+    block_pubkey: me3.block_pubkey,
+
+    missed_blocks: [],
+
+    shares: 0,
+    hub: {
+      handle: "asia",
+      name: '@asia (Asia)'
+    }
+  })
+
+
+
+
+
+  await (Insurance.create({
+    userId: 2,
+    hubId: 1,
+    nonce: 0,
+    insurance: 500000,
+    rebalanced: 0,
+    asset: 0
+  }))
+
 
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)

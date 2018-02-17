@@ -244,7 +244,10 @@ FS.onready(() => {
     data () {
       return {
         auth_code: localStorage.auth_code,
+
         asset: 'FSD',
+        hub: 'eu',
+
         whitepaper: wp,
 
         pubkey: false,
@@ -329,13 +332,8 @@ FS.onready(() => {
           <a class="nav-link" @click="go('explorer')">Explorer</a>
         </li>
 
-
-        <li class="nav-item" v-bind:class="{ active: tab=='network' }">
-          <a class="nav-link" @click="go('network')">Network Stats</a>
-        </li>
-
         <li class="nav-item" v-bind:class="{ active: tab=='help' }">
-          <a class="nav-link" @click="go('help')">Help</a>
+          <a class="nav-link" @click="go('help')">Help & Stats</a>
         </li>
 
 
@@ -378,6 +376,51 @@ FS.onready(() => {
 
       <p><b>Insurance</b> is how much collateral is stored in blockchain in a payment channel between you and hub. Ideally, your balance must be around insurance amount - this way 100% of your balance is insured plus you're not subject to expensive on-chain fees.</p>
 
+
+
+      <h1>Raw K data</h1>
+
+      <pre>{{ JSON.stringify(K, 2, 2) }}</pre>
+
+      <h1>Board of Members</h1>
+      <p v-for="m in K.members">{{m.username}} ({{m.location}}) <b v-if="m.hubId">[hub]</b> - <b>{{m.shares}} shares</b></p>
+
+
+      <h2>Current network settings</h2>
+      <p>Blocktime: {{K.blocktime}} seconds</p>
+      <p>Blocksize: {{K.blocksize}} bytes</p>
+      <p>Account creation fee (pubkey registration): {{commy(K.account_creation_fee)}}</p>
+
+      <p>Average onchain fee: {{commy(K.tax * 83)}} (to short ID) – {{commy(K.tax * 115)}} (to pubkey)</p>
+
+      <h2>Hubs & topology</h2>
+      <p>Risk limit: {{commy(K.risk)}}</p>
+      <p>Hard risk limit: {{commy(K.hard_limit)}}</p>
+
+
+      <h2>Snapshots</h2>
+      <p>Bytes until next snapshot: {{K.snapshot_after_bytes-K.bytes_since_last_snapshot}}</p>
+      <p>Last snapshot at block # : {{K.last_snapshot_height}}</p>
+
+
+      <h2>Network stats</h2>
+      <p>Total blocks: {{K.total_blocks}}</p>
+      <p>Of which usable blocks: {{K.total_blocks}}</p>
+      <p>Last block received {{timeAgo(K.ts)}}</p>
+      
+      <p>Network created {{timeAgo(K.created_at)}}</p>
+
+      <p>FSD Market Cap {{ commy(K.assets[0].total_supply) }}</p>
+
+      <p>Transactions: {{K.total_tx}}</p>
+      <p>Tx bytes: {{K.total_tx_bytes}}</p>
+
+
+      <h2>Governance stats</h2>
+
+      <p>Proposals created: {{K.proposals_created}}</p>
+
+
     </div>
 
 
@@ -386,22 +429,34 @@ FS.onready(() => {
 
       <template v-if="pubkey">
 
+        <div class="float-right"><select v-model="asset" class="custom-select custom-select-lg mb-3">
+          <option disabled>Select current asset</option>
+          <option v-for="(a,index) in K.assets" :value="a.ticker">{{a.name}}</option>
+        </select></div>
+
+        <div class="float-right"><select v-model="hub" class="custom-select custom-select-lg mb-3">
+          <option disabled>Select current hub</option>
+          <option v-for="(a,index) in K.members.filter(m=>!!m.hub)" :value="a.hub.handle">{{a.hub.name}}</option>
+        </select> </div>
+
+
+
+
         <div v-if="is_hub">
-          <p>This node is a hub. Total uninsured balances over time:</p>
+          <h1>This node is a hub.</h1>
+
+          <p>Plotting risk of uninsured balances we promised over time:</p>
               <canvas width="100%" id="riskcanvas"></canvas>
         </div>
         <div v-else>
-
-          <p><button class="btn btn-success" @click="call('faucet')">Testnet Faucet</button></p>
             
-          <h1 style="display:inline-block">\${{commy(ch.payable)}}</h1>
-
+          <h1 style="display:inline-block">{{commy(ch.payable)}}</h1>
 
           <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.rdelta > 0 ? "+ "+commy(ch.rdelta)+" uninsured" : "- "+commy(-ch.rdelta)+" spent"}}</small> 
           
           <p><div v-if="ch.payable>0 || ch.insurance > 0">
 
-            <div class="progress" style="max-width:1000px">
+            <div class="progress" style="max-width:1400px">
               <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
                 {{commy(ch.insured)}} (insured)
               </div>
@@ -419,15 +474,14 @@ FS.onready(() => {
 
           <div class="row">
             <div class="col-sm-6">
-              <h3>→ Request</h3>
-              <p>Receivable: {{commy(ch.receivable)}}</p>
-
               <p><div class="input-group" style="width:400px">
-                <span class="input-group-addon" id="sizing-addon2">$</span>
+                <span class="input-group-addon" id="sizing-addon2">{{asset}}</span>
                 <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
               </div></p>
 
-              <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">Request Payment</button></p>
+              <p>Receivable: {{commy(ch.receivable)}}</p>
+
+              <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">→ Request</button></p>
 
               <p><div v-show="new_invoice.length > 0" class="input-group" style="width:400px">
                 <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
@@ -435,14 +489,13 @@ FS.onready(() => {
             </div>
 
             <div class="col-sm-6">
-              <h3>Pay →</h3>
-              <p>Payable: {{commy(ch.payable)}}</p>
-
               <p><div class="input-group" style="width:400px" >
                 <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
               </div></p>
 
-              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice()); pay_invoice='';">Pay Invoice</button></p>
+              <p>Payable: {{commy(ch.payable)}}</p>
+
+              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice()); pay_invoice='';">Pay Now → </button></p>
 
               <div v-if="pay_invoice.length > 0">
                 <p>Amount: {{commy(unpackInvoice().amount)}}</p>
@@ -460,6 +513,10 @@ FS.onready(() => {
           If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a global dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is still operating and not compromised.
           </div>
 
+
+          <p><button class="btn btn-success" @click="call('faucet')">Testnet Faucet</button></p>
+
+
           <canvas width="100%" id="riskcanvas"></canvas>
 
           <table v-if="history.length > 0" class="table">
@@ -472,7 +529,7 @@ FS.onready(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="h in history.slice(0, 50)">
+              <tr v-for="h in history.slice(0, 20)">
                 <td>{{ new Date(h.date).toLocaleString() }}</td>
                 <td>{{h.desc}}</td>
                 <td>{{commy(h.amount)}}</td>
@@ -536,62 +593,15 @@ FS.onready(() => {
     </div>
 
 
-    <div v-else-if="tab=='network'">
-
-      <h1>Raw K data</h1>
-
-      <pre>{{ JSON.stringify(K, 2, 2) }}</pre>
-
-      <h1>Board of Members</h1>
-      <p v-for="m in K.members">{{m.username}} ({{m.location}}) <b v-if="m.hubId">[hub]</b> - <b>{{m.shares}} shares</b></p>
-
-
-      <h2>Current network settings</h2>
-      <p>Blocktime: {{K.blocktime}} seconds</p>
-      <p>Blocksize: {{K.blocksize}} bytes</p>
-      <p>Account creation fee (pubkey registration): {{commy(K.account_creation_fee)}}</p>
-
-      <p>Average onchain fee: {{commy(K.tax * 83)}} (to short ID) – {{commy(K.tax * 115)}} (to pubkey)</p>
-
-      <h2>Hubs & topology</h2>
-      <p>Risk limit: {{commy(K.risk)}}</p>
-      <p>Hard risk limit: {{commy(K.hard_limit)}}</p>
-
-
-      <h2>Snapshots</h2>
-      <p>Bytes until next snapshot: {{K.snapshot_after_bytes-K.bytes_since_last_snapshot}}</p>
-      <p>Last snapshot at block # : {{K.last_snapshot_height}}</p>
-
-
-      <h2>Network stats</h2>
-      <p>Total blocks: {{K.total_blocks}}</p>
-      <p>Of which usable blocks: {{K.total_blocks}}</p>
-      <p>Last block received {{timeAgo(K.ts)}}</p>
-      
-      <p>Network created {{timeAgo(K.created_at)}}</p>
-
-      <p>FSD Market Cap \${{ commy(K.assets[0].total_supply) }}</p>
-
-      <p>Transactions: {{K.total_tx}}</p>
-      <p>Tx bytes: {{K.total_tx_bytes}}</p>
-
-
-      <h2>Governance stats</h2>
-
-      <p>Proposals created: {{K.proposals_created}}</p>
-
-
-
-    </div>
 
     <div v-else-if="tab=='install'">
         <h3>Currently only macOS/Linux are supported</h3>
         <p>1. Install <a href="https://nodejs.org/en/download/">Node.js</a></p>
         <p>2. Copy-paste this snippet to your text editor:</p>
         <pre><code>{{install_snippet}}</code></pre>
-        <p>3. (optional) Compare our snippet with snippets from other sources for better security: Failsafe.someshop.com/#install, Failsafe.trustedsite.com...</p>
+        <p>3. (optional) Compare our snippet with snippets from other sources for stronger security: Failsafe.someshop.com/#install, Failsafe.trustedsite.com...</p>
         <p>4. If there's exact match paste the snippet into <kbd>Terminal.app</kbd></p>
-        <p>Or use <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">direct link</a>, run <kbd>./install && node fs 8000</kbd> (to bind to 8000 port)</p>
+        <p>Or simply use <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">direct link</a>, run <kbd>./install && node fs 8001</kbd> (8001 is default port)</p>
     </div>
 
     <div v-else-if="tab=='gov'">
@@ -735,10 +745,6 @@ FS.onready(() => {
 
     </div>
 
-    <div v-else-if="tab=='names'">
-      <h3>Failsafe Names </h3>
-      <p>By the end of 2018 you will be able to register a domain name and local DNS resolver will seamlessly load "name.fs" in the browser</p>
-    </div>
 
   </div>
 </div>

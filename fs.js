@@ -206,16 +206,46 @@ trustlessInstall = async a => {
   l('generating install ' + filename)
   tar.c({
     gzip: true,
-  		portable: true,
+		portable: true,
     file: 'private/' + filename,
     filter: (path, stat) => {
-      stat.mtime = null // must be deterministic
-        // disable /private (blocks sqlite, proofs, local config) allow /default_private
-      if (path.match(/(\.git|\.DS_Store|private|node_modules|test)/)) {
-          // l('skipping '+path)
+      // must be deterministic
+      /*
+./simulate Stats {
+  dev: 16777220,
+  mode: 33261,
+  nlink: 1,
+  uid: 501,
+  gid: 20,
+  rdev: 0,
+  blksize: 4194304,
+  ino: 4299243413,
+  size: 552,
+  blocks: 8,
+  atimeMs: 1518891958539.4458,
+  mtimeMs: 1518889328083.1042,
+  ctimeMs: 1518889328083.1042,
+  birthtimeMs: 1514479589775.199,
+  atime: 2018-02-17T18:25:58.539Z,
+  mtime: null,
+  ctime: 2018-02-17T17:42:08.083Z,
+  birthtime: 2017-12-28T16:46:29.775Z }
+      */
+
+      stat.mtime = null 
+      stat.atime = null 
+      stat.ctime = null 
+      stat.birthtime = null 
+
+      // skip /private (blocks sqlite, proofs, local config)
+      // tests, and all hidden/dotfiles
+
+      if (path.startsWith('./.') || path.match(/(private|node_modules|test)/)) {
+        //l('skipping '+path)
         return false
+      } else {
+        return true
       }
-      return true
     }
   },
     ['.']
@@ -277,14 +307,16 @@ cache = async (i) => {
 
       var out_hash = out.split(' ')[0]
 
-      var our_location = me.my_member.location == 'ws://0.0.0.0:8000' ? `http://0.0.0.0:8000/` : `https://failsafe.network/`
+      var our_location = me.my_member.location.indexOf('0.0.0.0') != -1 ? `http://0.0.0.0:8000/` : `https://failsafe.network/`
 
       cached_result.install_snippet = `id=fs
 f=${filename}
 mkdir $id && cd $id && curl ${our_location}$f -o $f
 
 if [[ -x /usr/bin/sha256sum ]] && sha256sum $f || shasum -a 256 $f | grep ${out_hash}; then
-  tar -xzf $f && rm $f && ./install && node fs.js 8001
+  tar -xzf $f && rm $f && ./install
+
+  node fs -p8001
 fi`
     })
   }

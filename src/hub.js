@@ -71,11 +71,11 @@ module.exports = async function () {
 
     }
 
-    if (ins.length > 0 && outs.length > 0) {
+    if (ins.length > 0 || outs.length > 0) {
       await me.broadcast('rebalanceHub', r([0, ins, outs]))
     }
 
-  }, 3000)
+  }, 5000)
 
   return {
     channels: channels,
