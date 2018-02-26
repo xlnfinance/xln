@@ -1,40 +1,21 @@
 
 // http://ipinfo.io/ip
-module.exports = async (opts) => {
+module.exports = async (genesis) => {
   l('Start genesis')
 
   await (sequelize.sync({force: true}))
 
-  opts = Object.assign({
-    username: 'root'
-    // infra: 'https://www.digitalocean.com'
-  }, opts)
 
-  opts.pw = toHex(crypto.randomBytes(16))
 
-  l(opts.pw)
 
   // entity / country / infra
-
-  var seed = await derive(opts.username, opts.pw)
-  delete (opts.pw)
-
-  me = new Me()
-  await me.init(opts.username, seed)
-
-  var user = await (User.create({
-    pubkey: bin(me.id.publicKey),
-    username: opts.username,
-    nonce: 0,
-    balance: 100000000
-  }))
 
 
 
 
   K = {
     // global network pepper to protect derivation from rainbow tables
-    network_name: opts.username,
+    network_name: 'main',
 
     usable_blocks: 0,
     total_blocks: 0,
@@ -47,7 +28,7 @@ module.exports = async (opts) => {
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 100000,
+    snapshot_after_bytes: 1000,
     proposals_created: 0,
 
     tax: 2,
@@ -80,7 +61,7 @@ module.exports = async (opts) => {
       {
         ticker: 'FSD',
         name: 'Failsafe Dollar',
-        total_supply: user.balance
+        total_supply: 1000
       },
       {
         ticker: 'FSB',
@@ -100,129 +81,97 @@ module.exports = async (opts) => {
 
     ],
 
-    hubs: [
-
-    ],
 
     min_amount: 100,
     max_amount: 300000,
 
     members: [],
-    total_shares: 30,
-    majority: 25,
+    hubs: [],
 
-    hubs: []
+    total_shares: 30,
+    majority: 20,
+
   }
 
 
 
 
 
-  K.members.push({
-    id: user.id,
+  // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
 
-    username: opts.username,
-    location: opts.location,
+  createMember = async (username, pw, loc)=>{
+    var seed = await derive(username, pw)
+    me = new Me()
+    await me.init(username, seed)
 
-    pubkey: toHex(me.id.publicKey),
-    block_pubkey: me.block_pubkey,
+    var user = await (User.create({
+      pubkey: me.pubkey,
+      username: username,
+      nonce: 0,
+      balance: 500000
+    }))
 
+    l(username+" : "+pw+" at "+loc)
 
-    missed_blocks: [],
-    shares: 30,
+    K.members.push({
+      id: user.id,
 
-    hub: {
-      handle: 'eu',
-      name: '@eu (Europe)'
-    }
-  })
+      username: username,
+      location: loc,
 
+      pubkey: toHex(me.pubkey),
+      block_pubkey: me.block_pubkey,
 
+      missed_blocks: [],
 
+      shares: 0
+    })
+    return seed
+  }
 
+  var base = genesis == 'test' ? 'ws://0.0.0.0:' : 'wss://failsafe.network:'
 
+  var seed = await createMember('root', toHex(crypto.randomBytes(16)), base + 8000)
 
-  // extra user for demo
-  var seed2 = await derive('8001', 'password')
-  me2 = new Me()
-  await me2.init('8001', seed2)
-
-  var user2 = await (User.create({
-    pubkey: bin(me2.id.publicKey),
-    username: '8001',
-    nonce: 0,
-    balance: 500000
-  }))
-  var loc2 = opts.location.split(':')
-
-  K.members.push({
-    id: user2.id,
-
-    username: '8001',
-    location: 'ws:' + loc2[1] + ':' + (parseInt(loc2[2])+10),
-
-    pubkey: toHex(me2.id.publicKey),
-    block_pubkey: me2.block_pubkey,
-
-    missed_blocks: [],
-
-    shares: 0,
-  })
+  for (var i = 8001; i<8005; i++) {
+    await createMember(i.toString(), 'password', base + (i+10))
+  }
 
 
+  K.members[0].shares = 10
+  K.members[1].shares = 10
+  K.members[2].shares = 6
+  K.members[3].shares = 4
 
 
+  K.members[0].hub = {
+    handle: 'eu',
+    name: '@eu (Europe)'
+  }
 
-  // extra user for demo
-  var seed3 = await derive('8003', 'password')
-  me3 = new Me()
-  await me3.init('8003', seed2)
-
-  var user3 = await (User.create({
-    pubkey: bin(me3.id.publicKey),
-    username: '8003',
-    nonce: 0,
-    balance: 500000
-  }))
-  var loc3 = opts.location.split(':')
-
-  K.members.push({
-    id: user3.id,
-
-    username: '8003',
-    location: 'ws:' + loc3[1] + ':' + (parseInt(loc3[2])+12),
-
-    pubkey: toHex(me3.id.publicKey),
-    block_pubkey: me3.block_pubkey,
-
-    missed_blocks: [],
-
-    shares: 0,
-    hub: {
-      handle: "asia",
-      name: '@asia (Asia)'
-    }
-  })
-
-
+  K.members[1].hub = {
+    handle: 'asia',
+    name: '@asia (Asia)'
+  }
 
 
 
   await (Insurance.create({
-    userId: 2,
-    hubId: 1,
+    leftId: 2,
+    rightId: 1,
     nonce: 0,
-    insurance: 500000,
-    rebalanced: 0,
+    insurance: 100000000,
+    ondelta: 0,
     asset: 0
   }))
+
 
 
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)
 
   fs.writeFileSync('private/pk.json', JSON.stringify({
-    username: opts.username,
+    username: 'root',
     seed: seed.toString('hex'),
     auth_code: toHex(crypto.randomBytes(32))
   }))

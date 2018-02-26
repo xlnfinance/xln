@@ -69,6 +69,8 @@ WebSocketClient.prototype.onmessage = function (data, flags, number) {  // conso
 WebSocketClient.prototype.onerror = function (e) {
   console.log("Couldn't reach " + e.host)
 }
-WebSocketClient.prototype.onclose = function (e) { console.log('WebSocketClient: closed', arguments) }
+WebSocketClient.prototype.onclose = function (e) { 
+  //console.log('WebSocketClient: closed', arguments) 
+}
 
 module.exports = WebSocketClient

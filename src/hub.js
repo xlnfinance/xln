@@ -1,6 +1,6 @@
 /*
 In this method we implement looking for net-spenders and matching them with net-receivers.
-Eg matching those who have rdelta <-100 with those with rdelta>100
+Eg matching those who have delta <-100 with those with delta>100
 
 First, we calculate receivers who requested rebalance.
 Based on how much they want to insure, we can find the minimum amount of spenders to ask withdrawals from
@@ -8,14 +8,13 @@ Based on how much they want to insure, we can find the minimum amount of spender
 */
 
 module.exports = async function () {
-  var hubId = me.record.id
 
-  var deltas = await Delta.findAll({where: {hubId: hubId}})
+
+  var channels = await me.channels() 
 
   var ins = []
   var outs = []
 
-  var channels = []
 
   me.record = await me.byKey()
 
@@ -23,28 +22,27 @@ module.exports = async function () {
   var uninsured = 0
   var checkBack = []
 
-  for (var d of deltas) {
-    var ch = await me.channel(d.userId)
+  for (var ch of channels) {
     channels.push(ch)
 
-    solvency -= ch.rdelta
+    solvency -= ch.delta
 
-    if (ch.rdelta > 0) {
-      uninsured += ch.rdelta
+    if (ch.delta > 0) {
+      uninsured += ch.delta
 
-      if (ch.rdelta >= K.risk) {
-        outs.push([ch.rdelta, d.userId, hubId])
+      if (ch.delta >= K.risk) {
+        outs.push([ch.delta, d.partner, hubId])
       }
 
 
-    } else if (ch.rdelta <= -K.risk) {
-      if (ch.delta_record.our_input_sig) {
+    } else if (ch.delta <= -K.risk) {
+      if (ch.d.our_input_sig) {
         l('we already have input to use')
         // method, user, hub, nonce, amount
 
-        ins.push([ ch.delta_record.our_input_amount, 
+        ins.push([ ch.d.our_input_amount, 
           ch.userId, 
-          ch.delta_record.our_input_sig ])
+          ch.d.our_input_sig ])
 
       } else if (me.users[d.userId]) {
         l(`We can pull payment from ${toHex(d.userId)} and use next rebalance`)
@@ -63,10 +61,10 @@ module.exports = async function () {
   setTimeout(async ()=>{
     for (var userId of checkBack) {
       var ch = await me.channel(userId)
-      if (ch.delta_record.our_input_sig) {
-        ins.push([ ch.delta_record.our_input_amount, 
+      if (ch.d.our_input_sig) {
+        ins.push([ ch.d.our_input_amount, 
           ch.userId, 
-          ch.delta_record.our_input_sig ])
+          ch.d.our_input_sig ])
       }
 
     }

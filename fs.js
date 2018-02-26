@@ -34,6 +34,13 @@ asyncexec = require('util').promisify(exec)
 Me = require('./src/me').Me
 
 
+// globals
+K = false 
+me = false
+Members = false
+// Private Key value
+PK = {}
+
 
 RPC = {
   internal_rpc: require('./src/internal_rpc'),
@@ -42,7 +49,7 @@ RPC = {
 
 
 l = console.log
-d = l // ()=>{}
+
 
 r = function (a) {
   if (a instanceof Buffer) {
@@ -193,66 +200,8 @@ allowedOnchain = [
   'voteDeny'
 ]
 
-// globals
-K = false 
-me = false
-Members = false
-// Private Key value
-PK = {}
 
-trustlessInstall = async a => {
-  tar = require('tar')
-  var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
-  l('generating install ' + filename)
-  tar.c({
-    gzip: true,
-		portable: true,
-    file: 'private/' + filename,
-    filter: (path, stat) => {
-      // must be deterministic
-      /*
-./simulate Stats {
-  dev: 16777220,
-  mode: 33261,
-  nlink: 1,
-  uid: 501,
-  gid: 20,
-  rdev: 0,
-  blksize: 4194304,
-  ino: 4299243413,
-  size: 552,
-  blocks: 8,
-  atimeMs: 1518891958539.4458,
-  mtimeMs: 1518889328083.1042,
-  ctimeMs: 1518889328083.1042,
-  birthtimeMs: 1514479589775.199,
-  atime: 2018-02-17T18:25:58.539Z,
-  mtime: null,
-  ctime: 2018-02-17T17:42:08.083Z,
-  birthtime: 2017-12-28T16:46:29.775Z }
-      */
 
-      stat.mtime = null 
-      stat.atime = null 
-      stat.ctime = null 
-      stat.birthtime = null 
-
-      // skip /private (blocks sqlite, proofs, local config)
-      // tests, and all hidden/dotfiles
-
-      if (path.startsWith('./.') || path.match(/(private|node_modules|test)/)) {
-        //l('skipping '+path)
-        return false
-      } else {
-        return true
-      }
-    }
-  },
-    ['.']
-  ).then(_ => {
-    l('Snapshot made: ' + filename)
-  })
-}
 
 
 cache = async (i) => {
@@ -267,16 +216,18 @@ cache = async (i) => {
       cached_result.deltas = []
       cached_result.solvency = 0
 
-      var deltas = await Delta.findAll({where: {hubId: me.record.id}})
+
+      var deltas = await Delta.findAll({where: {myId: me.record.id} })
       var uninsured = 0
       for (var d of deltas) {
         var ch = await me.channel(d.userId)
-        if (ch.rdelta > 0) uninsured += ch.rdelta
+        if (ch.delta > 0) uninsured += ch.delta
       }
-
+      
+      if (cached_result.history[0].delta != uninsured)
       cached_result.history.unshift({
         date: new Date(),
-        rdelta: uninsured
+        delta: uninsured
       })
 
     } else {   
@@ -330,14 +281,13 @@ react = async (result = {}, id = 1) => {
 
     result.username = me.username // just for welcome message
 
-    result.pubkey = toHex(me.id.publicKey)
+    result.pubkey = toHex(me.pubkey)
 
 
 
     result.invoices = invoices
 
-
-    if (!me.is_hub) result.ch = await me.channel(Members[0].pubkey)
+    result.channels = await me.channels()
   }
 
   if (me.browser) {
@@ -348,11 +298,10 @@ react = async (result = {}, id = 1) => {
   }
 }
 
-me = false
 
 // now in memory, for simplicity
 cached_result = {
-  history: [{date: new Date, rdelta: 0}]
+  history: [{date: new Date, delta: 0}]
 }
 
 invoices = {}
@@ -404,6 +353,12 @@ initDashboard = async a => {
     }
     var server = require('https').createServer(cert, cb)
     base_port = 443
+
+    // redirecting from http://
+    require('http').createServer(function (req, res) {
+      res.writeHead(301, { "Location": "https://" + req.headers['host'] });
+      res.end();
+    }).listen(80)
   } else {
     cert = false
     var server = require('http').createServer(cb)
@@ -418,6 +373,8 @@ initDashboard = async a => {
   me = new Me()
   me.processQueue()
 
+  repl.context.me = me
+
   if (fs.existsSync('private/pk.json')) {
     PK = JSON.parse(fs.readFileSync('private/pk.json'))
 
@@ -431,11 +388,12 @@ initDashboard = async a => {
   if (argv.username) {
     var seed = await derive(argv.username, argv.pw)
     await me.init(argv.username, seed)
+    await me.start()
   } else if (PK.username) {
     await me.init(PK.username, Buffer.from(PK.seed, 'hex'))
+    await me.start()
   }
 
-  await me.start()
 
   var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + PK.auth_code
   l('Open ' + url + ' in your browser')
@@ -522,31 +480,50 @@ Proposal = sequelize.define('proposal', {
 })
 
 Insurance = sequelize.define('insurance', {
+  leftId: Sequelize.INTEGER,
+  rightId: Sequelize.INTEGER,
+
   nonce: Sequelize.INTEGER, // for instant withdrawals
 
   insurance: Sequelize.BIGINT, // insurance
-  rebalanced: Sequelize.BIGINT, // what hub already insuranceized
-
-  asset: Sequelize.INTEGER,
+  ondelta: Sequelize.BIGINT, // what hub already insuranceized
 
   delayed: Sequelize.INTEGER,
-  dispute_is_hub: Sequelize.BOOLEAN, // was it started by hub or user?
   dispute_delta: Sequelize.INTEGER
 
 })
+
+
+Insurance.prototype.between = async (leftId, rightId)=>{
+  /*
+  return Insurance.findOrBuild({
+    where: {
+      leftId
+    },
+    defaults: {
+      nonce: 0,
+      insurance: 0,
+      ondelta: 0
+    },
+    include: { all: true }
+  }) 
+  */
+}
+
+
+
 
 Vote = sequelize.define('vote', {
   rationale: Sequelize.TEXT,
   approval: Sequelize.BOOLEAN // approval or denial
 })
 
-// promises
 
 Proposal.belongsTo(User)
 
-//User.belongsTo(Insurance, {as: 'hub'})
+//User.belongsToMany(User, {through: Insurance, as: 'left'})
+//User.belongsToMany(User, {through: Insurance, as: 'right'})
 
-User.belongsToMany(User, {through: Insurance, as: 'hub'})
 
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
@@ -566,8 +543,8 @@ Block = privSequelize.define('block', {
 
 Delta = privSequelize.define('delta', {
   // between who and who
-  userId: Sequelize.CHAR(32).BINARY,
-  hubId: Sequelize.INTEGER,
+  myId: Sequelize.CHAR(32).BINARY,
+  partnerId: Sequelize.CHAR(32).BINARY,
 
   // higher nonce is valid
   nonce: Sequelize.INTEGER,
@@ -575,21 +552,21 @@ Delta = privSequelize.define('delta', {
 
   instant_until: Sequelize.INTEGER,
 
-  // copied from onchain for convenience
+  // Three most important values that define balances of each other
   insurance: Sequelize.INTEGER,
-  rebalanced: Sequelize.INTEGER,
+  ondelta: Sequelize.INTEGER,
+  offdelta: Sequelize.INTEGER,
 
 
-  hub_risks: Sequelize.INTEGER, 
-  hub_trusts: Sequelize.INTEGER, // usually 0
+  we_soft_limit: Sequelize.INTEGER, 
+  we_hard_limit: Sequelize.INTEGER, // usually 0
 
-  user_trusts: Sequelize.INTEGER, 
-  user_risks: Sequelize.INTEGER, // user specified risk
+  they_soft_limit: Sequelize.INTEGER, 
+  they_hard_limit: Sequelize.INTEGER, // user specified risk
+
 
   last_online: Sequelize.DATE,
 
-
-  delta: Sequelize.INTEGER,
 
   their_input_amount: Sequelize.INTEGER,
 
@@ -623,18 +600,18 @@ Delta = privSequelize.define('delta', {
 
 Delta.prototype.getState = function() {
   return r([methodMap('delta'), 
-    this.userId,
-    this.hubId, 
+    this.leftId,
+    this.rightId, 
     this.nonce, 
-    packSInt(this.delta)])
+    packSInt(this.offdelta)])
 }
 
 
 History = privSequelize.define('history', {
-  userId: Sequelize.CHAR(32).BINARY,
-  hubId: Sequelize.INTEGER,
+  leftId: Sequelize.CHAR(32).BINARY,
+  rightId: Sequelize.CHAR(32).BINARY,
 
-  rdelta: Sequelize.INTEGER,
+  delta: Sequelize.INTEGER,
 
   amount: Sequelize.INTEGER,
   balance: Sequelize.INTEGER,
@@ -646,10 +623,10 @@ History = privSequelize.define('history', {
 
 
 Purchase = privSequelize.define('purchase', {
-  userId: Sequelize.CHAR(32).BINARY,
-  hubId: Sequelize.INTEGER,
+  myId: Sequelize.CHAR(32).BINARY,
+  partnerId: Sequelize.INTEGER,
 
-  rdelta: Sequelize.INTEGER,
+  delta: Sequelize.INTEGER,
 
   amount: Sequelize.INTEGER,
   balance: Sequelize.INTEGER,
@@ -667,7 +644,7 @@ Event = privSequelize.define('event', {
 
 sync = () => {
   if (K.prev_hash) {
-    me.send(K.members[0], 'sync', Buffer.from(K.prev_hash, 'hex'))
+    me.send(Members[0], 'sync', Buffer.from(K.prev_hash, 'hex'))
   }
 }
 
@@ -698,7 +675,7 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
   } else if (process.argv[2] == 'city') {
     city()
   } else if (argv.genesis) {
-    require('./src/genesis')({location: argv.genesis })
+    require('./src/genesis')(argv.genesis)
   } else {
 
     if (fs.existsSync('data/k.json')) {
@@ -738,4 +715,10 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
 process.on('unhandledRejection', r => console.log(r))
 
 repl = require('repl').start('> ')
+_eval = repl.eval
+repl.eval=(cmd, context, filename, callback)=>{
+  if (cmd.indexOf('await') != -1) cmd = `(function(){ async function _wrap() { return ${cmd} } return console.log(_wrap()) })()`
+  _eval(cmd, context, filename, callback)
+}
+
 

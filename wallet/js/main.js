@@ -7,8 +7,11 @@ renderRisk = (hist) => {
 
   var precision = 100 // devide time by 
 
+  //riskcanvas.height = 300
+
   if (!window.riskchart) {
-    window.riskchart = new Chart(riskcanvas.getContext('2d'), {
+    var ctx = riskcanvas.getContext('2d')
+    window.riskchart = new Chart(ctx, {
       type: 'line',
       data: {
         labels: [],
@@ -21,10 +24,13 @@ renderRisk = (hist) => {
         }]
       },
       options: {
+        legend: {
+          display: false
+        },
+        maintainAspectRatio: false,
         // responsive: true,
         title: {
-          display: true,
-          text: 'Risk analytics'
+          display: true
         },
         scales: {
           xAxes: [{
@@ -54,7 +60,7 @@ renderRisk = (hist) => {
     d.push({
       x: Math.round(Date.parse(h.date)/precision),
       // for now we hide the spent dynamics to not confuse the user
-      y: (h.rdelta < 0) ? 0 : Math.round(h.rdelta/100)
+      y: (h.delta < 0) ? 0 : Math.round(h.delta/100)
     })
   }
 
@@ -86,7 +92,7 @@ FS.onready(() => {
 
   if (localStorage.auth_code) {
     // local node
-    if (location.hash == '') location.hash = '#wallet'
+    // if (location.hash == '') location.hash = '#wallet'
 
     setInterval(function () {
       FS('load').then(render)
@@ -125,7 +131,7 @@ FS.onready(() => {
 
       // if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
       app.call('rebalanceUser', {
-        asset: 0,
+        asset: asset,
         ins: app.ins,
         outs: app.outs
       })
@@ -153,7 +159,7 @@ FS.onready(() => {
       if (app.record) {
         if (app.record.balance >= app.K.standalone_balance) {
           if (confirm('Transaction fee is $' + fee + '. Proceed and start onchain dispute?')) {
-            app.call('takeEverything')
+            app.call('dispute')
           }
         } else {
           alert("You don't have enough global balance. You need at least " + fee)
@@ -246,7 +252,7 @@ FS.onready(() => {
         auth_code: localStorage.auth_code,
 
         asset: 'FSD',
-        hub: 'eu',
+        hub: 0,
 
         whitepaper: wp,
 
@@ -257,7 +263,7 @@ FS.onready(() => {
         pw: '',
         username: '',
 
-        channels: {},
+        channels: [],
 
         record: false,
 
@@ -281,6 +287,9 @@ FS.onready(() => {
         pay_invoice: ''
 
       }
+    },
+    computed: {
+      ch: ()=>{ return app.channels[app.hub] }
     },
     methods: methods,
     template: `
@@ -429,47 +438,23 @@ FS.onready(() => {
 
       <template v-if="pubkey">
 
-        <div class="float-right"><select v-model="asset" class="custom-select custom-select-lg mb-3">
-          <option disabled>Select current asset</option>
-          <option v-for="(a,index) in K.assets" :value="a.ticker">{{a.name}}</option>
-        </select></div>
+        <div v-if="is_hub">
+          <h1>This node is a hub.</h1>
+        </div>
 
         <div class="float-right"><select v-model="hub" class="custom-select custom-select-lg mb-3">
           <option disabled>Select current hub</option>
-          <option v-for="(a,index) in K.members.filter(m=>!!m.hub)" :value="a.hub.handle">{{a.hub.name}}</option>
+          <option v-for="(a,index) in channels" :value="index">{{a.member.hub.name}}</option>
         </select> </div>
 
+        <div>
+          <p>To start sending and receiving digital assets in Failsafe you need to add hubs and define trust limits:</p>
+          <p> <input type="text" v-model="ch.d.we_hard_limit"> </p>
 
-
-
-        <div v-if="is_hub">
-          <h1>This node is a hub.</h1>
-
-          <p>Plotting risk of uninsured balances we promised over time:</p>
-              <canvas width="100%" id="riskcanvas"></canvas>
-        </div>
-        <div v-else>
-            
           <h1 style="display:inline-block">{{commy(ch.payable)}}</h1>
-
-          <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.rdelta > 0 ? "+ "+commy(ch.rdelta)+" uninsured" : "- "+commy(-ch.rdelta)+" spent"}}</small> 
+          <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.delta > 0 ? "+ "+commy(ch.delta)+" uninsured" : "- "+commy(-ch.delta)+" spent"}}</small> 
           
-          <p><div v-if="ch.payable>0 || ch.insurance > 0">
-
-            <div class="progress" style="max-width:1400px">
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-                {{commy(ch.insured)}} (insured)
-              </div>
-              <div v-if="ch.rdelta<0" v-bind:style="{ width: Math.round(-ch.rdelta*100/ch.payable)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
-                {{commy(ch.rdelta)}} (spent)
-              </div>
-              <div v-if="ch.rdelta>0" v-bind:style="{ width: Math.round(ch.rdelta*100/ch.payable)+'%', 'background-color':'#dc3545'}"   class="progress-bar"  role="progressbar">
-                +{{commy(ch.rdelta)}} (uninsured)
-              </div>
-            </div>
-
-
-          </div></p>
+          
 
 
           <div class="row">
@@ -479,9 +464,9 @@ FS.onready(() => {
                 <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
               </div></p>
 
-              <p>Receivable: {{commy(ch.receivable)}}</p>
+              <p>Receivable: {{commy(ch.they_payable)}}</p>
 
-              <p><button type="button" class="btn btn-success" @click="call('invoice', {amount: uncommy(off_amount)})">→ Request</button></p>
+              <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, hub: hub, amount: uncommy(off_amount)})">→ Request</button></p>
 
               <p><div v-show="new_invoice.length > 0" class="input-group" style="width:400px">
                 <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
@@ -495,7 +480,7 @@ FS.onready(() => {
 
               <p>Payable: {{commy(ch.payable)}}</p>
 
-              <p><button type="button" class="btn btn-success" @click="call('send', unpackInvoice()); pay_invoice='';">Pay Now → </button></p>
+              <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {asset: asset, hub: hub}) ); pay_invoice='';">Pay Now → </button></p>
 
               <div v-if="pay_invoice.length > 0">
                 <p>Amount: {{commy(unpackInvoice().amount)}}</p>
@@ -510,14 +495,13 @@ FS.onready(() => {
 
 
           <div class="alert alert-light" role="alert">
-          If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a global dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is still operating and not compromised.
+          If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is active.
           </div>
 
 
-          <p><button class="btn btn-success" @click="call('faucet')">Testnet Faucet</button></p>
+          <p><button class="btn btn-success" @click="call('faucet', { asset: asset, hub: hub })">Testnet Faucet</button></p>
 
 
-          <canvas width="100%" id="riskcanvas"></canvas>
 
           <table v-if="history.length > 0" class="table">
             <thead>
@@ -535,12 +519,15 @@ FS.onready(() => {
                 <td>{{commy(h.amount)}}</td>
                 <td v-if="h.balance>0">{{commy(h.balance)}}</td>
               </tr>
+
+              <tr><a href="">Show Next</a></tr>
             </tbody>
           </table>
-   
+        </div>
 
-      </div>
 
+
+        <canvas width="100%" id="riskcanvas"></canvas>
 
       </template>
 
@@ -575,7 +562,7 @@ FS.onready(() => {
 
       </div>
 
-      <p>Global ID: <b>\${{commy(record.id)}}</b></p>
+      <p>Global ID: <b>{{record.id}}</b></p>
       <p>Global Balance: <b>\${{commy(record.balance)}}</b></p>
 
       <small>Currently there's only one hub <b>@1</b>. So to deposit to someone's channel with hub use their_ID@1</small>
@@ -688,15 +675,15 @@ FS.onready(() => {
           <tbody>
           
             <tr v-for="d in deltas">
-              <th v-html="icon(toHexString(d.delta_record.userId.data),30)"></th>
-              <th scope="row"><small>{{toHexString(d.delta_record.userId.data).substr(0,10)}}...</small></th>
+              <th v-html="icon(toHexString(d.d.userId.data),30)"></th>
+              <th scope="row"><small>{{toHexString(d.d.userId.data).substr(0,10)}}...</small></th>
 
-              <td>{{d.nonce}}/{{d.delta_record.nonce}}</td>
+              <td>{{d.nonce}}/{{d.d.nonce}}</td>
               <td>{{commy(d.insurance)}}</td>
 
-              <td v-bind:style="{'background-color': deltaColor(d.rdelta) }">{{commy(d.rdelta)}}</td>
+              <td v-bind:style="{'background-color': deltaColor(d.delta) }">{{commy(d.delta)}}</td>
 
-              <td>{{commy(d.receivable)}}</td>
+              <td>{{commy(d.they_payable)}}</td>
 
             </tr>
 
@@ -734,7 +721,7 @@ FS.onready(() => {
             <td>{{u.nonce}}</td>
             
             <td>{{commy(u.hub[0] ? u.hub[0].insurance.insurance : 0)}}</td>
-            <td>{{commy(u.hub[0] ? u.hub[0].insurance.rebalanced : 0)}}</td>
+            <td>{{commy(u.hub[0] ? u.hub[0].insurance.ondelta : 0)}}</td>
 
           </tr>
 
@@ -752,8 +739,30 @@ FS.onready(() => {
   })
 })
 
-/*
 
-<p id="decentText"></p>
-<canvas id="decentChart"></canvas>
-*/
+
+// delayed features:
+
+/*
+<div class="float-right"><select v-model="asset" class="custom-select custom-select-lg mb-3">
+  <option disabled>Select current asset</option>
+  <option v-for="(a,index) in K.assets" :value="a.ticker">{{a.name}}</option>
+</select></div>
+
+
+
+
+
+<p><div v-if="ch.payable>0 || ch.insurance > 0">
+  <div class="progress" style="max-width:1400px">
+    <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+      {{commy(ch.insured)}} (insured)
+    </div>
+    <div v-if="ch.delta<0" v-bind:style="{ width: Math.round(-ch.delta*100/ch.payable)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
+      {{commy(ch.delta)}} (spent)
+    </div>
+    <div v-if="ch.delta>0" v-bind:style="{ width: Math.round(ch.delta*100/ch.payable)+'%', 'background-color':'#dc3545'}"   class="progress-bar"  role="progressbar">
+      +{{commy(ch.delta)}} (uninsured)
+    </div>
+  </div>
+</div></p>*/

@@ -13,7 +13,7 @@ class Me {
 
     this.seed = seed
     this.id = nacl.sign.keyPair.fromSeed(this.seed)
-    this.id.publicKey = bin(this.id.publicKey)
+    this.pubkey = bin(this.id.publicKey)
 
     this.mempool = []
     this.status = 'await'
@@ -50,11 +50,14 @@ class Me {
   }
 
   async byKey (pk) {
-    if (!pk && this.id) {
-      pk = this.id.publicKey
-    } else {
-      return false
+    if (!pk) {
+      if (this.id) {
+        pk = this.id.publicKey
+      } else {
+        return false
+      }
     }
+    
     return await User.findOne({
       where: { pubkey: bin(pk) }
     })
@@ -82,21 +85,13 @@ class Me {
     // flush it
     me.mempool = []
 
-    var block_number = K.total_blocks
-    block_number++
-
-    var prev_hash = K.prev_hash
-    // block has current height, hash of prev block , ts()
-
     me.precommit = r([
-      block_number,
       methodMap('block'),
-      Buffer.from(prev_hash, 'hex'),
+      me.record.id,
+      Buffer.from(K.prev_hash, 'hex'),
       ts(),
       ordered_tx
     ])
-
-    d('Mempool result: ', ordered_tx.length)
 
     me.my_member.sig = ec(me.precommit, me.block_keypair.secretKey)
 
@@ -184,8 +179,6 @@ class Me {
 
 
   async start () {
-    await cache()
-
     // in json pubkeys are in hex
     this.record = await this.byKey()
 
@@ -196,14 +189,17 @@ class Me {
       }
     }
 
-    l('start caching')
-    me.intervals.push(setInterval(cache, 2000))
+    await cache()
+    this.intervals.push(setInterval(cache, 2000))
+
 
     if (this.my_member) {
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
       var member_server = cert ? require('https').createServer(cert, cb) : require('http').createServer(cb)
       member_server.listen(parseInt(this.my_member.location.split(':')[2]))
+
+      l("Bootstrapping local server at: "+this.my_member.location)
 
       me.wss = new ws.Server({
         server: member_server,
@@ -227,15 +223,18 @@ class Me {
       }
 
       if (this.is_hub) {
-        me.intervals.push(setInterval(require('./hub'), K.blocktime * 2000))
+        //me.intervals.push(setInterval(require('./hub'), K.blocktime * 2000))
       }
+
     } else {
       // keep connection to hub open
-      this.send(K.members[0], 'auth', this.envelope( methodMap('auth') ))
+      this.send(Members[0], 'auth', this.envelope( methodMap('auth') ))
 
-      l('Set up sync')
-      me.intervals.push(setInterval(sync, K.blocktime * 1000))
     }
+
+    l('Set up sync')
+    me.intervals.push(setInterval(sync, 3000))
+
   }
 
   async addHistory (amount, desc, checkpoint=false) {
@@ -249,7 +248,7 @@ class Me {
     if (checkpoint) {
       // add current balances
       var c = await me.channel(Members[0].pubkey)
-      attrs.rdelta = c.rdelta
+      attrs.delta = c.delta
       attrs.balance = c.payable
     }
 
@@ -280,8 +279,8 @@ class Me {
   async payChannel (opts) {
     var ch = await me.channel(opts.partner)
 
-    if (ch.delta_record.status != 'ready') {
-      return [false, 'The channel is not ready to accept payments: ' + ch.delta_record.status]
+    if (ch.d.status != 'ready') {
+      return [false, 'The channel is not ready to accept payments: ' + ch.d.status]
     }
 
     if (opts.amount < K.min_amount || opts.amount > K.max_amount) {
@@ -294,16 +293,15 @@ class Me {
     }
 
 
-    if (opts.mediate_to == bin(me.id.publicKey))  {
+    if (me.pubkey.equals(opts.mediate_to))  {
       return [false, 'Cannot pay to your own account']
     }
 
-    ch.delta_record.delta += (me.is_hub ? opts.amount : -opts.amount)
+    ch.d.offdelta += ch.left ? -opts.amount : opts.amount
+    ch.d.nonce++
 
-    ch.delta_record.nonce++
 
-
-    var newState = ch.delta_record.getState()
+    var newState = ch.d.getState()
 
     var body = r([
       methodMap('update'),
@@ -316,17 +314,17 @@ class Me {
     ])
 
     var signedState = r([
-      bin(me.id.publicKey), 
+      me.pubkey, 
       ec(body, me.id.secretKey),
       body
     ])
     
-    ch.delta_record.status = 'await'
+    ch.d.status = 'await'
     
-    await ch.delta_record.save()
+    await ch.d.save()
 
-    // todo: ensure delivery
     if (me.is_hub) {
+      l('todo: ensure delivery')
 
     } else {
       await me.addHistory(-opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '...', true)
@@ -342,100 +340,120 @@ class Me {
     return [true, false]
   }
   
+  async channels () {
+    var channels = []
+
+    for (var m of Members) {
+      if (m.hub && (!me.record || me.record.id != m.id)) {
+
+        var ch = await me.channel(m.pubkey)
+        channels.push(ch)
+      }
+    }
+
+    return channels
+  }
 
   // accepts pubkey only
   async channel (partner) {
-    var otherHub = Members.find(m => m.hub && m.pubkey.equals(partner))
-
-    // if both parties are hubs, lower id is acting as hub
-    var is_hub = (me.is_hub && otherHub) ? (me.my_member.id < otherHub.id) : me.is_hub
-    
+    var compared = Buffer.compare(me.pubkey, partner)
+    if (compared == 0) return false
 
     var r = {
       // default insurance
       insurance: 0,
-      rebalanced: 0,
+      ondelta: 0,
       nonce: 0,
+      left: compared == -1
     }
+
+    r.member = Members.find(m=>m.pubkey.equals(partner))
 
     me.record = await me.byKey()
 
-    var delta = await Delta.findOrBuild({
-      where: is_hub ? {
-        hubId: me.record.id,
-        userId: partner
-      } : {
-        hubId: otherHub.id,
-        userId: bin(me.id.publicKey)
+    r.d = (await Delta.findOrBuild({
+      where: {
+        myId: me.pubkey,
+        partnerId: partner
       },
       defaults: {
-        delta: 0,
+        offdelta: 0,
         instant_until: 0,
         
         our_input_amount: 0,
         their_input_amount: 0,
 
+        we_hard_limit: 0,
+        they_hard_limit: 0,
+
         nonce: 0,
         status: 'ready',
         state: '{"locks":[]}'
       }
-    })
+    }))[0]
 
 
-    if (is_hub) {
+    if (me.record) {
       var user = await me.byKey(partner)
+  
       if (user) {
+        r.partner = user.id
+
         var insurance = await Insurance.find({where: {
-          userId: user.id,
-          hubId: me.record.id
+          leftId: r.left ? me.record.id : user.id,
+          rightId: r.left ? user.id : me.record.id
         }})
       }
-    } else if (me.record) {
-      var insurance = await Insurance.find({where: {
-        userId: me.record.id,
-        hubId: otherHub.id
-      }})
     }
 
     if (insurance) {
       r.insurance = insurance.insurance
-      r.rebalanced = insurance.rebalanced
+      r.ondelta = insurance.ondelta
       r.nonce = insurance.nonce
 
-      r.userId = insurance.userId
     }
 
-    r.delta_record = delta[0]
+    //r.d.state = JSON.parse(r.d.state)
 
-    //r.delta_record.state = JSON.parse(r.delta_record.state)
+    r.delta = r.ondelta + r.d.offdelta
+    r.state = parse(r.d.state)
 
-    r.rdelta = r.rebalanced + r.delta_record.delta
-    r.state = parse(r.delta_record.state)
 
-    r.receivable = K.hard_limit - r.rdelta
-    r.payable = r.insurance + r.rdelta
-    
-    if (r.rdelta >= 0) {
+    r.promised = 0
+    r.they_promised = 0
+
+    // three scenarios
+
+    if (r.delta >= 0) {
       r.insured = r.insurance 
-    } else if (-r.rdelta < r.insurance) {
-      r.insured = r.insurance + r.rdelta
-    } else {
+      r.they_insured = 0
+
+      r.they_promised = r.delta
+    } else if (r.delta >= -r.insurance) {
       r.insured = 0
+      r.they_insured = r.insurance
+
+      r.promised = -(r.insurance + r.delta)
+    } else {
+      r.insured = r.insurance + r.delta
+      r.they_insured = -r.delta
     }
 
-    r.uninsured = r.payable - r.insured
+
 
     // view from hub's side of channel
-    if (is_hub) {
-      [r.receivable, r.payable] = [r.payable, r.receivable]
-      r.insured = r.insurance - r.insured
-
-      r.uninsured -= K.hard_limit
+    if (!r.left) {
+      [r.insured, r.they_insured] = [r.they_insured, r.insured]
+      [r.promised, r.they_promised] = [r.they_promised, r.promised]
     }
 
+    r.payable = (r.insured - r.d.our_input_amount) + r.they_promised + 
+    (r.d.they_hard_limit - r.promised)
+
+    r.they_payable = (r.they_insured - r.d.they_input_amount) + r.promised + 
+    (r.d.we_hard_limit - r.they_promised)
+
     // inputs not in blockchain yet, so we hold them temporarily
-    r.receivable -= r.delta_record.their_input_amount
-    r.payable -= r.delta_record.our_input_amount
 
     return r
   }
@@ -463,36 +481,32 @@ class Me {
       return false
     }
 
-    var [block_number,
-      methodId,
+    var [methodId,
+      built_by,
       prev_hash,
       timestamp,
       ordered_tx] = r(finalblock)
 
-    block_number = readInt(block_number)
     timestamp = readInt(timestamp)
-    prev_hash = prev_hash.toString('hex')
 
     if (readInt(methodId) != methodMap('block')) {
       return l('Wrong method for block')
     }
 
     if (finalblock.length > K.blocksize) {
-      return l('Invalid block')
+      return l('Too long block')
     }
 
     if (timestamp < K.ts) {
-      l('New block from the past')
-      return false
+      return l('New block from the past')
     }
-    //, 
 
-    if (K.prev_hash != prev_hash) {
-      l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
+    if (K.prev_hash != prev_hash.toString('hex')) {
+      //l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
       return false
     }
 
-    d(`Processing ${block_number}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
+    l(`Processing block built by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
 
     var meta = {
       inputs_volume: 0,
@@ -520,6 +534,8 @@ class Me {
     // every x blocks create new installer
     if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
       K.bytes_since_last_snapshot = 0
+
+      var old_snapshot = K.last_snapshot_height
       K.last_snapshot_height = K.total_blocks
     } else {
 
@@ -538,10 +554,10 @@ class Me {
     for (let dispute of disputes) {
       l(dispute)
 
-      var rdelta = dispute.rebalanced + dispute.dispute_delta
+      var delta = dispute.ondelta + dispute.dispute_delta
 
-      if (rdelta < 0) {
-        var user_gets = dispute.insurance + rdelta
+      if (delta < 0) {
+        var user_gets = dispute.insurance + delta
         var hub_gets = dispute.insurance - user_gets
       } else {
         var user_gets = dispute.insurance
@@ -601,11 +617,61 @@ class Me {
     }
 
     // block processing is over, saving current K
-
     fs.writeFileSync('data/k.json', stringify(K))
 
     if (K.bytes_since_last_snapshot == 0) {
-      trustlessInstall()
+      var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
+
+      require('tar').c({
+        gzip: true,
+        sync: false,
+        portable: true,
+        noMtime: true,
+        file: 'private/' + filename,
+        filter: (path, stat) => {
+          // must be deterministic
+          /*
+    ./simulate Stats {
+      dev: 16777220,
+      mode: 33261,
+      nlink: 1,
+      uid: 501,
+      gid: 20,
+      rdev: 0,
+      blksize: 4194304,
+      ino: 4299243413,
+      size: 552,
+      blocks: 8,
+      atimeMs: 1518891958539.4458,
+      mtimeMs: 1518889328083.1042,
+      ctimeMs: 1518889328083.1042,
+      birthtimeMs: 1514479589775.199,
+      atime: 2018-02-17T18:25:58.539Z,
+      mtime: null,
+      ctime: 2018-02-17T17:42:08.083Z,
+      birthtime: 2017-12-28T16:46:29.775Z }
+      33279 mode
+          */
+
+          stat.mtime = null 
+          stat.atime = null 
+          stat.ctime = null 
+          stat.birthtime = null 
+
+          // skip /private (blocks sqlite, proofs, local config)
+          // tests, and all hidden/dotfiles
+          if (path.startsWith('./.') || path.match(/(DS_Store|private|node_modules|test)/)) {
+            return false
+          } else {
+            return true
+          }
+        }
+      }, ['.'], _ => {
+        fs.unlink('private/Failsafe-' + old_snapshot + '.tar.gz', ()=>{
+          l('Removed old snapshot and created '+filename)
+        })
+      })
+
     }
 
     // save final block in blockchain db and broadcast
@@ -616,11 +682,15 @@ class Me {
         block: block
       })
 
+      
       var blocktx = concat(inputMap('chain'), r([block]))
       // send finalblock to all websocket users if we're member
+      
       if (me.wss) {
         me.wss.clients.forEach(client => client.send(blocktx))
       }
+      
+
     }
 
     if (me.request_reload) {
@@ -650,7 +720,7 @@ class Me {
     } 
 
     // member object
-    l(`Invoking ${method} in member ${m.id}`)
+    //l(`Invoking ${method} in member ${m.id}`)
 
     if (me.users[m.pubkey]) {
       me.users[m.pubkey].send(tx)

@@ -40,11 +40,15 @@ module.exports = async (ws, msg) => {
 
         break
 
-      case 'takeEverything':
+      case 'dispute':
 
         var ch = await me.channel(Members[0].pubkey)
-        // post last available signed delta
-        await me.broadcast('rebalanceUser', r([ 0, [ch.delta_record.sig ? ch.delta_record.sig : 1], [] ]))
+
+        // post last sig if any
+        var dispute = ch.d.sig ? [Members[0].pubkey, ch.d.sig, ch.d.getState()] : [Members[0].pubkey] 
+
+        await me.broadcast('dispute', r( dispute ))
+        
         result.confirm = 'Started a dispute onchain. Please wait a delay period to get your money back.'
         break
 
@@ -65,6 +69,7 @@ module.exports = async (ws, msg) => {
             break
           }
         }
+
 
         var partner = Members[0].pubkey
         l("Choosing partner ",partner)
@@ -145,14 +150,14 @@ module.exports = async (ws, msg) => {
 
         break
       case 'faucet':
-        me.send(K.members[0], 'faucet', bin(me.id.publicKey))
+        me.send(Members[0], 'faucet', me.pubkey)
         result.confirm = 'Faucet triggered. Check your wallet!'
 
         break
 
 
 
-
+      // creates and checks status of invoice
       case 'invoice':
         if (p.invoice) {
           // deep clone
@@ -180,7 +185,7 @@ module.exports = async (ws, msg) => {
 
           result.new_invoice = [
             invoices[invoice].amount, 
-            me.record ? me.record.id : toHex(me.id.publicKey),
+            me.record ? me.record.id : toHex(me.pubkey),
             hubId,
             invoice].join('_')
 

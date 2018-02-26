@@ -17,7 +17,7 @@ module.exports = async (ws, msg) => {
 
   msg = msg.slice(1)
 
-  l('New input: ' + inputType)
+  //l('New input: ' + inputType)
 
   // some socket is authenticating their pubkey 
   if (inputType == 'auth') {
@@ -68,7 +68,7 @@ module.exports = async (ws, msg) => {
 
     // ensure the block is non repeating
     if (m && ec.verify(block, sig, pubkey)) {
-      l(`${m.id} asks us to sign their block!`)
+      //l(`${m.id} asks us to sign their block!`)
 
       me.send(m, 'signed', r([
           me.my_member.block_pubkey,
@@ -137,7 +137,7 @@ module.exports = async (ws, msg) => {
 
       ws.send(concat(inputMap('chain'), r(blockmap)))
     } else {
-      l("No blocks to sync after " + msg.toString('hex'))
+      //l("No blocks to sync after " + msg.toString('hex'))
     }
 
 
@@ -153,15 +153,15 @@ module.exports = async (ws, msg) => {
 
     var input = r([methodMap('withdrawal'), 
       ch.userId,
-      ch.delta_record.hubId, 
+      ch.d.hubId, 
       ch.nonce, 
       ch.insured])
 
     if (input.equals(body)) {
       l("Equal! save")
-      ch.delta_record.our_input_amount = ch.insured
-      ch.delta_record.our_input_sig = sig
-      await ch.delta_record.save()
+      ch.d.our_input_amount = ch.insured
+      ch.d.our_input_sig = sig
+      await ch.d.save()
     }
 
   } else if (inputType == 'requestWithdraw') {
@@ -173,7 +173,7 @@ module.exports = async (ws, msg) => {
 
     var amount = readInt(r(body)[0])
 
-    if (ch.delta_record.their_input_amount > 0) {
+    if (ch.d.their_input_amount > 0) {
       l("Peer already has withdrawal from us")
       return false
     }
@@ -186,12 +186,12 @@ module.exports = async (ws, msg) => {
     
     var input = me.envelope(methodMap('withdrawal'), 
       ch.userId,
-      ch.delta_record.hubId, 
+      ch.d.hubId, 
       ch.nonce, 
       amount)
 
-    ch.delta_record.their_input_amount = amount
-    await ch.delta_record.save()
+    ch.d.their_input_amount = amount
+    await ch.d.save()
 
 
     me.send(pubkey, 'withdrawal', input)
@@ -203,12 +203,12 @@ module.exports = async (ws, msg) => {
 
     var [secret, sig]= r(body)
 
-    if (!ec.verify(ch.delta_record.getState(), sig, pubkey)) return false
+    if (!ec.verify(ch.d.getState(), sig, pubkey)) return false
 
-    ch.delta_record.sig = sig
-    ch.delta_record.status = 'ready'
+    ch.d.sig = sig
+    ch.d.status = 'ready'
 
-    await ch.delta_record.save()
+    await ch.d.save()
 
     var invoice = toHex(sha3(secret))
 
@@ -222,7 +222,7 @@ module.exports = async (ws, msg) => {
     } else {
       var return_ch = await me.channel(return_to)
       me.send(return_to, 'ack', me.envelope(
-        secret, ec(return_ch.delta_record.getState(), me.id.secretKey)
+        secret, ec(return_ch.d.getState(), me.id.secretKey)
       ))
     }
 
@@ -252,34 +252,38 @@ module.exports = async (ws, msg) => {
         return false
       }
 
-      if (amount > ch.receivable) {
-        l("Channel is depleted") 
+      if (amount > ch.they_payable) {
+        l("Channel is depleted for "+amount, ch) 
         return false
       }
 
-      if (ch.delta_record.status != 'ready') {
+      if (ch.d.status != 'ready') {
         l("Channel is not ready") 
         return false
       }
 
 
-      ch.delta_record.delta -= me.is_hub ? amount : -amount
-      ch.delta_record.nonce++
+      ch.d.offdelta += ch.left ? amount : -amount
+      ch.d.nonce++
 
-      var resultState = ch.delta_record.getState()
+      var resultState = ch.d.getState()
 
-      if (!resultState.equals(newState)) l("State mismatch ", resultState, newState)
+      if (!resultState.equals(newState)) {
+        return l("State mismatch ", resultState, newState)
+      }
 
       if (ec.verify(resultState, stateSig, pubkey)) {
-        ch.delta_record.sig = stateSig 
+        ch.d.sig = stateSig 
 
 
         //l('return ACK')
 
         if (me.is_hub) {
-          //me.send(pubkey, 'ack', ec(ch.delta_record.getState(), me.id.secretKey))
+          // forward to peer or other hub
+          
+          //me.send(pubkey, 'ack', ec(ch.d.getState(), me.id.secretKey))
 
-          await ch.delta_record.save()
+          await ch.d.save()
 
           await me.payChannel({
             partner: mediate_to,
@@ -289,7 +293,7 @@ module.exports = async (ws, msg) => {
             invoice: invoice
           })          
         } else {
-          await ch.delta_record.save()
+          await ch.d.save()
 
           l('looking for ', invoice)
 
@@ -309,8 +313,8 @@ module.exports = async (ws, msg) => {
           }
 
           l("Acking back to ", pubkey)
-          me.send(K.members[0], 'ack', me.envelope(
-            paid_invoice ? paid_invoice.secret : 0, ec(ch.delta_record.getState(), me.id.secretKey)
+          me.send(Members[0], 'ack', me.envelope(
+            paid_invoice ? paid_invoice.secret : 0, ec(ch.d.getState(), me.id.secretKey)
           ))
 
           await me.addHistory(amount, 'Received', true)

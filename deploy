@@ -10,7 +10,9 @@ mkdir data
 mkdir private
 ./install
 
-node fs --genesis=wss://failsafe.network:8000
+node fs --genesis=main
+
+forever stopall
 forever start fs.js -p8000
 
 ENDSSH

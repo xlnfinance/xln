@@ -61,7 +61,7 @@ require('http').createServer((req, res) => {
       id = rand()
       cookies.set('id', id)
     }
-    if (!users[id]) users[id] = 0
+    if (!users[id]) users[id] = Math.round(Math.random()*1000000)
 
       require('serve-static')('../wallet')(req, res, require('finalhandler')(req, res))
 
@@ -80,11 +80,8 @@ require('http').createServer((req, res) => {
     <main role="main" class="container">
       <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
 
-      <p>Your ID at our bank: ${id}</p>
+      <p>Your ID at the bank: ${id}</p>
       <p>Available Balance: <b>\$${commy(users[id])}</b></p>
-      <p>You're logged in as random user and your balance is simply stored in app's memory.</p>
-
-
      
       <h3>Deposit</h3>
       <p class="form-label-group">

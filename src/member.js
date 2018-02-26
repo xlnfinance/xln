@@ -40,9 +40,8 @@ module.exports = () => {
 
     if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - 10)) {
       if (total_shares < K.majority) {
-        d(`Only have ${total_shares} shares, cannot build a block!`)
+        l(`Only have ${total_shares} shares, cannot build a block!`)
       } else {
-        d('Lets process the finalblock we just built')
 
         me.processBlock(concat(
             Buffer.concat(sigs),

@@ -62,6 +62,25 @@ module.exports = {
       // don't forget BREAK
       // we use fall-through for methods covered by same code
 
+      case 'dispute':
+        var [pubkey, sig, body] = args
+
+        var ch = await Insurance.findOrBuild({
+          where: {
+            userId: user.id,
+            hubId: 1
+          },
+          defaults: {
+            nonce: 0,
+            insurance: 0,
+            ondelta: 0
+          },
+          include: { all: true }
+        })
+
+
+      break
+
       case 'rebalanceHub':
       case 'rebalanceUser':
         // 1. collect all ins insurance
@@ -80,8 +99,6 @@ module.exports = {
             where: is_hub ? {userId: userId, hubId: signer.id} : {userId: signer.id, hubId: userId},
             include: {all: true}
           })
-
-          l("Found insurance: ", ins)
 
           var body = r([methodMap('withdrawal'),
             ins.userId,
@@ -105,7 +122,7 @@ module.exports = {
 
           ins.insurance -= amount
           signer.balance += amount
-          if (is_hub) ins.rebalanced += amount
+          if (is_hub) ins.ondelta += amount
 
           ins.nonce++
 
@@ -117,20 +134,18 @@ module.exports = {
             if (me.record.id == userId) {
               var ch = await me.channel(signer.pubkey)
               // they planned to withdraw and they did. Nullify hold amount
-              ch.delta_record.their_input_amount = 0
-              await ch.delta_record.save()
+              ch.d.their_input_amount = 0
+              await ch.d.save()
             }
 
             if (me.record.id == signer.id) {
               var ch = await me.channel(partner.pubkey)
               // they planned to withdraw and they did. Nullify hold amount
-              ch.delta_record.our_input_amount = 0
-              ch.delta_record.our_input_sig = null
-              await ch.delta_record.save()         
+              ch.d.our_input_amount = 0
+              ch.d.our_input_sig = null
+              await ch.d.save()         
             }
           }
-
-
 
         }
 
@@ -168,7 +183,7 @@ module.exports = {
             var user = await User.findById(readInt(userId))
           }
 
-          var is_me = me.id && me.id.publicKey.equals(user.pubkey)
+          var is_me = me.id && me.pubkey.equals(user.pubkey)
 
 
           if (user.id) {
@@ -220,7 +235,7 @@ module.exports = {
               defaults: {
                 nonce: 0,
                 insurance: 0,
-                rebalanced: 0
+                ondelta: 0
               },
               include: { all: true }
             })
@@ -231,7 +246,7 @@ module.exports = {
               ch[0].insurance -= reimburse_tax
               reimbursed += reimburse_tax
 
-              ch[0].rebalanced -= originalAmount
+              ch[0].ondelta -= originalAmount
 
             }
             signer.balance -= amount
@@ -289,7 +304,7 @@ module.exports = {
       defaults: {
         nonce: 0,
         insurance: 0,
-        rebalanced: 0
+        ondelta: 0
       },
       include: { all: true }
     }))[0]
