@@ -2,17 +2,16 @@
 
 module.exports = async (ws, msg) => {
   var result = {}
- 
+
   var json = parse(bin(msg).toString())
 
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
 
   if (json.auth_code == PK.auth_code) {
-
     if (ws.send) {
       // browser session
-      me.browser = ws     
+      me.browser = ws
     }
 
     var p = json.params
@@ -36,6 +35,16 @@ module.exports = async (ws, msg) => {
       case 'logout':
         me.id = null
         me.intervals.map(clearInterval)
+
+        if (me.member_server) {
+          me.member_server.close()
+          me.wss.clients.forEach(c=>c.close())
+          //Object.keys(me.users).forEach( c=>me.users[c].end() )
+        }
+
+        server.close()
+sockets.forEach( (s) => s.end() )
+
         result.pubkey = null
 
         break
@@ -45,10 +54,10 @@ module.exports = async (ws, msg) => {
         var ch = await me.channel(Members[0].pubkey)
 
         // post last sig if any
-        var dispute = ch.d.sig ? [Members[0].pubkey, ch.d.sig, ch.d.getState()] : [Members[0].pubkey] 
+        var dispute = ch.d.sig ? [Members[0].pubkey, ch.d.sig, ch.d.getState()] : [Members[0].pubkey]
 
-        await me.broadcast('dispute', r( dispute ))
-        
+        await me.broadcast('dispute', r(dispute))
+
         result.confirm = 'Started a dispute onchain. Please wait a delay period to get your money back.'
         break
 
@@ -70,19 +79,19 @@ module.exports = async (ws, msg) => {
           }
         }
 
-
-        var partner = Members[0].pubkey
-        l("Choosing partner ",partner)
-
+        var partner = Members.find(m => m.id == p.partner).pubkey
+        l('Choosing partner ', partner)
 
         var [status, error] = await me.payChannel({
           partner: partner,
-          amount: amount, 
+          amount: amount,
           execution: p.execution,
 
           mediate_to: mediate_to,
-          return_to: (obj)=>{
-            l("Returning now")
+          mediate_hub: parseInt(p.hubId),
+
+          return_to: (obj) => {
+            l('Returning now')
             ws.send ? ws.send(JSON.stringify({
               result: obj,
               id: json.id
@@ -150,12 +159,27 @@ module.exports = async (ws, msg) => {
 
         break
       case 'faucet':
-        me.send(Members[0], 'faucet', me.pubkey)
+        me.send(Members.find(m => m.id == p.partner), 'faucet', me.pubkey)
         result.confirm = 'Faucet triggered. Check your wallet!'
 
         break
 
+      case 'setLimits':
+        var m = Members.find(m => m.id == p.partner)
 
+        var ch = await me.channel(m.pubkey)
+
+        ch.d.we_soft_limit = parseInt(p.limits[0]) * 100
+        ch.d.we_hard_limit = parseInt(p.limits[1]) * 100
+        await ch.d.save()
+
+        me.send(m, 'setLimits', me.envelope(
+            methodMap('setLimits'), ch.d.we_soft_limit, ch.d.we_hard_limit
+        ))
+
+        result.confirm = 'The hub has been notified about new credit limits'
+
+        break
 
       // creates and checks status of invoice
       case 'invoice':
@@ -164,11 +188,10 @@ module.exports = async (ws, msg) => {
           var result = Object.assign({}, invoices[p.invoice])
 
           // prevent race condition attack
-          if (invoices[p.invoice].status == 'paid') { 
-            invoices[p.invoice].status = 'archive' 
+          if (invoices[p.invoice].status == 'paid') {
+            invoices[p.invoice].status = 'archive'
           }
         } else if (p.amount) {
-
           var secret = crypto.randomBytes(32)
           var invoice = toHex(sha3(secret))
 
@@ -181,19 +204,15 @@ module.exports = async (ws, msg) => {
 
           me.record = await me.byKey()
 
-          var hubId = 1
-
           result.new_invoice = [
-            invoices[invoice].amount, 
+            invoices[invoice].amount,
             me.record ? me.record.id : toHex(me.pubkey),
-            hubId,
+            p.partner,
             invoice].join('_')
 
           result.confirm = 'Invoice Created'
-        
         }
-      break
-
+        break
 
       case 'propose':
         result.confirm = await me.broadcast('propose', p)
@@ -209,14 +228,13 @@ module.exports = async (ws, msg) => {
         result.token = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
         break
     }
-    
+
     // is HTTP response or websocket?
     if (ws.end) {
       ws.end(JSON.stringify(result))
     } else {
       react(result, json.id)
     }
-
   } else {
     ws.send(JSON.stringify({
       result: Object.assign(result, cached_result),

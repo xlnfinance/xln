@@ -69,12 +69,12 @@
           a = parseFloat(match[4])
         } else if (match = string.match(keyword)) {
           if (match[1] == 'transparent') {
-          return [0, 0, 0, 0]
-        }
+            return [0, 0, 0, 0]
+          }
           rgb = colorNames[match[1]]
           if (!rgb) {
-          return
-        }
+            return
+          }
         }
 
         for (var i = 0; i < rgb.length; i++) {
@@ -270,12 +270,12 @@
           } else if (vals.v !== undefined || vals.value !== undefined) {
             this.setValues('hsv', vals)
           } else if (vals.w !== undefined || vals.whiteness !== undefined) {
-          this.setValues('hwb', vals)
-        } else if (vals.c !== undefined || vals.cyan !== undefined) {
-        this.setValues('cmyk', vals)
-      } else {
-        throw new Error('Unable to parse color from object ' + JSON.stringify(obj))
-      }
+            this.setValues('hwb', vals)
+          } else if (vals.c !== undefined || vals.cyan !== undefined) {
+            this.setValues('cmyk', vals)
+          } else {
+            throw new Error('Unable to parse color from object ' + JSON.stringify(obj))
+          }
         }
       }
 
@@ -1999,10 +1999,10 @@
                 if (dsMeta.bar && dsMeta.yAxisID === yScale.id && me.chart.isDatasetVisible(i)) {
                   var stackedVal = Number(ds.data[index])
                   if (stackedVal < 0) {
-                  sumNeg += stackedVal || 0
-                } else {
-                  sumPos += stackedVal || 0
-                }
+                    sumNeg += stackedVal || 0
+                  } else {
+                    sumPos += stackedVal || 0
+                  }
                 }
               }
 
@@ -2094,10 +2094,10 @@
 
                 if (tooltipItems.length > 0) {
                   if (tooltipItems[0].yLabel) {
-                  title = tooltipItems[0].yLabel
-                } else if (data.labels.length > 0 && tooltipItems[0].index < data.labels.length) {
-                title = data.labels[tooltipItems[0].index]
-              }
+                    title = tooltipItems[0].yLabel
+                  } else if (data.labels.length > 0 && tooltipItems[0].index < data.labels.length) {
+                    title = data.labels[tooltipItems[0].index]
+                  }
                 }
 
                 return title
@@ -2290,10 +2290,10 @@
                 if (dsMeta.bar && dsMeta.xAxisID === xScale.id && me.chart.isDatasetVisible(i)) {
                   var stackedVal = Number(ds.data[index])
                   if (stackedVal < 0) {
-                  sumNeg += stackedVal || 0
-                } else {
-                  sumPos += stackedVal || 0
-                }
+                    sumNeg += stackedVal || 0
+                  } else {
+                    sumPos += stackedVal || 0
+                  }
                 }
               }
 
@@ -2496,27 +2496,27 @@
                 var data = chart.data
                 if (data.labels.length && data.datasets.length) {
                   return data.labels.map(function (label, i) {
-                var meta = chart.getDatasetMeta(0)
-                var ds = data.datasets[0]
-                var arc = meta.data[i]
-                var custom = arc && arc.custom || {}
-                var getValueAtIndexOrDefault = helpers.getValueAtIndexOrDefault
-                var arcOpts = chart.options.elements.arc
-                var fill = custom.backgroundColor ? custom.backgroundColor : getValueAtIndexOrDefault(ds.backgroundColor, i, arcOpts.backgroundColor)
-                var stroke = custom.borderColor ? custom.borderColor : getValueAtIndexOrDefault(ds.borderColor, i, arcOpts.borderColor)
-                var bw = custom.borderWidth ? custom.borderWidth : getValueAtIndexOrDefault(ds.borderWidth, i, arcOpts.borderWidth)
+                    var meta = chart.getDatasetMeta(0)
+                    var ds = data.datasets[0]
+                    var arc = meta.data[i]
+                    var custom = arc && arc.custom || {}
+                    var getValueAtIndexOrDefault = helpers.getValueAtIndexOrDefault
+                    var arcOpts = chart.options.elements.arc
+                    var fill = custom.backgroundColor ? custom.backgroundColor : getValueAtIndexOrDefault(ds.backgroundColor, i, arcOpts.backgroundColor)
+                    var stroke = custom.borderColor ? custom.borderColor : getValueAtIndexOrDefault(ds.borderColor, i, arcOpts.borderColor)
+                    var bw = custom.borderWidth ? custom.borderWidth : getValueAtIndexOrDefault(ds.borderWidth, i, arcOpts.borderWidth)
 
-                return {
-                  text: label,
-                  fillStyle: fill,
-                  strokeStyle: stroke,
-                  lineWidth: bw,
-                  hidden: isNaN(ds.data[i]) || meta.data[i].hidden,
+                    return {
+                      text: label,
+                      fillStyle: fill,
+                      strokeStyle: stroke,
+                      lineWidth: bw,
+                      hidden: isNaN(ds.data[i]) || meta.data[i].hidden,
 
                 // Extra data used for toggling the correct item
-                  index: i
-                }
-              })
+                      index: i
+                    }
+                  })
                 }
                 return []
               }
@@ -2971,10 +2971,10 @@
                 if (dsMeta.type === 'line' && dsMeta.yAxisID === yScale.id && chart.isDatasetVisible(i)) {
                   var stackedRightValue = Number(yScale.getRightValue(ds.data[index]))
                   if (stackedRightValue < 0) {
-                sumNeg += stackedRightValue || 0
-              } else {
-                sumPos += stackedRightValue || 0
-              }
+                    sumNeg += stackedRightValue || 0
+                  } else {
+                    sumPos += stackedRightValue || 0
+                  }
                 }
               }
 
@@ -3143,27 +3143,27 @@
                 var data = chart.data
                 if (data.labels.length && data.datasets.length) {
                   return data.labels.map(function (label, i) {
-                var meta = chart.getDatasetMeta(0)
-                var ds = data.datasets[0]
-                var arc = meta.data[i]
-                var custom = arc.custom || {}
-                var getValueAtIndexOrDefault = helpers.getValueAtIndexOrDefault
-                var arcOpts = chart.options.elements.arc
-                var fill = custom.backgroundColor ? custom.backgroundColor : getValueAtIndexOrDefault(ds.backgroundColor, i, arcOpts.backgroundColor)
-                var stroke = custom.borderColor ? custom.borderColor : getValueAtIndexOrDefault(ds.borderColor, i, arcOpts.borderColor)
-                var bw = custom.borderWidth ? custom.borderWidth : getValueAtIndexOrDefault(ds.borderWidth, i, arcOpts.borderWidth)
+                    var meta = chart.getDatasetMeta(0)
+                    var ds = data.datasets[0]
+                    var arc = meta.data[i]
+                    var custom = arc.custom || {}
+                    var getValueAtIndexOrDefault = helpers.getValueAtIndexOrDefault
+                    var arcOpts = chart.options.elements.arc
+                    var fill = custom.backgroundColor ? custom.backgroundColor : getValueAtIndexOrDefault(ds.backgroundColor, i, arcOpts.backgroundColor)
+                    var stroke = custom.borderColor ? custom.borderColor : getValueAtIndexOrDefault(ds.borderColor, i, arcOpts.borderColor)
+                    var bw = custom.borderWidth ? custom.borderWidth : getValueAtIndexOrDefault(ds.borderWidth, i, arcOpts.borderWidth)
 
-                return {
-                  text: label,
-                  fillStyle: fill,
-                  strokeStyle: stroke,
-                  lineWidth: bw,
-                  hidden: isNaN(ds.data[i]) || meta.data[i].hidden,
+                    return {
+                      text: label,
+                      fillStyle: fill,
+                      strokeStyle: stroke,
+                      lineWidth: bw,
+                      hidden: isNaN(ds.data[i]) || meta.data[i].hidden,
 
                 // Extra data used for toggling the correct item
-                  index: i
-                }
-              })
+                      index: i
+                    }
+                  })
                 }
                 return []
               }
@@ -4580,8 +4580,8 @@
 
                 helpers.each(array._chartjs.listeners, function (object) {
                   if (typeof object[method] === 'function') {
-                object[method].apply(object, args)
-              }
+                    object[method].apply(object, args)
+                  }
                 })
 
                 return res
@@ -4902,29 +4902,29 @@
         // Init if doesn't exist
               } else if (!me._view.hasOwnProperty(key)) {
                 if (typeof value === 'number' && !isNaN(me._view[key])) {
-                me._view[key] = value * ease
-              } else {
-                me._view[key] = value
-              }
+                  me._view[key] = value * ease
+                } else {
+                  me._view[key] = value
+                }
         // No unnecessary computations
               } else if (value === me._view[key]) {
           // It's the same! Woohoo!
         // Color transitions if possible
-            } else if (typeof value === 'string') {
-            try {
-            var color = helpers.color(me._model[key]).mix(helpers.color(me._start[key]), ease)
-            me._view[key] = color.rgbString()
-          } catch (err) {
-            me._view[key] = value
-          }
+              } else if (typeof value === 'string') {
+                try {
+                  var color = helpers.color(me._model[key]).mix(helpers.color(me._start[key]), ease)
+                  me._view[key] = color.rgbString()
+                } catch (err) {
+                  me._view[key] = value
+                }
         // Number transitions
-          } else if (typeof value === 'number') {
-          var startVal = me._start[key] !== undefined && isNaN(me._start[key]) === false ? me._start[key] : 0
-          me._view[key] = ((me._model[key] - startVal) * ease) + startVal
+              } else if (typeof value === 'number') {
+                var startVal = me._start[key] !== undefined && isNaN(me._start[key]) === false ? me._start[key] : 0
+                me._view[key] = ((me._model[key] - startVal) * ease) + startVal
         // Everything else
-        } else {
-          me._view[key] = value
-        }
+              } else {
+                me._view[key] = value
+              }
             }, me)
 
             return me
@@ -5022,11 +5022,11 @@
             typeof value === 'object' &&
             !helpers.isArray(value)) {
           // If we are overwriting an object with an object, do a merge of the properties.
-              base[key] = helpers.configMerge(baseVal, value)
-            } else {
+                base[key] = helpers.configMerge(baseVal, value)
+              } else {
           // can just overwrite the value in this case
-              base[key] = value
-            }
+                base[key] = value
+              }
             })
           })
 
@@ -5043,14 +5043,14 @@
                   var axisType = helpers.getValueOrDefault(valueObj.type, key === 'xAxes' ? 'category' : 'linear')
                   var axisDefaults = Chart.scaleService.getScaleDefaults(axisType)
                   if (index >= base[key].length || !base[key][index].type) {
-                  base[key].push(helpers.configMerge(axisDefaults, valueObj))
-                } else if (valueObj.type && valueObj.type !== base[key][index].type) {
+                    base[key].push(helpers.configMerge(axisDefaults, valueObj))
+                  } else if (valueObj.type && valueObj.type !== base[key][index].type) {
               // Type changed. Bring in the new defaults before we bring in valueObj so that valueObj can override the correct scale defaults
-                base[key][index] = helpers.configMerge(base[key][index], axisDefaults, valueObj)
-              } else {
+                    base[key][index] = helpers.configMerge(base[key][index], axisDefaults, valueObj)
+                  } else {
               // Type is the same
-                base[key][index] = helpers.configMerge(base[key][index], valueObj)
-              }
+                    base[key][index] = helpers.configMerge(base[key][index], valueObj)
+                  }
                 })
               } else {
                 base[key] = []
@@ -5826,8 +5826,8 @@
               helpers.each(thing, function (nestedThing) {
           // Undefined strings and arrays should not be measured
                 if (nestedThing !== undefined && nestedThing !== null && !helpers.isArray(nestedThing)) {
-                longest = helpers.measureText(ctx, data, gc, longest, nestedThing)
-              }
+                  longest = helpers.measureText(ctx, data, gc, longest, nestedThing)
+                }
               })
             }
           })
@@ -6221,8 +6221,8 @@
 
                   if (ret === 0) {
               // if equal sort by dataset index
-                  ret = a._datasetIndex - b._datasetIndex
-                }
+                    ret = a._datasetIndex - b._datasetIndex
+                  }
 
                   return ret
                 })
@@ -6527,11 +6527,11 @@
               if (minBoxSize) {
                 if (box.isHorizontal()) {
                   var scaleMargin = {
-                  left: totalLeftBoxesWidth,
-                  right: totalRightBoxesWidth,
-                  top: 0,
-                  bottom: 0
-                }
+                    left: totalLeftBoxesWidth,
+                    right: totalRightBoxesWidth,
+                    top: 0,
+                    bottom: 0
+                  }
 
             // Don't use min size here because of label rotation. When the labels are rotated, their rotation highly depends
             // on the margin. Sometimes they need to increase in size slightly
@@ -6913,17 +6913,17 @@
                   var width = boxWidth + (fontSize / 2) + ctx.measureText(legendItem.text).width
 
                   if (lineWidths[lineWidths.length - 1] + width + labelOpts.padding >= me.width) {
-                totalHeight += fontSize + (labelOpts.padding)
-                lineWidths[lineWidths.length] = me.left
-              }
+                    totalHeight += fontSize + (labelOpts.padding)
+                    lineWidths[lineWidths.length] = me.left
+                  }
 
             // Store the hitbox width and height here. Final position will be updated in `draw`
                   hitboxes[i] = {
-                left: 0,
-                top: 0,
-                width: width,
-                height: fontSize
-              }
+                    left: 0,
+                    top: 0,
+                    width: width,
+                    height: fontSize
+                  }
 
                   lineWidths[lineWidths.length - 1] += width + labelOpts.padding
                 })
@@ -6943,12 +6943,12 @@
 
             // If too tall, go to new column
                   if (currentColHeight + itemHeight > minSize.height) {
-                totalWidth += currentColWidth + labelOpts.padding
-                columnWidths.push(currentColWidth) // previous column width
+                    totalWidth += currentColWidth + labelOpts.padding
+                    columnWidths.push(currentColWidth) // previous column width
 
-                currentColWidth = 0
-                currentColHeight = 0
-              }
+                    currentColWidth = 0
+                    currentColHeight = 0
+                  }
 
             // Get max width
                   currentColWidth = Math.max(currentColWidth, itemWidth)
@@ -6956,11 +6956,11 @@
 
             // Store the hitbox width and height here. Final position will be updated in `draw`
                   hitboxes[i] = {
-                left: 0,
-                top: 0,
-                width: itemWidth,
-                height: fontSize
-              }
+                    left: 0,
+                    top: 0,
+                    width: itemWidth,
+                    height: fontSize
+                  }
                 })
 
                 totalWidth += currentColWidth
@@ -7045,8 +7045,8 @@
                 } else {
             // Draw box as legend symbol
                   if (!isLineWidthZero) {
-                ctx.strokeRect(x, y, boxWidth, fontSize)
-              }
+                    ctx.strokeRect(x, y, boxWidth, fontSize)
+                  }
                   ctx.fillRect(x, y, boxWidth, fontSize)
                 }
 
@@ -7090,15 +7090,15 @@
 
                 if (isHorizontal) {
                   if (x + width >= legendWidth) {
-                y = cursor.y += itemHeight
-                cursor.line++
-                x = cursor.x = me.left + ((legendWidth - lineWidths[cursor.line]) / 2)
-              }
+                    y = cursor.y += itemHeight
+                    cursor.line++
+                    x = cursor.x = me.left + ((legendWidth - lineWidths[cursor.line]) / 2)
+                  }
                 } else if (y + itemHeight > me.bottom) {
-              x = cursor.x = x + me.columnWidths[cursor.line] + labelOpts.padding
-              y = cursor.y = me.top
-              cursor.line++
-            }
+                  x = cursor.x = x + me.columnWidths[cursor.line] + labelOpts.padding
+                  y = cursor.y = me.top
+                  cursor.line++
+                }
 
                 drawLegendBox(x, y, legendItem)
 
@@ -7154,14 +7154,14 @@
                 if (x >= hitBox.left && x <= hitBox.left + hitBox.width && y >= hitBox.top && y <= hitBox.top + hitBox.height) {
             // Touching an element
                   if (type === 'click') {
-                opts.onClick.call(me, e, me.legendItems[i])
-                changed = true
-                break
-              } else if (type === 'mousemove') {
-                opts.onHover.call(me, e, me.legendItems[i])
-                changed = true
-                break
-              }
+                    opts.onClick.call(me, e, me.legendItems[i])
+                    changed = true
+                    break
+                  } else if (type === 'mousemove') {
+                    opts.onHover.call(me, e, me.legendItems[i])
+                    changed = true
+                    break
+                  }
                 }
               }
             }
@@ -7547,16 +7547,16 @@
 
             // We're right aligning the text now.
                   if (firstRotated + tickFontSize / 2 > me.yLabelWidth) {
-                me.paddingLeft = firstRotated + tickFontSize / 2
-              }
+                    me.paddingLeft = firstRotated + tickFontSize / 2
+                  }
 
                   me.paddingRight = tickFontSize / 2
 
                   if (sinRotation * originalLabelWidth > me.maxHeight) {
               // go back one step
-                me.labelRotation--
-                break
-              }
+                    me.labelRotation--
+                    break
+                  }
 
                   me.labelRotation++
                   labelWidth = cosRotation * originalLabelWidth
@@ -7850,8 +7850,8 @@
               if (maxTicks && me.ticks.length > maxTicks) {
                 while (!skipRatio || me.ticks.length / (skipRatio || 1) > maxTicks) {
                   if (!skipRatio) {
-                skipRatio = 1
-              }
+                    skipRatio = 1
+                  }
                   skipRatio += 1
                 }
               }
@@ -7914,20 +7914,20 @@
               } else {
                 if (options.position === 'left') {
                   if (optionTicks.mirror) {
-                labelX = me.right + optionTicks.padding
-                textAlign = 'left'
-              } else {
-                labelX = me.right - optionTicks.padding
-                textAlign = 'right'
-              }
+                    labelX = me.right + optionTicks.padding
+                    textAlign = 'left'
+                  } else {
+                    labelX = me.right - optionTicks.padding
+                    textAlign = 'right'
+                  }
           // right side
                 } else if (optionTicks.mirror) {
-              labelX = me.left - optionTicks.padding
-              textAlign = 'right'
-            } else {
-              labelX = me.left + optionTicks.padding
-              textAlign = 'left'
-            }
+                  labelX = me.left - optionTicks.padding
+                  textAlign = 'right'
+                } else {
+                  labelX = me.left + optionTicks.padding
+                  textAlign = 'left'
+                }
 
                 var yLineValue = me.getPixelForTick(index) // xvalues for grid lines
                 yLineValue += helpers.aliasPixel(lineWidth)
@@ -8001,10 +8001,10 @@
                 if (helpers.isArray(label)) {
                   for (var i = 0, y = -(label.length - 1) * tickFontSize * 0.75; i < label.length; ++i) {
               // We just make sure the multiline element is a string here..
-                context.fillText('' + label[i], 0, y)
+                    context.fillText('' + label[i], 0, y)
               // apply same lineSpacing as calculated @ L#320
-                y += (tickFontSize * 1.5)
-              }
+                    y += (tickFontSize * 1.5)
+                  }
                 } else {
                   context.fillText(label, 0, 0)
                 }
@@ -8573,8 +8573,8 @@
                 if (item.xLabel) {
                   title = item.xLabel
                 } else if (labelCount > 0 && item.index < labelCount) {
-                title = labels[item.index]
-              }
+                  title = labels[item.index]
+                }
               }
 
               return title
@@ -9582,46 +9582,46 @@
           // First point moves to it's starting position no matter what
                 if (index === 0) {
                   if (loop) {
-                ctx.moveTo(fillPoint.x, fillPoint.y)
-              } else {
-                ctx.moveTo(currentVM.x, fillPoint)
-              }
+                    ctx.moveTo(fillPoint.x, fillPoint.y)
+                  } else {
+                    ctx.moveTo(currentVM.x, fillPoint)
+                  }
 
                   if (!currentVM.skip) {
-                lastDrawnIndex = index
-                ctx.lineTo(currentVM.x, currentVM.y)
-              }
+                    lastDrawnIndex = index
+                    ctx.lineTo(currentVM.x, currentVM.y)
+                  }
                 } else {
                   previous = lastDrawnIndex === -1 ? previous : points[lastDrawnIndex]
 
                   if (currentVM.skip) {
               // Only do this if this is the first point that is skipped
-                if (!spanGaps && lastDrawnIndex === (index - 1)) {
-                  if (loop) {
-                    ctx.lineTo(fillPoint.x, fillPoint.y)
+                    if (!spanGaps && lastDrawnIndex === (index - 1)) {
+                      if (loop) {
+                        ctx.lineTo(fillPoint.x, fillPoint.y)
+                      } else {
+                        ctx.lineTo(previous._view.x, fillPoint)
+                      }
+                    }
                   } else {
-                    ctx.lineTo(previous._view.x, fillPoint)
-                  }
-                }
-              } else {
-                if (lastDrawnIndex !== (index - 1)) {
+                    if (lastDrawnIndex !== (index - 1)) {
                 // There was a gap and this is the first point after the gap. If we've never drawn a point, this is a special case.
                 // If the first data point is NaN, then there is no real gap to skip
-                  if (spanGaps && lastDrawnIndex !== -1) {
+                      if (spanGaps && lastDrawnIndex !== -1) {
                   // We are spanning the gap, so simple draw a line to this point
-                    lineToPoint(previous, current)
-                  } else if (loop) {
-                  ctx.lineTo(currentVM.x, currentVM.y)
-                } else {
-                  ctx.lineTo(currentVM.x, fillPoint)
-                  ctx.lineTo(currentVM.x, currentVM.y)
-                }
-                } else {
+                        lineToPoint(previous, current)
+                      } else if (loop) {
+                        ctx.lineTo(currentVM.x, currentVM.y)
+                      } else {
+                        ctx.lineTo(currentVM.x, fillPoint)
+                        ctx.lineTo(currentVM.x, currentVM.y)
+                      }
+                    } else {
                 // Line to next point
-                  lineToPoint(previous, current)
-                }
-                lastDrawnIndex = index
-              }
+                      lineToPoint(previous, current)
+                    }
+                    lastDrawnIndex = index
+                  }
                 }
               }
 
@@ -9669,11 +9669,11 @@
                 if (!currentVM.skip) {
                   if ((lastDrawnIndex !== (index - 1) && !spanGaps) || lastDrawnIndex === -1) {
               // There was a gap and this is the first point after the gap
-                ctx.moveTo(currentVM.x, currentVM.y)
-              } else {
+                    ctx.moveTo(currentVM.x, currentVM.y)
+                  } else {
               // Line to next point
-                lineToPoint(previous, current)
-              }
+                    lineToPoint(previous, current)
+                  }
                   lastDrawnIndex = index
                 }
               }
@@ -10106,9 +10106,9 @@
                 var meta = chart.getDatasetMeta(datasetIndex)
                 if (valuesPerType[meta.type] === undefined) {
                   valuesPerType[meta.type] = {
-                  positiveValues: [],
-                  negativeValues: []
-                }
+                    positiveValues: [],
+                    negativeValues: []
+                  }
                 }
 
           // Store these per type
@@ -10117,22 +10117,22 @@
 
                 if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta)) {
                   helpers.each(dataset.data, function (rawValue, index) {
-                  var value = +me.getRightValue(rawValue)
-                  if (isNaN(value) || meta.data[index].hidden) {
-                  return
-                }
+                    var value = +me.getRightValue(rawValue)
+                    if (isNaN(value) || meta.data[index].hidden) {
+                      return
+                    }
 
-                  positiveValues[index] = positiveValues[index] || 0
-                  negativeValues[index] = negativeValues[index] || 0
+                    positiveValues[index] = positiveValues[index] || 0
+                    negativeValues[index] = negativeValues[index] || 0
 
-                  if (opts.relativePoints) {
-                  positiveValues[index] = 100
-                } else if (value < 0) {
-                  negativeValues[index] += value
-                } else {
-                  positiveValues[index] += value
-                }
-                })
+                    if (opts.relativePoints) {
+                      positiveValues[index] = 100
+                    } else if (value < 0) {
+                      negativeValues[index] += value
+                    } else {
+                      positiveValues[index] += value
+                    }
+                  })
                 }
               })
 
@@ -10148,23 +10148,23 @@
                 var meta = chart.getDatasetMeta(datasetIndex)
                 if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta)) {
                   helpers.each(dataset.data, function (rawValue, index) {
-                  var value = +me.getRightValue(rawValue)
-                  if (isNaN(value) || meta.data[index].hidden) {
-                  return
-                }
+                    var value = +me.getRightValue(rawValue)
+                    if (isNaN(value) || meta.data[index].hidden) {
+                      return
+                    }
 
-                  if (me.min === null) {
-                  me.min = value
-                } else if (value < me.min) {
-                  me.min = value
-                }
+                    if (me.min === null) {
+                      me.min = value
+                    } else if (value < me.min) {
+                      me.min = value
+                    }
 
-                  if (me.max === null) {
-                  me.max = value
-                } else if (value > me.max) {
-                  me.max = value
-                }
-                })
+                    if (me.max === null) {
+                      me.max = value
+                    } else if (value > me.max) {
+                      me.max = value
+                    }
+                  })
                 }
               })
             }
@@ -10376,25 +10376,25 @@
                 var meta = chart.getDatasetMeta(datasetIndex)
                 if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta)) {
                   if (valuesPerType[meta.type] === undefined) {
-                  valuesPerType[meta.type] = []
-                }
+                    valuesPerType[meta.type] = []
+                  }
 
                   helpers.each(dataset.data, function (rawValue, index) {
-                  var values = valuesPerType[meta.type]
-                  var value = +me.getRightValue(rawValue)
-                  if (isNaN(value) || meta.data[index].hidden) {
-                  return
-                }
+                    var values = valuesPerType[meta.type]
+                    var value = +me.getRightValue(rawValue)
+                    if (isNaN(value) || meta.data[index].hidden) {
+                      return
+                    }
 
-                  values[index] = values[index] || 0
+                    values[index] = values[index] || 0
 
-                  if (opts.relativePoints) {
-                  values[index] = 100
-                } else {
+                    if (opts.relativePoints) {
+                      values[index] = 100
+                    } else {
                 // Don't need to split positive and negative since the log scale can't handle a 0 crossing
-                  values[index] += value
-                }
-                })
+                      values[index] += value
+                    }
+                  })
                 }
               })
 
@@ -10409,27 +10409,27 @@
                 var meta = chart.getDatasetMeta(datasetIndex)
                 if (chart.isDatasetVisible(datasetIndex) && IDMatches(meta)) {
                   helpers.each(dataset.data, function (rawValue, index) {
-                  var value = +me.getRightValue(rawValue)
-                  if (isNaN(value) || meta.data[index].hidden) {
-                  return
-                }
+                    var value = +me.getRightValue(rawValue)
+                    if (isNaN(value) || meta.data[index].hidden) {
+                      return
+                    }
 
-                  if (me.min === null) {
-                  me.min = value
-                } else if (value < me.min) {
-                  me.min = value
-                }
+                    if (me.min === null) {
+                      me.min = value
+                    } else if (value < me.min) {
+                      me.min = value
+                    }
 
-                  if (me.max === null) {
-                  me.max = value
-                } else if (value > me.max) {
-                  me.max = value
-                }
+                    if (me.max === null) {
+                      me.max = value
+                    } else if (value > me.max) {
+                      me.max = value
+                    }
 
-                  if (value !== 0 && (me.minNotZero === null || value < me.minNotZero)) {
-                  me.minNotZero = value
-                }
-                })
+                    if (value !== 0 && (me.minNotZero === null || value < me.minNotZero)) {
+                      me.minNotZero = value
+                    }
+                  })
                 }
               })
             }
@@ -10521,19 +10521,19 @@
                 if (newVal === start) {
                   pixel = me.bottom - paddingBottom
                 } else if (newVal === me.minNotZero) {
-                pixel = me.bottom - paddingBottom - innerDimension * 0.02
-              } else {
-                pixel = me.bottom - paddingBottom - innerDimension * 0.02 - (innerDimension * 0.98 / range * (helpers.log10(newVal) - helpers.log10(me.minNotZero)))
-              }
+                  pixel = me.bottom - paddingBottom - innerDimension * 0.02
+                } else {
+                  pixel = me.bottom - paddingBottom - innerDimension * 0.02 - (innerDimension * 0.98 / range * (helpers.log10(newVal) - helpers.log10(me.minNotZero)))
+                }
               } else if (me.end === 0 && tickOpts.reverse) {
                 range = helpers.log10(me.start) - helpers.log10(me.minNotZero)
                 if (newVal === me.end) {
-                pixel = me.top + paddingTop
-              } else if (newVal === me.minNotZero) {
-              pixel = me.top + paddingTop + innerDimension * 0.02
-            } else {
-              pixel = me.top + paddingTop + innerDimension * 0.02 + (innerDimension * 0.98 / range * (helpers.log10(newVal) - helpers.log10(me.minNotZero)))
-            }
+                  pixel = me.top + paddingTop
+                } else if (newVal === me.minNotZero) {
+                  pixel = me.top + paddingTop + innerDimension * 0.02
+                } else {
+                  pixel = me.top + paddingTop + innerDimension * 0.02 + (innerDimension * 0.98 / range * (helpers.log10(newVal) - helpers.log10(me.minNotZero)))
+                }
               } else {
                 range = helpers.log10(me.end) - helpers.log10(start)
                 innerDimension = me.height - (paddingTop + paddingBottom)
@@ -10640,20 +10640,20 @@
                 helpers.each(dataset.data, function (rawValue, index) {
                   var value = +me.getRightValue(rawValue)
                   if (isNaN(value) || meta.data[index].hidden) {
-                return
-              }
+                    return
+                  }
 
                   if (me.min === null) {
-                me.min = value
-              } else if (value < me.min) {
-                me.min = value
-              }
+                    me.min = value
+                  } else if (value < me.min) {
+                    me.min = value
+                  }
 
                   if (me.max === null) {
-                me.max = value
-              } else if (value > me.max) {
-                me.max = value
-              }
+                    me.max = value
+                  } else if (value > me.max) {
+                    me.max = value
+                  }
                 })
               }
             })
@@ -10755,14 +10755,14 @@
               } else if (angle < 180) {
           // Less than half the values means we'll left align the text
                 if (pointPosition.x + textWidth > furthestRight) {
-              furthestRight = pointPosition.x + textWidth
-              furthestRightIndex = i
-            }
+                  furthestRight = pointPosition.x + textWidth
+                  furthestRightIndex = i
+                }
         // More than half the values means we'll right align the text
               } else if (pointPosition.x - textWidth < furthestLeft) {
-            furthestLeft = pointPosition.x - textWidth
-            furthestLeftIndex = i
-          }
+                furthestLeft = pointPosition.x - textWidth
+                furthestLeftIndex = i
+              }
             }
 
             xProtrusionLeft = furthestLeft
@@ -10866,51 +10866,51 @@
 
             // Draw circular lines around the scale
                   if (gridLineOpts.display && index !== 0) {
-                ctx.strokeStyle = helpers.getValueAtIndexOrDefault(gridLineOpts.color, index - 1)
-                ctx.lineWidth = helpers.getValueAtIndexOrDefault(gridLineOpts.lineWidth, index - 1)
+                    ctx.strokeStyle = helpers.getValueAtIndexOrDefault(gridLineOpts.color, index - 1)
+                    ctx.lineWidth = helpers.getValueAtIndexOrDefault(gridLineOpts.lineWidth, index - 1)
 
-                if (opts.lineArc) {
+                    if (opts.lineArc) {
                 // Draw circular arcs between the points
-                  ctx.beginPath()
-                  ctx.arc(me.xCenter, me.yCenter, yCenterOffset, 0, Math.PI * 2)
-                  ctx.closePath()
-                  ctx.stroke()
-                } else {
+                      ctx.beginPath()
+                      ctx.arc(me.xCenter, me.yCenter, yCenterOffset, 0, Math.PI * 2)
+                      ctx.closePath()
+                      ctx.stroke()
+                    } else {
                 // Draw straight lines connecting each index
-                  ctx.beginPath()
-                  for (var i = 0; i < me.getValueCount(); i++) {
-                    var pointPosition = me.getPointPosition(i, yCenterOffset)
-                    if (i === 0) {
-                    ctx.moveTo(pointPosition.x, pointPosition.y)
-                  } else {
-                    ctx.lineTo(pointPosition.x, pointPosition.y)
+                      ctx.beginPath()
+                      for (var i = 0; i < me.getValueCount(); i++) {
+                        var pointPosition = me.getPointPosition(i, yCenterOffset)
+                        if (i === 0) {
+                          ctx.moveTo(pointPosition.x, pointPosition.y)
+                        } else {
+                          ctx.lineTo(pointPosition.x, pointPosition.y)
+                        }
+                      }
+                      ctx.closePath()
+                      ctx.stroke()
+                    }
                   }
-                  }
-                  ctx.closePath()
-                  ctx.stroke()
-                }
-              }
 
                   if (tickOpts.display) {
-                var tickFontColor = getValueOrDefault(tickOpts.fontColor, globalDefaults.defaultFontColor)
-                ctx.font = tickLabelFont
+                    var tickFontColor = getValueOrDefault(tickOpts.fontColor, globalDefaults.defaultFontColor)
+                    ctx.font = tickLabelFont
 
-                if (tickOpts.showLabelBackdrop) {
-                  var labelWidth = ctx.measureText(label).width
-                  ctx.fillStyle = tickOpts.backdropColor
-                  ctx.fillRect(
+                    if (tickOpts.showLabelBackdrop) {
+                      var labelWidth = ctx.measureText(label).width
+                      ctx.fillStyle = tickOpts.backdropColor
+                      ctx.fillRect(
                   me.xCenter - labelWidth / 2 - tickOpts.backdropPaddingX,
                   yHeight - tickFontSize / 2 - tickOpts.backdropPaddingY,
                   labelWidth + tickOpts.backdropPaddingX * 2,
                   tickFontSize + tickOpts.backdropPaddingY * 2
                 )
-                }
+                    }
 
-                ctx.textAlign = 'center'
-                ctx.textBaseline = 'middle'
-                ctx.fillStyle = tickFontColor
-                ctx.fillText(label, me.xCenter, yHeight)
-              }
+                    ctx.textAlign = 'center'
+                    ctx.textBaseline = 'middle'
+                    ctx.fillStyle = tickFontColor
+                    ctx.fillText(label, me.xCenter, yHeight)
+                  }
                 }
               })
 
@@ -10928,13 +10928,13 @@
 
                 for (var i = me.getValueCount() - 1; i >= 0; i--) {
                   if (angleLineOpts.display) {
-                var outerPosition = me.getPointPosition(i, outerDistance)
-                ctx.beginPath()
-                ctx.moveTo(me.xCenter, me.yCenter)
-                ctx.lineTo(outerPosition.x, outerPosition.y)
-                ctx.stroke()
-                ctx.closePath()
-              }
+                    var outerPosition = me.getPointPosition(i, outerDistance)
+                    ctx.beginPath()
+                    ctx.moveTo(me.xCenter, me.yCenter)
+                    ctx.lineTo(outerPosition.x, outerPosition.y)
+                    ctx.stroke()
+                    ctx.closePath()
+                  }
             // Extra 3px out for some label spacing
                   var pointLabelPosition = me.getPointPosition(i, outerDistance + 5)
 
@@ -10950,21 +10950,21 @@
                   var angle = (angleRadians * 360 / (2 * Math.PI)) % 360
 
                   if (angle === 0 || angle === 180) {
-                ctx.textAlign = 'center'
-              } else if (angle < 180) {
-                ctx.textAlign = 'left'
-              } else {
-                ctx.textAlign = 'right'
-              }
+                    ctx.textAlign = 'center'
+                  } else if (angle < 180) {
+                    ctx.textAlign = 'left'
+                  } else {
+                    ctx.textAlign = 'right'
+                  }
 
             // Set the correct text baseline based on outer positioning
                   if (angle === 90 || angle === 270) {
-                ctx.textBaseline = 'middle'
-              } else if (angle > 270 || angle < 90) {
-                ctx.textBaseline = 'bottom'
-              } else {
-                ctx.textBaseline = 'top'
-              }
+                    ctx.textBaseline = 'middle'
+                  } else if (angle > 270 || angle < 90) {
+                    ctx.textBaseline = 'bottom'
+                  } else {
+                    ctx.textBaseline = 'top'
+                  }
 
                   ctx.fillText(pointLabels[i] ? pointLabels[i] : '', pointLabelPosition.x, pointLabelPosition.y)
                 }
@@ -10998,21 +10998,21 @@
             name: 'hour',
             steps: [1, 2, 3, 6, 12]
           }, {
-        name: 'day',
-        steps: [1, 2, 5]
-      }, {
-        name: 'week',
-        maxStep: 4
-      }, {
-      name: 'month',
-      maxStep: 3
-    }, {
-      name: 'quarter',
-      maxStep: 4
-    }, {
-      name: 'year',
-      maxStep: false
-    }]
+            name: 'day',
+            steps: [1, 2, 5]
+          }, {
+            name: 'week',
+            maxStep: 4
+          }, {
+            name: 'month',
+            maxStep: 3
+          }, {
+            name: 'quarter',
+            maxStep: 4
+          }, {
+            name: 'year',
+            maxStep: false
+          }]
         }
 
         var defaultConfig = {
@@ -11100,8 +11100,8 @@
 
                 if (labelMoment.isValid()) {
                   if (me.options.time.round) {
-                labelMoment.startOf(me.options.time.round)
-              }
+                    labelMoment.startOf(me.options.time.round)
+                  }
                   scaleLabelMoments.push(labelMoment)
                 }
               }, me)
@@ -11122,17 +11122,17 @@
                   var labelMoment = me.parseTime(me.getRightValue(value))
 
                   if (labelMoment.isValid()) {
-                if (me.options.time.round) {
-                  labelMoment.startOf(me.options.time.round)
-                }
-                momentsForDataset.push(labelMoment)
+                    if (me.options.time.round) {
+                      labelMoment.startOf(me.options.time.round)
+                    }
+                    momentsForDataset.push(labelMoment)
 
-                if (datasetVisible) {
+                    if (datasetVisible) {
                 // May have gone outside the scale ranges, make sure we keep the first and last ticks updated
-                  me.firstTick = me.firstTick !== null ? moment.min(me.firstTick, labelMoment) : labelMoment
-                  me.lastTick = me.lastTick !== null ? moment.max(me.lastTick, labelMoment) : labelMoment
-                }
-              }
+                      me.firstTick = me.firstTick !== null ? moment.min(me.firstTick, labelMoment) : labelMoment
+                      me.lastTick = me.lastTick !== null ? moment.max(me.lastTick, labelMoment) : labelMoment
+                    }
+                  }
                 }, me)
               } else {
           // We have no labels. Use the ones from the scale
@@ -11166,8 +11166,8 @@
 
                 if (labelMoment.isValid()) {
                   if (me.options.time.round) {
-                labelMoment.startOf(me.options.time.round)
-              }
+                    labelMoment.startOf(me.options.time.round)
+                  }
                   scaleLabelDiffs.push(labelMoment.diff(me.firstTick, me.tickUnit, true))
                 }
               }, me)
@@ -11181,11 +11181,11 @@
                   var labelMoment = me.parseTime(me.getRightValue(value))
 
                   if (labelMoment.isValid()) {
-                if (me.options.time.round) {
-                  labelMoment.startOf(me.options.time.round)
-                }
-                diffsForDataset.push(labelMoment.diff(me.firstTick, me.tickUnit, true))
-              }
+                    if (me.options.time.round) {
+                      labelMoment.startOf(me.options.time.round)
+                    }
+                    diffsForDataset.push(labelMoment.diff(me.firstTick, me.tickUnit, true))
+                  }
                 }, me)
               } else {
           // We have no labels. Use common ones
@@ -11243,28 +11243,28 @@
                 if (helpers.isArray(unitDefinition.steps) && Math.ceil(me.scaleSizeInUnits / labelCapacity) < helpers.max(unitDefinition.steps)) {
             // Use one of the predefined steps
                   for (var idx = 0; idx < unitDefinition.steps.length; ++idx) {
-                if (unitDefinition.steps[idx] >= Math.ceil(me.scaleSizeInUnits / labelCapacity)) {
-                  me.unitScale = helpers.getValueOrDefault(me.options.time.unitStepSize, unitDefinition.steps[idx])
-                  break
-                }
-              }
+                    if (unitDefinition.steps[idx] >= Math.ceil(me.scaleSizeInUnits / labelCapacity)) {
+                      me.unitScale = helpers.getValueOrDefault(me.options.time.unitStepSize, unitDefinition.steps[idx])
+                      break
+                    }
+                  }
 
                   break
                 } else if ((unitDefinition.maxStep === false) || (Math.ceil(me.scaleSizeInUnits / labelCapacity) < unitDefinition.maxStep)) {
             // We have a max step. Scale this unit
-              me.unitScale = helpers.getValueOrDefault(me.options.time.unitStepSize, Math.ceil(me.scaleSizeInUnits / labelCapacity))
-              break
-            } else {
+                  me.unitScale = helpers.getValueOrDefault(me.options.time.unitStepSize, Math.ceil(me.scaleSizeInUnits / labelCapacity))
+                  break
+                } else {
             // Move to the next unit up
-              ++unitDefinitionIndex
-              unitDefinition = time.units[unitDefinitionIndex]
+                  ++unitDefinitionIndex
+                  unitDefinition = time.units[unitDefinitionIndex]
 
-              me.tickUnit = unitDefinition.name
-              var leadingUnitBuffer = me.firstTick.diff(me.getMomentStartOf(me.firstTick), me.tickUnit, true)
-              var trailingUnitBuffer = me.getMomentStartOf(me.lastTick.clone().add(1, me.tickUnit)).diff(me.lastTick, me.tickUnit, true)
-              me.scaleSizeInUnits = me.lastTick.diff(me.firstTick, me.tickUnit, true) + leadingUnitBuffer + trailingUnitBuffer
-              me.displayFormat = me.options.time.displayFormats[unitDefinition.name]
-            }
+                  me.tickUnit = unitDefinition.name
+                  var leadingUnitBuffer = me.firstTick.diff(me.getMomentStartOf(me.firstTick), me.tickUnit, true)
+                  var trailingUnitBuffer = me.getMomentStartOf(me.lastTick.clone().add(1, me.tickUnit)).diff(me.lastTick, me.tickUnit, true)
+                  me.scaleSizeInUnits = me.lastTick.diff(me.firstTick, me.tickUnit, true) + leadingUnitBuffer + trailingUnitBuffer
+                  me.displayFormat = me.options.time.displayFormats[unitDefinition.name]
+                }
               }
             }
 

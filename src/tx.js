@@ -78,8 +78,7 @@ module.exports = {
           include: { all: true }
         })
 
-
-      break
+        break
 
       case 'rebalanceHub':
       case 'rebalanceUser':
@@ -88,11 +87,11 @@ module.exports = {
 
         var is_hub = (method == 'rebalanceHub')
 
-        l("Processing inputs ", inputs)
+        l('Processing inputs ', inputs)
 
         for (var input of inputs) {
           var amount = readInt(input[0])
-          var userId = readInt(input[1]) // no pubkey ID is allowed here 
+          var userId = readInt(input[1]) // no pubkey ID is allowed here
           var sig = input[2]
 
           var ins = await Insurance.find({
@@ -110,7 +109,7 @@ module.exports = {
           var partner = await User.findById(userId)
 
           if (!ec.verify(body, sig, partner.pubkey)) {
-            l("Fake signature by partner")
+            l('Fake signature by partner')
             continue
           }
 
@@ -118,7 +117,6 @@ module.exports = {
             l(`Invalid amount ${ins.insurance} vs ${amount}`)
             continue
           }
-
 
           ins.insurance -= amount
           signer.balance += amount
@@ -130,11 +128,10 @@ module.exports = {
 
           // was this input related to us?
           if (me.record) {
-
             if (me.record.id == userId) {
               var ch = await me.channel(signer.pubkey)
               // they planned to withdraw and they did. Nullify hold amount
-              ch.d.their_input_amount = 0
+              ch.d.they_input_amount = 0
               await ch.d.save()
             }
 
@@ -143,10 +140,9 @@ module.exports = {
               // they planned to withdraw and they did. Nullify hold amount
               ch.d.our_input_amount = 0
               ch.d.our_input_sig = null
-              await ch.d.save()         
+              await ch.d.save()
             }
           }
-
         }
 
         // 2. are there disputes?
@@ -185,7 +181,6 @@ module.exports = {
 
           var is_me = me.id && me.pubkey.equals(user.pubkey)
 
-
           if (user.id) {
             if (hubId == undefined) {
               // can't settle to own global balance
@@ -218,7 +213,6 @@ module.exports = {
                 await me.addHistory(-K.account_creation_fee, 'Account creation fee')
                 await me.addHistory(-K.standalone_balance, 'Minimum global balance')
               }
-
             }
 
             K.collected_tax += K.account_creation_fee
@@ -247,20 +241,16 @@ module.exports = {
               reimbursed += reimburse_tax
 
               ch[0].ondelta -= originalAmount
-
             }
             signer.balance -= amount
 
             await ch[0].save()
-
 
             // rebalance by hub for our account = reimburse hub fees
             if (is_hub && is_me) {
               await me.addHistory(-reimburse_tax, 'Rebalance fee', true)
             }
           }
-
-
         }
 
         signer.balance += reimbursed
@@ -295,7 +285,7 @@ module.exports = {
   },
 
   mint: async function mint (asset, userId, hubId, amount) {
-    var ch = (await Insurance.findOrBuild({
+    var ins = (await Insurance.findOrBuild({
       where: {
         userId: userId,
         hubId: hubId,
@@ -309,9 +299,9 @@ module.exports = {
       include: { all: true }
     }))[0]
 
-    ch.insurance += amount
+    ins.insurance += amount
     K.assets[asset].total_supply += amount
 
-    await ch.save()
+    await ins.save()
   }
 }

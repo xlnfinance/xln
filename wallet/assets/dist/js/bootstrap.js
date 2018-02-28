@@ -3365,8 +3365,8 @@ if (typeof jQuery === 'undefined') {
             $(_this26.element).on(eventIn, _this26.config.selector, function (event) {
               return _this26._enter(event)
             }).on(eventOut, _this26.config.selector, function (event) {
-            return _this26._leave(event)
-          })
+              return _this26._leave(event)
+            })
           }
 
           $(_this26.element).closest('.modal').on('hide.bs.modal', function () {
@@ -3582,19 +3582,19 @@ if (typeof jQuery === 'undefined') {
       }, {
         key: 'Event',
         get: function get () {
-        return Event
-      }
+          return Event
+        }
       }, {
-      key: 'EVENT_KEY',
-      get: function get () {
-        return EVENT_KEY
-      }
-    }, {
-      key: 'DefaultType',
-      get: function get () {
-        return DefaultType
-      }
-    }])
+        key: 'EVENT_KEY',
+        get: function get () {
+          return EVENT_KEY
+        }
+      }, {
+        key: 'DefaultType',
+        get: function get () {
+          return DefaultType
+        }
+      }])
 
       return Tooltip
     }())
@@ -3775,19 +3775,19 @@ if (typeof jQuery === 'undefined') {
       }, {
         key: 'Event',
         get: function get () {
-        return Event
-      }
+          return Event
+        }
       }, {
-      key: 'EVENT_KEY',
-      get: function get () {
-        return EVENT_KEY
-      }
-    }, {
-      key: 'DefaultType',
-      get: function get () {
-        return DefaultType
-      }
-    }])
+        key: 'EVENT_KEY',
+        get: function get () {
+          return EVENT_KEY
+        }
+      }, {
+        key: 'DefaultType',
+        get: function get () {
+          return DefaultType
+        }
+      }])
 
       return Popover
     }(Tooltip))

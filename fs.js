@@ -15,14 +15,13 @@ crypto = require('crypto')
 keccak = require('keccak')
 nacl = require('./lib/nacl')
 
-ec = (a,b) => bin(nacl.sign.detached(a,b))
+ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = nacl.sign.detached.verify
 
 // encoders
 BN = require('bn.js')
 stringify = require('./lib/stringify')
 rlp = require('rlp')
-
 
 child_process = require('child_process')
 const {spawn, exec, execSync} = child_process
@@ -33,23 +32,19 @@ asyncexec = require('util').promisify(exec)
 
 Me = require('./src/me').Me
 
-
 // globals
-K = false 
+K = false
 me = false
 Members = false
 // Private Key value
 PK = {}
-
 
 RPC = {
   internal_rpc: require('./src/internal_rpc'),
   external_rpc: require('./src/external_rpc')
 }
 
-
 l = console.log
-
 
 r = function (a) {
   if (a instanceof Buffer) {
@@ -70,13 +65,11 @@ kmac = (key, msg) => keccak('keccak256').update(key).update(bin(msg)).digest()
 
 ts = () => Math.round(new Date() / 1000)
 
-
 afterFees = (amount) => {
   var fee = Math.round(amount * K.hub_fee)
   if (fee == 0) fee = K.hub_fee_base
   return amount - fee
 }
-
 
 parse = (json) => {
   try {
@@ -88,7 +81,6 @@ parse = (json) => {
     return {}
   }
 }
-
 
 commy = (b, dot = true) => {
   let prefix = b < 0 ? '-' : ''
@@ -109,10 +101,7 @@ commy = (b, dot = true) => {
 
 // trick to pack signed int into unsigned int
 packSInt = (num) => (Math.abs(num) * 2) + (num < 0 ? 1 : 0)
-readSInt = (num) => (num % 2 == 1 ? -(num-1)/2 : num/2)
-
-
-
+readSInt = (num) => (num % 2 == 1 ? -(num - 1) / 2 : num / 2)
 
 concat = function () {
   return Buffer.concat(Object.values(arguments))
@@ -137,11 +126,11 @@ inputMap = (i) => {
     'sync', // i want to sync since this prev_hash
     'chain', // return X blocks since given prev_hash
 
-    'update', // new input to state machine 
-    'requestWithdraw', 
-    'withdrawal', 
+    'update', // new input to state machine
+    'requestWithdraw',
+    'withdrawal',
     'ack',
-
+    'setLimits',
 
     'faucet'
   ]
@@ -169,7 +158,7 @@ methodMap = (i) => {
     'update',   // transitions to state machine + new sig
     'unlockedPayment', // pay without hashlock
     'ack',
-
+    'setLimits',
 
     'propose',
 
@@ -200,13 +189,9 @@ allowedOnchain = [
   'voteDeny'
 ]
 
-
-
-
-
 cache = async (i) => {
   if (K) { // already initialized
-    cached_result.is_hub = me.is_hub
+    cached_result.is_hub = me.is_hub ? me.my_member.hub.handle : false
 
     cached_result.my_member = !!me.my_member
 
@@ -216,21 +201,20 @@ cache = async (i) => {
       cached_result.deltas = []
       cached_result.solvency = 0
 
-
       var deltas = await Delta.findAll({where: {myId: me.record.id} })
-      var uninsured = 0
+      var promised = 0
       for (var d of deltas) {
         var ch = await me.channel(d.userId)
-        if (ch.delta > 0) uninsured += ch.delta
+        if (ch.delta > 0) promised += ch.promised
       }
-      
-      if (cached_result.history[0].delta != uninsured)
-      cached_result.history.unshift({
-        date: new Date(),
-        delta: uninsured
-      })
 
-    } else {   
+      if (cached_result.history[0].delta != promised) {
+        cached_result.history.unshift({
+          date: new Date(),
+          delta: promised
+        })
+      }
+    } else {
       cached_result.history = await History.findAll({
         order: [['id', 'desc']],
         include: {all: true}
@@ -243,7 +227,6 @@ cache = async (i) => {
     })
 
     cached_result.users = await User.findAll({include: {all: true}})
-
   }
 
   if (me.my_member && K.last_snapshot_height) {
@@ -283,8 +266,6 @@ react = async (result = {}, id = 1) => {
 
     result.pubkey = toHex(me.pubkey)
 
-
-
     result.invoices = invoices
 
     result.channels = await me.channels()
@@ -298,16 +279,13 @@ react = async (result = {}, id = 1) => {
   }
 }
 
-
 // now in memory, for simplicity
 cached_result = {
-  history: [{date: new Date, delta: 0}]
+  history: [{date: new Date(), delta: 0}]
 }
 
 invoices = {}
 purchases = {}
-
-
 
 initDashboard = async a => {
   var finalhandler = require('finalhandler')
@@ -335,7 +313,7 @@ initDashboard = async a => {
       req.on('data', function (data) { queryData += data })
 
       req.on('end', function () {
-        me.queue.push(['internal_rpc', res, queryData]) 
+        me.queue.push(['internal_rpc', res, queryData])
       })
     } else {
       serveStatic('./wallet')(req, res, finalhandler(req, res))
@@ -356,8 +334,8 @@ initDashboard = async a => {
 
     // redirecting from http://
     require('http').createServer(function (req, res) {
-      res.writeHead(301, { "Location": "https://" + req.headers['host'] });
-      res.end();
+      res.writeHead(301, { 'Location': 'https://' + req.headers['host'] })
+      res.end()
     }).listen(80)
   } else {
     cert = false
@@ -367,9 +345,6 @@ initDashboard = async a => {
   l('Set up HTTP server at ' + base_port)
   server.listen(base_port).on('error', l)
 
-
-
-
   me = new Me()
   me.processQueue()
 
@@ -377,7 +352,6 @@ initDashboard = async a => {
 
   if (fs.existsSync('private/pk.json')) {
     PK = JSON.parse(fs.readFileSync('private/pk.json'))
-
   } else {
     // used to authenticate browser sessions to this daemon
     PK = {
@@ -394,20 +368,18 @@ initDashboard = async a => {
     await me.start()
   }
 
-
   var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + PK.auth_code
   l('Open ' + url + ' in your browser')
 
   // only in desktop
   if (base_port != 443) opn(url)
 
-
   localwss = new ws.Server({ server: server, maxPayload: 64 * 1024 * 1024 })
 
   localwss.on('error', function (err) { console.error(err) })
   localwss.on('connection', function (ws) {
     ws.on('message', (msg) => {
-      me.queue.push(['internal_rpc', ws, msg]) 
+      me.queue.push(['internal_rpc', ws, msg])
     })
   })
 }
@@ -415,9 +387,9 @@ initDashboard = async a => {
 derive = async (username, pw) => {
   return new Promise((resolve, reject) => {
     require('./lib/scrypt')(pw, username, {
-      N: Math.pow(2, 16),
+      N: Math.pow(2, 12),
       r: 8,
-      p: 2,
+      p: 1,
       dkLen: 32,
       encoding: 'binary'
     }, (r) => {
@@ -493,8 +465,7 @@ Insurance = sequelize.define('insurance', {
 
 })
 
-
-Insurance.prototype.between = async (leftId, rightId)=>{
+Insurance.prototype.between = async (leftId, rightId) => {
   /*
   return Insurance.findOrBuild({
     where: {
@@ -506,24 +477,19 @@ Insurance.prototype.between = async (leftId, rightId)=>{
       ondelta: 0
     },
     include: { all: true }
-  }) 
+  })
   */
 }
-
-
-
 
 Vote = sequelize.define('vote', {
   rationale: Sequelize.TEXT,
   approval: Sequelize.BOOLEAN // approval or denial
 })
 
-
 Proposal.belongsTo(User)
 
-//User.belongsToMany(User, {through: Insurance, as: 'left'})
-//User.belongsToMany(User, {through: Insurance, as: 'right'})
-
+// User.belongsToMany(User, {through: Insurance, as: 'left'})
+// User.belongsToMany(User, {through: Insurance, as: 'right'})
 
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
@@ -540,7 +506,6 @@ Block = privSequelize.define('block', {
   prev_hash: Sequelize.CHAR(32).BINARY
 })
 
-
 Delta = privSequelize.define('delta', {
   // between who and who
   myId: Sequelize.CHAR(32).BINARY,
@@ -549,7 +514,6 @@ Delta = privSequelize.define('delta', {
   // higher nonce is valid
   nonce: Sequelize.INTEGER,
 
-
   instant_until: Sequelize.INTEGER,
 
   // Three most important values that define balances of each other
@@ -557,33 +521,29 @@ Delta = privSequelize.define('delta', {
   ondelta: Sequelize.INTEGER,
   offdelta: Sequelize.INTEGER,
 
-
-  we_soft_limit: Sequelize.INTEGER, 
+  we_soft_limit: Sequelize.INTEGER,
   we_hard_limit: Sequelize.INTEGER, // usually 0
 
-  they_soft_limit: Sequelize.INTEGER, 
+  they_soft_limit: Sequelize.INTEGER,
   they_hard_limit: Sequelize.INTEGER, // user specified risk
-
 
   last_online: Sequelize.DATE,
 
-
-  their_input_amount: Sequelize.INTEGER,
+  they_input_amount: Sequelize.INTEGER,
 
   our_input_amount: Sequelize.INTEGER,
   our_input_sig: Sequelize.TEXT,
 
   hashlocks: Sequelize.TEXT,
-  
 
   // all channels in serialized field
   state: {
     type: Sequelize.TEXT,
-    set (val) { 
-      stringify(this.setDataValue('state')) 
+    set (val) {
+      stringify(this.setDataValue('state'))
     },
-    get (val) { 
-      return parse(this.getDataValue('state')) 
+    get (val) {
+      return parse(this.getDataValue('state'))
     }
   },
 
@@ -598,14 +558,13 @@ Delta = privSequelize.define('delta', {
   date: Sequelize.DATE
 })
 
-Delta.prototype.getState = function() {
-  return r([methodMap('delta'), 
+Delta.prototype.getState = function () {
+  return r([methodMap('delta'),
     this.leftId,
-    this.rightId, 
-    this.nonce, 
+    this.rightId,
+    this.nonce,
     packSInt(this.offdelta)])
 }
-
 
 History = privSequelize.define('history', {
   leftId: Sequelize.CHAR(32).BINARY,
@@ -620,7 +579,6 @@ History = privSequelize.define('history', {
   date: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 
 })
-
 
 Purchase = privSequelize.define('purchase', {
   myId: Sequelize.CHAR(32).BINARY,
@@ -662,14 +620,11 @@ city = async () => {
 
 var argv = require('minimist')(process.argv.slice(2), {
   string: ['username', 'pw']
-});
+})
 
 base_port = argv.p ? parseInt(argv.p) : 8000;
 
-
-
 (async () => {
-
   if (argv.console) {
 
   } else if (process.argv[2] == 'city') {
@@ -677,7 +632,6 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
   } else if (argv.genesis) {
     require('./src/genesis')(argv.genesis)
   } else {
-
     if (fs.existsSync('data/k.json')) {
       l('Loading K data')
       var json = fs.readFileSync('data/k.json')
@@ -686,13 +640,11 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
       Members = JSON.parse(json).members // another object ref
       for (m of Members) {
         m.pubkey = Buffer.from(m.pubkey, 'hex')
-        m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')        
+        m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
       }
-
     }
 
     await privSequelize.sync({force: false})
-
 
     /*
     var cluster = require('cluster')
@@ -709,16 +661,13 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
     initDashboard()
     // }
   }
-
 })()
 
 process.on('unhandledRejection', r => console.log(r))
 
 repl = require('repl').start('> ')
 _eval = repl.eval
-repl.eval=(cmd, context, filename, callback)=>{
+repl.eval = (cmd, context, filename, callback) => {
   if (cmd.indexOf('await') != -1) cmd = `(function(){ async function _wrap() { return ${cmd} } return console.log(_wrap()) })()`
   _eval(cmd, context, filename, callback)
 }
-
-

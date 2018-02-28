@@ -6,7 +6,7 @@ module.exports = () => {
   var searchIndex = 0
   for (var i in Members) {
     searchIndex += Members[i].shares
-    
+
     if (currentIndex < searchIndex) {
       me.current = Members[i]
 
@@ -23,7 +23,7 @@ module.exports = () => {
     }
   }
 
-  //d(`Status ${me.status} at ${now} Current: ${me.current.id}, next: ${me.next_member.id}.`)
+  // d(`Status ${me.status} at ${now} Current: ${me.current.id}, next: ${me.next_member.id}.`)
 
   if (me.my_member == me.current) {
       // do we have enough sig or it's time?
@@ -42,7 +42,6 @@ module.exports = () => {
       if (total_shares < K.majority) {
         l(`Only have ${total_shares} shares, cannot build a block!`)
       } else {
-
         me.processBlock(concat(
             Buffer.concat(sigs),
             me.precommit

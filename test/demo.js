@@ -8,16 +8,15 @@ Cookies = require('cookies')
 fs = require('fs')
 users = {}
 
-
 FS_PATH = '/Users/homakov/work/8002'
 FS_RPC = 'http://0.0.0.0:8002/rpc'
 LOCAL_FS_RPC = 'http://0.0.0.0:8001'
 
-if (fs.existsSync(FS_PATH+'/private/pk.json')) {
-  auth_code = JSON.parse(fs.readFileSync(FS_PATH+'/private/pk.json')).auth_code
-  l("Auth code to our node: "+auth_code)
+if (fs.existsSync(FS_PATH + '/private/pk.json')) {
+  auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json')).auth_code
+  l('Auth code to our node: ' + auth_code)
 } else {
-  throw "No auth"
+  throw 'No auth'
 }
 
 FS = (method, params, cb) => {
@@ -27,9 +26,6 @@ FS = (method, params, cb) => {
     params: params
   }).then(cb)
 }
-
-
-
 
 commy = (b, dot = true) => {
   let prefix = b < 0 ? '-' : ''
@@ -48,7 +44,6 @@ commy = (b, dot = true) => {
   return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-
 require('http').createServer((req, res) => {
   cookies = new Cookies(req, res)
 
@@ -61,9 +56,9 @@ require('http').createServer((req, res) => {
       id = rand()
       cookies.set('id', id)
     }
-    if (!users[id]) users[id] = Math.round(Math.random()*1000000)
+    if (!users[id]) users[id] = Math.round(Math.random() * 1000000)
 
-      require('serve-static')('../wallet')(req, res, require('finalhandler')(req, res))
+    require('serve-static')('../wallet')(req, res, require('finalhandler')(req, res))
 
     res.end(`
 
@@ -215,7 +210,6 @@ window.onload = function(){
       var p = JSON.parse(queryData)
 
       if (p.deposit_invoice) {
-
         FS('invoice', {invoice: p.deposit_invoice}, r => {
           if (r.data.status == 'paid' && r.data.extra == id) {
             users[id] += r.data.amount
@@ -224,10 +218,9 @@ window.onload = function(){
           }
           res.end(JSON.stringify({status: 'paid'}))
         })
-
       } else if (p.withdraw_invoice) {
         if (users[id] < p.withdraw_invoice) {
-          l("Not enough balance")
+          l('Not enough balance')
           return false
         }
 
@@ -235,21 +228,19 @@ window.onload = function(){
 
         FS('send', p.withdraw_invoice, r => {
           if (r.data.status == 'paid') {
-            l("Withdrawn")
+            l('Withdrawn')
           } else {
             console.log('Expired')
           }
 
           res.end(JSON.stringify({status: 'paid'}))
         })
-
       } else if (p.amount) {
-
         FS('invoice', {
-            amount: p.amount,
-            asset: p.asset,
-            extra: id
-          }, r => {
+          amount: p.amount,
+          asset: p.asset,
+          extra: id
+        }, r => {
           res.end(JSON.stringify(r.data.new_invoice))
         })
       }
@@ -260,4 +251,3 @@ window.onload = function(){
 }).listen(3010)
 
 require('../lib/opn')('http://0.0.0.0:3010')
-

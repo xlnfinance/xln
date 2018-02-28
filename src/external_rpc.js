@@ -1,8 +1,7 @@
-// External RPC processes requests to our node coming from outside node. 
+// External RPC processes requests to our node coming from outside node.
 // Also implements validator and hub functionality
 
 module.exports = async (ws, msg) => {
-
   msg = bin(msg)
   // sanity checks 100mb
   if (msg.length > 100000000) {
@@ -11,21 +10,21 @@ module.exports = async (ws, msg) => {
   }
 
   var inputType = inputMap(msg[0])
-  
+
   // how many blocks to share at once
   var sync_limit = 100
 
   msg = msg.slice(1)
 
-  //l('New input: ' + inputType)
+  if (['chain', 'sync', 'needSig', 'signed'].indexOf(inputType) == -1) l('External RPC: ' + inputType)
 
-  // some socket is authenticating their pubkey 
+  // some socket is authenticating their pubkey
   if (inputType == 'auth') {
     var [pubkey, sig, body] = r(msg)
 
-    l("authing ",pubkey)
+    l('authing ', pubkey)
 
-    if (ec.verify( r([methodMap('auth')]) , sig, pubkey)) {
+    if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
       me.users[pubkey] = ws
 
       if (me.is_hub) {
@@ -33,17 +32,12 @@ module.exports = async (ws, msg) => {
         ch.last_online = new Date()
 
         if (ch.input_requested_at) {
-          
+
         }
-
-
-
       }
-
     } else {
       return false
     }
-
 
   // someone wants tx to be broadcasted
   } else if (inputType == 'tx') {
@@ -58,9 +52,6 @@ module.exports = async (ws, msg) => {
       me.send(me.next_member, 'tx', msg)
     }
 
-
-
-
   // another member wants a sig
   } else if (inputType == 'needSig') {
     var [pubkey, sig, block] = r(msg)
@@ -68,12 +59,12 @@ module.exports = async (ws, msg) => {
 
     // ensure the block is non repeating
     if (m && ec.verify(block, sig, pubkey)) {
-      //l(`${m.id} asks us to sign their block!`)
+      // l(`${m.id} asks us to sign their block!`)
 
       me.send(m, 'signed', r([
-          me.my_member.block_pubkey,
-          ec(block, me.block_keypair.secretKey)
-        ])
+        me.my_member.block_pubkey,
+        ec(block, me.block_keypair.secretKey)
+      ])
       )
     }
   // we provide block sig back
@@ -93,19 +84,13 @@ module.exports = async (ws, msg) => {
     } else {
       l("this sig doesn't work for our block")
     }
-
-
-
-
   } else if (inputType == 'faucet') {
     var [result, status] = await me.payChannel({
       partner: msg,
-      amount: Math.round(Math.random() * 30000),
-      invoice: Buffer([0])
+      amount: Math.round(Math.random() * 30000)
     })
 
     l(status)
-
   } else if (inputType == 'chain') {
     var chain = r(msg)
     for (var block of chain) {
@@ -137,35 +122,49 @@ module.exports = async (ws, msg) => {
 
       ws.send(concat(inputMap('chain'), r(blockmap)))
     } else {
-      //l("No blocks to sync after " + msg.toString('hex'))
+      // l("No blocks to sync after " + msg.toString('hex'))
     }
-
-
-  } else if (inputType == 'withdrawal') {
-    // we received instant withdrawal for rebalance
+  } else if (inputType == 'setLimits') {
     var [pubkey, sig, body] = r(msg)
-    if (!ec.verify(body, sig, pubkey)) {
-      l("Invalid withdrawal")
+
+    var limits = r(body)
+
+    if (!ec.verify(body, sig, pubkey) || readInt(limits[0]) != methodMap('setLimits')) {
+      l('Invalid message')
       return false
     }
 
     var ch = await me.channel(pubkey)
 
-    var input = r([methodMap('withdrawal'), 
+    ch.d.they_soft_limit = readInt(limits[1])
+    ch.d.they_hard_limit = readInt(limits[2])
+
+    await ch.d.save()
+    l('Received updated limits')
+  } else if (inputType == 'withdrawal') {
+    // we received instant withdrawal for rebalance
+    var [pubkey, sig, body] = r(msg)
+    if (!ec.verify(body, sig, pubkey)) {
+      l('Invalid withdrawal')
+      return false
+    }
+
+    var ch = await me.channel(pubkey)
+
+    var input = r([methodMap('withdrawal'),
       ch.userId,
-      ch.d.hubId, 
-      ch.nonce, 
+      ch.d.hubId,
+      ch.nonce,
       ch.insured])
 
     if (input.equals(body)) {
-      l("Equal! save")
+      l('Equal! save')
       ch.d.our_input_amount = ch.insured
       ch.d.our_input_sig = sig
       await ch.d.save()
     }
-
   } else if (inputType == 'requestWithdraw') {
-    // partner asked us for instant withdrawal 
+    // partner asked us for instant withdrawal
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
 
@@ -173,8 +172,8 @@ module.exports = async (ws, msg) => {
 
     var amount = readInt(r(body)[0])
 
-    if (ch.d.their_input_amount > 0) {
-      l("Peer already has withdrawal from us")
+    if (ch.d.they_input_amount > 0) {
+      l('Peer already has withdrawal from us')
       return false
     }
 
@@ -183,50 +182,46 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    
-    var input = me.envelope(methodMap('withdrawal'), 
+    var input = me.envelope(methodMap('withdrawal'),
       ch.userId,
-      ch.d.hubId, 
-      ch.nonce, 
+      ch.d.hubId,
+      ch.nonce,
       amount)
 
-    ch.d.their_input_amount = amount
+    ch.d.they_input_amount = amount
     await ch.d.save()
 
-
     me.send(pubkey, 'withdrawal', input)
-
-
   } else if (inputType == 'ack') {
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)
 
-    var [secret, sig]= r(body)
+    var [secret, stateSig] = r(body)
 
-    if (!ec.verify(ch.d.getState(), sig, pubkey)) return false
+    if (!ec.verify(ch.d.getState(), stateSig, pubkey)) return l("Invalid state signed")
 
-    ch.d.sig = sig
+    ch.d.sig = stateSig
     ch.d.status = 'ready'
 
     await ch.d.save()
+
+    l("Got secret ",secret)
 
     var invoice = toHex(sha3(secret))
 
     var return_to = purchases[invoice]
 
-    if (!return_to) return false
+    if (!return_to) return l("Nowhere to return to for "+invoice, purchases)
 
     // ws from browser
-    if (typeof return_to == 'function') {
-      return_to({confirm: 'Payment succeeded', secret: toHex(secret)}) 
+    if (typeof return_to === 'function') {
+      return_to({confirm: 'Payment succeeded', secret: toHex(secret)})
     } else {
       var return_ch = await me.channel(return_to)
       me.send(return_to, 'ack', me.envelope(
         secret, ec(return_ch.d.getState(), me.id.secretKey)
       ))
     }
-
-
   } else if (inputType == 'update') {
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)
@@ -235,33 +230,33 @@ module.exports = async (ws, msg) => {
       var [method, transitions, stateSig, newState] = r(body)
 
       if (readInt(method) != methodMap('update')) {
-        l("Invalid update input")
+        l('Invalid update input')
         return false
       }
 
-
-      var [action, amount, mediate_to, invoice] = transitions[0]
+      var [action, amount, mediate_hub, mediate_to, invoice] = transitions[0]
 
       if (readInt(action) != methodMap('unlockedPayment')) {
-        return false
+        return l('Wrong method')
       }
+
       amount = readInt(amount)
+      mediate_hub = readInt(mediate_hub)
 
       if (amount < 99) {
-        l("Too low amount")
+        l('Too low amount')
         return false
       }
 
       if (amount > ch.they_payable) {
-        l("Channel is depleted for "+amount, ch) 
+        l('Channel is depleted for ' + amount, ch)
         return false
       }
 
       if (ch.d.status != 'ready') {
-        l("Channel is not ready") 
+        l('Channel is not ready')
         return false
       }
-
 
       ch.d.offdelta += ch.left ? amount : -amount
       ch.d.nonce++
@@ -269,72 +264,61 @@ module.exports = async (ws, msg) => {
       var resultState = ch.d.getState()
 
       if (!resultState.equals(newState)) {
-        return l("State mismatch ", resultState, newState)
+        return l('State mismatch ', resultState, newState)
       }
 
-      if (ec.verify(resultState, stateSig, pubkey)) {
-        ch.d.sig = stateSig 
+      if (!ec.verify(resultState, stateSig, pubkey)) {
+        return l('Invalid state sig')
+      }
+      ch.d.sig = stateSig
 
+      l('The payment is accepted ')
 
-        //l('return ACK')
+      if (me.is_hub && mediate_to.length > 1) {
+        l(`Forward to peer or other hub ${mediate_to.length}`)
 
-        if (me.is_hub) {
-          // forward to peer or other hub
-          
-          //me.send(pubkey, 'ack', ec(ch.d.getState(), me.id.secretKey))
+        //me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
 
-          await ch.d.save()
+        await ch.d.save()
 
-          await me.payChannel({
-            partner: mediate_to,
-            amount: afterFees(amount),
-            mediate_to: null,
-            return_to: pubkey,
-            invoice: invoice
-          })          
+        var partner = mediate_hub == me.record.id ? mediate_to : Members.find(m=>m.id==mediate_hub).pubkey
+
+        await me.payChannel({
+          partner: partner,
+          amount: afterFees(amount),
+
+          mediate_to: mediate_to,
+          mediate_hub: mediate_hub,
+
+          return_to: pubkey,
+          invoice: invoice
+        })
+      } else {
+        await ch.d.save()
+
+        l('Looking for invoice ', invoice)
+
+        var paid_invoice = invoices[toHex(invoice)]
+
+        // did we get right amount in right asset?
+        if (paid_invoice &&
+          amount >= paid_invoice.amount-1000 &&
+          paid_invoice.status == 'pending') {
+          l('Our invoice was paid!', paid_invoice)
+          paid_invoice.status = 'paid'
         } else {
-          await ch.d.save()
-
-          l('looking for ', invoice)
-
-          var paid_invoice = invoices[toHex(invoice)]
-
-          // did we get right amount in right asset?
-          if (paid_invoice && 
-            amount >= afterFees(paid_invoice.amount) &&
-            paid_invoice.status == 'pending') {
-
-            l('Our invoice was paid!', paid_invoice)
-            paid_invoice.status = 'paid'
-
-    
-          }else {
-            l("No such invoice found. Donation?")
-          }
-
-          l("Acking back to ", pubkey)
-          me.send(Members[0], 'ack', me.envelope(
-            paid_invoice ? paid_invoice.secret : 0, ec(ch.d.getState(), me.id.secretKey)
-          ))
-
-          await me.addHistory(amount, 'Received', true)
-
-          react()
-
-
+          l('No such invoice found. Donation?')
         }
+
+        l('Acking back to ', pubkey)
+        me.send(pubkey, 'ack', me.envelope(
+          paid_invoice ? paid_invoice.secret : 0, ec(ch.d.getState(), me.id.secretKey)
+        ))
+
+        await me.addHistory(pubkey, amount, 'Received', true)
+
+        react()
       }
-      
-    } 
-
-
-
-
-
-
-
-
+    }
   }
-
-
 }

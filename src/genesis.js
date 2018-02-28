@@ -5,13 +5,7 @@ module.exports = async (genesis) => {
 
   await (sequelize.sync({force: true}))
 
-
-
-
   // entity / country / infra
-
-
-
 
   K = {
     // global network pepper to protect derivation from rainbow tables
@@ -28,7 +22,7 @@ module.exports = async (genesis) => {
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 1000,
+    snapshot_after_bytes: 10000,
     proposals_created: 0,
 
     tax: 2,
@@ -44,7 +38,6 @@ module.exports = async (genesis) => {
 
     risk: 10000, // recommended rebalance limit
     hard_limit: 500000, // how much can a user lose if hub is insolvent?
-
 
     dispute_delay: 5, // in how many blocks disputes are considered final
 
@@ -81,7 +74,6 @@ module.exports = async (genesis) => {
 
     ],
 
-
     min_amount: 100,
     max_amount: 300000,
 
@@ -89,17 +81,13 @@ module.exports = async (genesis) => {
     hubs: [],
 
     total_shares: 30,
-    majority: 20,
+    majority: 20
 
   }
 
-
-
-
-
   // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
 
-  createMember = async (username, pw, loc)=>{
+  createMember = async (username, pw, loc) => {
     var seed = await derive(username, pw)
     me = new Me()
     await me.init(username, seed)
@@ -111,7 +99,7 @@ module.exports = async (genesis) => {
       balance: 500000
     }))
 
-    l(username+" : "+pw+" at "+loc)
+    l(username + ' : ' + pw + ' at ' + loc)
 
     K.members.push({
       id: user.id,
@@ -133,16 +121,14 @@ module.exports = async (genesis) => {
 
   var seed = await createMember('root', toHex(crypto.randomBytes(16)), base + 8000)
 
-  for (var i = 8001; i<8005; i++) {
-    await createMember(i.toString(), 'password', base + (i+10))
+  for (var i = 8001; i < 8005; i++) {
+    await createMember(i.toString(), 'password', base + (i + 10))
   }
-
 
   K.members[0].shares = 10
   K.members[1].shares = 10
   K.members[2].shares = 6
   K.members[3].shares = 4
-
 
   K.members[0].hub = {
     handle: 'eu',
@@ -155,7 +141,6 @@ module.exports = async (genesis) => {
   }
 
 
-
   await (Insurance.create({
     leftId: 2,
     rightId: 1,
@@ -164,8 +149,6 @@ module.exports = async (genesis) => {
     ondelta: 0,
     asset: 0
   }))
-
-
 
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)

@@ -3,14 +3,15 @@ l = console.log
 ts = () => Math.round(new Date() / 1000)
 
 renderRisk = (hist) => {
-  if (hist.length == 0) return false
+  //if (hist.length == 0) return false
 
-  var precision = 100 // devide time by 
-
-  //riskcanvas.height = 300
+  var precision = 100 // devide time by
 
   if (!window.riskchart) {
     var ctx = riskcanvas.getContext('2d')
+    ctx.height = '400px'
+    ctx.width = '100%'
+
     window.riskchart = new Chart(ctx, {
       type: 'line',
       data: {
@@ -18,7 +19,7 @@ renderRisk = (hist) => {
         datasets: [{
           label: 'Uninsured',
           steppedLine: true,
-          data: [{x: Math.round(new Date/precision), y: 0}],
+          data: [{x: Math.round(new Date() / precision), y: 0}],
           borderColor: 'rgb(220, 53, 69)',
           backgroundColor: 'rgb(220, 53, 69)'
         }]
@@ -27,8 +28,10 @@ renderRisk = (hist) => {
         legend: {
           display: false
         },
+
         maintainAspectRatio: false,
-        // responsive: true,
+        // responsive: false,
+
         title: {
           display: true
         },
@@ -58,15 +61,15 @@ renderRisk = (hist) => {
 
   for (h of hist) {
     d.push({
-      x: Math.round(Date.parse(h.date)/precision),
+      x: Math.round(Date.parse(h.date) / precision),
       // for now we hide the spent dynamics to not confuse the user
-      y: (h.delta < 0) ? 0 : Math.round(h.delta/100)
+      y: (h.delta < 0) ? 0 : Math.round(h.delta / 100)
     })
   }
 
   // keep it updated
   d.push({
-    x: Math.round(new Date/precision),
+    x: Math.round(new Date() / precision),
     y: d[d.length - 1].y
   })
 
@@ -88,16 +91,6 @@ render = r => {
 FS.resolvers.push(render)
 
 FS.onready(() => {
-  FS('load').then(render)
-
-  if (localStorage.auth_code) {
-    // local node
-    // if (location.hash == '') location.hash = '#wallet'
-
-    setInterval(function () {
-      FS('load').then(render)
-    }, 3000)
-  }
 
   notyf = new Notyf({delay: 4000})
 
@@ -215,7 +208,7 @@ FS.onready(() => {
         userId: i[1],
         hubId: i[2],
         invoice: i[3],
-        trimmedId: i[1].length == 64 ? i[1].substr(0,10)+'...' : i[1]
+        trimmedId: i[1].length == 64 ? i[1].substr(0, 10) + '...' : i[1]
       }
     },
 
@@ -239,6 +232,16 @@ FS.onready(() => {
           return diff + ' ' + unit.name + (diff > 1 ? 's' : '') + ' ago'
         }
       };
+    },
+
+    toggle: () => {
+      if (localStorage.settings) {
+        delete (localStorage.settings)
+      } else {
+        localStorage.settings = 1
+      }
+
+      app.settings = !app.settings
     }
 
   }
@@ -247,12 +250,28 @@ FS.onready(() => {
 
   app = new Vue({
     el: '#app',
+    mounted: ()=>{
+      FS('load').then(render)
+
+      if (localStorage.auth_code) {
+        // local node
+        // if (location.hash == '') location.hash = '#wallet'
+
+        setInterval(function () {
+          FS('load').then(render)
+        }, 3000)
+      }
+
+
+      //renderRisk([])
+    },
     data () {
       return {
         auth_code: localStorage.auth_code,
 
         asset: 'FSD',
         hub: 0,
+        channels: [],
 
         whitepaper: wp,
 
@@ -262,8 +281,6 @@ FS.onready(() => {
 
         pw: '',
         username: '',
-
-        channels: [],
 
         record: false,
 
@@ -278,10 +295,15 @@ FS.onready(() => {
         off_amount: '',
         is_hub: false,
 
+        limits: [100, 1000],
+
+        history_limits: [0, 10],
+
         history: [],
 
         proposal: ['Mint $1000 FSD to 1@1', `await Tx.mint(0, 1, 1, 100000)`, ''],
 
+        settings: !localStorage.settings,
 
         new_invoice: '',
         pay_invoice: ''
@@ -289,7 +311,7 @@ FS.onready(() => {
       }
     },
     computed: {
-      ch: ()=>{ return app.channels[app.hub] }
+      ch: () => { return app.channels[app.hub] }
     },
     methods: methods,
     template: `
@@ -436,99 +458,116 @@ FS.onready(() => {
 
     <div v-else-if="tab=='wallet'">
 
-      <template v-if="pubkey">
+      <template v-if="pubkey && ch">
 
-        <div v-if="is_hub">
-          <h1>This node is a hub.</h1>
-        </div>
-
-        <div class="float-right"><select v-model="hub" class="custom-select custom-select-lg mb-3">
+        <select v-model="hub" class="custom-select custom-select-lg mb-3">
           <option disabled>Select current hub</option>
           <option v-for="(a,index) in channels" :value="index">{{a.member.hub.name}}</option>
-        </select> </div>
+        </select>
 
-        <div>
-          <p>To start sending and receiving digital assets in Failsafe you need to add hubs and define trust limits:</p>
-          <p> <input type="text" v-model="ch.d.we_hard_limit"> </p>
+        <button type="button" class="btn btn-warning mb-3" @click="toggle" href="#">{{settings ? 'Hide' : 'Show'}} Settings</button>
 
-          <h1 style="display:inline-block">{{commy(ch.payable)}}</h1>
-          <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.delta > 0 ? "+ "+commy(ch.delta)+" uninsured" : "- "+commy(-ch.delta)+" spent"}}</small> 
-          
-          
+        <button class="btn btn-success mb-3" @click="call('faucet', { partner: ch.partner })">Testnet Faucet</button>
+
+        <p v-if="is_hub">You are hub @{{is_hub}}</p>
 
 
-          <div class="row">
-            <div class="col-sm-6">
-              <p><div class="input-group" style="width:400px">
-                <span class="input-group-addon" id="sizing-addon2">{{asset}}</span>
-                <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
-              </div></p>
+        <div v-if="settings" class="alert alert-danger" role="alert">
+          <h3>Credit limit</h3>
 
-              <p>Receivable: {{commy(ch.they_payable)}}</p>
+          <p>In order to receive money from the hub off-chain you must define <b>soft and hard limits</b> below. Soft one tells the hub after what amount uninsured balances must be insured (rebalanced). Hard limit defines a maximum uninsured balance you can have at any time, you can lose it in worst case scenario if the hub is insolvent. Low hard limit may prevent you from receiving large payments.</p>
 
-              <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, hub: hub, amount: uncommy(off_amount)})">→ Request</button></p>
+          <p><label>Soft limit (currently {{commy(ch.d.we_soft_limit)}}, recommended {{commy(K.risk)}}):</label>
+          <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
+          <label>Hard limit (currently {{commy(ch.d.we_hard_limit)}}, recommended 1000):</label>
+          <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]"></p>
 
-              <p><div v-show="new_invoice.length > 0" class="input-group" style="width:400px">
-                <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
-              </div></p>
-            </div>
+          <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Credit Limits</button></p>
 
-            <div class="col-sm-6">
-              <p><div class="input-group" style="width:400px" >
-                <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
-              </div></p>
+          <hr/>
 
-              <p>Payable: {{commy(ch.payable)}}</p>
+          <h3>Risk analytics</h3>
+          <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
 
-              <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {asset: asset, hub: hub}) ); pay_invoice='';">Pay Now → </button></p>
+          <hr/>
 
-              <div v-if="pay_invoice.length > 0">
-                <p>Amount: {{commy(unpackInvoice().amount)}}</p>
-                <p>Pay to: <b>{{unpackInvoice().trimmedId}}</b></p>
-                <p>Receiver's hub: {{unpackInvoice().hubId}}</p>
-              </div>
+          <h3>Start a Dispute</h3>
 
-            </div>
+          <p>If this hub becomes unresponsive, <a @click="dispute" href="#">you can always start a dispute on-chain</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you might get <b>uninsured</b> balance later if the hub is solvent.
+          </p>
+
+        </div>
+
+        <br>
+
+
+        <h1 style="display:inline-block">{{commy(ch.payable)}}</h1>
+        <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.delta > 0 ? "+ "+commy(ch.delta)+" uninsured" : "- "+commy(-ch.delta)+" spent"}}</small> 
+        
+        
+
+
+        <div class="row">
+          <div class="col-sm-6">
+            <p><div class="input-group" style="width:400px">
+              <span class="input-group-addon" id="sizing-addon2">{{asset}}</span>
+              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
+            </div></p>
+
+            <p>Receivable: {{commy(ch.they_payable)}}</p>
+
+            <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, partner: ch.partner, amount: uncommy(off_amount)})">→ Request</button></p>
+
+            <p><div v-show="new_invoice.length > 0" class="input-group" style="width:400px">
+              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
+            </div></p>
           </div>
 
+          <div class="col-sm-6">
+            <p><div class="input-group" style="width:400px" >
+              <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
+            </div></p>
 
+            <p>Payable: {{commy(ch.payable)}}</p>
+            <small>{{ch.d.status}}</small>
 
+            <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {partner: ch.partner}) ); pay_invoice='';">Pay Now → </button></p>
 
-          <div class="alert alert-light" role="alert">
-          If you want to claim your balance or have any problem with this hub, <a @click="dispute" href="#">you can start a dispute</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you will get <b>uninsured</b> balance if the hub is active.
+            <div v-if="pay_invoice.length > 0">
+              <p>Amount: {{commy(unpackInvoice().amount)}}</p>
+              <p>Pay to: <b>{{unpackInvoice().trimmedId}}</b></p>
+              <p>Receiver's hub: {{unpackInvoice().hubId}}</p>
+            </div>
+
           </div>
-
-
-          <p><button class="btn btn-success" @click="call('faucet', { asset: asset, hub: hub })">Testnet Faucet</button></p>
-
-
-
-          <table v-if="history.length > 0" class="table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Amount</th>
-                <th>Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="h in history.slice(0, 20)">
-                <td>{{ new Date(h.date).toLocaleString() }}</td>
-                <td>{{h.desc}}</td>
-                <td>{{commy(h.amount)}}</td>
-                <td v-if="h.balance>0">{{commy(h.balance)}}</td>
-              </tr>
-
-              <tr><a href="">Show Next</a></tr>
-            </tbody>
-          </table>
         </div>
 
 
 
-        <canvas width="100%" id="riskcanvas"></canvas>
 
+
+
+
+        <table v-if="history.length > 0" class="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Amount</th>
+              <th>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="h in history.slice(history_limits[0], history_limits[1])">
+              <td>{{ new Date(h.date).toLocaleString() }}</td>
+              <td>{{h.desc}}</td>
+              <td>{{commy(h.amount)}}</td>
+              <td v-if="h.balance>0">{{commy(h.balance)}}</td>
+            </tr>
+
+            <p><a@click="history_limits[1]=999999">Show All</a></p>
+          </tbody>
+        </table>
       </template>
 
 
@@ -737,9 +776,9 @@ FS.onready(() => {
 </div>
 `
   })
+
+
 })
-
-
 
 // delayed features:
 
@@ -748,10 +787,6 @@ FS.onready(() => {
   <option disabled>Select current asset</option>
   <option v-for="(a,index) in K.assets" :value="a.ticker">{{a.name}}</option>
 </select></div>
-
-
-
-
 
 <p><div v-if="ch.payable>0 || ch.insurance > 0">
   <div class="progress" style="max-width:1400px">
@@ -765,4 +800,4 @@ FS.onready(() => {
       +{{commy(ch.delta)}} (uninsured)
     </div>
   </div>
-</div></p>*/
+</div></p> */
