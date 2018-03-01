@@ -8,41 +8,42 @@ Based on how much they want to insure, we can find the minimum amount of spender
 */
 
 module.exports = async function () {
-  var channels = await me.channels()
+
+  var deltas = await Delta.findAll({where: {myId: me.pubkey}})
 
   var ins = []
   var outs = []
 
   me.record = await me.byKey()
 
-  var solvency = me.record.balance
-  var uninsured = 0
   var checkBack = []
 
-  for (var ch of channels) {
-    channels.push(ch)
+  var collectedSoFar = me.record.balance
 
-    solvency -= ch.delta
+  for (var d of deltas) {
+    l("Checking channel with ", d.partnerId)
 
-    if (ch.delta > 0) {
-      uninsured += ch.delta
+    var ch = await me.channel(d.partnerId)
 
-      if (ch.delta >= K.risk) {
-        outs.push([ch.delta, d.partner, hubId])
-      }
-    } else if (ch.delta <= -K.risk) {
+    // finding who's gone beyond soft limit
+    if (ch.promised >= ch.d.they_soft_limit) {
+      l("Covering our promise ", ch.d.partnerId)
+      outs.push([ch.promised, ch.d.myId, ch.d.partnerId])
+      
+    } else if (ch.insured >= K.risk) {
       if (ch.d.our_input_sig) {
         l('we already have input to use')
         // method, user, hub, nonce, amount
-
+        /*
         ins.push([ ch.d.our_input_amount,
-          ch.userId,
+          ch.d.partnerId,
           ch.d.our_input_sig ])
-      } else if (me.users[d.userId]) {
-        l(`We can pull payment from ${toHex(d.userId)} and use next rebalance`)
-        me.send(d.userId, 'requestWithdraw', me.envelope(ch.insured))
+          */
+      } else if (me.users[ch.d.partnerId]) {
+        l(`We can pull payment from ${toHex(ch.d.partnerId)} and use next rebalance`)
+        me.send(ch.d.partnerId, 'requestWithdraw', me.envelope(ch.insured))
 
-        checkBack.push(d.userId)
+        checkBack.push(ch.d.partnerId)
       } else {
         l('Delayed pull')
       }
@@ -51,22 +52,30 @@ module.exports = async function () {
 
   // checking on all inputs we expected to get, then rebalance
   setTimeout(async () => {
-    for (var userId of checkBack) {
-      var ch = await me.channel(userId)
+
+    for (var partnerId of checkBack) {
+      var ch = await me.channel(partnerId)
       if (ch.d.our_input_sig) {
+        collectedSoFar += ch.d.our_input_amount
+
         ins.push([ ch.d.our_input_amount,
-          ch.userId,
+          ch.d.partnerId,
           ch.d.our_input_sig ])
       }
     }
 
-    if (ins.length > 0 || outs.length > 0) {
-      await me.broadcast('rebalanceHub', r([0, ins, outs]))
-    }
-  }, 5000)
+    // sorting, bigger amounts are prioritized 
+    ins.sort((a,b)=>a[0]<b[0])
+    outs.sort((a,b)=>a[0]<b[0])
 
-  return {
-    channels: channels,
-    solvency: solvency
-  }
+    var finalset = [0, ins, outs]
+
+    l(finalset)
+
+
+    if (ins.length > 0 || outs.length > 0) {
+      await me.broadcast('rebalance', r(finalset))
+    }
+  }, 3000)
+
 }

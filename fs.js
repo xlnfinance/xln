@@ -54,6 +54,10 @@ r = function (a) {
   }
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 readInt = (i) => i.readUIntBE(0, i.length)
 
 toHex = (inp) => Buffer.from(inp).toString('hex')
@@ -149,8 +153,7 @@ methodMap = (i) => {
 
     'block',
 
-    'rebalanceHub',
-    'rebalanceUser',
+    'rebalance',
 
     'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
     'delta',    // delayed balance proof
@@ -180,8 +183,7 @@ methodMap = (i) => {
 }
 
 allowedOnchain = [
-  'rebalanceHub',
-  'rebalanceUser',
+  'rebalance',
 
   'propose',
 
@@ -441,6 +443,20 @@ User = sequelize.define('user', {
 
 })
 
+User.idOrKey = async (id) => {
+  if (id.length == 32) {
+    return (await User.findOrBuild({
+      where: {pubkey: id},
+      defaults: {
+        nonce:0,
+        balance:0
+      }
+    }))[0]
+  } else {
+    return await User.findById(readInt(id))    
+  }
+}
+
 Proposal = sequelize.define('proposal', {
   desc: Sequelize.TEXT,
   code: Sequelize.TEXT,
@@ -570,13 +586,13 @@ History = privSequelize.define('history', {
   leftId: Sequelize.CHAR(32).BINARY,
   rightId: Sequelize.CHAR(32).BINARY,
 
+  date: { type: Sequelize.DATE, defaultValue: Sequelize.NOW },
   delta: Sequelize.INTEGER,
 
   amount: Sequelize.INTEGER,
   balance: Sequelize.INTEGER,
   desc: Sequelize.TEXT,
 
-  date: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 
 })
 
@@ -668,6 +684,6 @@ process.on('unhandledRejection', r => console.log(r))
 repl = require('repl').start('> ')
 _eval = repl.eval
 repl.eval = (cmd, context, filename, callback) => {
-  if (cmd.indexOf('await') != -1) cmd = `(function(){ async function _wrap() { return ${cmd} } return console.log(_wrap()) })()`
+  if (cmd.indexOf('await') != -1) cmd = `(function(){ async function _wrap() { console.log(${cmd}) } return _wrap() })()`
   _eval(cmd, context, filename, callback)
 }

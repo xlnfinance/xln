@@ -136,19 +136,10 @@ module.exports = async (genesis) => {
   }
 
   K.members[1].hub = {
-    handle: 'asia',
-    name: '@asia (Asia)'
+    handle: 'jp',
+    name: '@jp (Asia)'
   }
 
-
-  await (Insurance.create({
-    leftId: 2,
-    rightId: 1,
-    nonce: 0,
-    insurance: 100000000,
-    ondelta: 0,
-    asset: 0
-  }))
 
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)

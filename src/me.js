@@ -112,8 +112,7 @@ class Me {
     me.record = await me.byKey()
 
     switch (method) {
-      case 'rebalanceHub':
-      case 'rebalanceUser':
+      case 'rebalance':
 
         var confirm = 'Broadcasted globally!'
         break
@@ -150,8 +149,6 @@ class Me {
       me.mempool.push(tx)
     } else {
       me.send(K.members[0], 'tx', tx)
-
-      l(r(tx))
     }
 
     l('Just broadcasted: ', method)
@@ -215,11 +212,14 @@ class Me {
       }
 
       if (this.is_hub) {
-        // me.intervals.push(setInterval(require('./hub'), K.blocktime * 2000))
+        me.intervals.push(setInterval(require('./hub'), K.blocktime * 2000))
       }
     } else {
-      // keep connection to hub open
-      this.send(Members[0], 'auth', this.envelope(methodMap('auth')))
+      // keep connection to all hubs
+      Members.map(m=>{
+        if (this.my_member != m)
+        this.send(m, 'auth', this.envelope(methodMap('auth')))
+      })
     }
 
     l('Set up sync')
@@ -329,7 +329,7 @@ class Me {
   // accepts pubkey only
   async channel (partner) {
     var compared = Buffer.compare(me.pubkey, partner)
-    if (compared == 0) throw 'Channel to self'
+    if (compared == 0) return false
 
     var r = {
       // default insurance
@@ -373,17 +373,17 @@ class Me {
       if (user) {
         r.partner = user.id
 
-        var insurance = await Insurance.find({where: {
+        r.ins = await Insurance.find({where: {
           leftId: r.left ? me.record.id : user.id,
           rightId: r.left ? user.id : me.record.id
         }})
       }
     }
 
-    if (insurance) {
-      r.insurance = insurance.insurance
-      r.ondelta = insurance.ondelta
-      r.nonce = insurance.nonce
+    if (r.ins) {
+      r.insurance = r.ins.insurance
+      r.ondelta = r.ins.ondelta
+      r.nonce = r.ins.nonce
     }
 
     // r.d.state = JSON.parse(r.d.state)
@@ -424,6 +424,8 @@ class Me {
     (r.d.we_hard_limit - r.they_promised)
 
     // inputs not in blockchain yet, so we hold them temporarily
+
+    r.bar = r.promised + r.insurance + r.they_promised
 
     return r
   }
@@ -476,7 +478,7 @@ class Me {
       return false
     }
 
-    //l(`Processing block built by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
+    l(`Processing block ${K.total_blocks+1} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
 
     var meta = {
       inputs_volume: 0,
@@ -485,7 +487,9 @@ class Me {
 
     // processing transactions one by one
     for (var i = 0; i < ordered_tx.length; i++) {
-      await Tx.processTx(ordered_tx[i], meta)
+      var obj = await Tx.processTx(ordered_tx[i], meta)
+      l(obj)
+      
       K.total_tx++
       K.total_tx_bytes += ordered_tx[i].length
     }

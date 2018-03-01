@@ -3,8 +3,6 @@ l = console.log
 ts = () => Math.round(new Date() / 1000)
 
 renderRisk = (hist) => {
-  //if (hist.length == 0) return false
-
   var precision = 100 // devide time by
 
   if (!window.riskchart) {
@@ -57,13 +55,14 @@ renderRisk = (hist) => {
 
   var last = d.pop()
 
+  if (hist.length == 0) return false
   var hist = hist.slice().reverse().slice(d.length)
 
   for (h of hist) {
     d.push({
       x: Math.round(Date.parse(h.date) / precision),
       // for now we hide the spent dynamics to not confuse the user
-      y: (h.delta < 0) ? 0 : Math.round(h.delta / 100)
+      y: Math.round(h.delta / 100)
     })
   }
 
@@ -122,10 +121,10 @@ FS.onready(() => {
     rebalance: () => {
       var total = app.outs.reduce((k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount), 0)
 
-      // if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
-      app.call('rebalanceUser', {
-        asset: asset,
-        ins: app.ins,
+      //if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
+      app.call('rebalance', {
+        partner: app.ch.partner,
+        request_amount: app.uncommy(app.request_amount),
         outs: app.outs
       })
       // }
@@ -288,11 +287,14 @@ FS.onready(() => {
 
         install_snippet: false,
 
-        ins: [],
+
+        request_amount: 0,
         outs: [{to: '', amount: ''}],
+
 
         off_to: '',
         off_amount: '',
+
         is_hub: false,
 
         limits: [100, 1000],
@@ -335,10 +337,6 @@ FS.onready(() => {
           <a class="nav-link" @click="go('wallet')">Wallet</a>
         </li>
 
-
-        <li v-if="auth_code && record" class="nav-item" v-bind:class="{ active: tab=='rebalance' }">
-          <a class="nav-link" @click="go('rebalance')">Settlement</a>
-        </li>
 
 
 
@@ -474,7 +472,6 @@ FS.onready(() => {
 
         <div v-if="settings" class="alert alert-danger" role="alert">
           <h3>Credit limit</h3>
-
           <p>In order to receive money from the hub off-chain you must define <b>soft and hard limits</b> below. Soft one tells the hub after what amount uninsured balances must be insured (rebalanced). Hard limit defines a maximum uninsured balance you can have at any time, you can lose it in worst case scenario if the hub is insolvent. Low hard limit may prevent you from receiving large payments.</p>
 
           <p><label>Soft limit (currently {{commy(ch.d.we_soft_limit)}}, recommended {{commy(K.risk)}}):</label>
@@ -485,27 +482,62 @@ FS.onready(() => {
           <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Credit Limits</button></p>
 
           <hr/>
+            <h3>On-chain Rebalance</h3>
+
+            <p>Global ID: <b>{{record.id}}</b></p>
+            <p>Global Balance: <b>\${{commy(record.balance)}}</b></p>
+
+            <small>You can withdraw money from your insured balance (up to {{commy(ch.insured)}}) to your global balance. Also you can deposit from your global balance to any channel insurance or global balance. You can do both these actions in a single on-chain transaction.</small>
+              
+            <p><input style="width:200px" type="number" class="form-control small-input" v-model="request_amount" placeholder="Amount"></p>
+
+            <p v-for="out in outs">
+              <input style="width:400px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
+              <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
+            </p>
+         
+            <p>
+              <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
+              <button type="button" class="btn btn-warning" @click="rebalance()">Settle Globally</button>
+            </p>
+
+
+          <hr/>
+
+          <h3>Start On-Chain Dispute</h3>
+
+          <p>If this hub becomes unresponsive, <a @click="dispute" href="#">you can always start a dispute on-chain</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you might get <b>uninsured</b> balance later if the hub is solvent.
+          </p>
 
           <h3>Risk analytics</h3>
           <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
 
           <hr/>
-
-          <h3>Start a Dispute</h3>
-
-          <p>If this hub becomes unresponsive, <a @click="dispute" href="#">you can always start a dispute on-chain</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you might get <b>uninsured</b> balance later if the hub is solvent.
-          </p>
-
         </div>
 
         <br>
 
 
         <h1 style="display:inline-block">{{commy(ch.payable)}}</h1>
-        <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.delta > 0 ? "+ "+commy(ch.delta)+" uninsured" : "- "+commy(-ch.delta)+" spent"}}</small> 
+        <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : "- "+commy(ch.they_insured)+" spent"}}</small> 
         
-        
+        <p><div v-if="ch.bar > 0">
+          <div class="progress" style="max-width:1400px">
+            <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}"   class="progress-bar"  role="progressbar">
+              {{commy(ch.promised)}} (we promised)
+            </div>
 
+            <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+              {{commy(ch.insured)}} (insured)
+            </div>
+            <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
+              -{{commy(ch.they_insured)}} (spent)
+            </div>
+            <div v-bind:style="{ width: Math.round(ch.they_promised*100/ch.bar)+'%', 'background-color':'#dc3545'}"   class="progress-bar"  role="progressbar">
+              +{{commy(ch.they_promised)}} (uninsured)
+            </div>
+          </div>
+        </div></p> 
 
         <div class="row">
           <div class="col-sm-6">
@@ -565,7 +597,7 @@ FS.onready(() => {
               <td v-if="h.balance>0">{{commy(h.balance)}}</td>
             </tr>
 
-            <p><a@click="history_limits[1]=999999">Show All</a></p>
+            <p><a @click="history_limits[1]=999999">Show All</a></p>
           </tbody>
         </table>
       </template>
@@ -590,33 +622,6 @@ FS.onready(() => {
 
 
 
-    <div v-else-if="tab=='rebalance'">
-      <h1>Global Settlement</h1>
-
-      <div class="alert alert-danger" role="alert">
-        On this page you can make onchain transactions. Money is deducted from your global balance and deposited to outputs (batch your transactions to save on fees). 
-        Global settlement is slow (can take hours) and expensive, but it avoids temporary risks of intermediary hubs.
-        <br><br>
-        Most likely you don't need to use this feature: go to Wallet page to use instant offchain payments instead.
-
-      </div>
-
-      <p>Global ID: <b>{{record.id}}</b></p>
-      <p>Global Balance: <b>\${{commy(record.balance)}}</b></p>
-
-      <small>Currently there's only one hub <b>@1</b>. So to deposit to someone's channel with hub use their_ID@1</small>
-
-      <p v-for="out in outs">
-        <input style="width:400px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
-        <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
-      </p>
-   
-      <p>
-        <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add output</button>
-        <button type="button" class="btn btn-warning" @click="rebalance()">Settle Globally</button>
-      </p>
-
-    </div>
 
 
 
@@ -787,17 +792,4 @@ FS.onready(() => {
   <option disabled>Select current asset</option>
   <option v-for="(a,index) in K.assets" :value="a.ticker">{{a.name}}</option>
 </select></div>
-
-<p><div v-if="ch.payable>0 || ch.insurance > 0">
-  <div class="progress" style="max-width:1400px">
-    <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.payable)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-      {{commy(ch.insured)}} (insured)
-    </div>
-    <div v-if="ch.delta<0" v-bind:style="{ width: Math.round(-ch.delta*100/ch.payable)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
-      {{commy(ch.delta)}} (spent)
-    </div>
-    <div v-if="ch.delta>0" v-bind:style="{ width: Math.round(ch.delta*100/ch.payable)+'%', 'background-color':'#dc3545'}"   class="progress-bar"  role="progressbar">
-      +{{commy(ch.delta)}} (uninsured)
-    </div>
-  </div>
-</div></p> */
+*/

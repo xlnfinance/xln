@@ -109,16 +109,39 @@ sockets.forEach( (s) => s.end() )
 
         break
 
-      case 'rebalanceUser':
-        // contacting hubs and collecting instant withdrawals ins
+      case 'rebalance':
+        l('contacting hubs and collecting instant withdrawals ins')
 
+        var ins = []
         var outs = []
+
+        if (p.request_amount > 0) {
+          var hub = Members.find(m=>m.id==p.partner).pubkey
+          var ch = await me.channel(hub)
+          if (p.request_amount > ch.insured) {
+            result.alert = "More than you can withdraw from insured"
+            break
+          }
+          me.send(hub, 'requestWithdraw', me.envelope(p.request_amount))
+
+          // waiting for the response
+          await sleep(2000)
+
+          var ch = await me.channel(hub)
+          if (ch.d.our_input_sig) {
+            ins.push([ ch.d.our_input_amount,
+              ch.d.partnerId,
+              ch.d.our_input_sig ])
+          }
+        }
+
+
         for (o of p.outs) {
           // split by @
           if (o.to.length > 0) {
             var to = o.to.split('@')
 
-            var hubId = to[1] ? parseInt(to[1]) : 0
+            var hubId = to[1] ? Members.find(m=>m.hub&&m.hub.handle==to[1]) : 0
 
             if (to[0].length == 64) {
               var userId = Buffer.from(to[0], 'hex')
@@ -138,6 +161,7 @@ sockets.forEach( (s) => s.end() )
 
               if (!u) {
                 result.alert = 'User with short ID ' + userId + " doesn't exist."
+                break
               }
             }
 
@@ -146,16 +170,18 @@ sockets.forEach( (s) => s.end() )
             var amount = parseInt(o.amount.replace(/[^0-9]/g, ''))
 
             if (amount > 0) {
-              outs.push([userId, hubId, amount])
+              outs.push([amount, userId, hubId.pubkey])
             }
           }
         }
+        //p.request_amount > 0
 
-        if (!result.alert) {
-          var encoded = r([0, p.ins, outs])
-
-          result.confirm = await me.broadcast('rebalanceUser', encoded)
+        if (ins.length > 0 || outs.length > 0) {
+          result.confirm = await me.broadcast('rebalance', r([0, ins, outs]))
+          react(result, json.id)
         }
+
+        return false
 
         break
       case 'faucet':

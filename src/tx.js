@@ -80,47 +80,51 @@ module.exports = {
 
         break
 
-      case 'rebalanceHub':
-      case 'rebalanceUser':
+      case 'rebalance':
         // 1. collect all ins insurance
         var [asset, inputs, outputs] = args
+     
+        var is_hub = Members.find(m=>m.hub && m.id == signer.id)
 
-        var is_hub = (method == 'rebalanceHub')
-
-        l('Processing inputs ', inputs)
+        l('Processing inputs ', is_hub)
 
         for (var input of inputs) {
           var amount = readInt(input[0])
-          var userId = readInt(input[1]) // no pubkey ID is allowed here
-          var sig = input[2]
+
+          var partner = await User.idOrKey(input[1])
+
+          var compared = Buffer.compare(signer.pubkey, partner.pubkey)
+          if (compared == 0) continue
 
           var ins = await Insurance.find({
-            where: is_hub ? {userId: userId, hubId: signer.id} : {userId: signer.id, hubId: userId},
+            where: {
+              leftId: compared==-1 ? signer.id : partner.id, 
+              rightId: compared==-1 ? partner.id : signer.id
+            },
             include: {all: true}
           })
 
-          var body = r([methodMap('withdrawal'),
-            ins.userId,
-            ins.hubId,
-            ins.nonce,
-            amount
-          ])
-
-          var partner = await User.findById(userId)
-
-          if (!ec.verify(body, sig, partner.pubkey)) {
-            l('Fake signature by partner')
-            continue
-          }
-
-          if (amount > ins.insurance) {
+          if (!ins || amount > ins.insurance) {
             l(`Invalid amount ${ins.insurance} vs ${amount}`)
             continue
           }
 
+          var body = r([methodMap('withdrawal'),
+            ins.leftId,
+            ins.rightId,
+            ins.nonce,
+            amount
+          ])
+
+          if (!ec.verify(body, input[2], partner.pubkey)) {
+            l('Wrong signature by partner')
+            continue
+          }
+
           ins.insurance -= amount
+          if (compared == 1) ins.ondelta += amount
+
           signer.balance += amount
-          if (is_hub) ins.ondelta += amount
 
           ins.nonce++
 
@@ -128,7 +132,7 @@ module.exports = {
 
           // was this input related to us?
           if (me.record) {
-            if (me.record.id == userId) {
+            if (me.record.id == partner.id) {
               var ch = await me.channel(signer.pubkey)
               // they planned to withdraw and they did. Nullify hold amount
               ch.d.they_input_amount = 0
@@ -153,102 +157,113 @@ module.exports = {
         var reimbursed = 0
         var reimburse_tax = 1 + Math.floor(tax / outputs.length)
 
-        for (var d of outputs) {
-          var originalAmount = readInt(d[0])
-          var amount = readInt(d[0])
-
-          l('outputs ', amount, originalAmount)
-          var userId = d[1]
-
-          var hubId = readInt(d[2])
-
-          // is pubkey or id
-          // if(userId.length != 32) userId = readInt(userId)
+        for (var output of outputs) {
+          var amount = readInt(output[0])
+          var withPartner = output[2]
 
           if (amount > signer.balance) continue
 
-          if (userId.length == 32) {
-            var user = await User.findOrBuild({
-              where: {pubkey: userId},
-              defaults: {
-                nonce: 0
-              }
-            })
-            user = user[0]
-          } else {
-            var user = await User.findById(readInt(userId))
-          }
+          var giveTo = await User.idOrKey(output[1])
 
-          var is_me = me.id && me.pubkey.equals(user.pubkey)
 
-          if (user.id) {
-            if (hubId == undefined) {
-              // can't settle to own global balance
-              if (user.id == signer.id) continue
+          if (giveTo.id) {
+            // settling to global balance
+            if (withPartner.length == 0) {
+              if (giveTo.id == signer.id) continue
 
               l('Adding to existing user')
               // already exists
-              user.balance += amount
+              giveTo.balance += amount
               signer.balance -= amount
             } else {
+              l("HAS withPartner")
+              withPartner = await User.idOrKey(withPartner)
+              
+              var is_me = withPartner.id && me.pubkey.equals(withPartner.pubkey)
+
+              if (!withPartner.id) {
+
+                var fee = (K.standalone_balance + K.account_creation_fee)
+                if (amount < fee) continue
+
+                withPartner.balance = K.standalone_balance
+                amount -= fee
+                signer.balance -= fee
+                await withPartner.save()
+
+                if (is_me) {
+                  await me.addHistory(giveTo.pubkey, -K.account_creation_fee, 'Account creation fee')
+                  await me.addHistory(giveTo.pubkey, -K.standalone_balance, 'Minimum global balance')
+                }
+
+              }
 
             }
           } else {
             l('Created new user')
 
-            if (hubId == undefined) {
+            if (withPartner.length == 0) {
               if (amount < K.account_creation_fee) continue
-              user.balance = (amount - K.account_creation_fee)
+              giveTo.balance = (amount - K.account_creation_fee)
 
               signer.balance -= amount
             } else {
               var fee = (K.standalone_balance + K.account_creation_fee)
               if (amount < fee) continue
 
-              user.balance = K.standalone_balance
+              giveTo.balance = K.standalone_balance
               amount -= fee
               signer.balance -= fee
 
-              if (is_me) {
-                await me.addHistory(-K.account_creation_fee, 'Account creation fee')
-                await me.addHistory(-K.standalone_balance, 'Minimum global balance')
-              }
             }
 
             K.collected_tax += K.account_creation_fee
           }
 
-          await user.save()
+          await giveTo.save()
 
-          if (hubId) {
-            var ch = await Insurance.findOrBuild({
+
+          if (withPartner.id) {
+
+            var compared = Buffer.compare(giveTo.pubkey, withPartner.pubkey)
+            if (compared == 0) continue
+
+            var ins = await Insurance.findOrBuild({
               where: {
-                userId: user.id,
-                hubId: hubId
+                leftId: compared==-1 ? giveTo.id : withPartner.id, 
+                rightId: compared==-1 ? withPartner.id : giveTo.id
               },
               defaults: {
                 nonce: 0,
                 insurance: 0,
                 ondelta: 0
               },
-              include: { all: true }
+              include: {all: true}
             })
 
-            ch[0].insurance += amount
+            ins = ins[0]
 
-            if (is_hub) {
-              ch[0].insurance -= reimburse_tax
-              reimbursed += reimburse_tax
+            ins.insurance += amount
+            if (compared==1) ins.ondelta -= amount
 
-              ch[0].ondelta -= originalAmount
-            }
             signer.balance -= amount
 
-            await ch[0].save()
+            if (is_hub) {
+              ins.insurance -= reimburse_tax
+              if (compared==-1) ins.ondelta += reimburse_tax
+
+              // account creation fees are on user, if any
+              ins.ondelta -= (readInt(output[0]) - amount) * compared
+
+              signer.balance += reimburse_tax
+            }
+
+
+            await ins.save()
 
             // rebalance by hub for our account = reimburse hub fees
             if (is_hub && is_me) {
-              await me.addHistory(-reimburse_tax, 'Rebalance fee', true)
+              await me.addHistory(giveTo.pubkey, -reimburse_tax, 'Rebalance fee', true)
             }
           }
         }

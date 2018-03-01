@@ -152,8 +152,8 @@ module.exports = async (ws, msg) => {
     var ch = await me.channel(pubkey)
 
     var input = r([methodMap('withdrawal'),
-      ch.userId,
-      ch.d.hubId,
+      ch.ins.leftId,
+      ch.ins.rightId,
       ch.nonce,
       ch.insured])
 
@@ -177,14 +177,14 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    if (amount == 0 || amount > ch.insurance - ch.insured) {
-      l(`Peer asks for ${amount} but owns ${ch.insurance - ch.insured}`)
+    if (amount == 0 || amount > ch.they_insured) {
+      l(`Peer asks for ${amount} but owns ${ch.they_insured}`)
       return false
     }
 
     var input = me.envelope(methodMap('withdrawal'),
-      ch.userId,
-      ch.d.hubId,
+      ch.ins.leftId,
+      ch.ins.rightId,
       ch.nonce,
       amount)
 
@@ -205,7 +205,7 @@ module.exports = async (ws, msg) => {
 
     await ch.d.save()
 
-    l("Got secret ",secret)
+    if (secret.length == 0) return l("Got no secret ")
 
     var invoice = toHex(sha3(secret))
 
