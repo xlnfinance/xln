@@ -34,11 +34,11 @@ module.exports = async function () {
       if (ch.d.our_input_sig) {
         l('we already have input to use')
         // method, user, hub, nonce, amount
-        /*
+        
         ins.push([ ch.d.our_input_amount,
           ch.d.partnerId,
           ch.d.our_input_sig ])
-          */
+          
       } else if (me.users[ch.d.partnerId]) {
         l(`We can pull payment from ${toHex(ch.d.partnerId)} and use next rebalance`)
         me.send(ch.d.partnerId, 'requestWithdraw', me.envelope(ch.insured))

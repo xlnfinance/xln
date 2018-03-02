@@ -80,7 +80,6 @@ sockets.forEach( (s) => s.end() )
         }
 
         var partner = Members.find(m => m.id == p.partner).pubkey
-        l('Choosing partner ', partner)
 
         var [status, error] = await me.payChannel({
           partner: partner,
@@ -88,10 +87,9 @@ sockets.forEach( (s) => s.end() )
           execution: p.execution,
 
           mediate_to: mediate_to,
-          mediate_hub: parseInt(p.hubId),
+          mediate_hub: Members.find(m => m.hub && (m.hub.handle == p.hubId)).id,
 
           return_to: (obj) => {
-            l('Returning now')
             ws.send ? ws.send(JSON.stringify({
               result: obj,
               id: json.id
@@ -233,7 +231,7 @@ sockets.forEach( (s) => s.end() )
           result.new_invoice = [
             invoices[invoice].amount,
             me.record ? me.record.id : toHex(me.pubkey),
-            p.partner,
+            Members.find(m=>m.id==p.partner).hub.handle,
             invoice].join('_')
 
           result.confirm = 'Invoice Created'

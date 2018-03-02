@@ -199,6 +199,25 @@ cache = async (i) => {
 
     cached_result.K = K
 
+
+
+    cached_result.blocks = (await Block.findAll()).map(b=>{
+      var [methodId,
+        built_by,
+        prev_hash,
+        timestamp,
+        ordered_tx] = r(b.block.slice(Members.length * 64))
+
+      return {
+        prev_hash: toHex(b.prev_hash),
+        hash: toHex(b.hash),
+        built_by: readInt(built_by),
+        timestamp: readInt(timestamp),
+        meta: JSON.parse(b.meta)
+      }
+    })
+
+
     if (me.is_hub) {
       cached_result.deltas = []
       cached_result.solvency = 0
@@ -519,8 +538,11 @@ privSequelize = new Sequelize('', '', 'password', base_db)
 Block = privSequelize.define('block', {
   block: Sequelize.CHAR.BINARY,
   hash: Sequelize.CHAR(32).BINARY,
-  prev_hash: Sequelize.CHAR(32).BINARY
+  prev_hash: Sequelize.CHAR(32).BINARY,
+  meta: Sequelize.TEXT
 })
+
+
 
 Delta = privSequelize.define('delta', {
   // between who and who

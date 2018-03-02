@@ -301,6 +301,8 @@ FS.onready(() => {
 
         history_limits: [0, 10],
 
+        blocks: [],
+
         history: [],
 
         proposal: ['Mint $1000 FSD to 1@1', `await Tx.mint(0, 1, 1, 100000)`, ''],
@@ -524,7 +526,7 @@ FS.onready(() => {
         <p><div v-if="ch.bar > 0">
           <div class="progress" style="max-width:1400px">
             <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}"   class="progress-bar"  role="progressbar">
-              {{commy(ch.promised)}} (we promised)
+              -{{commy(ch.promised)}} (we promised)
             </div>
 
             <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
@@ -561,7 +563,6 @@ FS.onready(() => {
             </div></p>
 
             <p>Payable: {{commy(ch.payable)}}</p>
-            <small>{{ch.d.status}}</small>
 
             <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {partner: ch.partner}) ); pay_invoice='';">Pay Now → </button></p>
 
@@ -740,6 +741,32 @@ FS.onready(() => {
 
     <div v-else-if="tab=='explorer'">
       <h1>Blockchain Explorer</h1>
+
+      <table class="table table-striped">
+        <thead class="thead-dark">
+          <tr>
+            <th scope="col">Previous Hash</th>
+            <th scope="col">Hash</th>
+            <th scope="col">Built By</th>
+
+          </tr>
+        </thead>
+        <tbody>
+          <div v-for="b in blocks">
+            <tr>
+              <td>{{b.prev_hash}}</td>
+              <td>{{b.hash}}</td>
+              <td>{{b.built_by}}</td>
+            </tr>
+            <tr v-for="m in b.meta.parsed">
+              <p v-for="input in m.inputs">User {{b.meta.signer}} withdraws {{commy(input[0])}} from user {{input[1]}}</p>
+              <p v-for="output in m.outputs">User {{b.meta.signer}} deposits {{commy(output[0])}} to {{output[1]}} @ {{output[2]}}</p>
+            </tr>
+          </div>
+        </tbody>
+      </table>
+
+
       <table class="table table-striped">
         <thead class="thead-dark">
           <tr>

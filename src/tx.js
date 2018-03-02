@@ -86,6 +86,12 @@ module.exports = {
      
         var is_hub = Members.find(m=>m.hub && m.id == signer.id)
 
+        var parsed = {
+          inputs: [],
+          outputs: [],
+          signer: signer.id
+        }
+
         l('Processing inputs ', is_hub)
 
         for (var input of inputs) {
@@ -120,6 +126,9 @@ module.exports = {
             l('Wrong signature by partner')
             continue
           }
+          
+          // for blockchain explorer
+          parsed.inputs.push([amount, partner.id])
 
           ins.insurance -= amount
           if (compared == 1) ins.ondelta += amount
@@ -147,6 +156,7 @@ module.exports = {
               await ch.d.save()
             }
           }
+
         }
 
         // 2. are there disputes?
@@ -159,55 +169,25 @@ module.exports = {
 
         for (var output of outputs) {
           var amount = readInt(output[0])
-          var withPartner = output[2]
 
           if (amount > signer.balance) continue
 
           var giveTo = await User.idOrKey(output[1])
+          var withPartner = output[2].length == 0 ? false : await User.idOrKey(output[2])
 
+          // here we ensure both parties are registred, and take needed fees
 
-          if (giveTo.id) {
-            // settling to global balance
-            if (withPartner.length == 0) {
-              if (giveTo.id == signer.id) continue
+          if (!giveTo.id) {
 
-              l('Adding to existing user')
-              // already exists
-              giveTo.balance += amount
-              signer.balance -= amount
-            } else {
-              l("HAS withPartner")
-              withPartner = await User.idOrKey(withPartner)
-              
-              var is_me = withPartner.id && me.pubkey.equals(withPartner.pubkey)
-
-              if (!withPartner.id) {
-
-                var fee = (K.standalone_balance + K.account_creation_fee)
-                if (amount < fee) continue
-
-                withPartner.balance = K.standalone_balance
-                amount -= fee
-                signer.balance -= fee
-                await withPartner.save()
-
-                if (is_me) {
-                  await me.addHistory(giveTo.pubkey, -K.account_creation_fee, 'Account creation fee')
-                  await me.addHistory(giveTo.pubkey, -K.standalone_balance, 'Minimum global balance')
-                }
-
-              }
-
-            }
-          } else {
-            l('Created new user')
-
-            if (withPartner.length == 0) {
+            if (!withPartner) {
               if (amount < K.account_creation_fee) continue
               giveTo.balance = (amount - K.account_creation_fee)
 
               signer.balance -= amount
+
             } else {
+              if (!withPartner.id) continue
+
               var fee = (K.standalone_balance + K.account_creation_fee)
               if (amount < fee) continue
 
@@ -217,11 +197,37 @@ module.exports = {
 
             }
 
+            await giveTo.save()
+
             K.collected_tax += K.account_creation_fee
+          } else {
+            if (withPartner) {
+              
+              if (!withPartner.id) {
+                l("Looks like hub rebalance")
+
+                var fee = (K.standalone_balance + K.account_creation_fee)
+                if (amount < fee) continue
+
+                withPartner.balance = K.standalone_balance
+                amount -= fee
+                signer.balance -= fee
+                await withPartner.save()
+                // now it has id
+
+                if (me.pubkey.equals(withPartner.pubkey)) {
+                  await me.addHistory(giveTo.pubkey, -K.account_creation_fee, 'Account creation fee')
+                  await me.addHistory(giveTo.pubkey, -K.standalone_balance, 'Minimum global balance')
+                }
+
+              }
+            } else {
+              if (giveTo.id == signer.id) continue
+              giveTo.balance += amount
+              signer.balance -= amount
+              await giveTo.save()
+            }
           }
-
-          await giveTo.save()
-
 
           if (withPartner.id) {
 
@@ -262,11 +268,17 @@ module.exports = {
             await ins.save()
 
             // rebalance by hub for our account = reimburse hub fees
-            if (is_hub && is_me) {
+            if (is_hub && me.pubkey.equals(withPartner.pubkey)) {
               await me.addHistory(giveTo.pubkey, -reimburse_tax, 'Rebalance fee', true)
             }
           }
+
+          parsed.outputs.push([amount, giveTo.id, withPartner ? withPartner.id : false])
+
+
         }
+
+        meta['parsed'].push(parsed)
 
         signer.balance += reimbursed
 

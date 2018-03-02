@@ -9,7 +9,6 @@ node fs --genesis=test
 cd ..
 
 rsync -rva --exclude=private  --exclude=.git fs/ 8001
-
 rsync -rva --exclude=private --exclude=.git fs/ 8002
 rsync -rva --exclude=private --exclude=.git fs/ 8003
 rsync -rva --exclude=private --exclude=.git fs/ 8004
@@ -17,13 +16,9 @@ rsync -rva --exclude=private --exclude=.git fs/ 8004
 
 
 
-ttab "cd 8001; node fs -p8001 --username=8001 --pw=password"
+ttab "cd 8001; node  fs -p8001 --username=8001 --pw=password"
 
-ttab "cd 8002; node fs -p8002 --username=8002 --pw=password"
+ttab "cd 8002; node  fs -p8002 --username=8002 --pw=password"
 ttab "cd 8003; node fs -p8003 --username=8003 --pw=password"
 ttab "cd 8004; node fs -p8004 --username=8004 --pw=password"
-
-
-
-cd fs; node fs -p8433
-
+ttab "cd fs; node --inspect fs -p8433"

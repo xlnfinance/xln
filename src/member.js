@@ -10,7 +10,7 @@ module.exports = () => {
     if (currentIndex < searchIndex) {
       me.current = Members[i]
 
-      var increment = (K.blocktime - (now % K.blocktime)) < 10 ? 2 : 1
+      var increment = (K.blocktime - (now % K.blocktime)) < 5 ? 2 : 1
 
       if (currentIndex + increment >= searchIndex) {
         // take next member or rewind back to 0
@@ -38,7 +38,7 @@ module.exports = () => {
       }
     })
 
-    if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - 10)) {
+    if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - 5)) {
       if (total_shares < K.majority) {
         l(`Only have ${total_shares} shares, cannot build a block!`)
       } else {
@@ -51,7 +51,7 @@ module.exports = () => {
       Members.map(c => c.sig = null)
 
       me.status = 'await'
-    } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - 10)) {
+    } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - 5)) {
       me.status = 'precommit'
       me.processMempool()
     }

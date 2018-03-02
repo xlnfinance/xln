@@ -482,7 +482,8 @@ class Me {
 
     var meta = {
       inputs_volume: 0,
-      outputs_volume: 0
+      outputs_volume: 0,
+      parsed: []
     }
 
     // processing transactions one by one
@@ -624,12 +625,15 @@ class Me {
     }
 
     // save final block in blockchain db and broadcast
+    await Block.create({
+      prev_hash: Buffer.from(prev_hash, 'hex'),
+      hash: sha3(finalblock),
+      block: block,
+      
+      meta: JSON.stringify(meta)
+    })
+
     if (me.my_member) {
-      await Block.create({
-        prev_hash: Buffer.from(prev_hash, 'hex'),
-        hash: sha3(finalblock),
-        block: block
-      })
 
       var blocktx = concat(inputMap('chain'), r([block]))
       // send finalblock to all websocket users if we're member
