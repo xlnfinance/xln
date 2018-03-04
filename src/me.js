@@ -4,6 +4,8 @@ Tx = require('./tx')
 
 class Me {
   async init (username, seed) {
+    this.processBlock = require('./block')
+
     this.username = username
 
     this.is_hub = false
@@ -195,8 +197,6 @@ class Me {
         maxPayload: 64 * 1024 * 1024
       })
 
-      me.users = {}
-
       me.wss.on('error', function (err) { console.error(err) })
       me.wss.on('connection', function (ws) {
         ws.on('message', (msg) => { me.queue.push(['external_rpc', ws, msg]) })
@@ -245,16 +245,16 @@ class Me {
   }
 
   parseDelta (body) {
-    var [method, partner, nonce, delta, instant_until] = r(body)
+    var [method, partner, nonce, offdelta, instant_until] = r(body)
 
     nonce = readInt(nonce)
     method = readInt(method)
     instant_until = readInt(instant_until)
-    delta = readSInt(readInt(delta))
+    offdelta = readSInt(readInt(offdelta))
 
-    if (method != methodMap('delta')) return false
+    if (method != methodMap('offdelta')) return false
 
-    return [partner, nonce, delta, instant_until]
+    return [partner, nonce, offdelta, instant_until]
   }
 
   async payChannel (opts) {
@@ -389,33 +389,10 @@ class Me {
     // r.d.state = JSON.parse(r.d.state)
 
     r.delta = r.ondelta + r.d.offdelta
-    r.state = parse(r.d.state)
 
-    r.promised = 0
-    r.they_promised = 0
 
-    // three scenarios
+    Object.assign(r, resolveChannel(r.insurance, r.delta, r.left))
 
-    if (r.delta >= 0) {
-      r.insured = r.insurance
-      r.they_insured = 0
-
-      r.they_promised = r.delta
-    } else if (r.delta >= -r.insurance) {
-      r.insured = r.insurance + r.delta
-      r.they_insured = -r.delta
-    } else {
-      r.insured = 0
-      r.they_insured = r.insurance
-
-      r.promised = -(r.insurance + r.delta)
-    }
-
-    // view from hub's side of channel
-    if (!r.left) {
-      [r.insured, r.they_insured] = [r.they_insured, r.insured];
-      [r.promised, r.they_promised] = [r.they_promised, r.promised];
-    }
 
     r.payable = (r.insured - r.d.our_input_amount) + r.they_promised +
     (r.d.they_hard_limit - r.promised)
@@ -428,224 +405,6 @@ class Me {
     r.bar = r.promised + r.insurance + r.they_promised
 
     return r
-  }
-
-  async processBlock (block) {
-    var finalblock = block.slice(Members.length * 64)
-
-    var total_shares = 0
-
-    for (var i = 0; i < Members.length; i++) {
-      var sig = (block.slice(i * 64, (i + 1) * 64))
-
-      if (sig.equals(Buffer.alloc(64))) {
-
-      } else if (ec.verify(finalblock, sig, Members[i].block_pubkey)) {
-        total_shares += Members[i].shares
-      } else {
-        l(`Invalid signature for a given block. Halt!`)
-        // return false
-      }
-    }
-
-    if (total_shares < K.majority) {
-      l('Not enough shares on a block')
-      return false
-    }
-
-    var [methodId,
-      built_by,
-      prev_hash,
-      timestamp,
-      ordered_tx] = r(finalblock)
-
-    timestamp = readInt(timestamp)
-
-    if (readInt(methodId) != methodMap('block')) {
-      return l('Wrong method for block')
-    }
-
-    if (finalblock.length > K.blocksize) {
-      return l('Too long block')
-    }
-
-    if (timestamp < K.ts) {
-      return l('New block from the past')
-    }
-
-    if (K.prev_hash != prev_hash.toString('hex')) {
-      // l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
-      return false
-    }
-
-    l(`Processing block ${K.total_blocks+1} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
-
-    var meta = {
-      inputs_volume: 0,
-      outputs_volume: 0,
-      parsed: []
-    }
-
-    // processing transactions one by one
-    for (var i = 0; i < ordered_tx.length; i++) {
-      var obj = await Tx.processTx(ordered_tx[i], meta)
-      l(obj)
-      
-      K.total_tx++
-      K.total_tx_bytes += ordered_tx[i].length
-    }
-
-    K.ts = timestamp
-    K.prev_hash = toHex(sha3(finalblock))
-
-    K.total_blocks++
-    if (finalblock.length < K.blocksize - 1000) {
-      K.usable_blocks++
-    }
-
-    K.total_bytes += block.length
-    K.bytes_since_last_snapshot += block.length
-
-    // every x blocks create new installer
-    if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
-      K.bytes_since_last_snapshot = 0
-
-      var old_snapshot = K.last_snapshot_height
-      K.last_snapshot_height = K.total_blocks
-    }
-
-    // cron jobs
-    if (K.total_blocks % 100 == 0) {
-    }
-
-    // executing proposals that are due
-    let disputes = await Insurance.findAll({
-      where: {delayed: K.usable_blocks},
-      include: {all: true}
-    })
-
-    for (let dispute of disputes) {
-      l(dispute)
-
-      var delta = dispute.ondelta + dispute.dispute_delta
-
-      if (delta < 0) {
-        var user_gets = dispute.insurance + delta
-        var hub_gets = dispute.insurance - user_gets
-      } else {
-        var user_gets = dispute.insurance
-        var hub_gets = 0
-      }
-
-      var user = await User.findById(dispute.userId)
-      var hub = await User.findById(dispute.hubId)
-
-      user.balance += user_gets
-      hub.balance += hub_gets
-      dispute.insurance = 0
-      dispute.delayed = null
-
-      await user.save()
-      await hub.save()
-      await dispute.save()
-    }
-
-    // executing proposals that are due
-    let jobs = await Proposal.findAll({
-      where: {delayed: K.usable_blocks},
-      include: {all: true}
-    })
-
-    for (let job of jobs) {
-      var total_shares = 0
-      for (let v of job.voters) {
-        var voter = K.members.find(m => m.id == v.id)
-        if (v.vote.approval && voter) {
-          total_shares += voter.shares
-        } else {
-
-        }
-      }
-
-      if (total_shares < K.majority) continue
-
-      l('Evaling ' + job.code)
-
-      l(await eval(`(async function() { ${job.code} })()`))
-
-      var patch = job.patch
-
-      if (patch.length > 0) {
-        me.request_reload = true
-        var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
-          console.log(error, stdout, stderr)
-        })
-        pr.stdin.write(patch)
-        pr.stdin.end()
-
-        l('Patch applied! Restarting...')
-      }
-
-      await job.destroy()
-    }
-
-    // block processing is over, saving current K
-    fs.writeFileSync('data/k.json', stringify(K))
-
-    if (K.bytes_since_last_snapshot == 0) {
-      var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
-
-      require('tar').c({
-        gzip: true,
-        sync: false,
-        portable: true,
-        noMtime: true,
-        file: 'private/' + filename,
-        filter: (path, stat) => {
-          // must be deterministic
-
-          stat.mtime = null
-          stat.atime = null
-          stat.ctime = null
-          stat.birthtime = null
-
-          // skip /private (blocks sqlite, proofs, local config)
-          // tests, and all hidden/dotfiles
-          if (path.startsWith('./.') || path.match(/(DS_Store|private|node_modules|test)/)) {
-            return false
-          } else {
-            return true
-          }
-        }
-      }, ['.'], _ => {
-        fs.unlink('private/Failsafe-' + old_snapshot + '.tar.gz', () => {
-          l('Removed old snapshot and created ' + filename)
-        })
-      })
-    }
-
-    // save final block in blockchain db and broadcast
-    await Block.create({
-      prev_hash: Buffer.from(prev_hash, 'hex'),
-      hash: sha3(finalblock),
-      block: block,
-      
-      meta: JSON.stringify(meta)
-    })
-
-    if (me.my_member) {
-
-      var blocktx = concat(inputMap('chain'), r([block]))
-      // send finalblock to all websocket users if we're member
-
-      if (me.wss) {
-        me.wss.clients.forEach(client => client.send(blocktx))
-      }
-    }
-
-    if (me.request_reload) {
-      process.exit(0) // exit w/o error
-    }
   }
 
   // a generic interface to send a websocket message to some user or member

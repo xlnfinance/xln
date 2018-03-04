@@ -147,17 +147,8 @@ FS.onready(() => {
     },
 
     dispute: () => {
-      var fee = app.commy(app.K.standalone_balance)
-      if (app.record) {
-        if (app.record.balance >= app.K.standalone_balance) {
-          if (confirm('Transaction fee is $' + fee + '. Proceed and start onchain dispute?')) {
-            app.call('dispute')
-          }
-        } else {
-          alert("You don't have enough global balance. You need at least " + fee)
-        }
-      } else {
-        alert('You are not registred onchain yet. Ensure to receive at list $' + app.commy(K.risk) + ', or be registred by other users.')
+      if (confirm('Transaction fee is $' + app.commy(app.K.standalone_balance) + '. Proceed and start onchain dispute?')) {
+        app.call('dispute', {partner: app.hub})
       }
     },
 
@@ -302,6 +293,8 @@ FS.onready(() => {
         history_limits: [0, 10],
 
         blocks: [],
+        users: [],
+        show_empty_blocks: false,
 
         history: [],
 
@@ -355,9 +348,6 @@ FS.onready(() => {
 
 
 
-        <li v-if="is_hub" class="nav-item"  v-bind:class="{ active: tab=='solvency' }">
-          <a class="nav-link" @click="go('solvency')">Offchain Demo Explorer</a>
-        </li>
 
         <li class="nav-item"  v-bind:class="{ active: tab=='explorer' }">
           <a class="nav-link" @click="go('explorer')">Explorer</a>
@@ -474,47 +464,62 @@ FS.onready(() => {
 
         <div v-if="settings" class="alert alert-danger" role="alert">
           <h3>Credit limit</h3>
-          <p>In order to receive money from the hub off-chain you must define <b>soft and hard limits</b> below. Soft one tells the hub after what amount uninsured balances must be insured (rebalanced). Hard limit defines a maximum uninsured balance you can have at any time, you can lose it in worst case scenario if the hub is insolvent. Low hard limit may prevent you from receiving large payments.</p>
 
-          <p><label>Soft limit (currently {{commy(ch.d.we_soft_limit)}}, recommended {{commy(K.risk)}}):</label>
+          <p>You can send money through hub if you deposit to this channel, but in order to receive from the hub off-chain you must define <b>soft and hard limits</b> below.</p>
+
+          <p><label>Soft limit (currently {{commy(ch.d.we_soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit incurs higher rebalance fees.</label>
           <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
-          <label>Hard limit (currently {{commy(ch.d.we_hard_limit)}}, recommended 1000):</label>
+          </p>
+
+          <p>
+          <label>Hard limit (currently {{commy(ch.d.we_hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
           <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]"></p>
 
           <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Credit Limits</button></p>
 
-          <hr/>
+
+          <div v-if="record">
+            <hr/>
             <h3>On-chain Rebalance</h3>
 
             <p>Global ID: <b>{{record.id}}</b></p>
+            <p>Pubkey: <b>{{pubkey}}</b></p>
             <p>Global Balance: <b>\${{commy(record.balance)}}</b></p>
+            
+            <small>1. How much to withdraw (up to {{commy(ch.insured)}}) from this channel to your global balance. Leave empty if you just want to deposit.</small>
 
-            <small>You can withdraw money from your insured balance (up to {{commy(ch.insured)}}) to your global balance. Also you can deposit from your global balance to any channel insurance or global balance. You can do both these actions in a single on-chain transaction.</small>
-              
-            <p><input style="width:200px" type="number" class="form-control small-input" v-model="request_amount" placeholder="Amount"></p>
+            <p><input style="width:200px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount"></p>
+           
+            <small>2. Deposit to other global balances (e.g. user "120") or to their channels (120@eu). Leave empty if you just want to withdraw.</small>
 
             <p v-for="out in outs">
               <input style="width:400px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
               <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
             </p>
-         
+
+            <small>3. Combining previous two functionalities you can either withdraw money to your global balance, withdraw from global balance to other users or channels, or do both in a single action. E.g. to transfer 100 units from your channel with @eu to user #120 channel with eu type to withdraw 100 in the first field and add output for 100 to 120@eu</small>
+
             <p>
               <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
               <button type="button" class="btn btn-warning" @click="rebalance()">Settle Globally</button>
             </p>
-
+          </div>
 
           <hr/>
-
           <h3>Start On-Chain Dispute</h3>
-
-          <p>If this hub becomes unresponsive, <a @click="dispute" href="#">you can always start a dispute on-chain</a>. You are guaranteed to get <b>insured</b> part of your balance back, and you might get <b>uninsured</b> balance later if the hub is solvent.
+          <p>If this hub becomes unresponsive,you can always start a dispute on-chain. You are guaranteed to get <b>insured</b> part of your balance back, and you might get <b>uninsured</b> balance later if the hub is solvent.
           </p>
+
+          <p v-if="record && record.balance > K.standalone_balance"> 
+            <button class="btn btn-danger" @click="dispute" href="#">Request {{commy(ch.insured+ch.they_promised)}} with Dispute</button>
+          </p>
+          <p v-else>To start on-chain dispute you must be registred on-chain and have on your global balance at least {{commy(K.standalone_balance)}}. Ask another hub or user to register you and/or deposit money to your global balance.</p>
+
+          <hr/>
 
           <h3>Risk analytics</h3>
           <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
 
-          <hr/>
         </div>
 
         <br>
@@ -568,17 +573,11 @@ FS.onready(() => {
 
             <div v-if="pay_invoice.length > 0">
               <p>Amount: {{commy(unpackInvoice().amount)}}</p>
-              <p>Pay to: <b>{{unpackInvoice().trimmedId}}</b></p>
-              <p>Receiver's hub: {{unpackInvoice().hubId}}</p>
+              <p>Pay to: <b>{{unpackInvoice().trimmedId}}@{{unpackInvoice().hubId}}</b></p>
             </div>
 
           </div>
         </div>
-
-
-
-
-
 
 
         <table v-if="history.length > 0" class="table">
@@ -690,79 +689,55 @@ FS.onready(() => {
     </div>
 
 
-
-    <div v-else-if="tab=='solvency'">
-
-      <div v-if="is_hub">
-        <p>Testnet-only private channels explorer.</p>
-
-        <p>Risk limit: {{commy(K.risk)}}</p>
-        <p>Rebalance every {{K.blocktime*2}} seconds.</p>
-        <p>Solvency: {{commy(solvency)}}</p>
-
-        <h1>Channel Explorer</h1>
-        <table class="table table-striped">
-          <thead class="thead-dark">
-            <tr>
-              <th scope="col">Icon</th>
-              <th scope="col">Pubkey</th>
-
-              <th scope="col">Nonces (onchain/offchain)</th>
-
-              <th scope="col">Insurance</th>
-
-              <th scope="col">Settled+Delta</th>
-
-              <th scope="col">Receivable</th>
-
-            </tr>
-          </thead>
-          <tbody>
-          
-            <tr v-for="d in deltas">
-              <th v-html="icon(toHexString(d.d.userId.data),30)"></th>
-              <th scope="row"><small>{{toHexString(d.d.userId.data).substr(0,10)}}...</small></th>
-
-              <td>{{d.nonce}}/{{d.d.nonce}}</td>
-              <td>{{commy(d.insurance)}}</td>
-
-              <td v-bind:style="{'background-color': deltaColor(d.delta) }">{{commy(d.delta)}}</td>
-
-              <td>{{commy(d.they_payable)}}</td>
-
-            </tr>
-
-          </tbody>
-        </table>
-      </div>
-
-    </div>
-
-
     <div v-else-if="tab=='explorer'">
       <h1>Blockchain Explorer</h1>
+
+      <div class="form-check">
+        <input v-model="show_empty_blocks" type="checkbox" id="defaultCheck1">
+        <label class="form-check-label" for="defaultCheck1">
+          Show Empty Blocks
+        </label>
+      </div>
+
 
       <table class="table table-striped">
         <thead class="thead-dark">
           <tr>
-            <th scope="col">Previous Hash</th>
+            <th scope="col">Prev Hash</th>
             <th scope="col">Hash</th>
-            <th scope="col">Built By</th>
-
+            <th scope="col">Relayed By</th>
+            <th scope="col">Relayed At</th>
+            <th scope="col">Total Tx</th>
+            <th scope="col">Inputs / Outputs Volume</th>
           </tr>
         </thead>
         <tbody>
-          <div v-for="b in blocks">
+          <template v-if="show_empty_blocks || b.meta.total_tx > 0" v-for="b in blocks">
             <tr>
-              <td>{{b.prev_hash}}</td>
-              <td>{{b.hash}}</td>
+              <td>{{b.prev_hash.substr(0,10)}}</td>
+              <td>{{b.hash.substr(0,10)}}</td>
               <td>{{b.built_by}}</td>
+              <td>{{timeAgo(b.timestamp)}}</td>
+              <td>{{b.meta.total_tx}}</td>
+              <td>{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>
             </tr>
+      
             <tr v-for="m in b.meta.parsed">
-              <p v-for="input in m.inputs">User {{b.meta.signer}} withdraws {{commy(input[0])}} from user {{input[1]}}</p>
-              <p v-for="output in m.outputs">User {{b.meta.signer}} deposits {{commy(output[0])}} to {{output[1]}} @ {{output[2]}}</p>
+              <td colspan="6">
+                <span class="badge badge-warning">Rebalance by {{m.signer}}</span>
+                <br>
+                <template v-for="input in m.inputs">
+                  <span class="badge badge-danger" >-{{commy(input[0])}} from {{m.signer}}@{{input[1]}}</span>&nbsp;
+                </template>
+                <br>
+                <template v-for="output in m.outputs">
+                  <span class="badge badge-success" >+{{commy(output[0])}} to {{output[1]}}@{{output[2]}}</span>&nbsp;
+                </template>
+              </td>
             </tr>
-          </div>
+
+          </template>
+
         </tbody>
       </table>
 
@@ -774,10 +749,7 @@ FS.onready(() => {
             <th scope="col">ID</th>
             <th scope="col">Pubkey</th>
             <th scope="col">Global Balance</th>
-
             <th scope="col">Nonce</th>
-            <th scope="col">Insurance</th>
-            <th scope="col">Settled</th>
           </tr>
         </thead>
         <tbody>
@@ -788,12 +760,8 @@ FS.onready(() => {
             <th scope="row">{{u.id}}</th>
             <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}..</small></td>
             <td>{{commy(u.balance)}}</td>
-
             <td>{{u.nonce}}</td>
             
-            <td>{{commy(u.hub[0] ? u.hub[0].insurance.insurance : 0)}}</td>
-            <td>{{commy(u.hub[0] ? u.hub[0].insurance.ondelta : 0)}}</td>
-
           </tr>
 
         </tbody>

@@ -54,11 +54,39 @@ r = function (a) {
   }
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+
+resolveChannel = (insurance, delta, is_left) => {
+  var r = {
+    promised: 0,
+    insured: 0,
+    they_insured: 0,
+    they_promised: 0
+  }
+  // three scenarios how delta splits the channel
+
+  if (delta >= 0) {
+    r.insured = insurance
+    r.they_insured = 0
+
+    r.they_promised = delta
+  } else if (delta >= -insurance) {
+    r.insured = insurance + delta
+    r.they_insured = -delta
+  } else {
+    r.insured = 0
+    r.they_insured = insurance
+
+    r.promised = -(insurance + delta)
+  }
+  if (!is_left) {
+    [r.insured, r.they_insured] = [r.they_insured, r.insured];
+    [r.promised, r.they_promised] = [r.they_promised, r.promised];
+  }
+  return r
 }
 
-readInt = (i) => i.readUIntBE(0, i.length)
+
+readInt = (i) => i.length > 0 ? i.readUIntBE(0, i.length) : 0
 
 toHex = (inp) => Buffer.from(inp).toString('hex')
 bin = (data) => Buffer.from(data)
@@ -156,7 +184,7 @@ methodMap = (i) => {
     'rebalance',
 
     'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
-    'delta',    // delayed balance proof
+    'offdelta',    // delayed balance proof
 
     'update',   // transitions to state machine + new sig
     'unlockedPayment', // pay without hashlock
@@ -201,7 +229,7 @@ cache = async (i) => {
 
 
 
-    cached_result.blocks = (await Block.findAll()).map(b=>{
+    cached_result.blocks = (await Block.findAll({limit: 100,order: [['id', 'desc']],})).map(b=>{
       var [methodId,
         built_by,
         prev_hash,
@@ -495,9 +523,11 @@ Insurance = sequelize.define('insurance', {
   insurance: Sequelize.BIGINT, // insurance
   ondelta: Sequelize.BIGINT, // what hub already insuranceized
 
-  delayed: Sequelize.INTEGER,
-  dispute_delta: Sequelize.INTEGER
 
+  dispute_delayed: Sequelize.INTEGER,
+  dispute_nonce: Sequelize.INTEGER,
+  dispute_offdelta: Sequelize.INTEGER,
+  dispute_left: Sequelize.BOOLEAN
 })
 
 Insurance.prototype.between = async (leftId, rightId) => {
@@ -597,7 +627,7 @@ Delta = privSequelize.define('delta', {
 })
 
 Delta.prototype.getState = function () {
-  return r([methodMap('delta'),
+  return r([methodMap('offdelta'),
     this.leftId,
     this.rightId,
     this.nonce,

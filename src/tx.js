@@ -33,7 +33,7 @@ module.exports = {
       }
     }
 
-    l(`ProcessTx: ${method} with ${args.length} by ${id}`)
+    l(`ProcessTx: ${method} with ${args.length} by ${signer.id}`)
 
     // Validation is over, fee is ours. Can be reimbursed by outputs.
     signer.balance -= tax
@@ -65,10 +65,16 @@ module.exports = {
       case 'dispute':
         var [pubkey, sig, body] = args
 
-        var ch = await Insurance.findOrBuild({
+        var partner = await User.idOrKey(pubkey)
+        if (!partner.id) return l("Your partner is not registred")
+
+        var compared = Buffer.compare(signer.pubkey, partner.pubkey)
+        if (compared == 0) return l("Cannot dispute with yourself")
+
+        var ins = (await Insurance.findOrBuild({
           where: {
-            userId: user.id,
-            hubId: 1
+            leftId: compared==-1?signer.id:partner.id,
+            rightId: compared==-1?partner.id:signer.id
           },
           defaults: {
             nonce: 0,
@@ -76,7 +82,52 @@ module.exports = {
             ondelta: 0
           },
           include: { all: true }
-        })
+        }))[0]
+
+        if (sig) {
+          var parsed = r(body)
+          var nonce = readInt(parsed[3])
+          var offdelta = readInt(parsed[4])
+
+          var state = r([
+            methodMap('offdelta'),
+            ins.leftId,
+            ins.rightId,
+            nonce,
+            offdelta
+          ])
+
+          if (!ec.verify(state, sig, partner.pubkey)) {
+            return l("Invalid offdelta state sig")
+          }          
+        } else {
+          l('Split with default values')
+          var nonce = 0
+          var offdelta = 0
+        }
+
+        var resolved = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared==-1)
+
+        l("Channel result: ", resolved)
+        l("Pay out right now ", resolved.they_insured)
+
+        ins.dispute_offdelta == offdelta
+        ins.dispute_nonce == nonce
+
+        ins.dispute_left = compared == -1
+        ins.dispute_delayed == K.usable_blocks + 4
+
+        await ins.save()
+
+        if (partner.pubkey == me.pubkey) {
+          l("Channel with us is closed")
+          var ch = await me.channel(signer.pubkey)
+
+          if (resolved.they_insured < ch.insured || resolved.they_promised > ch.promised) {
+            l("Stealing attempt")
+
+          }
+        }
 
         break
 
@@ -91,8 +142,6 @@ module.exports = {
           outputs: [],
           signer: signer.id
         }
-
-        l('Processing inputs ', is_hub)
 
         for (var input of inputs) {
           var amount = readInt(input[0])
@@ -129,6 +178,7 @@ module.exports = {
           
           // for blockchain explorer
           parsed.inputs.push([amount, partner.id])
+          meta.inputs_volume += amount
 
           ins.insurance -= amount
           if (compared == 1) ins.ondelta += amount
@@ -164,11 +214,10 @@ module.exports = {
         // 3. pay to outputs
 
         // we want outputs to pay for their own rebalance
-        var reimbursed = 0
         var reimburse_tax = 1 + Math.floor(tax / outputs.length)
 
         for (var output of outputs) {
-          var amount = readInt(output[0])
+          amount = readInt(output[0])
 
           if (amount > signer.balance) continue
 
@@ -229,12 +278,12 @@ module.exports = {
             }
           }
 
-          if (withPartner.id) {
+          if (withPartner && withPartner.id) {
 
             var compared = Buffer.compare(giveTo.pubkey, withPartner.pubkey)
             if (compared == 0) continue
 
-            var ins = await Insurance.findOrBuild({
+            var ins = (await Insurance.findOrBuild({
               where: {
                 leftId: compared==-1 ? giveTo.id : withPartner.id, 
                 rightId: compared==-1 ? withPartner.id : giveTo.id
@@ -245,9 +294,7 @@ module.exports = {
                 ondelta: 0
               },
               include: {all: true}
-            })
-
-            ins = ins[0]
+            }))[0]
 
             ins.insurance += amount
             if (compared==1) ins.ondelta -= amount
@@ -259,11 +306,11 @@ module.exports = {
               if (compared==-1) ins.ondelta += reimburse_tax
 
               // account creation fees are on user, if any
-              ins.ondelta -= (readInt(output[0]) - amount) * compared
+              var diff = (readInt(output[0]) - amount)
+              ins.ondelta -= diff * compared
 
               signer.balance += reimburse_tax
             }
-
 
             await ins.save()
 
@@ -274,13 +321,11 @@ module.exports = {
           }
 
           parsed.outputs.push([amount, giveTo.id, withPartner ? withPartner.id : false])
-
-
+          meta.outputs_volume += amount
         }
 
         meta['parsed'].push(parsed)
 
-        signer.balance += reimbursed
 
         break
 

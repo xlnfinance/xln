@@ -33,7 +33,6 @@ module.exports = async (ws, msg) => {
 
         break
       case 'logout':
-        me.id = null
         me.intervals.map(clearInterval)
 
         if (me.member_server) {
@@ -41,20 +40,17 @@ module.exports = async (ws, msg) => {
           me.wss.clients.forEach(c=>c.close())
           //Object.keys(me.users).forEach( c=>me.users[c].end() )
         }
-
-        server.close()
-sockets.forEach( (s) => s.end() )
-
+        me = new Me()
         result.pubkey = null
 
         break
 
       case 'dispute':
-
-        var ch = await me.channel(Members[0].pubkey)
+        var partner = Members.find(m=>m.id==p.partner)
+        var ch = await me.channel(partner.pubkey)
 
         // post last sig if any
-        var dispute = ch.d.sig ? [Members[0].pubkey, ch.d.sig, ch.d.getState()] : [Members[0].pubkey]
+        var dispute = ch.d.sig ? [partner.pubkey, ch.d.sig, ch.d.getState()] : [partner.pubkey]
 
         await me.broadcast('dispute', r(dispute))
 
@@ -113,27 +109,6 @@ sockets.forEach( (s) => s.end() )
         var ins = []
         var outs = []
 
-        if (p.request_amount > 0) {
-          var hub = Members.find(m=>m.id==p.partner).pubkey
-          var ch = await me.channel(hub)
-          if (p.request_amount > ch.insured) {
-            result.alert = "More than you can withdraw from insured"
-            break
-          }
-          me.send(hub, 'requestWithdraw', me.envelope(p.request_amount))
-
-          // waiting for the response
-          await sleep(2000)
-
-          var ch = await me.channel(hub)
-          if (ch.d.our_input_sig) {
-            ins.push([ ch.d.our_input_amount,
-              ch.d.partnerId,
-              ch.d.our_input_sig ])
-          }
-        }
-
-
         for (o of p.outs) {
           // split by @
           if (o.to.length > 0) {
@@ -172,11 +147,37 @@ sockets.forEach( (s) => s.end() )
             }
           }
         }
-        //p.request_amount > 0
 
-        if (ins.length > 0 || outs.length > 0) {
-          result.confirm = await me.broadcast('rebalance', r([0, ins, outs]))
-          react(result, json.id)
+
+
+        if (p.request_amount > 0) {
+          var hub = Members.find(m=>m.id==p.partner).pubkey
+          var ch = await me.channel(hub)
+          if (p.request_amount > ch.insured) {
+            react({alert: "More than you can withdraw from insured"})
+            break
+          }
+          me.send(hub, 'requestWithdraw', me.envelope(p.request_amount))
+
+          // waiting for the response
+          setTimeout(async ()=>{
+            var ch = await me.channel(hub)
+            if (ch.d.our_input_sig) {
+              ins.push([ ch.d.our_input_amount,
+                ch.d.partnerId,
+                ch.d.our_input_sig ])
+              await me.broadcast('rebalance', r([0, ins, outs]))
+              react({confirm: "Rebalanced"})
+            } else {
+              react({alert: "Failed"})
+            }
+          }, 3000)
+
+        } else if (outs.length > 0) {
+          await me.broadcast('rebalance', r([0, ins, outs]))
+          react({confirm: "Rebalanced"})
+        } else {
+          l("Nothing to do")
         }
 
         return false

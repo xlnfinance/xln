@@ -31,7 +31,7 @@ module.exports = async (genesis) => {
     standalone_balance: 500, // keep $5 on your own balance for onchain tx fees
 
     blocksize: 200000,
-    blocktime: 10,
+    blocktime: 20,
 
     // each genesis is randomized
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
@@ -145,10 +145,12 @@ module.exports = async (genesis) => {
     name: '@us (America-based)'
   }
 
+  /*
   K.members[3].hub = {
     handle: 'bad',
     name: '@bad (Tries To Hack You)'
   }
+  */
 
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)

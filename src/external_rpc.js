@@ -144,25 +144,26 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'withdrawal') {
     // we received instant withdrawal for rebalance
     var [pubkey, sig, body] = r(msg)
-    if (!ec.verify(body, sig, pubkey)) {
-      l('Invalid withdrawal')
-      return false
-    }
 
     var ch = await me.channel(pubkey)
+    var amount = readInt(r(body)[0])
 
     var input = r([methodMap('withdrawal'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
-      ch.insured])
+      amount])
 
-    if (input.equals(body)) {
-      l('Equal! save')
-      ch.d.our_input_amount = ch.insured
-      ch.d.our_input_sig = sig
-      await ch.d.save()
+    if (!ec.verify(input, sig, pubkey)) {
+      l('Invalid withdrawal')
+      return false
     }
+
+    l('Got withdrawal for '+amount)
+    ch.d.our_input_amount = amount
+    ch.d.our_input_sig = sig
+    await ch.d.save()
+    
   } else if (inputType == 'requestWithdraw') {
     // partner asked us for instant withdrawal
     var [pubkey, sig, body] = r(msg)
@@ -182,16 +183,22 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    var input = me.envelope(methodMap('withdrawal'),
+    var input = r([methodMap('withdrawal'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
-      amount)
+      amount])
 
     ch.d.they_input_amount = amount
     await ch.d.save()
+    l("Gave withdrawal for "+amount)
 
-    me.send(pubkey, 'withdrawal', input)
+    me.send(pubkey, 'withdrawal', r([
+      me.pubkey,
+      ec(input, me.id.secretKey),
+      r([amount])
+    ]))
+
   } else if (inputType == 'ack') {
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)

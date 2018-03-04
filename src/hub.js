@@ -26,7 +26,8 @@ module.exports = async function () {
     var ch = await me.channel(d.partnerId)
 
     // finding who's gone beyond soft limit
-    if (ch.promised >= ch.d.they_soft_limit) {
+    // soft limit can be raised over K.risk to pay less fees
+    if (ch.promised >= Math.max(K.risk, ch.d.they_soft_limit)) {
       l("Covering our promise ", ch.d.partnerId)
       outs.push([ch.promised, ch.d.myId, ch.d.partnerId])
       
