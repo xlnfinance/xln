@@ -81,13 +81,13 @@ module.exports = async (genesis) => {
     hubs: [],
 
     total_shares: 30,
-    majority: 20
+    majority: 5
 
   }
 
   // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
 
-  createMember = async (username, pw, loc) => {
+  createMember = async (username, pw, loc, website) => {
     var seed = await derive(username, pw)
     me = new Me()
     await me.init(username, seed)
@@ -105,7 +105,9 @@ module.exports = async (genesis) => {
       id: user.id,
 
       username: username,
+
       location: loc,
+      website: website,
 
       pubkey: toHex(me.pubkey),
       block_pubkey: me.block_pubkey,
@@ -117,12 +119,16 @@ module.exports = async (genesis) => {
     return seed
   }
 
-  var base = genesis == 'test' ? 'ws://0.0.0.0:' : 'wss://failsafe.network:'
+  var base_rpc = genesis == 'test' ? 'ws://0.0.0.0' : 'wss://failsafe.network'
+  var base_web = genesis == 'test' ? 'http://0.0.0.0' : 'https://failsafe.network'
 
-  var seed = await createMember('root', toHex(crypto.randomBytes(16)), base + 8000)
+  var seed = await createMember('root', toHex(crypto.randomBytes(16)), 
+    `${base_rpc}:8000`,
+    genesis == 'test' ? 'http://0.0.0.0:8443' : 'https://failsafe.network'
+    )
 
-  for (var i = 8001; i < 8005; i++) {
-    await createMember(i.toString(), 'password', base + (i + 10))
+  for (var i = 8001; i < 8004; i++) {
+    await createMember(i.toString(), 'password', `${base_rpc}:${i + 10}`, `${base_web}:${i}`)
   }
 
   K.members[0].shares = 10

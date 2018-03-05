@@ -463,9 +463,9 @@ FS.onready(() => {
 
 
         <div v-if="settings" class="alert alert-danger" role="alert">
-          <h3>Credit limit</h3>
+          <h3>Credit Limits</h3>
 
-          <p>You can send money through hub if you deposit to this channel, but in order to receive from the hub off-chain you must define <b>soft and hard limits</b> below.</p>
+          <p>You can pay through the hub if you deposit insurance to this channel, but in order to receive from the hub off-chain you must define <b>credit limits</b> below.</p>
 
           <p><label>Soft limit (currently {{commy(ch.d.we_soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit incurs higher rebalance fees.</label>
           <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
@@ -476,7 +476,6 @@ FS.onready(() => {
           <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]"></p>
 
           <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Credit Limits</button></p>
-
 
           <div v-if="record">
             <hr/>
@@ -500,7 +499,7 @@ FS.onready(() => {
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
             </p>
 
-            <small>Combine withdraw and deposit in a single transaction if you want to transfer money from this channel to somebody another channel or user.</small>
+            <small>Combine withdraw and deposit in a single transaction if you want to transfer money from this channel to another channel or user.</small>
 
             <p>
               
@@ -510,23 +509,20 @@ FS.onready(() => {
 
           <hr/>
           <h3>Start On-Chain Dispute</h3>
-          <p>If this hub becomes unresponsive,you can always start a dispute on-chain. You are guaranteed to get {{commy(ch.insured)}} <b>insured</b> part of your balance back, but you may lose {{commy(ch.they_promised)}} <b>uninsured</b> balance if the hub is compromised. Money will be deposited to your global balance after dispute timeout ends and you will be able to move it to another hub.
-          </p>
+            <p>If this hub becomes unresponsive, you can always start a dispute on-chain. You are guaranteed to get {{commy(ch.insured)}} - <b>insured</b> part of your balance back, but you may lose {{commy(ch.they_promised)}} - <b>uninsured</b> balance if the hub is compromised.
+            </p>
 
-          <p v-if="record && record.balance > K.standalone_balance"> 
-            <button class="btn btn-danger" @click="dispute" href="#">Start Dispute for {{commy(ch.insured+ch.they_promised)}}</button>
-          </p>
-          <p v-else>To start on-chain dispute you must be registred on-chain and have on your global balance at least {{commy(K.standalone_balance)}}. Ask another hub or user to register you and/or deposit money to your global balance.</p>
+            <p>After a timeout money will arrive to your global balance, then you will be able to move it to another hub.</p>
 
-          <hr/>
+            <p v-if="record && record.balance > K.standalone_balance"> 
+              <button class="btn btn-danger" @click="dispute" href="#">Start Dispute</button>
+            </p>
 
-          <h3>Risk analytics</h3>
-          <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
+            <p v-else>To start on-chain dispute you must be registred on-chain and have on your global balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your global balance.</p>
 
         </div>
 
         <br>
-
 
         <h1 style="display:inline-block">{{commy(ch.payable)}}</h1>
         <small v-if="ch.payable>0">= {{commy(ch.insurance)}} insurance {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : "- "+commy(ch.they_insured)+" spent"}}</small> 
@@ -536,7 +532,6 @@ FS.onready(() => {
             <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}"   class="progress-bar"  role="progressbar">
               -{{commy(ch.promised)}} (we promised)
             </div>
-
             <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
               {{commy(ch.insured)}} (insured)
             </div>
@@ -549,7 +544,7 @@ FS.onready(() => {
           </div>
         </div></p> 
 
-        <div class="row">
+        <div v-if="ch.d.status == 'ready'" class="row">
           <div class="col-sm-6">
             <p><div class="input-group" style="width:400px">
               <span class="input-group-addon" id="sizing-addon2">{{asset}}</span>
@@ -580,6 +575,14 @@ FS.onready(() => {
             </div>
 
           </div>
+        </div>
+
+        <div v-else-if="ch.d.status == 'await'">
+          <p>You cannot send or receive payments: we await the confirmation for previous payment.</p>
+        </div>
+
+        <div v-else-if="ch.d.status == 'disputed'">
+          <p>You cannot send or receive payments: this channel is in a dispute. <span v-if="ch.ins && ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span></p>
         </div>
 
 
@@ -630,10 +633,12 @@ FS.onready(() => {
 
     <div v-else-if="tab=='install'">
         <h3>Currently only macOS/Linux are supported</h3>
-        <p>1. Install <a href="https://nodejs.org/en/download/">Node.js</a></p>
+        <p>1. Install <a href="https://nodejs.org/en/download/">Node.js</a> 9.6.0+</p>
         <p>2. Copy-paste this snippet to your text editor:</p>
         <pre><code>{{install_snippet}}</code></pre>
-        <p>3. (optional) Compare our snippet with snippets from other sources for stronger security: Failsafe.someshop.com/#install, Failsafe.trustedsite.com...</p>
+        <p>3. (optional) Compare our code with other sources for stronger security:</p>
+        <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}}</a></li></ul>
+
         <p>4. If there's exact match paste the snippet into <kbd>Terminal.app</kbd></p>
         <p>Or simply use <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">direct link</a>, run <kbd>./install && node fs 8001</kbd> (8001 is default port)</p>
     </div>
@@ -727,15 +732,20 @@ FS.onready(() => {
       
             <tr v-for="m in b.meta.parsed">
               <td colspan="6">
-                <span class="badge badge-warning">Rebalance by {{m.signer}}</span>
-                <br>
+                <span class="badge badge-warning">Rebalance by {{m.signer}}:</span>&nbsp;
+
                 <template v-for="input in m.inputs">
-                  <span class="badge badge-danger" >-{{commy(input[0])}} from {{m.signer}}@{{input[1]}}</span>&nbsp;
+                  <span class="badge badge-danger" >{{commy(input[0])}} from {{m.signer}}@{{input[1]}}</span>&nbsp;
                 </template>
-                <br>
+
+                <template v-for="input in m.debts">
+                  <span class="badge badge-dark">{{commy(input[0])}} enforced debt to {{input[1]}}</span>&nbsp;
+                </template>
+
                 <template v-for="output in m.outputs">
-                  <span class="badge badge-success" >+{{commy(output[0])}} to {{output[1]}}@{{output[2]}}</span>&nbsp;
+                  <span class="badge badge-success" >{{commy(output[0])}} to {{output[1]}}@{{output[2]}}</span>&nbsp;
                 </template>
+
               </td>
             </tr>
 
@@ -786,6 +796,14 @@ FS.onready(() => {
 // delayed features:
 
 /*
+<hr/>
+
+<h3>Risk analytics</h3>
+<canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
+
+
+
+
 <div class="float-right"><select v-model="asset" class="custom-select custom-select-lg mb-3">
   <option disabled>Select current asset</option>
   <option v-for="(a,index) in K.assets" :value="a.ticker">{{a.name}}</option>

@@ -236,9 +236,9 @@ class Me {
 
     if (checkpoint) {
       // add current balances
-      var c = await me.channel(pubkey)
-      attrs.delta = c.they_promised
-      attrs.balance = c.payable
+      var ch = await me.channel(pubkey)
+      attrs.delta = ch.they_promised
+      attrs.balance = ch.payable
     }
 
     await History.create(attrs)
@@ -331,7 +331,7 @@ class Me {
     var compared = Buffer.compare(me.pubkey, partner)
     if (compared == 0) return false
 
-    var r = {
+    var ch = {
       // default insurance
       insurance: 0,
       ondelta: 0,
@@ -339,18 +339,17 @@ class Me {
       left: compared == -1
     }
 
-    r.member = Members.find(m => m.pubkey.equals(partner))
+    ch.member = Members.find(m => m.pubkey.equals(partner))
 
     me.record = await me.byKey()
 
-    r.d = (await Delta.findOrBuild({
+    ch.d = (await Delta.findOrBuild({
       where: {
         myId: me.pubkey,
         partnerId: partner
       },
       defaults: {
         offdelta: 0,
-        instant_until: 0,
 
         our_input_amount: 0,
         they_input_amount: 0,
@@ -362,8 +361,7 @@ class Me {
         they_hard_limit: 0,
 
         nonce: 0,
-        status: 'ready',
-        state: '{"locks":[]}'
+        status: 'ready'
       }
     }))[0]
 
@@ -371,40 +369,38 @@ class Me {
       var user = await me.byKey(partner)
 
       if (user) {
-        r.partner = user.id
+        ch.partner = user.id
 
-        r.ins = await Insurance.find({where: {
-          leftId: r.left ? me.record.id : user.id,
-          rightId: r.left ? user.id : me.record.id
+        ch.ins = await Insurance.find({where: {
+          leftId: ch.left ? me.record.id : user.id,
+          rightId: ch.left ? user.id : me.record.id
         }})
       }
     }
 
-    if (r.ins) {
-      r.insurance = r.ins.insurance
-      r.ondelta = r.ins.ondelta
-      r.nonce = r.ins.nonce
+    if (ch.ins) {
+      ch.insurance = ch.ins.insurance
+      ch.ondelta = ch.ins.ondelta
+      ch.nonce = ch.ins.nonce
     }
 
-    // r.d.state = JSON.parse(r.d.state)
+    // ch.d.state = JSON.parse(ch.d.state)
 
-    r.delta = r.ondelta + r.d.offdelta
+    ch.delta = ch.ondelta + ch.d.offdelta
 
+    Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
-    Object.assign(r, resolveChannel(r.insurance, r.delta, r.left))
+    ch.payable = (ch.insured - ch.d.our_input_amount) + ch.they_promised +
+    (ch.d.they_hard_limit - ch.promised)
 
-
-    r.payable = (r.insured - r.d.our_input_amount) + r.they_promised +
-    (r.d.they_hard_limit - r.promised)
-
-    r.they_payable = (r.they_insured - r.d.they_input_amount) + r.promised +
-    (r.d.we_hard_limit - r.they_promised)
+    ch.they_payable = (ch.they_insured - ch.d.they_input_amount) + ch.promised +
+    (ch.d.we_hard_limit - ch.they_promised)
 
     // inputs not in blockchain yet, so we hold them temporarily
 
-    r.bar = r.promised + r.insurance + r.they_promised
+    ch.bar = ch.promised + ch.insured + ch.they_insured + ch.they_promised
 
-    return r
+    return ch
   }
 
   // a generic interface to send a websocket message to some user or member

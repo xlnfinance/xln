@@ -642,13 +642,9 @@ Delta = privSequelize.define('delta', {
 
   sig: Sequelize.TEXT,
 
-  status: Sequelize.TEXT,
+  most_profitable: Sequelize.TEXT,
 
-// history
-  amount: Sequelize.INTEGER,
-  balance: Sequelize.INTEGER,
-  desc: Sequelize.TEXT,
-  date: Sequelize.DATE
+  status: Sequelize.TEXT
 })
 
 Delta.prototype.getState = function () {
@@ -670,8 +666,7 @@ History = privSequelize.define('history', {
 
   amount: Sequelize.INTEGER,
   balance: Sequelize.INTEGER,
-  desc: Sequelize.TEXT,
-
+  desc: Sequelize.TEXT
 
 })
 

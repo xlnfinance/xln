@@ -52,6 +52,9 @@ module.exports = async (ws, msg) => {
         // post last sig if any
         var dispute = ch.d.sig ? [partner.pubkey, ch.d.sig, ch.d.getState()] : [partner.pubkey]
 
+        ch.d.status = 'disputed'
+        await ch.d.save()
+
         await me.broadcast('dispute', r(dispute))
 
         result.confirm = 'Started a Dispute'

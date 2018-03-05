@@ -261,7 +261,7 @@ module.exports = async (ws, msg) => {
       }
 
       if (ch.d.status != 'ready') {
-        l('Channel is not ready')
+        l('Channel is not ready: '+ch.d.status)
         return false
       }
 

@@ -71,7 +71,6 @@ module.exports = {
 
         if (sig) {
           var parsed = r(body)
-          l(parsed)
 
           var dispute_nonce = readInt(parsed[3])
           var offdelta = readSInt(parsed[4]) // signed int
@@ -117,9 +116,9 @@ module.exports = {
             l("Channel with us is disputed")
             var ch = await me.channel(signer.pubkey)
             if ((ch.left && offdelta < ch.d.offdelta) || 
-              (!ch.left && offdelta > ch.d.offdelta))
+              (!ch.left && offdelta > ch.d.offdelta)){
 
-              l("Stealing attempt")
+              l("Unprofitable proof posted!")
               await me.broadcast('dispute', r([signer.pubkey, ch.d.sig, ch.d.getState()]))
             }
           }
@@ -136,7 +135,10 @@ module.exports = {
 
         var parsed = {
           inputs: [],
+          debts: [],
           outputs: [],
+          signer_before: signer.balance,
+
           signer: signer.id
         }
 
@@ -211,12 +213,26 @@ module.exports = {
         var debts = await signer.getDebts()
 
         for (var d of debts) {
+          var u = await User.findById(d.oweTo)
+          l("Covering debt "+d.amount_left)
+
           if (d.amount_left <= signer.balance) {
             signer.balance -= d.amount_left
+            u.balance += d.amount_left
+
+            parsed.debts.push([d.amount_left, u.id])
+
+            await u.save()
             await d.destroy()
           } else {
             d.amount_left -= signer.balance
-            signer.balance = 0
+            u.balance += signer.balance
+            signer.balance = 0 // signer is broke now!
+
+
+            parsed.debts.push([signer.balance, u.id])
+
+            await u.save()
             await d.save()
             break
           }

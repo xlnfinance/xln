@@ -32,13 +32,36 @@ Off-chain layers design is a hard problem. Here are some trade-offs to deliver u
 * Trustless asset exchange (atomic offchain swaps) by 2020
 
 
-## Simnet
+## Local Simulation
 
-Look into `simulate` and install ttab for convenient debugging. 
+Look into `./simulate` and install ttab for convenient debugging. 
 
-Basically it creates new root member and copy-paste the folder into 8001, 8002 etc, folder name is the port for convenience. 
+Basically it creates new root member and copy-pastes the folder into 8001, 8002 etc, folder name is the port for convenience. 
 
-Latest Node.js is a must.
+1. Receiving money with faucet. 
+
+Go to tab with a user and set credit limits, then click on faucet. This is uninsured money.
+
+2. Rebalances
+
+If you received more than your soft limit, soon this will be insured.
+
+3. Same hub payments
+
+Select another user, set credit limit, create invoice and give invoice to first user. It will route through same hub
+
+4. Cross hub payments
+
+Do the same but with another hub eg @jp and set credit limit. IMPORTANT: set credit lines between hubs too. If eu pays to jp, jp must trust @eu up to received amount.
+
+Then create a payment request. Pay this invoice with first user.
+
+5. Any problem with hub? Press start a dispute and see all your insured money credited to global balance.
+
+6. Try to set huge soft limit and then start dispute. Since all money is uninsured it will create a debt on the hub. Now when hub insures for someone else, debt will be paid.
+
+7. Look at Explorer to see rebalances real time.
+
 
 ## What is it? Docs?
 
