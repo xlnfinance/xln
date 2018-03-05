@@ -4,11 +4,10 @@ killall Failsafe
 rsync -rva --exclude=private  --exclude=.git fs/ 8001
 rsync -rva --exclude=private --exclude=.git fs/ 8002
 rsync -rva --exclude=private --exclude=.git fs/ 8003
-rsync -rva --exclude=private --exclude=.git fs/ 8004
 
 
 ttab "cd 8001; node fs.js -p8001 --username=8001 --pw=password"
 ttab "cd 8002; node fs.js -p8002 --username=8002 --pw=password"
 ttab "cd 8003; node fs.js -p8003 --username=8003 --pw=password"
-ttab "cd 8004; node fs.js -p8004 --username=8004 --pw=password"
+
 ttab "cd fs; node fs.js -p8433"

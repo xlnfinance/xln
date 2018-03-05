@@ -95,20 +95,8 @@ module.exports = async (block)=>{
   })
 
   for (let ins of disputes) {
-    l(ins)
-    var resolved = resolveChannel(ins.insurance, ins.ondelta + ins.dispute_delta, true)
-
-    var left = await User.findById(dispute.leftId)
-    var right = await User.findById(dispute.rightId)
-
-    left.balance += resolved.insured
-    right.balance += resolved.they_insured
-    ins.insurance = 0
-    ins.delayed = null
-
-    await left.save()
-    await right.save()
-    await ins.save()
+    await ins.resolve()
+    l("Resolved")
   }
 
   // executing proposals that are due

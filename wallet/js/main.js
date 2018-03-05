@@ -148,7 +148,7 @@ FS.onready(() => {
 
     dispute: () => {
       if (confirm('Transaction fee is $' + app.commy(app.K.standalone_balance) + '. Proceed and start onchain dispute?')) {
-        app.call('dispute', {partner: app.hub})
+        app.call('dispute', {partner: app.ch.partner})
       }
     },
 
@@ -279,7 +279,7 @@ FS.onready(() => {
         install_snippet: false,
 
 
-        request_amount: 0,
+        request_amount: '',
         outs: [{to: '', amount: ''}],
 
 
@@ -496,22 +496,25 @@ FS.onready(() => {
               <input style="width:400px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
               <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
             </p>
+            <p>
+            <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
+            </p>
 
-            <small>3. Combining previous two functionalities you can either withdraw money to your global balance, withdraw from global balance to other users or channels, or do both in a single action. E.g. to transfer 100 units from your channel with @eu to user #120 channel with eu type to withdraw 100 in the first field and add output for 100 to 120@eu</small>
+            <small>Combine withdraw and deposit in a single transaction if you want to transfer money from this channel to somebody another channel or user.</small>
 
             <p>
-              <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
+              
               <button type="button" class="btn btn-warning" @click="rebalance()">Settle Globally</button>
             </p>
           </div>
 
           <hr/>
           <h3>Start On-Chain Dispute</h3>
-          <p>If this hub becomes unresponsive,you can always start a dispute on-chain. You are guaranteed to get <b>insured</b> part of your balance back, and you might get <b>uninsured</b> balance later if the hub is solvent.
+          <p>If this hub becomes unresponsive,you can always start a dispute on-chain. You are guaranteed to get {{commy(ch.insured)}} <b>insured</b> part of your balance back, but you may lose {{commy(ch.they_promised)}} <b>uninsured</b> balance if the hub is compromised. Money will be deposited to your global balance after dispute timeout ends and you will be able to move it to another hub.
           </p>
 
           <p v-if="record && record.balance > K.standalone_balance"> 
-            <button class="btn btn-danger" @click="dispute" href="#">Request {{commy(ch.insured+ch.they_promised)}} with Dispute</button>
+            <button class="btn btn-danger" @click="dispute" href="#">Start Dispute for {{commy(ch.insured+ch.they_promised)}}</button>
           </p>
           <p v-else>To start on-chain dispute you must be registred on-chain and have on your global balance at least {{commy(K.standalone_balance)}}. Ask another hub or user to register you and/or deposit money to your global balance.</p>
 

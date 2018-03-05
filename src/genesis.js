@@ -140,12 +140,12 @@ module.exports = async (genesis) => {
     name: '@jp (Asia-based)'
   }
 
+/*
   K.members[2].hub = {
     handle: 'us',
     name: '@us (America-based)'
   }
-
-  /*
+  
   K.members[3].hub = {
     handle: 'bad',
     name: '@bad (Tries To Hack You)'

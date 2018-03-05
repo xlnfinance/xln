@@ -133,7 +133,10 @@ commy = (b, dot = true) => {
 
 // trick to pack signed int into unsigned int
 packSInt = (num) => (Math.abs(num) * 2) + (num < 0 ? 1 : 0)
-readSInt = (num) => (num % 2 == 1 ? -(num - 1) / 2 : num / 2)
+readSInt = (num) => {
+  num = readInt(num)
+  return (num % 2 == 1 ? -(num - 1) / 2 : num / 2)
+}
 
 concat = function () {
   return Buffer.concat(Object.values(arguments))
@@ -186,6 +189,8 @@ methodMap = (i) => {
     'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
     'offdelta',    // delayed balance proof
 
+    'dispute',
+
     'update',   // transitions to state machine + new sig
     'unlockedPayment', // pay without hashlock
     'ack',
@@ -196,10 +201,8 @@ methodMap = (i) => {
     'voteApprove',
     'voteDeny',
 
-    'auth', // any kind of off-chain auth signatures between peers
+    'auth' // any kind of off-chain auth signatures between peers
 
-    'fsd',
-    'fsb'
   ]
 
   if (typeof i === 'string') {
@@ -212,6 +215,8 @@ methodMap = (i) => {
 
 allowedOnchain = [
   'rebalance',
+
+  'dispute',
 
   'propose',
 
@@ -504,6 +509,16 @@ User.idOrKey = async (id) => {
   }
 }
 
+Debt = sequelize.define('debt', {
+  amount_left: Sequelize.INTEGER,
+  oweTo: Sequelize.INTEGER
+})
+
+
+Debt.belongsTo(User)
+User.hasMany(Debt)
+
+
 Proposal = sequelize.define('proposal', {
   desc: Sequelize.TEXT,
   code: Sequelize.TEXT,
@@ -523,27 +538,37 @@ Insurance = sequelize.define('insurance', {
   insurance: Sequelize.BIGINT, // insurance
   ondelta: Sequelize.BIGINT, // what hub already insuranceized
 
-
   dispute_delayed: Sequelize.INTEGER,
   dispute_nonce: Sequelize.INTEGER,
   dispute_offdelta: Sequelize.INTEGER,
   dispute_left: Sequelize.BOOLEAN
 })
 
-Insurance.prototype.between = async (leftId, rightId) => {
-  /*
-  return Insurance.findOrBuild({
-    where: {
-      leftId
-    },
-    defaults: {
-      nonce: 0,
-      insurance: 0,
-      ondelta: 0
-    },
-    include: { all: true }
-  })
-  */
+Insurance.prototype.resolve = async function(){
+  var resolved = resolveChannel(this.insurance, this.ondelta + this.dispute_offdelta, true)
+
+  var left = await User.findById(this.leftId)
+  var right = await User.findById(this.rightId)
+
+  this.insurance = 0
+  this.dispute_delayed = null
+  this.ondelta = -this.dispute_offdelta
+
+  left.balance += resolved.insured
+  right.balance += resolved.they_insured
+
+  if (resolved.promised > 0 || resolved.they_promised > 0) {
+    var d = await Debt.create({
+      userId: resolved.promised > 0 ? left.id : right.id,
+      oweTo: resolved.promised > 0 ? right.id : left.id,
+      amount_left: resolved.promised > 0 ? resolved.promised : resolved.they_promised
+    })
+    l(d)
+  }
+
+  await left.save()
+  await right.save()
+  await this.save()
 }
 
 Vote = sequelize.define('vote', {
@@ -627,9 +652,11 @@ Delta = privSequelize.define('delta', {
 })
 
 Delta.prototype.getState = function () {
+  var compared = Buffer.compare(this.myId, this.partnerId)
+
   return r([methodMap('offdelta'),
-    this.leftId,
-    this.rightId,
+    compared==-1?this.myId:this.partnerId,
+    compared==-1?this.partnerId:this.myId,
     this.nonce,
     packSInt(this.offdelta)])
 }

@@ -1,7 +1,6 @@
 
 module.exports = {
   processTx: async function processTx (tx, meta) {
-    // l('new ', r(tx, true))
 
     var [id, sig, methodId, args] = r(tx)
     methodId = readInt(methodId)
@@ -13,11 +12,16 @@ module.exports = {
     // we prepend omitted vars to not bloat tx size
     var payload = r([signer.nonce, methodId, args])
 
-    if (!ec.verify(payload, sig, signer.pubkey)) { return {error: 'Invalid signature'} }
+    if (!ec.verify(payload, sig, signer.pubkey)) { 
+      l(payload, sig, signer.pubkey)
+      return {error: 'Invalid tx signature'} 
+    }
 
     var method = methodMap(methodId)
 
-    if (allowedOnchain.indexOf(method) == -1) { return {error: 'No such method exposed onchain'} }
+    if (allowedOnchain.indexOf(method) == -1) { 
+      return {error: 'No such method exposed onchain'} 
+    }
 
     var tax = Math.round(K.tax * tx.length)
 
@@ -41,27 +45,8 @@ module.exports = {
 
     args = r(args)
 
+    // don't forget BREAK
     switch (method) {
-      case 'propose':
-        var execute_on = K.usable_blocks + K.voting_period // 60*24
-
-        var new_proposal = await Proposal.create({
-          desc: args[0].toString(),
-          code: args[1].toString(),
-          patch: args[2].toString(),
-          kindof: method,
-          delayed: execute_on,
-          userId: signer.id
-        })
-
-        l(`Added new proposal!`)
-
-        K.proposals_created++
-
-        break
-      // don't forget BREAK
-      // we use fall-through for methods covered by same code
-
       case 'dispute':
         var [pubkey, sig, body] = args
 
@@ -86,50 +71,62 @@ module.exports = {
 
         if (sig) {
           var parsed = r(body)
-          var nonce = readInt(parsed[3])
-          var offdelta = readInt(parsed[4])
+          l(parsed)
+
+          var dispute_nonce = readInt(parsed[3])
+          var offdelta = readSInt(parsed[4]) // signed int
 
           var state = r([
             methodMap('offdelta'),
-            ins.leftId,
-            ins.rightId,
-            nonce,
-            offdelta
+            compared==-1?signer.pubkey:partner.pubkey,
+            compared==-1?partner.pubkey:signer.pubkey,
+            dispute_nonce,
+            packSInt(offdelta)
           ])
 
           if (!ec.verify(state, sig, partner.pubkey)) {
-            return l("Invalid offdelta state sig")
+            return l("Invalid offdelta state sig ", state)
           }          
         } else {
-          l('Split with default values')
-          var nonce = 0
+          l('Fresh channel? Split with default values')
+          var dispute_nonce = 0
           var offdelta = 0
         }
 
-        var resolved = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared==-1)
+        if (ins.dispute_delayed) {
+          if (dispute_nonce > ins.dispute_nonce && ins.dispute_left == (compared==1)) {
+            l("Newer nonce submitted")
+            ins.dispute_offdelta = offdelta
+            await ins.resolve()
+          } else {
+            l("Old nonce or same counterparty")
+          }
+        } else {
 
-        l("Channel result: ", resolved)
-        l("Pay out right now ", resolved.they_insured)
+          ins.dispute_offdelta = offdelta
+          ins.dispute_nonce = dispute_nonce
 
-        ins.dispute_offdelta == offdelta
-        ins.dispute_nonce == nonce
+          ins.dispute_left = (compared == -1)
+          ins.dispute_delayed = K.usable_blocks + 6
 
-        ins.dispute_left = compared == -1
-        ins.dispute_delayed == K.usable_blocks + 4
+          await ins.save()
 
-        await ins.save()
+          var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared==-1)
 
-        if (partner.pubkey == me.pubkey) {
-          l("Channel with us is closed")
-          var ch = await me.channel(signer.pubkey)
+          if (me.pubkey.equals(partner.pubkey)) {
+            l("Channel with us is disputed")
+            var ch = await me.channel(signer.pubkey)
+            if ((ch.left && offdelta < ch.d.offdelta) || 
+              (!ch.left && offdelta > ch.d.offdelta))
 
-          if (resolved.they_insured < ch.insured || resolved.they_promised > ch.promised) {
-            l("Stealing attempt")
-
+              l("Stealing attempt")
+              await me.broadcast('dispute', r([signer.pubkey, ch.d.sig, ch.d.getState()]))
+            }
           }
         }
 
         break
+
 
       case 'rebalance':
         // 1. collect all ins insurance
@@ -172,7 +169,7 @@ module.exports = {
           ])
 
           if (!ec.verify(body, input[2], partner.pubkey)) {
-            l('Wrong signature by partner')
+            l('Wrong signature by partner ', ins.nonce)
             continue
           }
           
@@ -209,7 +206,22 @@ module.exports = {
 
         }
 
-        // 2. are there disputes?
+        // 2. pay to debts
+
+        var debts = await signer.getDebts()
+
+        for (var d of debts) {
+          if (d.amount_left <= signer.balance) {
+            signer.balance -= d.amount_left
+            await d.destroy()
+          } else {
+            d.amount_left -= signer.balance
+            signer.balance = 0
+            await d.save()
+            break
+          }
+
+        }
 
         // 3. pay to outputs
 
@@ -326,6 +338,29 @@ module.exports = {
 
         meta['parsed'].push(parsed)
 
+
+        break
+
+
+
+
+
+
+      case 'propose':
+        var execute_on = K.usable_blocks + K.voting_period // 60*24
+
+        var new_proposal = await Proposal.create({
+          desc: args[0].toString(),
+          code: args[1].toString(),
+          patch: args[2].toString(),
+          kindof: method,
+          delayed: execute_on,
+          userId: signer.id
+        })
+
+        l(`Added new proposal!`)
+
+        K.proposals_created++
 
         break
 

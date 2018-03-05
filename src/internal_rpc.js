@@ -54,7 +54,7 @@ module.exports = async (ws, msg) => {
 
         await me.broadcast('dispute', r(dispute))
 
-        result.confirm = 'Started a dispute onchain. Please wait a delay period to get your money back.'
+        result.confirm = 'Started a Dispute'
         break
 
       case 'send':
@@ -167,7 +167,7 @@ module.exports = async (ws, msg) => {
                 ch.d.partnerId,
                 ch.d.our_input_sig ])
               await me.broadcast('rebalance', r([0, ins, outs]))
-              react({confirm: "Rebalanced"})
+              react({confirm: "On-chain rebalance tx sent"})
             } else {
               react({alert: "Failed"})
             }

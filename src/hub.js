@@ -21,7 +21,7 @@ module.exports = async function () {
   var collectedSoFar = me.record.balance
 
   for (var d of deltas) {
-    l("Checking channel with ", d.partnerId)
+    //l("Checking channel with ", d.partnerId)
 
     var ch = await me.channel(d.partnerId)
 
@@ -71,10 +71,10 @@ module.exports = async function () {
 
     var finalset = [0, ins, outs]
 
-    l(finalset)
 
 
     if (ins.length > 0 || outs.length > 0) {
+      l(finalset)
       await me.broadcast('rebalance', r(finalset))
     }
   }, 3000)

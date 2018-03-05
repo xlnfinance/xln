@@ -212,7 +212,7 @@ class Me {
       }
 
       if (this.is_hub) {
-        me.intervals.push(setInterval(require('./hub'), K.blocktime * 2000))
+        me.intervals.push(setInterval(require('./hub'), K.blocktime * 1000))
       }
     } else {
       // keep connection to all hubs
@@ -250,7 +250,7 @@ class Me {
     nonce = readInt(nonce)
     method = readInt(method)
     instant_until = readInt(instant_until)
-    offdelta = readSInt(readInt(offdelta))
+    offdelta = readSInt(offdelta)
 
     if (method != methodMap('offdelta')) return false
 
