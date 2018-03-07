@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+
 // system
 assert = require('assert')
 fs = require('fs')
@@ -13,10 +14,11 @@ crypto = require('crypto')
 // scrypt = require('scrypt') // require('./scrypt_'+os.platform())
 
 keccak = require('keccak')
-nacl = require('./lib/nacl')
 
+nacl = require('./lib/nacl')
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = nacl.sign.detached.verify
+
 
 // encoders
 BN = require('bn.js')
@@ -148,13 +150,13 @@ usage = () => {
   return Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
 }
 
-// used just for convenience in parsing
+// tells external RPC how to parse this request (256 options)
 inputMap = (i) => {
-  // up to 256 input types for websockets
   var map = [
     'tx', // add new tx to block
-    'auth', // i am this pubkey in this socket
+    'auth', // this socket belongs to my pubkey
 
+    // consensus
     'needSig', // member needs sig of others
     'signed',  // other members return sigs of block
 
@@ -167,7 +169,7 @@ inputMap = (i) => {
     'ack',
     'setLimits',
 
-    'faucet'
+    'testnet'
   ]
   if (typeof i === 'string') {
     // buffer friendly
@@ -234,7 +236,13 @@ cache = async (i) => {
 
 
 
-    cached_result.blocks = (await Block.findAll({limit: 100,order: [['id', 'desc']],})).map(b=>{
+    cached_result.blocks = (await Block.findAll({
+      limit: 500,
+      order: [['id', 'desc']], 
+      where: {
+        total_tx: {[Sequelize.Op.gt]: 0}
+      }
+    })).map(b=>{
       var [methodId,
         built_by,
         prev_hash,
@@ -246,7 +254,8 @@ cache = async (i) => {
         hash: toHex(b.hash),
         built_by: readInt(built_by),
         timestamp: readInt(timestamp),
-        meta: JSON.parse(b.meta)
+        meta: JSON.parse(b.meta),
+        total_tx: b.total_tx
       }
     })
 
@@ -262,7 +271,7 @@ cache = async (i) => {
         if (ch.delta > 0) promised += ch.promised
       }
 
-      if (cached_result.history[0].delta != promised) {
+      if (cached_result.history[0] && cached_result.history[0].delta != promised) {
         cached_result.history.unshift({
           date: new Date(),
           delta: promised
@@ -322,6 +331,9 @@ react = async (result = {}, id = 1) => {
 
     result.invoices = invoices
 
+
+    result.pending_tx = PK.pending_tx
+
     result.channels = await me.channels()
   }
 
@@ -335,7 +347,7 @@ react = async (result = {}, id = 1) => {
 
 // now in memory, for simplicity
 cached_result = {
-  history: [{date: new Date(), delta: 0}]
+  history: []
 }
 
 invoices = {}
@@ -384,13 +396,15 @@ initDashboard = async a => {
       key: fs.readFileSync('/etc/letsencrypt/live/failsafe.network/privkey.pem')
     }
     var server = require('https').createServer(cert, cb)
-    base_port = 443
 
     // redirecting from http://
-    require('http').createServer(function (req, res) {
-      res.writeHead(301, { 'Location': 'https://' + req.headers['host'] })
-      res.end()
-    }).listen(80)
+    if (base_port == 443) {
+      require('http').createServer(function (req, res) {
+        res.writeHead(301, { 'Location': 'https://' + req.headers['host'] })
+        res.end()
+      }).listen(80)
+    }
+  
   } else {
     cert = false
     var server = require('http').createServer(cb)
@@ -400,7 +414,6 @@ initDashboard = async a => {
   server.listen(base_port).on('error', l)
 
   me = new Me()
-  me.processQueue()
 
   repl.context.me = me
 
@@ -409,7 +422,9 @@ initDashboard = async a => {
   } else {
     // used to authenticate browser sessions to this daemon
     PK = {
-      auth_code: toHex(crypto.randomBytes(32))
+      auth_code: toHex(crypto.randomBytes(32)),
+      
+      pending_tx: []
     }
   }
 
@@ -421,6 +436,8 @@ initDashboard = async a => {
     await me.init(PK.username, Buffer.from(PK.seed, 'hex'))
     await me.start()
   }
+  
+  me.processQueue()
 
   var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + PK.auth_code
   l('Open ' + url + ' in your browser')
@@ -563,12 +580,26 @@ Insurance.prototype.resolve = async function(){
       oweTo: resolved.promised > 0 ? right.id : left.id,
       amount_left: resolved.promised > 0 ? resolved.promised : resolved.they_promised
     })
-    l(d)
   }
 
   await left.save()
   await right.save()
   await this.save()
+
+  var partner = me.pubkey.equals(left.pubkey) ? right : (me.pubkey.equals(right.pubkey) ? left : false)
+
+  if (partner) {
+    var ch = await me.channel(partner.pubkey)
+    // reset all credit limits - the relationship starts from scratch
+    ch.d.we_soft_limit = 0
+    ch.d.we_hard_limit = 0
+    ch.d.they_soft_limit = 0
+    ch.d.they_hard_limit = 0
+
+    ch.d.status = 'ready'
+    await ch.d.save()
+  }
+
 }
 
 Vote = sequelize.define('vote', {
@@ -594,7 +625,9 @@ Block = privSequelize.define('block', {
   block: Sequelize.CHAR.BINARY,
   hash: Sequelize.CHAR(32).BINARY,
   prev_hash: Sequelize.CHAR(32).BINARY,
-  meta: Sequelize.TEXT
+  meta: Sequelize.TEXT,
+  
+  total_tx: Sequelize.INTEGER
 })
 
 
@@ -620,7 +653,10 @@ Delta = privSequelize.define('delta', {
   they_soft_limit: Sequelize.INTEGER,
   they_hard_limit: Sequelize.INTEGER, // user specified risk
 
+
   last_online: Sequelize.DATE,
+  withdrawal_requested_at: Sequelize.DATE,
+
 
   they_input_amount: Sequelize.INTEGER,
 
@@ -655,6 +691,28 @@ Delta.prototype.getState = function () {
     compared==-1?this.partnerId:this.myId,
     this.nonce,
     packSInt(this.offdelta)])
+}
+
+Delta.prototype.startDispute = async function(profitable) {
+  if (profitable) {
+    if (this.most_profitable) {          
+      var profitable = r(this.most_profitable)
+      this.offdelta = readSInt(profitable[0])
+      this.nonce = readInt(profitable[1])
+      this.sig = profitable[2]
+    } else {
+      this.sig = null
+    }
+  }
+
+  // post last sig if any
+  var dispute = this.sig ? [this.partnerId, this.sig, this.getState()] : [this.partnerId]
+
+  this.status = 'disputed'
+  await this.save()
+
+  await me.broadcast('dispute', r(dispute))
+
 }
 
 History = privSequelize.define('history', {
@@ -692,7 +750,8 @@ Event = privSequelize.define('event', {
 
 sync = () => {
   if (K.prev_hash) {
-    me.send(Members[0], 'sync', Buffer.from(K.prev_hash, 'hex'))
+
+    me.send(Members[Math.floor(Math.random()*Members.length)], 'sync', Buffer.from(K.prev_hash, 'hex'))
   }
 }
 
@@ -732,6 +791,7 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
         m.pubkey = Buffer.from(m.pubkey, 'hex')
         m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
       }
+
     }
 
     await privSequelize.sync({force: false})

@@ -18,8 +18,13 @@ class Me {
     this.status = 'await'
 
     this.users = {}
+    this.hubs = {}
+
+    this.queue = []
 
     this.intervals = []
+
+    this.next_member = false
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
@@ -32,7 +37,6 @@ class Me {
   }
 
   async processQueue () {
-    if (!this.queue) this.queue = []
 
     // first in first out - call rpc with ws and msg
     var action
@@ -109,8 +113,6 @@ class Me {
   }
 
   async broadcast (method, args) {
-    var methodId = methodMap(method)
-
     me.record = await me.byKey()
 
     switch (method) {
@@ -139,21 +141,28 @@ class Me {
         break
     }
 
-    var to_sign = r([me.record.nonce, methodId, args])
+    var nonce = me.record.nonce + PK.pending_tx.length
+
+    var to_sign = r([methodMap(method), nonce, args])
 
     var tx = r([
-      me.record.id, ec(to_sign, me.id.secretKey), methodId, args
+      me.record.id, ec(to_sign, me.id.secretKey), methodMap(method), nonce, args
     ])
 
     confirm += ` Tx size ${tx.length}b, fee ${tx.length * K.tax}.`
 
+    PK.pending_tx.push({
+      method: method,
+      raw: toHex(tx)
+    })
+
     if (me.my_member && me.my_member == me.next_member) {
       me.mempool.push(tx)
     } else {
-      me.send(K.members[0], 'tx', tx)
+      me.send(me.next_member, 'tx', tx)
     }
 
-    l('Just broadcasted: ', method)
+    l('Just broadcasted: '+method+' pendings: ', PK.pending_tx)
 
     return confirm
   }
@@ -184,6 +193,8 @@ class Me {
     await cache()
     this.intervals.push(setInterval(cache, 2000))
 
+    this.intervals.push(setInterval(require('./member'), 2000))
+
     if (this.my_member) {
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
@@ -202,8 +213,6 @@ class Me {
         ws.on('message', (msg) => { me.queue.push(['external_rpc', ws, msg]) })
       })
 
-      me.intervals.push(setInterval(require('./member'), 2000))
-
       for (var m of Members) {
         if (this.my_member != m) {
           // we need to have connections ready to all members
@@ -216,14 +225,13 @@ class Me {
       }
     } else {
       // keep connection to all hubs
-      Members.map(m=>{
-        if (this.my_member != m)
-        this.send(m, 'auth', this.envelope(methodMap('auth')))
+      Members.map(m => {
+        if (this.my_member != m) { this.send(m, 'auth', this.envelope(methodMap('auth'))) }
       })
     }
 
     l('Set up sync')
-    me.intervals.push(setInterval(sync, 3000))
+    me.intervals.push(setInterval(sync, K.blocktime * 1000))
   }
 
   async addHistory (pubkey, amount, desc, checkpoint = false) {
@@ -343,6 +351,8 @@ class Me {
 
     me.record = await me.byKey()
 
+    var is_hub = (p)=>Members.find(m=>m.hub && m.pubkey.equals(p))
+
     ch.d = (await Delta.findOrBuild({
       where: {
         myId: me.pubkey,
@@ -354,23 +364,21 @@ class Me {
         our_input_amount: 0,
         they_input_amount: 0,
 
-        we_soft_limit: 0,
-        we_hard_limit: 0,
+        we_soft_limit: is_hub(partner) ? K.risk : 0,
+        we_hard_limit: is_hub(partner) ? K.hard_limit : 0,
 
-        they_soft_limit: 0,
-        they_hard_limit: 0,
+        they_soft_limit: is_hub(me.pubkey) ? K.risk : 0,
+        they_hard_limit: is_hub(me.pubkey) ? K.hard_limit :  0,
 
         nonce: 0,
         status: 'ready'
       }
     }))[0]
 
-    if (me.record) {
-      var user = await me.byKey(partner)
-
-      if (user) {
-        ch.partner = user.id
-
+    var user = await me.byKey(partner)
+    if (user) {
+      ch.partner = user.id
+      if (me.record) {
         ch.ins = await Insurance.find({where: {
           leftId: ch.left ? me.record.id : user.id,
           rightId: ch.left ? user.id : me.record.id
@@ -425,7 +433,7 @@ class Me {
     }
 
     // member object
-    // l(`Invoking ${method} in member ${m.id}`)
+    //l(`Invoking ${method} in member ${m.id}`)
 
     if (me.users[m.pubkey]) {
       me.users[m.pubkey].send(tx)
@@ -436,6 +444,9 @@ class Me {
         this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
       }
 
+      me.users[m.pubkey].onerror = function (e) {
+        l("Failed to open the socket")
+      }
       me.users[m.pubkey].onopen = function (e) {
         if (me.id) {
           me.users[m.pubkey].send(concat(inputMap('auth'), me.envelope(methodMap('auth'))))

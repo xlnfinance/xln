@@ -1,4 +1,4 @@
-normalws = require('ws')
+var normalws = require('ws')
 
 function WebSocketClient () {
   this.number = 0  // Message number
@@ -46,10 +46,17 @@ WebSocketClient.prototype.open = function (url) {
   })
 }
 WebSocketClient.prototype.send = function (data, option) {
+  if (this.instance && this.instance.readyState != 1) {
+    l("Socket is not ready")
+    return false
+  }
   try {
     this.instance.send(data, option)
+    return true
   } catch (e) {
-    this.instance.emit('error', e)
+    l("Failed to send ", e)
+    return false
+    //this.instance.emit('error', e)
   }
 }
 WebSocketClient.prototype.reconnect = function (e) {
@@ -66,7 +73,7 @@ WebSocketClient.prototype.onopen = function (e) {
 WebSocketClient.prototype.onmessage = function (data, flags, number) {  // console.log("WebSocketClient: message",arguments);
 }
 WebSocketClient.prototype.onerror = function (e) {
-  console.log("Couldn't reach " + e.host)
+  console.log("WS error  ", e)
 }
 WebSocketClient.prototype.onclose = function (e) {
   // console.log('WebSocketClient: closed', arguments)

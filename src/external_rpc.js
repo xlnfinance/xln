@@ -31,7 +31,7 @@ module.exports = async (ws, msg) => {
         var ch = await me.channel(pubkey)
         ch.last_online = new Date()
 
-        if (ch.input_requested_at) {
+        if (ch.withdrawal_requested_at) {
 
         }
       }
@@ -45,7 +45,7 @@ module.exports = async (ws, msg) => {
     if (!me.my_member) return false
 
     if (me.my_member == me.next_member) {
-      l('We are next, adding to mempool :', r(msg))
+      l('We are next, adding to mempool')
 
       me.mempool.push(bin(msg))
     } else {
@@ -84,13 +84,30 @@ module.exports = async (ws, msg) => {
     } else {
       l("this sig doesn't work for our block")
     }
-  } else if (inputType == 'faucet') {
-    var [result, status] = await me.payChannel({
-      partner: msg,
-      amount: Math.round(Math.random() * 30000)
-    })
 
-    l(status)
+
+
+  // testnet stuff
+  } else if (inputType == 'testnet') {
+    var pubkey = msg.slice(1)
+    if (msg[0] == 1) {    
+      await me.payChannel({
+        partner: pubkey,
+        amount: Math.round(Math.random() * 30000)
+      })
+    }
+
+    if (msg[0] == 2) {    
+      (await me.channel(pubkey)).d.startDispute()
+    }
+
+    if (msg[0] == 3) {    
+      (await me.channel(pubkey)).d.startDispute(true)
+    }
+
+
+
+
   } else if (inputType == 'chain') {
     var chain = r(msg)
     for (var block of chain) {
@@ -105,7 +122,7 @@ module.exports = async (ws, msg) => {
     }})
 
     if (last) {
-      l('Sharing blocks since ' + last.id)
+      //l('Sharing blocks since ' + last.id)
 
       var blocks = await Block.findAll({
         where: {
@@ -124,6 +141,10 @@ module.exports = async (ws, msg) => {
     } else {
       // l("No blocks to sync after " + msg.toString('hex'))
     }
+
+
+
+
   } else if (inputType == 'setLimits') {
     var [pubkey, sig, body] = r(msg)
 
@@ -159,11 +180,10 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    l('Got withdrawal for '+amount)
+    l('Got withdrawal for ' + amount)
     ch.d.our_input_amount = amount
     ch.d.our_input_sig = sig
     await ch.d.save()
-    
   } else if (inputType == 'requestWithdraw') {
     // partner asked us for instant withdrawal
     var [pubkey, sig, body] = r(msg)
@@ -191,34 +211,33 @@ module.exports = async (ws, msg) => {
 
     ch.d.they_input_amount = amount
     await ch.d.save()
-    l("Gave withdrawal for "+amount)
+    l('Gave withdrawal for ' + amount)
 
     me.send(pubkey, 'withdrawal', r([
       me.pubkey,
       ec(input, me.id.secretKey),
       r([amount])
     ]))
-
   } else if (inputType == 'ack') {
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)
 
     var [secret, stateSig] = r(body)
 
-    if (!ec.verify(ch.d.getState(), stateSig, pubkey)) return l("Invalid state signed")
+    if (!ec.verify(ch.d.getState(), stateSig, pubkey)) return l('Invalid state signed')
 
     ch.d.sig = stateSig
     ch.d.status = 'ready'
 
     await ch.d.save()
 
-    if (secret.length == 0) return l("Got no secret ")
+    if (secret.length == 0) return l('Got no secret ')
 
     var invoice = toHex(sha3(secret))
 
     var return_to = purchases[invoice]
 
-    if (!return_to) return l("Nowhere to return to for "+invoice, purchases)
+    if (!return_to) return l('Nowhere to return to for ' + invoice, purchases)
 
     // ws from browser
     if (typeof return_to === 'function') {
@@ -261,7 +280,7 @@ module.exports = async (ws, msg) => {
       }
 
       if (ch.d.status != 'ready') {
-        l('Channel is not ready: '+ch.d.status)
+        l('Channel is not ready: ' + ch.d.status)
         return false
       }
 
@@ -279,16 +298,23 @@ module.exports = async (ws, msg) => {
       }
       ch.d.sig = stateSig
 
+      // experimental: storing most profitable outcome for us
+      var profitable = r(ch.d.most_profitable)
+      if ((ch.left && ch.d.offdelta > readSInt(profitable[0])) ||
+        (!ch.left && ch.d.offdelta < readSInt(profitable[0]))) {
+        ch.d.most_profitable = r([packSInt(ch.d.offdelta), ch.d.nonce, ch.d.sig])
+      }
+
       l('The payment is accepted ')
 
       if (me.is_hub && mediate_to.length > 1) {
         l(`Forward to peer or other hub ${mediate_to.length}`)
 
-        //me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
+        // me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
 
         await ch.d.save()
 
-        var partner = mediate_hub == me.record.id ? mediate_to : Members.find(m=>m.id==mediate_hub).pubkey
+        var partner = mediate_hub == me.record.id ? mediate_to : Members.find(m => m.id == mediate_hub).pubkey
 
         await me.payChannel({
           partner: partner,
@@ -309,7 +335,7 @@ module.exports = async (ws, msg) => {
 
         // did we get right amount in right asset?
         if (paid_invoice &&
-          amount >= paid_invoice.amount-1000 &&
+          amount >= paid_invoice.amount - 1000 &&
           paid_invoice.status == 'pending') {
           l('Our invoice was paid!', paid_invoice)
           paid_invoice.status = 'paid'

@@ -37,8 +37,8 @@ module.exports = async (ws, msg) => {
 
         if (me.member_server) {
           me.member_server.close()
-          me.wss.clients.forEach(c=>c.close())
-          //Object.keys(me.users).forEach( c=>me.users[c].end() )
+          me.wss.clients.forEach(c => c.close())
+          // Object.keys(me.users).forEach( c=>me.users[c].end() )
         }
         me = new Me()
         result.pubkey = null
@@ -46,16 +46,8 @@ module.exports = async (ws, msg) => {
         break
 
       case 'dispute':
-        var partner = Members.find(m=>m.id==p.partner)
-        var ch = await me.channel(partner.pubkey)
-
-        // post last sig if any
-        var dispute = ch.d.sig ? [partner.pubkey, ch.d.sig, ch.d.getState()] : [partner.pubkey]
-
-        ch.d.status = 'disputed'
-        await ch.d.save()
-
-        await me.broadcast('dispute', r(dispute))
+        var ch = await me.channel(Members.find(m => m.id == p.partner).pubkey)
+        await ch.d.startDispute(p.profitable)
 
         result.confirm = 'Started a Dispute'
         break
@@ -117,7 +109,7 @@ module.exports = async (ws, msg) => {
           if (o.to.length > 0) {
             var to = o.to.split('@')
 
-            var hubId = to[1] ? Members.find(m=>m.hub&&m.hub.handle==to[1]) : 0
+            var hubId = to[1] ? Members.find(m => m.hub && m.hub.handle == to[1]) : 0
 
             if (to[0].length == 64) {
               var userId = Buffer.from(to[0], 'hex')
@@ -151,45 +143,44 @@ module.exports = async (ws, msg) => {
           }
         }
 
-
-
         if (p.request_amount > 0) {
-          var hub = Members.find(m=>m.id==p.partner).pubkey
-          var ch = await me.channel(hub)
+          var partner = Members.find(m => m.id == p.partner)
+          var ch = await me.channel(partner.pubkey)
           if (p.request_amount > ch.insured) {
-            react({alert: "More than you can withdraw from insured"})
+            react({alert: 'More than you can withdraw from insured'})
             break
           }
-          me.send(hub, 'requestWithdraw', me.envelope(p.request_amount))
+          me.send(partner, 'requestWithdraw', me.envelope(p.request_amount))
 
           // waiting for the response
-          setTimeout(async ()=>{
-            var ch = await me.channel(hub)
+          setTimeout(async () => {
+            var ch = await me.channel(partner.pubkey)
             if (ch.d.our_input_sig) {
               ins.push([ ch.d.our_input_amount,
                 ch.d.partnerId,
                 ch.d.our_input_sig ])
               await me.broadcast('rebalance', r([0, ins, outs]))
-              react({confirm: "On-chain rebalance tx sent"})
+              react({confirm: 'On-chain rebalance tx sent'})
             } else {
-              react({alert: "Failed"})
+              react({alert: 'Failed to obtain withdrawal. Try later or start a dispute.'})
             }
           }, 3000)
-
         } else if (outs.length > 0) {
           await me.broadcast('rebalance', r([0, ins, outs]))
-          react({confirm: "Rebalanced"})
+          react({confirm: 'Rebalanced'})
         } else {
-          l("Nothing to do")
+          l('Nothing to do')
         }
 
         return false
 
         break
-      case 'faucet':
-        me.send(Members.find(m => m.id == p.partner), 'faucet', me.pubkey)
-        result.confirm = 'Faucet triggered. Check your wallet!'
 
+
+      case 'testnet':
+        me.send(Members.find(m => m.id == p.partner), 'testnet', concat(bin([p.action]), me.pubkey))
+
+        result.confirm = 'Testnet action triggered'
         break
 
       case 'setLimits':
@@ -235,7 +226,7 @@ module.exports = async (ws, msg) => {
           result.new_invoice = [
             invoices[invoice].amount,
             me.record ? me.record.id : toHex(me.pubkey),
-            Members.find(m=>m.id==p.partner).hub.handle,
+            Members.find(m => m.id == p.partner).hub.handle,
             invoice].join('_')
 
           result.confirm = 'Invoice Created'
@@ -265,7 +256,7 @@ module.exports = async (ws, msg) => {
     }
   } else {
     ws.send(JSON.stringify({
-      result: Object.assign(result, cached_result),
+      result: cached_result,
       id: json.id
     }))
   }

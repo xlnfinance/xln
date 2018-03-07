@@ -1,4 +1,4 @@
-module.exports = async (block)=>{
+module.exports = async (block) => {
   var finalblock = block.slice(Members.length * 64)
 
   var total_shares = 0
@@ -29,6 +29,11 @@ module.exports = async (block)=>{
 
   timestamp = readInt(timestamp)
 
+  if (K.prev_hash != prev_hash.toString('hex')) {
+    // l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
+    return false
+  }
+  
   if (readInt(methodId) != methodMap('block')) {
     return l('Wrong method for block')
   }
@@ -41,28 +46,28 @@ module.exports = async (block)=>{
     return l('New block from the past')
   }
 
-  if (K.prev_hash != prev_hash.toString('hex')) {
-    // l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
-    return false
-  }
 
-  l(`Processing block ${K.total_blocks+1} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
+  l(`Processing block ${K.total_blocks + 1} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
 
   var meta = {
     inputs_volume: 0,
     outputs_volume: 0,
-    parsed: [],
-    
-    total_tx: ordered_tx.length
+    parsed_tx: []
   }
 
   // processing transactions one by one
   for (var i = 0; i < ordered_tx.length; i++) {
     var obj = await Tx.processTx(ordered_tx[i], meta)
-    l(obj)
-    
+
     K.total_tx++
     K.total_tx_bytes += ordered_tx[i].length
+  }
+
+  if (PK.pending_tx.length > 0) {
+    l("Rebroadcasting pending tx")
+    PK.pending_tx.map(tx=>{
+      me.send(me.next_member, 'tx', Buffer.from(tx.raw, 'hex'))
+    })
   }
 
   K.ts = timestamp
@@ -96,7 +101,7 @@ module.exports = async (block)=>{
 
   for (let ins of disputes) {
     await ins.resolve()
-    l("Resolved")
+    l('Resolved')
   }
 
   // executing proposals that are due
@@ -178,12 +183,12 @@ module.exports = async (block)=>{
     prev_hash: Buffer.from(prev_hash, 'hex'),
     hash: sha3(finalblock),
     block: block,
+    total_tx: ordered_tx.length,
 
     meta: JSON.stringify(meta)
   })
 
   if (me.my_member) {
-
     var blocktx = concat(inputMap('chain'), r([block]))
     // send finalblock to all websocket users if we're member
 

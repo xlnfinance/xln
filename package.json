@@ -1,0 +1,40 @@
+{
+  "standard": {
+    "globals": [
+      "assert",
+      "fs",
+      "http",
+      "os",
+      "ws",
+      "opn",
+      "crypto",
+      "keccak",
+      "nacl",
+      "me",
+      "ec",
+      "K",
+      "readInt",
+      "packSInt",
+      "l",
+      "bin",
+      "Members",
+      "r",
+      "methodMap"
+    ]
+  },
+  "ignore": [
+    "wallet/"
+  ],
+  "dependencies": {
+    "bn.js": "4.11.8",
+    "finalhandler": "1.1.0",
+    "keccak": "1.4.0",
+    "rlp": "2.0.0",
+    "sequelize": "4.35.2",
+    "serve-static": "1.13.2",
+    "sqlite3": "3.1.13",
+    "tar": "4.4.0",
+    "tweetnacl": "1.0.0",
+    "ws": "3.2.0"
+  }
+}

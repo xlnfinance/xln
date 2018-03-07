@@ -37,7 +37,7 @@ module.exports = async (genesis) => {
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
 
     risk: 10000, // recommended rebalance limit
-    hard_limit: 500000, // how much can a user lose if hub is insolvent?
+    hard_limit: 100000, // how much can a user lose if hub is insolvent?
 
     dispute_delay: 5, // in how many blocks disputes are considered final
 
@@ -119,16 +119,18 @@ module.exports = async (genesis) => {
     return seed
   }
 
-  var base_rpc = genesis == 'test' ? 'ws://0.0.0.0' : 'wss://failsafe.network'
-  var base_web = genesis == 'test' ? 'http://0.0.0.0' : 'https://failsafe.network'
+  var local = !fs.existsSync('/etc/letsencrypt/live/failsafe.network/fullchain.pem')
 
-  var seed = await createMember('root', toHex(crypto.randomBytes(16)), 
-    `${base_rpc}:8000`,
-    genesis == 'test' ? 'http://0.0.0.0:8443' : 'https://failsafe.network'
+  var base_rpc = local ? 'ws://0.0.0.0' : 'wss://failsafe.network'
+  var base_web = local ? 'http://0.0.0.0' : 'https://failsafe.network'
+
+  var seed = await createMember('root', toHex(crypto.randomBytes(16)),
+    `${base_rpc}:8100`,
+    local ? 'http://0.0.0.0:8000' : 'https://failsafe.network'
     )
 
   for (var i = 8001; i < 8004; i++) {
-    await createMember(i.toString(), 'password', `${base_rpc}:${i + 10}`, `${base_web}:${i}`)
+    await createMember(i.toString(), 'password', `${base_rpc}:${i + 100}`, `${base_web}:${i}`)
   }
 
   K.members[0].shares = 10
@@ -151,12 +153,7 @@ module.exports = async (genesis) => {
     handle: 'us',
     name: '@us (America-based)'
   }
-  
-  K.members[3].hub = {
-    handle: 'bad',
-    name: '@bad (Tries To Hack You)'
-  }
-  */
+*/
 
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)
@@ -164,7 +161,8 @@ module.exports = async (genesis) => {
   fs.writeFileSync('private/pk.json', JSON.stringify({
     username: 'root',
     seed: seed.toString('hex'),
-    auth_code: toHex(crypto.randomBytes(32))
+    auth_code: toHex(crypto.randomBytes(32)),
+    pending_tx: []
   }))
 
   process.exit(0)

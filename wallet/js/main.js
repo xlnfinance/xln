@@ -146,11 +146,6 @@ FS.onready(() => {
       return app.commy(before + fee)
     },
 
-    dispute: () => {
-      if (confirm('Transaction fee is $' + app.commy(app.K.standalone_balance) + '. Proceed and start onchain dispute?')) {
-        app.call('dispute', {partner: app.ch.partner})
-      }
-    },
 
     go: (path) => {
       if (path == '') {
@@ -243,14 +238,10 @@ FS.onready(() => {
     mounted: ()=>{
       FS('load').then(render)
 
-      if (localStorage.auth_code) {
-        // local node
-        // if (location.hash == '') location.hash = '#wallet'
-
-        setInterval(function () {
-          FS('load').then(render)
-        }, 3000)
-      }
+      setInterval(function () {
+        FS('load').then(render)
+      }, localStorage.auth_code ? 3000 : 30000)
+    
 
 
       //renderRisk([])
@@ -294,9 +285,9 @@ FS.onready(() => {
 
         blocks: [],
         users: [],
-        show_empty_blocks: false,
 
         history: [],
+        pending_tx: [],
 
         proposal: ['Mint $1000 FSD to 1@1', `await Tx.mint(0, 1, 1, 100000)`, ''],
 
@@ -361,6 +352,8 @@ FS.onready(() => {
       </ul>
 
           
+  <span v-if="pending_tx.length > 0">Pending on-chain tx: {{pending_tx.map(t=>t.method).join(', ')}} </span> &nbsp;
+
   <span>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span>
   &nbsp;     
 
@@ -457,9 +450,8 @@ FS.onready(() => {
 
         <button type="button" class="btn btn-warning mb-3" @click="toggle" href="#">{{settings ? 'Hide' : 'Show'}} Settings</button>
 
-        <button class="btn btn-success mb-3" @click="call('faucet', { partner: ch.partner })">Testnet Faucet</button>
 
-        <p v-if="is_hub">You are hub @{{is_hub}}</p>
+        <h1 v-if="is_hub">You are hub @{{is_hub}}</h1>
 
 
         <div v-if="settings" class="alert alert-danger" role="alert">
@@ -485,21 +477,21 @@ FS.onready(() => {
             <p>Pubkey: <b>{{pubkey}}</b></p>
             <p>Global Balance: <b>\${{commy(record.balance)}}</b></p>
             
-            <small>1. How much to withdraw (up to {{commy(ch.insured)}}) from this channel to your global balance. Leave empty if you just want to deposit.</small>
+            <small>Amount to withdraw (up to {{commy(ch.insured)}}) from this channel to your global balance.</small>
 
             <p><input style="width:200px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount"></p>
            
-            <small>2. Deposit to other global balances (e.g. user "120") or to their channels (120@eu). Leave empty if you just want to withdraw.</small>
+            <small>Outputs to other users or channels.</small>
 
             <p v-for="out in outs">
-              <input style="width:400px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
+              <input style="width:400px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub (eg 4255 or 4255@eu)">
               <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
             </p>
             <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
             </p>
 
-            <small>Combine withdraw and deposit in a single transaction if you want to transfer money from this channel to another channel or user.</small>
+            <small>You can withdraw from hub, deposit to others, or both - in a single transaction</small>
 
             <p>
               
@@ -514,11 +506,22 @@ FS.onready(() => {
 
             <p>After a timeout money will arrive to your global balance, then you will be able to move it to another hub.</p>
 
-            <p v-if="record && record.balance > K.standalone_balance"> 
-              <button class="btn btn-danger" @click="dispute" href="#">Start Dispute</button>
+            <p v-if="record && record.balance >= K.standalone_balance"> 
+              <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
             </p>
-
             <p v-else>To start on-chain dispute you must be registred on-chain and have on your global balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your global balance.</p>
+
+            
+            <h3>Testnet Actions</h3>
+
+
+            <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 1 })">Testnet Faucet</button>
+
+            <button class="btn mb-3" @click="call('dispute', {partner: ch.partner, profitable: true})" href="#">Cheat in Dispute</button>
+
+            <button class="btn mb-3" @click="call('testnet', { partner: ch.partner, action: 2 })">Ask Hub to Start Dispute</button>
+
+            <button class="btn mb-3" @click="call('testnet', { partner: ch.partner, action: 3 })">Ask Hub to Cheat in Dispute</button>
 
         </div>
 
@@ -596,7 +599,7 @@ FS.onready(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="h in history.slice(history_limits[0], history_limits[1])">
+            <tr v-if="h.desc" v-for="h in history.slice(history_limits[0], history_limits[1])">
               <td>{{ new Date(h.date).toLocaleString() }}</td>
               <td>{{h.desc}}</td>
               <td>{{commy(h.amount)}}</td>
@@ -700,15 +703,9 @@ FS.onready(() => {
     <div v-else-if="tab=='explorer'">
       <h1>Blockchain Explorer</h1>
 
-      <div class="form-check">
-        <input v-model="show_empty_blocks" type="checkbox" id="defaultCheck1">
-        <label class="form-check-label" for="defaultCheck1">
-          Show Empty Blocks
-        </label>
-      </div>
 
 
-      <table class="table table-striped">
+      <table class="table">
         <thead class="thead-dark">
           <tr>
             <th scope="col">Prev Hash</th>
@@ -720,22 +717,22 @@ FS.onready(() => {
           </tr>
         </thead>
         <tbody>
-          <template v-if="show_empty_blocks || b.meta.total_tx > 0" v-for="b in blocks">
+          <template v-for="b in blocks">
             <tr>
               <td>{{b.prev_hash.substr(0,10)}}</td>
               <td>{{b.hash.substr(0,10)}}</td>
               <td>{{b.built_by}}</td>
               <td>{{timeAgo(b.timestamp)}}</td>
-              <td>{{b.meta.total_tx}}</td>
+              <td>{{b.total_tx}}</td>
               <td>{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>
             </tr>
       
-            <tr v-for="m in b.meta.parsed">
-              <td colspan="6">
-                <span class="badge badge-warning">Rebalance by {{m.signer}}:</span>&nbsp;
+            <tr v-for="m in b.meta.parsed_tx">
+              <td v-if="m.method=='rebalance'" colspan="6">
+                <span class="badge badge-warning">Rebalance by {{m.signer.id}}:</span>&nbsp;
 
                 <template v-for="input in m.inputs">
-                  <span class="badge badge-danger" >{{commy(input[0])}} from {{m.signer}}@{{input[1]}}</span>&nbsp;
+                  <span class="badge badge-danger" >{{commy(input[0])}} from {{m.signer.id}}@{{input[1]}}</span>&nbsp;
                 </template>
 
                 <template v-for="input in m.debts">
@@ -745,7 +742,10 @@ FS.onready(() => {
                 <template v-for="output in m.outputs">
                   <span class="badge badge-success" >{{commy(output[0])}} to {{output[1]}}@{{output[2]}}</span>&nbsp;
                 </template>
+              </td>
 
+              <td v-else-if="m.method=='dispute'" colspan="6">
+                <span class="badge badge-warning">Dispute in {{m.signer.id}}@{{m.partner.id}}: {{m.result == 'started' ? "started dispute" : "posted fraud proof"}}</span>
               </td>
             </tr>
 

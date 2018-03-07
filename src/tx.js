@@ -1,26 +1,23 @@
 
 module.exports = {
   processTx: async function processTx (tx, meta) {
-
-    var [id, sig, methodId, args] = r(tx)
-    methodId = readInt(methodId)
+    var [id, sig, methodId, nonce, args] = r(tx)
 
     var signer = await User.findById(readInt(id))
 
     if (!signer) { return {error: "This user doesn't exist"} }
 
     // we prepend omitted vars to not bloat tx size
-    var payload = r([signer.nonce, methodId, args])
+    var payload = r([readInt(methodId), signer.nonce, args])
 
-    if (!ec.verify(payload, sig, signer.pubkey)) { 
-      l(payload, sig, signer.pubkey)
-      return {error: 'Invalid tx signature'} 
+    if (!ec.verify(payload, sig, signer.pubkey)) {
+      return {error: `Invalid tx signature. Nonce ${readInt(nonce)} but expected ${signer.nonce}`}
     }
 
-    var method = methodMap(methodId)
+    var method = methodMap(readInt(methodId))
 
-    if (allowedOnchain.indexOf(method) == -1) { 
-      return {error: 'No such method exposed onchain'} 
+    if (allowedOnchain.indexOf(method) == -1) {
+      return {error: 'No such method exposed onchain'}
     }
 
     var tax = Math.round(K.tax * tx.length)
@@ -39,11 +36,28 @@ module.exports = {
 
     l(`ProcessTx: ${method} with ${args.length} by ${signer.id}`)
 
-    // Validation is over, fee is ours. Can be reimbursed by outputs.
+
+    if (me.pubkey.equals(signer.pubkey)) {
+      for (var i in PK.pending_tx) {
+        if (PK.pending_tx[i].raw == toHex(tx)) {
+          l("Our pending tx has been added to the blockchain")
+          PK.pending_tx.splice(i, 1)
+        }
+      }
+    }
+
+    // Validation is over, fee is validator's
     signer.balance -= tax
     K.collected_tax += tax
 
     args = r(args)
+
+    var parsed_tx = {
+      method: method,
+      signer: signer,
+      nonce: nonce,
+      tax: tax
+    }
 
     // don't forget BREAK
     switch (method) {
@@ -51,15 +65,15 @@ module.exports = {
         var [pubkey, sig, body] = args
 
         var partner = await User.idOrKey(pubkey)
-        if (!partner.id) return l("Your partner is not registred")
+        if (!partner.id) return l('Your partner is not registred')
 
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
-        if (compared == 0) return l("Cannot dispute with yourself")
+        if (compared == 0) return l('Cannot dispute with yourself')
 
         var ins = (await Insurance.findOrBuild({
           where: {
-            leftId: compared==-1?signer.id:partner.id,
-            rightId: compared==-1?partner.id:signer.id
+            leftId: compared == -1 ? signer.id : partner.id,
+            rightId: compared == -1 ? partner.id : signer.id
           },
           defaults: {
             nonce: 0,
@@ -70,77 +84,78 @@ module.exports = {
         }))[0]
 
         if (sig) {
-          var parsed = r(body)
+          var state = r(body)
 
-          var dispute_nonce = readInt(parsed[3])
-          var offdelta = readSInt(parsed[4]) // signed int
+          var dispute_nonce = readInt(state[3])
+          var offdelta = readSInt(state[4]) // signed int
 
           var state = r([
             methodMap('offdelta'),
-            compared==-1?signer.pubkey:partner.pubkey,
-            compared==-1?partner.pubkey:signer.pubkey,
+            compared == -1 ? signer.pubkey : partner.pubkey,
+            compared == -1 ? partner.pubkey : signer.pubkey,
             dispute_nonce,
             packSInt(offdelta)
           ])
 
           if (!ec.verify(state, sig, partner.pubkey)) {
-            return l("Invalid offdelta state sig ", state)
-          }          
+            return l('Invalid offdelta state sig ', state)
+          }
         } else {
-          l('Fresh channel? Split with default values')
+          l('New channel? Split with default values')
           var dispute_nonce = 0
           var offdelta = 0
         }
 
+        parsed_tx.partner = partner
+
         if (ins.dispute_delayed) {
-          if (dispute_nonce > ins.dispute_nonce && ins.dispute_left == (compared==1)) {
-            l("Newer nonce submitted")
+          if (dispute_nonce > ins.dispute_nonce && ins.dispute_left == (compared == 1)) {
+            parsed_tx.result = 'disputed'
             ins.dispute_offdelta = offdelta
             await ins.resolve()
+            l("Resolving with fraud proof")
           } else {
-            l("Old nonce or same counterparty")
+            l('Old nonce or same counterparty')
           }
         } else {
-
           ins.dispute_offdelta = offdelta
           ins.dispute_nonce = dispute_nonce
 
           ins.dispute_left = (compared == -1)
           ins.dispute_delayed = K.usable_blocks + 6
 
+          parsed_tx.result = 'started'
+
           await ins.save()
 
-          var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared==-1)
+          var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared == -1)
 
           if (me.pubkey.equals(partner.pubkey)) {
-            l("Channel with us is disputed")
+            l('Channel with us is disputed')
             var ch = await me.channel(signer.pubkey)
-            if ((ch.left && offdelta < ch.d.offdelta) || 
-              (!ch.left && offdelta > ch.d.offdelta)){
+            ch.d.status = 'disputed'
+            await ch.d.save()
 
-              l("Unprofitable proof posted!")
+            if ((ch.left && offdelta < ch.d.offdelta) ||
+              (!ch.left && offdelta > ch.d.offdelta)) {
+              l('Unprofitable proof posted!')
               await me.broadcast('dispute', r([signer.pubkey, ch.d.sig, ch.d.getState()]))
             }
           }
         }
 
-        break
 
+        break
 
       case 'rebalance':
         // 1. collect all ins insurance
         var [asset, inputs, outputs] = args
-     
-        var is_hub = Members.find(m=>m.hub && m.id == signer.id)
 
-        var parsed = {
-          inputs: [],
-          debts: [],
-          outputs: [],
-          signer_before: signer.balance,
+        var is_hub = Members.find(m => m.hub && m.id == signer.id)
 
-          signer: signer.id
-        }
+        parsed_tx.inputs = []
+        parsed_tx.debts = []
+        parsed_tx.outputs = []
 
         for (var input of inputs) {
           var amount = readInt(input[0])
@@ -152,8 +167,8 @@ module.exports = {
 
           var ins = await Insurance.find({
             where: {
-              leftId: compared==-1 ? signer.id : partner.id, 
-              rightId: compared==-1 ? partner.id : signer.id
+              leftId: compared == -1 ? signer.id : partner.id,
+              rightId: compared == -1 ? partner.id : signer.id
             },
             include: {all: true}
           })
@@ -174,9 +189,9 @@ module.exports = {
             l('Wrong signature by partner ', ins.nonce)
             continue
           }
-          
+
           // for blockchain explorer
-          parsed.inputs.push([amount, partner.id])
+          parsed_tx.inputs.push([amount, partner.id])
           meta.inputs_volume += amount
 
           ins.insurance -= amount
@@ -205,7 +220,6 @@ module.exports = {
               await ch.d.save()
             }
           }
-
         }
 
         // 2. pay to debts
@@ -214,13 +228,12 @@ module.exports = {
 
         for (var d of debts) {
           var u = await User.findById(d.oweTo)
-          l("Covering debt "+d.amount_left)
 
           if (d.amount_left <= signer.balance) {
             signer.balance -= d.amount_left
             u.balance += d.amount_left
 
-            parsed.debts.push([d.amount_left, u.id])
+            parsed_tx.debts.push([d.amount_left, u.id])
 
             await u.save()
             await d.destroy()
@@ -229,14 +242,12 @@ module.exports = {
             u.balance += signer.balance
             signer.balance = 0 // signer is broke now!
 
-
-            parsed.debts.push([signer.balance, u.id])
+            parsed_tx.debts.push([signer.balance, u.id])
 
             await u.save()
             await d.save()
             break
           }
-
         }
 
         // 3. pay to outputs
@@ -255,13 +266,11 @@ module.exports = {
           // here we ensure both parties are registred, and take needed fees
 
           if (!giveTo.id) {
-
             if (!withPartner) {
               if (amount < K.account_creation_fee) continue
               giveTo.balance = (amount - K.account_creation_fee)
 
               signer.balance -= amount
-
             } else {
               if (!withPartner.id) continue
 
@@ -271,7 +280,6 @@ module.exports = {
               giveTo.balance = K.standalone_balance
               amount -= fee
               signer.balance -= fee
-
             }
 
             await giveTo.save()
@@ -279,9 +287,8 @@ module.exports = {
             K.collected_tax += K.account_creation_fee
           } else {
             if (withPartner) {
-              
               if (!withPartner.id) {
-                l("Looks like hub rebalance")
+                l('Looks like hub rebalance')
 
                 var fee = (K.standalone_balance + K.account_creation_fee)
                 if (amount < fee) continue
@@ -296,7 +303,6 @@ module.exports = {
                   await me.addHistory(giveTo.pubkey, -K.account_creation_fee, 'Account creation fee')
                   await me.addHistory(giveTo.pubkey, -K.standalone_balance, 'Minimum global balance')
                 }
-
               }
             } else {
               if (giveTo.id == signer.id) continue
@@ -307,14 +313,13 @@ module.exports = {
           }
 
           if (withPartner && withPartner.id) {
-
             var compared = Buffer.compare(giveTo.pubkey, withPartner.pubkey)
             if (compared == 0) continue
 
             var ins = (await Insurance.findOrBuild({
               where: {
-                leftId: compared==-1 ? giveTo.id : withPartner.id, 
-                rightId: compared==-1 ? withPartner.id : giveTo.id
+                leftId: compared == -1 ? giveTo.id : withPartner.id,
+                rightId: compared == -1 ? withPartner.id : giveTo.id
               },
               defaults: {
                 nonce: 0,
@@ -325,13 +330,13 @@ module.exports = {
             }))[0]
 
             ins.insurance += amount
-            if (compared==1) ins.ondelta -= amount
+            if (compared == 1) ins.ondelta -= amount
 
             signer.balance -= amount
 
             if (is_hub) {
               ins.insurance -= reimburse_tax
-              if (compared==-1) ins.ondelta += reimburse_tax
+              if (compared == -1) ins.ondelta += reimburse_tax
 
               // account creation fees are on user, if any
               var diff = (readInt(output[0]) - amount)
@@ -348,11 +353,9 @@ module.exports = {
             }
           }
 
-          parsed.outputs.push([amount, giveTo.id, withPartner ? withPartner.id : false])
+          parsed_tx.outputs.push([amount, giveTo.id, withPartner ? withPartner.id : false])
           meta.outputs_volume += amount
         }
-
-        meta['parsed'].push(parsed)
 
 
         break
@@ -375,9 +378,7 @@ module.exports = {
         })
 
         l(`Added new proposal!`)
-
         K.proposals_created++
-
         break
 
       case 'voteApprove':
@@ -401,6 +402,8 @@ module.exports = {
     }
 
     signer.nonce++
+    
+    meta['parsed_tx'].push(parsed_tx)
 
     await signer.save()
 
