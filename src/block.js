@@ -65,9 +65,7 @@ module.exports = async (block) => {
 
   if (PK.pending_tx.length > 0) {
     l("Rebroadcasting pending tx")
-    PK.pending_tx.map(tx=>{
-      me.send(me.next_member, 'tx', Buffer.from(tx.raw, 'hex'))
-    })
+    me.send(me.next_member, 'tx', r(PK.pending_tx.map(tx=>Buffer.from(tx.raw, 'hex'))) )
   }
 
   K.ts = timestamp

@@ -153,12 +153,13 @@ usage = () => {
 // tells external RPC how to parse this request (256 options)
 inputMap = (i) => {
   var map = [
-    'tx', // add new tx to block
     'auth', // this socket belongs to my pubkey
 
     // consensus
     'needSig', // member needs sig of others
     'signed',  // other members return sigs of block
+
+    'tx', // propose array of tx to add to block
 
     'sync', // i want to sync since this prev_hash
     'chain', // return X blocks since given prev_hash

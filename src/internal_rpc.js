@@ -242,13 +242,17 @@ module.exports = async (ws, msg) => {
 
         break
 
-      // Login button
+      // Successor of Secure Login, returns signed origin
       case 'login':
-        result.token = toHex(nacl.sign(json.proxyOrigin, me.id.secretKey))
+         ws.send(JSON.stringify({
+            result: toHex(nacl.sign(Buffer.from(json.proxyOrigin), me.id.secretKey)),
+            id: json.id
+          }))
+        return false
         break
     }
 
-    // is HTTP response or websocket?
+    // http or websocket?
     if (ws.end) {
       ws.end(JSON.stringify(result))
     } else {

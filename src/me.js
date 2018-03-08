@@ -159,7 +159,7 @@ class Me {
     if (me.my_member && me.my_member == me.next_member) {
       me.mempool.push(tx)
     } else {
-      me.send(me.next_member, 'tx', tx)
+      me.send(me.next_member, 'tx', r(tx))
     }
 
     l('Just broadcasted: '+method+' pendings: ', PK.pending_tx)

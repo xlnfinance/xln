@@ -8,6 +8,8 @@ Cookies = require('cookies')
 fs = require('fs')
 users = {}
 
+nacl = require('../lib/nacl')
+
 FS_PATH = '/Users/homakov/work/8002'
 FS_RPC = 'http://0.0.0.0:8002/rpc'
 LOCAL_FS_RPC = 'http://0.0.0.0:8001'
@@ -93,6 +95,8 @@ require('http').createServer((req, res) => {
       <p>Your node (user): ${LOCAL_FS_RPC}.</p>
       <p>Our node (bank): ${FS_RPC}.</p>
       <p>auth_code to control our node is read from ${FS_PATH}</p>
+
+      <p><button class="btn btn-success" id="login">Login with Failsafe</button></p>
 
    </main>
 
@@ -196,6 +200,10 @@ window.onload = function(){
       })
  
     })
+  }
+
+  login.onclick = function(){
+    FS('login').then(data=>l(data))
   }
 }
 </script>

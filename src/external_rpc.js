@@ -39,18 +39,19 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-  // someone wants tx to be broadcasted
+  // accepts array of tx
   } else if (inputType == 'tx') {
     // why would we be asked to add tx to block?
     if (!me.my_member) return false
 
     if (me.my_member == me.next_member) {
-      l('We are next, adding to mempool')
-
-      me.mempool.push(bin(msg))
+      r(msg).map(tx=>{
+        me.mempool.push(tx)
+      })
     } else {
       me.send(me.next_member, 'tx', msg)
     }
+
 
   // another member wants a sig
   } else if (inputType == 'needSig') {
