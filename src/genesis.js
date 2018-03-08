@@ -96,7 +96,7 @@ module.exports = async (genesis) => {
       pubkey: me.pubkey,
       username: username,
       nonce: 0,
-      balance: 500000
+      balance: 5000000
     }))
 
     l(username + ' : ' + pw + ' at ' + loc)

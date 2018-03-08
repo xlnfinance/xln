@@ -571,7 +571,7 @@ FS.onready(() => {
   </div>
 
 
-  <div class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
+  <div v-if="record" class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
             <h3>On-chain Rebalance</h3>
 
             <p>Global ID: <b>{{record.id}}</b></p>
@@ -623,15 +623,15 @@ FS.onready(() => {
         <p>Case 1. Just arrived? You can go to an exchange or any other service to purchase our digital assets. For now just click on faucet. After reaching {{commy(K.risk)}} in uninsured balance, the hub must rebalance/insure you on-chain - <b>wait for it</b>. That will automatically register your account on-chain. <b>Keep an eye on Blockchain Explorer - every node will see this rebalance transaction</b></p>
         <p><button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 1 })">Testnet Faucet</button></p>
 
-        <p>Case 2. Now let's practice p2p payments: use the install snippet again but replace id=fs to id=fs2 and 8001 port to 8002 (to run a parallel user on the same machine). Under the new user, create an invoice for 123 and pay it with this user. Instantly you will see this user has 123 under "spent" and a new user under "uninsured". After some time the hub will ask your node to withdraw from your channel in order to insure the second user, because 123 is beyond risk limit. If you'd pay $5, there would be no rebalance.</p>
+        <p>Case 2. Now let's practice p2p payments: use the install snippet again but replace id=fs to id=fs2 and 8001 port to 8002 (to run a parallel user on the same machine). Under the new user, create an invoice for 123 and pay it with our user. Instantly you will see this user has 123 under "spent" and a new user under "uninsured". After some time the hub will ask your node to withdraw from your channel in order to insure the second user, because 123 is beyond risk limit. If you'd pay $5, there would be no rebalance.</p>
 
-        <p>Case 3. Both users are on @eu hub: you->eu->new user. Now Let's try to pay to with 2 hops: you->eu->jp->new user. Select jp hub by another user, create an invoice and pay it with this user again. You will pay fees to both hubs.</p>
+        <p>Case 3. You both were using @eu hub, now let's practice 2 hops payment: <b>you->eu->jp->new user</b>. Select jp hub by another user, create an invoice and pay it with our user again. You will pay fees to both hubs (roughly 0.1+0.1%).</p>
 
-        <p>Case 4. Request withdraw by this user on On-chain rebalance page.</p>
+        <p>Case 4. Request withdraw by this user on On-chain rebalance page. Withdraw is taking money "the nice way" from your hub and you could move them to another hub or to make a direct payment to someone else's channel on-chain.</p>
 
-        <p>Case 5. If the hub tried to censor you and didn't let to withdraw the good way, you can go the ugly way: start on-chain dispute under On-Chain Dispute tab.</p>
+        <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start on-chain dispute under On-Chain Dispute tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
 
-        <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state you ever had. When hub notices that, they will post latest state to claim their money. Keep an eye on Blockchain Explorer page.</p>
+        <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state - biggest balance you ever owned. When hub notices that, they will post latest state before delay period. Keep an eye on Blockchain Explorer page to see that.</p>
 
         <button class="btn btn-success mb-3" @click="call('dispute', {partner: ch.partner, profitable: true})" href="#">Cheat in Dispute</button><br>
 
@@ -639,7 +639,7 @@ FS.onready(() => {
 
         <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 2 })">Ask Hub to Start Dispute</button><br>
 
-        <p>Case 8. Using this button you can ensure you're safe if the hub also tries to cheat on you with most profitable state for them.</p>
+        <p>Case 8. Using this button you can ensure you're safe if the hub also tries to cheat on you with most profitable state.</p>
 
         <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 3 })">Ask Hub to Cheat in Dispute</button>
   </div>
@@ -780,24 +780,28 @@ FS.onready(() => {
             </tr>
       
             <tr v-for="m in b.meta.parsed_tx">
-              <td v-if="m.method=='rebalance'" colspan="6">
-                <span class="badge badge-warning">Rebalance by {{m.signer.id}}:</span>&nbsp;
 
-                <template v-for="input in m.inputs">
-                  <span class="badge badge-danger" >{{commy(input[0])}} from {{m.signer.id}}@{{input[1]}}</span>&nbsp;
+              <td colspan="6">
+                <span class="badge badge-warning">{{m.method}} by {{m.signer.id}} ({{commy(m.tax)}} fee, size {{m.length}}):</span>&nbsp;
+
+                <template v-if="m.method=='rebalance'">
+                  <template v-for="input in m.inputs">
+                    <span class="badge badge-danger" >{{commy(input[0])}} from {{m.signer.id}}@{{input[1]}}</span>&nbsp;
+                  </template>
+
+                  <template v-for="input in m.debts">
+                    <span class="badge badge-dark">{{commy(input[0])}} enforced debt to {{input[1]}}</span>&nbsp;
+                  </template>
+
+                  <template v-for="output in m.outputs">
+                    <span class="badge badge-success" >{{commy(output[0])}} to {{output[1]}}@{{output[2]}}</span>&nbsp;
+                  </template>
                 </template>
 
-                <template v-for="input in m.debts">
-                  <span class="badge badge-dark">{{commy(input[0])}} enforced debt to {{input[1]}}</span>&nbsp;
+                <template v-else-if="m.method=='dispute'">
+                  <span class="badge badge-danger">{{m.result == 'started' ? "started a dispute with "+m.partner.id : "posted latest state and resolved dispute with "+m.partner.id}}</span>
                 </template>
 
-                <template v-for="output in m.outputs">
-                  <span class="badge badge-success" >{{commy(output[0])}} to {{output[1]}}@{{output[2]}}</span>&nbsp;
-                </template>
-              </td>
-
-              <td v-else-if="m.method=='dispute'" colspan="6">
-                <span class="badge badge-warning">Dispute in {{m.signer.id}}@{{m.partner.id}}: {{m.result == 'started' ? "started dispute" : "posted fraud proof"}}</span>
               </td>
             </tr>
 

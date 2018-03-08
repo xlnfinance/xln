@@ -10,8 +10,9 @@ users = {}
 
 nacl = require('../lib/nacl')
 
-FS_PATH = '/Users/homakov/work/8002'
+FS_PATH = '/root/8002'
 FS_RPC = 'http://0.0.0.0:8002/rpc'
+
 LOCAL_FS_RPC = 'http://0.0.0.0:8001'
 
 if (fs.existsSync(FS_PATH + '/private/pk.json')) {
@@ -74,7 +75,7 @@ require('http').createServer((req, res) => {
   </head>
 
   <body>
-    <main role="main" class="container">
+    <main role="main" class="container" id="main">
       <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
 
       <p>Your ID at the bank: ${id}</p>
@@ -129,7 +130,14 @@ FS.frame=document.createElement('iframe');
 FS.frame.style.display = 'none'
 FS.frame.src=FS.origin+'/sdk.html'
 document.body.appendChild(FS.frame)
+
+var fallback = setTimeout(()=>{
+  main.innerHTML="Couldn't connect to local node at 0.0.0.0:8001. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
+}, 500)
+
 FS.onready = fn => {
+  clearTimeout(fallback)
+  
   if(FS.ready == true){
     fn()
   }else{
@@ -257,5 +265,3 @@ window.onload = function(){
 
   }
 }).listen(3010)
-
-require('../lib/opn')('http://0.0.0.0:3010')

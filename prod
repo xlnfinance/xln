@@ -23,3 +23,6 @@ cd ../8002; forever start fs.js -p8002 --username=8002 --pw=password
 
 cd ../8003; forever start fs.js -p8003 --username=8003 --pw=password
 
+cd ../fs/test
+forever start demo.js
+

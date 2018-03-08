@@ -93,7 +93,7 @@ module.exports = async (ws, msg) => {
         if (error) {
           result.alert = error
         } else {
-          return false
+          result.confirm = 'Payment sent'
         }
 
         break

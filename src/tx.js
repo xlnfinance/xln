@@ -4,14 +4,12 @@ module.exports = {
     var [id, sig, methodId, nonce, args] = r(tx)
 
     var signer = await User.findById(readInt(id))
+    var nonce = readInt(nonce)
 
     if (!signer) { return {error: "This user doesn't exist"} }
 
-    // we prepend omitted vars to not bloat tx size
-    var payload = r([readInt(methodId), signer.nonce, args])
-
-    if (!ec.verify(payload, sig, signer.pubkey)) {
-      return {error: `Invalid tx signature. Nonce ${readInt(nonce)} but expected ${signer.nonce}`}
+    if (!ec.verify(r([readInt(methodId), nonce, args]), sig, signer.pubkey)) {
+      return {error: `Invalid tx signature.`}
     }
 
     var method = methodMap(readInt(methodId))
@@ -26,12 +24,23 @@ module.exports = {
 
     // This is precommit, so no need to apply tx and change db
     if (meta.dry_run) {
-      if (meta[signer.id]) {
-        return {error: 'Only one tx per block per account currently allowed'}
+      if (meta[signer.id] && meta[signer.id] > 5) {
+        return {error: 'Only few tx per block per account currently allowed'}
       } else {
-        meta[signer.id] = true
+        if (!meta[signer.id]) meta[signer.id] = 0
+
+        if (signer.nonce + meta[signer.id] != nonce) {
+          return {error: 'Invalid nonce'}
+        }
+
+        meta[signer.id]++
+
         return {success: true}
       }
+    } else {
+      if (signer.nonce != nonce) {
+        return {error: 'Invalid nonce'}
+      }      
     }
 
     l(`ProcessTx: ${method} with ${args.length} by ${signer.id}`)
@@ -56,7 +65,8 @@ module.exports = {
       method: method,
       signer: signer,
       nonce: nonce,
-      tax: tax
+      tax: tax,
+      length: tx.length
     }
 
     // don't forget BREAK

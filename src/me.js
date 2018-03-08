@@ -3,16 +3,9 @@ stringify = require('../lib/stringify')
 Tx = require('./tx')
 
 class Me {
-  async init (username, seed) {
-    this.processBlock = require('./block')
-
-    this.username = username
-
+  // boilerplate attributes
+  constructor () {
     this.is_hub = false
-
-    this.seed = seed
-    this.id = nacl.sign.keyPair.fromSeed(this.seed)
-    this.pubkey = bin(this.id.publicKey)
 
     this.mempool = []
     this.status = 'await'
@@ -24,7 +17,18 @@ class Me {
 
     this.intervals = []
 
-    this.next_member = false
+    this.next_member = false    
+  }
+
+  // derives needed keys from the seed, saves creds into pk.json
+  async init (username, seed) {
+    this.processBlock = require('./block')
+
+    this.username = username
+
+    this.seed = seed
+    this.id = nacl.sign.keyPair.fromSeed(this.seed)
+    this.pubkey = bin(this.id.publicKey)
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
@@ -36,6 +40,7 @@ class Me {
     fs.writeFileSync('private/pk.json', JSON.stringify(PK))
   }
 
+  // all requests are processed one by one for race condition safety (for now)
   async processQueue () {
 
     // first in first out - call rpc with ws and msg
