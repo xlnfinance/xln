@@ -109,8 +109,6 @@ module.exports = async (ws, msg) => {
           if (o.to.length > 0) {
             var to = o.to.split('@')
 
-            var hubId = to[1] ? Members.find(m => m.hub && m.hub.handle == to[1]) : 0
-
             if (to[0].length == 64) {
               var userId = Buffer.from(to[0], 'hex')
 
@@ -138,7 +136,10 @@ module.exports = async (ws, msg) => {
             var amount = parseInt(o.amount.replace(/[^0-9]/g, ''))
 
             if (amount > 0) {
-              outs.push([amount, userId, hubId.pubkey])
+              outs.push([amount, 
+                userId, 
+                to[1] ? Members.find(m => m.hub && m.hub.handle == to[1]).id : 0
+              ])
             }
           }
         }
@@ -159,6 +160,9 @@ module.exports = async (ws, msg) => {
               ins.push([ ch.d.our_input_amount,
                 ch.d.partnerId,
                 ch.d.our_input_sig ])
+
+              l("Rebalancing ", [ins, outs])
+
               await me.broadcast('rebalance', r([0, ins, outs]))
               react({confirm: 'On-chain rebalance tx sent'})
             } else {
@@ -169,7 +173,7 @@ module.exports = async (ws, msg) => {
           await me.broadcast('rebalance', r([0, ins, outs]))
           react({confirm: 'Rebalanced'})
         } else {
-          l('Nothing to do')
+          react({alert: 'No action specified'})
         }
 
         return false
@@ -223,6 +227,8 @@ module.exports = async (ws, msg) => {
 
           me.record = await me.byKey()
 
+          l('invoice ',p)
+
           result.new_invoice = [
             invoices[invoice].amount,
             me.record ? me.record.id : toHex(me.pubkey),
@@ -238,7 +244,7 @@ module.exports = async (ws, msg) => {
         break
 
       case 'vote':
-        result.confirm = await me.broadcast(p.approve ? 'voteApprove' : 'voteDeny', r([p.id, p.rationale]))
+        result.confirm = await me.broadcast('vote', r([p.id, p.approval, p.rationale]))
 
         break
 

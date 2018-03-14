@@ -70,52 +70,6 @@ class Me {
     })
   }
 
-  async processMempool () {
-    var ordered_tx = []
-    var total_size = 0
-
-    var meta = {dry_run: true}
-
-    for (var candidate of me.mempool) {
-      if (total_size + candidate.length > K.blocksize) break
-
-      var result = await Tx.processTx(candidate, meta)
-      if (result.success) {
-        ordered_tx.push(candidate)
-        total_size += candidate.length
-      } else {
-        l(result.error)
-        // punish submitter ip
-      }
-    }
-
-    // flush it
-    me.mempool = []
-
-    me.precommit = r([
-      methodMap('block'),
-      me.record.id,
-      Buffer.from(K.prev_hash, 'hex'),
-      ts(),
-      ordered_tx
-    ])
-
-    me.my_member.sig = ec(me.precommit, me.block_keypair.secretKey)
-
-    if (K.majority > 1) {
-      var needSig = r([
-        me.my_member.block_pubkey,
-        me.my_member.sig,
-        me.precommit
-      ])
-
-      Members.map((c) => {
-        if (c != me.my_member) { me.send(c, 'needSig', needSig) }
-      })
-    }
-
-    return me.precommit
-  }
 
   async broadcast (method, args) {
     me.record = await me.byKey()
@@ -125,6 +79,7 @@ class Me {
 
         var confirm = 'Broadcasted globally!'
         break
+
       case 'propose':
         if (args[0].length <= 1) throw 'Rationale is required'
 
@@ -138,8 +93,7 @@ class Me {
         var confirm = 'Proposal submitted!'
         break
 
-      case 'voteApprove':
-      case 'voteDeny':
+      case 'vote':
 
         var confirm = 'You voted!'
 
@@ -164,10 +118,10 @@ class Me {
     if (me.my_member && me.my_member == me.next_member) {
       me.mempool.push(tx)
     } else {
-      me.send(me.next_member, 'tx', r(tx))
+      me.send(me.next_member, 'tx', r([tx]))
     }
 
-    l('Just broadcasted: '+method+' pendings: ', PK.pending_tx)
+    l('Just broadcasted: '+method, r(args) )
 
     return confirm
   }
@@ -288,6 +242,8 @@ class Me {
     ch.d.offdelta += ch.left ? -opts.amount : opts.amount
     ch.d.nonce++
 
+    //ch.d.hashlocks.push()
+
     var newState = ch.d.getState()
 
     var body = r([
@@ -349,7 +305,11 @@ class Me {
       insurance: 0,
       ondelta: 0,
       nonce: 0,
-      left: compared == -1
+      left: compared == -1,
+      
+      online: me.users[partner] && (me.users[partner].readyState == 1 || 
+      (me.users[partner].instance && me.users[partner].instance.readyState == 1))
+
     }
 
     ch.member = Members.find(m => m.pubkey.equals(partner))
@@ -376,7 +336,9 @@ class Me {
         they_hard_limit: is_hub(me.pubkey) ? K.hard_limit :  0,
 
         nonce: 0,
-        status: 'ready'
+        status: 'ready',
+
+        hashlocks: null
       }
     }))[0]
 
@@ -441,7 +403,7 @@ class Me {
     //l(`Invoking ${method} in member ${m.id}`)
 
     if (me.users[m.pubkey]) {
-      me.users[m.pubkey].send(tx)
+      return me.users[m.pubkey].send(tx)
     } else {
       me.users[m.pubkey] = new WebSocketClient()
 

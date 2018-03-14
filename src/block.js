@@ -109,30 +109,31 @@ module.exports = async (block) => {
   })
 
   for (let job of jobs) {
-    var total_shares = 0
+    var approved = 0
     for (let v of job.voters) {
       var voter = K.members.find(m => m.id == v.id)
       if (v.vote.approval && voter) {
-        total_shares += voter.shares
+        approved += voter.shares
       } else {
-
+        // TODO: denied? slash some votes?
       }
     }
 
-    if (total_shares < K.majority) continue
+    if (approved < K.majority) continue
 
-    l('Evaling ' + job.code)
+    l('To eval ', job.code)
 
     l(await eval(`(async function() { ${job.code} })()`))
 
-    var patch = job.patch
 
-    if (patch.length > 0) {
+    if (job.patch.length > 0) {
+      l('To patch ', job.patch)
+
       me.request_reload = true
       var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
         console.log(error, stdout, stderr)
       })
-      pr.stdin.write(patch)
+      pr.stdin.write(job.patch)
       pr.stdin.end()
 
       l('Patch applied! Restarting...')
@@ -163,7 +164,7 @@ module.exports = async (block) => {
 
         // skip /private (blocks sqlite, proofs, local config)
         // tests, and all hidden/dotfiles
-        if (path.startsWith('./.') || path.match(/(DS_Store|private|node_modules|test)/)) {
+        if (path.startsWith('./.') || path.match(/(private|DS_Store|node_modules|test)/)) {
           return false
         } else {
           return true

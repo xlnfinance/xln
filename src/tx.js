@@ -30,7 +30,7 @@ module.exports = {
         if (!meta[signer.id]) meta[signer.id] = 0
 
         if (signer.nonce + meta[signer.id] != nonce) {
-          return {error: 'Invalid nonce'}
+          return {error: 'Invalid nonce dry run'}
         }
 
         meta[signer.id]++
@@ -72,10 +72,10 @@ module.exports = {
     // don't forget BREAK
     switch (method) {
       case 'dispute':
-        var [pubkey, sig, body] = args
+        var [id, sig, dispute_nonce, offdelta, hashlocks] = args
 
-        var partner = await User.idOrKey(pubkey)
-        if (!partner.id) return l('Your partner is not registred')
+        var partner = await User.findById(readInt(id))
+        if (!partner) return l('Your partner is not registred')
 
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
         if (compared == 0) return l('Cannot dispute with yourself')
@@ -94,17 +94,16 @@ module.exports = {
         }))[0]
 
         if (sig) {
-          var state = r(body)
-
-          var dispute_nonce = readInt(state[3])
-          var offdelta = readSInt(state[4]) // signed int
+          var dispute_nonce = readInt(dispute_nonce)
+          var offdelta = readSInt(offdelta) // SIGNED int
 
           var state = r([
             methodMap('offdelta'),
             compared == -1 ? signer.pubkey : partner.pubkey,
             compared == -1 ? partner.pubkey : signer.pubkey,
             dispute_nonce,
-            packSInt(offdelta)
+            packSInt(offdelta),
+            hashlocks
           ])
 
           if (!ec.verify(state, sig, partner.pubkey)) {
@@ -149,7 +148,7 @@ module.exports = {
             if ((ch.left && offdelta < ch.d.offdelta) ||
               (!ch.left && offdelta > ch.d.offdelta)) {
               l('Unprofitable proof posted!')
-              await me.broadcast('dispute', r([signer.pubkey, ch.d.sig, ch.d.getState()]))
+              await ch.d.startDispute()
             }
           }
         }
@@ -158,7 +157,7 @@ module.exports = {
         break
 
       case 'rebalance':
-        // 1. collect all ins insurance
+        // 1. take insurance from withdrawals
         var [asset, inputs, outputs] = args
 
         var is_hub = Members.find(m => m.hub && m.id == signer.id)
@@ -232,7 +231,7 @@ module.exports = {
           }
         }
 
-        // 2. pay to debts
+        // 2. enforce pay insurance to debts
 
         var debts = await signer.getDebts()
 
@@ -260,7 +259,7 @@ module.exports = {
           }
         }
 
-        // 3. pay to outputs
+        // 3. deposit insurance to outputs
 
         // we want outputs to pay for their own rebalance
         var reimburse_tax = 1 + Math.floor(tax / outputs.length)
@@ -376,6 +375,8 @@ module.exports = {
 
 
       case 'propose':
+        if (signer.id != 1) return l("Currenlty only root can propose an amendment")
+
         var execute_on = K.usable_blocks + K.voting_period // 60*24
 
         var new_proposal = await Proposal.create({
@@ -391,9 +392,8 @@ module.exports = {
         K.proposals_created++
         break
 
-      case 'voteApprove':
-      case 'voteDeny':
-        var [proposalId, rationale] = args
+      case 'vote':
+        var [proposalId, approval, rationale] = args
         var vote = await Vote.findOrBuild({
           where: {
             userId: signer.id,
@@ -403,7 +403,7 @@ module.exports = {
         vote = vote[0]
 
         vote.rationale = rationale.toString()
-        vote.approval = method == 'voteApprove'
+        vote.approval = approval[0] == 1
 
         await vote.save()
         l(`Voted ${vote.approval} for ${vote.proposalId}`)

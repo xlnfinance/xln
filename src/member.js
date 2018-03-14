@@ -1,4 +1,4 @@
-module.exports = () => {
+module.exports = async () => {
   var now = ts()
 
   var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
@@ -53,7 +53,53 @@ module.exports = () => {
       me.status = 'await'
     } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - 5)) {
       me.status = 'precommit'
-      me.processMempool()
+
+      // processing mempool
+      var ordered_tx = []
+      var total_size = 0
+
+      var meta = {dry_run: true}
+
+      for (var candidate of me.mempool) {
+        if (total_size + candidate.length > K.blocksize) break
+
+        var result = await Tx.processTx(candidate, meta)
+        if (result.success) {
+          ordered_tx.push(candidate)
+          total_size += candidate.length
+        } else {
+          l(result.error)
+          // punish submitter ip
+        }
+      }
+
+      // flush it
+      me.mempool = []
+
+      me.precommit = r([
+        methodMap('block'),
+        me.record.id,
+        Buffer.from(K.prev_hash, 'hex'),
+        ts(),
+        ordered_tx
+      ])
+
+      me.my_member.sig = ec(me.precommit, me.block_keypair.secretKey)
+
+      if (K.majority > 1) {
+        var needSig = r([
+          me.my_member.block_pubkey,
+          me.my_member.sig,
+          me.precommit
+        ])
+
+        Members.map((c) => {
+          if (c != me.my_member) { me.send(c, 'needSig', needSig) }
+        })
+      }
+
+      return me.precommit
+
     }
   } else {
     me.status = 'await'

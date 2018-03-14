@@ -574,11 +574,11 @@ FS.onready(() => {
   <div v-if="record" class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
             <h3>On-chain Rebalance</h3>
 
-            <p>Global ID: <b>{{record.id}}</b></p>
+            <p>On-chain ID: <b>{{record.id}}</b></p>
             <p>Pubkey: <b>{{pubkey}}</b></p>
-            <p>Global Balance: <b>\${{commy(record.balance)}}</b></p>
+            <p>On-chain Balance: <b>\${{commy(record.balance)}}</b></p>
             
-            <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance in this channel to your global balance.</small>
+            <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance in this channel to your on-chain balance.</small>
 
             <p v-if="ch.insured>0"><input style="width:200px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount"></p>
            
@@ -593,7 +593,7 @@ FS.onready(() => {
             </p>
 
             <p>
-              <button type="button" class="btn btn-warning" @click="rebalance()">Settle Globally</button>
+              <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance</button>
             </p>
 
   </div>
@@ -603,12 +603,12 @@ FS.onready(() => {
     <p>If this hub becomes unresponsive, you can always start a dispute on-chain. You are guaranteed to get {{commy(ch.insured)}} - <b>insured</b> part of your balance back, but you may lose {{commy(ch.they_promised)}} - <b>uninsured</b> balance if the hub is compromised.
     </p>
 
-            <p>After a timeout money will arrive to your global balance, then you will be able to move it to another hub.</p>
+            <p>After a timeout money will arrive to your on-chain balance, then you will be able to move it to another hub.</p>
 
             <p v-if="record && record.balance >= K.standalone_balance"> 
               <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
             </p>
-            <p v-else>To start on-chain dispute you must be registred on-chain and have on your global balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your global balance.</p>
+            <p v-else>To start on-chain dispute you must be registred on-chain and have on your on-chain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your on-chain balance.</p>
 
 
 
@@ -732,8 +732,8 @@ FS.onready(() => {
 
         <div v-if="record">
           <p v-if="!ivoted(p.voters)">
-            <button @click="call('vote', {approve: true, id: p.id})" class="btn btn-success">Approve</button>
-            <button @click="call('vote', {approve: false, id: p.id})" class="btn btn-danger">Deny</button>
+            <button @click="call('vote', {approval: 1, id: p.id})" class="btn btn-success">Approve</button>
+            <button @click="call('vote', {approval: 0, id: p.id})" class="btn btn-danger">Deny</button>
           </p>
 
         </div>
@@ -817,7 +817,7 @@ FS.onready(() => {
             <th scope="col">Icon</th>
             <th scope="col">ID</th>
             <th scope="col">Pubkey</th>
-            <th scope="col">Global Balance</th>
+            <th scope="col">On-chain Balance</th>
             <th scope="col">Nonce</th>
           </tr>
         </thead>

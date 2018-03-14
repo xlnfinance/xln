@@ -112,7 +112,7 @@ cache = async (i) => {
 
       var out_hash = out.split(' ')[0]
 
-      var our_location = me.my_member.location.indexOf('0.0.0.0') != -1 ? `http://0.0.0.0:8000/` : `https://failsafe.network/`
+      var our_location = me.my_member.location.indexOf(localhost) != -1 ? `http://${localhost}:8000/` : `https://failsafe.network/`
 
       cached_result.install_snippet = `id=fs
 f=${filename}
@@ -247,7 +247,7 @@ initDashboard = async a => {
   
   me.processQueue()
 
-  var url = 'http://0.0.0.0:' + base_port + '/#auth_code=' + PK.auth_code
+  var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
   l('Open ' + url + ' in your browser')
 
   // only in desktop
@@ -375,8 +375,7 @@ Insurance.prototype.resolve = async function(){
   var left = await User.findById(this.leftId)
   var right = await User.findById(this.rightId)
 
-  this.insurance = 0
-  this.dispute_delayed = null
+
   this.ondelta = -this.dispute_offdelta
 
   left.balance += resolved.insured
@@ -392,6 +391,13 @@ Insurance.prototype.resolve = async function(){
 
   await left.save()
   await right.save()
+
+  this.insurance = 0
+  this.dispute_delayed = null
+  this.dispute_left = null
+  this.dispute_nonce = null
+  this.dispute_offdelta = null
+
   await this.save()
 
   var withus = me.pubkey.equals(left.pubkey) ? right : (me.pubkey.equals(right.pubkey) ? left : false)
@@ -447,24 +453,26 @@ Delta = privSequelize.define('delta', {
 
   // higher nonce is valid
   nonce: Sequelize.INTEGER,
+  status: Sequelize.TEXT,
 
   instant_until: Sequelize.INTEGER,
 
-  // Three most important values that define balances of each other
+  // TODO: clone from Insurance table to Delta
   insurance: Sequelize.INTEGER,
   ondelta: Sequelize.INTEGER,
+
+
   offdelta: Sequelize.INTEGER,
 
   we_soft_limit: Sequelize.INTEGER,
-  we_hard_limit: Sequelize.INTEGER, // usually 0
+  we_hard_limit: Sequelize.INTEGER, // we trust up to
 
   they_soft_limit: Sequelize.INTEGER,
-  they_hard_limit: Sequelize.INTEGER, // user specified risk
+  they_hard_limit: Sequelize.INTEGER, // they trust us
 
 
   last_online: Sequelize.DATE,
   withdrawal_requested_at: Sequelize.DATE,
-
 
   they_input_amount: Sequelize.INTEGER,
 
@@ -473,22 +481,11 @@ Delta = privSequelize.define('delta', {
 
   hashlocks: Sequelize.TEXT,
 
-  // all channels in serialized field
-  state: {
-    type: Sequelize.TEXT,
-    set (val) {
-      stringify(this.setDataValue('state'))
-    },
-    get (val) {
-      return parse(this.getDataValue('state'))
-    }
-  },
-
   sig: Sequelize.TEXT,
 
-  most_profitable: Sequelize.TEXT,
+  // testnet: cheaty transaction
+  most_profitable: Sequelize.TEXT
 
-  status: Sequelize.TEXT
 })
 
 Delta.prototype.getState = function () {
@@ -498,7 +495,9 @@ Delta.prototype.getState = function () {
     compared==-1?this.myId:this.partnerId,
     compared==-1?this.partnerId:this.myId,
     this.nonce,
-    packSInt(this.offdelta)])
+    packSInt(this.offdelta),
+    [] //this.hashlocks
+  ])
 }
 
 Delta.prototype.startDispute = async function(profitable) {
@@ -514,7 +513,8 @@ Delta.prototype.startDispute = async function(profitable) {
   }
 
   // post last sig if any
-  var dispute = this.sig ? [this.partnerId, this.sig, this.getState()] : [this.partnerId]
+  var partner = await User.idOrKey(this.partnerId)
+  var dispute = this.sig ? [partner.id, this.sig, this.nonce, packSInt(this.offdelta), []] : [partner.id]
 
   this.status = 'disputed'
   await this.save()

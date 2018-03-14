@@ -10,19 +10,25 @@ users = {}
 
 nacl = require('../lib/nacl')
 
-FS_PATH = '/root/8002'
+// define merchant node path
+FS_PATH = fs.existsSync('/root/8002/private/pk.json') ? '/root/8002' : '/Users/homakov/work/8002'
+
 FS_RPC = 'http://0.0.0.0:8002/rpc'
 
+l(FS_PATH)
+
+// pointing browser SDK to user node 
 LOCAL_FS_RPC = 'http://0.0.0.0:8001'
 
-if (fs.existsSync(FS_PATH + '/private/pk.json')) {
-  auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json')).auth_code
-  l('Auth code to our node: ' + auth_code)
-} else {
-  throw 'No auth'
-}
 
 FS = (method, params, cb) => {
+  if (fs.existsSync(FS_PATH + '/private/pk.json')) {
+    auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json')).auth_code
+    l('Auth code to our node: ' + auth_code)
+  } else {
+    throw 'No auth'
+  }
+
   axios.post(FS_RPC, {
     method: method,
     auth_code: auth_code,
@@ -118,12 +124,6 @@ FS = (method, params={})=>{
   })
 }
 
-var hash = location.hash.split('auth_code=')
-if(hash[1]){
-  localStorage.auth_code = hash[1].replace(/[^a-z0-9]/g,'')
-  history.replaceState(null,null,'/#wallet')
-}
-
 FS.frame=false;
 FS.origin = '${LOCAL_FS_RPC}'
 FS.frame=document.createElement('iframe');
@@ -132,12 +132,11 @@ FS.frame.src=FS.origin+'/sdk.html'
 document.body.appendChild(FS.frame)
 
 var fallback = setTimeout(()=>{
-  main.innerHTML="Couldn't connect to local node at 0.0.0.0:8001. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
-}, 500)
+  main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
+}, 3000)
 
 FS.onready = fn => {
-  clearTimeout(fallback)
-  
+
   if(FS.ready == true){
     fn()
   }else{
@@ -145,10 +144,11 @@ FS.onready = fn => {
   }
 }
 FS.resolvers = [()=>{
+  clearTimeout(fallback)
   if(FS.ready){
     FS.ready()
-    FS.ready = true
   }
+  FS.ready = true
 }]
 window.addEventListener('message', function(e){
   if(e.origin == FS.origin){
@@ -254,6 +254,7 @@ window.onload = function(){
       } else if (p.amount) {
         FS('invoice', {
           amount: p.amount,
+          partner: 0,
           asset: p.asset,
           extra: id
         }, r => {

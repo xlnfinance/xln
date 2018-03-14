@@ -52,9 +52,7 @@ r = function (a) {
 }
 
 
-
-
-
+localhost = '127.0.0.1'
 
 
 readInt = (i) => i.length > 0 ? i.readUIntBE(0, i.length) : 0
@@ -157,6 +155,8 @@ methodMap = (i) => {
     'block',
 
     'rebalance',
+    'propose',
+    'vote',
 
     'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
     'offdelta',    // delayed balance proof
@@ -168,10 +168,6 @@ methodMap = (i) => {
     'ack',
     'setLimits',
 
-    'propose',
-
-    'voteApprove',
-    'voteDeny',
 
     'auth' // any kind of off-chain auth signatures between peers
 
@@ -191,7 +187,6 @@ allowedOnchain = [
   'dispute',
 
   'propose',
-
-  'voteApprove',
-  'voteDeny'
+  
+  'vote'
 ]

@@ -45,13 +45,13 @@ WebSocketClient.prototype.open = function (url) {
     }
   })
 }
-WebSocketClient.prototype.send = function (data, option) {
+WebSocketClient.prototype.send = function (data) {
   if (this.instance && this.instance.readyState != 1) {
     l("Socket is not ready")
     return false
   }
   try {
-    this.instance.send(data, option)
+    this.instance.send(data)
     return true
   } catch (e) {
     l("Failed to send ", e)

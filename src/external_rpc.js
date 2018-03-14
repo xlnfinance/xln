@@ -25,13 +25,19 @@ module.exports = async (ws, msg) => {
     l('authing ', pubkey)
 
     if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
-      me.users[pubkey] = ws
+      if (ws.instance) {
+        me.users[pubkey] = ws
+      } else {
+        me.users[pubkey] = new WebSocketClient()
+        me.users[pubkey].instance = ws
+      }
 
       if (me.is_hub) {
         var ch = await me.channel(pubkey)
         ch.last_online = new Date()
 
         if (ch.withdrawal_requested_at) {
+          me.send(pubkey, 'requestWithdraw', me.envelope(ch.insured))
 
         }
       }
@@ -299,7 +305,7 @@ module.exports = async (ws, msg) => {
       }
       ch.d.sig = stateSig
 
-      // experimental: storing most profitable outcome for us
+      // TESTNET: storing most profitable outcome for us
       var profitable = r(ch.d.most_profitable)
       if ((ch.left && ch.d.offdelta > readSInt(profitable[0])) ||
         (!ch.left && ch.d.offdelta < readSInt(profitable[0]))) {
@@ -311,7 +317,7 @@ module.exports = async (ws, msg) => {
       if (me.is_hub && mediate_to.length > 1) {
         l(`Forward to peer or other hub ${mediate_to.length}`)
 
-        // me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
+        me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
 
         await ch.d.save()
 
@@ -334,10 +340,10 @@ module.exports = async (ws, msg) => {
 
         var paid_invoice = invoices[toHex(invoice)]
 
-        // did we get right amount in right asset?
-        if (paid_invoice &&
-          amount >= paid_invoice.amount - 1000 &&
-          paid_invoice.status == 'pending') {
+        // TODO: did we get right amount in right asset?
+        if (paid_invoice && amount >= paid_invoice.amount - 1000) {
+          //paid_invoice.status == 'pending'
+
           l('Our invoice was paid!', paid_invoice)
           paid_invoice.status = 'paid'
         } else {

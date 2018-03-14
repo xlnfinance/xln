@@ -25,7 +25,7 @@ module.exports = async (genesis) => {
     snapshot_after_bytes: 10000,
     proposals_created: 0,
 
-    tax: 2,
+    tax: 1,
 
     account_creation_fee: 100,
     standalone_balance: 500, // keep $5 on your own balance for onchain tx fees
@@ -80,8 +80,8 @@ module.exports = async (genesis) => {
     members: [],
     hubs: [],
 
-    total_shares: 30,
-    majority: 5
+    total_shares: 10,
+    majority: 7
 
   }
 
@@ -121,31 +121,31 @@ module.exports = async (genesis) => {
 
   var local = !fs.existsSync('/etc/letsencrypt/live/failsafe.network/fullchain.pem')
 
-  var base_rpc = local ? 'ws://0.0.0.0' : 'wss://failsafe.network'
-  var base_web = local ? 'http://0.0.0.0' : 'https://failsafe.network'
+  var base_rpc = local ? 'ws://'+localhost : 'wss://failsafe.network'
+  var base_web = local ? 'http://'+localhost : 'https://failsafe.network'
 
   var seed = await createMember('root', toHex(crypto.randomBytes(16)),
     `${base_rpc}:8100`,
-    local ? 'http://0.0.0.0:8000' : 'https://failsafe.network'
+    local ? 'http://'+localhost+'8000' : 'https://failsafe.network'
     )
 
   for (var i = 8001; i < 8004; i++) {
     await createMember(i.toString(), 'password', `${base_rpc}:${i + 100}`, `${base_web}:${i}`)
   }
 
-  K.members[0].shares = 10
-  K.members[1].shares = 10
-  K.members[2].shares = 6
-  K.members[3].shares = 4
+  K.members[0].shares = 3
+  K.members[1].shares = 2
+  K.members[2].shares = 3
+  K.members[3].shares = 2
 
   K.members[0].hub = {
     handle: 'eu',
-    name: '@eu (Europe-based)'
+    name: '@eu (Europe)'
   }
 
-  K.members[1].hub = {
+  K.members[3].hub = {
     handle: 'jp',
-    name: '@jp (Asia-based)'
+    name: '@jp (Japan)'
   }
 
 /*

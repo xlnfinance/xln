@@ -48,9 +48,10 @@ module.exports = async function () {
         checkBack.push(ch.d.partnerId)
       } else if (ch.d.withdrawal_requested_at == null) {
         l('Delayed pull')
-        ch.d.withdrawal_requested_at = new Date()
-      } else if (ch.d.withdrawal_requested_at) {
-
+        ch.d.withdrawal_requested_at = ts()
+      } else if (ch.d.withdrawal_requested_at + 60 < ts()) {
+        l('User is offline for too long, starting a dispute')
+        ch.d.startDispute()
       }
     }
   }
