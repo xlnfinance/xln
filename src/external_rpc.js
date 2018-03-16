@@ -342,9 +342,10 @@ module.exports = async (ws, msg) => {
           return_to: pubkey,
           invoice: invoice
         })
-      } else if (mediate_to.equals(me.pubkey)) {
+      } else if (true) {
 
-        l('Looking for invoice ', invoice)
+
+        l('Looking for invoice ', invoice, mediate_to)
 
         var paid_invoice = invoices[toHex(invoice)]
 
@@ -353,7 +354,7 @@ module.exports = async (ws, msg) => {
           //paid_invoice.status == 'pending'
 
           // handicap
-          await sleep(3000)
+          //await sleep(3000)
 
           l('Our invoice was paid!', paid_invoice)
           paid_invoice.status = 'paid'

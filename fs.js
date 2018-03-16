@@ -2,10 +2,11 @@
 
 require('./utils')
 
-// three scenarios of delta | 
-// ====--| 
-// ==|==
-// |--====
+// This method returns what can be taken from insurance and what was promised
+// There are 3 major scenarios of delta position:
+// 4,2  ====--| 
+// 4,-2 ==|==
+// 4,-6 |--====
 resolveChannel = (insurance, delta, is_left) => {
   var parts = {
     promised: delta >= -insurance ? 0 : -insurance-delta,
@@ -21,9 +22,10 @@ resolveChannel = (insurance, delta, is_left) => {
   return parts
 }
 
-
+// Called once in a while to cache current state of everything and flush it to browser
+// TODO: better way to keep app reactive?
 cache = async (i) => {
-  if (K) { // already initialized
+  if (K) {
     cached_result.is_hub = me.is_hub ? me.my_member.hub.handle : false
 
     cached_result.my_member = !!me.my_member
@@ -87,6 +89,8 @@ cache = async (i) => {
 
   }
 
+
+  // TODO: read hash just after snapshot generation 
   if (me.my_member && K.last_snapshot_height) {
     var filename = `Failsafe-${K.last_snapshot_height}.tar.gz`
     var cmd = 'shasum -a 256 private/' + filename
@@ -114,6 +118,8 @@ fi`
   }
 }
 
+
+// Flush an object to browser websocket
 react = async (result = {}, id = 1) => {
   await cache()
 
@@ -126,7 +132,6 @@ react = async (result = {}, id = 1) => {
 
     result.invoices = invoices
     result.purchases = purchases
-
 
     result.pending_tx = PK.pending_tx
 
@@ -141,13 +146,15 @@ react = async (result = {}, id = 1) => {
   }
 }
 
-// now in memory, for simplicity
+// TODO: Move from memory to persistent DB
 cached_result = {
   history: []
 }
 
 invoices = {}
 purchases = {}
+
+
 
 initDashboard = async a => {
   var finalhandler = require('finalhandler')
@@ -238,7 +245,7 @@ initDashboard = async a => {
   var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
   l('Open ' + url + ' in your browser')
 
-  // only in desktop
+  // opn doesn't work in SSH console
   if (base_port != 443) opn(url)
 
   localwss = new ws.Server({ server: server, maxPayload: 64 * 1024 * 1024 })
@@ -261,13 +268,10 @@ derive = async (username, pw) => {
       encoding: 'binary'
     }, (r) => {
       r = bin(r)
-
-      // l(`Derived ${r.toString('hex')} for ${username}:${pw}`)
-
       resolve(r)
     })
 
-/*
+/* Native scrypt. TESTNET: we use pure JS scrypt
     var seed = await scrypt.hash(pw, {
       N: Math.pow(2, 16),
       interruptStep: 1000,
@@ -293,8 +297,6 @@ var base_db = {
 
 sequelize = new Sequelize('', '', 'password', base_db)
 
-// two kinds of storage: 1) critical database that might be used by code
-// 2) complementary stats like updatedAt that's useful in exploring and can be deleted safely
 
 User = sequelize.define('user', {
   username: Sequelize.STRING,
@@ -305,7 +307,6 @@ User = sequelize.define('user', {
   balance: Sequelize.BIGINT, // mostly to pay taxes
 
   assets: Sequelize.TEXT
-
 })
 
 User.idOrKey = async (id) => {
@@ -420,7 +421,11 @@ Proposal.belongsTo(User)
 
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
-// OFF-CHAIN database below:
+
+
+
+
+// OFF-CHAIN local database below:
 
 if (!fs.existsSync('private')) fs.mkdirSync('private')
 
@@ -437,7 +442,8 @@ Block = privSequelize.define('block', {
 })
 
 
-
+// stores all payment channels, offdelta and last signatures
+// TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 Delta = privSequelize.define('delta', {
   // between who and who
   myId: Sequelize.CHAR(32).BINARY,
@@ -449,7 +455,7 @@ Delta = privSequelize.define('delta', {
 
   instant_until: Sequelize.INTEGER,
 
-  // TODO: clone from Insurance table to Delta
+  // TODO: clone from Insurance table to Delta to avoid double querying both dbs
   insurance: Sequelize.INTEGER,
   ondelta: Sequelize.INTEGER,
 
@@ -600,6 +606,9 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
     await privSequelize.sync({force: false})
 
     /*
+    TODO: fault tolerant reloader 
+
+
     var cluster = require('cluster')
     if (cluster.isMaster) {
       cluster.fork();
@@ -618,8 +627,12 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
 
 process.on('unhandledRejection', r => console.log(r))
 
+
+
 repl = require('repl').start('> ')
 _eval = repl.eval
+
+// top level await in repl
 repl.eval = (cmd, context, filename, callback) => {
   if (cmd.indexOf('await') != -1) cmd = `(function(){ async function _wrap() { console.log(${cmd}) } return _wrap() })()`
   _eval(cmd, context, filename, callback)

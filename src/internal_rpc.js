@@ -226,26 +226,26 @@ module.exports = async (ws, msg) => {
         } else if (p.amount) {
           var secret = crypto.randomBytes(32)
           var invoice = toHex(sha3(secret))
-          
-          me.record = await me.byKey()
 
-          result.new_invoice = [
-            invoices[invoice].amount,
-            me.record ? me.record.id : toHex(me.pubkey),
-            Members.find(m => m.id == p.partner).hub.handle,
-            invoice].join('_')
+          me.record = await me.byKey()
 
           invoices[invoice] = {
             secret: secret,
             amount: parseInt(p.amount),
             extra: p.extra,
             status: 'pending',
-            invoice: result.new_invoice
+
+            invoice: [
+              parseInt(p.amount),
+              me.record ? me.record.id : toHex(me.pubkey),
+              Members.find(m => m.id == p.partner).hub.handle,
+              invoice
+            ].join('_')
+            
           }
 
 
-          l('invoice ',p)
-
+          result.new_invoice = invoices[invoice].invoice
 
           result.confirm = 'Invoice Created'
         }
