@@ -53,7 +53,7 @@ class Me {
 
     // l("Setting timeout for queue")
 
-    setTimeout(() => { me.processQueue() }, 50)
+    setTimeout(() => { me.processQueue() }, 100)
   }
 
   async byKey (pk) {
@@ -77,7 +77,8 @@ class Me {
     switch (method) {
       case 'rebalance':
 
-        var confirm = 'Broadcasted globally!'
+        l("Broadcasted rebalance ", r(args))
+
         break
 
       case 'propose':
@@ -89,15 +90,8 @@ class Me {
         }
 
         args = r(args)
-
-        var confirm = 'Proposal submitted!'
         break
 
-      case 'vote':
-
-        var confirm = 'You voted!'
-
-        break
     }
 
     var nonce = me.record.nonce + PK.pending_tx.length
@@ -107,8 +101,6 @@ class Me {
     var tx = r([
       me.record.id, ec(to_sign, me.id.secretKey), methodMap(method), nonce, args
     ])
-
-    confirm += ` Tx size ${tx.length}b, fee ${tx.length * K.tax}.`
 
     PK.pending_tx.push({
       method: method,
@@ -121,9 +113,6 @@ class Me {
       me.send(me.next_member, 'tx', r([tx]))
     }
 
-    l('Just broadcasted: '+method, r(args) )
-
-    return confirm
   }
 
   // this is off-chain for any kind of p2p authentication
@@ -329,8 +318,8 @@ class Me {
         our_input_amount: 0,
         they_input_amount: 0,
 
-        we_soft_limit: is_hub(partner) ? K.risk : 0,
-        we_hard_limit: is_hub(partner) ? K.hard_limit : 0,
+        soft_limit: is_hub(partner) ? K.risk : 0,
+        hard_limit: is_hub(partner) ? K.hard_limit : 0,
 
         they_soft_limit: is_hub(me.pubkey) ? K.risk : 0,
         they_hard_limit: is_hub(me.pubkey) ? K.hard_limit :  0,
@@ -369,7 +358,7 @@ class Me {
     (ch.d.they_hard_limit - ch.promised)
 
     ch.they_payable = (ch.they_insured - ch.d.they_input_amount) + ch.promised +
-    (ch.d.we_hard_limit - ch.they_promised)
+    (ch.d.hard_limit - ch.they_promised)
 
     // inputs not in blockchain yet, so we hold them temporarily
 

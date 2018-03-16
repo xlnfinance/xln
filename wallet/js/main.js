@@ -79,6 +79,11 @@ render = r => {
   if (r.alert) notyf.alert(r.alert)
   if (r.confirm) notyf.confirm(r.confirm)
 
+  if (r.already_opened) {
+    document.body.innerHTML = "<b>The wallet is already opened in another tab. Only one instance of wallet is allowed.</b>"
+    return false
+  }
+
   Object.assign(app, r)
   app.$forceUpdate()
 
@@ -240,11 +245,8 @@ FS.onready(() => {
 
       setInterval(function () {
         FS('load').then(render)
-      }, localStorage.auth_code ? 3000 : 30000)
-    
+      }, localStorage.auth_code ? 20000 : 30000)
 
-
-      //renderRisk([])
     },
     data () {
       return {
@@ -338,11 +340,17 @@ FS.onready(() => {
         </li>
 
 
+      <li class="nav-item dropdown">
+        <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#">Explorers
+        <span class="caret"></span></a>
+        <ul class="dropdown-menu">
+          <li><a class="nav-link" @click="go('blockchain_explorer')" >Blockchain Explorer</a></li>
+          <li><a class="nav-link" @click="go('account_explorer')" >Account Explorer</a></li>
+          <li><a class="nav-link" @click="go('insurance_explorer')" href="#">Insurance Explorer</a></li>
+        </ul>
+      </li>
 
 
-        <li class="nav-item"  v-bind:class="{ active: tab=='explorer' }">
-          <a class="nav-link" @click="go('explorer')">Explorer</a>
-        </li>
 
         <li class="nav-item" v-bind:class="{ active: tab=='help' }">
           <a class="nav-link" @click="go('help')">Help & Stats</a>
@@ -442,8 +450,11 @@ FS.onready(() => {
           <option disabled>Select current hub</option>
           <option v-for="(a,index) in channels" :value="index">{{a.member.hub.name}}</option>
         </select>
+        <span class="mb-3">Connection: {{ch.online ? 'Online' : 'Offline'}}</span>
 
-        <h1 class="alert alert-danger" v-if="is_hub">You are hub @{{is_hub}}</h1>
+
+
+        <h1 class="alert alert-danger" v-if="is_hub">This node is a hub @{{is_hub}}</h1>
         <br>
 
         <h1 style="display:inline-block">Balance: {{commy(ch.payable)}}</h1>
@@ -482,9 +493,9 @@ FS.onready(() => {
 
             <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, partner: ch.partner, amount: uncommy(off_amount)})">→ Request</button></p>
 
-            <p><div v-show="new_invoice.length > 0" class="input-group" style="width:400px">
-              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="new_invoice">
-            </div></p>
+            <p v-for="(value, k) in invoices" style="word-wrap: break-word" v-show="new_invoice.length > 0">{{value.status}} {{commy(value.amount)}}. Invoice: {{new_invoice}}</p>
+
+
           </div>
 
           <div class="col-sm-6">
@@ -495,6 +506,8 @@ FS.onready(() => {
             <p>Payable: {{commy(ch.payable)}}</p>
 
             <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {partner: ch.partner}) ); pay_invoice='';">Pay Now → </button></p>
+
+            <p v-for="(value, k) in purchases">{{k}} invoice</p>
 
             <div v-if="pay_invoice.length > 0">
               <p>Amount: {{commy(unpackInvoice().amount)}}</p>
@@ -558,12 +571,12 @@ FS.onready(() => {
 
       <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
 
-      <p><label>Soft limit (currently {{commy(ch.d.we_soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
+      <p><label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
       <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
       </p>
 
       <p>
-      <label>Hard limit (currently {{commy(ch.d.we_hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
+      <label>Hard limit (currently {{commy(ch.d.hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
       <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]"></p>
 
       <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Uninsured Limits</button></p>
@@ -580,13 +593,14 @@ FS.onready(() => {
             
             <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance in this channel to your on-chain balance.</small>
 
-            <p v-if="ch.insured>0"><input style="width:200px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount"></p>
+            <p v-if="ch.insured>0"><input style="width:200px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>
            
-            <small>Outputs to other users or channels.</small>
+            <small>Deposits to other users or channels.</small>
 
             <p v-for="out in outs">
-              <input style="width:400px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub (eg 4255 or 4255@eu)">
-              <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount">
+              <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
+
+              <input style="width:200px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub (eg 4255 or 4255@eu)">
             </p>
             <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
@@ -752,14 +766,15 @@ FS.onready(() => {
 
 
 
-    <div v-else-if="tab=='explorer'">
+    <div v-else-if="tab=='blockchain_explorer'">
       <h1>Blockchain Explorer</h1>
 
-
+      <p>Blockchain is a chain of blocks. Each block contains transactions. These transactions were publicly broadcasted, verified and executed on every full node, including yours.</p>
 
       <table class="table">
         <thead class="thead-dark">
           <tr>
+            <th scope="col">#</th>
             <th scope="col">Prev Hash</th>
             <th scope="col">Hash</th>
             <th scope="col">Relayed By</th>
@@ -771,6 +786,7 @@ FS.onready(() => {
         <tbody>
           <template v-for="b in blocks">
             <tr>
+              <td>{{b.id}}</td>
               <td>{{b.prev_hash.substr(0,10)}}</td>
               <td>{{b.hash.substr(0,10)}}</td>
               <td>{{b.built_by}}</td>
@@ -785,31 +801,43 @@ FS.onready(() => {
                 <span class="badge badge-warning">{{m.method}} by {{m.signer.id}} ({{commy(m.tax)}} fee, size {{m.length}}):</span>&nbsp;
 
                 <template v-if="m.method=='rebalance'">
-                  <template v-for="input in m.inputs">
-                    <span class="badge badge-danger" >{{commy(input[0])}} from {{m.signer.id}}@{{input[1]}}</span>&nbsp;
+                  <template v-for="d in m.disputes">
+                    <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "posted latest state and resolved dispute with "+d[0]}}</span>&nbsp;
                   </template>
 
-                  <template v-for="input in m.debts">
-                    <span class="badge badge-dark">{{commy(input[0])}} enforced debt to {{input[1]}}</span>&nbsp;
+                  <template v-for="d in m.inputs">
+                    <span class="badge badge-danger">{{commy(d[0])}} from {{d[1]}}</span>&nbsp;
                   </template>
 
-                  <template v-for="output in m.outputs">
-                    <span class="badge badge-success" >{{commy(output[0])}} to {{output[1]}}@{{output[2]}}</span>&nbsp;
+                  <template v-for="d in m.debts">
+                    <span class="badge badge-dark">{{commy(d[0])}} debt to {{d[1]}}</span>&nbsp;
                   </template>
-                </template>
 
-                <template v-else-if="m.method=='dispute'">
-                  <span class="badge badge-danger">{{m.result == 'started' ? "started a dispute with "+m.partner.id : "posted latest state and resolved dispute with "+m.partner.id}}</span>
+                  <template v-for="d in m.outputs">
+                    <span class="badge badge-success" >{{commy(d[0])}} to {{d[2] ? (d[1] == m.signer.id ? '': d[1])+'@'+d[2] : d[1]}}</span>&nbsp;
+                  </template>
                 </template>
 
               </td>
             </tr>
 
+            <tr v-if="b.meta.cron.length > 0">
+              <td colspan="6">
+                <template  v-for="m in b.meta.cron">
+                  <span class="badge badge-primary">{{m}}</span>&nbsp;
+                </template>
+              </td>
+            </tr>
+
+
           </template>
 
         </tbody>
       </table>
-
+    </div>
+    <div v-else-if="tab=='account_explorer'">
+      <h1>Account Explorer</h1>
+      <p>This is a table of registered users in the network. On-chain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Insurance Explorer.</p>
 
       <table class="table table-striped">
         <thead class="thead-dark">
@@ -830,15 +858,42 @@ FS.onready(() => {
             <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}..</small></td>
             <td>{{commy(u.balance)}}</td>
             <td>{{u.nonce}}</td>
-            
+          </tr>
+
+        </tbody>
+      </table>
+    </div>
+    <div v-else-if="tab=='insurance_explorer'">
+      <h1>Insurance Explorer</h1>
+      <p>Insurances (also known as payment channels) represent collateral between two parties: normally at least one of them is a hub. If the user has 100 units in insurance with @hub, it means the user is guaranteed to get up to 100 units back even if the hub is completely compromised. Pubkeys of both accounts are sorted numerically, lower one is called "left" another one is "right".</p>
+
+      <table class="table table-striped">
+        <thead class="thead-dark">
+          <tr>
+            <th scope="col">Left ID</th>
+            <th scope="col">Right ID</th>
+            <th scope="col">Insurance</th>
+            <th scope="col">Ondelta</th>
+            <th scope="col">Withdrawal Nonce</th>
+            <th scope="col">Dispute</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <tr v-for="u in insurances">
+            <th>{{u.leftId}}</th>
+            <th>{{u.rightId}}</th>
+            <th>{{commy(u.insurance)}}</th>
+            <th>{{commy(u.ondelta)}}</th>
+            <th>{{u.nonce}}</th>
+            <th>{{u.dispute_delayed ? "Until "+u.dispute_delayed+" started by "+(u.dispute_left ? u.leftId : u.rightId) : "N/A" }}</th>
           </tr>
 
         </tbody>
       </table>
 
-
-
     </div>
+
 
 
   </div>

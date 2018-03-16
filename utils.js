@@ -51,8 +51,11 @@ r = function (a) {
   }
 }
 
+sleep = async function (ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-localhost = '127.0.0.1'
+localhost = '0.0.0.0'
 
 
 readInt = (i) => i.length > 0 ? i.readUIntBE(0, i.length) : 0
@@ -161,7 +164,6 @@ methodMap = (i) => {
     'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
     'offdelta',    // delayed balance proof
 
-    'dispute',
 
     'update',   // transitions to state machine + new sig
     'unlockedPayment', // pay without hashlock
@@ -184,7 +186,7 @@ methodMap = (i) => {
 allowedOnchain = [
   'rebalance',
 
-  'dispute',
+  'batch',
 
   'propose',
   

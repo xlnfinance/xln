@@ -71,100 +71,107 @@ module.exports = {
 
     // don't forget BREAK
     switch (method) {
-      case 'dispute':
-        var [id, sig, dispute_nonce, offdelta, hashlocks] = args
+      case 'rebalance':
+        var [disputes, inputs, outputs] = args
 
-        var partner = await User.findById(readInt(id))
-        if (!partner) return l('Your partner is not registred')
+        parsed_tx.disputes = []
+        parsed_tx.inputs = []
+        parsed_tx.debts = []
+        parsed_tx.outputs = []
 
-        var compared = Buffer.compare(signer.pubkey, partner.pubkey)
-        if (compared == 0) return l('Cannot dispute with yourself')
+        // 1. process disputes if any
 
-        var ins = (await Insurance.findOrBuild({
-          where: {
-            leftId: compared == -1 ? signer.id : partner.id,
-            rightId: compared == -1 ? partner.id : signer.id
-          },
-          defaults: {
-            nonce: 0,
-            insurance: 0,
-            ondelta: 0
-          },
-          include: { all: true }
-        }))[0]
+        for (let dispute of disputes) {
+          var [id, sig, dispute_nonce, offdelta, hashlocks] = dispute
 
-        if (sig) {
-          var dispute_nonce = readInt(dispute_nonce)
-          var offdelta = readSInt(offdelta) // SIGNED int
+          var partner = await User.findById(readInt(id))
+          if (!partner) return l('Your partner is not registred')
 
-          var state = r([
-            methodMap('offdelta'),
-            compared == -1 ? signer.pubkey : partner.pubkey,
-            compared == -1 ? partner.pubkey : signer.pubkey,
-            dispute_nonce,
-            packSInt(offdelta),
-            hashlocks
-          ])
+          var compared = Buffer.compare(signer.pubkey, partner.pubkey)
+          if (compared == 0) return l('Cannot dispute with yourself')
 
-          if (!ec.verify(state, sig, partner.pubkey)) {
-            return l('Invalid offdelta state sig ', state)
-          }
-        } else {
-          l('New channel? Split with default values')
-          var dispute_nonce = 0
-          var offdelta = 0
-        }
+          var ins = (await Insurance.findOrBuild({
+            where: {
+              leftId: compared == -1 ? signer.id : partner.id,
+              rightId: compared == -1 ? partner.id : signer.id
+            },
+            defaults: {
+              nonce: 0,
+              insurance: 0,
+              ondelta: 0
+            },
+            include: { all: true }
+          }))[0]
 
-        parsed_tx.partner = partner
+          if (sig) {
+            var dispute_nonce = readInt(dispute_nonce)
+            var offdelta = readSInt(offdelta) // SIGNED int
 
-        if (ins.dispute_delayed) {
-          if (dispute_nonce > ins.dispute_nonce && ins.dispute_left == (compared == 1)) {
-            parsed_tx.result = 'disputed'
-            ins.dispute_offdelta = offdelta
-            await ins.resolve()
-            l("Resolving with fraud proof")
+            var state = r([
+              methodMap('offdelta'),
+              compared == -1 ? signer.pubkey : partner.pubkey,
+              compared == -1 ? partner.pubkey : signer.pubkey,
+              dispute_nonce,
+              packSInt(offdelta),
+              hashlocks
+            ])
+
+            if (!ec.verify(state, sig, partner.pubkey)) {
+              return l('Invalid offdelta state sig ', state)
+            }
           } else {
-            l('Old nonce or same counterparty')
+            l('New channel? Split with default values')
+            var dispute_nonce = 0
+            var offdelta = 0
           }
-        } else {
-          ins.dispute_offdelta = offdelta
-          ins.dispute_nonce = dispute_nonce
 
-          ins.dispute_left = (compared == -1)
-          ins.dispute_delayed = K.usable_blocks + 6
 
-          parsed_tx.result = 'started'
+          if (ins.dispute_delayed) {
+            if (dispute_nonce > ins.dispute_nonce && ins.dispute_left == (compared == 1)) {
 
-          await ins.save()
+              parsed_tx.disputes.push([partner.id, 'disputed'])
 
-          var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared == -1)
+              ins.dispute_offdelta = offdelta
+              await ins.resolve()
+              l("Resolving with fraud proof")
+            } else {
+              l('Old nonce or same counterparty')
+            }
+          } else {
+            ins.dispute_offdelta = offdelta
+            ins.dispute_nonce = dispute_nonce
 
-          if (me.pubkey.equals(partner.pubkey)) {
-            l('Channel with us is disputed')
-            var ch = await me.channel(signer.pubkey)
-            ch.d.status = 'disputed'
-            await ch.d.save()
+            ins.dispute_left = (compared == -1)
+            ins.dispute_delayed = K.usable_blocks + 9
 
-            if ((ch.left && offdelta < ch.d.offdelta) ||
-              (!ch.left && offdelta > ch.d.offdelta)) {
-              l('Unprofitable proof posted!')
-              await ch.d.startDispute()
+            parsed_tx.disputes.push([partner.id, 'started'])
+
+            await ins.save()
+
+            var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared == -1)
+
+            if (me.pubkey.equals(partner.pubkey)) {
+              l('Channel with us is disputed')
+              var ch = await me.channel(signer.pubkey)
+              ch.d.status = 'disputed'
+              await ch.d.save()
+
+              if ((ch.left && offdelta < ch.d.offdelta) ||
+                (!ch.left && offdelta > ch.d.offdelta)) {
+                l('Unprofitable proof posted!')
+                await ch.d.startDispute()
+              }
             }
           }
         }
 
 
-        break
 
-      case 'rebalance':
-        // 1. take insurance from withdrawals
-        var [asset, inputs, outputs] = args
+
+        // 2. take insurance from withdrawals
 
         var is_hub = Members.find(m => m.hub && m.id == signer.id)
 
-        parsed_tx.inputs = []
-        parsed_tx.debts = []
-        parsed_tx.outputs = []
 
         for (var input of inputs) {
           var amount = readInt(input[0])
@@ -231,7 +238,7 @@ module.exports = {
           }
         }
 
-        // 2. enforce pay insurance to debts
+        // 3. enforce pay insurance to debts
 
         var debts = await signer.getDebts()
 
@@ -420,12 +427,16 @@ module.exports = {
     return {success: true}
   },
 
-  mint: async function mint (asset, userId, hubId, amount) {
+
+
+
+
+  mint: async function mint (asset, leftId, rightId, amount) {
     var ins = (await Insurance.findOrBuild({
       where: {
-        userId: userId,
-        hubId: hubId,
-        asset: 0
+        leftId: leftId,
+        rightId: rightId,
+        asset: asset
       },
       defaults: {
         nonce: 0,
@@ -436,6 +447,7 @@ module.exports = {
     }))[0]
 
     ins.insurance += amount
+
     K.assets[asset].total_supply += amount
 
     await ins.save()

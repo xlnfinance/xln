@@ -22,15 +22,15 @@ module.exports = async (genesis) => {
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 10000,
+    snapshot_after_bytes: 100000,
     proposals_created: 0,
 
     tax: 1,
 
     account_creation_fee: 100,
-    standalone_balance: 500, // keep $5 on your own balance for onchain tx fees
+    standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
-    blocksize: 200000,
+    blocksize: 20000,
     blocktime: 20,
 
     // each genesis is randomized
@@ -126,7 +126,7 @@ module.exports = async (genesis) => {
 
   var seed = await createMember('root', toHex(crypto.randomBytes(16)),
     `${base_rpc}:8100`,
-    local ? 'http://'+localhost+'8000' : 'https://failsafe.network'
+    local ? 'http://'+localhost+':8433' : 'https://failsafe.network'
     )
 
   for (var i = 8001; i < 8004; i++) {
@@ -134,8 +134,8 @@ module.exports = async (genesis) => {
   }
 
   K.members[0].shares = 3
-  K.members[1].shares = 2
-  K.members[2].shares = 3
+  K.members[1].shares = 3
+  K.members[2].shares = 2
   K.members[3].shares = 2
 
   K.members[0].hub = {

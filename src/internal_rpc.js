@@ -9,9 +9,16 @@ module.exports = async (ws, msg) => {
   // strong coupling between the console and the browser client
 
   if (json.auth_code == PK.auth_code) {
-    if (ws.send) {
-      // browser session
-      me.browser = ws
+    if (ws.send && json.is_wallet && me.browser != ws) {
+      // not SDK
+      if (me.browser && me.browser.readyState == 1) {
+        ws.send(JSON.stringify({
+          result: {already_opened: true},
+          id: json.id
+        }))
+      } else {
+        me.browser = ws
+      }
     }
 
     var p = json.params
@@ -81,6 +88,8 @@ module.exports = async (ws, msg) => {
           mediate_hub: Members.find(m => m.hub && (m.hub.handle == p.hubId)).id,
 
           return_to: (obj) => {
+            react(obj)
+
             ws.send ? ws.send(JSON.stringify({
               result: obj,
               id: json.id
@@ -93,7 +102,7 @@ module.exports = async (ws, msg) => {
         if (error) {
           result.alert = error
         } else {
-          result.confirm = 'Payment sent'
+          result.confirm = 'Payment sent...'
         }
 
         break
@@ -163,14 +172,14 @@ module.exports = async (ws, msg) => {
 
               l("Rebalancing ", [ins, outs])
 
-              await me.broadcast('rebalance', r([0, ins, outs]))
+              await me.broadcast('rebalance', r([[], ins, outs]))
               react({confirm: 'On-chain rebalance tx sent'})
             } else {
               react({alert: 'Failed to obtain withdrawal. Try later or start a dispute.'})
             }
           }, 3000)
         } else if (outs.length > 0) {
-          await me.broadcast('rebalance', r([0, ins, outs]))
+          await me.broadcast('rebalance', r([[], ins, outs]))
           react({confirm: 'Rebalanced'})
         } else {
           react({alert: 'No action specified'})
@@ -192,12 +201,12 @@ module.exports = async (ws, msg) => {
 
         var ch = await me.channel(m.pubkey)
 
-        ch.d.we_soft_limit = parseInt(p.limits[0]) * 100
-        ch.d.we_hard_limit = parseInt(p.limits[1]) * 100
+        ch.d.soft_limit = parseInt(p.limits[0]) * 100
+        ch.d.hard_limit = parseInt(p.limits[1]) * 100
         await ch.d.save()
 
         me.send(m, 'setLimits', me.envelope(
-            methodMap('setLimits'), ch.d.we_soft_limit, ch.d.we_hard_limit
+            methodMap('setLimits'), ch.d.soft_limit, ch.d.hard_limit
         ))
 
         result.confirm = 'The hub has been notified about new credit limits'
@@ -217,23 +226,26 @@ module.exports = async (ws, msg) => {
         } else if (p.amount) {
           var secret = crypto.randomBytes(32)
           var invoice = toHex(sha3(secret))
-
-          invoices[invoice] = {
-            secret: secret,
-            amount: parseInt(p.amount),
-            extra: p.extra,
-            status: 'pending'
-          }
-
+          
           me.record = await me.byKey()
-
-          l('invoice ',p)
 
           result.new_invoice = [
             invoices[invoice].amount,
             me.record ? me.record.id : toHex(me.pubkey),
             Members.find(m => m.id == p.partner).hub.handle,
             invoice].join('_')
+
+          invoices[invoice] = {
+            secret: secret,
+            amount: parseInt(p.amount),
+            extra: p.extra,
+            status: 'pending',
+            invoice: result.new_invoice
+          }
+
+
+          l('invoice ',p)
+
 
           result.confirm = 'Invoice Created'
         }

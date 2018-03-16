@@ -8,7 +8,7 @@ module.exports = async (ws, msg) => {
     l(`too long input ${(msg).length}`)
     return false
   }
-
+  
   var inputType = inputMap(msg[0])
 
   // how many blocks to share at once
@@ -25,6 +25,8 @@ module.exports = async (ws, msg) => {
     l('authing ', pubkey)
 
     if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
+      if (pubkey.equals(me.pubkey)) return false
+
       if (ws.instance) {
         me.users[pubkey] = ws
       } else {
@@ -34,12 +36,15 @@ module.exports = async (ws, msg) => {
 
       if (me.is_hub) {
         var ch = await me.channel(pubkey)
-        ch.last_online = new Date()
+        ch.d.last_online = new Date()
+        
+        // testnet: instead of cloud backups hub shares latest state
+        //me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
 
         if (ch.withdrawal_requested_at) {
           me.send(pubkey, 'requestWithdraw', me.envelope(ch.insured))
-
         }
+        await ch.d.save()
       }
     } else {
       return false
@@ -248,13 +253,16 @@ module.exports = async (ws, msg) => {
 
     // ws from browser
     if (typeof return_to === 'function') {
-      return_to({confirm: 'Payment succeeded', secret: toHex(secret)})
+      return_to({confirm: 'Payment succeeded!', secret: toHex(secret)})
     } else {
       var return_ch = await me.channel(return_to)
       me.send(return_to, 'ack', me.envelope(
         secret, ec(return_ch.d.getState(), me.id.secretKey)
       ))
     }
+
+    delete(purchases[invoice])
+
   } else if (inputType == 'update') {
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)
@@ -312,14 +320,15 @@ module.exports = async (ws, msg) => {
         ch.d.most_profitable = r([packSInt(ch.d.offdelta), ch.d.nonce, ch.d.sig])
       }
 
-      l('The payment is accepted ')
+      l('The payment is accepted!')
+      await ch.d.save()
 
       if (me.is_hub && mediate_to.length > 1) {
         l(`Forward to peer or other hub ${mediate_to.length}`)
 
+
         me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
 
-        await ch.d.save()
 
         var partner = mediate_hub == me.record.id ? mediate_to : Members.find(m => m.id == mediate_hub).pubkey
 
@@ -333,8 +342,7 @@ module.exports = async (ws, msg) => {
           return_to: pubkey,
           invoice: invoice
         })
-      } else {
-        await ch.d.save()
+      } else if (mediate_to.equals(me.pubkey)) {
 
         l('Looking for invoice ', invoice)
 
@@ -343,6 +351,9 @@ module.exports = async (ws, msg) => {
         // TODO: did we get right amount in right asset?
         if (paid_invoice && amount >= paid_invoice.amount - 1000) {
           //paid_invoice.status == 'pending'
+
+          // handicap
+          await sleep(3000)
 
           l('Our invoice was paid!', paid_invoice)
           paid_invoice.status = 'paid'
@@ -358,6 +369,8 @@ module.exports = async (ws, msg) => {
         await me.addHistory(pubkey, amount, 'Received', true)
 
         react()
+      } else {
+        l("No mediation target")
       }
     }
   }

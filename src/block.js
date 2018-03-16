@@ -52,7 +52,8 @@ module.exports = async (block) => {
   var meta = {
     inputs_volume: 0,
     outputs_volume: 0,
-    parsed_tx: []
+    parsed_tx: [],
+    cron: []
   }
 
   // processing transactions one by one
@@ -83,12 +84,10 @@ module.exports = async (block) => {
   if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
     K.bytes_since_last_snapshot = 0
 
+    meta.cron.push(`Generated a new snapshot at height ${K.total_blocks}`)
+
     var old_snapshot = K.last_snapshot_height
     K.last_snapshot_height = K.total_blocks
-  }
-
-  // cron jobs
-  if (K.total_blocks % 100 == 0) {
   }
 
   // executing proposals that are due
@@ -99,6 +98,8 @@ module.exports = async (block) => {
 
   for (let ins of disputes) {
     await ins.resolve()
+    meta.cron.push(`Resolved a dispute in ${ins.leftId}@${ins.rightId}`)
+
     l('Resolved')
   }
 
@@ -184,7 +185,7 @@ module.exports = async (block) => {
     block: block,
     total_tx: ordered_tx.length,
 
-    meta: JSON.stringify(meta)
+    meta: (meta.parsed_tx.length + meta.cron.length > 0) ? JSON.stringify(meta) : null
   })
 
   if (me.my_member) {

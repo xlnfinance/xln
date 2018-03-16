@@ -71,7 +71,7 @@ module.exports = async function () {
     ins.sort((a, b) => a[0] < b[0])
     outs.sort((a, b) => a[0] < b[0])
 
-    var finalset = [0, ins, outs]
+    var finalset = [[], ins, outs]
 
     if (ins.length > 0 || outs.length > 0) {
       l(finalset)

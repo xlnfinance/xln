@@ -2,35 +2,23 @@
 
 require('./utils')
 
-
+// three scenarios of delta | 
+// ====--| 
+// ==|==
+// |--====
 resolveChannel = (insurance, delta, is_left) => {
-  var r = {
-    promised: 0,
-    insured: 0,
-    they_insured: 0,
-    they_promised: 0
+  var parts = {
+    promised: delta >= -insurance ? 0 : -insurance-delta,
+    insured: delta >= 0 ? insurance : (delta >= -insurance ? insurance + delta : 0),
+    they_insured: delta >= 0 ? 0 : (delta >= -insurance ? -delta : insurance),
+    they_promised: delta >= 0 ? delta : 0
   }
-  // three scenarios how delta splits the channel
 
-  if (delta >= 0) {
-    r.insured = insurance
-    r.they_insured = 0
-
-    r.they_promised = delta
-  } else if (delta >= -insurance) {
-    r.insured = insurance + delta
-    r.they_insured = -delta
-  } else {
-    r.insured = 0
-    r.they_insured = insurance
-
-    r.promised = -(insurance + delta)
-  }
   if (!is_left) {
-    [r.insured, r.they_insured] = [r.they_insured, r.insured];
-    [r.promised, r.they_promised] = [r.they_promised, r.promised];
+    [parts.promised, parts.insured, parts.they_insured, parts.they_promised] = 
+    [parts.they_promised, parts.they_insured, parts.insured, parts.promised]
   }
-  return r
+  return parts
 }
 
 
@@ -42,13 +30,19 @@ cache = async (i) => {
 
     cached_result.K = K
 
+    cached_result.proposals = await Proposal.findAll({
+      order: [['id', 'DESC']],
+      include: {all: true}
+    })
 
+    cached_result.users = await User.findAll({include: {all: true}})
+    cached_result.insurances = await Insurance.findAll({include: {all: true}})
 
     cached_result.blocks = (await Block.findAll({
       limit: 500,
       order: [['id', 'desc']], 
       where: {
-        total_tx: {[Sequelize.Op.gt]: 0}
+        meta: {[Sequelize.Op.not]: null}
       }
     })).map(b=>{
       var [methodId,
@@ -58,6 +52,7 @@ cache = async (i) => {
         ordered_tx] = r(b.block.slice(Members.length * 64))
 
       return {
+        id: b.id,
         prev_hash: toHex(b.prev_hash),
         hash: toHex(b.hash),
         built_by: readInt(built_by),
@@ -69,9 +64,6 @@ cache = async (i) => {
 
 
     if (me.is_hub) {
-      cached_result.deltas = []
-      cached_result.solvency = 0
-
       var deltas = await Delta.findAll({where: {myId: me.record.id} })
       var promised = 0
       for (var d of deltas) {
@@ -92,12 +84,7 @@ cache = async (i) => {
       })
     }
 
-    cached_result.proposals = await Proposal.findAll({
-      order: [['id', 'DESC']],
-      include: {all: true}
-    })
 
-    cached_result.users = await User.findAll({include: {all: true}})
   }
 
   if (me.my_member && K.last_snapshot_height) {
@@ -138,6 +125,7 @@ react = async (result = {}, id = 1) => {
     result.pubkey = toHex(me.pubkey)
 
     result.invoices = invoices
+    result.purchases = purchases
 
 
     result.pending_tx = PK.pending_tx
@@ -334,6 +322,10 @@ User.idOrKey = async (id) => {
   }
 }
 
+User.prototype.payDebts = async () => {
+  
+}
+
 Debt = sequelize.define('debt', {
   amount_left: Sequelize.INTEGER,
   oweTo: Sequelize.INTEGER
@@ -405,8 +397,8 @@ Insurance.prototype.resolve = async function(){
   if (withus) {
     var ch = await me.channel(withus.pubkey)
     // reset all credit limits - the relationship starts from scratch
-    ch.d.we_soft_limit = 0
-    ch.d.we_hard_limit = 0
+    ch.d.soft_limit = 0
+    ch.d.hard_limit = 0
     ch.d.they_soft_limit = 0
     ch.d.they_hard_limit = 0
 
@@ -464,8 +456,8 @@ Delta = privSequelize.define('delta', {
 
   offdelta: Sequelize.INTEGER,
 
-  we_soft_limit: Sequelize.INTEGER,
-  we_hard_limit: Sequelize.INTEGER, // we trust up to
+  soft_limit: Sequelize.INTEGER,
+  hard_limit: Sequelize.INTEGER, // we trust up to
 
   they_soft_limit: Sequelize.INTEGER,
   they_hard_limit: Sequelize.INTEGER, // they trust us
@@ -518,8 +510,7 @@ Delta.prototype.startDispute = async function(profitable) {
 
   this.status = 'disputed'
   await this.save()
-
-  await me.broadcast('dispute', r(dispute))
+  await me.broadcast('rebalance', r([ [dispute], [],[] ]))
 
 }
 

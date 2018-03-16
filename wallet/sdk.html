@@ -36,12 +36,14 @@ window.addEventListener('message',function(e){
   }
 
   ws.send(JSON.stringify({
+    auth_code: localStorage.auth_code,
+
     proxyOrigin: e.origin,
     method: e.data.method,
     id: e.data.id,
     params: json,
-    auth_code: localStorage.auth_code,
-    confirmed: true
+
+    is_wallet: e.origin == location.origin
   }))
 
 })
