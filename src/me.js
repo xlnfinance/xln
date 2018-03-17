@@ -52,7 +52,6 @@ class Me {
     }
 
     // l("Setting timeout for queue")
-
     setTimeout(() => { me.processQueue() }, 100)
   }
 

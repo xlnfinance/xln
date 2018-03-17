@@ -84,8 +84,7 @@ module.exports = async (block) => {
   if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
     K.bytes_since_last_snapshot = 0
 
-    meta.cron.push('snapshot', K.total_blocks)
-
+    meta.cron.push(['snapshot', K.total_blocks])
     var old_snapshot = K.last_snapshot_height
     K.last_snapshot_height = K.total_blocks
   }
@@ -100,7 +99,6 @@ module.exports = async (block) => {
     meta.cron.push(['autodispute', ins, resolveChannel(ins.insurance, ins.ondelta + ins.dispute_offdelta)])
 
     await ins.resolve()
-
   }
 
   // executing proposals that are due
@@ -122,7 +120,7 @@ module.exports = async (block) => {
 
     if (approved < K.majority) continue
 
-    l('To eval ', job.code)
+    meta.cron.push(['executed', job.code])
 
     l(await eval(`(async function() { ${job.code} })()`))
 

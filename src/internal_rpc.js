@@ -24,11 +24,6 @@ module.exports = async (ws, msg) => {
     var p = json.params
 
     switch (json.method) {
-      case 'sync':
-        result.confirm = 'Syncing the chain...'
-        sync()
-
-        break
       case 'load':
         if (p.username) {
           var seed = await derive(p.username, p.pw)
@@ -255,6 +250,14 @@ module.exports = async (ws, msg) => {
 
       case 'vote':
         result.confirm = await me.broadcast('vote', r([p.id, p.approval, p.rationale]))
+
+        break
+
+
+        
+      case 'sync':
+        result.confirm = 'Syncing the chain...'
+        sync()
 
         break
 

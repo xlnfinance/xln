@@ -12,7 +12,7 @@ module.exports = async (ws, msg) => {
   var inputType = inputMap(msg[0])
 
   // how many blocks to share at once
-  var sync_limit = 100
+  var sync_limit = 1000
 
   msg = msg.slice(1)
 
@@ -175,7 +175,6 @@ module.exports = async (ws, msg) => {
     await ch.d.save()
     l('Received updated limits')
   } else if (inputType == 'withdrawal') { // other party gives withdrawal on-chain
-    // we received instant withdrawal for rebalance
     var [pubkey, sig, body] = r(msg)
 
     var ch = await me.channel(pubkey)

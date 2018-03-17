@@ -340,10 +340,6 @@ FS.onready(() => {
 
 
 
-        <li class="nav-item"  v-bind:class="{ active: tab=='gov' }">
-          <a class="nav-link" @click="go('gov')">Governance</a>
-        </li>
-
 
 
         <li v-if="my_member" class="nav-item" v-bind:class="{ active: tab=='install' }">
@@ -357,7 +353,7 @@ FS.onready(() => {
         <ul class="dropdown-menu">
           <li><a class="nav-link" @click="go('blockchain_explorer')" >Blockchain Explorer</a></li>
           <li><a class="nav-link" @click="go('account_explorer')" >Account Explorer</a></li>
-          <li><a class="nav-link" @click="go('insurance_explorer')" href="#">Insurance Explorer</a></li>
+          <li><a class="nav-link" @click="go('channel_explorer')" href="#">Channel Explorer</a></li>
         </ul>
       </li>
 
@@ -367,6 +363,9 @@ FS.onready(() => {
           <a class="nav-link" @click="go('help')">Help & Stats</a>
         </li>
 
+        <li class="nav-item"  v-bind:class="{ active: tab=='gov' }">
+          <a class="nav-link" @click="go('gov')">Governance</a>
+        </li>
 
       </ul>
 
@@ -543,6 +542,7 @@ FS.onready(() => {
 
     <a class="nav-item nav-link" id="nav-uninsured-tab" data-toggle="tab" href="#nav-uninsured" role="tab" aria-controls="nav-uninsured" aria-selected="false">Uninsured Limits</a>
 
+
     <a v-if="record" class="nav-item nav-link" id="nav-onchain-tab" data-toggle="tab" href="#nav-onchain" role="tab" aria-controls="nav-onchain" aria-selected="false">On-Chain Rebalance</a>
 
     <a v-if="record" class="nav-item nav-link" id="nav-dispute-tab" data-toggle="tab" href="#nav-dispute" role="tab" aria-controls="nav-dispute" aria-selected="false">On-Chain Dispute</a>
@@ -576,8 +576,9 @@ FS.onready(() => {
         </table>
         <p v-else>There is no transaction history so far. Go to an exchange or use Testnet faucet to receive money.</p>
   </div>
+
+
   <div class="tab-pane fade" id="nav-uninsured" role="tabpanel" aria-labelledby="nav-uninsured-tab">
-     
       <h3>Uninsured Limits</h3>
 
       <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
@@ -592,33 +593,37 @@ FS.onready(() => {
 
       <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Uninsured Limits</button></p>
 
+      <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
+
+      <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
   </div>
+
 
 
   <div v-if="record" class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
             <h3>On-chain Rebalance</h3>
 
-            <p>On-chain ID: <b>{{record.id}}</b></p>
-            <p>Pubkey: <b>{{pubkey}}</b></p>
+            <p>ID: <b>{{record.id}}</b></p>
+
             <p>On-chain Balance: <b>\${{commy(record.balance)}}</b></p>
             
-            <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance in this channel to your on-chain balance.</small>
+            <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your on-chain balance.</small>
 
-            <p v-if="ch.insured>0"><input style="width:200px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>
+            <p v-if="ch.insured>0"><input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>
            
             <small>Deposits to other users or channels.</small>
 
             <p v-for="out in outs">
-              <input style="width:200px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
+              <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
 
-              <input style="width:200px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub (eg 4255 or 4255@eu)">
+              <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
             </p>
             <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
             </p>
 
             <p>
-              <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance</button>
+              <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance On-Chain</button>
             </p>
 
   </div>
@@ -707,7 +712,7 @@ FS.onready(() => {
         <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}}</a></li></ul>
 
         <p>4. If there's exact match paste the snippet into <kbd>Terminal.app</kbd></p>
-        <p>Or simply use <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">direct link</a>, run <kbd>./install && node fs 8001</kbd> (8001 is default port)</p>
+        <p>Or simply use <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">direct link</a>, run <kbd>./install && node fs -p8001</kbd> (8001 is default port)</p>
     </div>
 
 
@@ -816,7 +821,7 @@ FS.onready(() => {
 
                 <template v-if="m.method=='rebalance'">
                   <template v-for="d in m.disputes">
-                    <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "posted newer proof and resolved dispute with "+d[0] }}: {{dispute_outcome(d[2], d[3])}}
+                    <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "won a dispute with "+d[0] }}: {{dispute_outcome(d[2], d[3])}}
                     </span>&nbsp;
                   </template>
 
@@ -841,6 +846,7 @@ FS.onready(() => {
                 <template v-for="m in b.meta.cron">
                   <span v-if="m[0] == 'autodispute'" class="badge badge-primary">Dispute auto-resolved: {{dispute_outcome(m[1], m[2])}}</span>
                   <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
+                  <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span>
                   &nbsp;
                 </template>
               </td>
@@ -854,7 +860,7 @@ FS.onready(() => {
     </div>
     <div v-else-if="tab=='account_explorer'">
       <h1>Account Explorer</h1>
-      <p>This is a table of registered users in the network. On-chain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Insurance Explorer.</p>
+      <p>This is a table of registered users in the network. On-chain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Channel Explorer.</p>
 
       <table class="table table-striped">
         <thead class="thead-dark">
@@ -864,6 +870,7 @@ FS.onready(() => {
             <th scope="col">Pubkey</th>
             <th scope="col">On-chain Balance</th>
             <th scope="col">Nonce</th>
+            <th scope="col">Debts</th>
           </tr>
         </thead>
         <tbody>
@@ -875,14 +882,15 @@ FS.onready(() => {
             <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}..</small></td>
             <td>{{commy(u.balance)}}</td>
             <td>{{u.nonce}}</td>
+            <td>{{u.debts.length}}</td>
           </tr>
 
         </tbody>
       </table>
     </div>
-    <div v-else-if="tab=='insurance_explorer'">
-      <h1>Insurance Explorer</h1>
-      <p>Insurances (also known as payment channels) represent collateral between two parties: normally at least one of them is a hub. If the user has 100 units in insurance with @hub, it means the user is guaranteed to get up to 100 units back even if the hub is completely compromised. Pubkeys of both accounts are sorted numerically, lower one is called "left" another one is "right".</p>
+    <div v-else-if="tab=='channel_explorer'">
+      <h1>Channel Explorer</h1>
+      <p>Payment channels represent collateral between two parties: normally at least one of them is a hub. If the user has 100 units in insurance with @hub, it means the user is guaranteed to get up to 100 units back even if the hub is completely compromised. Pubkeys of both accounts are sorted numerically, lower one is called "left" another one is "right".</p>
 
       <table class="table table-striped">
         <thead class="thead-dark">
@@ -924,11 +932,6 @@ FS.onready(() => {
 // delayed features:
 
 /*
-<hr/>
-
-<h3>Risk analytics</h3>
-<canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
-
 
 
 
