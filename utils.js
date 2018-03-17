@@ -58,8 +58,8 @@ sleep = async function (ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// binds to all interfaces, todo: internal rpc bind to 127.0.0.1
-localhost = '0.0.0.0'
+
+localhost = '127.0.0.1'
 
 readInt = (i) => i.length > 0 ? i.readUIntBE(0, i.length) : 0
 

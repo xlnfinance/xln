@@ -360,7 +360,7 @@ FS.onready(() => {
 
 
         <li class="nav-item" v-bind:class="{ active: tab=='help' }">
-          <a class="nav-link" @click="go('help')">Help & Stats</a>
+          <a class="nav-link" @click="go('help')">Network</a>
         </li>
 
         <li class="nav-item"  v-bind:class="{ active: tab=='gov' }">
@@ -394,7 +394,7 @@ FS.onready(() => {
     </div>
 
     <div v-else-if="tab=='help'">
-      <h1>Help</h1>
+      <h1>Network</h1>
 
       <p>To start sending and receiving digital assets in Failsafe you need to add hubs and define trust limits.</p>
 
@@ -410,7 +410,8 @@ FS.onready(() => {
 
 
       <h1>Board of Members</h1>
-      <p v-for="m in K.members">{{m.username}} ({{m.location}}) <b v-if="m.hubId">[hub]</b> - <b>{{m.shares}} shares</b></p>
+
+      <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> <b v-if="m.hub">@{{m.hub.handle}}</b> - <b>{{m.shares}} shares</b></li></ul>
 
 
       <h2>Current network settings</h2>
@@ -704,20 +705,16 @@ FS.onready(() => {
 
 
     <div v-else-if="tab=='install'">
-        <h3>Currently only macOS/Linux are supported</h3>
-        <p>1. Install <a href="https://nodejs.org/en/download/">Node.js</a> 9.6.0+</p>
-        <p>2. Copy-paste this snippet to your text editor:</p>
-        <pre><code>{{install_snippet}}</code></pre>
-        <p>3. (optional) Compare our code with other sources for stronger security:</p>
-        <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}}</a></li></ul>
+        <h3>Decentralized Install for macOS/Linux/Windows</h3>
+        <p>For greatly increased security our install process is a little bit longer than just downloading an executable file. First, you'd need <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
+        <pre><code>{{install_snippet}}
+</code></pre>
+        <p>Double check it visually with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal.app</p>
 
-        <p>4. If there's exact match paste the snippet into <kbd>Terminal.app</kbd></p>
-        <p>Or simply use <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">direct link</a>, run <kbd>./install && node fs -p8001</kbd> (8001 is default port)</p>
+        <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li></ul>
+
+        <p>On Windows? <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with <kbd>certUtil -hashfile Failsafe-N.tar.gz SHA256</kbd> then run <kbd>./install && node fs -p8001</kbd> (8001 is default port). You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
     </div>
-
-
-
-
 
 
 
@@ -788,7 +785,11 @@ FS.onready(() => {
     <div v-else-if="tab=='blockchain_explorer'">
       <h1>Blockchain Explorer</h1>
 
-      <p>Blockchain is a chain of blocks. Each block contains transactions. These transactions were publicly broadcasted, verified and executed on every full node, including yours.</p>
+      <p>Blockchain is a chain of blocks, which contain transactions. These transactions were publicly broadcasted and executed on every full node, including yours. On this page you will see only last few blocks that your node processed, after a while they are deleted from your machine - you aren't required to store them.</p> 
+
+      <p>Empty blocks are omitted. Under each block you will see what happened: transactions submitted by users and some automatic events.</p>
+
+      <p>If you want to review historical blocks from the beginning go to an explorer of any of the validators listed under Network.</p>
 
       <table class="table">
         <thead class="thead-dark">

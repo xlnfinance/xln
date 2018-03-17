@@ -132,9 +132,16 @@ module.exports = async (genesis) => {
   }
 
   K.members[0].shares = 3
+  K.members[0].platform = 'Digital Ocean SGP1'
+
   K.members[1].shares = 3
+  K.members[1].platform = 'AWS'
+
   K.members[2].shares = 2
+  K.members[2].platform = 'Azure'
+
   K.members[3].shares = 2
+  K.members[3].platform = 'Google Cloud'
 
   K.members[0].hub = {
     handle: 'eu',
