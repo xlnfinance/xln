@@ -1,4 +1,4 @@
-// Internal RPC serves requests made by the wallet (the user's browser) or by the merchant app
+// Internal RPC serves requests made by the user's browser or by the merchant server app
 
 module.exports = async (ws, msg) => {
   var result = {}
@@ -10,13 +10,13 @@ module.exports = async (ws, msg) => {
 
   if (json.auth_code == PK.auth_code) {
     if (ws.send && json.is_wallet && me.browser != ws) {
-      // not SDK
       if (me.browser && me.browser.readyState == 1) {
         ws.send(JSON.stringify({
           result: {already_opened: true},
           id: json.id
         }))
       } else {
+        // used to react(). only one instance is allowed
         me.browser = ws
       }
     }
@@ -108,8 +108,6 @@ module.exports = async (ws, msg) => {
         break
 
       case 'rebalance':
-        l('contacting hubs and collecting instant withdrawals ins')
-
         var ins = []
         var outs = []
 
@@ -165,10 +163,10 @@ module.exports = async (ws, msg) => {
           // waiting for the response
           setTimeout(async () => {
             var ch = await me.channel(partner.pubkey)
-            if (ch.d.our_input_sig) {
-              ins.push([ ch.d.our_input_amount,
+            if (ch.d.input_sig) {
+              ins.push([ ch.d.input_amount,
                 ch.d.partnerId,
-                ch.d.our_input_sig ])
+                ch.d.input_sig ])
 
               l("Rebalancing ", [ins, outs])
 

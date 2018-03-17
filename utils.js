@@ -1,3 +1,4 @@
+// Convenience-first, later globals to be slowly reduced. 
 
 // system
 assert = require('assert')
@@ -43,6 +44,7 @@ RPC = {
 
 l = console.log
 
+// Amazing lib to forget about binary encoding: https://github.com/ethereum/wiki/wiki/RLP
 r = function (a) {
   if (a instanceof Buffer) {
     return rlp.decode(a)
@@ -51,12 +53,13 @@ r = function (a) {
   }
 }
 
+// for testnet handicaps
 sleep = async function (ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// binds to all interfaces, todo: internal rpc bind to 127.0.0.1
 localhost = '0.0.0.0'
-
 
 readInt = (i) => i.length > 0 ? i.readUIntBE(0, i.length) : 0
 
@@ -120,7 +123,7 @@ usage = () => {
   return Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
 }
 
-// tells external RPC how to parse this request (256 options)
+// tells external RPC how to parse this request
 inputMap = (i) => {
   var map = [
     'auth', // this socket belongs to my pubkey

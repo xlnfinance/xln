@@ -84,7 +84,7 @@ module.exports = async (block) => {
   if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
     K.bytes_since_last_snapshot = 0
 
-    meta.cron.push(`Generated a new snapshot at height ${K.total_blocks}`)
+    meta.cron.push('snapshot', K.total_blocks)
 
     var old_snapshot = K.last_snapshot_height
     K.last_snapshot_height = K.total_blocks
@@ -97,10 +97,10 @@ module.exports = async (block) => {
   })
 
   for (let ins of disputes) {
-    await ins.resolve()
-    meta.cron.push(`Resolved a dispute in ${ins.leftId}@${ins.rightId}`)
+    meta.cron.push(['autodispute', ins, resolveChannel(ins.insurance, ins.ondelta + ins.dispute_offdelta)])
 
-    l('Resolved')
+    await ins.resolve()
+
   }
 
   // executing proposals that are due

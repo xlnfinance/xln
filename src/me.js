@@ -315,7 +315,7 @@ class Me {
       defaults: {
         offdelta: 0,
 
-        our_input_amount: 0,
+        input_amount: 0,
         they_input_amount: 0,
 
         soft_limit: is_hub(partner) ? K.risk : 0,
@@ -354,7 +354,7 @@ class Me {
 
     Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
-    ch.payable = (ch.insured - ch.d.our_input_amount) + ch.they_promised +
+    ch.payable = (ch.insured - ch.d.input_amount) + ch.they_promised +
     (ch.d.they_hard_limit - ch.promised)
 
     ch.they_payable = (ch.they_insured - ch.d.they_input_amount) + ch.promised +

@@ -1,3 +1,5 @@
+// home baked ws client that auto reconnects
+
 var normalws = require('ws')
 
 function WebSocketClient () {
@@ -10,7 +12,7 @@ WebSocketClient.prototype.open = function (url) {
 
   this.instance._req.on('socket', function (socket) {
     socket.on('secureConnect', function () {
-      // l('Accessing cert ', )
+      // TODO: cert pinning to prevent rogue CA
       // C5:DA:46:F0:99:75:03:D5:D9:0C:30:56:91:58:85:09:16:0B:7A:73
       // if (socket.getPeerCertificate().fingerprint !== validFingerprint) ws.close();
     })

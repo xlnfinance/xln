@@ -1,9 +1,10 @@
 /*
-In this method we implement looking for net-spenders and matching them with net-receivers.
-Eg matching those who have delta <-100 with those with delta>100
+Here hub takes insurance from net-spenders and rebalances towards net-receivers.
+Matching those with who we have promised>they_soft_limit with those where we have insured>$100
 
-First, we calculate receivers who requested rebalance.
-Based on how much they want to insure, we can find the minimum amount of spenders to ask withdrawals from
+For now pretty simple. In the future can be added:
+* smart learning based on balances over time not on balance at the time of matching
+* use as little inputs/outputs to transfer as much as possible volume
 
 */
 
@@ -34,13 +35,13 @@ module.exports = async function () {
       outs.push([ch.promised, ch.d.myId, ch.d.partnerId])
 
     } else if (ch.insured >= K.risk) {
-      if (ch.d.our_input_sig) {
+      if (ch.d.input_sig) {
         l('we already have input to use')
         // method, user, hub, nonce, amount
 
-        ins.push([ ch.d.our_input_amount,
+        ins.push([ ch.d.input_amount,
           ch.d.partnerId,
-          ch.d.our_input_sig ])
+          ch.d.input_sig ])
       } else if (me.users[ch.d.partnerId]) {
         l(`We can pull payment from ${toHex(ch.d.partnerId)} and use next rebalance`)
         me.send(ch.d.partnerId, 'requestWithdraw', me.envelope(ch.insured))
@@ -60,10 +61,10 @@ module.exports = async function () {
   setTimeout(async () => {
     for (var partnerId of checkBack) {
       var ch = await me.channel(partnerId)
-      if (ch.d.our_input_sig) {
-        ins.push([ ch.d.our_input_amount,
+      if (ch.d.input_sig) {
+        ins.push([ ch.d.input_amount,
           ch.d.partnerId,
-          ch.d.our_input_sig ])
+          ch.d.input_sig ])
       }
     }
 

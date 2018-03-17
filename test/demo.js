@@ -1,3 +1,6 @@
+// Full featured demo of an integration with deposits/withdrawals.
+// TODO: e2e headless test of its functions
+
 // npm i axios cookies
 axios = require('axios')
 l = console.log

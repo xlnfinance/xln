@@ -1,3 +1,5 @@
+// Single file to store all client side logic
+// TODO: break up vue in templates without using preprocessors if possible
 
 l = console.log
 ts = () => Math.round(new Date() / 1000)
@@ -168,6 +170,17 @@ FS.onready(() => {
       return ''
     },
 
+    dispute_outcome: (ins, parts) => {
+      var o = []
+      if (parts.insured > 0) o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`)
+      if (parts.they_insured > 0) o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`)
+
+      if (parts.promised > 0) o.push(`${ins.leftId} owes ${app.commy(parts.promised)} to ${ins.rightId}`)
+      if (parts.they_promised > 0) o.push(`${ins.rightId} owes ${app.commy(parts.they_promised)} to ${ins.leftId}`)
+
+      return o.join(', ')
+    },
+
     commy: (b, dot = true) => {
       let prefix = b < 0 ? '-' : ''
 
@@ -318,14 +331,12 @@ FS.onready(() => {
       <ul class="navbar-nav mr-auto">
 
         <li class="nav-item" v-bind:class="{ active: tab=='' }">
-          <a class="nav-link" @click="go('')">Whitepaper</a>
+          <a class="nav-link" @click="go('')">Home</a>
         </li>
 
         <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
           <a class="nav-link" @click="go('wallet')">Wallet</a>
         </li>
-
-
 
 
 
@@ -619,7 +630,10 @@ FS.onready(() => {
 
             <p>After a timeout money will arrive to your on-chain balance, then you will be able to move it to another hub.</p>
 
-            <p v-if="record && record.balance >= K.standalone_balance"> 
+            <p v-if="ch.d.status == 'disputed'"> 
+              Please wait for dispute resolution.
+            </p>
+            <p v-else-if="record && record.balance >= K.standalone_balance"> 
               <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
             </p>
             <p v-else>To start on-chain dispute you must be registred on-chain and have on your on-chain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your on-chain balance.</p>
@@ -797,12 +811,13 @@ FS.onready(() => {
       
             <tr v-for="m in b.meta.parsed_tx">
 
-              <td colspan="6">
+              <td colspan="7">
                 <span class="badge badge-warning">{{m.method}} by {{m.signer.id}} ({{commy(m.tax)}} fee, size {{m.length}}):</span>&nbsp;
 
                 <template v-if="m.method=='rebalance'">
                   <template v-for="d in m.disputes">
-                    <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "posted latest state and resolved dispute with "+d[0]}}</span>&nbsp;
+                    <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "posted newer proof and resolved dispute with "+d[0] }}: {{dispute_outcome(d[2], d[3])}}
+                    </span>&nbsp;
                   </template>
 
                   <template v-for="d in m.inputs">
@@ -822,9 +837,11 @@ FS.onready(() => {
             </tr>
 
             <tr v-if="b.meta.cron.length > 0">
-              <td colspan="6">
-                <template  v-for="m in b.meta.cron">
-                  <span class="badge badge-primary">{{m}}</span>&nbsp;
+              <td colspan="7">
+                <template v-for="m in b.meta.cron">
+                  <span v-if="m[0] == 'autodispute'" class="badge badge-primary">Dispute auto-resolved: {{dispute_outcome(m[1], m[2])}}</span>
+                  <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
+                  &nbsp;
                 </template>
               </td>
             </tr>

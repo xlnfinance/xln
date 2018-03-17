@@ -1,10 +1,10 @@
-// External RPC processes requests to our node coming from outside node.
+// External RPC processes requests to our node coming from outside world.
 // Also implements validator and hub functionality
 
 module.exports = async (ws, msg) => {
   msg = bin(msg)
-  // sanity checks 100mb
-  if (msg.length > 100000000) {
+  // sanity checks 10mb
+  if (msg.length > 10000000) {
     l(`too long input ${(msg).length}`)
     return false
   }
@@ -21,8 +21,6 @@ module.exports = async (ws, msg) => {
   // some socket is authenticating their pubkey
   if (inputType == 'auth') {
     var [pubkey, sig, body] = r(msg)
-
-    l('authing ', pubkey)
 
     if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
       if (pubkey.equals(me.pubkey)) return false
@@ -105,7 +103,7 @@ module.exports = async (ws, msg) => {
     if (msg[0] == 1) {    
       await me.payChannel({
         partner: pubkey,
-        amount: Math.round(Math.random() * 30000)
+        amount: Math.round(Math.random() * 10000)
       })
     }
 
@@ -116,7 +114,6 @@ module.exports = async (ws, msg) => {
     if (msg[0] == 3) {    
       (await me.channel(pubkey)).d.startDispute(true)
     }
-
 
 
 
@@ -157,7 +154,10 @@ module.exports = async (ws, msg) => {
 
 
 
-  } else if (inputType == 'setLimits') {
+
+
+
+  } else if (inputType == 'setLimits') { // other party defines credit limit to us
     var [pubkey, sig, body] = r(msg)
 
     var limits = r(body)
@@ -174,7 +174,7 @@ module.exports = async (ws, msg) => {
 
     await ch.d.save()
     l('Received updated limits')
-  } else if (inputType == 'withdrawal') {
+  } else if (inputType == 'withdrawal') { // other party gives withdrawal on-chain
     // we received instant withdrawal for rebalance
     var [pubkey, sig, body] = r(msg)
 
@@ -193,10 +193,10 @@ module.exports = async (ws, msg) => {
     }
 
     l('Got withdrawal for ' + amount)
-    ch.d.our_input_amount = amount
-    ch.d.our_input_sig = sig
+    ch.d.input_amount = amount
+    ch.d.input_sig = sig
     await ch.d.save()
-  } else if (inputType == 'requestWithdraw') {
+  } else if (inputType == 'requestWithdraw') { // other party wants to withdraw on-chain
     // partner asked us for instant withdrawal
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
@@ -230,7 +230,7 @@ module.exports = async (ws, msg) => {
       ec(input, me.id.secretKey),
       r([amount])
     ]))
-  } else if (inputType == 'ack') {
+  } else if (inputType == 'ack') { // our payment was acknowledged
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)
 
@@ -263,7 +263,7 @@ module.exports = async (ws, msg) => {
 
     delete(purchases[invoice])
 
-  } else if (inputType == 'update') {
+  } else if (inputType == 'update') { // New payment arrived
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)
 

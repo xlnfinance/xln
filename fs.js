@@ -2,23 +2,28 @@
 
 require('./utils')
 
-// This method returns what can be taken from insurance and what was promised
-// There are 3 major scenarios of delta position:
-// 4,2  ====--| 
-// 4,-2 ==|==
-// 4,-6 |--====
-resolveChannel = (insurance, delta, is_left) => {
+// Defines promised/insured for both users based on insurance and delta=(ondelta+offdelta)
+// There are 3 major scenarios of delta position
+// . is 0, | is delta, = is insurance, - is promised
+// 4,6  .====--| 
+// 4,2  .==|==
+// 4,-2 |--.====
+resolveChannel = (insurance, delta, is_left=true) => {
   var parts = {
-    promised: delta >= -insurance ? 0 : -insurance-delta,
-    insured: delta >= 0 ? insurance : (delta >= -insurance ? insurance + delta : 0),
-    they_insured: delta >= 0 ? 0 : (delta >= -insurance ? -delta : insurance),
-    they_promised: delta >= 0 ? delta : 0
+    // left user promises only with negative delta, scenario 3
+    promised: delta < 0 ? -delta : 0,
+    insured:      delta > insurance ? insurance : (delta > 0 ? delta             : 0),
+    they_insured: delta > insurance ? 0         : (delta > 0 ? insurance - delta : insurance),
+    // right user promises when delta goes beyond insurance, scenario 1
+    they_promised: delta > insurance ? delta - insurance : 0
   }
-
+  
+  // default view is left. if current user is right, simply reverse
   if (!is_left) {
     [parts.promised, parts.insured, parts.they_insured, parts.they_promised] = 
     [parts.they_promised, parts.they_insured, parts.insured, parts.promised]
   }
+
   return parts
 }
 
@@ -190,7 +195,6 @@ initDashboard = async a => {
   }
 
   // this serves dashboard HTML page
-
   var on_server = fs.existsSync('/etc/letsencrypt/live/failsafe.network/fullchain.pem')
 
   if (on_server) {
@@ -285,7 +289,7 @@ derive = async (username, pw) => {
   })
 }
 
-// this is onchain database - shared among everybody
+// this is onchain database - every full node has exact same copy
 var base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
@@ -300,13 +304,9 @@ sequelize = new Sequelize('', '', 'password', base_db)
 
 User = sequelize.define('user', {
   username: Sequelize.STRING,
-
   pubkey: Sequelize.CHAR(32).BINARY,
-
   nonce: Sequelize.INTEGER,
-  balance: Sequelize.BIGINT, // mostly to pay taxes
-
-  assets: Sequelize.TEXT
+  balance: Sequelize.BIGINT // on-chain balance: mostly to pay taxes
 })
 
 User.idOrKey = async (id) => {
@@ -342,7 +342,7 @@ Proposal = sequelize.define('proposal', {
   code: Sequelize.TEXT,
   patch: Sequelize.TEXT,
 
-  delayed: Sequelize.INTEGER,
+  delayed: Sequelize.INTEGER, //cron
 
   kindof: Sequelize.STRING
 })
@@ -351,14 +351,18 @@ Insurance = sequelize.define('insurance', {
   leftId: Sequelize.INTEGER,
   rightId: Sequelize.INTEGER,
 
-  nonce: Sequelize.INTEGER, // for instant withdrawals
+  nonce: Sequelize.INTEGER, // for instant withdrawals, increase one by one
 
   insurance: Sequelize.BIGINT, // insurance
   ondelta: Sequelize.BIGINT, // what hub already insuranceized
 
   dispute_delayed: Sequelize.INTEGER,
-  dispute_nonce: Sequelize.INTEGER,
+
+  // increased off-chain. When disputed, higher one is true
+  dispute_nonce: Sequelize.INTEGER, 
   dispute_offdelta: Sequelize.INTEGER,
+
+  // started by left user?
   dispute_left: Sequelize.BOOLEAN
 })
 
@@ -368,12 +372,14 @@ Insurance.prototype.resolve = async function(){
   var left = await User.findById(this.leftId)
   var right = await User.findById(this.rightId)
 
-
+  // to balance delta into 0
   this.ondelta = -this.dispute_offdelta
 
+  // splitting insurance between users
   left.balance += resolved.insured
   right.balance += resolved.they_insured
 
+  // anybody owes to anyone?
   if (resolved.promised > 0 || resolved.they_promised > 0) {
     var d = await Debt.create({
       userId: resolved.promised > 0 ? left.id : right.id,
@@ -393,11 +399,12 @@ Insurance.prototype.resolve = async function(){
 
   await this.save()
 
-  var withus = me.pubkey.equals(left.pubkey) ? right : (me.pubkey.equals(right.pubkey) ? left : false)
+  var withUs = me.pubkey.equals(left.pubkey) ? right : (me.pubkey.equals(right.pubkey) ? left : false)
 
-  if (withus) {
-    var ch = await me.channel(withus.pubkey)
-    // reset all credit limits - the relationship starts from scratch
+  // are we in this dispute? Unfreeze the channel
+  if (withUs) {
+    var ch = await me.channel(withUs.pubkey)
+    // reset all credit limits - the relationship starts "from scratch"
     ch.d.soft_limit = 0
     ch.d.hard_limit = 0
     ch.d.they_soft_limit = 0
@@ -406,7 +413,6 @@ Insurance.prototype.resolve = async function(){
     ch.d.status = 'ready'
     await ch.d.save()
   }
-
 }
 
 Vote = sequelize.define('vote', {
@@ -444,6 +450,8 @@ Block = privSequelize.define('block', {
 
 // stores all payment channels, offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
+
+// we name our things "value", and counterparty's "they_value" 
 Delta = privSequelize.define('delta', {
   // between who and who
   myId: Sequelize.CHAR(32).BINARY,
@@ -474,8 +482,8 @@ Delta = privSequelize.define('delta', {
 
   they_input_amount: Sequelize.INTEGER,
 
-  our_input_amount: Sequelize.INTEGER,
-  our_input_sig: Sequelize.TEXT,
+  input_amount: Sequelize.INTEGER,
+  input_sig: Sequelize.TEXT, // we store a withdrawal sig to use in next rebalance
 
   hashlocks: Sequelize.TEXT,
 

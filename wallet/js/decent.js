@@ -1,3 +1,5 @@
+// OLD demo to show our decentralization goals
+
 
 var CSS_COLOR_NAMES = 'green yellow blue orange purple cyan magenta lime pink brown white black grey aqua maroon silver'.split(' ')
 function getRandomColors (n) {

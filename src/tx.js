@@ -1,3 +1,4 @@
+// supported types of transactions. Mainly about rebalance and self-amendments
 
 module.exports = {
   processTx: async function processTx (tx, meta) {
@@ -125,11 +126,12 @@ module.exports = {
             var offdelta = 0
           }
 
+          var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta)
 
           if (ins.dispute_delayed) {
             if (dispute_nonce > ins.dispute_nonce && ins.dispute_left == (compared == 1)) {
 
-              parsed_tx.disputes.push([partner.id, 'disputed'])
+              parsed_tx.disputes.push([partner.id, 'disputed', ins, offer])
 
               ins.dispute_offdelta = offdelta
               await ins.resolve()
@@ -144,11 +146,10 @@ module.exports = {
             ins.dispute_left = (compared == -1)
             ins.dispute_delayed = K.usable_blocks + 9
 
-            parsed_tx.disputes.push([partner.id, 'started'])
+            parsed_tx.disputes.push([partner.id, 'started', ins, offer])
 
             await ins.save()
 
-            var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta, compared == -1)
 
             if (me.pubkey.equals(partner.pubkey)) {
               l('Channel with us is disputed')
@@ -211,7 +212,7 @@ module.exports = {
           meta.inputs_volume += amount
 
           ins.insurance -= amount
-          if (compared == 1) ins.ondelta += amount
+          if (compared == -1) ins.ondelta -= amount
 
           signer.balance += amount
 
@@ -231,8 +232,8 @@ module.exports = {
             if (me.record.id == signer.id) {
               var ch = await me.channel(partner.pubkey)
               // they planned to withdraw and they did. Nullify hold amount
-              ch.d.our_input_amount = 0
-              ch.d.our_input_sig = null
+              ch.d.input_amount = 0
+              ch.d.input_sig = null
               await ch.d.save()
             }
           }
@@ -346,13 +347,15 @@ module.exports = {
             }))[0]
 
             ins.insurance += amount
-            if (compared == 1) ins.ondelta -= amount
+            if (compared == -1) ins.ondelta += amount
 
             signer.balance -= amount
 
             if (is_hub) {
+              // hubs get reimbursed for rebalancing
+              // TODO: attack vector, the user may not endorsed this rebalance
               ins.insurance -= reimburse_tax
-              if (compared == -1) ins.ondelta += reimburse_tax
+              if (compared == 1) ins.ondelta -= reimburse_tax
 
               // account creation fees are on user, if any
               var diff = (readInt(output[0]) - amount)

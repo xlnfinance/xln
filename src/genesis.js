@@ -1,5 +1,3 @@
-
-// http://ipinfo.io/ip
 module.exports = async (genesis) => {
   l('Start genesis')
 

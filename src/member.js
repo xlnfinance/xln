@@ -1,3 +1,5 @@
+// Code run by validator to build blocks
+// TODO: Comply with tendermint consensus
 module.exports = async () => {
   var now = ts()
 

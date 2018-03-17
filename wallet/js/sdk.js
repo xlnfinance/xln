@@ -1,4 +1,4 @@
-
+// controls tiny iframe that talks to localhost daemon
 FS = (method, params = {}) => {
   return new Promise((resolve, reject) => {
     var id = FS.resolvers.push(resolve) - 1
