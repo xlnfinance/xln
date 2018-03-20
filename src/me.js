@@ -23,6 +23,7 @@ class Me {
   // derives needed keys from the seed, saves creds into pk.json
   async init (username, seed) {
     this.processBlock = require('./block')
+    this.payChannel = require('./channel')
 
     this.username = username
 
@@ -114,9 +115,7 @@ class Me {
 
   }
 
-  // this is off-chain for any kind of p2p authentication
-  // no need to optimize for bandwidth
-  // so full pubkey is used instead of id and JSON is used as payload
+  // signs data and adds our pubkey
   envelope () {
     var msg = r(Object.values(arguments))
     return r([
@@ -140,7 +139,7 @@ class Me {
     await cache()
     this.intervals.push(setInterval(cache, 2000))
 
-    this.intervals.push(setInterval(require('./member'), 2000))
+    this.intervals.push(setInterval(require('./consensus'), 2000))
 
     if (this.my_member) {
       // there's 2nd dedicated websocket server for member/hub commands
@@ -199,78 +198,8 @@ class Me {
     await History.create(attrs)
   }
 
-  parseDelta (body) {
-    var [method, partner, nonce, offdelta, instant_until] = r(body)
 
-    nonce = readInt(nonce)
-    method = readInt(method)
-    instant_until = readInt(instant_until)
-    offdelta = readSInt(offdelta)
-
-    if (method != methodMap('offdelta')) return false
-
-    return [partner, nonce, offdelta, instant_until]
-  }
-
-  async payChannel (opts) {
-    var ch = await me.channel(opts.partner)
-
-    if (ch.d.status != 'ready') {
-      return [false, 'The channel is not ready to accept payments: ' + ch.d.status]
-    }
-
-    if (opts.amount < K.min_amount || opts.amount > K.max_amount) {
-      return [false, `The amount must be between $${commy(K.min_amount)} and $${commy(K.max_amount)}`]
-    }
-
-    if (opts.amount > ch.payable) {
-      return [false, 'Not enough funds']
-    }
-
-    ch.d.offdelta += ch.left ? -opts.amount : opts.amount
-    ch.d.nonce++
-
-    //ch.d.hashlocks.push()
-
-    var newState = ch.d.getState()
-
-    var body = r([
-      methodMap('update'),
-      // what we do to state
-      [[methodMap('unlockedPayment'), opts.amount, opts.mediate_hub, opts.mediate_to, opts.invoice]],
-      // sign what it turns into
-      ec(newState, me.id.secretKey),
-      // give our state for debug
-      newState
-    ])
-
-    var signedState = r([
-      me.pubkey,
-      ec(body, me.id.secretKey),
-      body
-    ])
-
-    ch.d.status = 'await'
-
-    await ch.d.save()
-
-    if (me.is_hub) {
-      l('todo: ensure delivery')
-    } else {
-      await me.addHistory(opts.partner, -opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '...', true)
-    }
-
-    // what do we do when we get the secret
-    if (opts.return_to) purchases[toHex(opts.invoice)] = opts.return_to
-
-    if (!me.send(opts.partner, 'update', signedState)) {
-      l(`${opts.partner} not online, deliver later?`)
-    }
-
-    return [true, false]
-  }
-
-  async channels () {
+  async channels () { // with all hubs
     var channels = []
 
     for (var m of Members) {
@@ -327,8 +256,11 @@ class Me {
         status: 'ready',
 
         hashlocks: null
-      }
+      },
+      include: {all: true}
     }))[0]
+
+    ch.tr = await ch.d.getTransitions()
 
     var user = await me.byKey(partner)
     if (user) {
@@ -353,6 +285,7 @@ class Me {
 
     Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
+    // todo: minus transitions
     ch.payable = (ch.insured - ch.d.input_amount) + ch.they_promised +
     (ch.d.they_hard_limit - ch.promised)
 
@@ -360,6 +293,7 @@ class Me {
     (ch.d.hard_limit - ch.they_promised)
 
     // inputs not in blockchain yet, so we hold them temporarily
+
 
     ch.bar = ch.promised + ch.insured + ch.they_insured + ch.they_promised
 

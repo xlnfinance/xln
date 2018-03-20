@@ -124,6 +124,8 @@ module.exports = async (ws, msg) => {
     }
     if (chain.length == sync_limit) {
       sync()
+    } else {
+      fs.writeFileSync('data/k.json', stringify(K))
     }
   } else if (inputType == 'sync') {
     var last = await Block.findOne({where: {
@@ -342,8 +344,6 @@ module.exports = async (ws, msg) => {
           invoice: invoice
         })
       } else if (true) {
-
-
         l('Looking for invoice ', invoice, mediate_to)
 
         var paid_invoice = invoices[toHex(invoice)]
@@ -353,7 +353,7 @@ module.exports = async (ws, msg) => {
           //paid_invoice.status == 'pending'
 
           // handicap
-          //await sleep(3000)
+          await sleep(1000)
 
           l('Our invoice was paid!', paid_invoice)
           paid_invoice.status = 'paid'

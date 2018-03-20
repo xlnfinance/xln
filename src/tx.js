@@ -31,7 +31,7 @@ module.exports = {
         if (!meta[signer.id]) meta[signer.id] = 0
 
         if (signer.nonce + meta[signer.id] != nonce) {
-          return {error: 'Invalid nonce dry run'}
+          //return {error: 'Invalid nonce dry run'}
         }
 
         meta[signer.id]++
@@ -140,6 +140,7 @@ module.exports = {
               l('Old nonce or same counterparty')
             }
           } else {
+            // TODO: return to partner their part right away, and our part is delayed
             ins.dispute_offdelta = offdelta
             ins.dispute_nonce = dispute_nonce
 
@@ -240,34 +241,10 @@ module.exports = {
         }
 
         // 3. enforce pay insurance to debts
+        await signer.payDebts(parsed_tx)
 
-        var debts = await signer.getDebts()
 
-        for (var d of debts) {
-          var u = await User.findById(d.oweTo)
-
-          if (d.amount_left <= signer.balance) {
-            signer.balance -= d.amount_left
-            u.balance += d.amount_left
-
-            parsed_tx.debts.push([d.amount_left, u.id])
-
-            await u.save()
-            await d.destroy()
-          } else {
-            d.amount_left -= signer.balance
-            u.balance += signer.balance
-            signer.balance = 0 // signer is broke now!
-
-            parsed_tx.debts.push([signer.balance, u.id])
-
-            await u.save()
-            await d.save()
-            break
-          }
-        }
-
-        // 3. deposit insurance to outputs
+        // 4. outputs: standalone balance or a channel
 
         // we want outputs to pay for their own rebalance
         var reimburse_tax = 1 + Math.floor(tax / outputs.length)
@@ -305,7 +282,6 @@ module.exports = {
           } else {
             if (withPartner) {
               if (!withPartner.id) {
-                l('Looks like hub rebalance')
 
                 var fee = (K.standalone_balance + K.account_creation_fee)
                 if (amount < fee) continue
@@ -372,7 +348,20 @@ module.exports = {
             }
           }
 
-          parsed_tx.outputs.push([amount, giveTo.id, withPartner ? withPartner.id : false])
+          // on-chain payment for specific invoice (to us or one of our channels)
+          if (me.pubkey.equals(giveTo.pubkey) && output[3].length > 0) {
+            var invoice = invoices[toHex(output[3])]
+            l("Invoice paid on chain ", output[3])
+            if (invoice && invoice.amount <= amount) {
+              invoice.status = 'paid'
+            }
+          }
+
+          parsed_tx.outputs.push([amount, 
+            giveTo.id, 
+            withPartner ? withPartner.id : false, 
+            output[3].length > 0 ? toHex(output[3]) : false])
+
           meta.outputs_volume += amount
         }
 

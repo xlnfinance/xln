@@ -20,7 +20,7 @@ module.exports = async (genesis) => {
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 100000,
+    snapshot_after_bytes: 1000000,
     proposals_created: 0,
 
     tax: 1,
@@ -29,7 +29,7 @@ module.exports = async (genesis) => {
     standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
     blocksize: 20000,
-    blocktime: 20,
+    blocktime: 10,
 
     // each genesis is randomized
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
@@ -94,7 +94,7 @@ module.exports = async (genesis) => {
       pubkey: me.pubkey,
       username: username,
       nonce: 0,
-      balance: 5000000
+      balance: 500000000
     }))
 
     l(username + ' : ' + pw + ' at ' + loc)

@@ -47,7 +47,6 @@ module.exports = async (block) => {
   }
 
 
-  l(`Processing block ${K.total_blocks + 1} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
 
   var meta = {
     inputs_volume: 0,
@@ -65,14 +64,19 @@ module.exports = async (block) => {
   }
 
   if (PK.pending_tx.length > 0) {
-    l("Rebroadcasting pending tx")
-    me.send(me.next_member, 'tx', r(PK.pending_tx.map(tx=>Buffer.from(tx.raw, 'hex'))) )
+    var raw = PK.pending_tx.map(tx=>Buffer.from(tx.raw, 'hex'))
+    l("Rebroadcasting pending tx ", raw)
+    me.send(me.next_member, 'tx', r(raw))
   }
 
   K.ts = timestamp
   K.prev_hash = toHex(sha3(finalblock))
 
   K.total_blocks++
+
+  if (K.total_blocks % 10 == 0) l(`Processed block ${K.total_blocks} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
+
+
   if (finalblock.length < K.blocksize - 1000) {
     K.usable_blocks++
   }
@@ -85,7 +89,7 @@ module.exports = async (block) => {
     K.bytes_since_last_snapshot = 0
 
     meta.cron.push(['snapshot', K.total_blocks])
-    var old_snapshot = K.last_snapshot_height
+    var old_height = K.last_snapshot_height
     K.last_snapshot_height = K.total_blocks
   }
 
@@ -118,33 +122,27 @@ module.exports = async (block) => {
       }
     }
 
-    if (approved < K.majority) continue
+    if (approved >= K.majority) {
+      await eval(`(async function() { ${job.code} })()`)
+      if (job.patch.length > 0) {
+        me.request_reload = true
+        var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
+          console.log(error, stdout, stderr)
+        })
+        pr.stdin.write(job.patch)
+        pr.stdin.end()
+      }
 
-    meta.cron.push(['executed', job.code])
-
-    l(await eval(`(async function() { ${job.code} })()`))
-
-
-    if (job.patch.length > 0) {
-      l('To patch ', job.patch)
-
-      me.request_reload = true
-      var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
-        console.log(error, stdout, stderr)
-      })
-      pr.stdin.write(job.patch)
-      pr.stdin.end()
-
-      l('Patch applied! Restarting...')
+      meta.cron.push(['executed', job.desc, job.code, job.patch])
     }
 
     await job.destroy()
   }
 
-  // block processing is over, saving current K
-  fs.writeFileSync('data/k.json', stringify(K))
+  // only members do snapshots, as they require extra computations
+  if (me.my_member && K.bytes_since_last_snapshot == 0) {
+    fs.writeFileSync('data/k.json', stringify(K))
 
-  if (K.bytes_since_last_snapshot == 0) {
     var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
 
     require('tar').c({
@@ -155,14 +153,12 @@ module.exports = async (block) => {
       file: 'private/' + filename,
       filter: (path, stat) => {
         // must be deterministic
-
         stat.mtime = null
         stat.atime = null
         stat.ctime = null
         stat.birthtime = null
 
-        // skip /private (blocks sqlite, proofs, local config)
-        // tests, and all hidden/dotfiles
+        // skip /private and irrelevant things
         if (path.startsWith('./.') || path.match(/(private|DS_Store|node_modules|test)/)) {
           return false
         } else {
@@ -170,9 +166,11 @@ module.exports = async (block) => {
         }
       }
     }, ['.'], _ => {
-      fs.unlink('private/Failsafe-' + old_snapshot + '.tar.gz', () => {
+      if (old_height > 1) { // genesis state is stored for analytics and member bootstraping 
+        fs.unlink('private/Failsafe-' + old_height + '.tar.gz')
         l('Removed old snapshot and created ' + filename)
-      })
+      }
+
     })
   }
 

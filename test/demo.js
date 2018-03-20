@@ -16,13 +16,14 @@ nacl = require('../lib/nacl')
 // define merchant node path
 FS_PATH = fs.existsSync('/root/8002/private/pk.json') ? '/root/8002' : '/Users/homakov/work/8002'
 
-FS_RPC = 'http://0.0.0.0:8002/rpc'
+FS_RPC = 'http://127.0.0.1:8002/rpc'
 
 l(FS_PATH)
 
 // pointing browser SDK to user node 
-LOCAL_FS_RPC = 'http://0.0.0.0:8001'
+LOCAL_FS_RPC = 'http://127.0.0.1:8001'
 
+preferredHub = 1
 
 FS = (method, params, cb) => {
   if (fs.existsSync(FS_PATH + '/private/pk.json')) {
@@ -87,7 +88,7 @@ require('http').createServer((req, res) => {
     <main role="main" class="container" id="main">
       <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
 
-      <p>Your ID at the bank: ${id}</p>
+      <p>Your account in our bank: ${id}</p>
       <p>Available Balance: <b>\$${commy(users[id])}</b></p>
      
       <h3>Deposit</h3>
@@ -97,8 +98,8 @@ require('http').createServer((req, res) => {
       <p><button class="btn btn-success" id="deposit">Deposit</button></p>
 
       <h3>Withdraw</h3>
-      <p><input type="text" id="withdraw_invoice" placeholder="Paste payment request here"></p>
-      <p><small>To withdraw create a payment request in your Failsafe wallet first</small></p>
+      <p><input type="text" id="withdraw_invoice" placeholder="Invoice"></p>
+      <p><small>To withdraw create an invoice in your Failsafe wallet</small></p>
       <p><button class="btn btn-success" id="withdraw">Withdraw</button></p>
      
 
@@ -196,6 +197,7 @@ window.onload = function(){
     }).then(r=>{
       console.log("Invoice to pay: " + r.data)
       var unpacked = unpackInvoice(r.data)
+      unpacked.partner = ${preferredHub}
 
       FS('send', unpacked).then(data=>{
         if (data.secret){
@@ -222,11 +224,14 @@ window.onload = function(){
 
       `)
   } else if (req.url == '/init') {
+
     var queryData = ''
     req.on('data', function (data) { queryData += data })
 
     req.on('end', function () {
       var p = JSON.parse(queryData)
+
+      l('init ',p)
 
       if (p.deposit_invoice) {
         FS('invoice', {invoice: p.deposit_invoice}, r => {
@@ -257,7 +262,7 @@ window.onload = function(){
       } else if (p.amount) {
         FS('invoice', {
           amount: p.amount,
-          partner: 0,
+          partner: preferredHub,
           asset: p.asset,
           extra: id
         }, r => {

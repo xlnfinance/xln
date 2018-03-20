@@ -113,13 +113,12 @@ cache = async (i) => {
       cached_result.install_snippet = `id=fs
 f=${filename}
 mkdir $id && cd $id && curl ${our_location}$f -o $f
-
 if [[ -x /usr/bin/sha256sum ]] && sha256sum $f || shasum -a 256 $f | grep \\
   ${out_hash}; then
   tar -xzf $f && rm $f && ./install
-
   node fs -p8001
-fi`
+fi
+`
     })
   }
 }
@@ -290,7 +289,7 @@ derive = async (username, pw) => {
   })
 }
 
-// this is onchain database - every full node has exact same copy
+// On-Chain Database - every full node has exact same copy
 var base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
@@ -310,7 +309,7 @@ User = sequelize.define('user', {
   balance: Sequelize.BIGINT // on-chain balance: mostly to pay taxes
 })
 
-User.idOrKey = async (id) => {
+User.idOrKey = async function (id) {
   if (id.length == 32) {
     return (await User.findOrBuild({
       where: {pubkey: id},
@@ -324,9 +323,34 @@ User.idOrKey = async (id) => {
   }
 }
 
-User.prototype.payDebts = async () => {
-  
+User.prototype.payDebts = async function (parsed_tx) {
+  var debts = await this.getDebts()
+
+  for (var d of debts) {
+    var u = await User.findById(d.oweTo)
+
+    if (d.amount_left <= this.balance) {
+      this.balance -= d.amount_left
+      u.balance += d.amount_left
+
+      parsed_tx.debts.push([d.amount_left, u.id])
+
+      await u.save()
+      await d.destroy()
+    } else {
+      d.amount_left -= this.balance
+      u.balance += this.balance
+      this.balance = 0 // this user is broke now!
+
+      parsed_tx.debts.push([this.balance, u.id])
+
+      await u.save()
+      await d.save()
+      break
+    }
+  }
 }
+
 
 Debt = sequelize.define('debt', {
   amount_left: Sequelize.INTEGER,
@@ -432,7 +456,7 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
 
 
-// OFF-CHAIN local database below:
+// Off-Chain database - local and private stuff
 
 if (!fs.existsSync('private')) fs.mkdirSync('private')
 
@@ -495,6 +519,26 @@ Delta = privSequelize.define('delta', {
 
 })
 
+Transition = privSequelize.define('transition', {
+
+  // await, sent, ready
+  status: Sequelize.TEXT,
+
+  // who is recipient
+  unlocker: Sequelize.TEXT,
+
+  // a change in offdelta 
+  offdelta: Sequelize.INTEGER,
+  hash: Sequelize.TEXT,
+  // best by block
+  exp: Sequelize.INTEGER
+})
+
+Delta.hasMany(Transition)
+Transition.belongsTo(Delta)
+
+
+
 Delta.prototype.getState = function () {
   var compared = Buffer.compare(this.myId, this.partnerId)
 
@@ -505,6 +549,12 @@ Delta.prototype.getState = function () {
     packSInt(this.offdelta),
     [] //this.hashlocks
   ])
+}
+
+Delta.prototype.getDispute = async function() {
+  // post last sig if any
+  var partner = await User.idOrKey(this.partnerId)
+  return this.sig ? [partner.id, this.sig, this.nonce, packSInt(this.offdelta), []] : [partner.id]
 }
 
 Delta.prototype.startDispute = async function(profitable) {
@@ -519,13 +569,15 @@ Delta.prototype.startDispute = async function(profitable) {
     }
   }
 
-  // post last sig if any
-  var partner = await User.idOrKey(this.partnerId)
-  var dispute = this.sig ? [partner.id, this.sig, this.nonce, packSInt(this.offdelta), []] : [partner.id]
+  if (me.is_hub) {
+    this.status = 'cheat_dispute'
+    // we don't broadcast dispute right away and wait until periodic rebalance
+  } else {
+    this.status = 'disputed'
+    await me.broadcast('rebalance', r([ [(await this.getDispute())], [],[] ]))    
+  }
 
-  this.status = 'disputed'
   await this.save()
-  await me.broadcast('rebalance', r([ [dispute], [],[] ]))
 
 }
 
@@ -572,12 +624,11 @@ sync = () => {
 
 
 city = async () => {
-  var u = []
-  for (var i = 0; i < 100; i++) {
-    u[i] = new Me()
-    var b = Buffer.alloc(32)
-    b.writeInt32BE(i)
-    u[i].init('u' + i, b)
+  for (var i = 0; i < 50; i++) {
+    await me.payChannel({
+      partner: crypto.randomBytes(32),
+      amount: Math.round(Math.random()*120000)
+    })
   }
 
   l('Ready')

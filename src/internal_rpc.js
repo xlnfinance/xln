@@ -140,7 +140,8 @@ module.exports = async (ws, msg) => {
             if (amount > 0) {
               outs.push([amount, 
                 userId, 
-                to[1] ? Members.find(m => m.hub && m.hub.handle == to[1]).id : 0
+                to[1] ? Members.find(m => m.hub && m.hub.handle == to[1]).id : 0,
+                o.invoice ? Buffer.from(o.invoice, 'hex') : 0
               ])
             }
           }
@@ -187,6 +188,11 @@ module.exports = async (ws, msg) => {
         me.send(Members.find(m => m.id == p.partner), 'testnet', concat(bin([p.action]), me.pubkey))
 
         result.confirm = 'Testnet action triggered'
+        break
+
+      case 'hardfork':
+        eval(p.hardfork)
+        result.confirm = 'Executed'
         break
 
       case 'setLimits':

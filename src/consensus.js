@@ -4,6 +4,7 @@ module.exports = async () => {
   var now = ts()
 
   var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
+  var round = 2
 
   var searchIndex = 0
   for (var i in Members) {
@@ -12,7 +13,7 @@ module.exports = async () => {
     if (currentIndex < searchIndex) {
       me.current = Members[i]
 
-      var increment = (K.blocktime - (now % K.blocktime)) < 5 ? 2 : 1
+      var increment = (K.blocktime - (now % K.blocktime)) < 2 ? 2 : 1
 
       if (currentIndex + increment >= searchIndex) {
         // take next member or rewind back to 0
@@ -24,8 +25,6 @@ module.exports = async () => {
       break
     }
   }
-
-  // d(`Status ${me.status} at ${now} Current: ${me.current.id}, next: ${me.next_member.id}.`)
 
   if (me.my_member == me.current) {
       // do we have enough sig or it's time?
@@ -40,20 +39,22 @@ module.exports = async () => {
       }
     })
 
-    if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - 5)) {
+    if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - round)) {
       if (total_shares < K.majority) {
         l(`Only have ${total_shares} shares, cannot build a block!`)
       } else {
-        me.processBlock(concat(
+        await me.processBlock(concat(
             Buffer.concat(sigs),
             me.precommit
           ))
+        fs.writeFileSync('data/k.json', stringify(K))
+
       }
         // flush sigs
       Members.map(c => c.sig = null)
 
       me.status = 'await'
-    } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - 5)) {
+    } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - round)) {
       me.status = 'precommit'
 
       // processing mempool

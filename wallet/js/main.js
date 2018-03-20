@@ -286,7 +286,7 @@ FS.onready(() => {
 
 
         request_amount: '',
-        outs: [{to: '', amount: ''}],
+        outs: [{to: '', amount: '', invoice: ''}],
 
 
         off_to: '',
@@ -309,7 +309,8 @@ FS.onready(() => {
         settings: !localStorage.settings,
 
         new_invoice: '',
-        pay_invoice: ''
+        pay_invoice: '',
+        hardfork: ''
 
       }
     },
@@ -396,23 +397,8 @@ FS.onready(() => {
     <div v-else-if="tab=='help'">
       <h1>Network</h1>
 
-      <p>To start sending and receiving digital assets in Failsafe you need to add hubs and define trust limits.</p>
-
-      <p><b>Hub</b> is an improved version of a bank: Failsafe hubs do not hold your assets unlike banks. They cannot censor you or modify your balance without your explicit permission (your digital signature). Instead, all assets are stored in trust-less payment channels between users and hubs.</p>
-
-      <p><b>Payment channel</b> is an improved version of a traditional bank account. You can always take your latest balance proof to blockchain and get your money back - the hubs cannot steal or freeze your funds. Payment channel works like a cross-signed state-machine - each action must be authorized by the actor and acknowledged by the other party to become final. The hub and the user act as equals and none of them has any privelege over the other.</p>
-
-      <p><img src="/img/channel.png"></p>
-
-      <p><b>Trust limit</b> defines how much <b>uninsured</b> balance you are willing to accept from this hub. E.g. $10,000 means your wallet will not accept payments after uninsured amount reaching 10000</p>
-
-      <p><b>Insurance</b> is how much collateral is stored in blockchain in a payment channel between you and hub. Ideally, your balance must be around insurance amount - this way 100% of your balance is insured plus you're not subject to expensive on-chain fees.</p>
-
-
-      <h1>Board of Members</h1>
-
+      <h2>Validators</h2>
       <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> <b v-if="m.hub">@{{m.hub.handle}}</b> - <b>{{m.shares}} shares</b></li></ul>
-
 
       <h2>Current network settings</h2>
       <p>Blocktime: {{K.blocktime}} seconds</p>
@@ -447,6 +433,16 @@ FS.onready(() => {
       <h2>Governance stats</h2>
 
       <p>Proposals created: {{K.proposals_created}}</p>
+
+      <h2>Hard Fork</h2>
+      <p><b>Hard fork is like a revolution</b>: sacred and extremely important for long term fairness, even when there is built-in governance protocol. Luckily, everyone is a full node in Failsafe, so you can unilaterally change consensus with a click of a button. If validators vote for things you don't agree with, find like minded people and decide on a new validator set out-of-band. Then paste the code that changes validators below:</p>
+
+      <div class="form-group">
+        <label for="comment">Code to execute:</label>
+        <textarea class="form-control" v-model="hardfork" rows="4" id="comment"></textarea>
+      </div>
+      <p><button @click="call('hardfork', {hardfork: hardfork})" class="btn btn-danger">Execute Code</button></p>
+
 
 
     </div>
@@ -504,7 +500,7 @@ FS.onready(() => {
 
             <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, partner: ch.partner, amount: uncommy(off_amount)})">→ Request</button></p>
 
-            <p v-for="(value, k) in invoices" style="word-wrap: break-word" v-show="new_invoice.length > 0">{{value.status}} {{commy(value.amount)}}. Invoice: {{new_invoice}}</p>
+            <p v-for="(value, k) in invoices" style="word-wrap: break-word">Invoice for {{commy(value.amount)}} ({{value.status}}):<br> {{value.invoice}}</p>
 
 
           </div>
@@ -518,7 +514,7 @@ FS.onready(() => {
 
             <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {partner: ch.partner}) ); pay_invoice='';">Pay Now → </button></p>
 
-            <p v-for="(value, k) in purchases">{{k}} invoice</p>
+            <p v-for="(value, k) in purchases">Payment sent for invoice: {{k}}</p>
 
             <div v-if="pay_invoice.length > 0">
               <p>Amount: {{commy(unpackInvoice().amount)}}</p>
@@ -544,9 +540,8 @@ FS.onready(() => {
     <a class="nav-item nav-link" id="nav-uninsured-tab" data-toggle="tab" href="#nav-uninsured" role="tab" aria-controls="nav-uninsured" aria-selected="false">Uninsured Limits</a>
 
 
-    <a v-if="record" class="nav-item nav-link" id="nav-onchain-tab" data-toggle="tab" href="#nav-onchain" role="tab" aria-controls="nav-onchain" aria-selected="false">On-Chain Rebalance</a>
+    <a class="nav-item nav-link" id="nav-onchain-tab" data-toggle="tab" href="#nav-onchain" role="tab" aria-controls="nav-onchain" aria-selected="false">On-Chain</a>
 
-    <a v-if="record" class="nav-item nav-link" id="nav-dispute-tab" data-toggle="tab" href="#nav-dispute" role="tab" aria-controls="nav-dispute" aria-selected="false">On-Chain Dispute</a>
 
     <a class="nav-item nav-link active" id="nav-testnet-tab" data-toggle="tab" href="#nav-testnet" role="tab" aria-controls="nav-testnet" aria-selected="false">Testnet</a>
 
@@ -601,51 +596,55 @@ FS.onready(() => {
 
 
 
-  <div v-if="record" class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
-            <h3>On-chain Rebalance</h3>
+  <div class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
+    <div v-if="record">
+      <h3>On-chain Actions</h3>
 
-            <p>ID: <b>{{record.id}}</b></p>
+      <p>ID: <b>{{record.id}}</b></p>
+      <p>On-chain Balance: <b>\${{commy(record.balance)}}</b></p>
+      
+      <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your on-chain balance.</small>
 
-            <p>On-chain Balance: <b>\${{commy(record.balance)}}</b></p>
-            
-            <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your on-chain balance.</small>
+      <p v-if="ch.insured>0"><input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>
+     
+      <small>Deposits to other users or channels.</small>
 
-            <p v-if="ch.insured>0"><input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>
-           
-            <small>Deposits to other users or channels.</small>
+      <p v-for="out in outs">
+        <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
 
-            <p v-for="out in outs">
-              <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
+        <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
 
-              <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
-            </p>
-            <p>
-            <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: ''})">Add Deposit</button>
-            </p>
+        <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Invoice (optional)">
+      </p>
+      <p>
+      <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">Add Deposit</button>
+      </p>
 
-            <p>
-              <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance On-Chain</button>
-            </p>
+      <p>
+        <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance On-Chain</button>
+      </p>
 
-  </div>
-  <div class="tab-pane fade" id="nav-dispute" role="tabpanel" aria-labelledby="nav-dispute-tab">
-    <h3>On-Chain Dispute</h3>
+      <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute on-chain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
+      </p>
 
-    <p>If this hub becomes unresponsive, you can always start a dispute on-chain. You are guaranteed to get {{commy(ch.insured)}} - <b>insured</b> part of your balance back, but you may lose {{commy(ch.they_promised)}} - <b>uninsured</b> balance if the hub is compromised.
-    </p>
+      <p>After a timeout money will arrive to your on-chain balance, then you will be able to move it to another hub.</p>
 
-            <p>After a timeout money will arrive to your on-chain balance, then you will be able to move it to another hub.</p>
+      <p v-if="ch.d.status == 'disputed'"> 
+        Please wait for dispute resolution.
+      </p>
+      <p v-else-if="record && record.balance >= K.standalone_balance"> 
+        <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
+      </p>
+      <p v-else>To start on-chain dispute you must be registred on-chain and have on your on-chain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your on-chain balance.</p>
 
-            <p v-if="ch.d.status == 'disputed'"> 
-              Please wait for dispute resolution.
-            </p>
-            <p v-else-if="record && record.balance >= K.standalone_balance"> 
-              <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
-            </p>
-            <p v-else>To start on-chain dispute you must be registred on-chain and have on your on-chain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your on-chain balance.</p>
+    </div>
+    <div v-else>
+      <h3>Registration</h3>
+      <p>You are not currently registered on the blockchain. On-chain registration is not required but it allows you to insure your balances, start disputes with hubs and do rebalances yourself. Your account will be registered automatically once you have more money in uninsured balances. </p>
+      <p>Otherwise you can ask someone to rebalance on-chain at least $10 to your temporary ID: <br>
+      <b>{{pubkey}}</b></p>
 
-
-
+    </div>
   </div>
 
 
@@ -707,13 +706,14 @@ FS.onready(() => {
     <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
         <p>For greatly increased security our install process is a little bit longer than just downloading an executable file. First, you'd need <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
-        <pre><code>{{install_snippet}}
-</code></pre>
+        <pre><code>{{install_snippet}}</code></pre>
         <p>Double check it visually with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal.app</p>
 
         <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li></ul>
 
-        <p>On Windows? <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with <kbd>certUtil -hashfile Failsafe-N.tar.gz SHA256</kbd> then run <kbd>./install && node fs -p8001</kbd> (8001 is default port). You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
+        <p>On Windows? <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with <kbd>certUtil -hashfile Failsafe-{{K.last_snapshot_height}}.tar.gz SHA256</kbd> then run <kbd>./install && node fs -p8001</kbd> (8001 is default port). You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
+
+        <p>Looking for genesis state for research or analytics? <a href="/Failsafe-1.tar.gz">Get Failsafe-1.tar.gz here</a></p>
     </div>
 
 
@@ -739,13 +739,14 @@ FS.onready(() => {
         <br>2. Edit code in "after", test it, then <b>diff -Naur before after > after.patch</b></small>
       </div>
 
-      <p><button @click="call('propose', proposal)" class="btn btn-warning">Propose</button></p>
-
+      <p v-if="my_member"><button @click="call('propose', proposal)" class="btn btn-warning">Propose</button></p>
+      <p v-else>Currently only stakeholders can submit a new amendment.</p>
 
 
       <div v-for="p in proposals">
         <h4>#{{p.id}}: {{p.desc}}</h4>
         <small>Proposed by #{{p.user.id}}</small>
+        <div v-html="icon(toHexString(p.user.pubkey.data),30)"></div>
 
         <pre><code class="javascript hljs" v-html="hljs('javascript',p.code).value"></code></pre>
 
@@ -755,6 +756,7 @@ FS.onready(() => {
         </div>
 
         <p v-for="u in p.voters">
+          <div v-html="icon(toHexString(u.pubkey.data),30)"></div>
           <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by #{{u.id}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
         </p>
 
@@ -767,10 +769,7 @@ FS.onready(() => {
           </p>
 
         </div>
-
       </div>
-
-
     </div>
 
 
@@ -835,7 +834,7 @@ FS.onready(() => {
                   </template>
 
                   <template v-for="d in m.outputs">
-                    <span class="badge badge-success" >{{commy(d[0])}} to {{d[2] ? (d[1] == m.signer.id ? '': d[1])+'@'+d[2] : d[1]}}</span>&nbsp;
+                    <span class="badge badge-success" >{{commy(d[0])}} to {{d[2] ? (d[1] == m.signer.id ? '': d[1])+'@'+d[2] : d[1]}}{{d[3] ? ' for '+d[3] : ''}}</span>&nbsp;
                   </template>
                 </template>
 
