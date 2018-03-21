@@ -231,6 +231,29 @@ module.exports = async (ws, msg) => {
       ec(input, me.id.secretKey),
       r([amount])
     ]))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   } else if (inputType == 'ack') { // our payment was acknowledged
     var [pubkey, sig, body] = r(msg)
     var ch = await me.channel(pubkey)
@@ -264,114 +287,14 @@ module.exports = async (ws, msg) => {
 
     delete(purchases[invoice])
 
+
+
+
+
+
+
+
   } else if (inputType == 'update') { // New payment arrived
-    var [pubkey, sig, body] = r(msg)
-    var ch = await me.channel(pubkey)
-
-    if (ec.verify(body, sig, pubkey)) {
-      var [method, transitions, stateSig, newState] = r(body)
-
-      if (readInt(method) != methodMap('update')) {
-        l('Invalid update input')
-        return false
-      }
-
-      var [action, amount, mediate_hub, mediate_to, invoice] = transitions[0]
-
-      if (readInt(action) != methodMap('unlockedPayment')) {
-        return l('Wrong method')
-      }
-
-      amount = readInt(amount)
-      mediate_hub = readInt(mediate_hub)
-
-      if (amount < 99) {
-        l('Too low amount')
-        return false
-      }
-
-      if (amount > ch.they_payable) {
-        l('Channel is depleted for ' + amount, ch)
-        return false
-      }
-
-      if (ch.d.status != 'ready') {
-        l('Channel is not ready: ' + ch.d.status)
-        return false
-      }
-
-      ch.d.offdelta += ch.left ? amount : -amount
-      ch.d.nonce++
-
-      var resultState = ch.d.getState()
-
-      if (!resultState.equals(newState)) {
-        return l('State mismatch ', resultState, newState)
-      }
-
-      if (!ec.verify(resultState, stateSig, pubkey)) {
-        return l('Invalid state sig')
-      }
-      ch.d.sig = stateSig
-
-      // TESTNET: storing most profitable outcome for us
-      var profitable = r(ch.d.most_profitable)
-      if ((ch.left && ch.d.offdelta > readSInt(profitable[0])) ||
-        (!ch.left && ch.d.offdelta < readSInt(profitable[0]))) {
-        ch.d.most_profitable = r([packSInt(ch.d.offdelta), ch.d.nonce, ch.d.sig])
-      }
-
-      l('The payment is accepted!')
-      await ch.d.save()
-
-      if (me.is_hub && mediate_to.length > 1) {
-        l(`Forward to peer or other hub ${mediate_to.length}`)
-
-
-        me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
-
-
-        var partner = mediate_hub == me.record.id ? mediate_to : Members.find(m => m.id == mediate_hub).pubkey
-
-        await me.payChannel({
-          partner: partner,
-          amount: afterFees(amount),
-
-          mediate_to: mediate_to,
-          mediate_hub: mediate_hub,
-
-          return_to: pubkey,
-          invoice: invoice
-        })
-      } else if (true) {
-        l('Looking for invoice ', invoice, mediate_to)
-
-        var paid_invoice = invoices[toHex(invoice)]
-
-        // TODO: did we get right amount in right asset?
-        if (paid_invoice && amount >= paid_invoice.amount - 1000) {
-          //paid_invoice.status == 'pending'
-
-          // handicap
-          await sleep(1000)
-
-          l('Our invoice was paid!', paid_invoice)
-          paid_invoice.status = 'paid'
-        } else {
-          l('No such invoice found. Donation?')
-        }
-
-        l('Acking back to ', pubkey)
-        me.send(pubkey, 'ack', me.envelope(
-          paid_invoice ? paid_invoice.secret : 0, ec(ch.d.getState(), me.id.secretKey)
-        ))
-
-        await me.addHistory(pubkey, amount, 'Received', true)
-
-        react()
-      } else {
-        l("No mediation target")
-      }
-    }
+    await require('./update_channel')(msg)
   }
 }

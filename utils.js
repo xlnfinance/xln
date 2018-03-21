@@ -7,6 +7,7 @@ http = require('http')
 os = require('os')
 ws = require('ws')
 opn = require('./lib/opn')
+chalk = require('chalk')
 
 // crypto
 crypto = require('crypto')
@@ -169,9 +170,14 @@ methodMap = (i) => {
 
 
     'update',   // transitions to state machine + new sig
-    'unlockedPayment', // pay without hashlock
     'ack',
     'setLimits',
+
+    // state machine transitions
+    'addHashlock', // we add hashlock transfer to state, go as unlocker
+    'cancelHashlock', // couldn't get unlock for <reason>, delete hashlock
+    'unlockHashlock', // we've got the secret so please unlock and apply to base offdelta
+     
 
 
     'auth' // any kind of off-chain auth signatures between peers
