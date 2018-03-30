@@ -27,3 +27,15 @@ Work in progress. Full RFC before late April.
 
 See <a href="https://github.com/failsafenetwork/failsafe/wiki">Wiki</a>
 
+## Codestyle
+
+* async/await is the only way to keep your sanity using JS
+
+* return early, don't stack elses on each other http://blog.timoxley.com/post/47041269194/avoid-else-return-early
+
+* deleted code is best code. Keep complexity/LOC as low as possible
+
+
+
+
+

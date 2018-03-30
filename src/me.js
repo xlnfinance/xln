@@ -23,7 +23,8 @@ class Me {
   // derives needed keys from the seed, saves creds into pk.json
   async init (username, seed) {
     this.processBlock = require('./block')
-    this.payChannel = require('./channel')
+    this.payChannel = require('./pay_channel')
+    this.updateChannel = require('./update_channel')
 
     this.username = username
 

@@ -498,7 +498,7 @@ FS.onready(() => {
 
             <p>Receivable: {{commy(ch.they_payable)}}</p>
 
-            <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, partner: ch.partner, amount: uncommy(off_amount)})">→ Request</button></p>
+            <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, partner: ch.partner, amount: uncommy(off_amount)})">→ Request Money</button></p>
 
             <p v-for="(value, k) in invoices" style="word-wrap: break-word">Invoice for {{commy(value.amount)}} ({{value.status}}):<br> {{value.invoice}}</p>
 
@@ -512,7 +512,7 @@ FS.onready(() => {
 
             <p>Payable: {{commy(ch.payable)}}</p>
 
-            <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {partner: ch.partner}) ); pay_invoice='';">Pay Now → </button></p>
+            <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {partner: ch.partner}) ); pay_invoice='';">Send Money → </button></p>
 
             <p v-for="(value, k) in purchases">Payment sent for invoice: {{k}}</p>
 

@@ -23,70 +23,63 @@ module.exports = async (opts) => {
     ]
   })
   */
-  var compared = Buffer.compare(ch.d.myId, ch.d.partnerId)
+  
+  ch.d.status = 'await'
 
   var transitions = []
-
-  var newState = [methodMap('offdelta'),
-    compared==-1?ch.d.myId:ch.d.partnerId,
-    compared==-1?ch.d.partnerId:ch.d.myId,
-    ch.d.nonce++,
-    packSInt(ch.d.offdelta),
-    (await ch.d.getTransitions({where: {status: 'hashlock'}})).map(
-      t=>[packSInt(t.offdelta), t.hash, t.exp]
-      ) 
-  ]
-
-  l(chalk.red(newState))
-
+  var newState = await ch.d.getState()
 
   var list = await ch.d.getTransitions({where:{status: 'await'}})
   var payable = ch.payable
 
   for (var t of list) {
     // is valid transition right now?
-    if (t.offdelta > payable) continue
+    var amount = ch.left ? -t.offdelta : t.offdelta
 
-    payable -= t.offdelta
+    if (amount < 0 || amount > payable) {
+      l("wrong amount")
+      continue
+    }
 
-    // has not been acked yet
-    transitions.push([methodMap('addHashlock'), 
-      t.offdelta, 
-      t.hash, 
-      t.exp,
-      t.unlocker
-    ])
+    payable -= amount
+
+    newState[3]++ //nonce
+
+
+    l('transfer ', ch.left, t.offdelta)
     // add hashlocks
     newState[5].push([packSInt(t.offdelta), t.hash, t.exp])
+
+
+    var state = r(newState)
+    transitions.push([
+      methodMap('addlock'),
+      [
+        packSInt(t.offdelta), 
+        t.hash, 
+        t.exp,
+        t.unlocker
+      ],
+      ec(state, me.id.secretKey), 
+      state // debug only
+    ])
+
   }
 
-
-  newState = r(newState)
-
-  var body = r([
-    methodMap('update'),
-    transitions,
-    // sign final state
-    ec(newState, me.id.secretKey),
-    // share our state for debug
-    newState
-  ])
-
-  var signedState = r([
-    me.pubkey,
-    ec(body, me.id.secretKey),
-    body
-  ])
-
-  ch.d.status = 'await'
-
+  ch.d.nonce = newState[3]
   await ch.d.save()
 
 
   // what do we do when we get the secret
   if (opts.return_to) purchases[toHex(opts.invoice)] = opts.return_to
 
-  if (!me.send(opts.partner, 'update', signedState)) {
+
+  l("Sending an update to ", opts.partner, transitions)
+
+  // transitions: method, args, sig, new state
+  var envelope = me.envelope(methodMap('update'), transitions)
+
+  if (!me.send(opts.partner, 'update', envelope)) {
     //l(`${opts.partner} not online, deliver later?`)
   }
 

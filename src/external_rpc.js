@@ -292,9 +292,7 @@ module.exports = async (ws, msg) => {
 
 
 
-
-
   } else if (inputType == 'update') { // New payment arrived
-    await require('./update_channel')(msg)
+    await me.updateChannel(msg)
   }
 }

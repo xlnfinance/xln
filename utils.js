@@ -165,22 +165,38 @@ methodMap = (i) => {
     'propose',
     'vote',
 
-    'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
     'offdelta',    // delayed balance proof
 
 
-    'update',   // transitions to state machine + new sig
+
+    // state machine transitions, sent peer to peer off-chain
+    'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
+
+    'update',  
     'ack',
     'setLimits',
 
-    // state machine transitions
-    'addHashlock', // we add hashlock transfer to state, go as unlocker
-    'cancelHashlock', // couldn't get unlock for <reason>, delete hashlock
-    'unlockHashlock', // we've got the secret so please unlock and apply to base offdelta
+    // 10,[] => 15,[] - add directly to base offdelta
+    'add',
+
+    // 15,[] => 15,[] - (NOT STATE CHANGING) offdelta remains the same, there was no hashlock
+    'settle',
+
+    // 15,[] => 10,[] - secret not found, offdelta is decreased voluntarily 
+    'fail',
      
+    // 10,[] => 10,[[5,H1,E1]]
+    'addlock', // we add hashlock transfer to state. 
+
+    // 10,[[5,H1,E1]] => 15,[]
+    'settlelock', // we've got the secret so please unlock and apply to base offdelta
+   
+    // 10,[[5,H1,E1]] => 10,[]
+    'faillock', // couldn't get secret for <reason>, delete hashlock
 
 
-    'auth' // any kind of off-chain auth signatures between peers
+
+    'auth', // any kind of off-chain auth signatures between peers
 
   ]
 

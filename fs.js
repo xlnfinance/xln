@@ -513,6 +513,7 @@ Delta = privSequelize.define('delta', {
   hashlocks: Sequelize.TEXT,
 
   sig: Sequelize.TEXT,
+  signed_state: Sequelize.TEXT,
 
   // testnet: cheaty transaction
   most_profitable: Sequelize.TEXT
@@ -539,17 +540,29 @@ Transition.belongsTo(Delta)
 
 
 
-Delta.prototype.getState = function () {
+
+
+Delta.prototype.getState = async function () {
   var compared = Buffer.compare(this.myId, this.partnerId)
 
-  return r([methodMap('offdelta'),
+  var state = [
+    methodMap('dispute'),
     compared==-1?this.myId:this.partnerId,
     compared==-1?this.partnerId:this.myId,
     this.nonce,
     packSInt(this.offdelta),
-    [] //this.hashlocks
-  ])
+    (await this.getTransitions({where: {status: 'hashlock'}})).map(
+      t=>[packSInt(t.offdelta), t.hash, t.exp]
+    )
+  ]
+
+  return state
 }
+
+
+
+
+
 
 Delta.prototype.getDispute = async function() {
   // post last sig if any
@@ -661,6 +674,8 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
         m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
       }
 
+    } else {
+      throw "No K.json"
     }
 
     await privSequelize.sync({force: false})

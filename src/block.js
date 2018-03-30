@@ -74,7 +74,7 @@ module.exports = async (block) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 10 == 0) l(`Processed block ${K.total_blocks} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
+  if (K.total_blocks % 50 == 0) l(`Processed block ${K.total_blocks} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
 
 
   if (finalblock.length < K.blocksize - 1000) {

@@ -109,7 +109,7 @@ module.exports = {
             var offdelta = readSInt(offdelta) // SIGNED int
 
             var state = r([
-              methodMap('offdelta'),
+              methodMap('dispute'),
               compared == -1 ? signer.pubkey : partner.pubkey,
               compared == -1 ? partner.pubkey : signer.pubkey,
               dispute_nonce,

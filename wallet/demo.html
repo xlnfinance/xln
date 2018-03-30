@@ -1,0 +1,306 @@
+<script>
+
+log = (where, act)=>{
+  window[where].innerHTML += `<p>${act}</p>`
+}
+
+// insurance, delta
+
+ch = []
+
+users = [
+['Alice', 15],
+['Bob', 15],
+['Shop', 15],
+['Creditor',20]
+]
+
+hub_balance = 15
+for(var i=0;i<4;i++){
+  ch[i] = [0, 0]
+}
+
+
+risk = 10
+
+
+pad=(str, len)=>str.toString().padEnd(len, ' ')
+
+fill=(symbol, len)=>Array(len+1).join(symbol)
+
+resolveChannel = (insurance, delta, is_left=true) => {
+  var parts = {
+    // left user promises only with negative delta, scenario 3
+    promised: delta < 0 ? -delta : 0,
+    insured:      delta > insurance ? insurance : (delta > 0 ? delta             : 0),
+    they_insured: delta > insurance ? 0         : (delta > 0 ? insurance - delta : insurance),
+    // right user promises when delta goes beyond insurance, scenario 1
+    they_promised: delta > insurance ? delta - insurance : 0
+  }
+  
+  // default view is left. if current user is right, simply reverse
+  if (!is_left) {
+    [parts.promised, parts.insured, parts.they_insured, parts.they_promised] = 
+    [parts.they_promised, parts.they_insured, parts.insured, parts.promised]
+  }
+
+  return parts
+}
+
+setInterval(()=>{
+  render()
+},100)
+
+
+send = (from, to, amount=1)=>{
+  if (amount > 1) {
+    log('off',users[from][0]+' sends $'+amount+' to '+users[to][0]+' via hub')
+
+    for (i=0;i<amount;i++){
+      setTimeout(()=>{
+        send(from, to, 1)
+      },100*i)
+    }
+
+  } else {
+    ch[from][1] -= amount
+    ch[to][1] += amount
+  }
+
+}
+
+
+slowmo = (cb, times)=>{
+  for (i=0;i<times;i++){
+    setTimeout(()=>{
+      cb()
+    },80*i)
+  }
+}
+
+
+
+
+
+var render = function () {
+
+
+
+  var html = `<b>Channels with Hub. Hub's balance: </b>${fill('$',hub_balance)} \n\n`
+
+  for (var id in ch) {
+    var u = ch[id]
+
+    var r = resolveChannel(u[0], u[1])
+    var bar = fill('-', r.promised) + fill('$', r.insured) + fill('$', r.they_insured) + fill('-', r.they_promised)
+
+    var insert_at = u[1] + r.promised
+
+    bar = bar.slice(0, insert_at) + '|' + bar.slice(insert_at)
+
+    html += '<b>'+pad(users[id][0], 10)+'</b>' + 
+    fill(' ', 50-insert_at) + 
+    bar + 
+    fill(' ', 50-(bar.length-insert_at)) + `\n${fill('$',users[id][1])}\n\n`
+  }
+  
+
+  asc.innerHTML = html
+}
+
+steps = []
+
+steps.push(()=>{
+
+  info.innerHTML=`<p>Alice just deposited $10 to channel with hub. You will see an on-chain action below - it must be processed on every node.</p>
+  <p>The channel is represented by a row of $. The delimiter | shows who owns what in this channel, everything to the left belongs to the user, to the right - to hub. When we say we deposit to user1@user2 it means we add the money <b>to the user1's side</b> in the channel with user2, and vice versa if user2@user1.</p>`
+
+  log('on', 'Alice deposits $10 to alice@hub')
+
+  slowmo(()=>{
+    ch[0][0]++
+    ch[0][1]++
+
+    users[0][1]--
+  }, 10)
+})
+
+
+
+steps.push(()=>{
+  info.innerHTML=`Alice wants to send Bob $5. Under original LN concept, the hub must somehow figure out and deposit at least $5 to a channel with Bob beforehand. Let's assume the hub does that and puts up $7 in collateral.`
+
+  log('on','Hub deposits $7 to hub@bob')
+
+  slowmo(()=>{
+    ch[1][0]++
+    hub_balance--
+  }, 7)
+
+  
+})
+
+
+steps.push(()=>{
+  info.innerHTML=`Finally, the Alice can send to Bob. She is doing it off-chain, first she sends a balance proof to hub, who in their turn sends balance proof to Bob.`
+
+  send(0, 1, 5)
+  
+})
+
+
+
+steps.push(()=>{
+  info.innerHTML=`If Alice wants to send another $5 however, the hub must deposit collateral again, since the channel is depleted. Hub is getting out of collateral already!`
+
+  log('on','Hub deposits $5 to hub@bob')
+
+  slowmo(()=>{
+    ch[1][0]++
+    hub_balance--
+  }, 5)
+  
+})
+
+
+
+
+steps.push(()=>{
+  info.innerHTML=`Alright, Alice spent all the money and now hub has no collateral to open new channels. Maybe, there's someone who could provide the collateral for hub to operate? Creditor!`
+  send(0, 1, 5)
+
+  
+})
+
+
+steps.push(()=>{
+  info.innerHTML=`Somehow, the Creditor decided to give the hub all its money ($20) in return for luxirious (actually not) off-chain fees that the hub collects. Now the Creditor may lose all their assets, <b>as they are entirely in custody of the hub</b>. There is no way for Creditor to enforce the promise of the hub or to get their money back. The returns on investments are incredibly low as well. --- represent the custodian balance of Creditor with hub.`
+
+  log('on','Creditor deposits $20 to hub')
+
+  slowmo(()=>{
+    ch[3][1]++
+    users[3][1]--
+
+    hub_balance++
+  }, 20)
+  
+})
+
+steps.push(()=>{
+  info.innerHTML=`<p>Bob wants to send all $10 to the shop. Now hub must again provide collateral before hand, and send expensive on-chain tx. There's no way for hub to know if the shop is a real entity or if that off-chain transaction will happen at all. <b>There's zero incentive for the hub to do it this way.</b></p>
+
+    <p>This is how LN is hoping to work, but as we've visually demonstrated, <b>none of that makes any sense.</b> Creditors have no incentive to risk their assets for nothing. Hubs have no incentive to risk collateral and open channels to unverified users. Users have no incentive to open channels to anyone else but most connected nodes (hubs, yes). Providing collateral on-chain beforehand requires a ton of guessing and unnecessary on-chain transactions, making it too expensive.</p>
+
+    <p>Let's try another approach: instead of putting up collateral beforehand let's allow <b>the hub promise money up to a credit line</b>.</p>`
+
+
+  log('on','Hub deposits $15 to hub@shop')
+
+  slowmo(()=>{
+    ch[2][0]++
+
+    hub_balance--
+  }, 15)
+})
+
+
+steps.push(()=>{
+  info.innerHTML=`We've rolled back everything. Let's start from scratch, Alice has just deposited $10 to alice@hub and wants to send $5 to Bob off-chain.`
+
+  on.innerHTML = ''
+  off.innerHTML = ''
+
+  users = [
+  ['Alice', 15],
+  ['Bob', 15],
+  ['Shop', 15],
+  ['Rent',15]
+  ]
+
+  hub_balance = 15
+  for(var i=0;i<4;i++){
+    ch[i] = [0, 0]
+  }
+
+
+  log('on', 'Alice deposits $10 to alice@hub')
+
+  slowmo(()=>{
+    ch[0][0]++
+    ch[0][1]++
+
+    users[0][1]--
+  }, 10)
+
+})
+
+
+steps.push(()=>{
+  info.innerHTML=`We can simply let the hub promise the $5 to Bob the same way hub did it to the creditor. <b>It's called uninsured balance</b>. In other words, we make all users liquidity providers themselves, without need for any external liquidity. <p>That will put some manageable risk on the shoulders of users instead of liquidity providers, and will require a lot less on-chain transactions</p> `
+  send(0, 1, 5)
+})
+
+
+steps.push(()=>{
+  info.innerHTML=`Bob in their turn can easily send that uninsured money forward to anyone else.`
+  send(1, 2, 3)
+})
+
+steps.push(()=>{
+  info.innerHTML=`Bob in their turn can easily send that uninsured money forward to anyone else.`
+  send(1, 3, 2)
+})
+
+steps.push(()=>{
+  info.innerHTML=`Finally, the hub can always insure - with $ with an on-chain rebalance tx.`
+
+  log('on','Hub takes 5 from hub@alice and deposits 3 to hub@shop, 2 to hub@rent')
+
+  ch[0][0]-=5
+
+  ch[2][0]+=3
+  ch[3][0]+=2
+})
+
+steps.push(()=>{
+  info.innerHTML=`Let's deposit all global balances to channels. To be continued.`
+
+  log('on','Bob deposits 5 to ')
+
+  for(i=0;i<4;i++){
+    ch[i][0]+=users[i][1]
+    ch[i][1]+=users[i][1]
+    log('on',users[i][0]+' deposits '+users[i][1]+' to '+users[i][0]+'@hub')
+
+    users[i][1]=0
+  }
+
+
+
+})
+
+
+
+window.onload = render
+</script>
+
+
+<div style="height:430px;font-size:24px" ><pre id=asc></pre></div>
+
+<center> <button onclick="steps.shift()()">Next Slide</button> </center>
+<br><br>
+
+<div style="font-size:24px; padding:40px" id=info>This is a dead simple and, hopefully, obvious visual demonstration of payment channels. We'll show how LN works, demonstrate the liquidity problem and propose a simple solution to it. Below every user you will see their global on-chain balance (Alice, Bob, Carol and Hub have 15 coins each, creditor has 20). Moving those is slow as it requires public broadcast, so let's create a payment channel.</div>
+
+<br><br>
+
+<div style="float:left; padding: 40px" width="50%"><b>Off-chain events (processed between participating nodes only)</b>
+<div id=off></div>
+</div>
+<div  style="float:right; padding: 40px" width="50%"><b>On-chain events (must be processed on every node)</b>
+<div id=on></div>
+
+</div>
+
+
