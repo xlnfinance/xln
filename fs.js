@@ -217,8 +217,6 @@ initDashboard = async a => {
     var server = require('http').createServer(cb)
   }
 
-  l('Set up HTTP server at ' + base_port)
-  server.listen(base_port).on('error', l)
 
   me = new Me()
 
@@ -235,6 +233,22 @@ initDashboard = async a => {
     }
   }
 
+
+  var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
+  l('Open ' + url + ' in your browser')
+  server.listen(base_port).once('error', function(err) {
+    if (err.code === 'EADDRINUSE') {
+      l('port is currently in use')
+      process.exit()  
+    }
+  });
+  
+  l('fff')
+
+  // opn doesn't work in SSH console
+  if (base_port != 443) opn(url)
+
+
   if (argv.username) {
     var seed = await derive(argv.username, argv.pw)
     await me.init(argv.username, seed)
@@ -246,11 +260,6 @@ initDashboard = async a => {
   
   me.processQueue()
 
-  var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
-  l('Open ' + url + ' in your browser')
-
-  // opn doesn't work in SSH console
-  if (base_port != 443) opn(url)
 
   localwss = new ws.Server({ server: server, maxPayload: 64 * 1024 * 1024 })
 
@@ -526,6 +535,9 @@ Transition = privSequelize.define('transition', {
   status: Sequelize.TEXT,
 
   // who is recipient
+  mediate_to: Sequelize.TEXT,
+
+  // string needed to decrypt
   unlocker: Sequelize.TEXT,
 
   // a change in offdelta 
@@ -550,9 +562,9 @@ Delta.prototype.getState = async function () {
     compared==-1?this.myId:this.partnerId,
     compared==-1?this.partnerId:this.myId,
     this.nonce,
-    packSInt(this.offdelta),
+    this.offdelta,
     (await this.getTransitions({where: {status: 'hashlock'}})).map(
-      t=>[packSInt(t.offdelta), t.hash, t.exp]
+      t=>[t.offdelta, t.hash, t.exp]
     )
   ]
 
@@ -567,14 +579,14 @@ Delta.prototype.getState = async function () {
 Delta.prototype.getDispute = async function() {
   // post last sig if any
   var partner = await User.idOrKey(this.partnerId)
-  return this.sig ? [partner.id, this.sig, this.nonce, packSInt(this.offdelta), []] : [partner.id]
+  return this.sig ? [partner.id, this.sig, this.nonce, this.offdelta, []] : [partner.id]
 }
 
 Delta.prototype.startDispute = async function(profitable) {
   if (profitable) {
     if (this.most_profitable) {          
       var profitable = r(this.most_profitable)
-      this.offdelta = readSInt(profitable[0])
+      this.offdelta = readInt(profitable[0])
       this.nonce = readInt(profitable[1])
       this.sig = profitable[2]
     } else {

@@ -17,14 +17,12 @@ class Me {
 
     this.intervals = []
 
-    this.next_member = false    
+    this.next_member = false
+
   }
 
   // derives needed keys from the seed, saves creds into pk.json
   async init (username, seed) {
-    this.processBlock = require('./block')
-    this.payChannel = require('./pay_channel')
-    this.updateChannel = require('./update_channel')
 
     this.username = username
 
@@ -34,6 +32,9 @@ class Me {
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
+    
+    this.box = nacl.box.keyPair.fromSecretKey(this.seed)
+
 
     this.record = await this.byKey()
 
@@ -351,6 +352,11 @@ class Me {
     return true
   }
 }
+
+Me.prototype.processBlock = require('./block')
+Me.prototype.payChannel = require('./pay_channel')
+Me.prototype.updateChannel = require('./update_channel')
+
 
 module.exports = {
   Me: Me

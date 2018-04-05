@@ -7,13 +7,16 @@ module.exports = async (opts) => {
 
   l(chalk.blue("Adding a transition"))
 
-  await ch.d.createTransition({
-    hash: opts.invoice,
+  var t = await ch.d.createTransition({
+    hash: opts.hash,
     offdelta: ch.left ? -opts.amount : opts.amount,
     exp: K.usable_blocks + 10,
-    unlocker: opts.mediate_to,
+    mediate_to: opts.mediate_to,
+    unlocker: opts.unlocker ? opts.unlocker : false,
     status: 'await'
   })
+
+  l('new tr', t)
 
   /*
 
@@ -30,6 +33,11 @@ module.exports = async (opts) => {
   var newState = await ch.d.getState()
 
   var list = await ch.d.getTransitions({where:{status: 'await'}})
+
+  l('tr list ',list)
+
+
+
   var payable = ch.payable
 
   for (var t of list) {
@@ -48,16 +56,21 @@ module.exports = async (opts) => {
 
     l('transfer ', ch.left, t.offdelta)
     // add hashlocks
-    newState[5].push([packSInt(t.offdelta), t.hash, t.exp])
+
+    l(t)
+
+
+    newState[5].push([t.offdelta, t.hash, t.exp])
 
 
     var state = r(newState)
     transitions.push([
-      methodMap('addlock'),
+      methodMap(t.unlocker ? 'addlock' : 'add'),
       [
-        packSInt(t.offdelta), 
+        t.offdelta, 
         t.hash, 
         t.exp,
+        t.mediate_to,
         t.unlocker
       ],
       ec(state, me.id.secretKey), 
@@ -65,6 +78,8 @@ module.exports = async (opts) => {
     ])
 
   }
+
+  if (transitions.length == 0) return l("No transitions")
 
   ch.d.nonce = newState[3]
   await ch.d.save()

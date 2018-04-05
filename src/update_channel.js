@@ -21,8 +21,6 @@ module.exports = async (msg) => {
     return false
   }
 
-
-
   l("New transitions arrived, lets apply them: ", transitions)
 
   var receivable = ch.they_payable
@@ -31,11 +29,12 @@ module.exports = async (msg) => {
 
   // we process every transition to state, verify the sig, if valid - execute the action
   for (var t of transitions) {
-    if (readInt(t[0]) == methodMap('addlock')) {
-      var [offdelta, hash, exp, unlocker] = t[1]
+    var m = methodMap(readInt(t[0]))
+    if (m == 'addlock' || m == 'add') {
+      var [offdelta, hash, exp, mediate_to, unlocker] = t[1]
 
       exp = readInt(exp)
-      offdelta = readSInt(offdelta)
+      offdelta = readInt(offdelta)
 
       var amount = ch.left ? offdelta : -offdelta
       if (amount < 0 || amount > receivable) {
@@ -46,19 +45,27 @@ module.exports = async (msg) => {
       l('We got ', amount)
 
       newState[3]++ //nonce
-      newState[5].push([packSInt(offdelta), hash, exp])
+      if (m == 'addlock') {
+        // push a hashlock
+        newState[5].push([offdelta, hash, exp])
+      } else {
+        // modify offdelta right away
+        newState[4] += offdelta
+      }
 
-
-      // check new state and sig
-
+      // check new state and sig, save
       if (!ec.verify(r(newState), t[2], pubkey)) {
         l('Invalid state sig: ', newState, r(t[3]))
         break
       }
       ch.d.nonce = newState[3]
       ch.d.sig = t[2]
+      ch.d.offdelta = newState[4]
       ch.d.signed_state = r(newState)
       await ch.d.save()
+
+
+
 
       // pay to unlocker
       if (me.is_hub && unlocker.length > 1) {
@@ -72,13 +79,24 @@ module.exports = async (msg) => {
         })
 
         await me.payChannel({
-          partner: unlocker,
+          partner: mediate_to,
+
+          unlocker: unlocker, // same unlocker passed over
           amount: afterFees(amount),
 
           return_to: pubkey,
-          invoice: hash
+          hash: hash
         })
       } else {
+        unlocker = r(unlocker)
+        var unlocked = nacl.box.open(unlocker[0], unlocker[1], unlocker[2], me.box.secretKey)
+        if (unlocked == null) {
+          return l("Bad unlocker")
+        }
+
+        l("Arrived payment!", unlocked)
+
+
         var paid_invoice = invoices[toHex(hash)]
 
         // TODO: did we get right amount in right asset?
@@ -109,6 +127,11 @@ module.exports = async (msg) => {
       }
 
 
+
+
+
+
+
     } else if (readInt(t[0]) == methodMap('settlelock')) {
       var hash = t[1]
       var index = newState[5].findIndex(hl=>hl[1].equals(hash))
@@ -117,7 +140,7 @@ module.exports = async (msg) => {
 
       if (hash.equals(sha3(t[2]))) {
         // secret was provided, apply to offdelta
-        ch.d.offdelta += readSInt(hl[0])
+        ch.d.offdelta += readInt(hl[0])
         newState[5].splice(index, 1)
 
 
@@ -166,9 +189,9 @@ module.exports = async (msg) => {
 
   // TESTNET: storing most profitable outcome for us
   var profitable = r(ch.d.most_profitable)
-  if ((ch.left && ch.d.offdelta > readSInt(profitable[0])) ||
-    (!ch.left && ch.d.offdelta < readSInt(profitable[0]))) {
-    ch.d.most_profitable = r([packSInt(ch.d.offdelta), ch.d.nonce, ch.d.sig])
+  if ((ch.left && ch.d.offdelta > readInt(profitable[0])) ||
+    (!ch.left && ch.d.offdelta < readInt(profitable[0]))) {
+    ch.d.most_profitable = r([ch.d.offdelta, ch.d.nonce, ch.d.sig])
   }
 
   l('The payment is accepted!')

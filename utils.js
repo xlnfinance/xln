@@ -23,8 +23,7 @@ ec.verify = nacl.sign.detached.verify
 // encoders
 BN = require('bn.js')
 stringify = require('./lib/stringify')
-rlp = require('rlp')
-
+rlp = require('./lib/rlp') // patched rlp for signed-integer
 
 Sequelize = require('sequelize')
 Op = Sequelize.Op
@@ -62,7 +61,16 @@ sleep = async function (ms) {
 
 localhost = '127.0.0.1'
 
-readInt = (i) => i.length > 0 ? i.readUIntBE(0, i.length) : 0
+readInt = (i) => {
+  // reads signed integer from RLP encoded buffer
+
+  if (i.length > 0) {
+    var num = i.readUIntBE(0, i.length) 
+    return (num % 2 == 1 ? -(num - 1) / 2 : num / 2)
+  } else {
+    return 0
+  }
+}
 
 toHex = (inp) => Buffer.from(inp).toString('hex')
 bin = (data) => Buffer.from(data)
@@ -73,6 +81,9 @@ kmac = (key, msg) => keccak('keccak256').update(key).update(bin(msg)).digest()
 
 ts = () => Math.round(new Date() / 1000)
 
+beforeFees = (amount) => {
+  return Math.round(amount * 1+K.hub_fee)
+}
 afterFees = (amount) => {
   var fee = Math.round(amount * K.hub_fee)
   if (fee == 0) fee = K.hub_fee_base
@@ -105,13 +116,6 @@ commy = (b, dot = true) => {
     }
   }
   return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-}
-
-// trick to pack signed int into unsigned int
-packSInt = (num) => (Math.abs(num) * 2) + (num < 0 ? 1 : 0)
-readSInt = (num) => {
-  num = readInt(num)
-  return (num % 2 == 1 ? -(num - 1) / 2 : num / 2)
 }
 
 concat = function () {
@@ -165,7 +169,9 @@ methodMap = (i) => {
     'propose',
     'vote',
 
+
     'offdelta',    // delayed balance proof
+    'dispute',    // delayed balance proof
 
 
 

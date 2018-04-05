@@ -106,14 +106,14 @@ module.exports = {
 
           if (sig) {
             var dispute_nonce = readInt(dispute_nonce)
-            var offdelta = readSInt(offdelta) // SIGNED int
+            var offdelta = readInt(offdelta) // SIGNED int
 
             var state = r([
               methodMap('dispute'),
               compared == -1 ? signer.pubkey : partner.pubkey,
               compared == -1 ? partner.pubkey : signer.pubkey,
               dispute_nonce,
-              packSInt(offdelta),
+              offdelta,
               hashlocks
             ])
 

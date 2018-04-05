@@ -57,13 +57,36 @@ module.exports = async (ws, msg) => {
       case 'send':
 
         // TODO: support batch sends
+        if (p.pay_invoice) {
+          var inv = p.pay_invoice.split('_')
+          var parsed = {}
 
-        var amount = parseInt(p.amount)
+          parsed.amount = inv[0]
+          parsed.invoice = inv[1]
+          parsed.box_pubkey = inv[2]
+          parsed.pubkey = inv[3]
+          parsed.partners = []
 
-        if (p.userId.length == 64) {
-          var mediate_to = Buffer.from(p.userId, 'hex')
+          for (var i = 4; i < inv.length; i++) {
+            parsed.partners.push(parseInt(inv[i]))
+          }
+
+          parsed.trimmedId = inv[2].length == 64 ? inv[2].substr(0, 10) + '...' : inv[2]
+
+          parsed.fee = Math.round(parseInt(parsed.amount) * 0.001)
+
+        }
+
+        if (p.dry_run) {
+          react({parsed_invoice: parsed})
+          return false
+        }
+
+
+        if (parsed.pubkey.length == 64) {
+          var mediate_to = Buffer.from(parsed.pubkey, 'hex')
         } else {
-          var mediate_to = await User.findById(parseInt(p.userId))
+          var mediate_to = await User.findById(parseInt(parsed.pubkey))
           if (mediate_to) {
             mediate_to = mediate_to.pubkey
           } else {
@@ -72,15 +95,28 @@ module.exports = async (ws, msg) => {
           }
         }
 
-        var partner = Members.find(m => m.id == p.partner).pubkey
+        var secret = crypto.randomBytes(32) // no need to store
+        var unlocker_nonce = crypto.randomBytes(24)
+
+        var box_pubkey = Buffer.from(parsed.box_pubkey, 'hex')
+        var invoice = Buffer.from(parsed.invoice, 'hex')
+
+        var hash = sha3(secret)
+
+        var amount = parseInt(parsed.amount)
+
+        var unlocker = nacl.box(r([amount, secret, invoice]), unlocker_nonce, box_pubkey, me.box.secretKey)
+
 
         var [status, error] = await me.payChannel({
-          partner: partner,
+          partner: Members[0].pubkey,
           amount: amount,
-          execution: p.execution,
+          hash: hash,
+
+          unlocker: r([bin(unlocker), unlocker_nonce, bin(me.box.publicKey)]),
 
           mediate_to: mediate_to,
-          mediate_hub: Members.find(m => m.hub && (m.hub.handle == p.hubId)).id,
+          mediate_hub: parsed.partners,
 
           return_to: (obj) => {
             react(obj)
@@ -89,9 +125,8 @@ module.exports = async (ws, msg) => {
               result: obj,
               id: json.id
             })) : ws.end(JSON.stringify(obj))
-          },
+          }
 
-          invoice: Buffer.from(p.invoice, 'hex')
         })
 
         if (error) {
@@ -223,28 +258,41 @@ module.exports = async (ws, msg) => {
             invoices[p.invoice].status = 'archive'
           }
         } else if (p.amount) {
+          var amount = parseInt(p.amount)
+
           var secret = crypto.randomBytes(32)
-          var invoice = toHex(sha3(secret))
+          var invoice = sha3(secret)
 
           me.record = await me.byKey()
 
-          invoices[invoice] = {
+          // format: bin(me.box.publicKey)
+
+          // we attempt to sort members by receivable to increase chance of payment success
+          
+          // todo: all channels or particular?
+          var offered_partners = (await me.channels())
+          .sort((a,b)=>b.they_payable - a.they_payable)
+          .filter(a=>a.they_payable >= amount)
+          .map(a=>a.partner).join('_')
+
+          var rawInvoice = ([
+            amount,
+            toHex(invoice),
+            toHex(me.box.publicKey),
+            me.record ? me.record.id : toHex(me.pubkey), // onchain allowed?
+            offered_partners,
+          ]).join('_')
+
+
+          invoices[toHex(invoice)] = {
             secret: secret,
             amount: parseInt(p.amount),
             extra: p.extra,
             status: 'pending',
-
-            invoice: [
-              parseInt(p.amount),
-              me.record ? me.record.id : toHex(me.pubkey),
-              Members.find(m => m.id == p.partner).hub.handle,
-              invoice
-            ].join('_')
-            
+            invoice: rawInvoice
           }
 
-
-          result.new_invoice = invoices[invoice].invoice
+          result.new_invoice = rawInvoice
 
           result.confirm = 'Invoice Created'
         }

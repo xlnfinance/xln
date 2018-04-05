@@ -203,18 +203,6 @@ FS.onready(() => {
       return parseInt(str.replace(/[^0-9]/g, ''))
     },
 
-    unpackInvoice: () => {
-      var i = app.pay_invoice.split('_')
-
-      return {
-        amount: i[0],
-        userId: i[1],
-        hubId: i[2],
-        invoice: i[3],
-        trimmedId: i[1].length == 64 ? i[1].substr(0, 10) + '...' : i[1]
-      }
-    },
-
     timeAgo: (time) => {
       var units = [
         { name: 'second', limit: 60, in_seconds: 1 },
@@ -245,6 +233,10 @@ FS.onready(() => {
       }
 
       app.settings = !app.settings
+    },
+
+    trim: (str) => {
+      return str.slice(0, 8) + '...'
     }
 
   }
@@ -310,6 +302,8 @@ FS.onready(() => {
 
         new_invoice: '',
         pay_invoice: '',
+        parsed_invoice: {},
+
         hardfork: ''
 
       }
@@ -322,7 +316,7 @@ FS.onready(() => {
 <div>
   <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
 
-    <a class="navbar-brand" href="#">Failsafe</a>
+    <a class="navbar-brand" href="#">Fairlayer</a>
     <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
       <span class="navbar-toggler-icon"></span>
     </button>
@@ -493,7 +487,7 @@ FS.onready(() => {
           <div class="col-sm-6">
             <p><div class="input-group" style="width:400px">
               <span class="input-group-addon" id="sizing-addon2">{{asset}}</span>
-              <input type="text" class="form-control " aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
+              <input type="text" class="form-control" aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
             </div></p>
 
             <p>Receivable: {{commy(ch.they_payable)}}</p>
@@ -507,18 +501,21 @@ FS.onready(() => {
 
           <div class="col-sm-6">
             <p><div class="input-group" style="width:400px" >
-              <input type="text" class="form-control small-input" v-model="pay_invoice" placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
+              <input type="text" class="form-control small-input" v-model="pay_invoice" @input="call('send', {dry_run: true, pay_invoice: pay_invoice})"  placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
             </div></p>
 
             <p>Payable: {{commy(ch.payable)}}</p>
 
-            <p><button type="button" class="btn btn-success" @click="call('send', Object.assign(unpackInvoice(), {partner: ch.partner}) ); pay_invoice='';">Send Money → </button></p>
+            <p><button type="button" class="btn btn-success" @click="call('send', {partner: ch.partner, pay_invoice: pay_invoice}); pay_invoice='';">Send Money → </button></p>
 
             <p v-for="(value, k) in purchases">Payment sent for invoice: {{k}}</p>
 
-            <div v-if="pay_invoice.length > 0">
-              <p>Amount: {{commy(unpackInvoice().amount)}}</p>
-              <p>Pay to: <b>{{unpackInvoice().trimmedId}}@{{unpackInvoice().hubId}}</b></p>
+            <div v-if="parsed_invoice && parsed_invoice.amount">
+              <p>Amount: {{commy(parsed_invoice.amount)}}</p>
+              <p>Fee: {{commy(parsed_invoice.fee)}}</p>
+              <p>Invoice: {{trim(parsed_invoice.invoice)}}</p>
+              <p>Destination: {{trim(parsed_invoice.pubkey)}}</p>
+              <p>Receiving hubs: <b>{{parsed_invoice.partners.join(', ')}}</b></p>
             </div>
 
           </div>
