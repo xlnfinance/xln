@@ -141,9 +141,14 @@ class Me {
     await cache()
     this.intervals.push(setInterval(cache, 2000))
 
-    this.intervals.push(setInterval(require('./consensus'), 2000))
+
+
 
     if (this.my_member) {
+
+      me.consensus()
+
+
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
       me.member_server = cert ? require('https').createServer(cert, cb) : require('http').createServer(cb)
@@ -158,7 +163,10 @@ class Me {
 
       me.wss.on('error', function (err) { console.error(err) })
       me.wss.on('connection', function (ws) {
-        ws.on('message', (msg) => { me.queue.push(['external_rpc', ws, msg]) })
+        ws.on('message', (msg) => { 
+          //me.queue.push(['external_rpc', ws, msg]) 
+          RPC.external_rpc(ws, msg)
+        })
       })
 
       for (var m of Members) {
@@ -332,7 +340,8 @@ class Me {
       me.users[m.pubkey] = new WebSocketClient()
 
       me.users[m.pubkey].onmessage = tx => {
-        this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
+        //this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
+        RPC.external_rpc(me.users[m.pubkey], bin(tx))
       }
 
       me.users[m.pubkey].onerror = function (e) {
@@ -357,6 +366,7 @@ Me.prototype.processBlock = require('./block')
 Me.prototype.payChannel = require('./pay_channel')
 Me.prototype.updateChannel = require('./update_channel')
 
+Me.prototype.consensus = require('./consensus')
 
 module.exports = {
   Me: Me

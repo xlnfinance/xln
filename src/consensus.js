@@ -1,12 +1,32 @@
-// Code run by validator to build blocks
-// TODO: Comply with tendermint consensus
+// Consensus Reactor - run by validators every second
+
+
+// TODO: Comply with tendermint consensus. Unlike tendermint we have no interest in fast 3s blocks and aim for "fat" blocks and low validator sig overhead with blocktime 1-10min
+
+/*
+This is a state machine where each transition is triggered by going to next step (time-based).
+
+
+0 propose
+10 broadcast everyone prevote on proposal or nil
+20 precommit if have prevotes 2/3+
+
+propose > prevote > precommit > commit
+
+*/
+
+
+
 module.exports = async () => {
   var now = ts()
+  var round = 5
 
   var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
-  var round = 2
 
   var searchIndex = 0
+
+
+
   for (var i in Members) {
     searchIndex += Members[i].shares
 
@@ -25,37 +45,16 @@ module.exports = async () => {
       break
     }
   }
+  
 
-  if (me.my_member == me.current) {
-      // do we have enough sig or it's time?
-    var sigs = []
-    var total_shares = 0
-    Members.map((c, index) => {
-      if (c.sig) {
-        sigs[index] = bin(c.sig)
-        total_shares += c.shares
-      } else {
-        sigs[index] = Buffer.alloc(64)
-      }
-    })
+  var second = now % K.blocktime
+  var phase = second < 5 ? 'propose' : (second < 10 ? 'prevote' : (second < 15 ? 'precommit' : 'commit'))
+  
 
-    if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - round)) {
-      if (total_shares < K.majority) {
-        l(`Only have ${total_shares} shares, cannot build a block!`)
-      } else {
-        await me.processBlock(concat(
-            Buffer.concat(sigs),
-            me.precommit
-          ))
-        fs.writeFileSync('data/k.json', stringify(K))
 
-      }
-        // flush sigs
-      Members.map(c => c.sig = null)
-
-      me.status = 'await'
-    } else if (me.status == 'await' && (now % K.blocktime < K.blocktime - round)) {
-      me.status = 'precommit'
+  // reactive state machine
+  if (me.current == me.my_member && me.status == 'await' && phase == 'propose') {
+      me.status = 'proposed'
 
       // processing mempool
       var ordered_tx = []
@@ -101,10 +100,39 @@ module.exports = async () => {
         })
       }
 
-      return me.precommit
 
-    }
-  } else {
-    me.status = 'await'
-  }
+
+
+      // do we have enough sig or it's time?
+    var sigs = []
+    var total_shares = 0
+    Members.map((c, index) => {
+      if (c.sig) {
+        sigs[index] = bin(c.sig)
+        total_shares += c.shares
+      } else {
+        sigs[index] = Buffer.alloc(64)
+      }
+    })
+
+    if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - round)) {
+      if (total_shares < K.majority) {
+        l(`Only have ${total_shares} shares, cannot build a block!`)
+      } else {
+        await me.processBlock(concat(
+            Buffer.concat(sigs),
+            me.precommit
+          ))
+        fs.writeFileSync('data/k.json', stringify(K))
+
+      }
+        // flush sigs
+      Members.map(c => c.sig = null)
+
+      me.status = 'await'
+    } 
+
+
+  setTimeout(me.consensus, 1000)
+
 }

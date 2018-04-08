@@ -134,8 +134,9 @@ inputMap = (i) => {
     'auth', // this socket belongs to my pubkey
 
     // consensus
-    'needSig', // member needs sig of others
-    'signed',  // other members return sigs of block
+    'propose',
+    'prevote', 
+    'precommit', 
 
     'tx', // propose array of tx to add to block
 

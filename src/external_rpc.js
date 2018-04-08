@@ -16,7 +16,7 @@ module.exports = async (ws, msg) => {
 
   msg = msg.slice(1)
 
-  if (['chain', 'sync', 'needSig', 'signed'].indexOf(inputType) == -1) l('External RPC: ' + inputType)
+  if (['chain', 'sync', 'propose', 'signed'].indexOf(inputType) == -1) l('External RPC: ' + inputType)
 
   // some socket is authenticating their pubkey
   if (inputType == 'auth') {
@@ -62,8 +62,12 @@ module.exports = async (ws, msg) => {
     }
 
 
+
+
+
+
   // another member wants a sig
-  } else if (inputType == 'needSig') {
+  } else if (inputType == 'propose') {
     var [pubkey, sig, block] = r(msg)
     var m = Members.find(f => f.block_pubkey.equals(pubkey))
 
@@ -71,14 +75,14 @@ module.exports = async (ws, msg) => {
     if (m && ec.verify(block, sig, pubkey)) {
       // l(`${m.id} asks us to sign their block!`)
 
-      me.send(m, 'signed', r([
+      me.send(m, 'prevote', r([
         me.my_member.block_pubkey,
         ec(block, me.block_keypair.secretKey)
       ])
       )
     }
   // we provide block sig back
-  } else if (inputType == 'signed') {
+  } else if (inputType == 'prevote') {
     var [pubkey, sig] = r(msg)
 
     var m = Members.find(f => f.block_pubkey.equals(pubkey))
@@ -94,6 +98,32 @@ module.exports = async (ws, msg) => {
     } else {
       l("this sig doesn't work for our block")
     }
+
+
+  } else if (inputType == 'precommit') {
+    var [pubkey, sig] = r(msg)
+
+    var m = Members.find(f => f.block_pubkey.equals(pubkey))
+
+    if (me.status != 'precommit') {
+      l('Not expecting any sigs')
+      return false
+    }
+
+    if (m && ec.verify(me.precommit, sig, pubkey)) {
+      m.sig = sig
+      // l(`Received another sig from  ${m.id}`)
+    } else {
+      l("this sig doesn't work for our block")
+    }
+
+
+
+
+
+
+
+
 
 
 

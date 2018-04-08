@@ -243,8 +243,6 @@ initDashboard = async a => {
     }
   });
   
-  l('fff')
-
   // opn doesn't work in SSH console
   if (base_port != 443) opn(url)
 
