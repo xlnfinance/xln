@@ -25,6 +25,7 @@ module.exports = async (ws, msg) => {
     if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
       if (pubkey.equals(me.pubkey)) return false
 
+      // wrap in custom WebSocketClient if it is a raw ws object
       if (ws.instance) {
         me.users[pubkey] = ws
       } else {
@@ -60,8 +61,6 @@ module.exports = async (ws, msg) => {
     } else {
       me.send(me.next_member(1), 'tx', msg)
     }
-
-
 
 
 
@@ -175,9 +174,13 @@ module.exports = async (ws, msg) => {
 
   } else if (inputType == 'chain') {
     var chain = r(msg)
+
+    l("Processing chain len "+chain.length)
     for (var block of chain) {
       await me.processBlock(block)
     }
+
+    // dirty hack to not backup k.json until all blocks are synced
     if (chain.length == sync_limit) {
       sync()
     } else {

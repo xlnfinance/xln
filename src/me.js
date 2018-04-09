@@ -201,9 +201,11 @@ class Me {
 
       me.wss.on('error', function (err) { console.error(err) })
       me.wss.on('connection', function (ws) {
-        ws.on('message', (msg) => { 
-          //me.queue.push(['external_rpc', ws, msg]) 
-          RPC.external_rpc(ws, msg)
+        ws.on('message', async (msg) => { 
+          me.queue.push(['external_rpc', ws, msg]) 
+          /*var unlock = await mutex('external_rpc')
+          await RPC.external_rpc(ws, msg)
+          unlock()*/
         })
       })
 
@@ -377,9 +379,11 @@ class Me {
     } else {
       me.users[m.pubkey] = new WebSocketClient()
 
-      me.users[m.pubkey].onmessage = tx => {
-        //this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
-        RPC.external_rpc(me.users[m.pubkey], bin(tx))
+      me.users[m.pubkey].onmessage = async tx => {
+        this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
+        /*var unlock = await mutex('external_rpc')
+        await RPC.external_rpc(me.users[m.pubkey], bin(tx))
+        unlock()*/
       }
 
       me.users[m.pubkey].onerror = function (e) {

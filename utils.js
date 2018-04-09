@@ -128,6 +128,43 @@ usage = () => {
   return Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
 }
 
+
+
+
+mutex = async function (key) {
+  return new Promise(resolve => {
+    // we resolve from mutex with a fn that fn() unlocks given key
+    var unlock = ()=>{ resolve(()=>mutex.unlock(key)) }
+ 
+    if (mutex.queue[key]) {
+      l('added to queue ', key)
+      mutex.queue[key].push(unlock)
+    } else {
+      l('init the queue, resolve now ', key)
+      mutex.queue[key] = []
+      unlock()
+    }
+
+  })
+}
+
+mutex.queue = {}
+mutex.unlock = async function (key) {
+  if (!mutex.queue[key]) {
+    l("Fail: there was no lock")
+  } else if (mutex.queue[key].length > 0) {
+    l('shifting from', mutex.queue[key])
+    mutex.queue[key].shift()()
+  } else {
+    l('delete queue', key)
+    delete(mutex.queue[key])
+  }
+}
+
+
+
+
+
 // tells external RPC how to parse this request
 inputMap = (i) => {
   var map = [

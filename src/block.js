@@ -4,6 +4,7 @@ module.exports = async (block) => {
   var shares = 0
   var precommit_body = r([methodMap('precommit'), header])
   for (var i = 0; i < Members.length; i++) {
+
     if (precommits[i] && 
       precommits[i].length == 64 && 
       ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
@@ -14,8 +15,7 @@ module.exports = async (block) => {
   }
 
   if (shares < K.majority) {
-    l('Not enough shares on a block')
-    return false
+    return l(`Not enough shares on a block ${shares}`)
   }
 
   var [methodId,

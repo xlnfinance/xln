@@ -173,8 +173,8 @@ module.exports = async () => {
 
       me.proposed_block = {}
 
-      await me.processBlock(block)
-      fs.writeFileSync('data/k.json', stringify(K))
+      // adding to our external queue to avoid race conditions 
+      me.queue.push(['external_rpc', null, concat(inputMap('chain'), r([block])) ]) 
 
     }
   }
