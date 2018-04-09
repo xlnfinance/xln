@@ -17,6 +17,8 @@ class Me {
 
     this.intervals = []
 
+    this.proposed_block = {}
+
   }
 
   // derives needed keys from the seed, saves creds into pk.json
@@ -156,6 +158,15 @@ class Me {
     ])
   }
 
+  block_envelope () {
+    var msg = r(Object.values(arguments))
+    return r([
+      bin(this.block_keypair.publicKey),
+      ec(msg, this.block_keypair.secretKey),
+      msg
+    ])
+  }
+
   async start () {
     // in json pubkeys are in hex
     this.record = await this.byKey()
@@ -174,9 +185,7 @@ class Me {
 
 
     if (this.my_member) {
-
-      me.consensus()
-
+      me.consensus() // 1s intervals
 
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}

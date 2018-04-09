@@ -29,7 +29,8 @@ module.exports = async (genesis) => {
     standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
     blocksize: 20000,
-    blocktime: 10,
+    blocktime: 20,
+
 
     // each genesis is randomized
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),

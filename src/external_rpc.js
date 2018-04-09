@@ -16,9 +16,9 @@ module.exports = async (ws, msg) => {
 
   msg = msg.slice(1)
 
-  if (['chain', 'sync', 'propose', 'signed'].indexOf(inputType) == -1) l('External RPC: ' + inputType)
+  // ignore some too frequest RPC commands 
+  if (['chain', 'sync', 'propose', 'prevote', 'precommit'].indexOf(inputType) == -1) l('External RPC: ' + inputType)
 
-  // some socket is authenticating their pubkey
   if (inputType == 'auth') {
     var [pubkey, sig, body] = r(msg)
 
@@ -72,14 +72,14 @@ module.exports = async (ws, msg) => {
 
   // another member wants a sig
   } else if (inputType == 'propose') {
-    var [pubkey, sig, header, ordered_tx] = r(msg)
+    var [pubkey, sig, header, ordered_tx_body] = r(msg)
 
     if (me.status != 'propose') {
-      return l("Not in propose phase")
+      return l(`${me.status} not propose`)
     }
 
     // ensure the proposer is the current one
-    if (!me.next_validator().block_pubkey.equals(pubkey)) {
+    if (!me.next_member().block_pubkey.equals(pubkey)) {
       return l("You are not the current proposer")
     }
 
@@ -87,32 +87,37 @@ module.exports = async (ws, msg) => {
       return l("Invalid proposer sig")
     }
 
+    if (me.proposed_block.locked) {
+      return l("We are still precommited to previous block.")
+    }
+
     // consensus operations are in-memory for now
+    l("Saving proposed block")
     me.proposed_block = {
       proposer: pubkey,
       sig: sig,
 
-      prevotes: [],
-      precommits: [],
-
       header: header,
-      ordered_tx: ordered_tx
+      ordered_tx_body: ordered_tx_body
     }
-
 
   // we provide block sig back
   } else if (inputType == 'prevote') {
     var [pubkey, sig] = r(msg)
 
     if (me.status != 'prevote') {
-      return l('Not expecting any prevotes')
+      return l(`${me.status} not prevote`)
+    }
+
+    if (!me.proposed_block.header) {
+      return l(`we don't have a block`)
     }
 
     var m = Members.find(f => f.block_pubkey.equals(pubkey))
 
     if (m && ec.verify(r([methodMap('prevote'), me.proposed_block.header]), sig, pubkey)) {
       m.prevote = sig
-      l(`Received another sig from  ${m.id}`)
+      l(`Received another prevote from  ${m.id}`)
     } else {
       l("this sig doesn't work for our block")
     }
@@ -124,12 +129,16 @@ module.exports = async (ws, msg) => {
     var m = Members.find(f => f.block_pubkey.equals(pubkey))
 
     if (me.status != 'precommit') {
-      return l('Not expecting any precommits')
+      return l(`${me.status} not precommit`)
     }
 
-    if (m && ec.verify(me.precommit, sig, pubkey)) {
-      m.sig = sig
-      // l(`Received another sig from  ${m.id}`)
+    if (!me.proposed_block.header) {
+      return l(`we don't have a block`)
+    }
+
+    if (m && ec.verify( r([methodMap('precommit'), me.proposed_block.header]), sig, pubkey)) {
+      m.precommit = sig
+      l(`Received another precommit from  ${m.id}`)
     } else {
       l("this sig doesn't work for our block")
     }

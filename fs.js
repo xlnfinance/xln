@@ -52,11 +52,13 @@ cache = async (i) => {
         meta: {[Sequelize.Op.not]: null}
       }
     })).map(b=>{
+      var [precommits, header, tx_body] = r(b.block)
+
       var [methodId,
         built_by,
         prev_hash,
         timestamp,
-        ordered_tx] = r(b.block.slice(Members.length * 64))
+        ordered_tx] = r(header)
 
       return {
         id: b.id,

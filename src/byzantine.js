@@ -1,22 +1,8 @@
 /*
-Consensus Reactor - run by validators every second
-This is a state machine where each transition is triggered by going to next step (time-based).
-Inspired by: https://tendermint.readthedocs.io/en/master/getting-started.html
-
-Unlike tendermint we have no interest in fast 3s blocks and aim for "fat" blocks and low validator sig overhead with blocktime 1-10min. Also "await" step was added when validators are idle.
-
-See external_rpc for other part of consensus.
+Byzantine scenarios for validator to attack network. 
+me.consensus=require('src/byzantine')
 
 
-0 propose
-10 broadcast everyone prevote on proposal or nil
-20 precommit if have prevotes 2/3+
-
-|====propose====|====prevote====|====precommit====|================await==================|
-
-propose > prevote on proposal or nil > precommit if 2/3+ prevotes or nil > commit if 2/3+ precommits and await.
-
-Long term TODO: redundancy reduced gossip. For now with validators <= 100, everyone sends to everyone.
 */
 
 module.exports = async () => {

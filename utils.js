@@ -164,7 +164,12 @@ methodMap = (i) => {
   var map = [
     'placeholder',
 
-    'block',
+    // consensus
+    'propose',
+    'prevote', 
+    'precommit', 
+
+
 
     'rebalance',
     'propose',

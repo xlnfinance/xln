@@ -2,17 +2,14 @@ module.exports = async (block) => {
   var [precommits, header, ordered_tx_body] = r(block)
 
   var shares = 0
-
+  var precommit_body = r([methodMap('precommit'), header])
   for (var i = 0; i < Members.length; i++) {
-    var precommit_body = r([methodMap('precommit'), header])
-
     if (precommits[i] && 
       precommits[i].length == 64 && 
       ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
       shares += Members[i].shares
     } else {
-      l(`Invalid signature for a given block. Halt!`)
-      // return false
+      //l(`Someone missed a precommit!`)
     }
   }
 
@@ -34,7 +31,7 @@ module.exports = async (block) => {
     return false
   }
   
-  if (readInt(methodId) != methodMap('block')) {
+  if (readInt(methodId) != methodMap('propose')) {
     return l('Wrong method for block')
   }
 
@@ -50,8 +47,19 @@ module.exports = async (block) => {
     return l('Invalid tx_root')
   }
 
+  // >>> Given block is considered valid and final after this point <<<
 
-  // parsed list of events/metadata about current block, used on Explorer page 
+
+  // In case we are member & locked on this height, unlock
+  if (me.proposed_block.locked) {
+    var locked_prev_hash = r(me.proposed_block.header)[2]
+
+    if (prev_hash.equals(locked_prev_hash)) {
+      me.proposed_block = {}
+    }
+  }
+
+  // List of events/metadata about current block, used on Explorer page 
   var meta = {
     inputs_volume: 0,
     outputs_volume: 0,
@@ -61,8 +69,8 @@ module.exports = async (block) => {
 
   var ordered_tx = r(ordered_tx_body)
 
-  // processing transactions one by one
-  // long term TODO: parallel execution with pessimistic locks
+  // Processing transactions one by one
+  // Long term TODO: parallel execution with pessimistic locks
   for (var i = 0; i < ordered_tx.length; i++) {
     var obj = await Tx.processTx(ordered_tx[i], meta)
 
@@ -70,7 +78,10 @@ module.exports = async (block) => {
     K.total_tx_bytes += ordered_tx[i].length
   }
 
-  // current user ensures their tx was finalized
+
+
+
+  // Current user ensures their tx was finalized
   if (PK.pending_tx.length > 0) {
     var raw = PK.pending_tx.map(tx=>Buffer.from(tx.raw, 'hex'))
     l("Rebroadcasting pending tx ", raw)
@@ -82,7 +93,7 @@ module.exports = async (block) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 50 == 0) l(`Processed block ${K.total_blocks} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
+  if (K.total_blocks % 50 == 0) l(`Processed block ${K.total_blocks} by ${readInt(built_by)}. Signed shares: ${shares}, tx: ${ordered_tx.length}`)
 
 
   if (ordered_tx_body.length < K.blocksize - 1000) {
@@ -92,7 +103,7 @@ module.exports = async (block) => {
   K.total_bytes += block.length
   K.bytes_since_last_snapshot += block.length
 
-  // every x blocks create new installer
+  // Every x blocks create new installer
   if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
     K.bytes_since_last_snapshot = 0
 
@@ -101,7 +112,7 @@ module.exports = async (block) => {
     K.last_snapshot_height = K.total_blocks
   }
 
-  // executing proposals that are due
+  // Auto resolving disputes that are due
   let disputes = await Insurance.findAll({
     where: {dispute_delayed: K.usable_blocks},
     include: {all: true}
@@ -113,7 +124,8 @@ module.exports = async (block) => {
     await ins.resolve()
   }
 
-  // executing proposals that are due
+
+  // Executing onchaing gov proposals that are due
   let jobs = await Proposal.findAll({
     where: {delayed: K.usable_blocks},
     include: {all: true}
@@ -146,6 +158,8 @@ module.exports = async (block) => {
 
     await job.destroy()
   }
+
+
 
   // only members do snapshots, as they require extra computations
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
@@ -194,10 +208,10 @@ module.exports = async (block) => {
   })
 
   if (me.my_member) {
-    var blocktx = concat(inputMap('chain'), r([block]))
+    var chaintx = concat(inputMap('chain'), r([block]))
 
     if (me.wss) {
-      me.wss.clients.forEach(client => client.send(blocktx))
+      me.wss.clients.forEach(client => client.send(chaintx))
     }
   }
 
