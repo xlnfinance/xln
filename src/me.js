@@ -17,8 +17,6 @@ class Me {
 
     this.intervals = []
 
-    this.next_member = false
-
   }
 
   // derives needed keys from the seed, saves creds into pk.json
@@ -109,12 +107,43 @@ class Me {
       raw: toHex(tx)
     })
 
-    if (me.my_member && me.my_member == me.next_member) {
+    if (me.my_member && me.my_member == me.next_member()) {
       me.mempool.push(tx)
     } else {
-      me.send(me.next_member, 'tx', r([tx]))
+      me.send(me.next_member(), 'tx', r([tx]))
     }
 
+  }
+
+  // tell all validators the same thing 
+  gossip (method, data) {
+    Members.map((c) => {
+      me.send(c, method, data) 
+    })
+  }
+
+  next_member (skip = false) {
+    var now = ts()
+    var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
+    var searchIndex = 0
+
+    for (var i in Members) {
+      searchIndex += Members[i].shares
+
+      if (searchIndex > currentIndex) {
+        var current = Members[i]
+
+        if (searchIndex > currentIndex + 1) {
+          // next slot is still theirs
+          var next = current
+        } else {
+          // take next member or rewind back to 0
+          var next = Members[(i + 1) % K.members.length]
+        }
+        break
+      }
+    }
+    return skip ? next : current
   }
 
   // signs data and adds our pubkey

@@ -1,138 +1,150 @@
-// Consensus Reactor - run by validators every second
-
-
-// TODO: Comply with tendermint consensus. Unlike tendermint we have no interest in fast 3s blocks and aim for "fat" blocks and low validator sig overhead with blocktime 1-10min
-
 /*
+Consensus Reactor - run by validators every second
 This is a state machine where each transition is triggered by going to next step (time-based).
+Inspired by: https://tendermint.readthedocs.io/en/master/getting-started.html
+
+Unlike tendermint we have no interest in fast 3s blocks and aim for "fat" blocks and low validator sig overhead with blocktime 1-10min. Also "await" step was added when validators are idle.
+
+See external_rpc for other part of consensus.
 
 
 0 propose
 10 broadcast everyone prevote on proposal or nil
 20 precommit if have prevotes 2/3+
 
-propose > prevote > precommit > commit
+|====propose====|====prevote====|====precommit====|================await==================|
 
+propose > prevote on proposal or nil > precommit if 2/3+ prevotes or nil > commit if 2/3+ precommits and await.
+
+
+Long term TODO: redundancy reduced gossip. For now with validators <= 100, everyone sends to everyone.
 */
-
-
 
 module.exports = async () => {
   var now = ts()
-  var round = 5
-
-  var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
-
-  var searchIndex = 0
-
-
-
-  for (var i in Members) {
-    searchIndex += Members[i].shares
-
-    if (currentIndex < searchIndex) {
-      me.current = Members[i]
-
-      var increment = (K.blocktime - (now % K.blocktime)) < 2 ? 2 : 1
-
-      if (currentIndex + increment >= searchIndex) {
-        // take next member or rewind back to 0
-        me.next_member = Members[(i + increment) % K.members.length]
-      } else {
-        // next slot is still theirs
-        me.next_member = me.current
-      }
-      break
-    }
-  }
-  
 
   var second = now % K.blocktime
-  var phase = second < 5 ? 'propose' : (second < 10 ? 'prevote' : (second < 15 ? 'precommit' : 'commit'))
+  var phase = second < 5 ? 'propose' : (second < 10 ? 'prevote' : (second < 15 ? 'precommit' : 'await'))
   
 
 
-  // reactive state machine
-  if (me.current == me.my_member && me.status == 'await' && phase == 'propose') {
-      me.status = 'proposed'
+  if (me.status == 'await' && phase == 'propose') {
+      me.status = 'propose'
 
-      // processing mempool
-      var ordered_tx = []
-      var total_size = 0
+      // it's our turn to propose, gossip new block
+      if (me.my_member == me.next_member()) {
+        // processing mempool
+        var ordered_tx = []
+        var total_size = 0
 
-      var meta = {dry_run: true}
+        var meta = {dry_run: true}
 
-      for (var candidate of me.mempool) {
-        if (total_size + candidate.length > K.blocksize) break
+        for (var candidate of me.mempool) {
+          if (total_size + candidate.length > K.blocksize) break
 
-        var result = await Tx.processTx(candidate, meta)
-        if (result.success) {
-          ordered_tx.push(candidate)
-          total_size += candidate.length
-        } else {
-          l(result.error)
-          // punish submitter ip
+          var result = await Tx.processTx(candidate, meta)
+          if (result.success) {
+            ordered_tx.push(candidate)
+            total_size += candidate.length
+          } else {
+            l(result.error)
+            // punish submitter ip
+          }
         }
-      }
 
-      // flush it
-      me.mempool = []
+        // sort by fee
 
-      me.precommit = r([
-        methodMap('block'),
-        me.record.id,
-        Buffer.from(K.prev_hash, 'hex'),
-        ts(),
-        ordered_tx
-      ])
+        // flush it
+        me.mempool = []
 
-      me.my_member.sig = ec(me.precommit, me.block_keypair.secretKey)
+        var ordered_tx_body = r(ordered_tx)
+        var tx_root = sha3(ordered_tx_body)
 
-      if (K.majority > 1) {
-        var needSig = r([
-          me.my_member.block_pubkey,
-          me.my_member.sig,
-          me.precommit
+        var header = r([
+          methodMap('block'),
+          me.record.id,
+          Buffer.from(K.prev_hash, 'hex'),
+          ts(),
+          tx_root
         ])
 
-        Members.map((c) => {
-          if (c != me.my_member) { me.send(c, 'needSig', needSig) }
-        })
+        var propose = r([
+          me.my_member.block_pubkey,
+          ec(me.proposal, me.block_keypair.secretKey),
+          header,
+          ordered_tx_body
+        ])
+
+        me.gossip('propose', propose) // todo: gossip a bit later to avoid clock skews
+
       }
 
 
 
+  } else if (me.status == 'propose' && phase == 'prevote') {
+    me.status = 'prevote'
 
-      // do we have enough sig or it's time?
-    var sigs = []
-    var total_shares = 0
+    // gossip your prevotes for block or nil
+    var prevotable = me.proposed_block ? me.proposed_block.header : 0 
+
+    me.gossip('prevote', me.envelope(methodMap('prevote'), prevotable))
+
+  } else if (me.status == 'prevote' && phase == 'precommit') {
+    me.status = 'precommit'
+
+    // gossip your precommits if have 2/3+ prevotes or nil
+
+    // do we have enough prevotes?
+    var shares = 0
     Members.map((c, index) => {
-      if (c.sig) {
-        sigs[index] = bin(c.sig)
-        total_shares += c.shares
-      } else {
-        sigs[index] = Buffer.alloc(64)
+      if (c.prevote) {
+        shares += c.shares
       }
     })
 
-    if (me.status == 'precommit' && (now % K.blocktime > K.blocktime - round)) {
-      if (total_shares < K.majority) {
-        l(`Only have ${total_shares} shares, cannot build a block!`)
+    var precommitable = shares >= K.majority ? me.proposed_block.header : 0
+
+    // me.lock
+    me.gossip('precommit', me.envelope(methodMap('precommit'), precommitable))
+
+  } else if (me.status == 'precommit' && phase == 'await') {
+    me.status = 'await'
+
+    // if have 2/3+ precommits, commit the block and share
+    var shares = 0
+
+    var precommits = []
+    Members.map((c, index) => {
+      if (c.precommit) {
+        shares += c.shares
+        precommits[index] = c.precommit
       } else {
-        await me.processBlock(concat(
-            Buffer.concat(sigs),
-            me.precommit
-          ))
-        fs.writeFileSync('data/k.json', stringify(K))
-
+        precommits[index] = 0
       }
-        // flush sigs
-      Members.map(c => c.sig = null)
 
-      me.status = 'await'
-    } 
+      // flush sigs for next round
+      c.prevote = null
+      c.precommit = null
+    })
+
+    if (shares < K.majority) {
+      return l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
+    }
+
+    var block = r([precommits,
+        me.proposed_block.header,
+        me.proposed_block.ordered_tx_body
+      ])
+
+    await me.processBlock(block)
+    fs.writeFileSync('data/k.json', stringify(K))
+  }
 
 
-  setTimeout(me.consensus, 1000)
 
+
+
+
+
+  setTimeout(me.consensus, 1000) // watch for new events in 1 s
 }

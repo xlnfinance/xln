@@ -78,11 +78,17 @@ module.exports = async (genesis) => {
     members: [],
     hubs: [],
 
-    total_shares: 10,
-    majority: 7
-
+    total_shares: 10
   }
 
+  K.majority = K.total_shares%3==0?K.total_shares*2/3+1:Math.ceil(K.total_shares*2/3)
+
+/*
+for(var i=1;i<300;i++){ 
+  var honest = i%3==0?i*2/3+1:Math.ceil(i*2/3)
+  console.log(`${i} validators require honest ${honest} and can tolerate up to ${i-honest} Byzantine. Must compromise ${i-honest+1}`) 
+} 
+*/
   // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
 
   createMember = async (username, pw, loc, website) => {

@@ -1,22 +1,22 @@
 module.exports = async (block) => {
-  var finalblock = block.slice(Members.length * 64)
+  var [precommits, header, ordered_tx_body] = r(block)
 
-  var total_shares = 0
+  var shares = 0
 
   for (var i = 0; i < Members.length; i++) {
-    var sig = (block.slice(i * 64, (i + 1) * 64))
+    var precommit_body = r([methodMap('precommit'), header])
 
-    if (sig.equals(Buffer.alloc(64))) {
-
-    } else if (ec.verify(finalblock, sig, Members[i].block_pubkey)) {
-      total_shares += Members[i].shares
+    if (precommits[i] && 
+      precommits[i].length == 64 && 
+      ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
+      shares += Members[i].shares
     } else {
       l(`Invalid signature for a given block. Halt!`)
       // return false
     }
   }
 
-  if (total_shares < K.majority) {
+  if (shares < K.majority) {
     l('Not enough shares on a block')
     return false
   }
@@ -25,7 +25,7 @@ module.exports = async (block) => {
     built_by,
     prev_hash,
     timestamp,
-    ordered_tx] = r(finalblock)
+    tx_root] = r(header)
 
   timestamp = readInt(timestamp)
 
@@ -38,7 +38,7 @@ module.exports = async (block) => {
     return l('Wrong method for block')
   }
 
-  if (finalblock.length > K.blocksize) {
+  if (ordered_tx_body.length > K.blocksize) {
     return l('Too long block')
   }
 
@@ -46,8 +46,12 @@ module.exports = async (block) => {
     return l('New block from the past')
   }
 
+  if (!sha3(ordered_tx_body).equals(tx_root)) {
+    return l('Invalid tx_root')
+  }
 
 
+  // parsed list of events/metadata about current block, used on Explorer page 
   var meta = {
     inputs_volume: 0,
     outputs_volume: 0,
@@ -55,7 +59,10 @@ module.exports = async (block) => {
     cron: []
   }
 
+  var ordered_tx = r(ordered_tx_body)
+
   // processing transactions one by one
+  // long term TODO: parallel execution with pessimistic locks
   for (var i = 0; i < ordered_tx.length; i++) {
     var obj = await Tx.processTx(ordered_tx[i], meta)
 
@@ -63,21 +70,22 @@ module.exports = async (block) => {
     K.total_tx_bytes += ordered_tx[i].length
   }
 
+  // current user ensures their tx was finalized
   if (PK.pending_tx.length > 0) {
     var raw = PK.pending_tx.map(tx=>Buffer.from(tx.raw, 'hex'))
     l("Rebroadcasting pending tx ", raw)
-    me.send(me.next_member, 'tx', r(raw))
+    me.send(me.next_member(1), 'tx', r(raw))
   }
 
   K.ts = timestamp
-  K.prev_hash = toHex(sha3(finalblock))
+  K.prev_hash = toHex(sha3(header))
 
   K.total_blocks++
 
   if (K.total_blocks % 50 == 0) l(`Processed block ${K.total_blocks} by ${readInt(built_by)}. Signed shares: ${total_shares}, tx: ${ordered_tx.length}`)
 
 
-  if (finalblock.length < K.blocksize - 1000) {
+  if (ordered_tx_body.length < K.blocksize - 1000) {
     K.usable_blocks++
   }
 
@@ -177,16 +185,16 @@ module.exports = async (block) => {
   // save final block in blockchain db and broadcast
   await Block.create({
     prev_hash: Buffer.from(prev_hash, 'hex'),
-    hash: sha3(finalblock),
-    block: block,
-    total_tx: ordered_tx.length,
+    hash: sha3(header),
 
+    block: block, // sigs, header and tx all in one
+
+    total_tx: ordered_tx.length,
     meta: (meta.parsed_tx.length + meta.cron.length > 0) ? JSON.stringify(meta) : null
   })
 
   if (me.my_member) {
     var blocktx = concat(inputMap('chain'), r([block]))
-    // send finalblock to all websocket users if we're member
 
     if (me.wss) {
       me.wss.clients.forEach(client => client.send(blocktx))
