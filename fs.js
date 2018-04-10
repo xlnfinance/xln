@@ -37,6 +37,9 @@ cache = async (i) => {
 
     cached_result.K = K
 
+    cached_result.current_db_hash = current_db_hash().toString('hex')
+
+
     cached_result.proposals = await Proposal.findAll({
       order: [['id', 'DESC']],
       include: {all: true}

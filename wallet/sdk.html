@@ -12,9 +12,10 @@ window.addEventListener('message',function(e){
   var json = e.data.params
 
   if (e.origin != location.origin) {
-    // special clause for 1click payments
+    
     if (e.data.method == 'send'){
-      var msg = "Send $"+(json.amount/100)+"?"
+      var msg = "Do you want to pay with Failsafe?\n\nRecipient: "+e.origin+"\n\nPay total: $"+(json.amount/100)+""
+
       var confirm_start = new Date
       if(!confirm(msg)) return false
       // was it authorized click?

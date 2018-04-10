@@ -44,6 +44,8 @@ RPC = {
 
 l = console.log
 
+child_process = require('child_process')
+
 // Amazing lib to forget about binary encoding: https://github.com/ethereum/wiki/wiki/RLP
 r = function (a) {
   if (a instanceof Buffer) {
@@ -56,6 +58,11 @@ r = function (a) {
 // for testnet handicaps
 sleep = async function (ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+current_db_hash = ()=>{
+  return Buffer.from(child_process.execSync('shasum -a 256 ./private/db.sqlite').toString().split(' ')[0], 'hex')
 }
 
 

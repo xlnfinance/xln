@@ -175,7 +175,6 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'chain') {
     var chain = r(msg)
 
-    l("Processing chain len "+chain.length)
     for (var block of chain) {
       await me.processBlock(block)
     }

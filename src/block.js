@@ -22,7 +22,8 @@ module.exports = async (block) => {
     built_by,
     prev_hash,
     timestamp,
-    tx_root] = r(header)
+    tx_root,
+    db_hash] = r(header)
 
   timestamp = readInt(timestamp)
 
@@ -45,6 +46,10 @@ module.exports = async (block) => {
 
   if (!sha3(ordered_tx_body).equals(tx_root)) {
     return l('Invalid tx_root')
+  }
+
+  if (!db_hash.equals(current_db_hash())) {
+    l('WARNING: state mismatch')
   }
 
   // >>> Given block is considered valid and final after this point <<<

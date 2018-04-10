@@ -77,12 +77,16 @@ module.exports = async () => {
 
         var ordered_tx_body = r(ordered_tx)
 
+
+        var db_hash = require('child_process').exec('private/db.sqlite')
+
         var header = r([
           methodMap('propose'),
           me.record.id,
           Buffer.from(K.prev_hash, 'hex'),
           ts(),
-          sha3(ordered_tx_body)
+          sha3(ordered_tx_body),
+          current_db_hash()
         ])
 
         var propose = r([

@@ -413,6 +413,7 @@ FS.onready(() => {
 
       <h2>Network stats</h2>
       <p>Total blocks: {{K.total_blocks}}</p>
+      <p>Current db hash: {{current_db_hash}}</p>
       <p>Of which usable blocks: {{K.total_blocks}}</p>
       <p>Last block received {{timeAgo(K.ts)}}</p>
       
