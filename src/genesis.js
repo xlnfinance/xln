@@ -77,19 +77,15 @@ module.exports = async (genesis) => {
     max_amount: 300000,
 
     members: [],
-    hubs: [],
-
-    total_shares: 10
+    hubs: []
   }
 
-  K.majority = K.total_shares%3==0?K.total_shares*2/3+1:Math.ceil(K.total_shares*2/3)
+  K.tolerance = 1 // how many validators can be Byzantine
+  K.total_shares = K.tolerance * 3 + 1 // total # of shares. 0=>1, 1=>4, 2=>7 etc
+  K.majority = K.total_shares - K.tolerance
+  //K.total_shares%3==0?K.total_shares*2/3+1:Math.ceil(K.total_shares*2/3)
 
-/*
-for(var i=1;i<300;i++){ 
-  var honest = i%3==0?i*2/3+1:Math.ceil(i*2/3)
-  console.log(`${i} validators require honest ${honest} and can tolerate up to ${i-honest} Byzantine. Must compromise ${i-honest+1}`) 
-} 
-*/
+
   // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
 
   createMember = async (username, pw, loc, website) => {
@@ -138,16 +134,16 @@ for(var i=1;i<300;i++){
     await createMember(i.toString(), 'password', `${base_rpc}:${i + 100}`, `${base_web}:${i}`)
   }
 
-  K.members[0].shares = 3
+  K.members[0].shares = 1
   K.members[0].platform = 'Digital Ocean SGP1'
 
-  K.members[1].shares = 3
+  K.members[1].shares = 1
   K.members[1].platform = 'AWS'
 
-  K.members[2].shares = 2
+  K.members[2].shares = 1
   K.members[2].platform = 'Azure'
 
-  K.members[3].shares = 2
+  K.members[3].shares = 1
   K.members[3].platform = 'Google Cloud'
 
   K.members[0].hub = {
@@ -159,6 +155,31 @@ for(var i=1;i<300;i++){
     handle: 'jp',
     name: '@jp (Japan)'
   }
+
+
+
+
+
+  K.hubs.push({
+    id: K.members[0].id,
+    location: K.members[0].location,
+    pubkey: K.members[0].pubkey,
+
+    handle: 'eu',
+    name: '@eu (Europe)'
+  })
+
+
+
+
+  // preload 2@3 channel 
+  await Insurance.create({
+    leftId: 2,
+    rightId: 1,
+    insurance: 1000000,
+    ondelta: 1000000,
+    nonce: 0
+  })
 
 /*
   K.members[2].hub = {

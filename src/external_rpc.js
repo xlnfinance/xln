@@ -91,7 +91,7 @@ module.exports = async (ws, msg) => {
     }
 
     // consensus operations are in-memory for now
-    l("Saving proposed block")
+    //l("Saving proposed block")
     me.proposed_block = {
       proposer: pubkey,
       sig: sig,
@@ -116,7 +116,7 @@ module.exports = async (ws, msg) => {
 
     if (m && ec.verify(r([methodMap('prevote'), me.proposed_block.header]), sig, pubkey)) {
       m.prevote = sig
-      l(`Received another prevote from  ${m.id}`)
+      //l(`Received another prevote from  ${m.id}`)
     } else {
       l("this sig doesn't work for our block")
     }
@@ -137,15 +137,10 @@ module.exports = async (ws, msg) => {
 
     if (m && ec.verify( r([methodMap('precommit'), me.proposed_block.header]), sig, pubkey)) {
       m.precommit = sig
-      l(`Received another precommit from  ${m.id}`)
+      //l(`Received another precommit from  ${m.id}`)
     } else {
       l("this sig doesn't work for our block")
     }
-
-
-
-
-
 
 
 

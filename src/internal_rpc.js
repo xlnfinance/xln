@@ -118,6 +118,8 @@ module.exports = async (ws, msg) => {
           mediate_to: mediate_to,
           mediate_hub: parsed.partners,
 
+          invoice: invoice,
+
           return_to: (obj) => {
             react(obj)
 

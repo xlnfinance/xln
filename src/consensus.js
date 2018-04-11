@@ -168,6 +168,7 @@ module.exports = async () => {
 
       l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
     } else {
+
       l("Success! commit block")
 
       var block = r([precommits,

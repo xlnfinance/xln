@@ -413,8 +413,8 @@ FS.onready(() => {
 
       <h2>Network stats</h2>
       <p>Total blocks: {{K.total_blocks}}</p>
-      <p>Current db hash: {{current_db_hash}}</p>
-      <p>Of which usable blocks: {{K.total_blocks}}</p>
+      <p>Current onchain db.sqlite hash: {{current_db_hash}}</p>
+      <p>Usable blocks: {{K.total_blocks}}</p>
       <p>Last block received {{timeAgo(K.ts)}}</p>
       
       <p>Network created {{timeAgo(K.created_at)}}</p>
@@ -447,6 +447,11 @@ FS.onready(() => {
     <div v-else-if="tab=='wallet'">
 
       <template v-if="pubkey && ch">
+
+        <div v-if="record">
+          <h1>ID: <b>{{record.id}}</b></h1>
+          <h1>On-chain Balance: <b>\${{commy(record.balance)}}</b></h1>
+        </div>
 
         <select v-model="hub" class="custom-select custom-select-lg mb-3">
           <option disabled>Select current hub</option>
@@ -598,9 +603,6 @@ FS.onready(() => {
     <div v-if="record">
       <h3>On-chain Actions</h3>
 
-      <p>ID: <b>{{record.id}}</b></p>
-      <p>On-chain Balance: <b>\${{commy(record.balance)}}</b></p>
-      
       <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your on-chain balance.</small>
 
       <p v-if="ch.insured>0"><input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>

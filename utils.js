@@ -62,7 +62,7 @@ sleep = async function (ms) {
 
 
 current_db_hash = ()=>{
-  return Buffer.from(child_process.execSync('shasum -a 256 ./private/db.sqlite').toString().split(' ')[0], 'hex')
+  return Buffer.from(child_process.execSync('shasum -a 256 data/db.sqlite').toString().split(' ')[0], 'hex')
 }
 
 

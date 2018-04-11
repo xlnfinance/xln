@@ -4,18 +4,16 @@ module.exports = async (block) => {
   var shares = 0
   var precommit_body = r([methodMap('precommit'), header])
   for (var i = 0; i < Members.length; i++) {
-
-    if (precommits[i] && 
-      precommits[i].length == 64 && 
-      ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
+    //precommits[i] && precommits[i].length == 64 && 
+    if (ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
       shares += Members[i].shares
     } else {
-      //l(`Someone missed a precommit!`)
+      l(`${i} missed a precommit for `, precommit_body)
     }
   }
 
   if (shares < K.majority) {
-    return l(`Not enough shares on a block ${shares}`)
+    return l(`Not enough precommits`)
   }
 
   var [methodId,
@@ -49,7 +47,7 @@ module.exports = async (block) => {
   }
 
   if (!db_hash.equals(current_db_hash())) {
-    l('WARNING: state mismatch')
+    l('DANGER: state mismatch. Some tx was not deterministic')
   }
 
   // >>> Given block is considered valid and final after this point <<<
@@ -212,13 +210,6 @@ module.exports = async (block) => {
     meta: (meta.parsed_tx.length + meta.cron.length > 0) ? JSON.stringify(meta) : null
   })
 
-  if (me.my_member) {
-    var chaintx = concat(inputMap('chain'), r([block]))
-
-    if (me.wss) {
-      me.wss.clients.forEach(client => client.send(chaintx))
-    }
-  }
 
   if (me.request_reload) {
     process.exit(0) // exit w/o error

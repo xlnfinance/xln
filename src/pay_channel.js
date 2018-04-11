@@ -5,8 +5,6 @@ module.exports = async (opts) => {
     return [false, 'The channel is not ready to accept payments: ' + ch.d.status]
   }
 
-  l(chalk.blue("Adding a transition"))
-
   var t = await ch.d.createTransition({
     hash: opts.hash,
     offdelta: ch.left ? -opts.amount : opts.amount,
@@ -15,8 +13,6 @@ module.exports = async (opts) => {
     unlocker: opts.unlocker ? opts.unlocker : false,
     status: 'await'
   })
-
-  l('new tr', t)
 
   /*
 
@@ -34,7 +30,6 @@ module.exports = async (opts) => {
 
   var list = await ch.d.getTransitions({where:{status: 'await'}})
 
-  l('tr list ',list)
 
 
 
@@ -56,8 +51,6 @@ module.exports = async (opts) => {
 
     l('transfer ', ch.left, t.offdelta)
     // add hashlocks
-
-    l(t)
 
 
     newState[5].push([t.offdelta, t.hash, t.exp])
