@@ -1,6 +1,13 @@
-WebSocketClient = require('./ws')
+WebSocketClient = require('../lib/ws')
 stringify = require('../lib/stringify')
-Tx = require('./tx')
+
+Me.prototype.consensus = require('./onchain/consensus')
+Me.prototype.processBlock = require('./onchain/block')
+Me.prototype.processTx = require('./onchain/tx')
+
+Me.prototype.payChannel = require('./offchain/pay_channel')
+Me.prototype.channel = require('./offchain/get_channel')
+Me.prototype.updateChannel = require('./offchain/update_channel')
 
 class Me {
   // boilerplate attributes
@@ -217,7 +224,7 @@ class Me {
       }
 
       if (this.is_hub) {
-        me.intervals.push(setInterval(require('./hub'), K.blocktime * 1000))
+        me.intervals.push(setInterval(require('./offchain/rebalance'), K.blocktime * 1000))
       }
     } else {
       // keep connection to all hubs
@@ -248,106 +255,18 @@ class Me {
     await History.create(attrs)
   }
 
-
-  async channels () { // with all hubs
+  // takes channels with supported hubs (verified and custom ones)
+  async channels () { 
     var channels = []
 
-    for (var m of Members) {
-      if (m.hub && (!me.record || me.record.id != m.id)) {
-        var ch = await me.channel(m.pubkey)
+    for (var m of K.hubs) {
+      if (!me.record || me.record.id != m.id) {
+        var ch = await me.channel(Buffer.from(m.pubkey, 'hex'))
         channels.push(ch)
       }
     }
 
     return channels
-  }
-
-  // accepts pubkey only
-  async channel (partner) {
-    var compared = Buffer.compare(me.pubkey, partner)
-    if (compared == 0) return false
-
-    var ch = {
-      // default insurance
-      insurance: 0,
-      ondelta: 0,
-      nonce: 0,
-      left: compared == -1,
-      
-      online: me.users[partner] && (me.users[partner].readyState == 1 || 
-      (me.users[partner].instance && me.users[partner].instance.readyState == 1))
-
-    }
-
-    ch.member = Members.find(m => m.pubkey.equals(partner))
-
-    me.record = await me.byKey()
-
-    var is_hub = (p)=>Members.find(m=>m.hub && m.pubkey.equals(p))
-
-    ch.d = (await Delta.findOrBuild({
-      where: {
-        myId: me.pubkey,
-        partnerId: partner
-      },
-      defaults: {
-        offdelta: 0,
-
-        input_amount: 0,
-        they_input_amount: 0,
-
-        soft_limit: is_hub(partner) ? K.risk : 0,
-        hard_limit: is_hub(partner) ? K.hard_limit : 0,
-
-        they_soft_limit: is_hub(me.pubkey) ? K.risk : 0,
-        they_hard_limit: is_hub(me.pubkey) ? K.hard_limit :  0,
-
-        nonce: 0,
-        status: 'ready',
-
-        hashlocks: null
-      },
-      include: {all: true}
-    }))[0]
-
-    ch.tr = await ch.d.getTransitions()
-
-    var user = await me.byKey(partner)
-    if (user) {
-      ch.partner = user.id
-      if (me.record) {
-        ch.ins = await Insurance.find({where: {
-          leftId: ch.left ? me.record.id : user.id,
-          rightId: ch.left ? user.id : me.record.id
-        }})
-      }
-    }
-
-    if (ch.ins) {
-      ch.insurance = ch.ins.insurance
-      ch.ondelta = ch.ins.ondelta
-      ch.nonce = ch.ins.nonce
-    }
-
-    // ch.d.state = JSON.parse(ch.d.state)
-
-    ch.delta = ch.ondelta + ch.d.offdelta
-
-    Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
-
-    // todo: minus transitions
-    ch.payable = (ch.insured - ch.d.input_amount) + ch.they_promised +
-    (ch.d.they_hard_limit - ch.promised)
-
-    ch.they_payable = (ch.they_insured - ch.d.they_input_amount) + ch.promised +
-    (ch.d.hard_limit - ch.they_promised)
-
-    // inputs not in blockchain yet, so we hold them temporarily
-
-
-    ch.bar = ch.promised + ch.insured + ch.they_insured + ch.they_promised
-
-    return ch
   }
 
   // a generic interface to send a websocket message to some user or member
@@ -403,12 +322,6 @@ class Me {
     return true
   }
 }
-
-Me.prototype.processBlock = require('./block')
-Me.prototype.payChannel = require('./pay_channel')
-Me.prototype.updateChannel = require('./update_channel')
-
-Me.prototype.consensus = require('./consensus')
 
 module.exports = {
   Me: Me

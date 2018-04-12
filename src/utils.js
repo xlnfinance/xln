@@ -6,29 +6,30 @@ fs = require('fs')
 http = require('http')
 os = require('os')
 ws = require('ws')
-opn = require('./lib/opn')
-chalk = require('chalk')
+opn = require('../lib/opn')
 
-// crypto
+chalk = require('chalk') // pretty logs?
+
+// crypto TODO: native version
 crypto = require('crypto')
 // scrypt = require('scrypt') // require('./scrypt_'+os.platform())
 
 keccak = require('keccak')
 
-nacl = require('./lib/nacl')
+nacl = require('../lib/nacl')
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = nacl.sign.detached.verify
 
 
 // encoders
 BN = require('bn.js')
-stringify = require('./lib/stringify')
-rlp = require('./lib/rlp') // patched rlp for signed-integer
+stringify = require('../lib/stringify')
+rlp = require('../lib/rlp') // patched rlp for signed-integer
 
 Sequelize = require('sequelize')
 Op = Sequelize.Op
 
-Me = require('./src/me').Me
+Me = require('./me').Me
 
 // globals
 K = false
@@ -38,8 +39,8 @@ Members = false
 PK = {}
 
 RPC = {
-  internal_rpc: require('./src/internal_rpc'),
-  external_rpc: require('./src/external_rpc')
+  internal_rpc: require('./internal_rpc'),
+  external_rpc: require('./external_rpc')
 }
 
 l = console.log

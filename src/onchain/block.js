@@ -1,3 +1,4 @@
+// Block processing code. Verifies precommits sigs then executes tx in it one by one
 module.exports = async (block) => {
   var [precommits, header, ordered_tx_body] = r(block)
 
@@ -75,7 +76,7 @@ module.exports = async (block) => {
   // Processing transactions one by one
   // Long term TODO: parallel execution with pessimistic locks
   for (var i = 0; i < ordered_tx.length; i++) {
-    var obj = await Tx.processTx(ordered_tx[i], meta)
+    var obj = await me.processTx(ordered_tx[i], meta)
 
     K.total_tx++
     K.total_tx_bytes += ordered_tx[i].length

@@ -109,7 +109,8 @@ module.exports = async (ws, msg) => {
     }
 
     if (!me.proposed_block.header) {
-      return l(`we don't have a block`)
+      return false
+      //l(`we don't have a block`)
     }
 
     var m = Members.find(f => f.block_pubkey.equals(pubkey))
@@ -132,7 +133,8 @@ module.exports = async (ws, msg) => {
     }
 
     if (!me.proposed_block.header) {
-      return l(`we don't have a block`)
+      return false
+      //l(`we don't have a block`)
     }
 
     if (m && ec.verify( r([methodMap('precommit'), me.proposed_block.header]), sig, pubkey)) {

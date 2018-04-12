@@ -235,6 +235,8 @@ FS.onready(() => {
       app.settings = !app.settings
     },
 
+    ts: () => Math.round(new Date() / 1000),
+
     trim: (str) => {
       return str.slice(0, 8) + '...'
     }
@@ -392,7 +394,7 @@ FS.onready(() => {
       <h1>Network</h1>
 
       <h2>Validators</h2>
-      <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> <b v-if="m.hub">@{{m.hub.handle}}</b> - <b>{{m.shares}} shares</b></li></ul>
+      <ul><li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b></li></ul>
 
       <h2>Current network settings</h2>
       <p>Blocktime: {{K.blocktime}} seconds</p>
@@ -448,46 +450,53 @@ FS.onready(() => {
 
       <template v-if="pubkey && ch">
 
-        <div v-if="record">
-          <h1>ID: <b>{{record.id}}</b></h1>
-          <h1>On-chain Balance: <b>\${{commy(record.balance)}}</b></h1>
-        </div>
+        <h2 class="alert alert-danger" v-if="pending_tx.length>0">Please wait until your <b>{{pending_tx[0].method}}</b> transaction is added to the blockchain.</h2>
 
-        <select v-model="hub" class="custom-select custom-select-lg mb-3">
-          <option disabled>Select current hub</option>
-          <option v-for="(a,index) in channels" :value="index">{{a.member.hub.name}}</option>
-        </select>
-        <span class="mb-3">Connection: {{ch.online ? 'Online' : 'Offline'}}</span>
+        <h2 class="alert alert-danger" v-if="K.ts < ts() - 60">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
 
-
-
-        <h1 class="alert alert-danger" v-if="is_hub">This node is a hub @{{is_hub}}</h1>
+        <h2 class="alert alert-danger" v-if="is_hub">This node is a hub @{{is_hub}}</h2>
         <br>
 
-        <h1 style="display:inline-block">Balance: {{commy(ch.payable)}}</h1>
-        <small v-if="ch.payable>0">
-        = {{commy(ch.insurance)}} insurance 
-        {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
-        {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
-        {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}}
-        </small> 
-        
-        <p><div v-if="ch.bar > 0">
-          <div class="progress" style="max-width:1400px">
-            <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}"   class="progress-bar"  role="progressbar">
-              -{{commy(ch.promised)}} (we promised)
+
+
+        <div v-if="record">
+          <h2>Balance on-chain: <b>\${{commy(record.balance)}}</b></h2>
+          <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with a hub. It is also used to cover on-chain transaction fees. Your on-chain ID: <b>{{record.id}}</b></p>
+
+          <hr />
+        </div>
+
+        <template v-for="(ch,index) in channels">
+          <h2 style="display:inline-block">Balance {{ch.handle}}: {{commy(ch.payable)}}</h2>
+
+          <small v-if="ch.payable>0">
+          = {{commy(ch.insurance)}} insurance 
+          {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
+          {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
+          {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}}
+          </small> 
+          
+          <p><div v-if="ch.bar > 0">
+            <div class="progress" style="max-width:1400px">
+              <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}"   class="progress-bar"  role="progressbar">
+                -{{commy(ch.promised)}} (we promised)
+              </div>
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+                {{commy(ch.insured)}} (insured)
+              </div>
+              <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
+                -{{commy(ch.they_insured)}} (spent)
+              </div>
+              <div v-bind:style="{ width: Math.round(ch.they_promised*100/ch.bar)+'%', 'background-color':'#dc3545'}"   class="progress-bar"  role="progressbar">
+                +{{commy(ch.they_promised)}} (uninsured)
+              </div>
             </div>
-            <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-              {{commy(ch.insured)}} (insured)
-            </div>
-            <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}"  class="progress-bar" role="progressbar">
-              -{{commy(ch.they_insured)}} (spent)
-            </div>
-            <div v-bind:style="{ width: Math.round(ch.they_promised*100/ch.bar)+'%', 'background-color':'#dc3545'}"   class="progress-bar"  role="progressbar">
-              +{{commy(ch.they_promised)}} (uninsured)
-            </div>
-          </div>
-        </div></p> 
+          </div></p> 
+
+        </template>
+
+
+
 
         <div v-if="ch.d.status == 'ready'" class="row">
           <div class="col-sm-6">
@@ -496,7 +505,6 @@ FS.onready(() => {
               <input type="text" class="form-control" aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
             </div></p>
 
-            <p>Receivable: {{commy(ch.they_payable)}}</p>
 
             <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, partner: ch.partner, amount: uncommy(off_amount)})">→ Request Money</button></p>
 
@@ -510,7 +518,6 @@ FS.onready(() => {
               <input type="text" class="form-control small-input" v-model="pay_invoice" @input="call('send', {dry_run: true, pay_invoice: pay_invoice})"  placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
             </div></p>
 
-            <p>Payable: {{commy(ch.payable)}}</p>
 
             <p><button type="button" class="btn btn-success" @click="call('send', {partner: ch.partner, pay_invoice: pay_invoice}); pay_invoice='';">Send Money → </button></p>
 
@@ -579,6 +586,12 @@ FS.onready(() => {
 
   <div class="tab-pane fade" id="nav-uninsured" role="tabpanel" aria-labelledby="nav-uninsured-tab">
       <h3>Uninsured Limits</h3>
+
+        <select v-model="hub" class="custom-select custom-select-lg mb-3">
+          <option disabled>Select current hub</option>
+          <option v-for="(a,index) in channels" :value="index">{{a.hub.handle}}</option>
+        </select>
+
 
       <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
 

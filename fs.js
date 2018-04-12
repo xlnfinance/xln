@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-require('./utils')
+require('./src/utils')
 
-require('./src/onchain_db')
-require('./src/offchain_db')
+require('./src/db/onchain_db')
+require('./src/db/offchain_db')
 
 // Defines promised/insured for both users based on insurance and delta=(ondelta+offdelta)
 // There are 3 major scenarios of delta position

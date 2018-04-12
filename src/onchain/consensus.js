@@ -1,16 +1,11 @@
 /*
-Consensus Reactor - run by validators every second
+Consensus Reactor fires up every second and based on Unix ts() triggers an action
 This is a state machine where each transition is triggered by going to next step (time-based).
 Inspired by: https://tendermint.readthedocs.io/en/master/getting-started.html
 
 Unlike tendermint we have no interest in fast 3s blocks and aim for "fat" blocks and low validator sig overhead with blocktime 1-10min. Also "await" step was added when validators are idle.
 
 See external_rpc for other part of consensus.
-
-
-0 propose
-10 broadcast everyone prevote on proposal or nil
-20 precommit if have prevotes 2/3+
 
 |====propose====|====prevote====|====precommit====|================await==================|
 
@@ -35,20 +30,17 @@ module.exports = async () => {
   }
 
 
-  var gossip_delay = 2000 // anti clock skew
+  var gossip_delay = 2000 // anti clock skew, give others time to change state
   
   if (me.status == 'await' && phase == 'propose') {
       me.status = 'propose'
 
       if (me.my_member == me.next_member()) {
-
-
         l(`it's our turn to propose, gossip new block`)
 
         if (me.proposed_block.locked) {
           // We precommited to previous block, keep proposing it
           var {header, ordered_tx_body} = me.proposed_block
-
         }
 
         // processing mempool
@@ -69,36 +61,35 @@ module.exports = async () => {
             // punish submitter ip
           }
         }
-
         // sort by fee
 
         // flush it
         me.mempool = []
 
-        var ordered_tx_body = r(ordered_tx)
+        // Propose no blocks if mempool is empty (up to 10 min)
+        if (ordered_tx.length > 0 || K.ts < ts() - 600) {
+          var ordered_tx_body = r(ordered_tx)
 
+          var header = r([
+            methodMap('propose'),
+            me.record.id,
+            Buffer.from(K.prev_hash, 'hex'),
+            ts(),
+            sha3(ordered_tx_body),
+            current_db_hash()
+          ])
 
-        var db_hash = require('child_process').exec('private/db.sqlite')
+          var propose = r([
+            bin(me.block_keypair.publicKey),
+            bin(ec(header, me.block_keypair.secretKey)),
+            header,
+            ordered_tx_body
+          ])
 
-        var header = r([
-          methodMap('propose'),
-          me.record.id,
-          Buffer.from(K.prev_hash, 'hex'),
-          ts(),
-          sha3(ordered_tx_body),
-          current_db_hash()
-        ])
-
-        var propose = r([
-          bin(me.block_keypair.publicKey),
-          bin(ec(header, me.block_keypair.secretKey)),
-          header,
-          ordered_tx_body
-        ])
-
-        setTimeout(()=>{
-          me.gossip('propose', propose) 
-        }, gossip_delay)
+          setTimeout(()=>{
+            me.gossip('propose', propose) 
+          }, gossip_delay)
+        }
 
       }
 
@@ -113,6 +104,7 @@ module.exports = async () => {
     setTimeout(()=>{
       me.gossip('prevote', me.block_envelope(methodMap('prevote'), prevotable))
     }, gossip_delay)
+
   } else if (me.status == 'prevote' && phase == 'precommit') {
     me.status = 'precommit'
 
@@ -126,8 +118,6 @@ module.exports = async () => {
       }
     })
 
-    l("Prevotes "+shares)
-
     if (shares >= K.majority) {
       var precommitable = me.proposed_block.header
 
@@ -136,7 +126,6 @@ module.exports = async () => {
 
     } else {
       var precommitable = 0
-
     }
 
     setTimeout(()=>{
@@ -168,9 +157,6 @@ module.exports = async () => {
 
       l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
     } else {
-
-      l("Success! commit block")
-
       var block = r([precommits,
           me.proposed_block.header,
           me.proposed_block.ordered_tx_body
@@ -180,7 +166,6 @@ module.exports = async () => {
 
       // adding to our external queue to avoid race conditions 
       me.queue.push(['external_rpc', null, concat(inputMap('chain'), r([block])) ]) 
-
     }
   }
 

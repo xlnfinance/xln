@@ -4,34 +4,43 @@ log = (where, act)=>{
   window[where].innerHTML += `<p>${act}</p>`
 }
 
+l=console.log
 
-
-FairDemo = (users, ch, trans, tag)=>{
+FairDemo = (users, ch, trans, times, tag)=>{
+  //style="height:430px;font-size:24px"
   var render = function () {
     var html = ''
     for (var id in ch) {
       var u = ch[id]
 
       var r = resolveChannel(u[2], u[3])
-      var bar = fill('-', r.promised) + fill('$', r.insured) + fill('$', r.they_insured) + fill('-', r.they_promised)
+      var bar = fill('○', r.promised) + fill('●', r.insured) + fill('●', r.they_insured) + fill('○', r.they_promised)
 
       var insert_at = u[3] + r.promised
 
-      bar = bar.slice(0, insert_at) + '|' + bar.slice(insert_at)
+      bar = bar.slice(0, insert_at) + fill(' ', 30-bar.length) + bar.slice(insert_at)
 
-      html += '<b>'+pad(users[u[0]][0], 10)+'</b>' + 
-      fill(' ', 30-insert_at) + 
-      bar + 
-      fill(' ', 30-(bar.length-insert_at)) + pad(users[u[1]][0], 10)+"\n"
+      html += '<b>'+pad(users[u[0]][0], 10)+'</b> ' + bar + ' '+ pad(users[u[1]][0], 10)+"\n"
     }
-    
-
     tag.innerHTML = '<pre>'+html+'</pre>'
   }
 
+  var clone = JSON.stringify(ch)
+
+  var i = 0
   setInterval(()=>{
+    i++
+    if (i == times + 10) {
+      ch = JSON.parse(clone)
+      i = 0
+    } else if (i<=times) {
+      trans(ch)
+    }
+
     render()
-  },100)
+  }, 200)
+
+
 
 }
 
@@ -91,24 +100,46 @@ window.onload=()=>{
 
 FairDemo([
   ['Hub', 10],
-
   ['Alice', 15],
   ['Bob', 15],
   ['Shop', 15],
   ['Creditor',20]
 ], [
-  [1, 0, 10, 0],
-  [2, 0, 10, 0],
-  [3, 0, 10, 0]
+  [1, 0, 10, 10],
+  [2, 0, 10, 10],
+  [3, 0, 10, 10]
+],(ch)=>{
+  ch[0][3]--
+  ch[1][3]++
+}, 5, asc)
 
-],[], asc)
+
+
+FairDemo([
+  ['Hub', 10],
+  ['Alice', 15],
+  ['Bob', 15],
+  ['Shop', 15],
+  ['Creditor',20]
+], [
+  [1, 0, 10, 5],
+  [2, 0, 10, 15],
+  [3, 0, 10, 10]
+],(ch)=>{
+  ch[0][3]--
+  ch[1][3]++
+}, 5, asc2)
+
+
 
 }
 
 </script>
 
 
-<div style="height:430px;font-size:24px" id=asc></div>
+<div id=asc></div>
+<div id=asc2></div>
+<div id=asc3></div>
 
 <center> <button onclick="steps.shift()()">Next Slide</button> </center>
 <br><br>

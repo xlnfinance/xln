@@ -15,7 +15,6 @@ module.exports = async (opts) => {
   })
 
   /*
-
   var list = await ch.d.getTransitions({where: [Sequelize.Op.or]: [
     {status: 'await'},
     {status: 'acked'}
@@ -29,8 +28,6 @@ module.exports = async (opts) => {
   var newState = await ch.d.getState()
 
   var list = await ch.d.getTransitions({where:{status: 'await'}})
-
-
 
 
   var payable = ch.payable

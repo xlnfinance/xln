@@ -6,7 +6,7 @@ Expected security properties:
 1/3- cannot make forks or deadlock consensus
 2/3- cannot make forks w/o powerful network partition
 1/3+ can attempt fork with partion. can deadlock by going offline
-2/3+ can do whatever they want
+2/3+ can do forks
 
 
 for all scenarios we use 4 nodes: A B C D each with 25% stake. We must tolerate 1 compromised node (A).

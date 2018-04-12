@@ -80,8 +80,15 @@ module.exports = async (genesis) => {
     hubs: []
   }
 
-  K.tolerance = 1 // how many validators can be Byzantine
-  K.total_shares = K.tolerance * 3 + 1 // total # of shares. 0=>1, 1=>4, 2=>7 etc
+  // Defines global Byzantine tolerance parameter
+  // 0 would require 1 validator, 1 - 4, 2 - 7. 
+  // Our final goal is at least 3333 tolerance with 10,000 validators
+  K.tolerance = 1 
+
+
+  K.total_shares = K.tolerance * 3 + 1 
+
+
   K.majority = K.total_shares - K.tolerance
   //K.total_shares%3==0?K.total_shares*2/3+1:Math.ceil(K.total_shares*2/3)
 
@@ -146,6 +153,8 @@ module.exports = async (genesis) => {
   K.members[3].shares = 1
   K.members[3].platform = 'Google Cloud'
 
+
+
   K.members[0].hub = {
     handle: 'eu',
     name: '@eu (Europe)'
@@ -155,8 +164,6 @@ module.exports = async (genesis) => {
     handle: 'jp',
     name: '@jp (Japan)'
   }
-
-
 
 
 
