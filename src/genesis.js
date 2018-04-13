@@ -155,16 +155,6 @@ module.exports = async (genesis) => {
 
 
 
-  K.members[0].hub = {
-    handle: 'eu',
-    name: '@eu (Europe)'
-  }
-
-  K.members[3].hub = {
-    handle: 'jp',
-    name: '@jp (Japan)'
-  }
-
 
 
   K.hubs.push({
@@ -172,8 +162,8 @@ module.exports = async (genesis) => {
     location: K.members[0].location,
     pubkey: K.members[0].pubkey,
 
-    handle: 'eu',
-    name: '@eu (Europe)'
+    handle: 'main',
+    name: '@main (Main)'
   })
 
 

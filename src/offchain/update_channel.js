@@ -1,3 +1,4 @@
+// receive a transition for state channel
 module.exports = async (msg) => {
   var [pubkey, sig, body] = r(msg)
 
@@ -13,7 +14,7 @@ module.exports = async (msg) => {
     return false
   }
 
-  var ch = await me.channel(pubkey)
+  var ch = await me.getChannel(pubkey)
 
 
   if (ch.d.status != 'ready') {
@@ -68,7 +69,7 @@ module.exports = async (msg) => {
 
 
       // pay to unlocker
-      if (me.is_hub && unlocker.length > 1) {
+      if (me.my_hub && unlocker.length > 1) {
         l(`Forward to peer or other hub ${unlocker.length}`)
 
         var hl = await ch.d.createTransition({
@@ -94,7 +95,7 @@ module.exports = async (msg) => {
           return l("Bad unlocker")
         }
 
-        l("Arrived payment!", unlocked)
+        l("Arrived payment!", r(unlocked))
 
 
         var paid_invoice = invoices[toHex(hash)]
@@ -125,6 +126,8 @@ module.exports = async (msg) => {
 
         react()
       }
+
+      l(ack_transitions)
 
 
 
@@ -171,7 +174,7 @@ module.exports = async (msg) => {
   }
 
 
-  if (me.is_hub) {
+  if (me.my_hub) {
     me.send(pubkey, 'update', me.envelope(methodMap('update'), [], ec(ch.d.signed_state, me.id.secretKey)))
   }
 

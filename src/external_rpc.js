@@ -33,8 +33,8 @@ module.exports = async (ws, msg) => {
         me.users[pubkey].instance = ws
       }
 
-      if (me.is_hub) {
-        var ch = await me.channel(pubkey)
+      if (me.my_hub) {
+        var ch = await me.getChannel(pubkey)
         ch.d.last_online = new Date()
         
         // testnet: instead of cloud backups hub shares latest state
@@ -160,11 +160,11 @@ module.exports = async (ws, msg) => {
     }
 
     if (msg[0] == 2) {    
-      (await me.channel(pubkey)).d.startDispute()
+      (await me.getChannel(pubkey)).d.startDispute()
     }
 
     if (msg[0] == 3) {    
-      (await me.channel(pubkey)).d.startDispute(true)
+      (await me.getChannel(pubkey)).d.startDispute(true)
     }
 
 
@@ -224,7 +224,7 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    var ch = await me.channel(pubkey)
+    var ch = await me.getChannel(pubkey)
 
     ch.d.they_soft_limit = readInt(limits[1])
     ch.d.they_hard_limit = readInt(limits[2])
@@ -234,7 +234,7 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'withdrawal') { // other party gives withdrawal on-chain
     var [pubkey, sig, body] = r(msg)
 
-    var ch = await me.channel(pubkey)
+    var ch = await me.getChannel(pubkey)
     var amount = readInt(r(body)[0])
 
     var input = r([methodMap('withdrawal'),
@@ -257,7 +257,7 @@ module.exports = async (ws, msg) => {
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
 
-    var ch = await me.channel(pubkey)
+    var ch = await me.getChannel(pubkey)
 
     var amount = readInt(r(body)[0])
 
@@ -311,7 +311,7 @@ module.exports = async (ws, msg) => {
 
   } else if (inputType == 'ack') { // our payment was acknowledged
     var [pubkey, sig, body] = r(msg)
-    var ch = await me.channel(pubkey)
+    var ch = await me.getChannel(pubkey)
 
     var [secret, stateSig] = r(body)
 
@@ -334,7 +334,7 @@ module.exports = async (ws, msg) => {
     if (typeof return_to === 'function') {
       return_to({confirm: 'Payment succeeded!', secret: toHex(secret)})
     } else {
-      var return_ch = await me.channel(return_to)
+      var return_ch = await me.getChannel(return_to)
       me.send(return_to, 'ack', me.envelope(
         secret, ec(return_ch.d.getState(), me.id.secretKey)
       ))

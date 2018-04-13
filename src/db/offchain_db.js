@@ -136,7 +136,7 @@ Delta.prototype.startDispute = async function(profitable) {
     }
   }
 
-  if (me.is_hub) {
+  if (me.my_hub) {
     this.status = 'cheat_dispute'
     // we don't broadcast dispute right away and wait until periodic rebalance
   } else {

@@ -48,7 +48,7 @@ module.exports = async (ws, msg) => {
         break
 
       case 'dispute':
-        var ch = await me.channel(Members.find(m => m.id == p.partner).pubkey)
+        var ch = await me.getChannel(Members.find(m => m.id == p.partner).pubkey)
         await ch.d.startDispute(p.profitable)
 
         result.confirm = 'Started a Dispute'
@@ -186,7 +186,7 @@ module.exports = async (ws, msg) => {
 
         if (p.request_amount > 0) {
           var partner = Members.find(m => m.id == p.partner)
-          var ch = await me.channel(partner.pubkey)
+          var ch = await me.getChannel(partner.pubkey)
           if (p.request_amount > ch.insured) {
             react({alert: 'More than you can withdraw from insured'})
             break
@@ -195,7 +195,7 @@ module.exports = async (ws, msg) => {
 
           // waiting for the response
           setTimeout(async () => {
-            var ch = await me.channel(partner.pubkey)
+            var ch = await me.getChannel(partner.pubkey)
             if (ch.d.input_sig) {
               ins.push([ ch.d.input_amount,
                 ch.d.partnerId,
@@ -235,7 +235,7 @@ module.exports = async (ws, msg) => {
       case 'setLimits':
         var m = Members.find(m => m.id == p.partner)
 
-        var ch = await me.channel(m.pubkey)
+        var ch = await me.getChannel(m.pubkey)
 
         ch.d.soft_limit = parseInt(p.limits[0]) * 100
         ch.d.hard_limit = parseInt(p.limits[1]) * 100

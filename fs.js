@@ -34,7 +34,7 @@ resolveChannel = (insurance, delta, is_left=true) => {
 // TODO: better way to keep app reactive?
 cache = async (i) => {
   if (K) {
-    cached_result.is_hub = me.is_hub ? me.my_member.hub.handle : false
+    cached_result.my_hub = me.my_hub
 
     cached_result.my_member = !!me.my_member
 
@@ -78,11 +78,11 @@ cache = async (i) => {
     })
 
 
-    if (me.is_hub) {
+    if (me.my_hub) {
       var deltas = await Delta.findAll({where: {myId: me.record.id} })
       var promised = 0
       for (var d of deltas) {
-        var ch = await me.channel(d.userId)
+        var ch = await me.getChannel(d.userId)
         if (ch.delta > 0) promised += ch.promised
       }
 

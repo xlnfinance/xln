@@ -154,7 +154,7 @@ module.exports = async (tx, meta) => {
 
           if (me.pubkey.equals(partner.pubkey)) {
             l('Channel with us is disputed')
-            var ch = await me.channel(signer.pubkey)
+            var ch = await me.getChannel(signer.pubkey)
             ch.d.status = 'disputed'
             await ch.d.save()
 
@@ -172,7 +172,7 @@ module.exports = async (tx, meta) => {
 
       // 2. take insurance from withdrawals
 
-      var is_hub = Members.find(m => m.hub && m.id == signer.id)
+      var my_hub = K.hubs.find(h => h.id == signer.id)
 
 
       for (var input of inputs) {
@@ -224,14 +224,14 @@ module.exports = async (tx, meta) => {
         // was this input related to us?
         if (me.record) {
           if (me.record.id == partner.id) {
-            var ch = await me.channel(signer.pubkey)
+            var ch = await me.getChannel(signer.pubkey)
             // they planned to withdraw and they did. Nullify hold amount
             ch.d.they_input_amount = 0
             await ch.d.save()
           }
 
           if (me.record.id == signer.id) {
-            var ch = await me.channel(partner.pubkey)
+            var ch = await me.getChannel(partner.pubkey)
             // they planned to withdraw and they did. Nullify hold amount
             ch.d.input_amount = 0
             ch.d.input_sig = null
@@ -327,7 +327,7 @@ module.exports = async (tx, meta) => {
 
           signer.balance -= amount
 
-          if (is_hub) {
+          if (my_hub) {
             // hubs get reimbursed for rebalancing
             // TODO: attack vector, the user may not endorsed this rebalance
             ins.insurance -= reimburse_tax
@@ -343,7 +343,7 @@ module.exports = async (tx, meta) => {
           await ins.save()
 
           // rebalance by hub for our account = reimburse hub fees
-          if (is_hub && me.pubkey.equals(withPartner.pubkey)) {
+          if (my_hub && me.pubkey.equals(withPartner.pubkey)) {
             await me.addHistory(giveTo.pubkey, -reimburse_tax, 'Rebalance fee', true)
           }
         }

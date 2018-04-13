@@ -138,7 +138,7 @@ Insurance.prototype.resolve = async function(){
 
   // are we in this dispute? Unfreeze the channel
   if (withUs) {
-    var ch = await me.channel(withUs.pubkey)
+    var ch = await me.getChannel(withUs.pubkey)
     // reset all credit limits - the relationship starts "from scratch"
     ch.d.soft_limit = 0
     ch.d.hard_limit = 0

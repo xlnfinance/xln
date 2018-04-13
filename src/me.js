@@ -1,18 +1,10 @@
 WebSocketClient = require('../lib/ws')
 stringify = require('../lib/stringify')
 
-Me.prototype.consensus = require('./onchain/consensus')
-Me.prototype.processBlock = require('./onchain/block')
-Me.prototype.processTx = require('./onchain/tx')
-
-Me.prototype.payChannel = require('./offchain/pay_channel')
-Me.prototype.channel = require('./offchain/get_channel')
-Me.prototype.updateChannel = require('./offchain/update_channel')
-
 class Me {
   // boilerplate attributes
   constructor () {
-    this.is_hub = false
+    this.my_hub = false
 
     this.mempool = []
     this.status = 'await'
@@ -178,18 +170,13 @@ class Me {
     // in json pubkeys are in hex
     this.record = await this.byKey()
 
-    for (var m of Members) {
-      if (this.record && this.record.id == m.id) {
-        this.my_member = m
-        this.is_hub = !!this.my_member.hub
-      }
+    if (this.record) {
+      this.my_member = Members.find(m=>m.id == this.record.id)
+      this.my_hub = K.hubs.find(m=>m.id == this.record.id)      
     }
 
     await cache()
     this.intervals.push(setInterval(cache, 2000))
-
-
-
 
     if (this.my_member) {
       me.consensus() // 1s intervals
@@ -223,7 +210,7 @@ class Me {
         }
       }
 
-      if (this.is_hub) {
+      if (this.my_hub) {
         me.intervals.push(setInterval(require('./offchain/rebalance'), K.blocktime * 1000))
       }
     } else {
@@ -247,7 +234,7 @@ class Me {
 
     if (checkpoint) {
       // add current balances
-      var ch = await me.channel(pubkey)
+      var ch = await me.getChannel(pubkey)
       attrs.delta = ch.they_promised
       attrs.balance = ch.payable
     }
@@ -261,7 +248,7 @@ class Me {
 
     for (var m of K.hubs) {
       if (!me.record || me.record.id != m.id) {
-        var ch = await me.channel(Buffer.from(m.pubkey, 'hex'))
+        var ch = await me.getChannel(Buffer.from(m.pubkey, 'hex'))
         channels.push(ch)
       }
     }
@@ -322,6 +309,16 @@ class Me {
     return true
   }
 }
+
+
+Me.prototype.consensus = require('./onchain/consensus')
+Me.prototype.processBlock = require('./onchain/block')
+Me.prototype.processTx = require('./onchain/tx')
+
+Me.prototype.payChannel = require('./offchain/pay_channel')
+Me.prototype.getChannel = require('./offchain/get_channel')
+Me.prototype.updateChannel = require('./offchain/update_channel')
+
 
 module.exports = {
   Me: Me

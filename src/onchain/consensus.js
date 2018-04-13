@@ -67,7 +67,7 @@ module.exports = async () => {
         me.mempool = []
 
         // Propose no blocks if mempool is empty (up to 10 min)
-        if (ordered_tx.length > 0 || K.ts < ts() - 600) {
+        if (ordered_tx.length > 0 || K.ts < ts() - 40) {
           var ordered_tx_body = r(ordered_tx)
 
           var header = r([
@@ -155,7 +155,7 @@ module.exports = async () => {
     if (shares < K.majority) {
       if (!me.proposed_block.locked) me.proposed_block = {}
 
-      l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
+      //l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
     } else {
       var block = r([precommits,
           me.proposed_block.header,

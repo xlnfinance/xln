@@ -1,5 +1,6 @@
+// add a transition to state channel
 module.exports = async (opts) => {
-  var ch = await me.channel(opts.partner)
+  var ch = await me.getChannel(opts.partner)
 
   if (ch.d.status != 'ready') {
     return [false, 'The channel is not ready to accept payments: ' + ch.d.status]
@@ -101,7 +102,7 @@ module.exports = async (opts) => {
 
 
 
-  if (me.is_hub) {
+  if (me.my_hub) {
     //l('todo: ensure delivery')
   } else {
     await me.addHistory(opts.partner, -opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '..', true)

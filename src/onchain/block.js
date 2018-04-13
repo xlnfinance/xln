@@ -6,7 +6,7 @@ module.exports = async (block) => {
   var precommit_body = r([methodMap('precommit'), header])
   for (var i = 0; i < Members.length; i++) {
     //precommits[i] && precommits[i].length == 64 && 
-    if (ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
+    if (precommits[i] && ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
       shares += Members[i].shares
     } else {
       l(`${i} missed a precommit for `, precommit_body)
@@ -55,6 +55,7 @@ module.exports = async (block) => {
 
 
   // In case we are member & locked on this height, unlock
+  // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
   if (me.proposed_block.locked) {
     var locked_prev_hash = r(me.proposed_block.header)[2]
 

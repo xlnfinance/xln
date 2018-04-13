@@ -260,7 +260,8 @@ FS.onready(() => {
         auth_code: localStorage.auth_code,
 
         asset: 'FSD',
-        hub: 0,
+        peer: 0,
+
         channels: [],
 
         whitepaper: wp,
@@ -286,7 +287,7 @@ FS.onready(() => {
         off_to: '',
         off_amount: '',
 
-        is_hub: false,
+        my_hub: false,
 
         limits: [100, 1000],
 
@@ -311,7 +312,7 @@ FS.onready(() => {
       }
     },
     computed: {
-      ch: () => { return app.channels[app.hub] }
+      ch: () => { return app.channels[app.peer] }
     },
     methods: methods,
     template: `
@@ -448,13 +449,13 @@ FS.onready(() => {
 
     <div v-else-if="tab=='wallet'">
 
-      <template v-if="pubkey && ch">
+      <template v-if="pubkey">
 
         <h2 class="alert alert-danger" v-if="pending_tx.length>0">Please wait until your <b>{{pending_tx[0].method}}</b> transaction is added to the blockchain.</h2>
 
         <h2 class="alert alert-danger" v-if="K.ts < ts() - 60">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
 
-        <h2 class="alert alert-danger" v-if="is_hub">This node is a hub @{{is_hub}}</h2>
+        <h2 class="alert alert-danger" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
         <br>
 
 
@@ -466,7 +467,7 @@ FS.onready(() => {
           <hr />
         </div>
 
-        <template v-for="(ch,index) in channels">
+        <template v-if="channels.length > 0" v-for="(ch, index) in channels">
           <h2 style="display:inline-block">Balance {{ch.handle}}: {{commy(ch.payable)}}</h2>
 
           <small v-if="ch.payable>0">
@@ -498,7 +499,7 @@ FS.onready(() => {
 
 
 
-        <div v-if="ch.d.status == 'ready'" class="row">
+        <div class="row">
           <div class="col-sm-6">
             <p><div class="input-group" style="width:400px">
               <span class="input-group-addon" id="sizing-addon2">{{asset}}</span>
@@ -506,7 +507,7 @@ FS.onready(() => {
             </div></p>
 
 
-            <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, partner: ch.partner, amount: uncommy(off_amount)})">→ Request Money</button></p>
+            <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, amount: uncommy(off_amount)})">→ Request Money</button></p>
 
             <p v-for="(value, k) in invoices" style="word-wrap: break-word">Invoice for {{commy(value.amount)}} ({{value.status}}):<br> {{value.invoice}}</p>
 
@@ -519,7 +520,7 @@ FS.onready(() => {
             </div></p>
 
 
-            <p><button type="button" class="btn btn-success" @click="call('send', {partner: ch.partner, pay_invoice: pay_invoice}); pay_invoice='';">Send Money → </button></p>
+            <p><button type="button" class="btn btn-success" @click="call('send', {pay_invoice: pay_invoice}); pay_invoice='';">Send Money → </button></p>
 
             <p v-for="(value, k) in purchases">Payment sent for invoice: {{k}}</p>
 
@@ -534,13 +535,9 @@ FS.onready(() => {
           </div>
         </div>
 
-        <div v-else-if="ch.d.status == 'await'">
-          <p>You cannot send or receive payments: we await the confirmation for previous payment.</p>
-        </div>
 
-        <div v-else-if="ch.d.status == 'disputed'">
-          <p>You cannot send or receive payments: this channel is in a dispute. <span v-if="ch.ins && ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span></p>
-        </div>
+
+
 
 
 <nav>
@@ -549,9 +546,7 @@ FS.onready(() => {
 
     <a class="nav-item nav-link" id="nav-uninsured-tab" data-toggle="tab" href="#nav-uninsured" role="tab" aria-controls="nav-uninsured" aria-selected="false">Uninsured Limits</a>
 
-
     <a class="nav-item nav-link" id="nav-onchain-tab" data-toggle="tab" href="#nav-onchain" role="tab" aria-controls="nav-onchain" aria-selected="false">On-Chain</a>
-
 
     <a class="nav-item nav-link active" id="nav-testnet-tab" data-toggle="tab" href="#nav-testnet" role="tab" aria-controls="nav-testnet" aria-selected="false">Testnet</a>
 
@@ -584,10 +579,10 @@ FS.onready(() => {
   </div>
 
 
-  <div class="tab-pane fade" id="nav-uninsured" role="tabpanel" aria-labelledby="nav-uninsured-tab">
+  <div v-if="ch" class="tab-pane fade" id="nav-uninsured" role="tabpanel" aria-labelledby="nav-uninsured-tab" >
       <h3>Uninsured Limits</h3>
 
-        <select v-model="hub" class="custom-select custom-select-lg mb-3">
+        <select v-model="peer" class="custom-select custom-select-lg mb-3">
           <option disabled>Select current hub</option>
           <option v-for="(a,index) in channels" :value="index">{{a.hub.handle}}</option>
         </select>
@@ -613,7 +608,7 @@ FS.onready(() => {
 
 
   <div class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
-    <div v-if="record">
+    <div v-if="record && ch">
       <h3>On-chain Actions</h3>
 
       <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your on-chain balance.</small>
@@ -643,7 +638,8 @@ FS.onready(() => {
       <p>After a timeout money will arrive to your on-chain balance, then you will be able to move it to another hub.</p>
 
       <p v-if="ch.d.status == 'disputed'"> 
-        Please wait for dispute resolution.
+        Please wait for dispute resolution. <span v-if="ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span>
+
       </p>
       <p v-else-if="record && record.balance >= K.standalone_balance"> 
         <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>

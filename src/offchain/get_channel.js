@@ -18,8 +18,8 @@ module.exports = async (partner) => {
 
   me.record = await me.byKey()
 
-  var is_hub = (p)=>K.hubs.find(m => m.pubkey==toHex(p))
-  ch.hub = is_hub(partner)
+  var my_hub = (p)=>K.hubs.find(m => m.pubkey==toHex(p))
+  ch.hub = my_hub(partner)
   
   // ch stands for Channel, d for Delta record, yes
   ch.d = (await Delta.findOrBuild({
@@ -33,11 +33,11 @@ module.exports = async (partner) => {
       input_amount: 0,
       they_input_amount: 0,
 
-      soft_limit: is_hub(partner) ? K.risk : 0,
-      hard_limit: is_hub(partner) ? K.hard_limit : 0,
+      soft_limit: my_hub(partner) ? K.risk : 0,
+      hard_limit: my_hub(partner) ? K.hard_limit : 0,
 
-      they_soft_limit: is_hub(me.pubkey) ? K.risk : 0,
-      they_hard_limit: is_hub(me.pubkey) ? K.hard_limit :  0,
+      they_soft_limit: my_hub(me.pubkey) ? K.risk : 0,
+      they_hard_limit: my_hub(me.pubkey) ? K.hard_limit :  0,
 
       nonce: 0,
       status: 'ready',

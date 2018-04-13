@@ -1,5 +1,5 @@
 /*
-Here hub takes insurance from net-spenders and rebalances towards net-receivers.
+Once in a few blocks hub takes insurance from net-spenders and rebalances towards net-receivers.
 Matching those with who we have promised>they_soft_limit with those where we have insured>$100
 
 For now pretty simple. In the future can be added:
@@ -28,7 +28,7 @@ module.exports = async function () {
   var checkBack = []
 
   for (var d of deltas) {
-    var ch = await me.channel(d.partnerId)
+    var ch = await me.getChannel(d.partnerId)
 
     // finding who's gone beyond soft limit
     // soft limit can be raised over K.risk to pay less fees
@@ -70,7 +70,7 @@ module.exports = async function () {
   // checking on all inputs we expected to get, then rebalance
   setTimeout(async () => {
     for (var partnerId of checkBack) {
-      var ch = await me.channel(partnerId)
+      var ch = await me.getChannel(partnerId)
       if (ch.d.input_sig) {
         reb[1].push([ ch.d.input_amount,
           ch.d.partnerId,
