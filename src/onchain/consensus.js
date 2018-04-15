@@ -157,15 +157,15 @@ module.exports = async () => {
 
       //l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
     } else {
-      var block = r([precommits,
+      // adding to our external queue to avoid race conditions 
+      var chain = r([
+        [ precommits,
           me.proposed_block.header,
           me.proposed_block.ordered_tx_body
-        ])
-
+        ]
+      ]) 
+      me.queue.push(['external_rpc', null, concat(inputMap('chain'), chain)])
       me.proposed_block = {}
-
-      // adding to our external queue to avoid race conditions 
-      me.queue.push(['external_rpc', null, concat(inputMap('chain'), r([block])) ]) 
     }
   }
 

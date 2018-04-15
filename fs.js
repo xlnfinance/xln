@@ -62,7 +62,8 @@ cache = async (i) => {
         built_by,
         prev_hash,
         timestamp,
-        ordered_tx] = r(b.header)
+        tx_root,
+        db_hash] = r(b.header)
 
       return {
         id: b.id,

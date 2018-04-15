@@ -1,5 +1,13 @@
 // Block processing code. Verifies precommits sigs then executes tx in it one by one
 module.exports = async (precommits, header, ordered_tx_body) => {
+  if (header.length > 200) {
+    return l("Too long header")
+  }
+
+  if (ordered_tx_body.length > K.blocksize) {
+    return l('Too long block')
+  }
+
   var [methodId,
     built_by,
     prev_hash,
@@ -18,10 +26,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return l('Wrong method for block')
   }
 
-  if (ordered_tx_body.length > K.blocksize) {
-    return l('Too long block')
-  }
-
   if (timestamp < K.ts) {
     return l('New block from the past')
   }
@@ -37,14 +41,15 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   if (precommits.length == 0) {
     // this is just dry run
     return true
+  } else if (precommits.length != Members.length) {
+    return l("Not valid number of precommits")
   }
 
 
   var shares = 0
   var precommit_body = r([methodMap('precommit'), header])
   for (var i = 0; i < Members.length; i++) {
-    //precommits[i] && precommits[i].length == 64 && 
-    if (precommits[i] && ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
+    if (precommits[i].length == 64 && ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
       shares += Members[i].shares
     } else {
       l(`${i} missed a precommit for `, precommit_body)
@@ -58,7 +63,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // >>> Given block is considered valid and final after this point <<<
 
 
-  // In case we are member & locked on this height, unlock
+  // In case we are member && locked on this prev_hash, unlock to ensure liveness
   // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
   if (me.proposed_block.locked) {
     var locked_prev_hash = r(me.proposed_block.header)[2]
@@ -109,8 +114,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     K.usable_blocks++
   }
 
-  K.total_bytes += block.length
-  K.bytes_since_last_snapshot += block.length
+  K.total_bytes += ordered_tx_body.length
+  K.bytes_since_last_snapshot += ordered_tx_body.length
 
   // Every x blocks create new installer
   if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {

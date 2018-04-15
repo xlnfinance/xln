@@ -15,7 +15,10 @@ var base_db = {
 privSequelize = new Sequelize('', '', 'password', base_db)
 
 Block = privSequelize.define('block', {
-  block: Sequelize.CHAR.BINARY,
+  precommits: Sequelize.CHAR.BINARY,
+  header: Sequelize.CHAR.BINARY,
+  ordered_tx_data: Sequelize.CHAR.BINARY,
+
   hash: Sequelize.CHAR(32).BINARY,
   prev_hash: Sequelize.CHAR(32).BINARY,
   meta: Sequelize.TEXT,

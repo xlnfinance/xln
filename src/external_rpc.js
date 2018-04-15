@@ -207,6 +207,7 @@ module.exports = async (ws, msg) => {
       var blockmap = []
 
       for (var b of blocks) {
+        // unpack precommits
         blockmap.push([r(b.precommits), b.header, b.ordered_tx_body])
       }
 
