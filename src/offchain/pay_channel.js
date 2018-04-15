@@ -1,4 +1,25 @@
-// add a transition to state channel
+// add a transition to state channel. Types:
+/*
+// 10,[] => 15,[] - add directly to base offdelta
+'add',
+
+// 15,[] => 15,[] - (NOT STATE CHANGING) offdelta remains the same, there was no hashlock
+'settle',
+
+// 15,[] => 10,[] - secret not found, offdelta is decreased voluntarily 
+'fail',
+ 
+// 10,[] => 10,[[5,H1,E1]]
+'addlock', // we add hashlock transfer to state. 
+
+// 10,[[5,H1,E1]] => 15,[]
+'settlelock', // we've got the secret so please unlock and apply to base offdelta
+
+// 10,[[5,H1,E1]] => 10,[]
+'faillock', // couldn't get secret for <reason>, delete hashlock
+*/
+
+
 module.exports = async (opts) => {
   var ch = await me.getChannel(opts.partner)
 
@@ -77,7 +98,10 @@ module.exports = async (opts) => {
 
 
   // what do we do when we get the secret
-  if (opts.return_to) purchases[toHex(opts.invoice)] = opts.return_to
+  if (opts.return_to && opts.invoice) {
+    l('inv',opts.invoice)
+    purchases[toHex(opts.invoice)] = opts.return_to
+  }
 
 
   l("Sending an update to ", opts.partner, transitions)

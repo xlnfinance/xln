@@ -299,7 +299,7 @@ FS.onready(() => {
         history: [],
         pending_tx: [],
 
-        proposal: ['Mint $1000 FSD to 1@1', `await Tx.mint(0, 1, 1, 100000)`, ''],
+        proposal: ['Increase Blocksize After Client Optimization', `K.blocksize += 1000000`, ''],
 
         settings: !localStorage.settings,
 
@@ -332,38 +332,37 @@ FS.onready(() => {
           <a class="nav-link" @click="go('')">Home</a>
         </li>
 
-        <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
-          <a class="nav-link" @click="go('wallet')">Wallet</a>
-        </li>
-
-
-
-
 
         <li v-if="my_member" class="nav-item" v-bind:class="{ active: tab=='install' }">
           <a class="nav-link" @click="go('install')">Install</a>
         </li>
 
 
+        <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
+          <a class="nav-link" @click="go('wallet')">Wallet</a>
+        </li>
+
       <li class="nav-item dropdown">
         <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#">Explorers
         <span class="caret"></span></a>
         <ul class="dropdown-menu">
-          <li><a class="nav-link" @click="go('blockchain_explorer')" >Blockchain Explorer</a></li>
-          <li><a class="nav-link" @click="go('account_explorer')" >Account Explorer</a></li>
-          <li><a class="nav-link" @click="go('channel_explorer')" href="#">Channel Explorer</a></li>
+          <li><a class="nav-link" @click="go('blockchain_explorer')" >Blockchain</a></li>
+          <li><a class="nav-link" @click="go('account_explorer')" >Accounts</a></li>
+          <li><a class="nav-link" @click="go('channel_explorer')" href="#">Channels</a></li>
+
+          <li><a class="nav-link" @click="go('help')" href="#">Network</a></li>
+
+
+          <li><a class="nav-link" @click="go('gov')" href="#">Governance</a></li>
+
+          <li><a class="nav-link" @click="go('assets')" href="#">Assets</a></li>
+          <li><a class="nav-link" @click="go('hubs')" href="#">Hubs</a></li>
+
+
         </ul>
       </li>
 
 
-
-        <li class="nav-item" v-bind:class="{ active: tab=='help' }">
-          <a class="nav-link" @click="go('help')">Network</a>
-        </li>
-
-        <li class="nav-item"  v-bind:class="{ active: tab=='gov' }">
-          <a class="nav-link" @click="go('gov')">Governance</a>
-        </li>
 
       </ul>
 
@@ -453,7 +452,7 @@ FS.onready(() => {
 
         <h2 class="alert alert-danger" v-if="pending_tx.length>0">Please wait until your <b>{{pending_tx[0].method}}</b> transaction is added to the blockchain.</h2>
 
-        <h2 class="alert alert-danger" v-if="K.ts < ts() - 60">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
+        <h2 class="alert alert-danger" v-if="K.ts < ts() - 600">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
 
         <h2 class="alert alert-danger" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
         <br>
@@ -461,14 +460,14 @@ FS.onready(() => {
 
 
         <div v-if="record">
-          <h2>Balance on-chain: <b>\${{commy(record.balance)}}</b></h2>
+          <h2>Balance on-chain: <b>{{commy(record.balance)}}</b></h2>
           <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with a hub. It is also used to cover on-chain transaction fees. Your on-chain ID: <b>{{record.id}}</b></p>
 
           <hr />
         </div>
 
         <template v-if="channels.length > 0" v-for="(ch, index) in channels">
-          <h2 style="display:inline-block">Balance {{ch.handle}}: {{commy(ch.payable)}}</h2>
+          <h2 style="display:inline-block">Balance @{{ch.hub.handle}}: {{commy(ch.payable)}}</h2>
 
           <small v-if="ch.payable>0">
           = {{commy(ch.insurance)}} insurance 
@@ -477,7 +476,7 @@ FS.onready(() => {
           {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}}
           </small> 
           
-          <p><div v-if="ch.bar > 0">
+          <p><div v-if="false && ch.bar > 0">
             <div class="progress" style="max-width:1400px">
               <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}"   class="progress-bar"  role="progressbar">
                 -{{commy(ch.promised)}} (we promised)

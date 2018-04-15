@@ -58,13 +58,11 @@ cache = async (i) => {
         meta: {[Sequelize.Op.not]: null}
       }
     })).map(b=>{
-      var [precommits, header, tx_body] = r(b.block)
-
       var [methodId,
         built_by,
         prev_hash,
         timestamp,
-        ordered_tx] = r(header)
+        ordered_tx] = r(b.header)
 
       return {
         id: b.id,
@@ -170,6 +168,17 @@ purchases = {}
 
 
 initDashboard = async a => {
+
+  // auto reloader for debugging
+  setInterval(()=>{
+    fs.stat('../restart', (e,f)=>{
+
+      if (f && f.atimeMs > (ts()-2)*1000 ) {
+        process.exit(0)
+      }
+    })
+  },1000)
+
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
 
@@ -360,28 +369,25 @@ base_port = argv.p ? parseInt(argv.p) : 8000;
 
     await privSequelize.sync({force: false})
 
-    /*
-    TODO: fault tolerant reloader 
 
 
     var cluster = require('cluster')
     if (cluster.isMaster) {
-      cluster.fork();
+      cluster.fork()
 
       cluster.on('exit', function(worker, code, signal) {
         console.log('exit')
-        //cluster.fork();
-      });
+        cluster.fork();
+      })
     }
 
-    if (cluster.isWorker) { */
-    initDashboard()
-    // }
+    if (cluster.isWorker) { 
+      initDashboard()
+    }
   }
 })()
 
 process.on('unhandledRejection', r => console.log(r))
-
 
 
 repl = require('repl').start('> ')

@@ -14,6 +14,8 @@ sequelize = new Sequelize('', '', 'password', base_db)
 
 User = sequelize.define('user', {
   username: Sequelize.STRING,
+
+
   pubkey: Sequelize.CHAR(32).BINARY,
   nonce: Sequelize.INTEGER,
   balance: Sequelize.BIGINT // on-chain balance: mostly to pay taxes
@@ -165,8 +167,9 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
 
 
-// Hashlocks help in atomic swaps and mediated transfers. 
-// They are are stored for some time and unlock a specific action
+// Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
+// Primarily used in atomic swaps and mediated transfers. Based on Sprites concept
+// They are are stored for a few days and unlock a specific action
 Hashlock = sequelize.define('hashlock', {
   alg: Sequelize.INTEGER, // sha256, sha3?
   hash: Sequelize.TEXT,
@@ -184,6 +187,4 @@ Asset = sequelize.define('asset', {
   issuerId: Sequelize.INTEGER,
   total_supply: Sequelize.INTEGER
 })
-
-
 

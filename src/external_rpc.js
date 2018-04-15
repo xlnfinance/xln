@@ -90,6 +90,11 @@ module.exports = async (ws, msg) => {
       return l("We are still precommited to previous block.")
     }
 
+    // no precommits means dry run
+    if (!await me.processBlock([], header, ordered_tx_body)){
+      return l("Invalid block header")
+    }
+
     // consensus operations are in-memory for now
     //l("Saving proposed block")
     me.proposed_block = {
@@ -100,7 +105,6 @@ module.exports = async (ws, msg) => {
       ordered_tx_body: ordered_tx_body
     }
 
-  // we provide block sig back
   } else if (inputType == 'prevote') {
     var [pubkey, sig] = r(msg)
 
@@ -169,11 +173,14 @@ module.exports = async (ws, msg) => {
 
 
 
+
+
+  // sync requests latest blocks, chain returns chain
   } else if (inputType == 'chain') {
     var chain = r(msg)
 
     for (var block of chain) {
-      await me.processBlock(block)
+      await me.processBlock(block[0], block[1], block[2])
     }
 
     // dirty hack to not backup k.json until all blocks are synced
@@ -200,7 +207,7 @@ module.exports = async (ws, msg) => {
       var blockmap = []
 
       for (var b of blocks) {
-        blockmap.push(b.block)
+        blockmap.push([r(b.precommits), b.header, b.ordered_tx_body])
       }
 
       ws.send(concat(inputMap('chain'), r(blockmap)))
@@ -213,8 +220,8 @@ module.exports = async (ws, msg) => {
 
 
 
-
-  } else if (inputType == 'setLimits') { // other party defines credit limit to us
+  // Other party defines credit limit to us (hub)
+  } else if (inputType == 'setLimits') { 
     var [pubkey, sig, body] = r(msg)
 
     var limits = r(body)
@@ -231,28 +238,9 @@ module.exports = async (ws, msg) => {
 
     await ch.d.save()
     l('Received updated limits')
-  } else if (inputType == 'withdrawal') { // other party gives withdrawal on-chain
-    var [pubkey, sig, body] = r(msg)
 
-    var ch = await me.getChannel(pubkey)
-    var amount = readInt(r(body)[0])
-
-    var input = r([methodMap('withdrawal'),
-      ch.ins.leftId,
-      ch.ins.rightId,
-      ch.nonce,
-      amount])
-
-    if (!ec.verify(input, sig, pubkey)) {
-      l('Invalid withdrawal')
-      return false
-    }
-
-    l('Got withdrawal for ' + amount)
-    ch.d.input_amount = amount
-    ch.d.input_sig = sig
-    await ch.d.save()
-  } else if (inputType == 'requestWithdraw') { // other party wants to withdraw on-chain
+  // other party wants to withdraw on-chain
+  } else if (inputType == 'requestWithdraw') { 
     // partner asked us for instant withdrawal
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
@@ -287,6 +275,29 @@ module.exports = async (ws, msg) => {
       r([amount])
     ]))
 
+
+  // other party gives withdrawal on-chain
+  } else if (inputType == 'withdrawal') { 
+    var [pubkey, sig, body] = r(msg)
+
+    var ch = await me.getChannel(pubkey)
+    var amount = readInt(r(body)[0])
+
+    var input = r([methodMap('withdrawal'),
+      ch.ins.leftId,
+      ch.ins.rightId,
+      ch.nonce,
+      amount])
+
+    if (!ec.verify(input, sig, pubkey)) {
+      l('Invalid withdrawal')
+      return false
+    }
+
+    l('Got withdrawal for ' + amount)
+    ch.d.input_amount = amount
+    ch.d.input_sig = sig
+    await ch.d.save()
 
 
 

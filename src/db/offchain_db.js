@@ -67,7 +67,14 @@ Delta = privSequelize.define('delta', {
   signed_state: Sequelize.TEXT,
 
   // testnet: cheaty transaction
-  most_profitable: Sequelize.TEXT
+  most_profitable: Sequelize.TEXT,
+
+  // 4th type of balance, equivalent traditional balance in a bank. For pocket change.
+  // Exists for convenience like pulling payments when the user is offline. 
+  custodian_balance: {
+    type: Sequelize.INTEGER,
+    defaultValue: 0
+  }
 
 })
 

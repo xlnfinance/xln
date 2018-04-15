@@ -19,22 +19,25 @@ module.exports = async (tx, meta) => {
     return {error: 'No such method exposed onchain'}
   }
 
+  // gas/tax estimation is very straighforward for now, later methods' pricing can be fine tuned
   var tax = Math.round(K.tax * tx.length)
 
   if (signer.balance < tax) { return {error: 'Not enough balance to cover tx fee'} }
 
-  // This is precommit, so no need to apply tx and change db
+  // This is just checking, so no need to apply
   if (meta.dry_run) {
-    if (meta[signer.id] && meta[signer.id] > 5) {
+    if (meta[signer.id]) {
+      // Why only 1 tx/block? Two reasons:
+      // * it's an extra hassle to ensure the account has money to cover subsequent w/o applying old ones. We don't the complexity of chain reorganizations - all transactions are final
+      // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway 
       return {error: 'Only few tx per block per account currently allowed'}
     } else {
-      if (!meta[signer.id]) meta[signer.id] = 0
-
-      if (signer.nonce + meta[signer.id] != nonce) {
-        //return {error: 'Invalid nonce dry run'}
+      if (signer.nonce != nonce) {
+        return {error: 'Invalid nonce during dry run'}
       }
 
-      meta[signer.id]++
+      // Mark this user to deny subsequent tx
+      if (!meta[signer.id]) meta[signer.id] = 1
 
       return {success: true}
     }
@@ -86,10 +89,16 @@ module.exports = async (tx, meta) => {
         var [id, sig, dispute_nonce, offdelta, hashlocks] = dispute
 
         var partner = await User.findById(readInt(id))
-        if (!partner) return l('Your partner is not registred')
+        if (!partner) {
+          l('Your partner is not registred')
+          continue
+        }
 
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
-        if (compared == 0) return l('Cannot dispute with yourself')
+        if (compared == 0) {
+          l('Cannot dispute with yourself')
+          continue
+        }
 
         var ins = (await Insurance.findOrBuild({
           where: {
@@ -118,7 +127,8 @@ module.exports = async (tx, meta) => {
           ])
 
           if (!ec.verify(state, sig, partner.pubkey)) {
-            return l('Invalid offdelta state sig ', state)
+            l('Invalid offdelta state sig ', state)
+            continue
           }
         } else {
           l('New channel? Split with default values')
@@ -374,7 +384,10 @@ module.exports = async (tx, meta) => {
     // Governance methods below: proposing and voting on patches
 
     case 'propose':
-      if (signer.id != 1) return l("Currenlty only root can propose an amendment")
+      if (signer.id != 1) {
+        l("Only root can propose an amendment")
+        break
+      }
 
       var execute_on = K.usable_blocks + K.voting_period // 60*24
 
@@ -411,10 +424,10 @@ module.exports = async (tx, meta) => {
   }
 
   signer.nonce++
+  await signer.save()
   
   meta['parsed_tx'].push(parsed_tx)
 
-  await signer.save()
 
   return {success: true}
 }

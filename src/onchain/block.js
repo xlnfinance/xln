@@ -1,22 +1,5 @@
 // Block processing code. Verifies precommits sigs then executes tx in it one by one
-module.exports = async (block) => {
-  var [precommits, header, ordered_tx_body] = r(block)
-
-  var shares = 0
-  var precommit_body = r([methodMap('precommit'), header])
-  for (var i = 0; i < Members.length; i++) {
-    //precommits[i] && precommits[i].length == 64 && 
-    if (precommits[i] && ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
-      shares += Members[i].shares
-    } else {
-      l(`${i} missed a precommit for `, precommit_body)
-    }
-  }
-
-  if (shares < K.majority) {
-    return l(`Not enough precommits`)
-  }
-
+module.exports = async (precommits, header, ordered_tx_body) => {
   var [methodId,
     built_by,
     prev_hash,
@@ -49,6 +32,27 @@ module.exports = async (block) => {
 
   if (!db_hash.equals(current_db_hash())) {
     l('DANGER: state mismatch. Some tx was not deterministic')
+  }
+
+  if (precommits.length == 0) {
+    // this is just dry run
+    return true
+  }
+
+
+  var shares = 0
+  var precommit_body = r([methodMap('precommit'), header])
+  for (var i = 0; i < Members.length; i++) {
+    //precommits[i] && precommits[i].length == 64 && 
+    if (precommits[i] && ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
+      shares += Members[i].shares
+    } else {
+      l(`${i} missed a precommit for `, precommit_body)
+    }
+  }
+
+  if (shares < K.majority) {
+    return l(`Not enough precommits`)
   }
 
   // >>> Given block is considered valid and final after this point <<<
@@ -206,7 +210,9 @@ module.exports = async (block) => {
     prev_hash: Buffer.from(prev_hash, 'hex'),
     hash: sha3(header),
 
-    block: block, // sigs, header and tx all in one
+    precommits: r(precommits), // pack them in rlp for storage 
+    header: header, 
+    ordered_tx_body: ordered_tx_body, 
 
     total_tx: ordered_tx.length,
     meta: (meta.parsed_tx.length + meta.cron.length > 0) ? JSON.stringify(meta) : null

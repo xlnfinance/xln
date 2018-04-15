@@ -52,7 +52,7 @@ module.exports = async () => {
         for (var candidate of me.mempool) {
           if (total_size + candidate.length > K.blocksize) break
 
-          var result = await Tx.processTx(candidate, meta)
+          var result = await me.processTx(candidate, meta)
           if (result.success) {
             ordered_tx.push(candidate)
             total_size += candidate.length
@@ -66,7 +66,7 @@ module.exports = async () => {
         // flush it
         me.mempool = []
 
-        // Propose no blocks if mempool is empty (up to 10 min)
+        // Propose no blocks if mempool is empty
         if (ordered_tx.length > 0 || K.ts < ts() - 40) {
           var ordered_tx_body = r(ordered_tx)
 

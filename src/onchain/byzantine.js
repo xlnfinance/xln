@@ -64,7 +64,7 @@ module.exports = async () => {
         for (var candidate of me.mempool) {
           if (total_size + candidate.length > K.blocksize) break
 
-          var result = await Tx.processTx(candidate, meta)
+          var result = await me.processTx(candidate, meta)
           if (result.success) {
             ordered_tx.push(candidate)
             total_size += candidate.length
@@ -170,14 +170,11 @@ module.exports = async () => {
     } else {
       l("Success! commit block")
 
-      var block = r([precommits,
-          me.proposed_block.header,
-          me.proposed_block.ordered_tx_body
-        ])
-
       me.proposed_block = {}
 
-      await me.processBlock(block)
+      await me.processBlock(precommits,
+          me.proposed_block.header,
+          me.proposed_block.ordered_tx_body)
       fs.writeFileSync('data/k.json', stringify(K))
 
     }

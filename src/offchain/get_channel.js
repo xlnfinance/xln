@@ -1,3 +1,7 @@
+// This method gets Insurance from onchain db, Delta from offchain db 
+// then derives a ton of info about current channel - who owns what, what's promised, what's insiured etc
+
+// TODO: periodically clone Insurance to Delta db to only deal with one db having all data 
 module.exports = async (partner) => {
   // accepts pubkey only
   var compared = Buffer.compare(me.pubkey, partner)
