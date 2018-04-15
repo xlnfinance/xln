@@ -209,6 +209,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
     })
   }
+  l("Save tx ", ordered_tx_body)
 
   // save final block in blockchain db and broadcast
   await Block.create({

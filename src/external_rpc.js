@@ -180,6 +180,7 @@ module.exports = async (ws, msg) => {
     var chain = r(msg)
 
     for (var block of chain) {
+      l("To process ", block)
       await me.processBlock(block[0], block[1], block[2])
     }
 
@@ -204,14 +205,14 @@ module.exports = async (ws, msg) => {
         limit: sync_limit
       })
 
-      var blockmap = []
+      var chain = []
 
       for (var b of blocks) {
         // unpack precommits
-        blockmap.push([r(b.precommits), b.header, b.ordered_tx_body])
+        chain.push([r(b.precommits), b.header, b.ordered_tx_body])
       }
 
-      ws.send(concat(inputMap('chain'), r(blockmap)))
+      ws.send(concat(inputMap('chain'), r(chain)))
     } else {
       // l("No blocks to sync after " + msg.toString('hex'))
     }

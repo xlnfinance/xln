@@ -15,9 +15,12 @@ var base_db = {
 privSequelize = new Sequelize('', '', 'password', base_db)
 
 Block = privSequelize.define('block', {
+  // sigs that authorize block
   precommits: Sequelize.CHAR.BINARY,
+  // header with merkle roots in it
   header: Sequelize.CHAR.BINARY,
-  ordered_tx_data: Sequelize.CHAR.BINARY,
+  // array of tx in block
+  ordered_tx_body: Sequelize.CHAR.BINARY,
 
   hash: Sequelize.CHAR(32).BINARY,
   prev_hash: Sequelize.CHAR(32).BINARY,
