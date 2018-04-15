@@ -1,4 +1,3 @@
-
 // On-Chain Database - every full node has exact same copy
 var base_db = {
   dialect: 'sqlite',
@@ -11,31 +10,29 @@ var base_db = {
 
 sequelize = new Sequelize('', '', 'password', base_db)
 
-
 User = sequelize.define('user', {
   username: Sequelize.STRING,
-
 
   pubkey: Sequelize.CHAR(32).BINARY,
   nonce: Sequelize.INTEGER,
   balance: Sequelize.BIGINT // on-chain balance: mostly to pay taxes
 })
 
-User.idOrKey = async function (id) {
+User.idOrKey = async function(id) {
   if (id.length == 32) {
     return (await User.findOrBuild({
       where: {pubkey: id},
       defaults: {
-        nonce:0,
-        balance:0
+        nonce: 0,
+        balance: 0
       }
     }))[0]
   } else {
-    return await User.findById(readInt(id))    
+    return await User.findById(readInt(id))
   }
 }
 
-User.prototype.payDebts = async function (parsed_tx) {
+User.prototype.payDebts = async function(parsed_tx) {
   var debts = await this.getDebts()
 
   for (var d of debts) {
@@ -63,16 +60,13 @@ User.prototype.payDebts = async function (parsed_tx) {
   }
 }
 
-
 Debt = sequelize.define('debt', {
   amount_left: Sequelize.INTEGER,
   oweTo: Sequelize.INTEGER
 })
 
-
 Debt.belongsTo(User)
 User.hasMany(Debt)
-
 
 Proposal = sequelize.define('proposal', {
   desc: Sequelize.TEXT,
@@ -96,15 +90,19 @@ Insurance = sequelize.define('insurance', {
   dispute_delayed: Sequelize.INTEGER,
 
   // increased off-chain. When disputed, higher one is true
-  dispute_nonce: Sequelize.INTEGER, 
+  dispute_nonce: Sequelize.INTEGER,
   dispute_offdelta: Sequelize.INTEGER,
 
   // started by left user?
   dispute_left: Sequelize.BOOLEAN
 })
 
-Insurance.prototype.resolve = async function(){
-  var resolved = resolveChannel(this.insurance, this.ondelta + this.dispute_offdelta, true)
+Insurance.prototype.resolve = async function() {
+  var resolved = resolveChannel(
+    this.insurance,
+    this.ondelta + this.dispute_offdelta,
+    true
+  )
 
   var left = await User.findById(this.leftId)
   var right = await User.findById(this.rightId)
@@ -121,7 +119,8 @@ Insurance.prototype.resolve = async function(){
     var d = await Debt.create({
       userId: resolved.promised > 0 ? left.id : right.id,
       oweTo: resolved.promised > 0 ? right.id : left.id,
-      amount_left: resolved.promised > 0 ? resolved.promised : resolved.they_promised
+      amount_left:
+        resolved.promised > 0 ? resolved.promised : resolved.they_promised
     })
   }
 
@@ -136,7 +135,11 @@ Insurance.prototype.resolve = async function(){
 
   await this.save()
 
-  var withUs = me.pubkey.equals(left.pubkey) ? right : (me.pubkey.equals(right.pubkey) ? left : false)
+  var withUs = me.pubkey.equals(left.pubkey)
+    ? right
+    : me.pubkey.equals(right.pubkey)
+      ? left
+      : false
 
   // are we in this dispute? Unfreeze the channel
   if (withUs) {
@@ -164,9 +167,6 @@ Proposal.belongsTo(User)
 
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
-
-
-
 // Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
 // Primarily used in atomic swaps and mediated transfers. Based on Sprites concept
 // They are are stored for a few days and unlock a specific action
@@ -176,15 +176,12 @@ Hashlock = sequelize.define('hashlock', {
   revealed_at: Sequelize.INTEGER
 })
 
-
-
 // Assets represent all numerical balances: currencies, tokens, shares, stocks.
 // Anyone can create and issue their own asset (like ERC20, but not programmable)
 Asset = sequelize.define('asset', {
-  ticker: Sequelize.TEXT, 
-  desc: Sequelize.TEXT, 
+  ticker: Sequelize.TEXT,
+  desc: Sequelize.TEXT,
 
   issuerId: Sequelize.INTEGER,
   total_supply: Sequelize.INTEGER
 })
-

@@ -8,19 +8,20 @@ For now pretty simple. In the future can be added:
 
 */
 
-module.exports = async function () {
-  if (PK.pending_tx.length > 0) return l("There are pending tx")
+module.exports = async function() {
+  if (PK.pending_tx.length > 0) return l('There are pending tx')
 
-
-  var deltas = await Delta.findAll({where: {
-    myId: me.pubkey, 
-    //status: 'ready'
-  }})
+  var deltas = await Delta.findAll({
+    where: {
+      myId: me.pubkey
+      //status: 'ready'
+    }
+  })
 
   var reb = [
     [], // disputes
     [], // inputs/withdrawals
-    []  // outputs/deposits
+    [] // outputs/deposits
   ]
 
   me.record = await me.byKey()
@@ -35,22 +36,21 @@ module.exports = async function () {
     if (ch.promised >= Math.max(K.risk, ch.d.they_soft_limit)) {
       l('Addint output for our promise ', ch.d.partnerId)
       reb[2].push([ch.promised, ch.d.myId, ch.d.partnerId, 0])
-
     } else if (ch.insured >= K.risk) {
       if (ch.d.input_sig) {
         l('we already have input to use')
         // method, user, hub, nonce, amount
 
-        reb[1].push([ ch.d.input_amount,
-          ch.d.partnerId,
-          ch.d.input_sig ])
-
+        reb[1].push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
       } else if (me.users[ch.d.partnerId]) {
-        l(`We can pull payment from ${toHex(ch.d.partnerId)} and use next rebalance`)
+        l(
+          `We can pull payment from ${toHex(
+            ch.d.partnerId
+          )} and use next rebalance`
+        )
         me.send(ch.d.partnerId, 'requestWithdraw', me.envelope(ch.insured))
 
         checkBack.push(ch.d.partnerId)
-
       } else if (ch.d.withdrawal_requested_at == null) {
         l('Delayed pull')
         ch.d.withdrawal_requested_at = ts()
@@ -59,12 +59,10 @@ module.exports = async function () {
         l('User is offline for too long, or tried to cheat')
         reb[0].push(await ch.d.getDispute())
       }
-
     } else if (ch.d.status == 'cheat_dispute') {
       l('User tried to cheat')
       reb[0].push(await ch.d.getDispute())
     }
-
   }
 
   // checking on all inputs we expected to get, then rebalance
@@ -72,15 +70,13 @@ module.exports = async function () {
     for (var partnerId of checkBack) {
       var ch = await me.getChannel(partnerId)
       if (ch.d.input_sig) {
-        reb[1].push([ ch.d.input_amount,
-          ch.d.partnerId,
-          ch.d.input_sig ])
+        reb[1].push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
       } else {
         ch.d.withdrawal_requested_at = ts()
         await ch.d.save()
       }
     }
-  
+
     if (reb[0].length + reb[1].length + reb[2].length > 0) {
       // sorting, bigger amounts are prioritized
       reb[1].sort((a, b) => b[0] - a[0])
