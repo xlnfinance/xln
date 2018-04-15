@@ -1,7 +1,7 @@
 module.exports = async (genesis) => {
   l('Start genesis')
 
-  await (sequelize.sync({force: true}))
+  await sequelize.sync({force: true})
 
   // entity / country / infra
 
@@ -30,7 +30,6 @@ module.exports = async (genesis) => {
 
     blocksize: 20000,
     blocktime: 20,
-
 
     // each genesis is randomized
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
@@ -70,7 +69,6 @@ module.exports = async (genesis) => {
         name: 'Ruble (ABC Bank)',
         total_supply: 0
       }
-
     ],
 
     min_amount: 100,
@@ -81,17 +79,14 @@ module.exports = async (genesis) => {
   }
 
   // Defines global Byzantine tolerance parameter
-  // 0 would require 1 validator, 1 - 4, 2 - 7. 
+  // 0 would require 1 validator, 1 - 4, 2 - 7.
   // Our final goal is at least 3333 tolerance with 10,000 validators
-  K.tolerance = 1 
+  K.tolerance = 1
 
-
-  K.total_shares = K.tolerance * 3 + 1 
-
+  K.total_shares = K.tolerance * 3 + 1
 
   K.majority = K.total_shares - K.tolerance
   //K.total_shares%3==0?K.total_shares*2/3+1:Math.ceil(K.total_shares*2/3)
-
 
   // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
 
@@ -100,12 +95,12 @@ module.exports = async (genesis) => {
     me = new Me()
     await me.init(username, seed)
 
-    var user = await (User.create({
+    var user = await User.create({
       pubkey: me.pubkey,
       username: username,
       nonce: 0,
       balance: 500000000
-    }))
+    })
 
     l(username + ' : ' + pw + ' at ' + loc)
 
@@ -127,18 +122,27 @@ module.exports = async (genesis) => {
     return seed
   }
 
-  var local = !fs.existsSync('/etc/letsencrypt/live/failsafe.network/fullchain.pem')
+  var local = !fs.existsSync(
+    '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
+  )
 
-  var base_rpc = local ? 'ws://'+localhost : 'wss://failsafe.network'
-  var base_web = local ? 'http://'+localhost : 'https://failsafe.network'
+  var base_rpc = local ? 'ws://' + localhost : 'wss://failsafe.network'
+  var base_web = local ? 'http://' + localhost : 'https://failsafe.network'
 
-  var seed = await createMember('root', toHex(crypto.randomBytes(16)),
+  var seed = await createMember(
+    'root',
+    toHex(crypto.randomBytes(16)),
     `${base_rpc}:8100`,
-    local ? 'http://'+localhost+':8433' : 'https://failsafe.network'
-    )
+    local ? 'http://' + localhost + ':8433' : 'https://failsafe.network'
+  )
 
   for (var i = 8001; i < 8004; i++) {
-    await createMember(i.toString(), 'password', `${base_rpc}:${i + 100}`, `${base_web}:${i}`)
+    await createMember(
+      i.toString(),
+      'password',
+      `${base_rpc}:${i + 100}`,
+      `${base_web}:${i}`
+    )
   }
 
   K.members[0].shares = 1
@@ -153,10 +157,6 @@ module.exports = async (genesis) => {
   K.members[3].shares = 1
   K.members[3].platform = 'Google Cloud'
 
-
-
-
-
   K.hubs.push({
     id: K.members[0].id,
     location: K.members[0].location,
@@ -166,10 +166,7 @@ module.exports = async (genesis) => {
     name: '@main (Main)'
   })
 
-
-
-
-  // preload 2@3 channel 
+  // preload 2@3 channel
   await Insurance.create({
     leftId: 2,
     rightId: 1,
@@ -178,7 +175,7 @@ module.exports = async (genesis) => {
     nonce: 0
   })
 
-/*
+  /*
   K.members[2].hub = {
     handle: 'us',
     name: '@us (America-based)'
@@ -188,12 +185,15 @@ module.exports = async (genesis) => {
   var json = stringify(K)
   fs.writeFileSync('data/k.json', json)
 
-  fs.writeFileSync('private/pk.json', JSON.stringify({
-    username: 'root',
-    seed: seed.toString('hex'),
-    auth_code: toHex(crypto.randomBytes(32)),
-    pending_tx: []
-  }))
+  fs.writeFileSync(
+    'private/pk.json',
+    JSON.stringify({
+      username: 'root',
+      seed: seed.toString('hex'),
+      auth_code: toHex(crypto.randomBytes(32)),
+      pending_tx: []
+    })
+  )
 
   process.exit(0)
 }

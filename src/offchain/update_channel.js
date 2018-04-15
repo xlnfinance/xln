@@ -176,7 +176,7 @@ module.exports = async (msg) => {
     me.envelope(
       methodMap('update'),
       ack_transitions,
-      ec(ch.d.getState(), me.id.secretKey)
+      ec(r(ch.d.getState()), me.id.secretKey)
     )
   )
 

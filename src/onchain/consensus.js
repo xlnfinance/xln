@@ -66,7 +66,7 @@ module.exports = async () => {
       me.mempool = []
 
       // Propose no blocks if mempool is empty
-      if (ordered_tx.length > 0 || K.ts < ts() - 40) {
+      if (ordered_tx.length > 0 || K.ts < ts() - 300) {
         var ordered_tx_body = r(ordered_tx)
 
         var header = r([

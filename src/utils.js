@@ -1,4 +1,4 @@
-// Convenience-first, later globals to be slowly reduced. 
+// Convenience-first, later globals to be slowly reduced.
 
 // system
 assert = require('assert')
@@ -19,7 +19,6 @@ keccak = require('keccak')
 nacl = require('../lib/nacl')
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = nacl.sign.detached.verify
-
 
 // encoders
 BN = require('bn.js')
@@ -48,7 +47,7 @@ l = console.log
 child_process = require('child_process')
 
 // Amazing lib to forget about binary encoding: https://github.com/ethereum/wiki/wiki/RLP
-r = function (a) {
+r = function(a) {
   if (a instanceof Buffer) {
     return rlp.decode(a)
   } else {
@@ -57,15 +56,19 @@ r = function (a) {
 }
 
 // for testnet handicaps
-sleep = async function (ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+sleep = async function(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-
-current_db_hash = ()=>{
-  return Buffer.from(child_process.execSync('shasum -a 256 data/db.sqlite').toString().split(' ')[0], 'hex')
+current_db_hash = () => {
+  return Buffer.from(
+    child_process
+      .execSync('shasum -a 256 data/db.sqlite')
+      .toString()
+      .split(' ')[0],
+    'hex'
+  )
 }
-
 
 localhost = '127.0.0.1'
 
@@ -73,8 +76,8 @@ readInt = (i) => {
   // reads signed integer from RLP encoded buffer
 
   if (i.length > 0) {
-    var num = i.readUIntBE(0, i.length) 
-    return (num % 2 == 1 ? -(num - 1) / 2 : num / 2)
+    var num = i.readUIntBE(0, i.length)
+    return num % 2 == 1 ? -(num - 1) / 2 : num / 2
   } else {
     return 0
   }
@@ -82,15 +85,22 @@ readInt = (i) => {
 
 toHex = (inp) => Buffer.from(inp).toString('hex')
 bin = (data) => Buffer.from(data)
-sha3 = (a) => keccak('keccak256').update(bin(a)).digest()
+sha3 = (a) =>
+  keccak('keccak256')
+    .update(bin(a))
+    .digest()
 
 // TODO: not proper alg
-kmac = (key, msg) => keccak('keccak256').update(key).update(bin(msg)).digest()
+kmac = (key, msg) =>
+  keccak('keccak256')
+    .update(key)
+    .update(bin(msg))
+    .digest()
 
 ts = () => Math.round(new Date() / 1000)
 
 beforeFees = (amount) => {
-  return Math.round(amount * 1+K.hub_fee)
+  return Math.round(amount * 1 + K.hub_fee)
 }
 afterFees = (amount) => {
   var fee = Math.round(amount * K.hub_fee)
@@ -126,24 +136,25 @@ commy = (b, dot = true) => {
   return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-concat = function () {
+concat = function() {
   return Buffer.concat(Object.values(arguments))
 }
 
 process.title = 'Failsafe'
 
 usage = () => {
-  return Object.assign(process.cpuUsage(), process.memoryUsage(), {uptime: process.uptime()})
+  return Object.assign(process.cpuUsage(), process.memoryUsage(), {
+    uptime: process.uptime()
+  })
 }
 
-
-
-
-mutex = async function (key) {
-  return new Promise(resolve => {
+mutex = async function(key) {
+  return new Promise((resolve) => {
     // we resolve from mutex with a fn that fn() unlocks given key
-    var unlock = ()=>{ resolve(()=>mutex.unlock(key)) }
- 
+    var unlock = () => {
+      resolve(() => mutex.unlock(key))
+    }
+
     if (mutex.queue[key]) {
       l('added to queue ', key)
       mutex.queue[key].push(unlock)
@@ -152,26 +163,21 @@ mutex = async function (key) {
       mutex.queue[key] = []
       unlock()
     }
-
   })
 }
 
 mutex.queue = {}
-mutex.unlock = async function (key) {
+mutex.unlock = async function(key) {
   if (!mutex.queue[key]) {
-    l("Fail: there was no lock")
+    l('Fail: there was no lock')
   } else if (mutex.queue[key].length > 0) {
     l('shifting from', mutex.queue[key])
     mutex.queue[key].shift()()
   } else {
     l('delete queue', key)
-    delete(mutex.queue[key])
+    delete mutex.queue[key]
   }
 }
-
-
-
-
 
 // tells external RPC how to parse this request
 inputMap = (i) => {
@@ -180,8 +186,8 @@ inputMap = (i) => {
 
     // consensus
     'propose',
-    'prevote', 
-    'precommit', 
+    'prevote',
+    'precommit',
 
     'tx', // propose array of tx to add to block
 
@@ -211,25 +217,20 @@ methodMap = (i) => {
 
     // consensus
     'propose',
-    'prevote', 
-    'precommit', 
-
-
+    'prevote',
+    'precommit',
 
     'rebalance',
     'propose',
     'vote',
 
-
-    'offdelta',    // delayed balance proof
-    'dispute',    // delayed balance proof
-
-
+    'offdelta', // delayed balance proof
+    'dispute', // delayed balance proof
 
     // state machine transitions, sent peer to peer off-chain
     'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
 
-    'update',  
+    'update',
     'ack',
     'setLimits',
 
@@ -239,22 +240,19 @@ methodMap = (i) => {
     // 15,[] => 15,[] - (NOT STATE CHANGING) offdelta remains the same, there was no hashlock
     'settle',
 
-    // 15,[] => 10,[] - secret not found, offdelta is decreased voluntarily 
+    // 15,[] => 10,[] - secret not found, offdelta is decreased voluntarily
     'fail',
-     
+
     // 10,[] => 10,[[5,H1,E1]]
-    'addlock', // we add hashlock transfer to state. 
+    'addlock', // we add hashlock transfer to state.
 
     // 10,[[5,H1,E1]] => 15,[]
     'settlelock', // we've got the secret so please unlock and apply to base offdelta
-   
+
     // 10,[[5,H1,E1]] => 10,[]
     'faillock', // couldn't get secret for <reason>, delete hashlock
 
-
-
-    'auth', // any kind of off-chain auth signatures between peers
-
+    'auth' // any kind of off-chain auth signatures between peers
   ]
 
   if (typeof i === 'string') {
@@ -265,12 +263,4 @@ methodMap = (i) => {
   }
 }
 
-allowedOnchain = [
-  'rebalance',
-
-  'batch',
-
-  'propose',
-  
-  'vote'
-]
+allowedOnchain = ['rebalance', 'batch', 'propose', 'vote']
