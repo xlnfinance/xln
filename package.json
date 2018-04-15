@@ -32,7 +32,6 @@
     "chalk": "2.3.2",
     "finalhandler": "1.1.0",
     "keccak": "1.4.0",
-    "npm": "5.7.1",
     "rlp": "2.0.0",
     "sequelize": "4.35.2",
     "serve-static": "1.13.2",
