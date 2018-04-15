@@ -1,7 +1,7 @@
-// This method gets Insurance from onchain db, Delta from offchain db 
+// This method gets Insurance from onchain db, Delta from offchain db
 // then derives a ton of info about current channel - who owns what, what's promised, what's insiured etc
 
-// TODO: periodically clone Insurance to Delta db to only deal with one db having all data 
+// TODO: periodically clone Insurance to Delta db to only deal with one db having all data
 module.exports = async (partner) => {
   // accepts pubkey only
   var compared = Buffer.compare(me.pubkey, partner)
@@ -13,18 +13,19 @@ module.exports = async (partner) => {
     ondelta: 0,
     nonce: 0,
     left: compared == -1,
-    
-    online: me.users[partner] && (me.users[partner].readyState == 1 || 
-    (me.users[partner].instance && me.users[partner].instance.readyState == 1))
 
+    online:
+      me.users[partner] &&
+      (me.users[partner].readyState == 1 ||
+        (me.users[partner].instance &&
+          me.users[partner].instance.readyState == 1))
   }
-
 
   me.record = await me.byKey()
 
-  var my_hub = (p)=>K.hubs.find(m => m.pubkey==toHex(p))
+  var my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
   ch.hub = my_hub(partner)
-  
+
   // ch stands for Channel, d for Delta record, yes
   ch.d = (await Delta.findOrBuild({
     where: {
@@ -41,7 +42,7 @@ module.exports = async (partner) => {
       hard_limit: my_hub(partner) ? K.hard_limit : 0,
 
       they_soft_limit: my_hub(me.pubkey) ? K.risk : 0,
-      they_hard_limit: my_hub(me.pubkey) ? K.hard_limit :  0,
+      they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0,
 
       nonce: 0,
       status: 'ready',
@@ -57,10 +58,12 @@ module.exports = async (partner) => {
   if (user) {
     ch.partner = user.id
     if (me.record) {
-      ch.ins = await Insurance.find({where: {
-        leftId: ch.left ? me.record.id : user.id,
-        rightId: ch.left ? user.id : me.record.id
-      }})
+      ch.ins = await Insurance.find({
+        where: {
+          leftId: ch.left ? me.record.id : user.id,
+          rightId: ch.left ? user.id : me.record.id
+        }
+      })
     }
   }
 
@@ -77,11 +80,17 @@ module.exports = async (partner) => {
   Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
   // todo: minus transitions
-  ch.payable = (ch.insured - ch.d.input_amount) + ch.they_promised +
-  (ch.d.they_hard_limit - ch.promised)
+  ch.payable =
+    ch.insured -
+    ch.d.input_amount +
+    ch.they_promised +
+    (ch.d.they_hard_limit - ch.promised)
 
-  ch.they_payable = (ch.they_insured - ch.d.they_input_amount) + ch.promised +
-  (ch.d.hard_limit - ch.they_promised)
+  ch.they_payable =
+    ch.they_insured -
+    ch.d.they_input_amount +
+    ch.promised +
+    (ch.d.hard_limit - ch.they_promised)
 
   // inputs are like bearer cheques and can be used any minute, so we deduct them
 

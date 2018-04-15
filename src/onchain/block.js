@@ -1,19 +1,14 @@
 // Block processing code. Verifies precommits sigs then executes tx in it one by one
 module.exports = async (precommits, header, ordered_tx_body) => {
   if (header.length > 200) {
-    return l("Too long header")
+    return l('Too long header')
   }
 
   if (ordered_tx_body.length > K.blocksize) {
     return l('Too long block')
   }
 
-  var [methodId,
-    built_by,
-    prev_hash,
-    timestamp,
-    tx_root,
-    db_hash] = r(header)
+  var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(header)
 
   timestamp = readInt(timestamp)
 
@@ -21,7 +16,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     // l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
     return false
   }
-  
+
   if (readInt(methodId) != methodMap('propose')) {
     return l('Wrong method for block')
   }
@@ -42,14 +37,16 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     // this is just dry run
     return true
   } else if (precommits.length != Members.length) {
-    return l("Not valid number of precommits")
+    return l('Not valid number of precommits')
   }
-
 
   var shares = 0
   var precommit_body = r([methodMap('precommit'), header])
   for (var i = 0; i < Members.length; i++) {
-    if (precommits[i].length == 64 && ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)) {
+    if (
+      precommits[i].length == 64 &&
+      ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)
+    ) {
       shares += Members[i].shares
     } else {
       l(`${i} missed a precommit for `, precommit_body)
@@ -62,7 +59,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   // >>> Given block is considered valid and final after this point <<<
 
-
   // In case we are member && locked on this prev_hash, unlock to ensure liveness
   // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
   if (me.proposed_block.locked) {
@@ -73,7 +69,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
   }
 
-  // List of events/metadata about current block, used on Explorer page 
+  // List of events/metadata about current block, used on Explorer page
   var meta = {
     inputs_volume: 0,
     outputs_volume: 0,
@@ -92,13 +88,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     K.total_tx_bytes += ordered_tx[i].length
   }
 
-
-
-
   // Current user ensures their tx was finalized
   if (PK.pending_tx.length > 0) {
-    var raw = PK.pending_tx.map(tx=>Buffer.from(tx.raw, 'hex'))
-    l("Rebroadcasting pending tx ", raw)
+    var raw = PK.pending_tx.map((tx) => Buffer.from(tx.raw, 'hex'))
+    l('Rebroadcasting pending tx ', raw)
     me.send(me.next_member(1), 'tx', r(raw))
   }
 
@@ -107,8 +100,12 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 50 == 0) l(`Processed block ${K.total_blocks} by ${readInt(built_by)}. Signed shares: ${shares}, tx: ${ordered_tx.length}`)
-
+  if (K.total_blocks % 50 == 0)
+    l(
+      `Processed block ${K.total_blocks} by ${readInt(
+        built_by
+      )}. Signed shares: ${shares}, tx: ${ordered_tx.length}`
+    )
 
   if (ordered_tx_body.length < K.blocksize - 1000) {
     K.usable_blocks++
@@ -133,11 +130,14 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   })
 
   for (let ins of disputes) {
-    meta.cron.push(['autodispute', ins, resolveChannel(ins.insurance, ins.ondelta + ins.dispute_offdelta)])
+    meta.cron.push([
+      'autodispute',
+      ins,
+      resolveChannel(ins.insurance, ins.ondelta + ins.dispute_offdelta)
+    ])
 
     await ins.resolve()
   }
-
 
   // Executing onchaing gov proposals that are due
   let jobs = await Proposal.findAll({
@@ -148,7 +148,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   for (let job of jobs) {
     var approved = 0
     for (let v of job.voters) {
-      var voter = K.members.find(m => m.id == v.id)
+      var voter = K.members.find((m) => m.id == v.id)
       if (v.vote.approval && voter) {
         approved += voter.shares
       } else {
@@ -160,9 +160,12 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       await eval(`(async function() { ${job.code} })()`)
       if (job.patch.length > 0) {
         me.request_reload = true
-        var pr = require('child_process').exec('patch -p1', (error, stdout, stderr) => {
-          console.log(error, stdout, stderr)
-        })
+        var pr = require('child_process').exec(
+          'patch -p1',
+          (error, stdout, stderr) => {
+            console.log(error, stdout, stderr)
+          }
+        )
         pr.stdin.write(job.patch)
         pr.stdin.end()
       }
@@ -173,41 +176,46 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     await job.destroy()
   }
 
-
-
   // only members do snapshots, as they require extra computations
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
     fs.writeFileSync('data/k.json', stringify(K))
 
     var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
 
-    require('tar').c({
-      gzip: true,
-      sync: false,
-      portable: true,
-      noMtime: true,
-      file: 'private/' + filename,
-      filter: (path, stat) => {
-        // must be deterministic
-        stat.mtime = null
-        stat.atime = null
-        stat.ctime = null
-        stat.birthtime = null
+    require('tar').c(
+      {
+        gzip: true,
+        sync: false,
+        portable: true,
+        noMtime: true,
+        file: 'private/' + filename,
+        filter: (path, stat) => {
+          // must be deterministic
+          stat.mtime = null
+          stat.atime = null
+          stat.ctime = null
+          stat.birthtime = null
 
-        // skip /private and irrelevant things
-        if (path.startsWith('./.') || path.match(/(private|DS_Store|node_modules|test)/)) {
-          return false
-        } else {
-          return true
+          // skip /private and irrelevant things
+          if (
+            path.startsWith('./.') ||
+            path.match(/(private|DS_Store|node_modules|test)/)
+          ) {
+            return false
+          } else {
+            return true
+          }
+        }
+      },
+      ['.'],
+      (_) => {
+        if (old_height > 1) {
+          // genesis state is stored for analytics and member bootstraping
+          fs.unlink('private/Failsafe-' + old_height + '.tar.gz')
+          l('Removed old snapshot and created ' + filename)
         }
       }
-    }, ['.'], _ => {
-      if (old_height > 1) { // genesis state is stored for analytics and member bootstraping 
-        fs.unlink('private/Failsafe-' + old_height + '.tar.gz')
-        l('Removed old snapshot and created ' + filename)
-      }
-
-    })
+    )
   }
 
   // save final block in blockchain db and broadcast
@@ -215,14 +223,14 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     prev_hash: Buffer.from(prev_hash, 'hex'),
     hash: sha3(header),
 
-    precommits: r(precommits), // pack them in rlp for storage 
-    header: header, 
-    ordered_tx_body: ordered_tx_body, 
+    precommits: r(precommits), // pack them in rlp for storage
+    header: header,
+    ordered_tx_body: ordered_tx_body,
 
     total_tx: ordered_tx.length,
-    meta: (meta.parsed_tx.length + meta.cron.length > 0) ? JSON.stringify(meta) : null
+    meta:
+      meta.parsed_tx.length + meta.cron.length > 0 ? JSON.stringify(meta) : null
   })
-
 
   if (me.request_reload) {
     process.exit(0) // exit w/o error
