@@ -3,9 +3,8 @@ module.exports = async (msg) => {
   var [pubkey, sig, body] = r(msg)
 
   if (!ec.verify(body, sig, pubkey)) {
-    return l("Wrong input")
+    return l('Wrong input')
   }
-
 
   var [method, transitions, stateSig, debugState] = r(body)
 
@@ -16,13 +15,12 @@ module.exports = async (msg) => {
 
   var ch = await me.getChannel(pubkey)
 
-
   if (ch.d.status != 'ready') {
     l('Channel is not ready: ' + ch.d.status)
     return false
   }
 
-  l("New transitions arrived, lets apply them: ", transitions)
+  l('New transitions arrived, lets apply them: ', transitions)
 
   var receivable = ch.they_payable
 
@@ -39,7 +37,7 @@ module.exports = async (msg) => {
 
       var amount = ch.left ? offdelta : -offdelta
       if (amount < 0 || amount > receivable) {
-        return l("Invalid transfer ", amount)
+        return l('Invalid transfer ', amount)
       }
       receivable -= amount
 
@@ -65,9 +63,6 @@ module.exports = async (msg) => {
       ch.d.signed_state = r(newState)
       await ch.d.save()
 
-
-
-
       // pay to unlocker
       if (me.my_hub && unlocker.length > 1) {
         l(`Forward to peer or other hub ${unlocker.length}`)
@@ -90,13 +85,17 @@ module.exports = async (msg) => {
         })
       } else {
         unlocker = r(unlocker)
-        var unlocked = nacl.box.open(unlocker[0], unlocker[1], unlocker[2], me.box.secretKey)
+        var unlocked = nacl.box.open(
+          unlocker[0],
+          unlocker[1],
+          unlocker[2],
+          me.box.secretKey
+        )
         if (unlocked == null) {
-          return l("Bad unlocker")
+          return l('Bad unlocker')
         }
 
-        l("Arrived payment!", r(unlocked))
-
+        l('Arrived payment!', r(unlocked))
 
         var paid_invoice = invoices[toHex(hash)]
 
@@ -121,44 +120,31 @@ module.exports = async (msg) => {
 
         ack_transitions.push([methodMap('settle', hash, paid_invoice.secret)])
 
-
         await me.addHistory(pubkey, amount, 'Received', true)
 
         react()
       }
 
       l(ack_transitions)
-
-
-
-
-
-
-
     } else if (readInt(t[0]) == methodMap('settlelock')) {
       var hash = t[1]
-      var index = newState[5].findIndex(hl=>hl[1].equals(hash))
+      var index = newState[5].findIndex((hl) => hl[1].equals(hash))
       var hl = newState[5][index]
-      l("Found unlockable ", hl)
+      l('Found unlockable ', hl)
 
       if (hash.equals(sha3(t[2]))) {
         // secret was provided, apply to offdelta
         ch.d.offdelta += readInt(hl[0])
         newState[5].splice(index, 1)
-
-
       } else {
         l('Wrong secret')
-
       }
 
-
-
       var hash = t[1]
-      var index = newState[5].findIndex(hl=>hl[1].equals(hash))
+      var index = newState[5].findIndex((hl) => hl[1].equals(hash))
       var hl = await ch.d.findTransition({where: {hash: hash}})
 
-      l("Found unlockable ", hl)
+      l('Found unlockable ', hl)
 
       if (hash.equals(sha3(t[2]))) {
         // secret was provided, apply to offdelta
@@ -166,38 +152,43 @@ module.exports = async (msg) => {
         hl.status = 'archive'
         await hl.save()
       }
-
-
-
     }
-
   }
 
-
   if (me.my_hub) {
-    me.send(pubkey, 'update', me.envelope(methodMap('update'), [], ec(ch.d.signed_state, me.id.secretKey)))
+    me.send(
+      pubkey,
+      'update',
+      me.envelope(
+        methodMap('update'),
+        [],
+        ec(ch.d.signed_state, me.id.secretKey)
+      )
+    )
   }
 
   // all transitions were valid, now change db
   var ack_transitions = []
 
-
-  me.send(pubkey, 'update', me.envelope(
-    methodMap('update'), 
-    ack_transitions, 
-    ec(ch.d.getState(), me.id.secretKey)
-  ))
-
-
+  me.send(
+    pubkey,
+    'update',
+    me.envelope(
+      methodMap('update'),
+      ack_transitions,
+      ec(ch.d.getState(), me.id.secretKey)
+    )
+  )
 
   // TESTNET: storing most profitable outcome for us
   var profitable = r(ch.d.most_profitable)
-  if ((ch.left && ch.d.offdelta > readInt(profitable[0])) ||
-    (!ch.left && ch.d.offdelta < readInt(profitable[0]))) {
+  if (
+    (ch.left && ch.d.offdelta > readInt(profitable[0])) ||
+    (!ch.left && ch.d.offdelta < readInt(profitable[0]))
+  ) {
     ch.d.most_profitable = r([ch.d.offdelta, ch.d.nonce, ch.d.sig])
   }
 
   l('The payment is accepted!')
   await ch.d.save()
-  
 }

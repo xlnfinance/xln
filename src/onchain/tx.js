@@ -7,7 +7,9 @@ module.exports = async (tx, meta) => {
   var signer = await User.findById(readInt(id))
   var nonce = readInt(nonce)
 
-  if (!signer) { return {error: "This user doesn't exist"} }
+  if (!signer) {
+    return {error: "This user doesn't exist"}
+  }
 
   if (!ec.verify(r([readInt(methodId), nonce, args]), sig, signer.pubkey)) {
     return {error: `Invalid tx signature.`}
@@ -22,14 +24,16 @@ module.exports = async (tx, meta) => {
   // gas/tax estimation is very straighforward for now, later methods' pricing can be fine tuned
   var tax = Math.round(K.tax * tx.length)
 
-  if (signer.balance < tax) { return {error: 'Not enough balance to cover tx fee'} }
+  if (signer.balance < tax) {
+    return {error: 'Not enough balance to cover tx fee'}
+  }
 
   // This is just checking, so no need to apply
   if (meta.dry_run) {
     if (meta[signer.id]) {
       // Why only 1 tx/block? Two reasons:
       // * it's an extra hassle to ensure the account has money to cover subsequent w/o applying old ones. We don't the complexity of chain reorganizations - all transactions are final
-      // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway 
+      // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway
       return {error: 'Only few tx per block per account currently allowed'}
     } else {
       if (signer.nonce != nonce) {
@@ -44,16 +48,15 @@ module.exports = async (tx, meta) => {
   } else {
     if (signer.nonce != nonce) {
       return {error: 'Invalid nonce'}
-    }      
+    }
   }
 
   l(`ProcessTx: ${method} with ${args.length} by ${signer.id}`)
 
-
   if (me.pubkey.equals(signer.pubkey)) {
     for (var i in PK.pending_tx) {
       if (PK.pending_tx[i].raw == toHex(tx)) {
-        l("Our pending tx has been added to the blockchain")
+        l('Our pending tx has been added to the blockchain')
         PK.pending_tx.splice(i, 1)
       }
     }
@@ -110,7 +113,7 @@ module.exports = async (tx, meta) => {
             insurance: 0,
             ondelta: 0
           },
-          include: { all: true }
+          include: {all: true}
         }))[0]
 
         if (sig) {
@@ -139,13 +142,15 @@ module.exports = async (tx, meta) => {
         var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta)
 
         if (ins.dispute_delayed) {
-          if (dispute_nonce > ins.dispute_nonce && ins.dispute_left == (compared == 1)) {
-
+          if (
+            dispute_nonce > ins.dispute_nonce &&
+            ins.dispute_left == (compared == 1)
+          ) {
             parsed_tx.disputes.push([partner.id, 'disputed', ins, offer])
 
             ins.dispute_offdelta = offdelta
             await ins.resolve()
-            l("Resolving with fraud proof")
+            l('Resolving with fraud proof')
           } else {
             l('Old nonce or same counterparty')
           }
@@ -154,13 +159,12 @@ module.exports = async (tx, meta) => {
           ins.dispute_offdelta = offdelta
           ins.dispute_nonce = dispute_nonce
 
-          ins.dispute_left = (compared == -1)
+          ins.dispute_left = compared == -1
           ins.dispute_delayed = K.usable_blocks + 9
 
           parsed_tx.disputes.push([partner.id, 'started', ins, offer])
 
           await ins.save()
-
 
           if (me.pubkey.equals(partner.pubkey)) {
             l('Channel with us is disputed')
@@ -168,8 +172,10 @@ module.exports = async (tx, meta) => {
             ch.d.status = 'disputed'
             await ch.d.save()
 
-            if ((ch.left && offdelta < ch.d.offdelta) ||
-              (!ch.left && offdelta > ch.d.offdelta)) {
+            if (
+              (ch.left && offdelta < ch.d.offdelta) ||
+              (!ch.left && offdelta > ch.d.offdelta)
+            ) {
               l('Unprofitable proof posted!')
               await ch.d.startDispute()
             }
@@ -177,13 +183,9 @@ module.exports = async (tx, meta) => {
         }
       }
 
-
-
-
       // 2. take insurance from withdrawals
 
-      var my_hub = K.hubs.find(h => h.id == signer.id)
-
+      var my_hub = K.hubs.find((h) => h.id == signer.id)
 
       for (var input of inputs) {
         var amount = readInt(input[0])
@@ -206,7 +208,8 @@ module.exports = async (tx, meta) => {
           continue
         }
 
-        var body = r([methodMap('withdrawal'),
+        var body = r([
+          methodMap('withdrawal'),
           ins.leftId,
           ins.rightId,
           ins.nonce,
@@ -253,7 +256,6 @@ module.exports = async (tx, meta) => {
       // 3. enforce pay insurance to debts
       await signer.payDebts(parsed_tx)
 
-
       // 4. outputs: standalone balance or a channel
 
       // we want outputs to pay for their own rebalance
@@ -265,20 +267,21 @@ module.exports = async (tx, meta) => {
         if (amount > signer.balance) continue
 
         var giveTo = await User.idOrKey(output[1])
-        var withPartner = output[2].length == 0 ? false : await User.idOrKey(output[2])
+        var withPartner =
+          output[2].length == 0 ? false : await User.idOrKey(output[2])
 
         // here we ensure both parties are registred, and take needed fees
 
         if (!giveTo.id) {
           if (!withPartner) {
             if (amount < K.account_creation_fee) continue
-            giveTo.balance = (amount - K.account_creation_fee)
+            giveTo.balance = amount - K.account_creation_fee
 
             signer.balance -= amount
           } else {
             if (!withPartner.id) continue
 
-            var fee = (K.standalone_balance + K.account_creation_fee)
+            var fee = K.standalone_balance + K.account_creation_fee
             if (amount < fee) continue
 
             giveTo.balance = K.standalone_balance
@@ -292,8 +295,7 @@ module.exports = async (tx, meta) => {
         } else {
           if (withPartner) {
             if (!withPartner.id) {
-
-              var fee = (K.standalone_balance + K.account_creation_fee)
+              var fee = K.standalone_balance + K.account_creation_fee
               if (amount < fee) continue
 
               withPartner.balance = K.standalone_balance
@@ -303,8 +305,16 @@ module.exports = async (tx, meta) => {
               // now it has id
 
               if (me.pubkey.equals(withPartner.pubkey)) {
-                await me.addHistory(giveTo.pubkey, -K.account_creation_fee, 'Account creation fee')
-                await me.addHistory(giveTo.pubkey, -K.standalone_balance, 'Minimum global balance')
+                await me.addHistory(
+                  giveTo.pubkey,
+                  -K.account_creation_fee,
+                  'Account creation fee'
+                )
+                await me.addHistory(
+                  giveTo.pubkey,
+                  -K.standalone_balance,
+                  'Minimum global balance'
+                )
               }
             }
           } else {
@@ -344,7 +354,7 @@ module.exports = async (tx, meta) => {
             if (compared == 1) ins.ondelta -= reimburse_tax
 
             // account creation fees are on user, if any
-            var diff = (readInt(output[0]) - amount)
+            var diff = readInt(output[0]) - amount
             ins.ondelta -= diff * compared
 
             signer.balance += reimburse_tax
@@ -354,38 +364,41 @@ module.exports = async (tx, meta) => {
 
           // rebalance by hub for our account = reimburse hub fees
           if (my_hub && me.pubkey.equals(withPartner.pubkey)) {
-            await me.addHistory(giveTo.pubkey, -reimburse_tax, 'Rebalance fee', true)
+            await me.addHistory(
+              giveTo.pubkey,
+              -reimburse_tax,
+              'Rebalance fee',
+              true
+            )
           }
         }
 
         // on-chain payment for specific invoice (to us or one of our channels)
         if (me.pubkey.equals(giveTo.pubkey) && output[3].length > 0) {
           var invoice = invoices[toHex(output[3])]
-          l("Invoice paid on chain ", output[3])
+          l('Invoice paid on chain ', output[3])
           if (invoice && invoice.amount <= amount) {
             invoice.status = 'paid'
           }
         }
 
-        parsed_tx.outputs.push([amount, 
-          giveTo.id, 
-          withPartner ? withPartner.id : false, 
-          output[3].length > 0 ? toHex(output[3]) : false])
+        parsed_tx.outputs.push([
+          amount,
+          giveTo.id,
+          withPartner ? withPartner.id : false,
+          output[3].length > 0 ? toHex(output[3]) : false
+        ])
 
         meta.outputs_volume += amount
       }
 
-
       break
-
-
-
 
     // Governance methods below: proposing and voting on patches
 
     case 'propose':
       if (signer.id != 1) {
-        l("Only root can propose an amendment")
+        l('Only root can propose an amendment')
         break
       }
 
@@ -425,12 +438,8 @@ module.exports = async (tx, meta) => {
 
   signer.nonce++
   await signer.save()
-  
-  meta['parsed_tx'].push(parsed_tx)
 
+  meta['parsed_tx'].push(parsed_tx)
 
   return {success: true}
 }
-
-
-

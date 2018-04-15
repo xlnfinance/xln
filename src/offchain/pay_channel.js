@@ -19,12 +19,14 @@
 'faillock', // couldn't get secret for <reason>, delete hashlock
 */
 
-
 module.exports = async (opts) => {
   var ch = await me.getChannel(opts.partner)
 
   if (ch.d.status != 'ready') {
-    return [false, 'The channel is not ready to accept payments: ' + ch.d.status]
+    return [
+      false,
+      'The channel is not ready to accept payments: ' + ch.d.status
+    ]
   }
 
   var t = await ch.d.createTransition({
@@ -43,14 +45,13 @@ module.exports = async (opts) => {
     ]
   })
   */
-  
+
   ch.d.status = 'await'
 
   var transitions = []
   var newState = await ch.d.getState()
 
-  var list = await ch.d.getTransitions({where:{status: 'await'}})
-
+  var list = await ch.d.getTransitions({where: {status: 'await'}})
 
   var payable = ch.payable
 
@@ -59,7 +60,7 @@ module.exports = async (opts) => {
     var amount = ch.left ? -t.offdelta : t.offdelta
 
     if (amount < 0 || amount > payable) {
-      l("wrong amount")
+      l('wrong amount')
       continue
     }
 
@@ -67,44 +68,32 @@ module.exports = async (opts) => {
 
     newState[3]++ //nonce
 
-
     l('transfer ', ch.left, t.offdelta)
     // add hashlocks
 
-
     newState[5].push([t.offdelta, t.hash, t.exp])
-
 
     var state = r(newState)
     transitions.push([
       methodMap(t.unlocker ? 'addlock' : 'add'),
-      [
-        t.offdelta, 
-        t.hash, 
-        t.exp,
-        t.mediate_to,
-        t.unlocker
-      ],
-      ec(state, me.id.secretKey), 
+      [t.offdelta, t.hash, t.exp, t.mediate_to, t.unlocker],
+      ec(state, me.id.secretKey),
       state // debug only
     ])
-
   }
 
-  if (transitions.length == 0) return l("No transitions")
+  if (transitions.length == 0) return l('No transitions')
 
   ch.d.nonce = newState[3]
   await ch.d.save()
 
-
   // what do we do when we get the secret
   if (opts.return_to && opts.invoice) {
-    l('inv',opts.invoice)
+    l('inv', opts.invoice)
     purchases[toHex(opts.invoice)] = opts.return_to
   }
 
-
-  l("Sending an update to ", opts.partner, transitions)
+  l('Sending an update to ', opts.partner, transitions)
 
   // transitions: method, args, sig, new state
   var envelope = me.envelope(methodMap('update'), transitions)
@@ -115,7 +104,6 @@ module.exports = async (opts) => {
 
   return [true, false]
 }
-
 
 /*
 // todo:
