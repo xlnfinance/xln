@@ -1,10 +1,18 @@
+var Vue = require('vue/dist/vue.js')
+var hljs = require('highlight.js')
+var Identicon = require('identicon.js')
+
 // Single file to store all client side logic
 // TODO: break up vue in templates without using preprocessors if possible
 
-l = console.log
-ts = () => Math.round(new Date() / 1000)
+window.jQuery = require('../assets/assets/js/vendor/jquery-slim.min.js')
+window.Popper = require('../assets/assets/js/vendor/popper.min.js')
+require('../assets/dist/js/bootstrap.min.js')
 
-hashargs = location.hash.split('/')[1]
+window.l = console.log
+window.ts = () => Math.round(new Date() / 1000)
+
+window.hashargs = location.hash.split('/')[1]
 
 hashargs = hashargs
   ? hashargs
@@ -16,7 +24,7 @@ hashargs = hashargs
       }, {})
   : {}
 
-renderRisk = (hist) => {
+window.renderRisk = (hist) => {
   var precision = 100 // devide time by
 
   if (!window.riskchart) {
@@ -98,7 +106,7 @@ renderRisk = (hist) => {
   window.riskchart.update()
 }
 
-render = (r) => {
+window.render = (r) => {
   if (r.alert) notyf.alert(r.alert)
   if (r.confirm) notyf.confirm(r.confirm)
 
@@ -119,7 +127,7 @@ render = (r) => {
 FS.resolvers.push(render)
 
 FS.onready(() => {
-  notyf = new Notyf({delay: 4000})
+  window.notyf = new Notyf({delay: 4000})
 
   var methods = {
     icon: (h, s) => {
@@ -308,7 +316,7 @@ FS.onready(() => {
 
   var wp = app.innerHTML
 
-  app = new Vue({
+  window.app = new Vue({
     el: '#app',
     mounted: () => {
       FS('load').then(render)

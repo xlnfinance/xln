@@ -209,6 +209,9 @@ initDashboard = async (a) => {
 
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
+  var Parcel = require('parcel-bundler')
+
+  var bundler = new Parcel('wallet/index.html').middleware()
 
   var cb = function(req, res) {
     if (req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)) {
@@ -238,8 +241,10 @@ initDashboard = async (a) => {
           return RPC.internal_rpc(res, queryData)
         })
       })
-    } else {
+    } else if (req.url == '/sdk.html') {
       serveStatic('./wallet')(req, res, finalhandler(req, res))
+    } else {
+      bundler(req, res, finalhandler(req, res))
     }
   }
 
