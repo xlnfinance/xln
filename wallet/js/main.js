@@ -391,7 +391,7 @@ FS.onready(() => {
     },
     methods: methods,
     template: `
-<div>
+<div id="app">
   <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
 
     <a class="navbar-brand" href="#">Fairlayer</a>

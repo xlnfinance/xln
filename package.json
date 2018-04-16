@@ -25,7 +25,7 @@
     "wallet/"
   ],
   "scripts": {
-    "prettier": "prettier --write src/**/*.js",
+    "prettier": "prettier --write src/**/*.js wallet/js/**/*.vue",
     "test": "jasmine"
   },
   "dependencies": {
@@ -46,7 +46,8 @@
   "devDependencies": {
     "babel-plugin-transform-es2015-modules-strip": "0.1.1",
     "jasmine": "3.1.0",
-    "parcel-bundler": "1.7.1"
+    "parcel-bundler": "1.7.1",
+    "vue-hot-reload-api": "2.3.0"
   },
   "prettier": {
     "semi": false,
