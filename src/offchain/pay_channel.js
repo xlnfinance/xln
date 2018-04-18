@@ -1,4 +1,4 @@
-// add a transition to state channel. Types:
+// Flush all pending transitions to state channel. Types:
 /*
 // 10,[] => 15,[] - add directly to base offdelta
 'add',
@@ -19,90 +19,113 @@
 'faillock', // couldn't get secret for <reason>, delete hashlock
 */
 
-module.exports = async (opts) => {
-  var ch = await me.getChannel(opts.partner)
+module.exports = async (partner, force_flush = false) => {
+  // First, we add a transition to the queue
+  var ch = await me.getChannel(partner)
 
-  if (ch.d.status != 'ready') {
-    return [
-      false,
-      'The channel is not ready to accept payments: ' + ch.d.status
-    ]
+  // If channel is master, send transitions now. Otherwise wait for ack
+
+  if (ch.d.status == 'sent') {
+    return l('Still waiting for ack')
   }
 
-  var t = await ch.d.createTransition({
-    hash: opts.hash,
-    offdelta: ch.left ? -opts.amount : opts.amount,
-    exp: K.usable_blocks + 10,
-    mediate_to: opts.mediate_to,
-    unlocker: opts.unlocker ? opts.unlocker : false,
-    status: 'await'
-  })
+  if (ch.d.status == 'listener') {
+    me.send(partner, 'update', me.envelope(methodMap('requestMaster')))
+    return l('Try to obtain master...')
+  }
 
-  /*
-  var list = await ch.d.getTransitions({where: [Sequelize.Op.or]: [
-    {status: 'await'},
-    {status: 'acked'}
-    ]
-  })
-  */
+  if (ch.d.status == 'master') {
+    l('Flushing changes')
+  }
 
-  ch.d.status = 'await'
-
-  var transitions = []
   var newState = await ch.d.getState()
 
-  var list = await ch.d.getTransitions({where: {status: 'await'}})
+  var transitions = []
 
-  var payable = ch.payable
+  l('Current state to be acked ', newState)
 
-  for (var t of list) {
-    // is valid transition right now?
-    var amount = ch.left ? -t.offdelta : t.offdelta
+  var ackSig = ec(r(newState), me.id.secretKey)
 
-    if (amount < 0 || amount > payable) {
-      l('wrong amount')
-      continue
+  var unlockable = await ch.d.getPayments({
+    where: {is_inward: true, status: 'unlocking'}
+  })
+  for (var t of unlockable) {
+    var inwards = newState[ch.left ? 5 : 6]
+
+    for (var i in inwards) {
+      if (inwards[i][1].equals(t.hash)) {
+        l('Removing hashlock from state and applying')
+        inwards.splice(i, 1)
+
+        newState[4] += ch.left ? t.amount : -t.amount
+        break
+      }
     }
+    newState[3]++
 
-    payable -= amount
+    t.status = 'unlocked'
+    await t.save()
 
-    newState[3]++ //nonce
-
-    l('transfer ', ch.left, t.offdelta)
-    // add hashlocks
-
-    newState[5].push([t.offdelta, t.hash, t.exp])
-
-    var state = r(newState)
+    var signable = r(newState)
     transitions.push([
-      methodMap(t.unlocker ? 'addlock' : 'add'),
-      [t.offdelta, t.hash, t.exp, t.mediate_to, t.unlocker],
-      ec(state, me.id.secretKey),
-      state // debug only
+      methodMap('settlelock'),
+      t.secret,
+      ec(signable, me.id.secretKey),
+      signable // debug only
     ])
   }
 
-  if (transitions.length == 0) return l('No transitions')
+  var outgoing = await ch.d.getPayments({
+    where: {is_inward: false, status: 'await'}
+  })
+  var payable = ch.payable
 
-  ch.d.nonce = newState[3]
-  await ch.d.save()
+  for (var t of outgoing) {
+    if (t.amount < 0 || t.amount > payable) {
+      l('Invalid transition amount')
+      continue
+    }
+    payable -= t.amount
 
-  // what do we do when we get the secret
-  if (opts.return_to && opts.invoice) {
-    l('inv', opts.invoice)
-    purchases[toHex(opts.invoice)] = opts.return_to
+    newState[3]++ //nonce
+
+    // add hashlocks
+
+    newState[ch.left ? 6 : 5].push(t.toLock())
+
+    var signable = r(newState)
+    transitions.push([
+      // use hashlocks for $100+ payments
+      methodMap('addlock'),
+      [t.amount, t.hash, t.exp, t.destination, t.unlocker],
+      ec(signable, me.id.secretKey),
+      signable // debug only
+    ])
+    t.status = 'hashlock'
+    await t.save()
   }
 
-  l('Sending an update to ', opts.partner, transitions)
+  if (transitions.length == 0) {
+    if (!force_flush) {
+      return l('No transitions to flush')
+    }
+  } else {
+    ch.d.status = 'sent'
+  }
 
   // transitions: method, args, sig, new state
-  var envelope = me.envelope(methodMap('update'), transitions)
+  var envelope = me.envelope(methodMap('update'), ackSig, transitions)
 
-  if (!me.send(opts.partner, 'update', envelope)) {
-    //l(`${opts.partner} not online, deliver later?`)
+  ch.d.nonce = newState[3]
+  ch.d.offdelta = newState[4]
+
+  ch.d.pending = envelope
+
+  await ch.d.save()
+
+  if (!me.send(partner, 'update', envelope)) {
+    //l(`${partner} not online, deliver later?`)
   }
-
-  return [true, false]
 }
 
 /*
@@ -117,6 +140,6 @@ module.exports = async (opts) => {
   if (me.my_hub) {
     //l('todo: ensure delivery')
   } else {
-    await me.addHistory(opts.partner, -opts.amount, 'Sent to ' + opts.mediate_to.toString('hex').substr(0, 10) + '..', true)
+    await me.addHistory(opts.partner, -opts.amount, 'Sent to ' + opts.destination.toString('hex').substr(0, 10) + '..', true)
   }
 */

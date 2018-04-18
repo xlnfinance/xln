@@ -61,13 +61,15 @@ sleep = async function(ms) {
 }
 
 current_db_hash = () => {
-  return Buffer.from(
+  return Buffer([])
+  /* TODO: fix. may cause race condition and lock db for reading breaking other operations
+  .from(
     child_process
       .execSync('shasum -a 256 data/db.sqlite')
       .toString()
       .split(' ')[0],
     'hex'
-  )
+  )*/
 }
 
 localhost = '127.0.0.1'
@@ -84,6 +86,7 @@ readInt = (i) => {
 }
 
 toHex = (inp) => Buffer.from(inp).toString('hex')
+fromHex = (inp) => Buffer.from(inp, 'hex')
 bin = (data) => Buffer.from(data)
 sha3 = (a) =>
   keccak('keccak256')
@@ -233,6 +236,9 @@ methodMap = (i) => {
     'update',
     'ack',
     'setLimits',
+
+    'requestMaster',
+    'grantMaster',
 
     // 10,[] => 15,[] - add directly to base offdelta
     'add',

@@ -179,7 +179,6 @@ module.exports = async (ws, msg) => {
     var chain = r(msg)
 
     for (var block of chain) {
-      l('To process ', block)
       await me.processBlock(block[0], block[1], block[2])
     }
 

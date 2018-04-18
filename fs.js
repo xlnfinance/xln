@@ -8,26 +8,35 @@ require('./src/db/offchain_db')
 // Defines promised/insured for both users based on insurance and delta=(ondelta+offdelta)
 // There are 3 major scenarios of delta position
 // . is 0, | is delta, = is insurance, - is promised
-// 4,6  .====--| 
+// 4,6  .====--|
 // 4,2  .==|==
 // 4,-2 |--.====
-resolveChannel = (insurance, delta, is_left=true) => {
+resolveChannel = (insurance, delta, is_left = true) => {
   var parts = {
     // left user promises only with negative delta, scenario 3
     promised: delta < 0 ? -delta : 0,
-    insured:      delta > insurance ? insurance : (delta > 0 ? delta             : 0),
-    they_insured: delta > insurance ? 0         : (delta > 0 ? insurance - delta : insurance),
+    insured: delta > insurance ? insurance : delta > 0 ? delta : 0,
+    they_insured:
+      delta > insurance ? 0 : delta > 0 ? insurance - delta : insurance,
     // right user promises when delta goes beyond insurance, scenario 1
     they_promised: delta > insurance ? delta - insurance : 0
   }
-  
+
   // default view is left. if current user is right, simply reverse
   if (!is_left) {
-    [parts.promised, parts.insured, parts.they_insured, parts.they_promised] = 
-    [parts.they_promised, parts.they_insured, parts.insured, parts.promised]
+    ;[
+      parts.promised,
+      parts.insured,
+      parts.they_insured,
+      parts.they_promised
+    ] = [parts.they_promised, parts.they_insured, parts.insured, parts.promised]
   }
 
   return parts
+}
+
+Buffer.prototype.toJSON = function() {
+  return this.toString('hex')
 }
 
 // Called once in a while to cache current state of everything and flush it to browser
@@ -42,7 +51,6 @@ cache = async (i) => {
 
     cached_result.current_db_hash = current_db_hash().toString('hex')
 
-
     cached_result.proposals = await Proposal.findAll({
       order: [['id', 'DESC']],
       include: {all: true}
@@ -53,17 +61,14 @@ cache = async (i) => {
 
     cached_result.blocks = (await Block.findAll({
       limit: 500,
-      order: [['id', 'desc']], 
+      order: [['id', 'desc']],
       where: {
         meta: {[Sequelize.Op.not]: null}
       }
-    })).map(b=>{
-      var [methodId,
-        built_by,
-        prev_hash,
-        timestamp,
-        tx_root,
-        db_hash] = r(b.header)
+    })).map((b) => {
+      var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(
+        b.header
+      )
 
       return {
         id: b.id,
@@ -76,16 +81,20 @@ cache = async (i) => {
       }
     })
 
+    cached_result.payments = await Payment.findAll({include: {all: true}})
 
     if (me.my_hub) {
-      var deltas = await Delta.findAll({where: {myId: me.record.id} })
+      var deltas = await Delta.findAll({where: {myId: me.record.id}})
       var promised = 0
       for (var d of deltas) {
         var ch = await me.getChannel(d.userId)
         if (ch.delta > 0) promised += ch.promised
       }
 
-      if (cached_result.history[0] && cached_result.history[0].delta != promised) {
+      if (
+        cached_result.history[0] &&
+        cached_result.history[0].delta != promised
+      ) {
         cached_result.history.unshift({
           date: new Date(),
           delta: promised
@@ -97,12 +106,9 @@ cache = async (i) => {
         include: {all: true}
       })
     }
-
-
   }
 
-
-  // TODO: read hash just after snapshot generation 
+  // TODO: read hash just after snapshot generation
   if (me.my_member && K.last_snapshot_height) {
     var filename = `Failsafe-${K.last_snapshot_height}.tar.gz`
     var cmd = 'shasum -a 256 private/' + filename
@@ -115,7 +121,10 @@ cache = async (i) => {
 
       var out_hash = out.split(' ')[0]
 
-      var our_location = me.my_member.location.indexOf(localhost) != -1 ? `http://${localhost}:8000/` : `https://failsafe.network/`
+      var our_location =
+        me.my_member.location.indexOf(localhost) != -1
+          ? `http://${localhost}:8000/`
+          : `https://failsafe.network/`
 
       cached_result.install_snippet = `id=fs
 f=${filename}
@@ -129,7 +138,6 @@ fi
     })
   }
 }
-
 
 // Flush an object to browser websocket
 react = async (result = {}, id = 1) => {
@@ -151,10 +159,12 @@ react = async (result = {}, id = 1) => {
   }
 
   if (me.browser) {
-    me.browser.send(JSON.stringify({
-      result: Object.assign(result, cached_result),
-      id: id
-    }))
+    me.browser.send(
+      JSON.stringify({
+        result: Object.assign(result, cached_result),
+        id: id
+      })
+    )
   }
 }
 
@@ -166,45 +176,61 @@ cached_result = {
 invoices = {}
 purchases = {}
 
-
-
-initDashboard = async a => {
-
+initDashboard = async (a) => {
   // auto reloader for debugging
-  setInterval(()=>{
-    fs.stat('../restart', (e,f)=>{
+  setInterval(() => {
+    fs.stat('../restart', (e, f) => {
+      var restartedAt = restartedAt ? restartedAt : f.atimeMs
 
-      if (f && f.atimeMs > (ts()-2)*1000 ) {
+      if (f && f.atimeMs != restartedAt) {
         process.exit(0)
       }
     })
-  },1000)
+  }, 1000)
+
+  if (fs.existsSync('data/k.json')) {
+    l('Loading K data')
+    var json = fs.readFileSync('data/k.json')
+    K = JSON.parse(json)
+
+    Members = JSON.parse(json).members // another object ref
+    for (m of Members) {
+      m.pubkey = Buffer.from(m.pubkey, 'hex')
+      m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
+    }
+  } else {
+    throw 'No K.json'
+  }
+
+  await privSequelize.sync({force: false})
 
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
 
-  var cb = function (req, res) {
+  var cb = function(req, res) {
     if (req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)) {
       var file = 'private' + req.url
       var stat = fs.statSync(file)
       res.writeHeader(200, {'Content-Length': stat.size})
       var fReadStream = fs.createReadStream(file)
-      fReadStream.on('data', function (chunk) {
+      fReadStream.on('data', function(chunk) {
         if (!res.write(chunk)) {
           fReadStream.pause()
         }
       })
-      fReadStream.on('end', function () {
+      fReadStream.on('end', function() {
         res.end()
       })
-      res.on('drain', function () {
+      res.on('drain', function() {
         fReadStream.resume()
       })
     } else if (req.url == '/rpc') {
       var queryData = ''
-      req.on('data', function (data) { queryData += data })
+      req.on('data', function(data) {
+        queryData += data
+      })
 
-      req.on('end', function () {
+      req.on('end', function() {
         me.queue.push(['internal_rpc', res, queryData])
       })
     } else {
@@ -213,28 +239,32 @@ initDashboard = async a => {
   }
 
   // this serves dashboard HTML page
-  var on_server = fs.existsSync('/etc/letsencrypt/live/failsafe.network/fullchain.pem')
+  var on_server = fs.existsSync(
+    '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
+  )
 
   if (on_server) {
     cert = {
-      cert: fs.readFileSync('/etc/letsencrypt/live/failsafe.network/fullchain.pem'),
+      cert: fs.readFileSync(
+        '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
+      ),
       key: fs.readFileSync('/etc/letsencrypt/live/failsafe.network/privkey.pem')
     }
     var server = require('https').createServer(cert, cb)
 
     // redirecting from http://
     if (base_port == 443) {
-      require('http').createServer(function (req, res) {
-        res.writeHead(301, { 'Location': 'https://' + req.headers['host'] })
-        res.end()
-      }).listen(80)
+      require('http')
+        .createServer(function(req, res) {
+          res.writeHead(301, {Location: 'https://' + req.headers['host']})
+          res.end()
+        })
+        .listen(80)
     }
-  
   } else {
     cert = false
     var server = require('http').createServer(cb)
   }
-
 
   me = new Me()
 
@@ -246,24 +276,10 @@ initDashboard = async a => {
     // used to authenticate browser sessions to this daemon
     PK = {
       auth_code: toHex(crypto.randomBytes(32)),
-      
+
       pending_tx: []
     }
   }
-
-
-  var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
-  l('Open ' + url + ' in your browser')
-  server.listen(base_port).once('error', function(err) {
-    if (err.code === 'EADDRINUSE') {
-      l('port is currently in use')
-      process.exit()  
-    }
-  });
-  
-  // opn doesn't work in SSH console
-  if (base_port != 443) opn(url)
-
 
   if (argv.username) {
     var seed = await derive(argv.username, argv.pw)
@@ -273,14 +289,26 @@ initDashboard = async a => {
     await me.init(PK.username, Buffer.from(PK.seed, 'hex'))
     await me.start()
   }
-  
+
   me.processQueue()
+  var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
+  l('Open ' + url + ' in your browser')
+  server.listen(base_port).once('error', function(err) {
+    if (err.code === 'EADDRINUSE') {
+      l('port is currently in use')
+      process.exit()
+    }
+  })
 
+  // opn doesn't work in SSH console
+  if (base_port != 443) opn(url)
 
-  localwss = new ws.Server({ server: server, maxPayload: 64 * 1024 * 1024 })
+  localwss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
-  localwss.on('error', function (err) { console.error(err) })
-  localwss.on('connection', function (ws) {
+  localwss.on('error', function(err) {
+    console.error(err)
+  })
+  localwss.on('connection', function(ws) {
     ws.on('message', (msg) => {
       me.queue.push(['internal_rpc', ws, msg])
     })
@@ -289,18 +317,23 @@ initDashboard = async a => {
 
 derive = async (username, pw) => {
   return new Promise((resolve, reject) => {
-    require('./lib/scrypt')(pw, username, {
-      N: Math.pow(2, 12),
-      r: 8,
-      p: 1,
-      dkLen: 32,
-      encoding: 'binary'
-    }, (r) => {
-      r = bin(r)
-      resolve(r)
-    })
+    require('./lib/scrypt')(
+      pw,
+      username,
+      {
+        N: Math.pow(2, 12),
+        r: 8,
+        p: 1,
+        dkLen: 32,
+        encoding: 'binary'
+      },
+      (r) => {
+        r = bin(r)
+        resolve(r)
+      }
+    )
 
-/* Native scrypt. TESTNET: we use pure JS scrypt
+    /* Native scrypt. TESTNET: we use pure JS scrypt
     var seed = await scrypt.hash(pw, {
       N: Math.pow(2, 16),
       interruptStep: 1000,
@@ -314,88 +347,53 @@ derive = async (username, pw) => {
   })
 }
 
-
-
-
 sync = () => {
   if (K.prev_hash) {
-
-    me.send(Members[Math.floor(Math.random()*Members.length)], 'sync', Buffer.from(K.prev_hash, 'hex'))
+    me.send(
+      Members[Math.floor(Math.random() * Members.length)],
+      'sync',
+      Buffer.from(K.prev_hash, 'hex')
+    )
   }
 }
-
-
-
-city = async () => {
-  for (var i = 0; i < 50; i++) {
-    await me.payChannel({
-      partner: crypto.randomBytes(32),
-      amount: Math.round(Math.random()*120000)
-    })
-  }
-
-  l('Ready')
-}
-
-
 
 var argv = require('minimist')(process.argv.slice(2), {
   string: ['username', 'pw']
 })
 
-base_port = argv.p ? parseInt(argv.p) : 8000;
-
-(async () => {
+base_port = argv.p ? parseInt(argv.p) : 8000
+;(async () => {
   if (argv.console) {
-
-  } else if (process.argv[2] == 'city') {
-    city()
+    initDashboard()
   } else if (argv.genesis) {
     require('./src/genesis')(argv.genesis)
-  } else {
-    if (fs.existsSync('data/k.json')) {
-      l('Loading K data')
-      var json = fs.readFileSync('data/k.json')
-      K = JSON.parse(json)
-
-      Members = JSON.parse(json).members // another object ref
-      for (m of Members) {
-        m.pubkey = Buffer.from(m.pubkey, 'hex')
-        m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
-      }
-
-    } else {
-      throw "No K.json"
-    }
-
-    await privSequelize.sync({force: false})
-
-
-
+  } else if (argv.cluster) {
     var cluster = require('cluster')
     if (cluster.isMaster) {
       cluster.fork()
 
       cluster.on('exit', function(worker, code, signal) {
         console.log('exit')
-        cluster.fork();
+        cluster.fork()
       })
     }
 
-    if (cluster.isWorker) { 
+    if (cluster.isWorker) {
       initDashboard()
     }
+  } else {
+    initDashboard()
   }
 })()
 
-process.on('unhandledRejection', r => console.log(r))
-
+process.on('unhandledRejection', (r) => console.log(r))
 
 repl = require('repl').start('> ')
 _eval = repl.eval
 
 // top level await in repl
 repl.eval = (cmd, context, filename, callback) => {
-  if (cmd.indexOf('await') != -1) cmd = `(function(){ async function _wrap() { console.log(${cmd}) } return _wrap() })()`
+  if (cmd.indexOf('await') != -1)
+    cmd = `(function(){ async function _wrap() { console.log(${cmd}) } return _wrap() })()`
   _eval(cmd, context, filename, callback)
 }

@@ -1,0 +1,6 @@
+cd ..
+rsync -rva --exclude=private  --exclude=.git fs/ 8001
+rsync -rva --exclude=private --exclude=.git fs/ 8002
+rsync -rva --exclude=private --exclude=.git fs/ 8003
+touch restart
+cd fs

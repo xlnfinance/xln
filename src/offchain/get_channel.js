@@ -2,7 +2,7 @@
 // then derives a ton of info about current channel - who owns what, what's promised, what's insiured etc
 
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
-module.exports = async (partner) => {
+module.exports = async (partner = Members[0].pubkey) => {
   // accepts pubkey only
   var compared = Buffer.compare(me.pubkey, partner)
   if (compared == 0) return false
@@ -45,14 +45,12 @@ module.exports = async (partner) => {
       they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0,
 
       nonce: 0,
-      status: 'ready',
+      status: ch.left ? 'master' : 'listener',
 
       hashlocks: null
     },
     include: {all: true}
   }))[0]
-
-  ch.tr = await ch.d.getTransitions()
 
   var user = await me.byKey(partner)
   if (user) {

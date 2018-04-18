@@ -166,12 +166,18 @@ module.exports = async (genesis) => {
     name: '@main (Main)'
   })
 
+  var left =
+    Buffer.compare(
+      fromHex(K.members[1].pubkey),
+      fromHex(K.members[0].pubkey)
+    ) == -1
+
   // preload 2@3 channel
   await Insurance.create({
-    leftId: 2,
-    rightId: 1,
+    leftId: left ? 2 : 1,
+    rightId: left ? 1 : 2,
     insurance: 1000000,
-    ondelta: 1000000,
+    ondelta: left ? 1000000 : 0,
     nonce: 0
   })
 

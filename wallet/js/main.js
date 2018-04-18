@@ -16,13 +16,15 @@ renderRisk = (hist) => {
       type: 'line',
       data: {
         labels: [],
-        datasets: [{
-          label: 'Uninsured',
-          steppedLine: true,
-          data: [{x: Math.round(new Date() / precision), y: 0}],
-          borderColor: 'rgb(220, 53, 69)',
-          backgroundColor: 'rgb(220, 53, 69)'
-        }]
+        datasets: [
+          {
+            label: 'Uninsured',
+            steppedLine: true,
+            data: [{x: Math.round(new Date() / precision), y: 0}],
+            borderColor: 'rgb(220, 53, 69)',
+            backgroundColor: 'rgb(220, 53, 69)'
+          }
+        ]
       },
       options: {
         legend: {
@@ -36,18 +38,22 @@ renderRisk = (hist) => {
           display: true
         },
         scales: {
-          xAxes: [{
-            type: 'linear',
-            position: 'bottom',
-            labelString: 'Time'
-          }],
-          yAxes: [{
-            ticks: {
-              suggestedMin: 0,
-              suggestedMax: 1000,
-              mirror: true
+          xAxes: [
+            {
+              type: 'linear',
+              position: 'bottom',
+              labelString: 'Time'
             }
-          }]
+          ],
+          yAxes: [
+            {
+              ticks: {
+                suggestedMin: 0,
+                suggestedMax: 1000,
+                mirror: true
+              }
+            }
+          ]
         }
       }
     })
@@ -58,7 +64,10 @@ renderRisk = (hist) => {
   var last = d.pop()
 
   if (hist.length == 0) return false
-  var hist = hist.slice().reverse().slice(d.length)
+  var hist = hist
+    .slice()
+    .reverse()
+    .slice(d.length)
 
   for (h of hist) {
     d.push({
@@ -77,12 +86,13 @@ renderRisk = (hist) => {
   window.riskchart.update()
 }
 
-render = r => {
+render = (r) => {
   if (r.alert) notyf.alert(r.alert)
   if (r.confirm) notyf.confirm(r.confirm)
 
   if (r.already_opened) {
-    document.body.innerHTML = "<b>The wallet is already opened in another tab. Only one instance of wallet is allowed.</b>"
+    document.body.innerHTML =
+      '<b>The wallet is already opened in another tab. Only one instance of wallet is allowed.</b>'
     return false
   }
 
@@ -97,26 +107,35 @@ render = r => {
 FS.resolvers.push(render)
 
 FS.onready(() => {
-
   notyf = new Notyf({delay: 4000})
 
   var methods = {
     icon: (h, s) => {
-      return '<img width=' + s + ' height=' + s + ' src="data:image/png;base64,' + (new Identicon(h.toString(), s).toString()) + '">'
+      return (
+        '<img width=' +
+        s +
+        ' height=' +
+        s +
+        ' src="data:image/png;base64,' +
+        new Identicon(h.toString(), s).toString() +
+        '">'
+      )
     },
     hljs: hljs.highlight,
 
     ivoted: (voters) => {
-      return voters.find(v => v.id == app.record.id)
+      return voters.find((v) => v.id == app.record.id)
     },
 
     toHexString: (byteArray) => {
-      return Array.prototype.map.call(byteArray, function (byte) {
-        return ('0' + (byte & 0xFF).toString(16)).slice(-2)
-      }).join('')
+      return Array.prototype.map
+        .call(byteArray, function(byte) {
+          return ('0' + (byte & 0xff).toString(16)).slice(-2)
+        })
+        .join('')
     },
 
-    call: function (method, args) {
+    call: function(method, args) {
       if (method == 'vote') {
         args.rationale = prompt('Why?')
         if (!args.rationale) return false
@@ -126,7 +145,10 @@ FS.onready(() => {
       return false
     },
     rebalance: () => {
-      var total = app.outs.reduce((k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount), 0)
+      var total = app.outs.reduce(
+        (k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount),
+        0
+      )
 
       //if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
       app.call('rebalance', {
@@ -136,7 +158,7 @@ FS.onready(() => {
       })
       // }
     },
-    derive: f => {
+    derive: (f) => {
       var data = {
         username: inputUsername.value,
         password: inputPassword.value
@@ -152,7 +174,6 @@ FS.onready(() => {
       if (fee == 0) fee = 1
       return app.commy(before + fee)
     },
-
 
     go: (path) => {
       if (path == '') {
@@ -172,11 +193,21 @@ FS.onready(() => {
 
     dispute_outcome: (ins, parts) => {
       var o = []
-      if (parts.insured > 0) o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`)
-      if (parts.they_insured > 0) o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`)
+      if (parts.insured > 0)
+        o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`)
+      if (parts.they_insured > 0)
+        o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`)
 
-      if (parts.promised > 0) o.push(`${ins.leftId} owes ${app.commy(parts.promised)} to ${ins.rightId}`)
-      if (parts.they_promised > 0) o.push(`${ins.rightId} owes ${app.commy(parts.they_promised)} to ${ins.leftId}`)
+      if (parts.promised > 0)
+        o.push(
+          `${ins.leftId} owes ${app.commy(parts.promised)} to ${ins.rightId}`
+        )
+      if (parts.they_promised > 0)
+        o.push(
+          `${ins.rightId} owes ${app.commy(parts.they_promised)} to ${
+            ins.leftId
+          }`
+        )
 
       return o.join(', ')
     },
@@ -197,7 +228,7 @@ FS.onready(() => {
       }
       return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     },
-    uncommy: str => {
+    uncommy: (str) => {
       if (str.indexOf('.') == -1) str += '.00'
 
       return parseInt(str.replace(/[^0-9]/g, ''))
@@ -205,29 +236,30 @@ FS.onready(() => {
 
     timeAgo: (time) => {
       var units = [
-        { name: 'second', limit: 60, in_seconds: 1 },
-        { name: 'minute', limit: 3600, in_seconds: 60 },
-        { name: 'hour', limit: 86400, in_seconds: 3600 },
-        { name: 'day', limit: 604800, in_seconds: 86400 },
-        { name: 'week', limit: 2629743, in_seconds: 604800 },
-        { name: 'month', limit: 31556926, in_seconds: 2629743 },
-        { name: 'year', limit: null, in_seconds: 31556926 }
+        {name: 'second', limit: 60, in_seconds: 1},
+        {name: 'minute', limit: 3600, in_seconds: 60},
+        {name: 'hour', limit: 86400, in_seconds: 3600},
+        {name: 'day', limit: 604800, in_seconds: 86400},
+        {name: 'week', limit: 2629743, in_seconds: 604800},
+        {name: 'month', limit: 31556926, in_seconds: 2629743},
+        {name: 'year', limit: null, in_seconds: 31556926}
       ]
       var diff = (new Date() - new Date(time * 1000)) / 1000
       if (diff < 5) return 'now'
 
-      var i = 0, unit
-      while (unit = units[i++]) {
+      var i = 0,
+        unit
+      while ((unit = units[i++])) {
         if (diff < unit.limit || !unit.limit) {
           var diff = Math.floor(diff / unit.in_seconds)
           return diff + ' ' + unit.name + (diff > 1 ? 's' : '') + ' ago'
         }
-      };
+      }
     },
 
     toggle: () => {
       if (localStorage.settings) {
-        delete (localStorage.settings)
+        delete localStorage.settings
       } else {
         localStorage.settings = 1
       }
@@ -238,24 +270,22 @@ FS.onready(() => {
     ts: () => Math.round(new Date() / 1000),
 
     trim: (str) => {
-      return str.slice(0, 8) + '...'
+      return str ? str.slice(0, 8) + '...' : ''
     }
-
   }
 
   var wp = app.innerHTML
 
   app = new Vue({
     el: '#app',
-    mounted: ()=>{
+    mounted: () => {
       FS('load').then(render)
 
-      setInterval(function () {
+      setInterval(function() {
         FS('load').then(render)
-      }, localStorage.auth_code ? 20000 : 30000)
-
+      }, localStorage.auth_code ? 1000 : 30000)
     },
-    data () {
+    data() {
       return {
         auth_code: localStorage.auth_code,
 
@@ -279,10 +309,8 @@ FS.onready(() => {
 
         install_snippet: false,
 
-
         request_amount: '',
         outs: [{to: '', amount: '', invoice: ''}],
-
 
         off_to: '',
         off_amount: '',
@@ -299,7 +327,11 @@ FS.onready(() => {
         history: [],
         pending_tx: [],
 
-        proposal: ['Increase Blocksize After Client Optimization', `K.blocksize += 1000000`, ''],
+        proposal: [
+          'Increase Blocksize After Client Optimization',
+          `K.blocksize += 1000000`,
+          ''
+        ],
 
         settings: !localStorage.settings,
 
@@ -308,11 +340,12 @@ FS.onready(() => {
         parsed_invoice: {},
 
         hardfork: ''
-
       }
     },
     computed: {
-      ch: () => { return app.channels[app.peer] }
+      ch: () => {
+        return app.channels[app.peer]
+      }
     },
     methods: methods,
     template: `
@@ -457,6 +490,26 @@ FS.onready(() => {
         <h2 class="alert alert-danger" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
         <br>
 
+
+        <table v-if="payments.length > 0" class="table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>Dest</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="h in payments.slice(0, 10)">
+              <td>{{h.status}}</td>
+              <td>{{h.is_inward ? 'Inward' : 'Outward'}}</td>
+              <td>{{commy(h.amount)}}</td>
+              <td>{{trim(h.destination)}}</td>
+            </tr>
+
+          </tbody>
+        </table>
 
 
         <div v-if="record">
@@ -933,8 +986,6 @@ FS.onready(() => {
 </div>
 `
   })
-
-
 })
 
 // delayed features:

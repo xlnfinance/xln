@@ -13,22 +13,7 @@ var base_db = {
 
 privSequelize = new Sequelize('', '', 'password', base_db)
 
-Block = privSequelize.define('block', {
-  // sigs that authorize block
-  precommits: Sequelize.CHAR.BINARY,
-  // header with merkle roots in it
-  header: Sequelize.CHAR.BINARY,
-  // array of tx in block
-  ordered_tx_body: Sequelize.CHAR.BINARY,
-
-  hash: Sequelize.CHAR(32).BINARY,
-  prev_hash: Sequelize.CHAR(32).BINARY,
-  meta: Sequelize.TEXT,
-
-  total_tx: Sequelize.INTEGER
-})
-
-// stores all payment channels, offdelta and last signatures
+// Encapsulates relationship with counterparty: offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
 // we name our things "value", and counterparty's "they_value"
@@ -41,7 +26,7 @@ Delta = privSequelize.define('delta', {
   nonce: Sequelize.INTEGER,
   status: Sequelize.TEXT,
 
-  instant_until: Sequelize.INTEGER,
+  pending: Sequelize.TEXT,
 
   // TODO: clone from Insurance table to Delta to avoid double querying both dbs
   insurance: Sequelize.INTEGER,
@@ -63,8 +48,6 @@ Delta = privSequelize.define('delta', {
   input_amount: Sequelize.INTEGER,
   input_sig: Sequelize.TEXT, // we store a withdrawal sig to use in next rebalance
 
-  hashlocks: Sequelize.TEXT,
-
   sig: Sequelize.TEXT,
   signed_state: Sequelize.TEXT,
 
@@ -79,40 +62,67 @@ Delta = privSequelize.define('delta', {
   }
 })
 
-Transition = privSequelize.define('transition', {
-  // await, sent, ready
+Payment = privSequelize.define('payment', {
+  // await (to be sent outward) => sent => got secret => unlocking =>
   status: Sequelize.TEXT,
+  // no inward = sender, no outward = receiver, otherwise = mediator
+  is_inward: Sequelize.BOOLEAN,
 
-  // who is recipient
-  mediate_to: Sequelize.TEXT,
+  // in mediated transfer, pull funds from previous inward
+  // pull_from: Sequelize.INTEGER,
+  //outward: Sequelize.TEXT,
 
-  // string needed to decrypt
-  unlocker: Sequelize.TEXT,
-
-  // a change in offdelta
-  offdelta: Sequelize.INTEGER,
+  // outward = inward - fee
+  amount: Sequelize.INTEGER,
+  // hash is same for inward and outward
   hash: Sequelize.TEXT,
   // best by block
-  exp: Sequelize.INTEGER
+  exp: Sequelize.INTEGER,
+  // asset type
+  asset: Sequelize.INTEGER,
+
+  // who is recipient
+  destination: Sequelize.TEXT,
+  // string to be decrypted by outward
+  unlocker: Sequelize.TEXT,
+
+  // secret that unlocks hash
+  secret: Sequelize.TEXT
 })
 
-Delta.hasMany(Transition)
-Transition.belongsTo(Delta)
+Delta.hasMany(Payment)
+Payment.belongsTo(Delta)
+//Delta.hasMany(Payment, {foreignKey: 'delta_id', sourceKey: 'id'})
+//Payment.belongsTo(Delta, {foreignKey: 'delta_id', targetKey: 'id'})
+
+Payment.prototype.toLock = function() {
+  return [this.amount, this.hash, this.exp]
+}
 
 Delta.prototype.getState = async function() {
-  var compared = Buffer.compare(this.myId, this.partnerId)
+  var left = Buffer.compare(this.myId, this.partnerId) == -1
+
+  var inwards = (await this.getPayments({
+    where: {
+      status: {[Sequelize.Op.or]: ['hashlock', 'unlocking']},
+
+      is_inward: true
+    }
+  })).map((t) => [t.amount, t.hash, t.exp])
+
+  var outwards = (await this.getPayments({
+    where: {status: 'hashlock', is_inward: false}
+  })).map((t) => [t.amount, t.hash, t.exp])
 
   var state = [
     methodMap('dispute'),
-    compared == -1 ? this.myId : this.partnerId,
-    compared == -1 ? this.partnerId : this.myId,
+    left ? this.myId : this.partnerId,
+    left ? this.partnerId : this.myId,
     this.nonce,
     this.offdelta,
-    (await this.getTransitions({where: {status: 'hashlock'}})).map((t) => [
-      t.offdelta,
-      t.hash,
-      t.exp
-    ])
+    // 5 is inwards for left, 6 for right
+    left ? inwards : outwards,
+    left ? outwards : inwards
   ]
 
   return state
@@ -148,6 +158,21 @@ Delta.prototype.startDispute = async function(profitable) {
 
   await this.save()
 }
+
+Block = privSequelize.define('block', {
+  // sigs that authorize block
+  precommits: Sequelize.CHAR.BINARY,
+  // header with merkle roots in it
+  header: Sequelize.CHAR.BINARY,
+  // array of tx in block
+  ordered_tx_body: Sequelize.CHAR.BINARY,
+
+  hash: Sequelize.CHAR(32).BINARY,
+  prev_hash: Sequelize.CHAR(32).BINARY,
+  meta: Sequelize.TEXT,
+
+  total_tx: Sequelize.INTEGER
+})
 
 History = privSequelize.define('history', {
   leftId: Sequelize.CHAR(32).BINARY,

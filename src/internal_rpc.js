@@ -11,10 +11,12 @@ module.exports = async (ws, msg) => {
   if (json.auth_code == PK.auth_code) {
     if (ws.send && json.is_wallet && me.browser != ws) {
       if (me.browser && me.browser.readyState == 1) {
-        ws.send(JSON.stringify({
-          result: {already_opened: true},
-          id: json.id
-        }))
+        ws.send(
+          JSON.stringify({
+            result: {already_opened: true},
+            id: json.id
+          })
+        )
       } else {
         // used to react(). only one instance is allowed
         me.browser = ws
@@ -39,7 +41,7 @@ module.exports = async (ws, msg) => {
 
         if (me.member_server) {
           me.member_server.close()
-          me.wss.clients.forEach(c => c.close())
+          me.wss.clients.forEach((c) => c.close())
           // Object.keys(me.users).forEach( c=>me.users[c].end() )
         }
         me = new Me()
@@ -48,14 +50,15 @@ module.exports = async (ws, msg) => {
         break
 
       case 'dispute':
-        var ch = await me.getChannel(Members.find(m => m.id == p.partner).pubkey)
+        var ch = await me.getChannel(
+          Members.find((m) => m.id == p.partner).pubkey
+        )
         await ch.d.startDispute(p.profitable)
 
         result.confirm = 'Started a Dispute'
         break
 
       case 'send':
-
         // TODO: support batch sends
         if (p.pay_invoice) {
           var inv = p.pay_invoice.split('_')
@@ -71,10 +74,10 @@ module.exports = async (ws, msg) => {
             parsed.partners.push(parseInt(inv[i]))
           }
 
-          parsed.trimmedId = inv[2].length == 64 ? inv[2].substr(0, 10) + '...' : inv[2]
+          parsed.trimmedId =
+            inv[2].length == 64 ? inv[2].substr(0, 10) + '...' : inv[2]
 
           parsed.fee = Math.round(parseInt(parsed.amount) * 0.001)
-
         }
 
         if (p.dry_run) {
@@ -82,13 +85,12 @@ module.exports = async (ws, msg) => {
           return false
         }
 
-
         if (parsed.pubkey.length == 64) {
-          var mediate_to = Buffer.from(parsed.pubkey, 'hex')
+          var destination = Buffer.from(parsed.pubkey, 'hex')
         } else {
-          var mediate_to = await User.findById(parseInt(parsed.pubkey))
-          if (mediate_to) {
-            mediate_to = mediate_to.pubkey
+          var destination = await User.findById(parseInt(parsed.pubkey))
+          if (destination) {
+            destination = destination.pubkey
           } else {
             result.alert = 'This user ID is not found'
             break
@@ -105,37 +107,37 @@ module.exports = async (ws, msg) => {
 
         var amount = parseInt(parsed.amount)
 
-        var unlocker = nacl.box(r([amount, secret, invoice]), unlocker_nonce, box_pubkey, me.box.secretKey)
+        var unlocker_box = nacl.box(
+          r([amount, secret, invoice]),
+          unlocker_nonce,
+          box_pubkey,
+          me.box.secretKey
+        )
+        var unlocker = r([
+          bin(unlocker_box),
+          unlocker_nonce,
+          bin(me.box.publicKey)
+        ])
 
+        var ch = await me.getChannel(Members[0].pubkey)
+        l('adding payment')
+        await ch.d.save()
 
-        var [status, error] = await me.payChannel({
-          partner: Members[0].pubkey,
+        await ch.d.createPayment({
+          status: 'await',
+          is_inward: false,
+
           amount: amount,
           hash: hash,
+          exp: K.usable_blocks + 10,
 
-          unlocker: r([bin(unlocker), unlocker_nonce, bin(me.box.publicKey)]),
-
-          mediate_to: mediate_to,
-          mediate_hub: parsed.partners,
-
-          invoice: invoice,
-
-          return_to: (obj) => {
-            react(obj)
-
-            ws.send ? ws.send(JSON.stringify({
-              result: obj,
-              id: json.id
-            })) : ws.end(JSON.stringify(obj))
-          }
-
+          unlocker: unlocker,
+          destination: destination
         })
 
-        if (error) {
-          result.alert = error
-        } else {
-          result.confirm = 'Payment sent...'
-        }
+        await me.payChannel(Members[0].pubkey)
+
+        result.confirm = 'Payment sent...'
 
         break
 
@@ -152,9 +154,11 @@ module.exports = async (ws, msg) => {
               var userId = Buffer.from(to[0], 'hex')
 
               // maybe this pubkey is already registred?
-              var u = await User.findOne({where: {
-                pubkey: userId
-              }})
+              var u = await User.findOne({
+                where: {
+                  pubkey: userId
+                }
+              })
 
               if (u) {
                 userId = u.id
@@ -165,7 +169,8 @@ module.exports = async (ws, msg) => {
               var u = await User.findById(userId)
 
               if (!u) {
-                result.alert = 'User with short ID ' + userId + " doesn't exist."
+                result.alert =
+                  'User with short ID ' + userId + " doesn't exist."
                 break
               }
             }
@@ -175,9 +180,12 @@ module.exports = async (ws, msg) => {
             var amount = parseInt(o.amount.replace(/[^0-9]/g, ''))
 
             if (amount > 0) {
-              outs.push([amount, 
-                userId, 
-                to[1] ? Members.find(m => m.hub && m.hub.handle == to[1]).id : 0,
+              outs.push([
+                amount,
+                userId,
+                to[1]
+                  ? Members.find((m) => m.hub && m.hub.handle == to[1]).id
+                  : 0,
                 o.invoice ? Buffer.from(o.invoice, 'hex') : 0
               ])
             }
@@ -185,7 +193,7 @@ module.exports = async (ws, msg) => {
         }
 
         if (p.request_amount > 0) {
-          var partner = Members.find(m => m.id == p.partner)
+          var partner = Members.find((m) => m.id == p.partner)
           var ch = await me.getChannel(partner.pubkey)
           if (p.request_amount > ch.insured) {
             react({alert: 'More than you can withdraw from insured'})
@@ -197,16 +205,17 @@ module.exports = async (ws, msg) => {
           setTimeout(async () => {
             var ch = await me.getChannel(partner.pubkey)
             if (ch.d.input_sig) {
-              ins.push([ ch.d.input_amount,
-                ch.d.partnerId,
-                ch.d.input_sig ])
+              ins.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
 
-              l("Rebalancing ", [ins, outs])
+              l('Rebalancing ', [ins, outs])
 
               await me.broadcast('rebalance', r([[], ins, outs]))
               react({confirm: 'On-chain rebalance tx sent'})
             } else {
-              react({alert: 'Failed to obtain withdrawal. Try later or start a dispute.'})
+              react({
+                alert:
+                  'Failed to obtain withdrawal. Try later or start a dispute.'
+              })
             }
           }, 3000)
         } else if (outs.length > 0) {
@@ -220,9 +229,12 @@ module.exports = async (ws, msg) => {
 
         break
 
-
       case 'testnet':
-        me.send(Members.find(m => m.id == p.partner), 'testnet', concat(bin([p.action]), me.pubkey))
+        me.send(
+          Members.find((m) => m.id == p.partner),
+          'testnet',
+          concat(bin([p.action]), me.pubkey)
+        )
 
         result.confirm = 'Testnet action triggered'
         break
@@ -233,7 +245,7 @@ module.exports = async (ws, msg) => {
         break
 
       case 'setLimits':
-        var m = Members.find(m => m.id == p.partner)
+        var m = Members.find((m) => m.id == p.partner)
 
         var ch = await me.getChannel(m.pubkey)
 
@@ -241,9 +253,11 @@ module.exports = async (ws, msg) => {
         ch.d.hard_limit = parseInt(p.limits[1]) * 100
         await ch.d.save()
 
-        me.send(m, 'setLimits', me.envelope(
-            methodMap('setLimits'), ch.d.soft_limit, ch.d.hard_limit
-        ))
+        me.send(
+          m,
+          'setLimits',
+          me.envelope(methodMap('setLimits'), ch.d.soft_limit, ch.d.hard_limit)
+        )
 
         result.confirm = 'The hub has been notified about new credit limits'
 
@@ -270,21 +284,21 @@ module.exports = async (ws, msg) => {
           // format: bin(me.box.publicKey)
 
           // we attempt to sort members by receivable to increase chance of payment success
-          
+
           // todo: all channels or particular?
           var offered_partners = (await me.channels())
-          .sort((a,b)=>b.they_payable - a.they_payable)
-          .filter(a=>a.they_payable >= amount)
-          .map(a=>a.partner).join('_')
+            .sort((a, b) => b.they_payable - a.they_payable)
+            .filter((a) => a.they_payable >= amount)
+            .map((a) => a.partner)
+            .join('_')
 
-          var rawInvoice = ([
+          var rawInvoice = [
             amount,
             toHex(invoice),
             toHex(me.box.publicKey),
             me.record ? me.record.id : toHex(me.pubkey), // onchain allowed?
-            offered_partners,
-          ]).join('_')
-
+            offered_partners
+          ].join('_')
 
           invoices[toHex(invoice)] = {
             secret: secret,
@@ -305,12 +319,13 @@ module.exports = async (ws, msg) => {
         break
 
       case 'vote':
-        result.confirm = await me.broadcast('vote', r([p.id, p.approval, p.rationale]))
+        result.confirm = await me.broadcast(
+          'vote',
+          r([p.id, p.approval, p.rationale])
+        )
 
         break
 
-
-        
       case 'sync':
         result.confirm = 'Syncing the chain...'
         sync()
@@ -319,10 +334,14 @@ module.exports = async (ws, msg) => {
 
       // Successor of Secure Login, returns signed origin
       case 'login':
-         ws.send(JSON.stringify({
-            result: toHex(nacl.sign(Buffer.from(json.proxyOrigin), me.id.secretKey)),
+        ws.send(
+          JSON.stringify({
+            result: toHex(
+              nacl.sign(Buffer.from(json.proxyOrigin), me.id.secretKey)
+            ),
             id: json.id
-          }))
+          })
+        )
         return false
         break
     }
@@ -334,9 +353,11 @@ module.exports = async (ws, msg) => {
       react(result, json.id)
     }
   } else {
-    ws.send(JSON.stringify({
-      result: cached_result,
-      id: json.id
-    }))
+    ws.send(
+      JSON.stringify({
+        result: cached_result,
+        id: json.id
+      })
+    )
   }
 }

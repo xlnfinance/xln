@@ -35,7 +35,7 @@ module.exports = async () => {
     me.status = 'propose'
 
     if (me.my_member == me.next_member()) {
-      l(`it's our turn to propose, gossip new block`)
+      //l(`it's our turn to propose, gossip new block`)
 
       if (me.proposed_block.locked) {
         // We precommited to previous block, keep proposing it
