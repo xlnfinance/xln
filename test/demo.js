@@ -14,30 +14,35 @@ users = {}
 nacl = require('../lib/nacl')
 
 // define merchant node path
-FS_PATH = fs.existsSync('/root/8002/private/pk.json') ? '/root/8002' : '/Users/homakov/work/8002'
+FS_PATH = fs.existsSync('/root/8002/private/pk.json')
+  ? '/root/8002'
+  : '/Users/homakov/work/8002'
 
 FS_RPC = 'http://127.0.0.1:8002/rpc'
 
 l(FS_PATH)
 
-// pointing browser SDK to user node 
+// pointing browser SDK to user node
 LOCAL_FS_RPC = 'http://127.0.0.1:8001'
 
 preferredHub = 1
 
 FS = (method, params, cb) => {
   if (fs.existsSync(FS_PATH + '/private/pk.json')) {
-    auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json')).auth_code
+    auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json'))
+      .auth_code
     l('Auth code to our node: ' + auth_code)
   } else {
     throw 'No auth'
   }
 
-  axios.post(FS_RPC, {
-    method: method,
-    auth_code: auth_code,
-    params: params
-  }).then(cb)
+  axios
+    .post(FS_RPC, {
+      method: method,
+      auth_code: auth_code,
+      params: params
+    })
+    .then(cb)
 }
 
 commy = (b, dot = true) => {
@@ -57,23 +62,28 @@ commy = (b, dot = true) => {
   return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-require('http').createServer((req, res) => {
-  cookies = new Cookies(req, res)
+require('http')
+  .createServer((req, res) => {
+    cookies = new Cookies(req, res)
 
-  res.status = 200
+    res.status = 200
 
-  var id = cookies.get('id')
+    var id = cookies.get('id')
 
-  if (req.url == '/') {
-    if (!id) {
-      id = rand()
-      cookies.set('id', id)
-    }
-    if (!users[id]) users[id] = Math.round(Math.random() * 1000000)
+    if (req.url == '/') {
+      if (!id) {
+        id = rand()
+        cookies.set('id', id)
+      }
+      if (!users[id]) users[id] = Math.round(Math.random() * 1000000)
 
-    require('serve-static')('../wallet')(req, res, require('finalhandler')(req, res))
+      require('serve-static')('../wallet')(
+        req,
+        res,
+        require('finalhandler')(req, res)
+      )
 
-    res.end(`
+      res.end(`
 
 
 <!DOCTYPE html>
@@ -115,53 +125,24 @@ require('http').createServer((req, res) => {
 <script>
 l=console.log
 
-FS = (method, params={})=>{
-  return new Promise((resolve,reject)=>{
-    var id = FS.resolvers.push(resolve) - 1
-
-    FS.frame.contentWindow.postMessage({
-      method: method,
-      params: params,
-      id: id
-    }, FS.origin)
-
-  })
-}
-
-FS.frame=false;
-FS.origin = '${LOCAL_FS_RPC}'
-FS.frame=document.createElement('iframe');
-FS.frame.style.display = 'none'
-FS.frame.src=FS.origin+'/sdk.html'
-document.body.appendChild(FS.frame)
+fs_origin = '${LOCAL_FS_RPC}'
 
 var fallback = setTimeout(()=>{
-  main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
+  //main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
 }, 3000)
 
-FS.onready = fn => {
 
-  if(FS.ready == true){
-    fn()
-  }else{
-    FS.ready = fn
-  }
+FS = function (invoice, cb) {
+  window.open(fs_origin+'/#invoice='+invoice)
+  window.addEventListener('message', function(e){
+    if(e.origin == fs_origin){
+      cb(e.data)
+    }
+  })
+
 }
-FS.resolvers = [()=>{
-  clearTimeout(fallback)
-  if(FS.ready){
-    FS.ready()
-  }
-  FS.ready = true
-}]
-window.addEventListener('message', function(e){
-  if(e.origin == FS.origin){
-    var data = JSON.parse(e.data)
 
-    FS.resolvers[data.id](data.result)
-    
-  }
-})
+
 
 </script>
 <script>
@@ -192,85 +173,90 @@ window.onload = function(){
   }
 
   deposit.onclick = function(){
+    window.open(fs_origin)
+
     axios.post('/init', {
       amount: parseFloat(amount.value)*100
     }).then(r=>{
       console.log("Invoice to pay: " + r.data)
-      var unpacked = unpackInvoice(r.data)
-      unpacked.partner = ${preferredHub}
 
-      FS('send', unpacked).then(data=>{
-        if (data.secret){
-          axios.post('/init', {
-            deposit_invoice: unpacked.invoice
-          }).then((r2)=>{
-            console.log(r2.data)
-            location.reload()
-          })
-
-        }
-
+      FS(r.data, data=>{
+        l(data)
+        axios.post('/init', {
+          deposit_invoice: unpacked.invoice
+        }).then((r2)=>{
+          console.log(r2.data)
+          location.reload()
+        })
       })
  
     })
   }
 
+/*
   login.onclick = function(){
     FS('login').then(data=>l(data))
-  }
+  }*/
+
+  
 }
 </script>
 </body></html>
 
       `)
-  } else if (req.url == '/init') {
+    } else if (req.url == '/init') {
+      var queryData = ''
+      req.on('data', function(data) {
+        queryData += data
+      })
 
-    var queryData = ''
-    req.on('data', function (data) { queryData += data })
+      req.on('end', function() {
+        var p = JSON.parse(queryData)
 
-    req.on('end', function () {
-      var p = JSON.parse(queryData)
+        l('init ', p)
 
-      l('init ',p)
-
-      if (p.deposit_invoice) {
-        FS('invoice', {invoice: p.deposit_invoice}, r => {
-          if (r.data.status == 'paid' && r.data.extra == id) {
-            users[id] += r.data.amount
-          } else {
-            console.log('Not paid')
+        if (p.deposit_invoice) {
+          FS('invoice', {invoice: p.deposit_invoice}, (r) => {
+            if (r.data.status == 'paid' && r.data.extra == id) {
+              users[id] += r.data.amount
+            } else {
+              console.log('Not paid')
+            }
+            res.end(JSON.stringify({status: 'paid'}))
+          })
+        } else if (p.withdraw_invoice) {
+          if (users[id] < p.withdraw_invoice) {
+            l('Not enough balance')
+            return false
           }
-          res.end(JSON.stringify({status: 'paid'}))
-        })
-      } else if (p.withdraw_invoice) {
-        if (users[id] < p.withdraw_invoice) {
-          l('Not enough balance')
-          return false
+
+          users[id] -= p.withdraw_invoice.amount
+
+          FS('send', p.withdraw_invoice, (r) => {
+            if (r.data.status == 'paid') {
+              l('Withdrawn')
+            } else {
+              console.log('Expired')
+            }
+
+            res.end(JSON.stringify({status: 'paid'}))
+          })
+        } else if (p.amount) {
+          FS(
+            'invoice',
+            {
+              amount: p.amount,
+              partner: preferredHub,
+              asset: p.asset,
+              extra: id
+            },
+            (r) => {
+              res.end(JSON.stringify(r.data.new_invoice))
+            }
+          )
         }
-
-        users[id] -= p.withdraw_invoice.amount
-
-        FS('send', p.withdraw_invoice, r => {
-          if (r.data.status == 'paid') {
-            l('Withdrawn')
-          } else {
-            console.log('Expired')
-          }
-
-          res.end(JSON.stringify({status: 'paid'}))
-        })
-      } else if (p.amount) {
-        FS('invoice', {
-          amount: p.amount,
-          partner: preferredHub,
-          asset: p.asset,
-          extra: id
-        }, r => {
-          res.end(JSON.stringify(r.data.new_invoice))
-        })
-      }
-    })
-  } else {
-
-  }
-}).listen(3010)
+      })
+    } else {
+    }
+  })
+  .listen(3010)

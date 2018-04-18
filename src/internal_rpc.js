@@ -119,7 +119,10 @@ module.exports = async (ws, msg) => {
           bin(me.box.publicKey)
         ])
 
-        var ch = await me.getChannel(Members[0].pubkey)
+        var via = fromHex(K.hubs[0].pubkey)
+        var sent_amount = beforeFees(amount, [K.hubs[0].fee])
+
+        var ch = await me.getChannel(via)
         l('adding payment')
         await ch.d.save()
 
@@ -127,7 +130,7 @@ module.exports = async (ws, msg) => {
           status: 'await',
           is_inward: false,
 
-          amount: amount,
+          amount: sent_amount,
           hash: hash,
           exp: K.usable_blocks + 10,
 
@@ -135,7 +138,7 @@ module.exports = async (ws, msg) => {
           destination: destination
         })
 
-        await me.payChannel(Members[0].pubkey)
+        await me.payChannel(via)
 
         result.confirm = 'Payment sent...'
 

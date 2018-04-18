@@ -102,12 +102,18 @@ kmac = (key, msg) =>
 
 ts = () => Math.round(new Date() / 1000)
 
-beforeFees = (amount) => {
-  return Math.round(amount * 1 + K.hub_fee)
+beforeFees = (amount, fees) => {
+  for (var fee of fees) {
+    new_amount = Math.round(amount * (1 + fee))
+  }
+  if (new_amount == amount) new_amount = amount + 1
+
+  return new_amount
 }
-afterFees = (amount) => {
-  var fee = Math.round(amount * K.hub_fee)
-  if (fee == 0) fee = K.hub_fee_base
+
+afterFees = (amount, fee) => {
+  var fee = Math.round(amount / (1 + fee) * fee)
+  if (fee == 0) fee = 1
   return amount - fee
 }
 

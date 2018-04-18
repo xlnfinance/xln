@@ -4,6 +4,8 @@
 l = console.log
 ts = () => Math.round(new Date() / 1000)
 
+var pay_invoice = location.hash.split('invoice=')
+
 renderRisk = (hist) => {
   var precision = 100 // devide time by
 
@@ -336,7 +338,7 @@ FS.onready(() => {
         settings: !localStorage.settings,
 
         new_invoice: '',
-        pay_invoice: '',
+        pay_invoice: location.hash.split('invoice=')[1],
         parsed_invoice: {},
 
         hardfork: ''
@@ -491,27 +493,6 @@ FS.onready(() => {
         <br>
 
 
-        <table v-if="payments.length > 0" class="table">
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Type</th>
-              <th>Amount</th>
-              <th>Dest</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="h in payments.slice(0, 10)">
-              <td>{{h.status}}</td>
-              <td>{{h.is_inward ? 'Inward' : 'Outward'}}</td>
-              <td>{{commy(h.amount)}}</td>
-              <td>{{trim(h.destination)}}</td>
-            </tr>
-
-          </tbody>
-        </table>
-
-
         <div v-if="record">
           <h2>Balance on-chain: <b>{{commy(record.balance)}}</b></h2>
           <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with a hub. It is also used to cover on-chain transaction fees. Your on-chain ID: <b>{{record.id}}</b></p>
@@ -607,24 +588,27 @@ FS.onready(() => {
 
 <div class="tab-content mt-3" id="nav-tabContent">
   <div class="tab-pane fade" id="nav-history" role="tabpanel" aria-labelledby="nav-history-tab">
-        <table v-if="history.length > 0" class="table">
+
+        <table v-if="payments.length > 0" class="table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Description</th>
+              <th>Status</th>
+              <th>Type</th>
               <th>Amount</th>
-              <th>Balance</th>
+              <th>Destination</th>
+              <th>Date</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="h.desc" v-for="h in history.slice(history_limits[0], history_limits[1])">
-              <td>{{ new Date(h.date).toLocaleString() }}</td>
-              <td>{{h.desc}}</td>
-              <td>{{commy(h.amount)}}</td>
-              <td v-if="h.balance>0">{{commy(h.balance)}}</td>
+            <tr v-for="h in payments.slice(history_limits[0], history_limits[1])">
+              <td>{{h.status}}</td>
+              <td>{{h.is_inward ? 'Inward' : 'Outward'}}</td>
+              <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
+              <td>{{trim(h.destination)}}</td>
+              <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
             </tr>
 
-            <p><a @click="history_limits[1]=999999">Show All</a></p>
+            <p><a @click="history_limits[1]=1000">Show All</a></p>
           </tbody>
         </table>
         <p v-else>There is no transaction history so far. Go to an exchange or use Testnet faucet to receive money.</p>

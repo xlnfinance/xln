@@ -25,7 +25,7 @@ module.exports = async (msg) => {
   }
 
   if (ch.d.status == 'sent' && method != 'update') {
-    return l('Sent only accepts updates')
+    return l('Sent only accepts updates ' + method)
   }
 
   if (ch.d.status == 'listener') {
@@ -64,7 +64,7 @@ module.exports = async (msg) => {
   ch.d.sig = ackSig
   ch.d.offdelta = newState[4]
   ch.d.signed_state = r(newState)
-  ch.d.status = 'ready'
+  ch.d.status = ch.left ? 'master' : 'listener'
   await ch.d.save()
   l('Saved ACK')
 
@@ -136,7 +136,7 @@ module.exports = async (msg) => {
         var paid_invoice = invoices[toHex(box_invoice)]
 
         // TODO: did we get right amount in right asset?
-        if (paid_invoice && amount >= box_amount - 1000) {
+        if (paid_invoice && amount >= box_amount) {
           //paid_invoice.status == 'pending'
 
           l('Our invoice was paid!', paid_invoice)
@@ -162,7 +162,7 @@ module.exports = async (msg) => {
           status: 'await',
           is_inward: false,
 
-          amount: afterFees(amount),
+          amount: afterFees(amount, me.my_hub.fee),
           hash: hash,
           exp: exp,
 
@@ -170,6 +170,7 @@ module.exports = async (msg) => {
           destination: destination
         })
         await me.payChannel(destination)
+        react()
       } else {
         l('We arent receiver and arent a hub O_O')
       }
@@ -223,14 +224,13 @@ module.exports = async (msg) => {
 
         await me.payChannel(inward.deltum.partnerId)
       }
+      react()
     } else if (m == 'faillock' || m == 'fail') {
     }
   }
 
-  if (transitions.length > 0) {
-    // Always ack if there were transitions
-    await me.payChannel(pubkey, true)
-  }
+  // Always ack if there were transitions
+  await me.payChannel(pubkey, transitions.length > 0)
 
   /*
   // TESTNET: storing most profitable outcome for us

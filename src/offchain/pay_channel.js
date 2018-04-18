@@ -29,7 +29,7 @@ module.exports = async (partner, force_flush = false) => {
     return l('Still waiting for ack')
   }
 
-  if (ch.d.status == 'listener') {
+  if (ch.d.status == 'listener' && !force_flush) {
     me.send(partner, 'update', me.envelope(methodMap('requestMaster')))
     return l('Try to obtain master...')
   }
@@ -85,6 +85,11 @@ module.exports = async (partner, force_flush = false) => {
       l('Invalid transition amount')
       continue
     }
+
+    if (t.destination.equals(me.pubkey)) {
+      l('Cannot pay to self')
+      continue
+    }
     payable -= t.amount
 
     newState[3]++ //nonce
@@ -122,6 +127,8 @@ module.exports = async (partner, force_flush = false) => {
   ch.d.pending = envelope
 
   await ch.d.save()
+
+  react()
 
   if (!me.send(partner, 'update', envelope)) {
     //l(`${partner} not online, deliver later?`)

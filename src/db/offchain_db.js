@@ -6,7 +6,7 @@ var base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
   storage: 'private/db.sqlite',
-  define: {timestamps: false},
+  define: {timestamps: true}, // we don't mind timestamps in offchain db
   operatorsAliases: false,
   logging: false
 }

@@ -39,9 +39,6 @@ module.exports = async (genesis) => {
 
     dispute_delay: 5, // in how many blocks disputes are considered final
 
-    hub_fee_base: 1, // a fee per payment
-    hub_fee: 0.001, // 10 basis points
-
     collected_tax: 0,
 
     ts: 0,
@@ -161,6 +158,8 @@ module.exports = async (genesis) => {
     id: K.members[0].id,
     location: K.members[0].location,
     pubkey: K.members[0].pubkey,
+
+    fee: 0.005,
 
     handle: 'main',
     name: '@main (Main)'
