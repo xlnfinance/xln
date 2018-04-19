@@ -65,6 +65,7 @@ module.exports = async (msg) => {
   ch.d.offdelta = newState[4]
   ch.d.signed_state = r(newState)
   ch.d.status = ch.left ? 'master' : 'listener'
+  ch.d.pending = null
   await ch.d.save()
   l('Saved ACK')
 
@@ -225,6 +226,12 @@ module.exports = async (msg) => {
         await me.payChannel(inward.deltum.partnerId)
       }
       react()
+
+      if (me.handicap_dontsettle) {
+        return l(
+          'HANDICAP ON: not settling on a given secret, but pulling from inward'
+        )
+      }
     } else if (m == 'faillock' || m == 'fail') {
     }
   }

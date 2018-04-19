@@ -3,7 +3,7 @@ stringify = require('../lib/stringify')
 
 class Me {
   // boilerplate attributes
-  constructor () {
+  constructor() {
     this.my_hub = false
 
     this.mempool = []
@@ -17,12 +17,10 @@ class Me {
     this.intervals = []
 
     this.proposed_block = {}
-
   }
 
   // derives needed keys from the seed, saves creds into pk.json
-  async init (username, seed) {
-
+  async init(username, seed) {
     this.username = username
 
     this.seed = seed
@@ -31,9 +29,8 @@ class Me {
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
-    
-    this.box = nacl.box.keyPair.fromSecretKey(this.seed)
 
+    this.box = nacl.box.keyPair.fromSecretKey(this.seed)
 
     this.record = await this.byKey()
 
@@ -42,22 +39,25 @@ class Me {
     fs.writeFileSync('private/pk.json', JSON.stringify(PK))
   }
 
-  // all requests are processed one by one for race condition safety (for now)
-  async processQueue () {
-
+  // all callbacks are processed one by one for race condition safety (for now)
+  async processQueue() {
     // first in first out - call rpc with ws and msg
     var action
-    while (action = this.queue.shift()) {
+    while ((action = this.queue.shift())) {
       try {
-        await RPC[action[0]](action[1], action[2])
-      } catch (e) { l(e) }
+        await action()
+      } catch (e) {
+        l(e)
+      }
     }
 
     // l("Setting timeout for queue")
-    setTimeout(() => { me.processQueue() }, 100)
+    setTimeout(() => {
+      me.processQueue()
+    }, 100)
   }
 
-  async byKey (pk) {
+  async byKey(pk) {
     if (!pk) {
       if (this.id) {
         pk = this.id.publicKey
@@ -67,18 +67,16 @@ class Me {
     }
 
     return await User.findOne({
-      where: { pubkey: bin(pk) }
+      where: {pubkey: bin(pk)}
     })
   }
 
-
-  async broadcast (method, args) {
+  async broadcast(method, args) {
     me.record = await me.byKey()
 
     switch (method) {
       case 'rebalance':
-
-        l("Broadcasted rebalance ", r(args))
+        l('Broadcasted rebalance ', r(args))
 
         break
 
@@ -92,7 +90,6 @@ class Me {
 
         args = r(args)
         break
-
     }
 
     var nonce = me.record.nonce + PK.pending_tx.length
@@ -100,7 +97,11 @@ class Me {
     var to_sign = r([methodMap(method), nonce, args])
 
     var tx = r([
-      me.record.id, ec(to_sign, me.id.secretKey), methodMap(method), nonce, args
+      me.record.id,
+      ec(to_sign, me.id.secretKey),
+      methodMap(method),
+      nonce,
+      args
     ])
 
     PK.pending_tx.push({
@@ -113,17 +114,16 @@ class Me {
     } else {
       me.send(me.next_member(), 'tx', r([tx]))
     }
-
   }
 
-  // tell all validators the same thing 
-  gossip (method, data) {
+  // tell all validators the same thing
+  gossip(method, data) {
     Members.map((c) => {
-      me.send(c, method, data) 
+      me.send(c, method, data)
     })
   }
 
-  next_member (skip = false) {
+  next_member(skip = false) {
     var now = ts()
     var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
     var searchIndex = 0
@@ -148,16 +148,12 @@ class Me {
   }
 
   // signs data and adds our pubkey
-  envelope () {
+  envelope() {
     var msg = r(Object.values(arguments))
-    return r([
-      bin(this.id.publicKey),
-      ec(msg, this.id.secretKey),
-      msg
-    ])
+    return r([bin(this.id.publicKey), ec(msg, this.id.secretKey), msg])
   }
 
-  block_envelope () {
+  block_envelope() {
     var msg = r(Object.values(arguments))
     return r([
       bin(this.block_keypair.publicKey),
@@ -166,13 +162,13 @@ class Me {
     ])
   }
 
-  async start () {
+  async start() {
     // in json pubkeys are in hex
     this.record = await this.byKey()
 
     if (this.record) {
-      this.my_member = Members.find(m=>m.id == this.record.id)
-      this.my_hub = K.hubs.find(m=>m.id == this.record.id)      
+      this.my_member = Members.find((m) => m.id == this.record.id)
+      this.my_hub = K.hubs.find((m) => m.id == this.record.id)
     }
 
     await cache()
@@ -183,7 +179,9 @@ class Me {
 
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
-      me.member_server = cert ? require('https').createServer(cert, cb) : require('http').createServer(cb)
+      me.member_server = cert
+        ? require('https').createServer(cert, cb)
+        : require('http').createServer(cb)
       me.member_server.listen(parseInt(this.my_member.location.split(':')[2]))
 
       l('Bootstrapping local server at: ' + this.my_member.location)
@@ -193,10 +191,14 @@ class Me {
         maxPayload: 64 * 1024 * 1024
       })
 
-      me.wss.on('error', function (err) { console.error(err) })
-      me.wss.on('connection', function (ws) {
-        ws.on('message', async (msg) => { 
-          me.queue.push(['external_rpc', ws, msg]) 
+      me.wss.on('error', function(err) {
+        console.error(err)
+      })
+      me.wss.on('connection', function(ws) {
+        ws.on('message', async (msg) => {
+          me.queue.push(async () => {
+            return RPC.external_rpc(ws, msg)
+          })
           /*var unlock = await mutex('external_rpc')
           await RPC.external_rpc(ws, msg)
           unlock()*/
@@ -211,12 +213,16 @@ class Me {
       }
 
       if (this.my_hub) {
-        me.intervals.push(setInterval(require('./offchain/rebalance'), K.blocktime * 1000))
+        me.intervals.push(
+          setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
+        )
       }
     } else {
       // keep connection to all hubs
-      Members.map(m => {
-        if (this.my_member != m) { this.send(m, 'auth', this.envelope(methodMap('auth'))) }
+      Members.map((m) => {
+        if (this.my_member != m) {
+          this.send(m, 'auth', this.envelope(methodMap('auth')))
+        }
       })
     }
 
@@ -224,7 +230,7 @@ class Me {
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
   }
 
-  async addHistory (pubkey, amount, desc, checkpoint = false) {
+  async addHistory(pubkey, amount, desc, checkpoint = false) {
     var attrs = {
       userId: me.pubkey,
       hubId: 1,
@@ -243,7 +249,7 @@ class Me {
   }
 
   // takes channels with supported hubs (verified and custom ones)
-  async channels () { 
+  async channels() {
     var channels = []
 
     for (var m of K.hubs) {
@@ -258,7 +264,7 @@ class Me {
 
   // a generic interface to send a websocket message to some user or member
 
-  send (m, method, tx) {
+  send(m, method, tx) {
     tx = concat(inputMap(method), tx)
 
     // regular pubkey
@@ -267,7 +273,7 @@ class Me {
         me.users[m].send(tx)
         return true
       } else {
-        var member = Members.find(f => f.pubkey.equals(m))
+        var member = Members.find((f) => f.pubkey.equals(m))
         if (member) {
           m = member
         } else {
@@ -285,19 +291,23 @@ class Me {
     } else {
       me.users[m.pubkey] = new WebSocketClient()
 
-      me.users[m.pubkey].onmessage = async tx => {
-        this.queue.push(['external_rpc', me.users[m.pubkey], bin(tx)])
+      me.users[m.pubkey].onmessage = async (tx) => {
+        this.queue.push(async () => {
+          return RPC.external_rpc(me.users[m.pubkey], bin(tx))
+        })
         /*var unlock = await mutex('external_rpc')
         await RPC.external_rpc(me.users[m.pubkey], bin(tx))
         unlock()*/
       }
 
-      me.users[m.pubkey].onerror = function (e) {
-        l("Failed to open the socket")
+      me.users[m.pubkey].onerror = function(e) {
+        l('Failed to open the socket')
       }
-      me.users[m.pubkey].onopen = function (e) {
+      me.users[m.pubkey].onopen = function(e) {
         if (me.id) {
-          me.users[m.pubkey].send(concat(inputMap('auth'), me.envelope(methodMap('auth'))))
+          me.users[m.pubkey].send(
+            concat(inputMap('auth'), me.envelope(methodMap('auth')))
+          )
         }
 
         me.users[m.pubkey].send(tx)
@@ -310,7 +320,6 @@ class Me {
   }
 }
 
-
 Me.prototype.consensus = require('./onchain/consensus')
 Me.prototype.processBlock = require('./onchain/block')
 Me.prototype.processTx = require('./onchain/tx')
@@ -318,7 +327,6 @@ Me.prototype.processTx = require('./onchain/tx')
 Me.prototype.payChannel = require('./offchain/pay_channel')
 Me.prototype.getChannel = require('./offchain/get_channel')
 Me.prototype.updateChannel = require('./offchain/update_channel')
-
 
 module.exports = {
   Me: Me

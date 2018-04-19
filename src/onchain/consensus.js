@@ -160,7 +160,9 @@ module.exports = async () => {
           me.proposed_block.ordered_tx_body
         ]
       ])
-      me.queue.push(['external_rpc', null, concat(inputMap('chain'), chain)])
+      me.queue.push(async () => {
+        return RPC.external_rpc(null, concat(inputMap('chain'), chain))
+      })
       me.proposed_block = {}
     }
   }

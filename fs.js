@@ -81,7 +81,10 @@ cache = async (i) => {
       }
     })
 
-    cached_result.payments = await Payment.findAll({include: {all: true}})
+    cached_result.payments = await Payment.findAll({
+      order: [['id', 'desc']],
+      include: {all: true}
+    })
 
     if (me.my_hub) {
       var deltas = await Delta.findAll({where: {myId: me.record.id}})
@@ -231,7 +234,9 @@ initDashboard = async (a) => {
       })
 
       req.on('end', function() {
-        me.queue.push(['internal_rpc', res, queryData])
+        me.queue.push(async () => {
+          return RPC.internal_rpc(res, queryData)
+        })
       })
     } else {
       serveStatic('./wallet')(req, res, finalhandler(req, res))
@@ -310,7 +315,9 @@ initDashboard = async (a) => {
   })
   localwss.on('connection', function(ws) {
     ws.on('message', (msg) => {
-      me.queue.push(['internal_rpc', ws, msg])
+      me.queue.push(async () => {
+        return RPC.internal_rpc(ws, msg)
+      })
     })
   })
 }

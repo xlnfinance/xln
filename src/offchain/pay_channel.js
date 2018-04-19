@@ -50,6 +50,10 @@ module.exports = async (partner, force_flush = false) => {
     where: {is_inward: true, status: 'unlocking'}
   })
   for (var t of unlockable) {
+    if (me.handicap_dontreveal) {
+      l('HANDICAP ON: not revealing our secret to inward')
+      continue
+    }
     var inwards = newState[ch.left ? 5 : 6]
 
     for (var i in inwards) {

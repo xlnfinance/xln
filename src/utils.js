@@ -102,19 +102,40 @@ kmac = (key, msg) =>
 
 ts = () => Math.round(new Date() / 1000)
 
+/*
+TODO: Add to test spec - arbitrary number of hops with random fee policy, 
+must always correctly guess amount to send for the recipient to get exact invoice amount
+
+fees = [0.0000001, 0.000002, Math.random(), Math.random()]
+
+for(var i = 0; i< 9999999;i++){
+  var am = i
+  var after = afterFees(beforeFees(i, fees), fees.reverse())
+
+  if (i != after){
+    console.log(i, after)
+  }
+
+}
+*/
+
 beforeFees = (amount, fees) => {
   for (var fee of fees) {
     new_amount = Math.round(amount * (1 + fee))
+    if (new_amount == amount) new_amount = amount + 1
+    amount = new_amount
   }
-  if (new_amount == amount) new_amount = amount + 1
 
   return new_amount
 }
-
-afterFees = (amount, fee) => {
-  var fee = Math.round(amount / (1 + fee) * fee)
-  if (fee == 0) fee = 1
-  return amount - fee
+afterFees = (amount, fees) => {
+  if (!(fees instanceof Array)) fees = [fees]
+  for (var fee of fees) {
+    var fee = Math.round(amount / (1 + fee) * fee)
+    if (fee == 0) fee = 1
+    amount = amount - fee
+  }
+  return amount
 }
 
 parse = (json) => {

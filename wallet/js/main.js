@@ -527,6 +527,8 @@ FS.onready(() => {
             </div>
           </div></p> 
 
+          <p>Tech data: status {{ch.d.status}} nonce {{ch.d.nonce}} pending {{trim(ch.d.pending)}}</p>
+
         </template>
 
 
@@ -553,7 +555,7 @@ FS.onready(() => {
             </div></p>
 
 
-            <p><button type="button" class="btn btn-success" @click="call('send', {pay_invoice: pay_invoice}); pay_invoice='';">Send Money → </button></p>
+            <p><button type="button" class="btn btn-success" @click="call('send', {pay_invoice: pay_invoice})">Send Money → </button></p>
 
             <p v-for="(value, k) in purchases">Payment sent for invoice: {{k}}</p>
 
@@ -577,7 +579,7 @@ FS.onready(() => {
   <div class="nav nav-tabs" id="nav-tab" role="tablist">
     <a class="nav-item nav-link" id="nav-history-tab" data-toggle="tab" href="#nav-history" role="tab" aria-controls="nav-history" aria-selected="true">History</a>
 
-    <a class="nav-item nav-link" id="nav-uninsured-tab" data-toggle="tab" href="#nav-uninsured" role="tab" aria-controls="nav-uninsured" aria-selected="false">Uninsured Limits</a>
+    <a v-if="ch" class="nav-item nav-link" id="nav-uninsured-tab" data-toggle="tab" href="#nav-uninsured" role="tab" aria-controls="nav-uninsured" aria-selected="false">Uninsured Limits</a>
 
     <a class="nav-item nav-link" id="nav-onchain-tab" data-toggle="tab" href="#nav-onchain" role="tab" aria-controls="nav-onchain" aria-selected="false">On-Chain</a>
 
