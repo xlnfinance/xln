@@ -54,7 +54,7 @@ class Me {
     // l("Setting timeout for queue")
     setTimeout(() => {
       me.processQueue()
-    }, 100)
+    }, 50)
   }
 
   async byKey(pk) {
@@ -254,7 +254,15 @@ class Me {
 
     for (var m of K.hubs) {
       if (!me.record || me.record.id != m.id) {
-        var ch = await me.getChannel(Buffer.from(m.pubkey, 'hex'))
+        var ch = await me.getChannel(fromHex(m.pubkey))
+        channels.push(ch)
+      }
+    }
+
+    var deltas = await Delta.findAll()
+    for (var d of deltas) {
+      if (!K.hubs.find((h) => fromHex(h.pubkey).equals(d.partnerId))) {
+        var ch = await me.getChannel(d.partnerId)
         channels.push(ch)
       }
     }

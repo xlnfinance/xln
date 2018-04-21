@@ -173,7 +173,8 @@ react = async (result = {}, id = 1) => {
 
 // TODO: Move from memory to persistent DB
 cached_result = {
-  history: []
+  history: [],
+  my_log: ''
 }
 
 invoices = {}

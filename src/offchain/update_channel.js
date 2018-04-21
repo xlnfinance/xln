@@ -6,7 +6,7 @@ module.exports = async (msg) => {
     return l('Wrong input')
   }
 
-  var [method, ackSig, transitions] = r(body)
+  var [method, ackSig, transitions, debugState] = r(body)
 
   method = methodMap(readInt(method))
 
@@ -18,10 +18,10 @@ module.exports = async (msg) => {
       await ch.d.save()
 
       me.send(pubkey, 'update', me.envelope(methodMap('grantMaster')))
+      return false
     } else {
-      l('master accepts only requestMaster')
+      l('master doesnt expect updates')
     }
-    return false
   }
 
   if (ch.d.status == 'sent' && method != 'update') {
@@ -33,7 +33,9 @@ module.exports = async (msg) => {
       ch.d.status = 'master'
       await ch.d.save()
 
-      await me.payChannel(pubkey)
+      l('we were granted master! Flushing with force')
+
+      await me.payChannel(pubkey, true)
       return
     }
 
@@ -52,12 +54,45 @@ module.exports = async (msg) => {
   // first, clone what they can pay and decrement
   var receivable = ch.they_payable
 
+  // an array of partners we need to ack or flush changes at the end of processing
+  var flushable = []
+
+  // this is state we are on right now.
   var newState = await ch.d.getState()
 
-  l('Current state WE EXPECT to be acked ', newState)
+  var rollback = [0, 0]
 
   if (!ec.verify(r(newState), ackSig, pubkey)) {
-    return l('Invalid ack sig: ')
+    oldState = r(ch.d.signed_state)
+    prettyState(debugState)
+    prettyState(oldState)
+
+    l('Ack mismatch. States (current, theirs, our old):')
+
+    logstate(newState)
+    logstate(debugState)
+    logstate(oldState)
+
+    /*
+    We received an acksig that doesnt match our current state. Apparently the partner sent
+    transitions simultaneously. 
+
+    Our job is to rollback to last known signed state, check ackSig against it, if true - apply
+    partner's transitions, and then reapply the difference we made with OUR transitions
+    namely - nonce and offdelta diffs because hashlocks are already processed. 
+    
+    We hope the partner does the same with our transitions so we both end up on equal states.
+
+    */
+
+    if (!ec.verify(r(oldState), ackSig, pubkey)) {
+      return l('Acksig is not for old nor new state. DEAD LOCK')
+    } else {
+      l('Conflict resolved - rolled back to old state')
+
+      rollback = [newState[3] - oldState[3], newState[4] - oldState[4]]
+      newState = oldState
+    }
   }
 
   ch.d.nonce = newState[3]
@@ -67,7 +102,7 @@ module.exports = async (msg) => {
   ch.d.status = ch.left ? 'master' : 'listener'
   ch.d.pending = null
   await ch.d.save()
-  l('Saved ACK')
+  //l('Saved ACK and became ' + ch.d.status)
 
   // we process every transition to state, verify the sig, if valid - execute the action
   for (var t of transitions) {
@@ -129,8 +164,6 @@ module.exports = async (msg) => {
           return l('Bad unlocker')
         }
 
-        l('Arrived unlocked!')
-
         var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
         box_amount = readInt(box_amount)
 
@@ -150,9 +183,7 @@ module.exports = async (msg) => {
         hl.status = 'unlocking'
         await hl.save()
 
-        await me.payChannel(pubkey)
-
-        react()
+        // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub) {
         l(`Forward ${amount} to peer or other hub ${toHex(destination)}`)
 
@@ -170,8 +201,8 @@ module.exports = async (msg) => {
           unlocker: unlocker,
           destination: destination
         })
-        await me.payChannel(destination)
-        react()
+
+        if (flushable.indexOf(destination) == -1) flushable.push(destination)
       } else {
         l('We arent receiver and arent a hub O_O')
       }
@@ -183,7 +214,6 @@ module.exports = async (msg) => {
 
       var index = outwards.findIndex((hl) => hl[1].equals(hash))
       var hl = outwards[index]
-      l('Found unlockable ', hl)
 
       // secret was provided, apply to offdelta
       newState[4] += ch.left ? -hl[0] : hl[0]
@@ -209,7 +239,6 @@ module.exports = async (msg) => {
       outward.secret = secret
       outward.status = 'unlocked'
       await outward.save()
-      l('Removing unlock record')
 
       var inward = await Payment.findOne({
         where: {hash: hash, is_inward: true},
@@ -217,15 +246,16 @@ module.exports = async (msg) => {
       })
 
       if (inward) {
-        l('Found an mediated inward to unlock with ', inward.deltum.partnerId)
+        //l('Found an mediated inward to unlock with ', inward.deltum.partnerId)
 
         inward.secret = secret
         inward.status = 'unlocking'
         await inward.save()
 
-        await me.payChannel(inward.deltum.partnerId)
+        var pull_from = inward.deltum.partnerId
+
+        if (flushable.indexOf(pull_from) == -1) flushable.push(pull_from)
       }
-      react()
 
       if (me.handicap_dontsettle) {
         return l(
@@ -236,8 +266,23 @@ module.exports = async (msg) => {
     }
   }
 
+  // since we applied partner's diffs, all we need is to add the diff of our own transitions
+  if (rollback[0] > 0) l('Rolling back our own diffs ', rollback)
+  ch.d.nonce += rollback[0]
+  ch.d.offdelta += rollback[1]
+  await ch.d.save()
+
   // Always ack if there were transitions
+  //l('Flushable: ', flushable)
+
   await me.payChannel(pubkey, transitions.length > 0)
+
+  for (var fl of flushable) {
+    // force flush ACK only to sender & if received any transitions
+    if (!fl.equals(pubkey)) await me.payChannel(fl, true)
+  }
+
+  react()
 
   /*
   // TESTNET: storing most profitable outcome for us
@@ -249,6 +294,4 @@ module.exports = async (msg) => {
     ch.d.most_profitable = r([ch.d.offdelta, ch.d.nonce, ch.d.sig])
   }
   */
-
-  l('The payment is accepted!')
 }

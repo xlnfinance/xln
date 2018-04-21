@@ -18,8 +18,9 @@ module.exports = async (ws, msg) => {
 
   // ignore some too frequest RPC commands
   if (
-    ['chain', 'sync', 'propose', 'prevote', 'precommit'].indexOf(inputType) ==
-    -1
+    ['update', 'chain', 'sync', 'propose', 'prevote', 'precommit'].indexOf(
+      inputType
+    ) == -1
   )
     l('External RPC: ' + inputType)
 

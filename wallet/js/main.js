@@ -534,6 +534,7 @@ FS.onready(() => {
 
 
 
+
         <div class="row">
           <div class="col-sm-6">
             <p><div class="input-group" style="width:400px">
@@ -570,8 +571,7 @@ FS.onready(() => {
           </div>
         </div>
 
-
-
+        <pre v-html="enable_log && my_log"></pre>
 
 
 

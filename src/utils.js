@@ -42,7 +42,77 @@ RPC = {
   external_rpc: require('./external_rpc')
 }
 
-l = console.log
+prettyState = (state) => {
+  state[3] = readInt(state[3])
+  state[4] = readInt(state[4])
+
+  state[5].map((h) => {
+    h[0] = readInt(h[0])
+    h[2] = readInt(h[2])
+  })
+
+  state[6].map((h) => {
+    h[0] = readInt(h[0])
+    h[2] = readInt(h[2])
+  })
+}
+
+logstate = (state) => {
+  l(
+    `Nonce #${state[3]} delta ${state[4]} locks ${state[5].length} / ${
+      state[6].length
+    }`
+  )
+}
+l = function() {
+  //var str =
+  var stamp = parseFloat(process.hrtime().join('.')).toFixed(6)
+  var a = Object.values(arguments)
+  console.log.call(console, a)
+
+  var str = base_port + ': ' + stamp + ' - ' + stringify(a) + '\n'
+  cached_result.my_log += str
+
+  var chunks = []
+  var chunkSize = 30
+
+  while (str) {
+    if (str.length < chunkSize) {
+      chunks.push(str)
+      break
+    } else {
+      chunks.push(str.substr(0, chunkSize))
+      str = str.substr(chunkSize)
+    }
+  }
+
+  tolog = '\n\n'
+
+  var pos = [8433, 8001, 8002, 8003].indexOf(base_port)
+  if (pos == -1) return false
+
+  chunks.map((ch) => {
+    tolog += Array(chunkSize * pos + 1).join(' ') + ch + '\n'
+  })
+
+  var path = '/tmp/log',
+    buffer = new Buffer(tolog)
+
+  fs.open(path, 'a', function(err, fd) {
+    if (err) {
+      throw 'error opening file: ' + err
+    }
+
+    fs.write(fd, buffer, 0, buffer.length, null, function(err) {
+      if (err) throw 'error writing file: ' + err
+      fs.close(fd, function() {
+        //console.log('file written')
+      })
+    })
+  })
+}
+
+//console.log
 
 child_process = require('child_process')
 
@@ -118,11 +188,11 @@ for(var i = 0; i< 9999999;i++){
 
 }
 */
-
+var min_fee = 0
 beforeFees = (amount, fees) => {
   for (var fee of fees) {
     new_amount = Math.round(amount * (1 + fee))
-    if (new_amount == amount) new_amount = amount + 1
+    if (new_amount == amount) new_amount = amount + min_fee
     amount = new_amount
   }
 
@@ -132,7 +202,7 @@ afterFees = (amount, fees) => {
   if (!(fees instanceof Array)) fees = [fees]
   for (var fee of fees) {
     var fee = Math.round(amount / (1 + fee) * fee)
-    if (fee == 0) fee = 1
+    if (fee == 0) fee = min_fee
     amount = amount - fee
   }
   return amount

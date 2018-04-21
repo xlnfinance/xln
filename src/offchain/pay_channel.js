@@ -20,29 +20,31 @@
 */
 
 module.exports = async (partner, force_flush = false) => {
+  //await sleep(2000)
   // First, we add a transition to the queue
   var ch = await me.getChannel(partner)
 
-  // If channel is master, send transitions now. Otherwise wait for ack
-
   if (ch.d.status == 'sent') {
-    return l('Still waiting for ack')
+    if (ch.d.pending) me.send(partner, 'update', ch.d.pending)
+
+    return l(`sent, repeating last ${ch.d.pending.length} pending data again`)
   }
 
   if (ch.d.status == 'listener' && !force_flush) {
-    me.send(partner, 'update', me.envelope(methodMap('requestMaster')))
-    return l('Try to obtain master...')
+    //me.send(partner, 'update', me.envelope(methodMap('requestMaster')))
+    //return //l('listener, request master...')
   }
 
   if (ch.d.status == 'master') {
-    l('Flushing changes')
+    //l('master, flushing')
   }
 
   var newState = await ch.d.getState()
 
   var transitions = []
 
-  l('Current state to be acked ', newState)
+  //l('Current state to be acked ', newState)
+  var debugState = r(r(newState))
 
   var ackSig = ec(r(newState), me.id.secretKey)
 
@@ -58,7 +60,7 @@ module.exports = async (partner, force_flush = false) => {
 
     for (var i in inwards) {
       if (inwards[i][1].equals(t.hash)) {
-        l('Removing hashlock from state and applying')
+        //l('Removing hashlock from state and applying')
         inwards.splice(i, 1)
 
         newState[4] += ch.left ? t.amount : -t.amount
@@ -116,23 +118,33 @@ module.exports = async (partner, force_flush = false) => {
 
   if (transitions.length == 0) {
     if (!force_flush) {
-      return l('No transitions to flush')
+      return //l('No transitions to flush')
     }
   } else {
     ch.d.status = 'sent'
   }
 
   // transitions: method, args, sig, new state
-  var envelope = me.envelope(methodMap('update'), ackSig, transitions)
+  var envelope = me.envelope(
+    methodMap('update'),
+    ackSig,
+    transitions,
+    debugState
+  )
 
   ch.d.nonce = newState[3]
   ch.d.offdelta = newState[4]
 
-  ch.d.pending = envelope
+  if (transitions.length > 0) {
+    ch.d.pending = envelope
+  }
 
   await ch.d.save()
 
   react()
+
+  // If channel is master, send transitions now. Otherwise wait for ack
+  l('Sending ' + ch.partner + '. Force: ' + force_flush)
 
   if (!me.send(partner, 'update', envelope)) {
     //l(`${partner} not online, deliver later?`)

@@ -123,24 +123,28 @@ module.exports = async (ws, msg) => {
         var sent_amount = beforeFees(amount, [K.hubs[0].fee])
 
         var ch = await me.getChannel(via)
-        l('adding payment')
-        await ch.d.save()
 
-        await ch.d.createPayment({
-          status: 'await',
-          is_inward: false,
+        if (amount > ch.payable) {
+          result.alert = 'Not enough funds'
+        } else {
+          await ch.d.save()
 
-          amount: sent_amount,
-          hash: hash,
-          exp: K.usable_blocks + 10,
+          await ch.d.createPayment({
+            status: 'await',
+            is_inward: false,
 
-          unlocker: unlocker,
-          destination: destination
-        })
+            amount: sent_amount,
+            hash: hash,
+            exp: K.usable_blocks + 10,
 
-        await me.payChannel(via)
+            unlocker: unlocker,
+            destination: destination
+          })
 
-        result.confirm = 'Payment sent...'
+          await me.payChannel(via)
+
+          result.confirm = 'Payment sent...'
+        }
 
         break
 

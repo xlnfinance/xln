@@ -24,7 +24,7 @@ module.exports = async (partner = Members[0].pubkey) => {
   me.record = await me.byKey()
 
   var my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
-  ch.hub = my_hub(partner)
+  ch.hub = my_hub(partner) || {handle: toHex(partner).substr(0, 10)}
 
   // ch stands for Channel, d for Delta record, yes
   ch.d = (await Delta.findOrBuild({
