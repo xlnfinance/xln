@@ -304,6 +304,8 @@ module.exports = async (tx, meta) => {
               await withPartner.save()
               // now it has id
 
+              /*
+
               if (me.pubkey.equals(withPartner.pubkey)) {
                 await me.addHistory(
                   giveTo.pubkey,
@@ -316,6 +318,7 @@ module.exports = async (tx, meta) => {
                   'Minimum global balance'
                 )
               }
+              */
             }
           } else {
             if (giveTo.id == signer.id) continue
@@ -363,6 +366,7 @@ module.exports = async (tx, meta) => {
           await ins.save()
 
           // rebalance by hub for our account = reimburse hub fees
+          /*
           if (my_hub && me.pubkey.equals(withPartner.pubkey)) {
             await me.addHistory(
               giveTo.pubkey,
@@ -371,6 +375,7 @@ module.exports = async (tx, meta) => {
               true
             )
           }
+          */
         }
 
         // on-chain payment for specific invoice (to us or one of our channels)

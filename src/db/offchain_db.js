@@ -33,6 +33,7 @@ Delta = privSequelize.define('delta', {
   ondelta: Sequelize.INTEGER,
 
   offdelta: Sequelize.INTEGER,
+  asset: Sequelize.INTEGER,
 
   soft_limit: Sequelize.INTEGER,
   hard_limit: Sequelize.INTEGER, // we trust up to
@@ -99,28 +100,61 @@ Payment.prototype.toLock = function() {
   return [this.amount, this.hash, this.exp]
 }
 
+Payment.prototype.getInward = async function() {
+  return await Payment.findOne({
+    where: {hash: this.hash, is_inward: true, asset: this.asset},
+    include: {all: true}
+  })
+}
+
+Delta.prototype.saveState = async function(state, ackSig) {
+  // canonical state representation
+  var canonical = r(state)
+  if (ec.verify(canonical, ackSig, this.partnerId)) {
+    this.nonce = state[1][2]
+    this.offdelta = state[1][3]
+
+    if (this.sig && ackSig.equals(this.sig)) {
+      //l(`Already saved ackSig`)
+      return true
+    }
+
+    this.sig = ackSig
+    this.signed_state = canonical
+    //l('Saving State Snapshot:')
+    //logstate(state)
+    await this.save()
+    return true
+  } else {
+    return false
+  }
+}
+
 Delta.prototype.getState = async function() {
   var left = Buffer.compare(this.myId, this.partnerId) == -1
 
   var inwards = (await this.getPayments({
     where: {
-      status: {[Sequelize.Op.or]: ['hashlock', 'unlocking']},
+      status: {[Sequelize.Op.or]: ['added', 'settle', 'fail']},
 
       is_inward: true
     }
   })).map((t) => [t.amount, t.hash, t.exp])
 
   var outwards = (await this.getPayments({
-    where: {status: 'hashlock', is_inward: false}
+    where: {status: 'added', is_inward: false}
   })).map((t) => [t.amount, t.hash, t.exp])
 
   var state = [
     methodMap('dispute'),
-    left ? this.myId : this.partnerId,
-    left ? this.partnerId : this.myId,
-    this.nonce,
-    this.offdelta,
-    // 5 is inwards for left, 6 for right
+    [
+      left ? this.myId : this.partnerId,
+      left ? this.partnerId : this.myId,
+      this.nonce,
+      this.offdelta,
+      this.asset
+    ],
+    // 2 is inwards for left, 3 for right
     left ? inwards : outwards,
     left ? outwards : inwards
   ]
@@ -174,6 +208,7 @@ Block = privSequelize.define('block', {
   total_tx: Sequelize.INTEGER
 })
 
+/*
 History = privSequelize.define('history', {
   leftId: Sequelize.CHAR(32).BINARY,
   rightId: Sequelize.CHAR(32).BINARY,
@@ -185,22 +220,4 @@ History = privSequelize.define('history', {
   balance: Sequelize.INTEGER,
   desc: Sequelize.TEXT
 })
-
-Purchase = privSequelize.define('purchase', {
-  myId: Sequelize.CHAR(32).BINARY,
-  partnerId: Sequelize.INTEGER,
-
-  delta: Sequelize.INTEGER,
-
-  amount: Sequelize.INTEGER,
-  balance: Sequelize.INTEGER,
-  desc: Sequelize.TEXT,
-
-  date: {type: Sequelize.DATE, defaultValue: Sequelize.NOW}
-})
-
-Event = privSequelize.define('event', {
-  data: Sequelize.CHAR.BINARY,
-  kindof: Sequelize.STRING,
-  p1: Sequelize.STRING
-})
+*/

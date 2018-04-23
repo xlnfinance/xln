@@ -6,50 +6,20 @@ module.exports = async (msg) => {
     return l('Wrong input')
   }
 
-  var [method, ackSig, transitions, debugState] = r(body)
+  // ackSig defines the sig of last known state between two parties.
+  // then each transitions contains an action and an ackSig after action is committed
+  // debugState/signedState are purely for debug phase
+  var [method, ackSig, transitions, debugState, signedState] = r(body)
 
-  method = methodMap(readInt(method))
-
-  var ch = await me.getChannel(pubkey)
-
-  if (ch.d.status == 'master') {
-    if (method == 'requestMaster') {
-      ch.d.status = 'listener'
-      await ch.d.save()
-
-      me.send(pubkey, 'update', me.envelope(methodMap('grantMaster')))
-      return false
-    } else {
-      l('master doesnt expect updates')
-    }
-  }
-
-  if (ch.d.status == 'sent' && method != 'update') {
-    return l('Sent only accepts updates ' + method)
-  }
-
-  if (ch.d.status == 'listener') {
-    if (method == 'grantMaster') {
-      ch.d.status = 'master'
-      await ch.d.save()
-
-      l('we were granted master! Flushing with force')
-
-      await me.payChannel(pubkey, true)
-      return
-    }
-
-    if (method == 'requestMaster') {
-      return l('Listeners cant grant master')
-    }
-  }
-
-  if (method != 'update') {
+  if (methodMap(readInt(method)) != 'update') {
     l('Invalid update input')
     return false
   }
 
-  //l('New transitions arrived, lets apply them: ', transitions)
+  prettyState(debugState)
+  prettyState(signedState)
+
+  var ch = await me.getChannel(pubkey)
 
   // first, clone what they can pay and decrement
   var receivable = ch.they_payable
@@ -62,16 +32,28 @@ module.exports = async (msg) => {
 
   var rollback = [0, 0]
 
-  if (!ec.verify(r(newState), ackSig, pubkey)) {
+  l(
+    `ours ${newState[1][2]} but ${debugState[1][2]}. We are in: ${
+      ch.d.status
+    } Tx ${transitions.length}`
+  )
+  //l(stringify(newState))
+  //l(stringify(debugState))
+
+  if (!await ch.d.saveState(newState, ackSig)) {
+    if (transitions.length == 0) return l('Empty invalid ack')
+
+    l('Ack mismatch. States (current, signed, theirs):')
+
     oldState = r(ch.d.signed_state)
-    prettyState(debugState)
     prettyState(oldState)
 
-    l('Ack mismatch. States (current, theirs, our old):')
-
     logstate(newState)
-    logstate(debugState)
     logstate(oldState)
+    logstate(debugState)
+    logstate(signedState)
+
+    //if (ch.d.status == 'rollback') return l('Rollback cant rollback')
 
     /*
     We received an acksig that doesnt match our current state. Apparently the partner sent
@@ -85,31 +67,25 @@ module.exports = async (msg) => {
 
     */
 
-    if (!ec.verify(r(oldState), ackSig, pubkey)) {
-      return l('Acksig is not for old nor new state. DEAD LOCK')
+    if (!await ch.d.saveState(oldState, ackSig)) {
+      return l('Dead lock!')
     } else {
-      l('Conflict resolved - rolled back to old state')
+      l('Rollback to old state')
 
-      rollback = [newState[3] - oldState[3], newState[4] - oldState[4]]
+      rollback = [
+        newState[1][2] - oldState[1][2],
+        newState[1][3] - oldState[1][3]
+      ]
       newState = oldState
     }
   }
 
-  ch.d.nonce = newState[3]
-  ch.d.sig = ackSig
-  ch.d.offdelta = newState[4]
-  ch.d.signed_state = r(newState)
-  ch.d.status = ch.left ? 'master' : 'listener'
-  ch.d.pending = null
-  await ch.d.save()
-  //l('Saved ACK and became ' + ch.d.status)
+  var outwards = newState[ch.left ? 3 : 2]
 
-  // we process every transition to state, verify the sig, if valid - execute the action
+  // we apply a transition to canonical state, if sig is valid - execute the action
   for (var t of transitions) {
     var m = methodMap(readInt(t[0]))
-    // a lot of logic for add and addlock are the same
-    if (m == 'ack') {
-    } else if (m == 'addlock' || m == 'add') {
+    if (m == 'addlock' || m == 'add') {
       var [amount, hash, exp, destination, unlocker] = t[1]
 
       exp = readInt(exp)
@@ -120,28 +96,23 @@ module.exports = async (msg) => {
       }
       receivable -= amount
 
-      newState[3]++ //nonce
+      newState[1][2]++ //nonce
       if (m == 'addlock') {
         // push a hashlock
-        newState[ch.left ? 5 : 6].push([amount, hash, exp])
+        newState[ch.left ? 2 : 3].push([amount, hash, exp])
       } else {
         // modify offdelta directly
         //newState[4] += offdelta
       }
 
       // check new state and sig, save
-      if (!ec.verify(r(newState), t[2], pubkey)) {
-        l('Invalid state sig: ', newState, r(t[3]))
+      if (!await ch.d.saveState(newState, t[2])) {
+        l('Invalid state sig addlock')
         break
       }
-      ch.d.nonce = newState[3]
-      ch.d.sig = t[2]
-      ch.d.offdelta = newState[4]
-      ch.d.signed_state = r(newState)
-      await ch.d.save()
 
       var hl = await ch.d.createPayment({
-        status: 'hashlock',
+        status: 'added',
         is_inward: true,
 
         amount: amount,
@@ -161,48 +132,59 @@ module.exports = async (msg) => {
           me.box.secretKey
         )
         if (unlocked == null) {
-          return l('Bad unlocker')
-        }
-
-        var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
-        box_amount = readInt(box_amount)
-
-        var paid_invoice = invoices[toHex(box_invoice)]
-
-        // TODO: did we get right amount in right asset?
-        if (paid_invoice && amount >= box_amount) {
-          //paid_invoice.status == 'pending'
-
-          l('Our invoice was paid!', paid_invoice)
-          paid_invoice.status = 'paid'
+          l('Bad unlocker')
+          hl.status = 'fail'
         } else {
-          l('No such invoice found. Donation?')
+          var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
+          box_amount = readInt(box_amount)
+
+          var paid_invoice = invoices[toHex(box_invoice)]
+
+          // TODO: did we get right amount in right asset?
+          if (paid_invoice && amount >= box_amount) {
+            //paid_invoice.status == 'pending'
+            l('Our invoice was paid!', paid_invoice)
+            paid_invoice.status = 'paid'
+          } else {
+            l('No such invoice found. Donation?')
+          }
+          react({confirm: 'Received a payment'})
+
+          hl.secret = box_secret
+          hl.status = 'settle'
         }
 
-        hl.secret = box_secret
-        hl.status = 'unlocking'
         await hl.save()
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub) {
         l(`Forward ${amount} to peer or other hub ${toHex(destination)}`)
+        var outward_amount = afterFees(amount, me.my_hub.fee)
 
         var dest_ch = await me.getChannel(destination)
-        await dest_ch.d.save()
 
-        await dest_ch.d.createPayment({
-          status: 'await',
-          is_inward: false,
+        // is online? Is payable?
 
-          amount: afterFees(amount, me.my_hub.fee),
-          hash: hash,
-          exp: exp,
+        if (dest_ch.payable >= outward_amount) {
+          await dest_ch.d.save()
 
-          unlocker: unlocker,
-          destination: destination
-        })
+          await dest_ch.d.createPayment({
+            status: 'add',
+            is_inward: false,
 
-        if (flushable.indexOf(destination) == -1) flushable.push(destination)
+            amount: outward_amount,
+            hash: hash,
+            exp: exp,
+
+            unlocker: unlocker,
+            destination: destination
+          })
+
+          if (flushable.indexOf(destination) == -1) flushable.push(destination)
+        } else {
+          hl.status = 'fail'
+          await hl.save()
+        }
       } else {
         l('We arent receiver and arent a hub O_O')
       }
@@ -210,26 +192,27 @@ module.exports = async (msg) => {
       var secret = t[1]
       var hash = sha3(secret)
 
-      var outwards = newState[ch.left ? 6 : 5]
-
       var index = outwards.findIndex((hl) => hl[1].equals(hash))
       var hl = outwards[index]
 
+      if (!hl) {
+        l('No such hashlock')
+        break
+      }
+
       // secret was provided, apply to offdelta
-      newState[4] += ch.left ? -hl[0] : hl[0]
-      newState[3]++ //nonce
+      newState[1][2]++ //nonce
+      newState[1][3] += ch.left ? -hl[0] : hl[0]
+      receivable += hl[0]
       outwards.splice(index, 1)
 
       // check new state and sig, save
-      if (!ec.verify(r(newState), t[2], pubkey)) {
-        l('Invalid state sig: ', newState, r(t[3]))
+      if (!await ch.d.saveState(newState, t[2])) {
+        l('Invalid state sig settle')
         break
       }
-      ch.d.nonce = newState[3]
-      ch.d.sig = t[2]
-      ch.d.offdelta = newState[4]
-      ch.d.signed_state = r(newState)
-      await ch.d.save()
+
+      await ch.d.saveState(newState, t[2])
 
       var outward = (await ch.d.getPayments({
         where: {hash: hash, is_inward: false},
@@ -237,7 +220,7 @@ module.exports = async (msg) => {
       }))[0]
 
       outward.secret = secret
-      outward.status = 'unlocked'
+      outward.status = 'settled'
       await outward.save()
 
       var inward = await Payment.findOne({
@@ -249,12 +232,14 @@ module.exports = async (msg) => {
         //l('Found an mediated inward to unlock with ', inward.deltum.partnerId)
 
         inward.secret = secret
-        inward.status = 'unlocking'
+        inward.status = 'settle'
         await inward.save()
 
         var pull_from = inward.deltum.partnerId
 
         if (flushable.indexOf(pull_from) == -1) flushable.push(pull_from)
+      } else {
+        react({confirm: 'Payment completed'})
       }
 
       if (me.handicap_dontsettle) {
@@ -263,26 +248,75 @@ module.exports = async (msg) => {
         )
       }
     } else if (m == 'faillock' || m == 'fail') {
+      var hash = t[1]
+
+      var index = outwards.findIndex((hl) => hl[1].equals(hash))
+      var hl = outwards[index]
+
+      if (!hl) {
+        l('No such hashlock')
+        break
+      }
+
+      // secret wasn't provided, delete lock
+      newState[1][2]++ //nonce
+      outwards.splice(index, 1)
+
+      // check new state and sig, save
+      if (!await ch.d.saveState(newState, t[2])) {
+        l('Invalid state sig fail ')
+        break
+      }
+
+      await ch.d.saveState(newState, t[2])
+
+      var outward = (await ch.d.getPayments({
+        where: {hash: hash, is_inward: false},
+        include: {all: true}
+      }))[0]
+
+      outward.status = 'failed'
+      await outward.save()
+
+      var inward = await outward.getInward()
+
+      if (inward) {
+        inward.status = 'fail'
+        await inward.save()
+
+        var pull_from = inward.deltum.partnerId
+
+        if (flushable.indexOf(pull_from) == -1) flushable.push(pull_from)
+      } else {
+        react({alert: 'Payment failed'})
+      }
     }
   }
 
+  ch.d.status = 'master'
+  ch.d.pending = null
+
   // since we applied partner's diffs, all we need is to add the diff of our own transitions
-  if (rollback[0] > 0) l('Rolling back our own diffs ', rollback)
-  ch.d.nonce += rollback[0]
-  ch.d.offdelta += rollback[1]
-  await ch.d.save()
+  if (rollback[0] > 0) {
+    ch.d.nonce += rollback[0]
+    ch.d.offdelta += rollback[1]
+    ch.d.status = 'rollback'
 
-  // Always ack if there were transitions
-  //l('Flushable: ', flushable)
-
-  await me.payChannel(pubkey, transitions.length > 0)
-
-  for (var fl of flushable) {
-    // force flush ACK only to sender & if received any transitions
-    if (!fl.equals(pubkey)) await me.payChannel(fl, true)
+    var st = await ch.d.getState()
+    l('After rollback we are at: ')
+    logstate(st)
   }
 
-  react()
+  await ch.d.save()
+
+  // We only flush when there were any transitions. Not if was just an empty ack
+  if (transitions.length > 0) {
+    await me.flushChannel(pubkey, true)
+
+    for (var fl of flushable) {
+      if (!fl.equals(pubkey)) await me.flushChannel(fl, true)
+    }
+  }
 
   /*
   // TESTNET: storing most profitable outcome for us

@@ -17,13 +17,13 @@ module.exports = async (ws, msg) => {
   msg = msg.slice(1)
 
   // ignore some too frequest RPC commands
-  if (
+  /*if (
     ['update', 'chain', 'sync', 'propose', 'prevote', 'precommit'].indexOf(
       inputType
     ) == -1
   )
     l('External RPC: ' + inputType)
-
+*/
   if (inputType == 'auth') {
     var [pubkey, sig, body] = r(msg)
 
@@ -161,7 +161,7 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'testnet') {
     var pubkey = msg.slice(1)
     if (msg[0] == 1) {
-      await me.payChannel({
+      await me.flushChannel({
         partner: pubkey,
         amount: Math.round(Math.random() * 10000)
       })
@@ -302,42 +302,6 @@ module.exports = async (ws, msg) => {
     ch.d.input_amount = amount
     ch.d.input_sig = sig
     await ch.d.save()
-  } else if (inputType == 'ack') {
-    // our payment was acknowledged
-    var [pubkey, sig, body] = r(msg)
-    var ch = await me.getChannel(pubkey)
-
-    var [secret, stateSig] = r(body)
-
-    if (!ec.verify(r(ch.d.getState()), stateSig, pubkey))
-      return l('Invalid state signed')
-
-    ch.d.sig = stateSig
-    ch.d.status = 'ready'
-
-    await ch.d.save()
-
-    if (secret.length == 0) return l('Got no secret ')
-
-    var invoice = toHex(sha3(secret))
-
-    var return_to = purchases[invoice]
-
-    if (!return_to) return l('Nowhere to return to for ' + invoice, purchases)
-
-    // ws from browser
-    if (typeof return_to === 'function') {
-      return_to({confirm: 'Payment succeeded!', secret: toHex(secret)})
-    } else {
-      var return_ch = await me.getChannel(return_to)
-      me.send(
-        return_to,
-        'ack',
-        me.envelope(secret, ec(r(return_ch.d.getState()), me.id.secretKey))
-      )
-    }
-
-    delete purchases[invoice]
   } else if (inputType == 'update') {
     // New payment arrived
     await me.updateChannel(msg)

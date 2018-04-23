@@ -43,25 +43,38 @@ RPC = {
 }
 
 prettyState = (state) => {
-  state[3] = readInt(state[3])
-  state[4] = readInt(state[4])
+  if (!state[1]) return false
+  state[1][2] = readInt(state[1][2])
+  state[1][3] = readInt(state[1][3])
+  state[1][4] = readInt(state[1][4])
 
-  state[5].map((h) => {
+  // amount and exp, except the hash
+  state[2].map((h) => {
     h[0] = readInt(h[0])
     h[2] = readInt(h[2])
   })
 
-  state[6].map((h) => {
+  state[3].map((h) => {
     h[0] = readInt(h[0])
     h[2] = readInt(h[2])
   })
 }
 
 logstate = (state) => {
+  if (!state[1]) return false
+  var trim = (ad) => toHex(ad).substr(0, 4)
+
   l(
-    `Nonce #${state[3]} delta ${state[4]} locks ${state[5].length} / ${
-      state[6].length
-    }`
+    `
+------
+| ${trim(state[1][0])} | ${trim(state[1][1])}
+------
+| #${state[1][2]}  |  ${state[1][3]}
+------
+| ${state[2].map((h) => trim(h[1])).join(', ')} 
+------
+| ${state[3].map((h) => trim(h[1])).join(', ')}
+------`
   )
 }
 l = function() {
@@ -70,7 +83,7 @@ l = function() {
   var a = Object.values(arguments)
   console.log.call(console, a)
 
-  var str = base_port + ': ' + stamp + ' - ' + stringify(a) + '\n'
+  var str = base_port + ': ' + stamp + ' - ' + a.toString() + '\n'
   cached_result.my_log += str
 
   var chunks = []
@@ -188,11 +201,10 @@ for(var i = 0; i< 9999999;i++){
 
 }
 */
-var min_fee = 0
 beforeFees = (amount, fees) => {
   for (var fee of fees) {
     new_amount = Math.round(amount * (1 + fee))
-    if (new_amount == amount) new_amount = amount + min_fee
+    if (new_amount == amount) new_amount = amount + K.min_fee
     amount = new_amount
   }
 
@@ -202,7 +214,7 @@ afterFees = (amount, fees) => {
   if (!(fees instanceof Array)) fees = [fees]
   for (var fee of fees) {
     var fee = Math.round(amount / (1 + fee) * fee)
-    if (fee == 0) fee = min_fee
+    if (fee == 0) fee = K.min_fee
     amount = amount - fee
   }
   return amount

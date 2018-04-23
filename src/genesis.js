@@ -72,7 +72,8 @@ module.exports = async (genesis) => {
     max_amount: 300000,
 
     members: [],
-    hubs: []
+    hubs: [],
+    min_fee: 1
   }
 
   // Defines global Byzantine tolerance parameter
@@ -159,7 +160,7 @@ module.exports = async (genesis) => {
     location: K.members[0].location,
     pubkey: K.members[0].pubkey,
 
-    fee: 0, //0.01,
+    fee: 0.002,
 
     handle: 'main',
     name: '@main (Main)'

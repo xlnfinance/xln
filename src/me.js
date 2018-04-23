@@ -54,7 +54,7 @@ class Me {
     // l("Setting timeout for queue")
     setTimeout(() => {
       me.processQueue()
-    }, 50)
+    }, 10)
   }
 
   async byKey(pk) {
@@ -230,24 +230,6 @@ class Me {
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
   }
 
-  async addHistory(pubkey, amount, desc, checkpoint = false) {
-    var attrs = {
-      userId: me.pubkey,
-      hubId: 1,
-      desc: desc,
-      amount: amount
-    }
-
-    if (checkpoint) {
-      // add current balances
-      var ch = await me.getChannel(pubkey)
-      attrs.delta = ch.they_promised
-      attrs.balance = ch.payable
-    }
-
-    await History.create(attrs)
-  }
-
   // takes channels with supported hubs (verified and custom ones)
   async channels() {
     var channels = []
@@ -332,7 +314,7 @@ Me.prototype.consensus = require('./onchain/consensus')
 Me.prototype.processBlock = require('./onchain/block')
 Me.prototype.processTx = require('./onchain/tx')
 
-Me.prototype.payChannel = require('./offchain/pay_channel')
+Me.prototype.flushChannel = require('./offchain/flush_channel')
 Me.prototype.getChannel = require('./offchain/get_channel')
 Me.prototype.updateChannel = require('./offchain/update_channel')
 

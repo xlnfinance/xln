@@ -45,9 +45,7 @@ module.exports = async (partner = Members[0].pubkey) => {
       they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0,
 
       nonce: 0,
-      status: ch.left ? 'master' : 'listener',
-
-      hashlocks: null
+      status: 'master'
     },
     include: {all: true}
   }))[0]
@@ -77,18 +75,26 @@ module.exports = async (partner = Members[0].pubkey) => {
 
   Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
-  // todo: minus transitions
+  // We reduce payable by total amount of unresolved hashlocks in either direction
+  var state = await ch.d.getState()
+  var left_inwards = 0
+  state[2].map((a) => (left_inwards += a[0]))
+  var right_inwards = 0
+  state[3].map((a) => (right_inwards += a[0]))
+
   ch.payable =
     ch.insured -
     ch.d.input_amount +
     ch.they_promised +
-    (ch.d.they_hard_limit - ch.promised)
+    (ch.d.they_hard_limit - ch.promised) -
+    (ch.left ? right_inwards : left_inwards)
 
   ch.they_payable =
     ch.they_insured -
     ch.d.they_input_amount +
     ch.promised +
-    (ch.d.hard_limit - ch.they_promised)
+    (ch.d.hard_limit - ch.they_promised) -
+    (ch.left ? left_inwards : right_inwards)
 
   // inputs are like bearer cheques and can be used any minute, so we deduct them
 

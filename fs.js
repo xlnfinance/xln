@@ -103,11 +103,6 @@ cache = async (i) => {
           delta: promised
         })
       }
-    } else {
-      cached_result.history = await History.findAll({
-        order: [['id', 'desc']],
-        include: {all: true}
-      })
     }
   }
 
@@ -149,13 +144,12 @@ react = async (result = {}, id = 1) => {
   if (me.id) {
     result.record = await me.byKey()
 
-    result.username = me.username // just for welcome message
+    result.username = me.username
 
+    result.address = toHex(r([bin(me.box.publicKey), me.pubkey]))
     result.pubkey = toHex(me.pubkey)
 
-    result.invoices = invoices
-    result.purchases = purchases
-
+    //result.invoices = invoices
     result.pending_tx = PK.pending_tx
 
     result.channels = await me.channels()
@@ -178,12 +172,12 @@ cached_result = {
 }
 
 invoices = {}
-purchases = {}
 
 initDashboard = async (a) => {
   // auto reloader for debugging
   setInterval(() => {
     fs.stat('../restart', (e, f) => {
+      if (!f) return l('Touch ../restart file')
       var restartedAt = restartedAt ? restartedAt : f.atimeMs
 
       if (f && f.atimeMs != restartedAt) {
@@ -307,7 +301,7 @@ initDashboard = async (a) => {
   })
 
   // opn doesn't work in SSH console
-  if (base_port != 443) opn(url)
+  if (base_port != 443 && !argv.silent) opn(url)
 
   localwss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
@@ -365,7 +359,7 @@ sync = () => {
   }
 }
 
-var argv = require('minimist')(process.argv.slice(2), {
+argv = require('minimist')(process.argv.slice(2), {
   string: ['username', 'pw']
 })
 

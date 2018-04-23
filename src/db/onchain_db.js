@@ -83,6 +83,7 @@ Insurance = sequelize.define('insurance', {
   rightId: Sequelize.INTEGER,
 
   nonce: Sequelize.INTEGER, // for instant withdrawals, increase one by one
+  asset: Sequelize.INTEGER,
 
   insurance: Sequelize.BIGINT, // insurance
   ondelta: Sequelize.BIGINT, // what hub already insuranceized

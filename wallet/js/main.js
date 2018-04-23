@@ -307,7 +307,7 @@ FS.onready(() => {
 
         record: false,
 
-        tab: location.hash.substr(1),
+        tab: location.hash.substr(1).split('/')[0],
 
         install_snippet: false,
 
@@ -340,6 +340,7 @@ FS.onready(() => {
         new_invoice: '',
         pay_invoice: location.hash.split('invoice=')[1],
         parsed_invoice: {},
+        outward: {},
 
         hardfork: ''
       }
@@ -507,7 +508,7 @@ FS.onready(() => {
           = {{commy(ch.insurance)}} insurance 
           {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
           {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
-          {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}}
+          {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} ({{ch.d.status}}#{{ch.d.nonce}})
           </small> 
           
           <p><div v-if="false && ch.bar > 0">
@@ -525,55 +526,22 @@ FS.onready(() => {
                 +{{commy(ch.they_promised)}} (uninsured)
               </div>
             </div>
-          </div></p> 
-
-          <p>Tech data: status {{ch.d.status}} nonce {{ch.d.nonce}} pending {{trim(ch.d.pending)}}</p>
-
+          </div></p>
         </template>
 
+        <p style="word-wrap: break-word">Receiving Address: <b>{{address}}</b></p>
 
+        <div class="col-sm-6">
+          <p><div class="input-group" style="width:400px" >
+            <input type="text" class="form-control small-input" v-model="outward.destination" placeholder="Destination Address" aria-describedby="basic-addon2">
+          </div></p>
 
+          <p><div class="input-group" style="width:400px" >
+            <input type="text" class="form-control small-input" v-model="outward.amount" placeholder="Amount" aria-describedby="basic-addon2">
+          </div></p>
 
-
-        <div class="row">
-          <div class="col-sm-6">
-            <p><div class="input-group" style="width:400px">
-              <span class="input-group-addon" id="sizing-addon2">{{asset}}</span>
-              <input type="text" class="form-control" aria-describedby="sizing-addon2" v-model="off_amount" placeholder="Amount">
-            </div></p>
-
-
-            <p><button type="button" class="btn btn-success" @click="call('invoice', {asset: asset, amount: uncommy(off_amount)})">→ Request Money</button></p>
-
-            <p v-for="(value, k) in invoices" style="word-wrap: break-word">Invoice for {{commy(value.amount)}} ({{value.status}}):<br> {{value.invoice}}</p>
-
-
-          </div>
-
-          <div class="col-sm-6">
-            <p><div class="input-group" style="width:400px" >
-              <input type="text" class="form-control small-input" v-model="pay_invoice" @input="call('send', {dry_run: true, pay_invoice: pay_invoice})"  placeholder="Enter Invoice Here" aria-describedby="basic-addon2">
-            </div></p>
-
-
-            <p><button type="button" class="btn btn-success" @click="call('send', {pay_invoice: pay_invoice})">Send Money → </button></p>
-
-            <p v-for="(value, k) in purchases">Payment sent for invoice: {{k}}</p>
-
-            <div v-if="parsed_invoice && parsed_invoice.amount">
-              <p>Amount: {{commy(parsed_invoice.amount)}}</p>
-              <p>Fee: {{commy(parsed_invoice.fee)}}</p>
-              <p>Invoice: {{trim(parsed_invoice.invoice)}}</p>
-              <p>Destination: {{trim(parsed_invoice.pubkey)}}</p>
-              <p>Receiving hubs: <b>{{parsed_invoice.partners.join(', ')}}</b></p>
-            </div>
-
-          </div>
+          <p><button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, amount: uncommy(outward.amount)}})">Pay Now → </button></p>
         </div>
-
-        <pre v-html="enable_log && my_log"></pre>
-
-
 
 <nav>
   <div class="nav nav-tabs" id="nav-tab" role="tablist">
@@ -584,6 +552,8 @@ FS.onready(() => {
     <a class="nav-item nav-link" id="nav-onchain-tab" data-toggle="tab" href="#nav-onchain" role="tab" aria-controls="nav-onchain" aria-selected="false">On-Chain</a>
 
     <a class="nav-item nav-link active" id="nav-testnet-tab" data-toggle="tab" href="#nav-testnet" role="tab" aria-controls="nav-testnet" aria-selected="false">Testnet</a>
+
+    <a class="nav-item nav-link" id="nav-logs-tab" data-toggle="tab" href="#nav-logs" role="tab" aria-controls="nav-logs" aria-selected="false">Logs</a>
 
   </div>
 </nav>
@@ -694,6 +664,9 @@ FS.onready(() => {
     </div>
   </div>
 
+  <div class="tab-pane fade" id="nav-logs" role="tabpanel" aria-labelledby="nav-logs-tab">
+        <pre v-html="my_log"></pre>
+  </div>
 
   <div class="tab-pane fade show active" id="nav-testnet" role="tabpanel" aria-labelledby="nav-testnet-tab">
         

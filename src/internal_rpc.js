@@ -60,11 +60,12 @@ module.exports = async (ws, msg) => {
 
       case 'send':
         // TODO: support batch sends
+        /*
         if (p.pay_invoice) {
           var inv = p.pay_invoice.split('_')
           var parsed = {}
 
-          parsed.amount = inv[0]
+          parsed.amount = parseInt(inv[0])
           parsed.invoice = inv[1]
           parsed.box_pubkey = inv[2]
           parsed.pubkey = inv[3]
@@ -77,7 +78,8 @@ module.exports = async (ws, msg) => {
           parsed.trimmedId =
             inv[2].length == 64 ? inv[2].substr(0, 10) + '...' : inv[2]
 
-          parsed.fee = Math.round(parseInt(parsed.amount) * 0.001)
+          parsed.fee =
+            beforeFees(parsed.amount, [K.hubs[0].fee]) - parsed.amount
         }
 
         if (p.dry_run) {
@@ -96,17 +98,19 @@ module.exports = async (ws, msg) => {
             break
           }
         }
+        */
 
-        var secret = crypto.randomBytes(32) // no need to store
-        var unlocker_nonce = crypto.randomBytes(24)
-
-        var box_pubkey = Buffer.from(parsed.box_pubkey, 'hex')
-        var invoice = Buffer.from(parsed.invoice, 'hex')
-
+        var secret = crypto.randomBytes(32)
         var hash = sha3(secret)
 
-        var amount = parseInt(parsed.amount)
+        var invoice = crypto.randomBytes(32)
 
+        var [box_pubkey, pubkey] = r(fromHex(p.outward.destination))
+        var amount = parseInt(p.outward.amount)
+        var via = fromHex(K.hubs[0].pubkey)
+        var sent_amount = beforeFees(amount, [K.hubs[0].fee])
+
+        var unlocker_nonce = crypto.randomBytes(24)
         var unlocker_box = nacl.box(
           r([amount, secret, invoice]),
           unlocker_nonce,
@@ -118,19 +122,19 @@ module.exports = async (ws, msg) => {
           unlocker_nonce,
           bin(me.box.publicKey)
         ])
-
-        var via = fromHex(K.hubs[0].pubkey)
-        var sent_amount = beforeFees(amount, [K.hubs[0].fee])
-
         var ch = await me.getChannel(via)
 
         if (amount > ch.payable) {
-          result.alert = 'Not enough funds'
+          result.alert = `Not enough funds`
+        } else if (amount > K.max_amount) {
+          result.alert = `Maximum payment is $${commy(K.max_amount)}`
+        } else if (amount < K.min_amount) {
+          result.alert = `Minimum payment is $${commy(K.min_amount)}`
         } else {
           await ch.d.save()
 
           await ch.d.createPayment({
-            status: 'await',
+            status: 'add',
             is_inward: false,
 
             amount: sent_amount,
@@ -138,12 +142,12 @@ module.exports = async (ws, msg) => {
             exp: K.usable_blocks + 10,
 
             unlocker: unlocker,
-            destination: destination
+            destination: pubkey
           })
 
-          await me.payChannel(via)
+          await me.flushChannel(via)
 
-          result.confirm = 'Payment sent...'
+          //result.confirm = 'Payment sent...'
         }
 
         break
