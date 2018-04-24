@@ -15,7 +15,7 @@ User = sequelize.define('user', {
 
   pubkey: Sequelize.CHAR(32).BINARY,
   nonce: Sequelize.INTEGER,
-  balance: Sequelize.BIGINT // on-chain balance: mostly to pay taxes
+  balance: Sequelize.BIGINT // onchain balance: mostly to pay taxes
 })
 
 User.idOrKey = async function(id) {
@@ -90,7 +90,7 @@ Insurance = sequelize.define('insurance', {
 
   dispute_delayed: Sequelize.INTEGER,
 
-  // increased off-chain. When disputed, higher one is true
+  // increased offchain. When disputed, higher one is true
   dispute_nonce: Sequelize.INTEGER,
   dispute_offdelta: Sequelize.INTEGER,
 

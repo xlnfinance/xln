@@ -13,6 +13,9 @@ chalk = require('chalk') // pretty logs?
 // crypto TODO: native version
 crypto = require('crypto')
 // scrypt = require('scrypt') // require('./scrypt_'+os.platform())
+base58 = require('base-x')(
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+)
 
 keccak = require('keccak')
 
@@ -66,25 +69,27 @@ logstate = (state) => {
 
   l(
     `
-------
 | ${trim(state[1][0])} | ${trim(state[1][1])}
 ------
-| #${state[1][2]}  |  ${state[1][3]}
+| #${state[1][2]}  |  ${state[1][3]} | ${state[1][4]}
 ------
 | ${state[2].map((h) => trim(h[1])).join(', ')} 
 ------
 | ${state[3].map((h) => trim(h[1])).join(', ')}
-------`
+`
   )
 }
-l = function() {
-  //var str =
-  var stamp = parseFloat(process.hrtime().join('.')).toFixed(6)
+l = console.log
+
+/* Some crazy visualized table log
+function() {
   var a = Object.values(arguments)
   console.log.call(console, a)
+  cached_result.my_log += a.toString()
+}
 
+  var stamp = parseFloat(process.hrtime().join('.')).toFixed(6)
   var str = base_port + ': ' + stamp + ' - ' + a.toString() + '\n'
-  cached_result.my_log += str
 
   var chunks = []
   var chunkSize = 30
@@ -123,9 +128,7 @@ l = function() {
       })
     })
   })
-}
-
-//console.log
+}*/
 
 child_process = require('child_process')
 
@@ -339,8 +342,8 @@ methodMap = (i) => {
     'offdelta', // delayed balance proof
     'dispute', // delayed balance proof
 
-    // state machine transitions, sent peer to peer off-chain
-    'withdrawal', // instant off-chain signature to withdraw from mutual payment channel
+    // state machine transitions, sent peer to peer offchain
+    'withdrawal', // instant offchain signature to withdraw from mutual payment channel
 
     'update',
     'ack',
@@ -367,7 +370,7 @@ methodMap = (i) => {
     // 10,[[5,H1,E1]] => 10,[]
     'faillock', // couldn't get secret for <reason>, delete hashlock
 
-    'auth' // any kind of off-chain auth signatures between peers
+    'auth' // any kind of offchain auth signatures between peers
   ]
 
   if (typeof i === 'string') {

@@ -123,6 +123,15 @@ FS.onready(() => {
         '">'
       )
     },
+
+    stream: () => {
+      n = 0
+      pay = () => {
+        $('.btn-success')[0].click()
+        if (n++ < 100) setTimeout(pay, 2000)
+      }
+      pay()
+    },
     hljs: hljs.highlight,
 
     ivoted: (voters) => {
@@ -273,6 +282,17 @@ FS.onready(() => {
 
     trim: (str) => {
       return str ? str.slice(0, 8) + '...' : ''
+    },
+    payment_status: (status, is_inward) => {
+      if (status == 'settled') {
+        return '✔ ' + (is_inward ? 'Received' : 'Paid')
+      }
+      if (status == 'failed') {
+        return '❌ ' + (is_inward ? 'Failed' : 'Failed')
+      }
+      if (status == 'added') return '🔒 Pending'
+
+      return '🕟 Wait'
     }
   }
 
@@ -285,7 +305,7 @@ FS.onready(() => {
 
       setInterval(function() {
         FS('load').then(render)
-      }, localStorage.auth_code ? 1000 : 30000)
+      }, localStorage.auth_code ? 15000 : 30000)
     },
     data() {
       return {
@@ -347,7 +367,7 @@ FS.onready(() => {
     },
     computed: {
       ch: () => {
-        return app.channels[app.peer]
+        return app.channels ? app.channels[app.peer] : false
       }
     },
     methods: methods,
@@ -378,6 +398,19 @@ FS.onready(() => {
           <a class="nav-link" @click="go('wallet')">Wallet</a>
         </li>
 
+
+        <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='credit' }">
+          <a class="nav-link" @click="go('credit')">Credit Lines</a>
+        </li>
+
+        <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
+          <a class="nav-link" @click="go('onchain')">Onchain</a>
+        </li>
+
+        <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
+          <a class="nav-link" @click="go('testnet')">Testnet</a>
+        </li>
+
       <li class="nav-item dropdown">
         <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#">Explorers
         <span class="caret"></span></a>
@@ -403,7 +436,7 @@ FS.onready(() => {
       </ul>
 
           
-  <span v-if="pending_tx.length > 0">Pending on-chain tx: {{pending_tx.map(t=>t.method).join(', ')}} </span> &nbsp;
+  <span v-if="pending_tx.length > 0">Pending onchain tx: {{pending_tx.map(t=>t.method).join(', ')}} </span> &nbsp;
 
   <span>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span>
   &nbsp;     
@@ -483,9 +516,7 @@ FS.onready(() => {
 
 
     <div v-else-if="tab=='wallet'">
-
       <template v-if="pubkey">
-
         <h2 class="alert alert-danger" v-if="pending_tx.length>0">Please wait until your <b>{{pending_tx[0].method}}</b> transaction is added to the blockchain.</h2>
 
         <h2 class="alert alert-danger" v-if="K.ts < ts() - 600">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
@@ -495,8 +526,8 @@ FS.onready(() => {
 
 
         <div v-if="record">
-          <h2>Balance on-chain: <b>{{commy(record.balance)}}</b></h2>
-          <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with a hub. It is also used to cover on-chain transaction fees. Your on-chain ID: <b>{{record.id}}</b></p>
+          <h2>Balance onchain: <b>{{commy(record.balance)}}</b></h2>
+          <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with a hub. It is also used to cover onchain transaction fees. Your onchain ID: <b>{{record.id}}</b></p>
 
           <hr />
         </div>
@@ -508,7 +539,7 @@ FS.onready(() => {
           = {{commy(ch.insurance)}} insurance 
           {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
           {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
-          {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} ({{ch.d.status}}#{{ch.d.nonce}})
+          {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}}
           </small> 
           
           <p><div v-if="false && ch.bar > 0">
@@ -529,7 +560,7 @@ FS.onready(() => {
           </div></p>
         </template>
 
-        <p style="word-wrap: break-word">Receiving Address: <b>{{address}}</b></p>
+        <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
 
         <div class="col-sm-6">
           <p><div class="input-group" style="width:400px" >
@@ -541,31 +572,16 @@ FS.onready(() => {
           </div></p>
 
           <p><button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, amount: uncommy(outward.amount)}})">Pay Now → </button></p>
+
+          <p><button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 1 })">Testnet Faucet</button></p>
+
         </div>
 
-<nav>
-  <div class="nav nav-tabs" id="nav-tab" role="tablist">
-    <a class="nav-item nav-link" id="nav-history-tab" data-toggle="tab" href="#nav-history" role="tab" aria-controls="nav-history" aria-selected="true">History</a>
-
-    <a v-if="ch" class="nav-item nav-link" id="nav-uninsured-tab" data-toggle="tab" href="#nav-uninsured" role="tab" aria-controls="nav-uninsured" aria-selected="false">Uninsured Limits</a>
-
-    <a class="nav-item nav-link" id="nav-onchain-tab" data-toggle="tab" href="#nav-onchain" role="tab" aria-controls="nav-onchain" aria-selected="false">On-Chain</a>
-
-    <a class="nav-item nav-link active" id="nav-testnet-tab" data-toggle="tab" href="#nav-testnet" role="tab" aria-controls="nav-testnet" aria-selected="false">Testnet</a>
-
-    <a class="nav-item nav-link" id="nav-logs-tab" data-toggle="tab" href="#nav-logs" role="tab" aria-controls="nav-logs" aria-selected="false">Logs</a>
-
-  </div>
-</nav>
-
-<div class="tab-content mt-3" id="nav-tabContent">
-  <div class="tab-pane fade" id="nav-history" role="tabpanel" aria-labelledby="nav-history-tab">
 
         <table v-if="payments.length > 0" class="table">
           <thead>
             <tr>
-              <th>Status</th>
-              <th>Type</th>
+              <th width="150px">Status</th>
               <th>Amount</th>
               <th>Destination</th>
               <th>Date</th>
@@ -573,134 +589,17 @@ FS.onready(() => {
           </thead>
           <tbody>
             <tr v-for="h in payments.slice(history_limits[0], history_limits[1])">
-              <td>{{h.status}}</td>
-              <td>{{h.is_inward ? 'Inward' : 'Outward'}}</td>
+              <td>{{payment_status(h.status, h.is_inward)}}</td>
               <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
               <td>{{trim(h.destination)}}</td>
               <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
             </tr>
+            <tr v-if="payments.length > history_limits[1]"><td colspan="7" align="center"><a @click="history_limits[1] += 20">Show More</a></td></tr>
 
-            <p><a @click="history_limits[1]=1000">Show All</a></p>
           </tbody>
         </table>
-        <p v-else>There is no transaction history so far. Go to an exchange or use Testnet faucet to receive money.</p>
-  </div>
-
-
-  <div v-if="ch" class="tab-pane fade" id="nav-uninsured" role="tabpanel" aria-labelledby="nav-uninsured-tab" >
-      <h3>Uninsured Limits</h3>
-
-        <select v-model="peer" class="custom-select custom-select-lg mb-3">
-          <option disabled>Select current hub</option>
-          <option v-for="(a,index) in channels" :value="index">{{a.hub.handle}}</option>
-        </select>
-
-
-      <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
-
-      <p><label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
-      <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
-      </p>
-
-      <p>
-      <label>Hard limit (currently {{commy(ch.d.hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
-      <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]"></p>
-
-      <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Uninsured Limits</button></p>
-
-      <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
-
-      <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
-  </div>
-
-
-
-  <div class="tab-pane fade" id="nav-onchain" role="tabpanel" aria-labelledby="nav-onchain-tab">
-    <div v-if="record && ch">
-      <h3>On-chain Actions</h3>
-
-      <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your on-chain balance.</small>
-
-      <p v-if="ch.insured>0"><input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>
-     
-      <small>Deposits to other users or channels.</small>
-
-      <p v-for="out in outs">
-        <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
-
-        <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
-
-        <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Invoice (optional)">
-      </p>
-      <p>
-      <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">Add Deposit</button>
-      </p>
-
-      <p>
-        <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance On-Chain</button>
-      </p>
-
-      <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute on-chain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
-      </p>
-
-      <p>After a timeout money will arrive to your on-chain balance, then you will be able to move it to another hub.</p>
-
-      <p v-if="ch.d.status == 'disputed'"> 
-        Please wait for dispute resolution. <span v-if="ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span>
-
-      </p>
-      <p v-else-if="record && record.balance >= K.standalone_balance"> 
-        <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
-      </p>
-      <p v-else>To start on-chain dispute you must be registred on-chain and have on your on-chain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your on-chain balance.</p>
-
-    </div>
-    <div v-else>
-      <h3>Registration</h3>
-      <p>You are not currently registered on the blockchain. On-chain registration is not required but it allows you to insure your balances, start disputes with hubs and do rebalances yourself. Your account will be registered automatically once you have more money in uninsured balances. </p>
-      <p>Otherwise you can ask someone to rebalance on-chain at least $10 to your temporary ID: <br>
-      <b>{{pubkey}}</b></p>
-
-    </div>
-  </div>
-
-  <div class="tab-pane fade" id="nav-logs" role="tabpanel" aria-labelledby="nav-logs-tab">
-        <pre v-html="my_log"></pre>
-  </div>
-
-  <div class="tab-pane fade show active" id="nav-testnet" role="tabpanel" aria-labelledby="nav-testnet-tab">
-        
-        <h3>Testnet Actions</h3>
-        <p>On this page we will guide you through basic functionality and user stories, telling what happens under the hood.</p>
-
-        <p>Case 1. Just arrived? You can go to an exchange or any other service to purchase our digital assets. For now just click on faucet. After reaching {{commy(K.risk)}} in uninsured balance, the hub must rebalance/insure you on-chain - <b>wait for it</b>. That will automatically register your account on-chain. <b>Keep an eye on Blockchain Explorer - every node will see this rebalance transaction</b></p>
-        <p><button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 1 })">Testnet Faucet</button></p>
-
-        <p>Case 2. Now let's practice p2p payments: use the install snippet again but replace id=fs to id=fs2 and 8001 port to 8002 (to run a parallel user on the same machine). Under the new user, create an invoice for 123 and pay it with our user. Instantly you will see this user has 123 under "spent" and a new user under "uninsured". After some time the hub will ask your node to withdraw from your channel in order to insure the second user, because 123 is beyond risk limit. If you'd pay $5, there would be no rebalance.</p>
-
-        <p>Case 3. You both were using @eu hub, now let's practice 2 hops payment: <b>you->eu->jp->new user</b>. Select jp hub by another user, create an invoice and pay it with our user again. You will pay fees to both hubs (roughly 0.1+0.1%).</p>
-
-        <p>Case 4. Request withdraw by this user on On-chain rebalance page. Withdraw is taking money "the nice way" from your hub and you could move them to another hub or to make a direct payment to someone else's channel on-chain.</p>
-
-        <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start on-chain dispute under On-Chain Dispute tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
-
-        <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state - biggest balance you ever owned. When hub notices that, they will post latest state before delay period. Keep an eye on Blockchain Explorer page to see that.</p>
-
-        <button class="btn btn-success mb-3" @click="call('dispute', {partner: ch.partner, profitable: true})" href="#">Cheat in Dispute</button><br>
-
-        <p>Case 7. If you've been offline for too long, and the hub tried to get a withdrawal from you, they would have to dispute the channel with you.</p>
-
-        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 2 })">Ask Hub to Start Dispute</button><br>
-
-        <p>Case 8. Using this button you can ensure you're safe if the hub also tries to cheat on you with most profitable state.</p>
-
-        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 3 })">Ask Hub to Cheat in Dispute</button>
-  </div>
-</div>
 
       </template>
-
-
       <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
 
         <label for="inputUsername" class="sr-only">Username</label>
@@ -714,13 +613,111 @@ FS.onready(() => {
 
         <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
       </form>
-
     </div>
 
 
+    <div v-else-if="pubkey && tab=='credit'">
+      <h3>Uninsured Limits</h3>
+
+      <select v-model="peer" class="custom-select custom-select-lg mb-3">
+        <option disabled>Select current hub</option>
+        <option v-for="(a,index) in channels" :value="index">{{a.hub.handle}}</option>
+      </select>
 
 
+      <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
 
+      <p><label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
+      <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
+      </p>
+
+      <p>
+      <label>Hard limit (currently {{commy(ch.d.hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
+      <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]"></p>
+
+      <p><button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.peer})" href="#">Save Uninsured Limits</button></p>
+
+      <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
+
+      <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
+    </div>
+
+    <div v-else-if="tab=='onchain'">
+      <div v-if="record && ch">
+        <h3>Onchain Actions</h3>
+        <p>Onchain balance: {{commy(record.balance)}}</p>
+
+        <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your onchain balance.</small>
+
+        <p v-if="ch.insured>0"><input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw"></p>
+       
+        <small>Deposits to other users or channels.</small>
+
+        <p v-for="out in outs">
+          <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
+
+          <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
+
+          <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Invoice (optional)">
+        </p>
+        <p>
+        <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">Add Deposit</button>
+        </p>
+
+        <p>
+          <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance On-Chain</button>
+        </p>
+
+        <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
+        </p>
+
+        <p>After a timeout money will arrive to your onchain balance, then you will be able to move it to another hub.</p>
+
+        <p v-if="ch.d.status == 'disputed'"> 
+          Please wait for dispute resolution. <span v-if="ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span>
+
+        </p>
+        <p v-else-if="record && record.balance >= K.standalone_balance"> 
+          <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
+        </p>
+        <p v-else>To start onchain dispute you must be registred onchain and have on your onchain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your onchain balance.</p>
+
+      </div>
+      <div v-else>
+        <h3>Registration</h3>
+        <p>You are not currently registered on the blockchain. Onchain registration is not required but it allows you to insure your balances, start disputes with hubs and do rebalances yourself. Your account will be registered automatically once you have more money in uninsured balances. </p>
+        <p>Otherwise you can ask someone to rebalance onchain at least $10 to your temporary ID: <br>
+        <b>{{pubkey}}</b></p>
+      </div>
+    </div>
+
+    <div v-else-if="tab=='testnet'">
+      <h3>Testnet Actions</h3>
+      <p>On this page we will guide you through basic functionality and user stories, telling what happens under the hood.</p>
+
+      <p>Case 1. Just arrived? You can go to an exchange or any other service to purchase our digital assets. For now just click on faucet. After reaching {{commy(K.risk)}} in uninsured balance, the hub must rebalance/insure you onchain - <b>wait for it</b>. That will automatically register your account onchain. <b>Keep an eye on Blockchain Explorer - every node will see this rebalance transaction</b></p>
+
+      <p>Case 2. Now let's practice p2p payments: use the install snippet again but replace id=fs to id=fs2 and 8001 port to 8002 (to run a parallel user on the same machine). Under the new user, create an invoice for 123 and pay it with our user. Instantly you will see this user has 123 under "spent" and a new user under "uninsured". After some time the hub will ask your node to withdraw from your channel in order to insure the second user, because 123 is beyond risk limit. If you'd pay $5, there would be no rebalance.</p>
+
+      <p>Case 3. You both were using @eu hub, now let's practice 2 hops payment: <b>you->eu->jp->new user</b>. Select jp hub by another user, create an invoice and pay it with our user again. You will pay fees to both hubs (roughly 0.1+0.1%).</p>
+
+      <p>Case 4. Request withdraw by this user on Onchain rebalance page. Withdraw is taking money "the nice way" from your hub and you could move them to another hub or to make a direct payment to someone else's channel onchain.</p>
+
+      <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start onchain dispute under On-Chain Dispute tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
+
+      <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state - biggest balance you ever owned. When hub notices that, they will post latest state before delay period. Keep an eye on Blockchain Explorer page to see that.</p>
+
+      <button class="btn btn-success mb-3" @click="call('dispute', {partner: ch.partner, profitable: true})" href="#">Cheat in Dispute</button><br>
+
+      <p>Case 7. If you've been offline for too long, and the hub tried to get a withdrawal from you, they would have to dispute the channel with you.</p>
+
+      <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 2 })">Ask Hub to Start Dispute</button><br>
+
+      <p>Case 8. Using this button you can ensure you're safe if the hub also tries to cheat on you with most profitable state.</p>
+
+      <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 3 })">Ask Hub to Cheat in Dispute</button>
+
+    </div>
 
 
     <div v-else-if="tab=='install'">
@@ -880,7 +877,7 @@ FS.onready(() => {
     </div>
     <div v-else-if="tab=='account_explorer'">
       <h1>Account Explorer</h1>
-      <p>This is a table of registered users in the network. On-chain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Channel Explorer.</p>
+      <p>This is a table of registered users in the network. Onchain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Channel Explorer.</p>
 
       <table class="table table-striped">
         <thead class="thead-dark">
@@ -888,7 +885,7 @@ FS.onready(() => {
             <th scope="col">Icon</th>
             <th scope="col">ID</th>
             <th scope="col">Pubkey</th>
-            <th scope="col">On-chain Balance</th>
+            <th scope="col">Onchain Balance</th>
             <th scope="col">Nonce</th>
             <th scope="col">Debts</th>
           </tr>

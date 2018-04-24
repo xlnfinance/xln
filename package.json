@@ -29,6 +29,7 @@
     "test": "jasmine"
   },
   "dependencies": {
+    "base-x": "3.0.4",
     "bn.js": "4.11.8",
     "chalk": "2.3.2",
     "finalhandler": "1.1.0",

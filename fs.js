@@ -145,11 +145,16 @@ react = async (result = {}, id = 1) => {
     result.record = await me.byKey()
 
     result.username = me.username
-
-    result.address = toHex(r([bin(me.box.publicKey), me.pubkey]))
+    /*
+          var offered_partners = (await me.channels())
+            .sort((a, b) => b.they_payable - a.they_payable)
+            .filter((a) => a.they_payable >= amount)
+            .map((a) => a.partner)
+            .join('_')
+            */
+    result.address = me.address
     result.pubkey = toHex(me.pubkey)
 
-    //result.invoices = invoices
     result.pending_tx = PK.pending_tx
 
     result.channels = await me.channels()
@@ -303,14 +308,15 @@ initDashboard = async (a) => {
   // opn doesn't work in SSH console
   if (base_port != 443 && !argv.silent) opn(url)
 
-  localwss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
+  internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
-  localwss.on('error', function(err) {
+  internal_wss.on('error', function(err) {
     console.error(err)
   })
-  localwss.on('connection', function(ws) {
+  internal_wss.on('connection', function(ws) {
     ws.on('message', (msg) => {
-      me.queue.push(async () => {
+      // internal requests go in the beginning of the queue
+      me.queue.unshift(async () => {
         return RPC.internal_rpc(ws, msg)
       })
     })

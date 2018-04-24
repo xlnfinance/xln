@@ -1,4 +1,4 @@
-// receive a transition for state channel
+// Receives an ack and set of transitions to execute on top of it by the partner
 module.exports = async (msg) => {
   var [pubkey, sig, body] = r(msg)
 
@@ -25,7 +25,7 @@ module.exports = async (msg) => {
   var receivable = ch.they_payable
 
   // an array of partners we need to ack or flush changes at the end of processing
-  var flushable = []
+  var flushable = [pubkey]
 
   // this is state we are on right now.
   var newState = await ch.d.getState()
@@ -43,19 +43,20 @@ module.exports = async (msg) => {
   if (!await ch.d.saveState(newState, ackSig)) {
     if (transitions.length == 0) return l('Empty invalid ack')
 
-    l('Ack mismatch. States (current, signed, theirs):')
-
     oldState = r(ch.d.signed_state)
     prettyState(oldState)
 
+    //if (ch.d.status == 'merge') {
+    //return l('Rollback cant rollback')
+    //}
+
+    /*
     logstate(newState)
     logstate(oldState)
     logstate(debugState)
     logstate(signedState)
 
-    //if (ch.d.status == 'rollback') return l('Rollback cant rollback')
 
-    /*
     We received an acksig that doesnt match our current state. Apparently the partner sent
     transitions simultaneously. 
 
@@ -138,17 +139,12 @@ module.exports = async (msg) => {
           var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
-          var paid_invoice = invoices[toHex(box_invoice)]
-
-          // TODO: did we get right amount in right asset?
-          if (paid_invoice && amount >= box_amount) {
-            //paid_invoice.status == 'pending'
-            l('Our invoice was paid!', paid_invoice)
-            paid_invoice.status = 'paid'
-          } else {
-            l('No such invoice found. Donation?')
+          invoices[toHex(box_invoice)] = {
+            amount: box_amount,
+            asset: 0
           }
-          react({confirm: 'Received a payment'})
+
+          //react({confirm: 'Received a payment'})
 
           hl.secret = box_secret
           hl.status = 'settle'
@@ -239,7 +235,7 @@ module.exports = async (msg) => {
 
         if (flushable.indexOf(pull_from) == -1) flushable.push(pull_from)
       } else {
-        react({confirm: 'Payment completed'})
+        //react({confirm: 'Payment completed'})
       }
 
       if (me.handicap_dontsettle) {
@@ -288,7 +284,7 @@ module.exports = async (msg) => {
 
         if (flushable.indexOf(pull_from) == -1) flushable.push(pull_from)
       } else {
-        react({alert: 'Payment failed'})
+        //react({alert: 'Payment failed'})
       }
     }
   }
@@ -300,23 +296,23 @@ module.exports = async (msg) => {
   if (rollback[0] > 0) {
     ch.d.nonce += rollback[0]
     ch.d.offdelta += rollback[1]
-    ch.d.status = 'rollback'
+    ch.d.status = 'merge'
 
     var st = await ch.d.getState()
-    l('After rollback we are at: ')
-    logstate(st)
+    //l('After rollback we are at: ')
+    //logstate(st)
   }
 
   await ch.d.save()
 
   // We only flush when there were any transitions. Not if was just an empty ack
   if (transitions.length > 0) {
-    await me.flushChannel(pubkey, true)
-
     for (var fl of flushable) {
-      if (!fl.equals(pubkey)) await me.flushChannel(fl, true)
+      var ch = await me.getChannel(fl)
+      await ch.d.requestFlush()
     }
   }
+  react()
 
   /*
   // TESTNET: storing most profitable outcome for us

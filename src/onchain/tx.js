@@ -378,7 +378,7 @@ module.exports = async (tx, meta) => {
           */
         }
 
-        // on-chain payment for specific invoice (to us or one of our channels)
+        // onchain payment for specific invoice (to us or one of our channels)
         if (me.pubkey.equals(giveTo.pubkey) && output[3].length > 0) {
           var invoice = invoices[toHex(output[3])]
           l('Invoice paid on chain ', output[3])

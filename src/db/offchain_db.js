@@ -41,6 +41,7 @@ Delta = privSequelize.define('delta', {
   they_soft_limit: Sequelize.INTEGER,
   they_hard_limit: Sequelize.INTEGER, // they trust us
 
+  flush_requested_at: Sequelize.DATE,
   last_online: Sequelize.DATE,
   withdrawal_requested_at: Sequelize.DATE,
 
@@ -127,6 +128,13 @@ Delta.prototype.saveState = async function(state, ackSig) {
     return true
   } else {
     return false
+  }
+}
+
+Delta.prototype.requestFlush = async function() {
+  if (!this.flush_requested_at) {
+    this.flush_requested_at = new Date()
+    await this.save()
   }
 }
 

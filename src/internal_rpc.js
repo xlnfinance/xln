@@ -41,7 +41,7 @@ module.exports = async (ws, msg) => {
 
         if (me.member_server) {
           me.member_server.close()
-          me.wss.clients.forEach((c) => c.close())
+          me.external_wss.clients.forEach((c) => c.close())
           // Object.keys(me.users).forEach( c=>me.users[c].end() )
         }
         me = new Me()
@@ -105,7 +105,7 @@ module.exports = async (ws, msg) => {
 
         var invoice = crypto.randomBytes(32)
 
-        var [box_pubkey, pubkey] = r(fromHex(p.outward.destination))
+        var [box_pubkey, pubkey] = r(base58.decode(p.outward.destination))
         var amount = parseInt(p.outward.amount)
         var via = fromHex(K.hubs[0].pubkey)
         var sent_amount = beforeFees(amount, [K.hubs[0].fee])
@@ -145,7 +145,7 @@ module.exports = async (ws, msg) => {
             destination: pubkey
           })
 
-          await me.flushChannel(via)
+          await ch.d.requestFlush()
 
           //result.confirm = 'Payment sent...'
         }
@@ -221,7 +221,7 @@ module.exports = async (ws, msg) => {
               l('Rebalancing ', [ins, outs])
 
               await me.broadcast('rebalance', r([[], ins, outs]))
-              react({confirm: 'On-chain rebalance tx sent'})
+              react({confirm: 'Onchain rebalance tx sent'})
             } else {
               react({
                 alert:
@@ -240,11 +240,14 @@ module.exports = async (ws, msg) => {
 
         break
 
+      case 'getinfo':
+        result.address = me.address
+
       case 'testnet':
         me.send(
           Members.find((m) => m.id == p.partner),
           'testnet',
-          concat(bin([p.action]), me.pubkey)
+          concat(bin([p.action]), r([bin(me.box.publicKey), me.pubkey]))
         )
 
         result.confirm = 'Testnet action triggered'
@@ -279,50 +282,9 @@ module.exports = async (ws, msg) => {
         if (p.invoice) {
           // deep clone
           var result = Object.assign({}, invoices[p.invoice])
-
-          // prevent race condition attack
-          if (invoices[p.invoice].status == 'paid') {
-            invoices[p.invoice].status = 'archive'
-          }
-        } else if (p.amount) {
-          var amount = parseInt(p.amount)
-
-          var secret = crypto.randomBytes(32)
-          var invoice = sha3(secret)
-
-          me.record = await me.byKey()
-
-          // format: bin(me.box.publicKey)
-
-          // we attempt to sort members by receivable to increase chance of payment success
-
-          // todo: all channels or particular?
-          var offered_partners = (await me.channels())
-            .sort((a, b) => b.they_payable - a.they_payable)
-            .filter((a) => a.they_payable >= amount)
-            .map((a) => a.partner)
-            .join('_')
-
-          var rawInvoice = [
-            amount,
-            toHex(invoice),
-            toHex(me.box.publicKey),
-            me.record ? me.record.id : toHex(me.pubkey), // onchain allowed?
-            offered_partners
-          ].join('_')
-
-          invoices[toHex(invoice)] = {
-            secret: secret,
-            amount: parseInt(p.amount),
-            extra: p.extra,
-            status: 'pending',
-            invoice: rawInvoice
-          }
-
-          result.new_invoice = rawInvoice
-
-          result.confirm = 'Invoice Created'
+          delete invoices[p.invoice]
         }
+
         break
 
       case 'propose':

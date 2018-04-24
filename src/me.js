@@ -32,6 +32,8 @@ class Me {
 
     this.box = nacl.box.keyPair.fromSecretKey(this.seed)
 
+    this.address = base58.encode(r([bin(me.box.publicKey), me.pubkey]))
+
     this.record = await this.byKey()
 
     PK.username = username
@@ -54,7 +56,7 @@ class Me {
     // l("Setting timeout for queue")
     setTimeout(() => {
       me.processQueue()
-    }, 10)
+    }, 100)
   }
 
   async byKey(pk) {
@@ -172,10 +174,29 @@ class Me {
     }
 
     await cache()
-    this.intervals.push(setInterval(cache, 2000))
+    this.intervals.push(setInterval(cache, 10000))
+
+    this.intervals.push(
+      setInterval(async () => {
+        var flushable = await Delta.findAll({
+          where: {
+            flush_requested_at: {
+              [Sequelize.Op.lt]: new Date() - 200
+            }
+          }
+        })
+
+        for (var fl of flushable) {
+          var ch = await me.getChannel(fl.partnerId)
+          ch.d.flush_requested_at = null
+          await ch.d.save()
+          await me.flushChannel(ch)
+        }
+      }, 200)
+    )
 
     if (this.my_member) {
-      me.consensus() // 1s intervals
+      me.consensus()
 
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
@@ -186,15 +207,15 @@ class Me {
 
       l('Bootstrapping local server at: ' + this.my_member.location)
 
-      me.wss = new ws.Server({
+      me.external_wss = new ws.Server({
         server: me.member_server,
         maxPayload: 64 * 1024 * 1024
       })
 
-      me.wss.on('error', function(err) {
+      me.external_wss.on('error', function(err) {
         console.error(err)
       })
-      me.wss.on('connection', function(ws) {
+      me.external_wss.on('connection', function(ws) {
         ws.on('message', async (msg) => {
           me.queue.push(async () => {
             return RPC.external_rpc(ws, msg)

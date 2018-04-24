@@ -9,17 +9,14 @@ settlelock - unlock inward hashlock by providing secret
 faillock - delete inward hashlock for some reason
 */
 
-module.exports = async (partner, force_flush = false) => {
+module.exports = async (ch, force_flush = false) => {
   //await sleep(2000)
 
   // First, we add a transition to the queue
-  var ch = await me.getChannel(partner)
 
   if (ch.d.status == 'sent') {
-    if (ch.d.pending) {
-      l(`Can't flush, awaiting ack.`)
-      //me.send(partner, 'update', ch.d.pending)
-    }
+    //l(`Can't flush, awaiting ack.`)
+    //me.send(partner, 'update', ch.d.pending)
     return false
   }
 
@@ -32,7 +29,7 @@ module.exports = async (partner, force_flush = false) => {
 
   // rollback cannot add new transitions because expects another ack
   // in rollback mode all you do is ack last (merged) state
-  if (ch.d.status != 'rollback') {
+  if (ch.d.status != 'merge') {
     var inwards = newState[ch.left ? 2 : 3]
     var payable = ch.payable
 
@@ -108,7 +105,8 @@ module.exports = async (partner, force_flush = false) => {
         if (inward) {
           inward.status = 'fail'
           await inward.save()
-          await me.flushChannel(inward.deltum.partnerId)
+          var notify = await me.getChannel(inward.deltum.partnerId)
+          await notify.d.requestFlush()
         }
         t.status = 'failed'
         await t.save()
@@ -163,9 +161,9 @@ module.exports = async (partner, force_flush = false) => {
   react()
 
   // If channel is master, send transitions now. Otherwise wait for ack
-  l(`Sending ${ch.partner} - Tr ${transitions.length}`)
+  //l(`Sending ${ch.partner} - Tr ${transitions.length}`)
 
-  if (!me.send(partner, 'update', envelope)) {
+  if (!me.send(ch.d.partnerId, 'update', envelope)) {
     //l(`${partner} not online, deliver later?`)
   }
 }

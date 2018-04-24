@@ -160,7 +160,7 @@ module.exports = async (genesis) => {
     location: K.members[0].location,
     pubkey: K.members[0].pubkey,
 
-    fee: 0.002,
+    fee: 0.015,
 
     handle: 'main',
     name: '@main (Main)'

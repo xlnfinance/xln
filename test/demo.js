@@ -62,6 +62,10 @@ commy = (b, dot = true) => {
   return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
+FS('getinfo', {}, (r) => {
+  l(r.address)
+})
+
 require('http')
   .createServer((req, res) => {
     cookies = new Cookies(req, res)
@@ -108,16 +112,10 @@ require('http')
       <p><button class="btn btn-success" id="deposit">Deposit</button></p>
 
       <h3>Withdraw</h3>
-      <p><input type="text" id="withdraw_invoice" placeholder="Invoice"></p>
-      <p><small>To withdraw create an invoice in your Failsafe wallet</small></p>
+      <p><input type="text" id="destination" placeholder="Destination"></p>
+      <p><input type="text" id="out_amount" placeholder="Amount"></p>
       <p><button class="btn btn-success" id="withdraw">Withdraw</button></p>
      
-
-      <p>Your node (user): ${LOCAL_FS_RPC}.</p>
-      <p>Our node (bank): ${FS_RPC}.</p>
-      <p>auth_code to control our node is read from ${FS_PATH}</p>
-
-      <p><button class="btn btn-success" id="login">Login with Failsafe</button></p>
 
    </main>
 
@@ -146,23 +144,14 @@ FS = function (invoice, cb) {
 
 </script>
 <script>
-//FYI sandbox="allow-scripts allow-modals" won't bypass it btw
 
-unpackInvoice = (i) => {
-  var i = i.split('_')
-  return {
-    amount: i[0],
-    userId: i[1],
-    hubId: i[2],
-    invoice: i[3]
-  }
-}
 
 window.onload = function(){
 
   withdraw.onclick = function(){
     axios.post('/init', {
-      withdraw_invoice: unpackInvoice(withdraw_invoice.value)
+      destination: destination.value,
+      out_amount: out_amount.value
     }).then((r2)=>{
       if (r2.data.status == 'paid') {
         location.reload()
@@ -173,30 +162,14 @@ window.onload = function(){
   }
 
   deposit.onclick = function(){
-    window.open(fs_origin)
+    var invoice = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(32)), function(byte) {
+      return ('0' + (byte & 0xFF).toString(16)).slice(-2);
+    }).join('')
+    window.open(fs_origin+'#invoice='+invoice+"&address=")
 
-    axios.post('/init', {
-      amount: parseFloat(amount.value)*100
-    }).then(r=>{
-      console.log("Invoice to pay: " + r.data)
-
-      FS(r.data, data=>{
-        l(data)
-        axios.post('/init', {
-          deposit_invoice: unpacked.invoice
-        }).then((r2)=>{
-          console.log(r2.data)
-          location.reload()
-        })
-      })
- 
-    })
+  
   }
 
-/*
-  login.onclick = function(){
-    FS('login').then(data=>l(data))
-  }*/
 
   
 }
@@ -224,34 +197,20 @@ window.onload = function(){
             }
             res.end(JSON.stringify({status: 'paid'}))
           })
-        } else if (p.withdraw_invoice) {
-          if (users[id] < p.withdraw_invoice) {
+        } else if (p.destination) {
+          var amount = parseInt(p.out_amount)
+          if (users[id] < amount) {
             l('Not enough balance')
             return false
           }
-
-          users[id] -= p.withdraw_invoice.amount
-
-          FS('send', p.withdraw_invoice, (r) => {
-            if (r.data.status == 'paid') {
-              l('Withdrawn')
-            } else {
-              console.log('Expired')
-            }
-
-            res.end(JSON.stringify({status: 'paid'}))
-          })
-        } else if (p.amount) {
+          users[id] -= amount
           FS(
-            'invoice',
-            {
-              amount: p.amount,
-              partner: preferredHub,
-              asset: p.asset,
-              extra: id
-            },
+            'send',
+            {outward: {destination: p.destination, amount: amount}},
             (r) => {
-              res.end(JSON.stringify(r.data.new_invoice))
+              l(r.data)
+
+              res.end(JSON.stringify({status: 'paid'}))
             }
           )
         }

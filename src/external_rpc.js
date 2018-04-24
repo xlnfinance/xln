@@ -90,7 +90,7 @@ module.exports = async (ws, msg) => {
 
     // no precommits means dry run
     if (!await me.processBlock([], header, ordered_tx_body)) {
-      return l('Invalid block header')
+      return l('Invalid block header: ', header)
     }
 
     // consensus operations are in-memory for now
@@ -159,12 +159,41 @@ module.exports = async (ws, msg) => {
 
     // testnet stuff
   } else if (inputType == 'testnet') {
-    var pubkey = msg.slice(1)
     if (msg[0] == 1) {
-      await me.flushChannel({
-        partner: pubkey,
-        amount: Math.round(Math.random() * 10000)
+      var secret = crypto.randomBytes(32)
+      var hash = sha3(secret)
+      var [box_pubkey, pubkey] = r(msg.slice(1))
+      var amount = Math.round(Math.random() * 10000)
+
+      var unlocker_nonce = crypto.randomBytes(24)
+      var unlocker_box = nacl.box(
+        r([amount, secret, Buffer([1])]),
+        unlocker_nonce,
+        box_pubkey,
+        me.box.secretKey
+      )
+      var unlocker = r([
+        bin(unlocker_box),
+        unlocker_nonce,
+        bin(me.box.publicKey)
+      ])
+      var ch = await me.getChannel(pubkey)
+
+      await ch.d.save()
+
+      await ch.d.createPayment({
+        status: 'add',
+        is_inward: false,
+
+        amount: amount,
+        hash: hash,
+        exp: K.usable_blocks + 10,
+
+        unlocker: unlocker,
+        destination: pubkey
       })
+
+      await ch.d.requestFlush()
     }
 
     if (msg[0] == 2) {
@@ -240,7 +269,7 @@ module.exports = async (ws, msg) => {
     await ch.d.save()
     l('Received updated limits')
 
-    // other party wants to withdraw on-chain
+    // other party wants to withdraw onchain
   } else if (inputType == 'requestWithdraw') {
     // partner asked us for instant withdrawal
     var [pubkey, sig, body] = r(msg)
@@ -278,7 +307,7 @@ module.exports = async (ws, msg) => {
       r([me.pubkey, ec(input, me.id.secretKey), r([amount])])
     )
 
-    // other party gives withdrawal on-chain
+    // other party gives withdrawal onchain
   } else if (inputType == 'withdrawal') {
     var [pubkey, sig, body] = r(msg)
 
