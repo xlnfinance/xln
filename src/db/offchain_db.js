@@ -136,8 +136,10 @@ Delta.prototype.saveState = async function(state, ackSig) {
 
 Delta.prototype.requestFlush = async function() {
   if (!this.flush_requested_at) {
-    this.flush_requested_at = new Date()
-    await this.save()
+    //this.flush_requested_at = new Date()
+    //await this.save()
+    var ch = await me.getChannel(this.partnerId)
+    await me.flushChannel(ch)
   }
 }
 

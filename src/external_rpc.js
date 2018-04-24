@@ -195,7 +195,7 @@ module.exports = async (ws, msg) => {
         invoice: invoice
       })
 
-      await ch.d.requestFlush()
+      await me.flushChannel(ch)
     }
 
     if (msg[0] == 2) {

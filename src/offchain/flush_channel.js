@@ -6,17 +6,24 @@ inward payments: added > (we received it with transitions) > settle/fail (pendin
 
 add - add outward hashlock
 settle - unlock inward hashlock by providing secret
-fail - delete inward hashlock for some reason
+fail - delete inward hashlock for some reason.
+
+This module has 3 types of behavior:
+regular flush: flushes ack with or without transitions
+opportunistic flush: flushes only if there are any transitions (used after receiving empty ack response)
+during merge: no transitions can be applied, otherwise deadlock could happen
 */
 
-module.exports = async (ch, force_flush = false) => {
+module.exports = async (ch, opportunistic = false) => {
   //await sleep(2000)
+
+  var ch = await me.getChannel(ch.d.partnerId)
 
   // First, we add a transition to the queue
 
   if (ch.d.status == 'sent') {
-    //l(`Can't flush, awaiting ack.`)
-    //me.send(partner, 'update', ch.d.pending)
+    l(`Can't flush, awaiting ack. Repeating our request`)
+    me.send(ch.d.partnerId, 'update', ch.d.pending)
     return false
   }
 
@@ -27,8 +34,8 @@ module.exports = async (ch, force_flush = false) => {
   // array of actions to apply to canonical state
   var transitions = []
 
-  // rollback cannot add new transitions because expects another ack
-  // in rollback mode all you do is ack last (merged) state
+  // merge cannot add new transitions because expects another ack
+  // in merge mode all you do is ack last (merged) state
   if (ch.d.status != 'merge') {
     var inwards = newState[ch.left ? 2 : 3]
     var payable = ch.payable
@@ -104,12 +111,8 @@ module.exports = async (ch, force_flush = false) => {
       await t.save()
     }
 
-    if (transitions.length == 0) {
-      if (!force_flush) {
-        return //l('No transitions to flush')
-      }
-    } else {
-      ch.d.status = 'sent'
+    if (opportunistic && transitions.length == 0) {
+      return l('Nothing to flush')
     }
   }
 
@@ -127,11 +130,10 @@ module.exports = async (ch, force_flush = false) => {
 
   if (transitions.length > 0) {
     ch.d.pending = envelope
+    ch.d.status = 'sent'
   }
 
   await ch.d.save()
-
-  react()
 
   if (!me.send(ch.d.partnerId, 'update', envelope)) {
     //l(`${partner} not online, deliver later?`)

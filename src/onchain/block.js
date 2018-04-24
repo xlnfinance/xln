@@ -1,7 +1,7 @@
 // Block processing code. Verifies precommits sigs then executes tx in it one by one
 module.exports = async (precommits, header, ordered_tx_body) => {
-  if (header.length > 200) {
-    return l('Too long header')
+  if (header.length < 64 || header.length > 200) {
+    return l('Invalid header length')
   }
 
   if (ordered_tx_body.length > K.blocksize) {

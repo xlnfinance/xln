@@ -527,7 +527,7 @@ FS.onready(() => {
 
         <div v-if="record">
           <h2>Balance onchain: <b>{{commy(record.balance)}}</b></h2>
-          <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with a hub. It is also used to cover onchain transaction fees. Your onchain ID: <b>{{record.id}}</b></p>
+          <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with any hub. Your onchain ID: <b>{{record.id}}</b></p>
 
           <hr />
         </div>
@@ -767,7 +767,7 @@ FS.onready(() => {
       <div v-for="p in proposals">
         <h4>#{{p.id}}: {{p.desc}}</h4>
         <small>Proposed by #{{p.user.id}}</small>
-        <div v-html="icon(toHexString(p.user.pubkey.data),30)"></div>
+        <div v-html="icon(p.user.pubkey, 30)"></div>
 
         <pre><code class="javascript hljs" v-html="hljs('javascript',p.code).value"></code></pre>
 
@@ -777,7 +777,7 @@ FS.onready(() => {
         </div>
 
         <p v-for="u in p.voters">
-          <div v-html="icon(toHexString(u.pubkey.data),30)"></div>
+          <div v-html="icon(u.pubkey,30)"></div>
           <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by #{{u.id}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
         </p>
 
@@ -897,10 +897,10 @@ FS.onready(() => {
         <tbody>
 
           <tr v-for="u in users">
-            <th v-html="icon(toHexString(u.pubkey.data),30)"></th>
+            <th v-html="icon(u.pubkey,30)"></th>
 
             <th scope="row">{{u.id}}</th>
-            <td><small>{{toHexString(u.pubkey.data).substr(0,10)}}..</small></td>
+            <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
             <td>{{commy(u.balance)}}</td>
             <td>{{u.nonce}}</td>
             <td>{{u.debts.length}}</td>

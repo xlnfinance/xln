@@ -16,27 +16,39 @@ module.exports = async (msg) => {
     return false
   }
 
+  var ch = await me.getChannel(pubkey)
+
+  oldState = r(ch.d.signed_state)
+  prettyState(oldState)
+
   prettyState(debugState)
   prettyState(signedState)
-
-  var ch = await me.getChannel(pubkey)
 
   // first, clone what they can pay and decrement
   var receivable = ch.they_payable
 
   // an array of partners we need to ack or flush changes at the end of processing
-  var flushable = [pubkey]
+  var flushable = []
+
+  // indexOf doesn't work with Buffers
+  var uniqAdd = (add) => {
+    if (!flushable.find((f) => f.equals(add))) {
+      flushable.push(add)
+    }
+  }
 
   // this is state we are on right now.
   var newState = await ch.d.getState()
 
   var rollback = [0, 0]
 
-  l(
-    `ours ${newState[1][2]} but ${debugState[1][2]}. We are in: ${
-      ch.d.status
-    } Tx ${transitions.length}`
-  )
+  if (newState[1][2] != debugState[1][2]) {
+    l(
+      `# ${newState[1][2]} vs ${debugState[1][2]} vs ${oldState[1][2]}. ${
+        transitions.length
+      }`
+    )
+  }
   //l(stringify(newState))
   //l(stringify(debugState))
 
@@ -51,11 +63,6 @@ module.exports = async (msg) => {
     }
 
     /*
-    logstate(newState)
-    logstate(oldState)
-    logstate(debugState)
-    logstate(signedState)
-
 
     We received an acksig that doesnt match our current state. Apparently the partner sent
     transitions simultaneously. 
@@ -69,7 +76,15 @@ module.exports = async (msg) => {
     */
 
     if (!await ch.d.saveState(oldState, ackSig)) {
-      return l('Dead lock!')
+      logstate(newState)
+      logstate(oldState)
+      logstate(debugState)
+      logstate(signedState)
+
+      l('Dead lock! Trying to recover by sending last ack')
+      await me.flushChannel(ch)
+
+      return false
     } else {
       l('Rollback to old state')
 
@@ -86,6 +101,7 @@ module.exports = async (msg) => {
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (var t of transitions) {
     var m = methodMap(readInt(t[0]))
+
     if (m == 'add') {
       var [amount, hash, exp, destination, unlocker] = t[1]
 
@@ -98,13 +114,8 @@ module.exports = async (msg) => {
       receivable -= amount
 
       newState[1][2]++ //nonce
-      if (m == 'add') {
-        // push a hashlock
-        newState[ch.left ? 2 : 3].push([amount, hash, exp])
-      } else {
-        // modify offdelta directly
-        //newState[4] += offdelta
-      }
+      // push a hashlock
+      newState[ch.left ? 2 : 3].push([amount, hash, exp])
 
       // check new state and sig, save
       if (!await ch.d.saveState(newState, t[2])) {
@@ -177,7 +188,7 @@ module.exports = async (msg) => {
             destination: destination
           })
 
-          if (flushable.indexOf(destination) == -1) flushable.push(destination)
+          uniqAdd(dest_ch.d.partnerId)
         } else {
           hl.status = 'fail'
           await hl.save()
@@ -226,15 +237,13 @@ module.exports = async (msg) => {
       })
 
       if (inward) {
-        l('Found an mediated inward to unlock with ', inward.deltum.partnerId)
+        l('Found inward to unlock with ', inward.deltum.partnerId)
 
         inward.secret = secret
         inward.status = 'settle'
         await inward.save()
 
-        var pull_from = inward.deltum.partnerId
-
-        if (flushable.indexOf(pull_from) == -1) flushable.push(pull_from)
+        uniqAdd(inward.deltum.partnerId)
       } else {
         //react({confirm: 'Payment completed'})
       }
@@ -280,10 +289,7 @@ module.exports = async (msg) => {
       if (inward) {
         inward.status = 'fail'
         await inward.save()
-
-        var pull_from = inward.deltum.partnerId
-
-        if (flushable.indexOf(pull_from) == -1) flushable.push(pull_from)
+        uniqAdd(inward.deltum.partnerId)
       } else {
         //react({alert: 'Payment failed'})
       }
@@ -300,19 +306,23 @@ module.exports = async (msg) => {
     ch.d.status = 'merge'
 
     var st = await ch.d.getState()
-    //l('After rollback we are at: ')
-    //logstate(st)
+    l('After rollback we are at: ')
+    logstate(st)
   }
 
   await ch.d.save()
 
-  // We only flush when there were any transitions. Not if was just an empty ack
-  if (transitions.length > 0) {
-    for (var fl of flushable) {
-      var ch = await me.getChannel(fl)
-      await ch.d.requestFlush()
-    }
+  // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)
+  // Otherwise give forced ack to the partner
+  await me.flushChannel(ch, transitions.length == 0)
+
+  for (var fl of flushable) {
+    var ch = await me.getChannel(fl)
+    // can be opportunistic also
+    await me.flushChannel(ch, true)
+    //await ch.d.requestFlush()
   }
+
   react()
 
   /*

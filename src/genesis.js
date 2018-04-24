@@ -73,12 +73,13 @@ module.exports = async (genesis) => {
 
     members: [],
     hubs: [],
+    flush_timeout: 250,
     min_fee: 1
   }
 
   // Defines global Byzantine tolerance parameter
   // 0 would require 1 validator, 1 - 4, 2 - 7.
-  // Our final goal is at least 3333 tolerance with 10,000 validators
+  // Long term goal is 3333 tolerance with 10,000 validators
   K.tolerance = 1
 
   K.total_shares = K.tolerance * 3 + 1
@@ -164,6 +165,17 @@ module.exports = async (genesis) => {
 
     handle: 'main',
     name: '@main (Main)'
+  })
+
+  K.hubs.push({
+    id: K.members[3].id,
+    location: K.members[3].location,
+    pubkey: K.members[3].pubkey,
+
+    fee: 0.001,
+
+    handle: 'jp',
+    name: '@jp (Japan)'
   })
 
   var left =

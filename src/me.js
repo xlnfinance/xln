@@ -181,7 +181,7 @@ class Me {
         var flushable = await Delta.findAll({
           where: {
             flush_requested_at: {
-              [Sequelize.Op.lt]: new Date() - 100
+              [Sequelize.Op.lt]: new Date() - K.flush_timeout
             }
           }
         })
@@ -191,9 +191,13 @@ class Me {
           //l('Flushing channel for ', fl.partnerId)
           ch.d.flush_requested_at = null
           await ch.d.save()
-          await me.flushChannel(ch, true)
+          await me.flushChannel(ch)
         }
-      }, 100)
+
+        if (flushable.length > 0) {
+          react()
+        }
+      }, K.flush_timeout)
     )
 
     if (this.my_member) {

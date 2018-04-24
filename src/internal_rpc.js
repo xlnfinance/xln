@@ -103,9 +103,9 @@ module.exports = async (ws, msg) => {
         var secret = crypto.randomBytes(32)
         var hash = sha3(secret)
 
-        var invoice = p.outward.invoice
-          ? bin(p.outward.invoice)
-          : crypto.randomBytes(32)
+        var invoice = bin(
+          p.outward.invoice ? p.outward.invoice : toHex(crypto.randomBytes(20))
+        )
 
         var [box_pubkey, pubkey] = r(base58.decode(p.outward.destination))
         var amount = parseInt(p.outward.amount)
@@ -147,8 +147,8 @@ module.exports = async (ws, msg) => {
             destination: pubkey,
             invoice: invoice.toString()
           })
-
-          await ch.d.requestFlush()
+          await me.flushChannel(ch)
+          //await ch.d.requestFlush()
 
           //result.confirm = 'Payment sent...'
         }
