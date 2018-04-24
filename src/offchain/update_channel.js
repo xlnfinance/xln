@@ -46,9 +46,9 @@ module.exports = async (msg) => {
     oldState = r(ch.d.signed_state)
     prettyState(oldState)
 
-    //if (ch.d.status == 'merge') {
-    //return l('Rollback cant rollback')
-    //}
+    if (ch.d.status == 'merge') {
+      return l('Rollback cant rollback')
+    }
 
     /*
     logstate(newState)
@@ -86,7 +86,7 @@ module.exports = async (msg) => {
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (var t of transitions) {
     var m = methodMap(readInt(t[0]))
-    if (m == 'addlock' || m == 'add') {
+    if (m == 'add') {
       var [amount, hash, exp, destination, unlocker] = t[1]
 
       exp = readInt(exp)
@@ -98,7 +98,7 @@ module.exports = async (msg) => {
       receivable -= amount
 
       newState[1][2]++ //nonce
-      if (m == 'addlock') {
+      if (m == 'add') {
         // push a hashlock
         newState[ch.left ? 2 : 3].push([amount, hash, exp])
       } else {
@@ -108,12 +108,12 @@ module.exports = async (msg) => {
 
       // check new state and sig, save
       if (!await ch.d.saveState(newState, t[2])) {
-        l('Invalid state sig addlock')
+        l('Invalid state sig add')
         break
       }
 
       var hl = await ch.d.createPayment({
-        status: 'added',
+        status: 'add_sent',
         is_inward: true,
 
         amount: amount,
@@ -139,12 +139,13 @@ module.exports = async (msg) => {
           var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
-          invoices[toHex(box_invoice)] = {
+          invoices[box_invoice] = {
             amount: box_amount,
             asset: 0
           }
 
           //react({confirm: 'Received a payment'})
+          hl.invoice = box_invoice.toString()
 
           hl.secret = box_secret
           hl.status = 'settle'
@@ -184,7 +185,7 @@ module.exports = async (msg) => {
       } else {
         l('We arent receiver and arent a hub O_O')
       }
-    } else if (m == 'settlelock' || m == 'settle') {
+    } else if (m == 'settle') {
       var secret = t[1]
       var hash = sha3(secret)
 
@@ -216,7 +217,7 @@ module.exports = async (msg) => {
       }))[0]
 
       outward.secret = secret
-      outward.status = 'settled'
+      outward.status = 'settle_sent'
       await outward.save()
 
       var inward = await Payment.findOne({
@@ -225,7 +226,7 @@ module.exports = async (msg) => {
       })
 
       if (inward) {
-        //l('Found an mediated inward to unlock with ', inward.deltum.partnerId)
+        l('Found an mediated inward to unlock with ', inward.deltum.partnerId)
 
         inward.secret = secret
         inward.status = 'settle'
@@ -243,7 +244,7 @@ module.exports = async (msg) => {
           'HANDICAP ON: not settling on a given secret, but pulling from inward'
         )
       }
-    } else if (m == 'faillock' || m == 'fail') {
+    } else if (m == 'fail') {
       var hash = t[1]
 
       var index = outwards.findIndex((hl) => hl[1].equals(hash))
@@ -271,7 +272,7 @@ module.exports = async (msg) => {
         include: {all: true}
       }))[0]
 
-      outward.status = 'failed'
+      outward.status = 'fail_sent'
       await outward.save()
 
       var inward = await outward.getInward()

@@ -103,7 +103,9 @@ module.exports = async (ws, msg) => {
         var secret = crypto.randomBytes(32)
         var hash = sha3(secret)
 
-        var invoice = crypto.randomBytes(32)
+        var invoice = p.outward.invoice
+          ? bin(p.outward.invoice)
+          : crypto.randomBytes(32)
 
         var [box_pubkey, pubkey] = r(base58.decode(p.outward.destination))
         var amount = parseInt(p.outward.amount)
@@ -142,7 +144,8 @@ module.exports = async (ws, msg) => {
             exp: K.usable_blocks + 10,
 
             unlocker: unlocker,
-            destination: pubkey
+            destination: pubkey,
+            invoice: invoice.toString()
           })
 
           await ch.d.requestFlush()

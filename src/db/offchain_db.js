@@ -88,6 +88,9 @@ Payment = privSequelize.define('payment', {
   // string to be decrypted by outward
   unlocker: Sequelize.TEXT,
 
+  // user-specified or randomly generated private message
+  invoice: Sequelize.TEXT,
+
   // secret that unlocks hash
   secret: Sequelize.TEXT
 })
@@ -143,14 +146,14 @@ Delta.prototype.getState = async function() {
 
   var inwards = (await this.getPayments({
     where: {
-      status: {[Sequelize.Op.or]: ['added', 'settle', 'fail']},
+      status: {[Sequelize.Op.or]: ['add_sent', 'settle', 'fail']},
 
       is_inward: true
     }
   })).map((t) => [t.amount, t.hash, t.exp])
 
   var outwards = (await this.getPayments({
-    where: {status: 'added', is_inward: false}
+    where: {status: 'add_sent', is_inward: false}
   })).map((t) => [t.amount, t.hash, t.exp])
 
   var state = [

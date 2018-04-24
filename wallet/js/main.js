@@ -284,13 +284,13 @@ FS.onready(() => {
       return str ? str.slice(0, 8) + '...' : ''
     },
     payment_status: (status, is_inward) => {
-      if (status == 'settled') {
+      if (status == 'settle_sent' || status == 'settle') {
         return '✔ ' + (is_inward ? 'Received' : 'Paid')
       }
-      if (status == 'failed') {
+      if (status == 'fail_sent') {
         return '❌ ' + (is_inward ? 'Failed' : 'Failed')
       }
-      if (status == 'added') return '🔒 Pending'
+      if (status == 'add_sent') return '🔒 Pending'
 
       return '🕟 Wait'
     }
@@ -564,14 +564,18 @@ FS.onready(() => {
 
         <div class="col-sm-6">
           <p><div class="input-group" style="width:400px" >
-            <input type="text" class="form-control small-input" v-model="outward.destination" placeholder="Destination Address" aria-describedby="basic-addon2">
+            <input type="text" class="form-control small-input" v-model="outward.destination" placeholder="Address" aria-describedby="basic-addon2">
           </div></p>
 
           <p><div class="input-group" style="width:400px" >
             <input type="text" class="form-control small-input" v-model="outward.amount" placeholder="Amount" aria-describedby="basic-addon2">
           </div></p>
 
-          <p><button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, amount: uncommy(outward.amount)}})">Pay Now → </button></p>
+          <p><div class="input-group" style="width:400px" >
+            <input type="text" class="form-control small-input" v-model="outward.invoice" placeholder="Private Message (optional)" aria-describedby="basic-addon2">
+          </div></p>
+
+          <p><button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, amount: uncommy(outward.amount), invoice: outward.invoice}})">Pay Now → </button></p>
 
           <p><button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 1 })">Testnet Faucet</button></p>
 
@@ -583,7 +587,7 @@ FS.onready(() => {
             <tr>
               <th width="150px">Status</th>
               <th>Amount</th>
-              <th>Destination</th>
+              <th>Details</th>
               <th>Date</th>
             </tr>
           </thead>
@@ -591,7 +595,7 @@ FS.onready(() => {
             <tr v-for="h in payments.slice(history_limits[0], history_limits[1])">
               <td>{{payment_status(h.status, h.is_inward)}}</td>
               <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-              <td>{{trim(h.destination)}}</td>
+              <td>{{h.invoice}}. {{h.destination ? trim(h.destination) : ''}}</td>
               <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
             </tr>
             <tr v-if="payments.length > history_limits[1]"><td colspan="7" align="center"><a @click="history_limits[1] += 20">Show More</a></td></tr>

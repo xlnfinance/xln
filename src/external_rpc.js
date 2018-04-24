@@ -164,10 +164,11 @@ module.exports = async (ws, msg) => {
       var hash = sha3(secret)
       var [box_pubkey, pubkey] = r(msg.slice(1))
       var amount = Math.round(Math.random() * 10000)
+      var invoice = Buffer([1])
 
       var unlocker_nonce = crypto.randomBytes(24)
       var unlocker_box = nacl.box(
-        r([amount, secret, Buffer([1])]),
+        r([amount, secret, invoice]),
         unlocker_nonce,
         box_pubkey,
         me.box.secretKey
@@ -190,7 +191,8 @@ module.exports = async (ws, msg) => {
         exp: K.usable_blocks + 10,
 
         unlocker: unlocker,
-        destination: pubkey
+        destination: pubkey,
+        invoice: invoice
       })
 
       await ch.d.requestFlush()

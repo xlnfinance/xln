@@ -353,28 +353,28 @@ methodMap = (i) => {
     'grantMaster',
 
     // 10,[] => 15,[] - add directly to base offdelta
-    'add',
+    'addrisk',
 
     // 15,[] => 15,[] - (NOT STATE CHANGING) offdelta remains the same, there was no hashlock
-    'settle',
+    'settlerisk',
 
     // 15,[] => 10,[] - secret not found, offdelta is decreased voluntarily
-    'fail',
+    'failrisk',
 
     // 10,[] => 10,[[5,H1,E1]]
-    'addlock', // we add hashlock transfer to state.
+    'add', // we add hashlock transfer to state.
 
     // 10,[[5,H1,E1]] => 15,[]
-    'settlelock', // we've got the secret so please unlock and apply to base offdelta
+    'settle', // we've got the secret so please unlock and apply to base offdelta
 
     // 10,[[5,H1,E1]] => 10,[]
-    'faillock', // couldn't get secret for <reason>, delete hashlock
+    'fail', // couldn't get secret for <reason>, delete hashlock
 
     'auth' // any kind of offchain auth signatures between peers
   ]
 
   if (typeof i === 'string') {
-    if (map.indexOf(i) == -1) throw 'No such method'
+    if (map.indexOf(i) == -1) throw 'No such method: ' + i
     return map.indexOf(i)
   } else {
     return map[i]
