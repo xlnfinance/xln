@@ -93,6 +93,8 @@ Insurance = sequelize.define('insurance', {
   // increased offchain. When disputed, higher one is true
   dispute_nonce: Sequelize.INTEGER,
   dispute_offdelta: Sequelize.INTEGER,
+  // two arrays of hashlocks, inwards for left and inwards for right
+  dispute_hashlocks: Sequelize.TEXT,
 
   // started by left user?
   dispute_left: Sequelize.BOOLEAN

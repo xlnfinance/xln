@@ -399,6 +399,16 @@ module.exports = async (tx, meta) => {
 
       break
 
+    case 'reveal':
+      for (var secret of args) {
+        await Hashlock.create({
+          hash: sha3(secret),
+          revealed_at: K.usable_blocks
+        })
+      }
+
+      break
+
     // Governance methods below: proposing and voting on patches
 
     case 'propose':

@@ -160,6 +160,10 @@ module.exports = async (msg) => {
 
           hl.secret = box_secret
           hl.status = 'settle'
+
+          // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our settle on time and the hashlock expires making us lose the money.
+          // SECURITY: if after timeout the settle is not acked, go to blockchain ASAP to reveal the preimage!
+          hl.settled_at = new Date()
         }
 
         await hl.save()
@@ -196,9 +200,14 @@ module.exports = async (msg) => {
       } else {
         l('We arent receiver and arent a hub O_O')
       }
-    } else if (m == 'settle') {
-      var secret = t[1]
-      var hash = sha3(secret)
+    } else if (m == 'settle' || m == 'fail') {
+      if (m == 'settle') {
+        var secret = t[1]
+        var hash = sha3(secret)
+      } else {
+        var secret = null
+        var hash = t[1]
+      }
 
       var index = outwards.findIndex((hl) => hl[1].equals(hash))
       var hl = outwards[index]
@@ -208,19 +217,22 @@ module.exports = async (msg) => {
         break
       }
 
-      // secret was provided, apply to offdelta
       newState[1][2]++ //nonce
-      newState[1][3] += ch.left ? -hl[0] : hl[0]
-      receivable += hl[0]
       outwards.splice(index, 1)
+
+      if (m == 'settle') {
+        // secret was provided - remove & apply hashlock on offdelta
+        newState[1][3] += ch.left ? -hl[0] : hl[0]
+        receivable += hl[0]
+      } else {
+        // secret wasn't provided, delete lock
+      }
 
       // check new state and sig, save
       if (!await ch.d.saveState(newState, t[2])) {
-        l('Invalid state sig settle')
+        l('Invalid state sig at ' + m)
         break
       }
-
-      await ch.d.saveState(newState, t[2])
 
       var outward = (await ch.d.getPayments({
         where: {hash: hash, is_inward: false},
@@ -228,19 +240,17 @@ module.exports = async (msg) => {
       }))[0]
 
       outward.secret = secret
-      outward.status = 'settle_sent'
+      outward.status = m + '_sent'
+
       await outward.save()
 
-      var inward = await Payment.findOne({
-        where: {hash: hash, is_inward: true},
-        include: {all: true}
-      })
+      var inward = await outward.getInward()
 
       if (inward) {
-        l('Found inward to unlock with ', inward.deltum.partnerId)
+        l('Found inward ', inward.deltum.partnerId)
 
         inward.secret = secret
-        inward.status = 'settle'
+        inward.status = m
         await inward.save()
 
         uniqAdd(inward.deltum.partnerId)
@@ -253,51 +263,8 @@ module.exports = async (msg) => {
           'HANDICAP ON: not settling on a given secret, but pulling from inward'
         )
       }
-    } else if (m == 'fail') {
-      var hash = t[1]
-
-      var index = outwards.findIndex((hl) => hl[1].equals(hash))
-      var hl = outwards[index]
-
-      if (!hl) {
-        l('No such hashlock')
-        break
-      }
-
-      // secret wasn't provided, delete lock
-      newState[1][2]++ //nonce
-      outwards.splice(index, 1)
-
-      // check new state and sig, save
-      if (!await ch.d.saveState(newState, t[2])) {
-        l('Invalid state sig fail ')
-        break
-      }
-
-      await ch.d.saveState(newState, t[2])
-
-      var outward = (await ch.d.getPayments({
-        where: {hash: hash, is_inward: false},
-        include: {all: true}
-      }))[0]
-
-      outward.status = 'fail_sent'
-      await outward.save()
-
-      var inward = await outward.getInward()
-
-      if (inward) {
-        inward.status = 'fail'
-        await inward.save()
-        uniqAdd(inward.deltum.partnerId)
-      } else {
-        //react({alert: 'Payment failed'})
-      }
     }
   }
-
-  ch.d.status = 'master'
-  ch.d.pending = null
 
   // since we applied partner's diffs, all we need is to add the diff of our own transitions
   if (rollback[0] > 0) {
@@ -308,6 +275,9 @@ module.exports = async (msg) => {
     var st = await ch.d.getState()
     l('After rollback we are at: ')
     logstate(st)
+  } else {
+    ch.d.status = 'master'
+    ch.d.pending = null
   }
 
   await ch.d.save()

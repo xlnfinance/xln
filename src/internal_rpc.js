@@ -242,10 +242,10 @@ module.exports = async (ws, msg) => {
         return false
 
         break
-
       case 'getinfo':
         result.address = me.address
 
+        break
       case 'testnet':
         me.send(
           Members.find((m) => m.id == p.partner),

@@ -22,8 +22,10 @@ module.exports = async (ch, opportunistic = false) => {
   // First, we add a transition to the queue
 
   if (ch.d.status == 'sent') {
-    l(`Can't flush, awaiting ack. Repeating our request`)
-    me.send(ch.d.partnerId, 'update', ch.d.pending)
+    if (ch.d.flushed_at < new Date() - 10000) {
+      l(`Can't flush, awaiting ack. Repeating our request`)
+      me.send(ch.d.partnerId, 'update', ch.d.pending)
+    }
     return false
   }
 
@@ -36,7 +38,7 @@ module.exports = async (ch, opportunistic = false) => {
 
   // merge cannot add new transitions because expects another ack
   // in merge mode all you do is ack last (merged) state
-  if (ch.d.status != 'merge') {
+  if (ch.d.status == 'master') {
     var inwards = newState[ch.left ? 2 : 3]
     var payable = ch.payable
 
@@ -129,6 +131,7 @@ module.exports = async (ch, opportunistic = false) => {
   ch.d.offdelta = newState[1][3]
 
   if (transitions.length > 0) {
+    ch.d.flushed_at = new Date()
     ch.d.pending = envelope
     ch.d.status = 'sent'
   }

@@ -42,6 +42,7 @@ Delta = privSequelize.define('delta', {
   they_hard_limit: Sequelize.INTEGER, // they trust us
 
   flush_requested_at: Sequelize.DATE,
+  flushed_at: Sequelize.DATE,
   last_online: Sequelize.DATE,
   withdrawal_requested_at: Sequelize.DATE,
 
@@ -92,7 +93,9 @@ Payment = privSequelize.define('payment', {
   invoice: Sequelize.TEXT,
 
   // secret that unlocks hash
-  secret: Sequelize.TEXT
+  secret: Sequelize.TEXT,
+
+  settled_at: Sequelize.DATE
 })
 
 Delta.hasMany(Payment)
@@ -221,16 +224,4 @@ Block = privSequelize.define('block', {
   total_tx: Sequelize.INTEGER
 })
 
-/*
-History = privSequelize.define('history', {
-  leftId: Sequelize.CHAR(32).BINARY,
-  rightId: Sequelize.CHAR(32).BINARY,
 
-  date: {type: Sequelize.DATE, defaultValue: Sequelize.NOW},
-  delta: Sequelize.INTEGER,
-
-  amount: Sequelize.INTEGER,
-  balance: Sequelize.INTEGER,
-  desc: Sequelize.TEXT
-})
-*/

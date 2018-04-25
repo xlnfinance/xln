@@ -437,6 +437,7 @@ FS.onready(() => {
 
           <li><a class="nav-link" @click="go('assets')" href="#">Assets</a></li>
           <li><a class="nav-link" @click="go('hubs')" href="#">Hubs</a></li>
+          <li><a class="nav-link" @click="go('hashlocks')" href="#">Hashlocks</a></li>
 
 
         </ul>
@@ -553,7 +554,7 @@ FS.onready(() => {
           {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}}
           </small> 
           
-          <p><div v-if="false && ch.bar > 0">
+          <p><div v-if="ch.bar > 0">
             <div class="progress" style="max-width:1400px">
               <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}"   class="progress-bar"  role="progressbar">
                 -{{commy(ch.promised)}} (we promised)

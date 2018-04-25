@@ -25,17 +25,15 @@ l(FS_PATH)
 // pointing browser SDK to user node
 LOCAL_FS_RPC = 'http://127.0.0.1:8001'
 
-preferredHub = 1
+if (fs.existsSync(FS_PATH + '/private/pk.json')) {
+  auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json'))
+    .auth_code
+  l('Auth code to our node: ' + auth_code)
+} else {
+  throw 'No auth'
+}
 
 FS = (method, params, cb) => {
-  if (fs.existsSync(FS_PATH + '/private/pk.json')) {
-    auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json'))
-      .auth_code
-    l('Auth code to our node: ' + auth_code)
-  } else {
-    throw 'No auth'
-  }
-
   axios
     .post(FS_RPC, {
       method: method,
@@ -63,7 +61,8 @@ commy = (b, dot = true) => {
 }
 
 FS('getinfo', {}, (r) => {
-  l(r.address)
+  address = r.address
+  l(address)
 })
 
 require('http')
@@ -106,9 +105,8 @@ require('http')
       <p>Available Balance: <b>\$${commy(users[id])}</b></p>
      
       <h3>Deposit</h3>
-      <p class="form-label-group">
-        <input id="amount" placeholder="Amount">
-      </p>
+      <a href="#" onclick="deposit">${address}</a>
+
       <p><button class="btn btn-success" id="deposit">Deposit</button></p>
 
       <h3>Withdraw</h3>
@@ -165,7 +163,8 @@ window.onload = function(){
     var invoice = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(32)), function(byte) {
       return ('0' + (byte & 0xFF).toString(16)).slice(-2);
     }).join('')
-    window.open(fs_origin+'#invoice='+invoice+"&address=")
+
+    window.open(fs_origin+'#invoice='+invoice+"&address=${address}")
 
   
   }
