@@ -4,7 +4,17 @@
 l = console.log
 ts = () => Math.round(new Date() / 1000)
 
-var pay_invoice = location.hash.split('invoice=')
+hashargs = location.hash.split('/')[1]
+
+hashargs = hashargs
+  ? hashargs
+      .split('&')
+      .map((el) => el.split('='))
+      .reduce((pre, cur) => {
+        pre[cur[0]] = cur[1]
+        return pre
+      }, {})
+  : {}
 
 renderRisk = (hist) => {
   var precision = 100 // devide time by
@@ -357,10 +367,11 @@ FS.onready(() => {
 
         settings: !localStorage.settings,
 
-        new_invoice: '',
-        pay_invoice: location.hash.split('invoice=')[1],
-        parsed_invoice: {},
-        outward: {},
+        outward: {
+          destination: hashargs['address'],
+          amount: hashargs['amount'],
+          invoice: hashargs['invoice']
+        },
 
         hardfork: ''
       }
