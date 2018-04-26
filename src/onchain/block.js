@@ -13,7 +13,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   timestamp = readInt(timestamp)
 
   if (K.prev_hash != prev_hash.toString('hex')) {
-    // l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
+    l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
     return false
   }
 
@@ -89,10 +89,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   // Current user ensures their tx was finalized
-  if (PK.pending_tx.length > 0) {
-    var raw = PK.pending_tx.map((tx) => Buffer.from(tx.raw, 'hex'))
+  if (PK.pending_batch) {
+    var raw = fromHex(PK.pending_batch)
     l('Rebroadcasting pending tx ', raw)
-    me.send(me.next_member(1), 'tx', r(raw))
+    me.send(me.next_member(1), 'tx', r([raw]))
   }
 
   K.ts = timestamp

@@ -127,7 +127,7 @@ module.exports = async (ws, msg) => {
       m.prevote = sig
       //l(`Received another prevote from  ${m.id}`)
     } else {
-      l("this sig doesn't work for our block")
+      l("this sig doesn't work for our block", me.proposed_block)
     }
   } else if (inputType == 'precommit') {
     var [pubkey, sig] = r(msg)
@@ -188,7 +188,7 @@ module.exports = async (ws, msg) => {
 
         amount: amount,
         hash: hash,
-        exp: K.usable_blocks + 10,
+        exp: K.usable_blocks + K.hashlock_exp,
 
         unlocker: unlocker,
         destination: pubkey,

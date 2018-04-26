@@ -97,7 +97,7 @@ module.exports = async (msg) => {
   }
 
   var outwards = newState[ch.left ? 3 : 2]
-
+  var inwards = newState[ch.left ? 2 : 3]
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (var t of transitions) {
     var m = methodMap(readInt(t[0]))
@@ -108,14 +108,34 @@ module.exports = async (msg) => {
       exp = readInt(exp)
       amount = readInt(amount)
 
-      if (amount < 0 || amount > receivable) {
-        return l('Invalid transfer ', amount)
+      var new_status = 'add_sent'
+
+      if (amount < K.min_amount || amount > receivable) {
+        l('Invalid amount ', amount)
+        new_status = 'fail'
       }
+
+      if (hash.length != 32) {
+        return l('Hash must be 32 bytes')
+      }
+
+      if (inwards.length >= K.max_hashlocks) {
+        return l('You try to set too many hashlocks')
+      }
+
+      var reveal_until = K.usable_blocks + K.hashlock_exp
+      // if usable blocks is 10 and default exp is 5, must be between 14-16
+
+      if (exp < reveal_until - 1 || exp > reveal_until + 1) {
+        new_status = 'fail'
+        l('Expiration is out of supported range')
+      }
+
       receivable -= amount
 
       newState[1][2]++ //nonce
       // push a hashlock
-      newState[ch.left ? 2 : 3].push([amount, hash, exp])
+      inwards.push([amount, hash, exp])
 
       // check new state and sig, save
       if (!await ch.d.saveState(newState, t[2])) {
@@ -124,15 +144,20 @@ module.exports = async (msg) => {
       }
 
       var hl = await ch.d.createPayment({
-        status: 'add_sent',
+        status: new_status,
         is_inward: true,
 
         amount: amount,
         hash: hash,
-        exp: exp,
+        exp: reveal_until,
 
         unlocker: unlocker
       })
+
+      if (new_status == 'fail') {
+        // go to next transition - we don't like this hashlock already
+        continue
+      }
 
       // pay to unlocker
       if (destination.equals(me.pubkey)) {

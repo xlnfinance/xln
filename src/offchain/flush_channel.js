@@ -24,7 +24,7 @@ module.exports = async (ch, opportunistic = false) => {
   if (ch.d.status == 'sent') {
     if (ch.d.flushed_at < new Date() - 10000) {
       l(`Can't flush, awaiting ack. Repeating our request`)
-      me.send(ch.d.partnerId, 'update', ch.d.pending)
+      //me.send(ch.d.partnerId, 'update', ch.d.pending)
     }
     return false
   }
@@ -40,6 +40,7 @@ module.exports = async (ch, opportunistic = false) => {
   // in merge mode all you do is ack last (merged) state
   if (ch.d.status == 'master') {
     var inwards = newState[ch.left ? 2 : 3]
+    var outwards = newState[ch.left ? 3 : 2]
     var payable = ch.payable
 
     var pendings = await ch.d.getPayments({
@@ -76,9 +77,10 @@ module.exports = async (ch, opportunistic = false) => {
       } else if (t.status == 'add') {
         // todo: this might be not needed as previous checks are sufficient
         if (
-          t.amount < 0 ||
+          t.amount < K.min_amount ||
           t.amount > payable ||
-          t.destination.equals(me.pubkey)
+          t.destination.equals(me.pubkey) ||
+          outwards.length >= K.max_hashlocks
         ) {
           l('error cannot transit this amount. Failing inward.')
           var inward = await t.getInward()
@@ -94,9 +96,13 @@ module.exports = async (ch, opportunistic = false) => {
 
           continue
         }
+        if (outwards.length >= K.max_hashlocks) {
+          l('Cannot set so many hashlocks now, maybe later')
+          //continue
+        }
         // decrease payable and add the hashlock to state
         payable -= t.amount
-        newState[ch.left ? 3 : 2].push(t.toLock())
+        outwards.push(t.toLock())
 
         var args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
       }

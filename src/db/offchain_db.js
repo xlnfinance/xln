@@ -1,4 +1,4 @@
-// Off-Chain database - local and private stuff
+// Offchain database - local and private stuff
 
 if (!fs.existsSync('private')) fs.mkdirSync('private')
 
@@ -203,7 +203,7 @@ Delta.prototype.startDispute = async function(profitable) {
     // we don't broadcast dispute right away and wait until periodic rebalance
   } else {
     this.status = 'disputed'
-    await me.broadcast('rebalance', r([[await this.getDispute()], [], []]))
+    await me.broadcast([['disputeWith', [await this.getDispute()]]])
   }
 
   await this.save()
@@ -223,5 +223,3 @@ Block = privSequelize.define('block', {
 
   total_tx: Sequelize.INTEGER
 })
-
-

@@ -9,7 +9,7 @@ For now pretty simple. In the future can be added:
 */
 
 module.exports = async function() {
-  if (PK.pending_tx.length > 0) return l('There are pending tx')
+  if (PK.pending_batch) return l('There are pending tx')
 
   var deltas = await Delta.findAll({
     where: {
@@ -23,6 +23,9 @@ module.exports = async function() {
     [], // inputs/withdrawals
     [] // outputs/deposits
   ]
+  var disputes = []
+  var withdrawals = []
+  var outputs = []
 
   me.record = await me.byKey()
 
@@ -35,13 +38,13 @@ module.exports = async function() {
     // soft limit can be raised over K.risk to pay less fees
     if (ch.promised >= Math.max(K.risk, ch.d.they_soft_limit)) {
       l('Addint output for our promise ', ch.d.partnerId)
-      reb[2].push([ch.promised, ch.d.myId, ch.d.partnerId, 0])
+      outputs.push([ch.promised, ch.d.myId, ch.d.partnerId, 0])
     } else if (ch.insured >= K.risk) {
       if (ch.d.input_sig) {
         l('we already have input to use')
         // method, user, hub, nonce, amount
 
-        reb[1].push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
+        withdrawals.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
       } else if (me.users[ch.d.partnerId]) {
         l(
           `We can pull payment from ${toHex(
@@ -57,11 +60,11 @@ module.exports = async function() {
         await ch.d.save()
       } else if (ch.d.withdrawal_requested_at + 60 < ts()) {
         l('User is offline for too long, or tried to cheat')
-        reb[0].push(await ch.d.getDispute())
+        disputes.push(await ch.d.getDispute())
       }
     } else if (ch.d.status == 'cheat_dispute') {
       l('User tried to cheat')
-      reb[0].push(await ch.d.getDispute())
+      disputes.push(await ch.d.getDispute())
     }
   }
 
@@ -70,20 +73,23 @@ module.exports = async function() {
     for (var partnerId of checkBack) {
       var ch = await me.getChannel(partnerId)
       if (ch.d.input_sig) {
-        reb[1].push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
+        withdrawals.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
       } else {
         ch.d.withdrawal_requested_at = ts()
         await ch.d.save()
       }
     }
 
-    if (reb[0].length + reb[1].length + reb[2].length > 0) {
+    if (withdrawals.length + disputes.length + outputs.length > 0) {
       // sorting, bigger amounts are prioritized
-      reb[1].sort((a, b) => b[0] - a[0])
-      reb[2].sort((a, b) => b[0] - a[0])
+      withdrawals.sort((a, b) => b[0] - a[0])
+      outputs.sort((a, b) => b[0] - a[0])
 
       // anything to broadcast?
-      await me.broadcast('rebalance', r(reb))
+      await me.broadcast([
+        ['withdrawFrom', withdrawals],
+        ['depositTo', outputs]
+      ])
     }
   }, 4000)
 }

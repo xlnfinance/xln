@@ -103,9 +103,9 @@ module.exports = async (ws, msg) => {
         var secret = crypto.randomBytes(32)
         var hash = sha3(secret)
 
-        var invoice = bin(
-          p.outward.invoice ? p.outward.invoice : toHex(crypto.randomBytes(20))
-        )
+        var invoice = p.outward.invoice
+          ? bin(p.outward.invoice)
+          : crypto.randomBytes(32)
 
         var [box_pubkey, pubkey] = r(base58.decode(p.outward.destination))
         var amount = parseInt(p.outward.amount)
@@ -141,7 +141,7 @@ module.exports = async (ws, msg) => {
 
             amount: sent_amount,
             hash: hash,
-            exp: K.usable_blocks + 10,
+            exp: K.usable_blocks + K.hashlock_exp,
 
             unlocker: unlocker,
             destination: pubkey,
@@ -221,9 +221,7 @@ module.exports = async (ws, msg) => {
             if (ch.d.input_sig) {
               ins.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
 
-              l('Rebalancing ', [ins, outs])
-
-              await me.broadcast('rebalance', r([[], ins, outs]))
+              await me.broadcast([['withdrawFrom', ins], ['depositTo', outs]])
               react({confirm: 'Onchain rebalance tx sent'})
             } else {
               react({
@@ -233,7 +231,7 @@ module.exports = async (ws, msg) => {
             }
           }, 3000)
         } else if (outs.length > 0) {
-          await me.broadcast('rebalance', r([[], ins, outs]))
+          await me.broadcast([['withdrawFrom', ins], ['depositTo', outs]])
           react({confirm: 'Rebalanced'})
         } else {
           react({alert: 'No action specified'})
@@ -291,14 +289,20 @@ module.exports = async (ws, msg) => {
         break
 
       case 'propose':
-        result.confirm = await me.broadcast('propose', p)
+        if (p[0].length <= 1) throw 'Rationale is required'
+
+        if (p[2]) {
+          // diff -urB . ../yo
+          p[2] = fs.readFileSync('../' + p[2])
+        }
+
+        result.confirm = await me.broadcast([['propose', p]])
         break
 
       case 'vote':
-        result.confirm = await me.broadcast(
-          'vote',
-          r([p.id, p.approval, p.rationale])
-        )
+        result.confirm = await me.broadcast([
+          ['vote', [p.id, p.approval, p.rationale]]
+        ])
 
         break
 

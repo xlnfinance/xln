@@ -73,48 +73,30 @@ class Me {
     })
   }
 
-  async broadcast(method, args) {
+  // takes an array of different transactions, puts into a batch, signs and broadcasts
+  async broadcast(transactions) {
     me.record = await me.byKey()
 
-    switch (method) {
-      case 'rebalance':
-        l('Broadcasted rebalance ', r(args))
-
-        break
-
-      case 'propose':
-        if (args[0].length <= 1) throw 'Rationale is required'
-
-        if (args[2]) {
-          // diff -urB . ../yo
-          args[2] = fs.readFileSync('../' + args[2])
-        }
-
-        args = r(args)
-        break
+    if (PK.pending_batch) {
+      return l('Only 1 tx is supported')
     }
 
-    var nonce = me.record.nonce + PK.pending_tx.length
+    // methodMap on every method name
+    transactions.map((kv) => (kv[0] = methodMap(kv[0])))
 
-    var to_sign = r([methodMap(method), nonce, args])
+    var nonce = me.record.nonce
 
-    var tx = r([
-      me.record.id,
-      ec(to_sign, me.id.secretKey),
-      methodMap(method),
-      nonce,
-      args
-    ])
+    var to_sign = r([methodMap('batch'), nonce, transactions])
 
-    PK.pending_tx.push({
-      method: method,
-      raw: toHex(tx)
-    })
+    var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
+
+    // saving locally to ensure it is added, and rebroadcast if needed
+    PK.pending_batch = toHex(signed_batch)
 
     if (me.my_member && me.my_member == me.next_member()) {
-      me.mempool.push(tx)
+      me.mempool.push(signed_batch)
     } else {
-      me.send(me.next_member(), 'tx', r([tx]))
+      me.send(me.next_member(), 'tx', r([signed_batch]))
     }
   }
 

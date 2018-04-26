@@ -1,24 +1,24 @@
-// Verify and apply transaction to current state
-// Only few methods are supported: rebalances, disputes and governance
+// Verify and apply transactions to current state.
+// Since we aim to be a settlement layer executed on *all* machines, transactions are sent in big signed batches to optimize load. Also only 1 batch per block is allowed
 
 module.exports = async (tx, meta) => {
-  var [id, sig, methodId, nonce, args] = r(tx)
+  var [id, sig, body] = r(tx)
 
   var signer = await User.findById(readInt(id))
-  var nonce = readInt(nonce)
 
   if (!signer) {
     return {error: "This user doesn't exist"}
   }
 
-  if (!ec.verify(r([readInt(methodId), nonce, args]), sig, signer.pubkey)) {
+  if (!ec.verify(body, sig, signer.pubkey)) {
     return {error: `Invalid tx signature.`}
   }
 
-  var method = methodMap(readInt(methodId))
+  var [methodId, nonce, transactions] = r(body)
+  nonce = readInt(nonce)
 
-  if (allowedOnchain.indexOf(method) == -1) {
-    return {error: 'No such method exposed onchain'}
+  if (methodMap(readInt(methodId)) != 'batch') {
+    return {error: 'Only batched tx are supported'}
   }
 
   // gas/tax estimation is very straighforward for now, later methods' pricing can be fine tuned
@@ -32,7 +32,7 @@ module.exports = async (tx, meta) => {
   if (meta.dry_run) {
     if (meta[signer.id]) {
       // Why only 1 tx/block? Two reasons:
-      // * it's an extra hassle to ensure the account has money to cover subsequent w/o applying old ones. We don't the complexity of chain reorganizations - all transactions are final
+      // * it's an extra hassle to ensure the account has money to cover subsequent w/o applying old ones. It would require fast rollbacks / reorganizations
       // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway
       return {error: 'Only few tx per block per account currently allowed'}
     } else {
@@ -51,14 +51,10 @@ module.exports = async (tx, meta) => {
     }
   }
 
-  l(`ProcessTx: ${method} with ${args.length} by ${signer.id}`)
-
   if (me.pubkey.equals(signer.pubkey)) {
-    for (var i in PK.pending_tx) {
-      if (PK.pending_tx[i].raw == toHex(tx)) {
-        l('Our pending tx has been added to the blockchain')
-        PK.pending_tx.splice(i, 1)
-      }
+    if (PK.pending_batch == toHex(tx)) {
+      react({confirm: 'Your onchain transaction has been added!'})
+      PK.pending_batch = null
     }
   }
 
@@ -66,29 +62,108 @@ module.exports = async (tx, meta) => {
   signer.balance -= tax
   K.collected_tax += tax
 
-  args = r(args)
-
   var parsed_tx = {
-    method: method,
     signer: signer,
     nonce: nonce,
     tax: tax,
-    length: tx.length
+    length: tx.length,
+
+    // channels
+    reveals: [],
+    disputes: [],
+    inputs: [],
+    outputs: [],
+    debts: [],
+
+    // governance
+    proposals: [],
+    votes: []
   }
 
-  // don't forget BREAK
-  switch (method) {
-    case 'rebalance':
-      var [disputes, inputs, outputs] = args
+  // at some point, we should apply strategy pattern here.
+  // For now it is easier to refer local vars with if/else if cascade.
+  for (var t of transactions) {
+    var method = methodMap(readInt(t[0]))
 
-      parsed_tx.disputes = []
-      parsed_tx.inputs = []
-      parsed_tx.debts = []
-      parsed_tx.outputs = []
+    if (method == 'withdrawFrom') {
+      //require('./methods/withdraw_from')(t[1])
 
-      // 1. process disputes if any
+      var my_hub = K.hubs.find((h) => h.id == signer.id)
 
-      for (let dispute of disputes) {
+      for (var input of t[1]) {
+        var amount = readInt(input[0])
+
+        var partner = await User.idOrKey(input[1])
+
+        var compared = Buffer.compare(signer.pubkey, partner.pubkey)
+        if (compared == 0) continue
+
+        var ins = await Insurance.find({
+          where: {
+            leftId: compared == -1 ? signer.id : partner.id,
+            rightId: compared == -1 ? partner.id : signer.id
+          },
+          include: {all: true}
+        })
+
+        if (!ins || amount > ins.insurance) {
+          l(`Invalid amount ${ins.insurance} vs ${amount}`)
+          continue
+        }
+
+        var body = r([
+          methodMap('withdrawal'),
+          ins.leftId,
+          ins.rightId,
+          ins.nonce,
+          amount
+        ])
+
+        if (!ec.verify(body, input[2], partner.pubkey)) {
+          l('Wrong signature by partner ', ins.nonce)
+          continue
+        }
+
+        // for blockchain explorer
+        parsed_tx.inputs.push([amount, partner.id])
+        meta.inputs_volume += amount
+
+        ins.insurance -= amount
+        if (compared == -1) ins.ondelta -= amount
+
+        signer.balance += amount
+
+        ins.nonce++
+
+        await ins.save()
+
+        // was this input related to us?
+        if (me.record) {
+          if (me.record.id == partner.id) {
+            var ch = await me.getChannel(signer.pubkey)
+            // they planned to withdraw and they did. Nullify hold amount
+            ch.d.they_input_amount = 0
+            await ch.d.save()
+          }
+
+          if (me.record.id == signer.id) {
+            var ch = await me.getChannel(partner.pubkey)
+            // they planned to withdraw and they did. Nullify hold amount
+            ch.d.input_amount = 0
+            ch.d.input_sig = null
+            await ch.d.save()
+          }
+        }
+      }
+    } else if (method == 'revealSecrets') {
+      for (var secret of t[1]) {
+        await Hashlock.create({
+          hash: sha3(secret),
+          revealed_at: K.usable_blocks
+        })
+      }
+    } else if (method == 'disputeWith') {
+      for (let dispute of t[1]) {
         var [id, sig, dispute_nonce, offdelta, hashlocks] = dispute
 
         var partner = await User.findById(readInt(id))
@@ -182,86 +257,11 @@ module.exports = async (tx, meta) => {
           }
         }
       }
-
-      // 2. take insurance from withdrawals
-
-      var my_hub = K.hubs.find((h) => h.id == signer.id)
-
-      for (var input of inputs) {
-        var amount = readInt(input[0])
-
-        var partner = await User.idOrKey(input[1])
-
-        var compared = Buffer.compare(signer.pubkey, partner.pubkey)
-        if (compared == 0) continue
-
-        var ins = await Insurance.find({
-          where: {
-            leftId: compared == -1 ? signer.id : partner.id,
-            rightId: compared == -1 ? partner.id : signer.id
-          },
-          include: {all: true}
-        })
-
-        if (!ins || amount > ins.insurance) {
-          l(`Invalid amount ${ins.insurance} vs ${amount}`)
-          continue
-        }
-
-        var body = r([
-          methodMap('withdrawal'),
-          ins.leftId,
-          ins.rightId,
-          ins.nonce,
-          amount
-        ])
-
-        if (!ec.verify(body, input[2], partner.pubkey)) {
-          l('Wrong signature by partner ', ins.nonce)
-          continue
-        }
-
-        // for blockchain explorer
-        parsed_tx.inputs.push([amount, partner.id])
-        meta.inputs_volume += amount
-
-        ins.insurance -= amount
-        if (compared == -1) ins.ondelta -= amount
-
-        signer.balance += amount
-
-        ins.nonce++
-
-        await ins.save()
-
-        // was this input related to us?
-        if (me.record) {
-          if (me.record.id == partner.id) {
-            var ch = await me.getChannel(signer.pubkey)
-            // they planned to withdraw and they did. Nullify hold amount
-            ch.d.they_input_amount = 0
-            await ch.d.save()
-          }
-
-          if (me.record.id == signer.id) {
-            var ch = await me.getChannel(partner.pubkey)
-            // they planned to withdraw and they did. Nullify hold amount
-            ch.d.input_amount = 0
-            ch.d.input_sig = null
-            await ch.d.save()
-          }
-        }
-      }
-
-      // 3. enforce pay insurance to debts
+    } else if (method == 'depositTo') {
       await signer.payDebts(parsed_tx)
+      var reimburse_tax = 1 + Math.floor(tax / t[1].length)
 
-      // 4. outputs: standalone balance or a channel
-
-      // we want outputs to pay for their own rebalance
-      var reimburse_tax = 1 + Math.floor(tax / outputs.length)
-
-      for (var output of outputs) {
+      for (var output of t[1]) {
         amount = readInt(output[0])
 
         if (amount > signer.balance) continue
@@ -396,22 +396,7 @@ module.exports = async (tx, meta) => {
 
         meta.outputs_volume += amount
       }
-
-      break
-
-    case 'reveal':
-      for (var secret of args) {
-        await Hashlock.create({
-          hash: sha3(secret),
-          revealed_at: K.usable_blocks
-        })
-      }
-
-      break
-
-    // Governance methods below: proposing and voting on patches
-
-    case 'propose':
+    } else if (method == 'propose') {
       if (signer.id != 1) {
         l('Only root can propose an amendment')
         break
@@ -420,9 +405,9 @@ module.exports = async (tx, meta) => {
       var execute_on = K.usable_blocks + K.voting_period // 60*24
 
       var new_proposal = await Proposal.create({
-        desc: args[0].toString(),
-        code: args[1].toString(),
-        patch: args[2].toString(),
+        desc: t[1][0].toString(),
+        code: t[1][1].toString(),
+        patch: t[1][2].toString(),
         kindof: method,
         delayed: execute_on,
         userId: signer.id
@@ -430,10 +415,8 @@ module.exports = async (tx, meta) => {
 
       l(`Added new proposal!`)
       K.proposals_created++
-      break
-
-    case 'vote':
-      var [proposalId, approval, rationale] = args
+    } else if (method == 'vote') {
+      var [proposalId, approval, rationale] = t[1]
       var vote = await Vote.findOrBuild({
         where: {
           userId: signer.id,
@@ -447,8 +430,7 @@ module.exports = async (tx, meta) => {
 
       await vote.save()
       l(`Voted ${vote.approval} for ${vote.proposalId}`)
-
-      break
+    }
   }
 
   signer.nonce++

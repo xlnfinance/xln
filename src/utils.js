@@ -335,40 +335,32 @@ methodMap = (i) => {
     'prevote',
     'precommit',
 
+    // onchain transactions
+    'batch', // all transactions are batched one by one
+
+    'withdrawFrom',
+    'revealSecrets',
+    'disputeWith',
+    'depositTo',
+
     'rebalance',
     'propose',
     'vote',
 
-    'offdelta', // delayed balance proof
     'dispute', // delayed balance proof
-
-    // state machine transitions, sent peer to peer offchain
     'withdrawal', // instant offchain signature to withdraw from mutual payment channel
-
-    'update',
-    'ack',
     'setLimits',
 
-    'requestMaster',
-    'grantMaster',
+    'update', // gives ack and 0 or more transitions on top
 
-    // 10,[] => 15,[] - add directly to base offdelta
-    'addrisk',
-
-    // 15,[] => 15,[] - (NOT STATE CHANGING) offdelta remains the same, there was no hashlock
-    'settlerisk',
-
-    // 15,[] => 10,[] - secret not found, offdelta is decreased voluntarily
-    'failrisk',
-
-    // 10,[] => 10,[[5,H1,E1]]
     'add', // we add hashlock transfer to state.
-
-    // 10,[[5,H1,E1]] => 15,[]
     'settle', // we've got the secret so please unlock and apply to base offdelta
-
-    // 10,[[5,H1,E1]] => 10,[]
     'fail', // couldn't get secret for <reason>, delete hashlock
+
+    // same, but off-the-canonical-state
+    'addrisk',
+    'settlerisk',
+    'failrisk',
 
     'auth' // any kind of offchain auth signatures between peers
   ]

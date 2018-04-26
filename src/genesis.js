@@ -74,7 +74,9 @@ module.exports = async (genesis) => {
     members: [],
     hubs: [],
     flush_timeout: 250,
-    min_fee: 1
+    min_fee: 1,
+    hashlock_exp: 5,
+    max_hashlocks: 10
   }
 
   // Defines global Byzantine tolerance parameter
@@ -209,7 +211,7 @@ module.exports = async (genesis) => {
       username: 'root',
       seed: seed.toString('hex'),
       auth_code: toHex(crypto.randomBytes(32)),
-      pending_tx: []
+      pending_batch: null
     })
   )
 

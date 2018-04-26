@@ -357,7 +357,7 @@ FS.onready(() => {
         users: [],
 
         history: [],
-        pending_tx: [],
+        pending_batch: null,
 
         proposal: [
           'Increase Blocksize After Client Optimization',
@@ -448,7 +448,7 @@ FS.onready(() => {
       </ul>
 
           
-  <span v-if="pending_tx.length > 0">Pending onchain tx: {{pending_tx.map(t=>t.method).join(', ')}} </span> &nbsp;
+  <span v-if="pending_batch">Pending onchain batch</span> &nbsp;
 
   <span>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span>
   &nbsp;     
@@ -529,7 +529,7 @@ FS.onready(() => {
 
     <div v-else-if="tab=='wallet'">
       <template v-if="pubkey">
-        <h2 class="alert alert-danger" v-if="pending_tx.length>0">Please wait until your <b>{{pending_tx[0].method}}</b> transaction is added to the blockchain.</h2>
+        <h2 class="alert alert-danger" v-if="pending_batch">Please wait until your onchain transaction is added to the blockchain.</h2>
 
         <h2 class="alert alert-danger" v-if="K.ts < ts() - 600">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
 
@@ -681,7 +681,7 @@ FS.onready(() => {
         </p>
 
         <p>
-          <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance On-Chain</button>
+          <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance Onchain</button>
         </p>
 
         <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
@@ -719,7 +719,7 @@ FS.onready(() => {
 
       <p>Case 4. Request withdraw by this user on Onchain rebalance page. Withdraw is taking money "the nice way" from your hub and you could move them to another hub or to make a direct payment to someone else's channel onchain.</p>
 
-      <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start onchain dispute under On-Chain Dispute tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
+      <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start onchain dispute under Onchain disputes tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
 
       <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state - biggest balance you ever owned. When hub notices that, they will post latest state before delay period. Keep an eye on Blockchain Explorer page to see that.</p>
 
@@ -847,28 +847,26 @@ FS.onready(() => {
               <td>{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>
             </tr>
       
-            <tr v-for="m in b.meta.parsed_tx">
+            <tr v-for="batch in b.meta.parsed_tx">
 
               <td colspan="7">
-                <span class="badge badge-warning">{{m.method}} by {{m.signer.id}} ({{commy(m.tax)}} fee, size {{m.length}}):</span>&nbsp;
+                <span class="badge badge-warning">By {{batch.signer.id}} ({{commy(batch.tax)}} fee, size {{batch.length}}):</span>&nbsp;
 
-                <template v-if="m.method=='rebalance'">
-                  <template v-for="d in m.disputes">
-                    <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "won a dispute with "+d[0] }}: {{dispute_outcome(d[2], d[3])}}
-                    </span>&nbsp;
-                  </template>
+                <template v-for="d in batch.disputes">
+                  <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "won a dispute with "+d[0] }}: {{dispute_outcome(d[2], d[3])}}
+                  </span>&nbsp;
+                </template>
 
-                  <template v-for="d in m.inputs">
-                    <span class="badge badge-danger">{{commy(d[0])}} from {{d[1]}}</span>&nbsp;
-                  </template>
+                <template v-for="d in batch.inputs">
+                  <span class="badge badge-danger">{{commy(d[0])}} from {{d[1]}}</span>&nbsp;
+                </template>
 
-                  <template v-for="d in m.debts">
-                    <span class="badge badge-dark">{{commy(d[0])}} debt to {{d[1]}}</span>&nbsp;
-                  </template>
+                <template v-for="d in batch.debts">
+                  <span class="badge badge-dark">{{commy(d[0])}} debt to {{d[1]}}</span>&nbsp;
+                </template>
 
-                  <template v-for="d in m.outputs">
-                    <span class="badge badge-success" >{{commy(d[0])}} to {{d[2] ? (d[1] == m.signer.id ? '': d[1])+'@'+d[2] : d[1]}}{{d[3] ? ' for '+d[3] : ''}}</span>&nbsp;
-                  </template>
+                <template v-for="d in batch.outputs">
+                  <span class="badge badge-success" >{{commy(d[0])}} to {{d[2] ? ((d[1] == batch.signer.id ? '': d[1])+'@'+d[2]) : d[1]}}{{d[3] ? ' for '+d[3] : ''}}</span>&nbsp;
                 </template>
 
               </td>

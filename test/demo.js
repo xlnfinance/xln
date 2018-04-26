@@ -61,8 +61,8 @@ commy = (b, dot = true) => {
 }
 
 FS('getinfo', {}, (r) => {
-  address = r.address
-  l(address)
+  // keep our static address as constant
+  address = r.data.address
 })
 
 require('http')
@@ -105,9 +105,7 @@ require('http')
       <p>Available Balance: <b>\$${commy(users[id])}</b></p>
      
       <h3>Deposit</h3>
-      <a href="#" onclick="deposit">${address}</a>
-
-      <p><button class="btn btn-success" id="deposit">Deposit</button></p>
+      <a href="#" id="deposit">${address}</a>
 
       <h3>Withdraw</h3>
       <p><input type="text" id="destination" placeholder="Destination"></p>
@@ -128,15 +126,12 @@ var fallback = setTimeout(()=>{
 }, 3000)
 
 
-FS = function (invoice, cb) {
-  window.open(fs_origin+'/#invoice='+invoice)
-  window.addEventListener('message', function(e){
-    if(e.origin == fs_origin){
-      cb(e.data)
-    }
-  })
-
-}
+window.addEventListener('message', function(e){
+  if(e.origin == fs_origin){
+    l(e.data)
+    location.reload()
+  }
+})
 
 
 
@@ -164,8 +159,7 @@ window.onload = function(){
       return ('0' + (byte & 0xFF).toString(16)).slice(-2);
     }).join('')
 
-    window.open(fs_origin+'#invoice='+invoice+"&address=${address}")
-
+    window.open(fs_origin+'#wallet/invoice='+invoice+"&address=${address}&amount=10")
   
   }
 
@@ -205,7 +199,13 @@ window.onload = function(){
           users[id] -= amount
           FS(
             'send',
-            {outward: {destination: p.destination, amount: amount}},
+            {
+              outward: {
+                destination: p.destination,
+                amount: amount,
+                invoice: 'from demo'
+              }
+            },
             (r) => {
               l(r.data)
 

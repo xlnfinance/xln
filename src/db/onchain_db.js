@@ -1,4 +1,4 @@
-// On-Chain Database - every full node has exact same copy
+// Onchain database - every full node has exact same copy
 var base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',

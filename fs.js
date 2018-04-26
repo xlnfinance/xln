@@ -155,7 +155,7 @@ react = async (result = {}, id = 1) => {
     result.address = me.address
     result.pubkey = toHex(me.pubkey)
 
-    result.pending_tx = PK.pending_tx
+    result.pending_batch = PK.pending_batch
 
     result.channels = await me.channels()
   }
@@ -282,7 +282,7 @@ initDashboard = async (a) => {
     PK = {
       auth_code: toHex(crypto.randomBytes(32)),
 
-      pending_tx: []
+      pending_batch: null
     }
   }
 
