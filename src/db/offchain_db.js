@@ -42,7 +42,7 @@ Delta = privSequelize.define('delta', {
   they_hard_limit: Sequelize.INTEGER, // they trust us
 
   flush_requested_at: Sequelize.DATE,
-  flushed_at: Sequelize.DATE,
+  ack_requested_at: Sequelize.DATE,
   last_online: Sequelize.DATE,
   withdrawal_requested_at: Sequelize.DATE,
 
@@ -54,8 +54,9 @@ Delta = privSequelize.define('delta', {
   sig: Sequelize.TEXT,
   signed_state: Sequelize.TEXT,
 
-  // testnet: cheaty transaction
-  most_profitable: Sequelize.TEXT,
+  // All the safety Byzantine checks start with cheat_
+  CHEAT_profitable_state: Sequelize.TEXT,
+  CHEAT_profitable_sig: Sequelize.TEXT,
 
   // 4th type of balance, equivalent traditional balance in a bank. For pocket change.
   // Exists for convenience like pulling payments when the user is offline.
@@ -66,7 +67,9 @@ Delta = privSequelize.define('delta', {
 })
 
 Payment = privSequelize.define('payment', {
-  // await (to be sent outward) => sent => got secret => unlocking =>
+  // add/settle/fail
+  type: Sequelize.TEXT,
+  // new>sent>acked
   status: Sequelize.TEXT,
   // no inward = sender, no outward = receiver, otherwise = mediator
   is_inward: Sequelize.BOOLEAN,
@@ -93,9 +96,7 @@ Payment = privSequelize.define('payment', {
   invoice: Sequelize.TEXT,
 
   // secret that unlocks hash
-  secret: Sequelize.TEXT,
-
-  settled_at: Sequelize.DATE
+  secret: Sequelize.TEXT
 })
 
 Delta.hasMany(Payment)
@@ -149,17 +150,27 @@ Delta.prototype.requestFlush = async function() {
 Delta.prototype.getState = async function() {
   var left = Buffer.compare(this.myId, this.partnerId) == -1
 
+  // builds current canonical state.
+  // status="new" settle and fail are still present in state
+
   var inwards = (await this.getPayments({
     where: {
-      status: {[Sequelize.Op.or]: ['add_sent', 'settle', 'fail']},
-
+      [Op.or]: [
+        {type: 'add', status: 'sent'},
+        {type: 'add', status: 'acked'},
+        {type: 'settle', status: 'new'},
+        {type: 'fail', status: 'new'}
+      ],
       is_inward: true
     }
-  })).map((t) => [t.amount, t.hash, t.exp])
+  })).map((t) => t.toLock())
 
   var outwards = (await this.getPayments({
-    where: {status: 'add_sent', is_inward: false}
-  })).map((t) => [t.amount, t.hash, t.exp])
+    where: {
+      [Op.or]: [{type: 'add', status: 'sent'}, {type: 'add', status: 'acked'}],
+      is_inward: false
+    }
+  })).map((t) => t.toLock())
 
   var state = [
     methodMap('dispute'),
@@ -181,21 +192,19 @@ Delta.prototype.getState = async function() {
 Delta.prototype.getDispute = async function() {
   // post last sig if any
   var partner = await User.idOrKey(this.partnerId)
-  return this.sig
-    ? [partner.id, this.sig, this.nonce, this.offdelta, []]
-    : [partner.id]
+  return this.sig ? [partner.id, this.sig, this.signed_state] : [partner.id]
 }
 
-Delta.prototype.startDispute = async function(profitable) {
-  if (profitable) {
-    if (this.most_profitable) {
-      var profitable = r(this.most_profitable)
-      this.offdelta = readInt(profitable[0])
-      this.nonce = readInt(profitable[1])
-      this.sig = profitable[2]
+Delta.prototype.startDispute = async function(cheat) {
+  if (cheat) {
+    if (this.CHEAT_profitable_state) {
+      await me.broadcast([
+        ['disputeWith', [this.partnerId, this.sig, this.CHEAT_profitable_state]]
+      ])
     } else {
-      this.sig = null
+      l('No profitable state stored')
     }
+    return false
   }
 
   if (me.my_hub) {

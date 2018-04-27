@@ -9,10 +9,10 @@ ws = require('ws')
 opn = require('../lib/opn')
 
 var chalk = require('chalk') // pretty logs?
-highlight = text => `"${chalk.bold(text)}"`
-link = text => `${chalk.underline.white.bold(text)}`
-errmsg = text => `${chalk.red('   [Error]')} ${text}`
-note = text => `${chalk.gray(`  ⠟ ${text}`)}`
+highlight = (text) => `"${chalk.bold(text)}"`
+link = (text) => `${chalk.underline.white.bold(text)}`
+errmsg = (text) => `${chalk.red('   [Error]')} ${text}`
+note = (text) => `${chalk.gray(`  ⠟ ${text}`)}`
 
 // crypto TODO: native version
 crypto = require('crypto')
@@ -84,7 +84,7 @@ logstate = (state) => {
   )
 }
 
-var _orig_console_log = console.log 
+var _orig_console_log = console.log
 try {
   // monkey-patch Parcel Logger to avoid cursor jump https://github.com/parcel-bundler/parcel/blob/0d984a563f72798cc0c08e9a27bc0e6e077a0b47/src/Logger.js
   var ParcelLogger = require('parcel-bundler/src/Logger')
@@ -183,7 +183,7 @@ sleep = async function(ms) {
 }
 
 current_db_hash = () => {
-  return Buffer([])
+  return Buffer.alloc(1)
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
   .from(
     child_process
@@ -355,7 +355,7 @@ inputMap = (i) => {
   ]
   if (typeof i === 'string') {
     // buffer friendly
-    return Buffer([map.indexOf(i)])
+    return Buffer.from([map.indexOf(i)])
   } else {
     return map[i]
   }

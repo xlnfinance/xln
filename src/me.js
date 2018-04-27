@@ -13,6 +13,7 @@ class Me {
     this.hubs = {}
 
     this.queue = []
+    this.batch = []
 
     this.intervals = []
 
@@ -80,6 +81,10 @@ class Me {
     if (PK.pending_batch) {
       return l('Only 1 tx is supported')
     }
+    // TODO: make batch persistent on disk
+    transactions = me.batch.concat(transactions)
+
+    l('After merging: ', transactions)
 
     // methodMap on every method name
     transactions.map((kv) => (kv[0] = methodMap(kv[0])))
@@ -156,14 +161,18 @@ class Me {
     }
 
     await cache()
+
     this.intervals.push(setInterval(cache, 10000))
+
+    // enforces hashlocks
+    this.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
 
     this.intervals.push(
       setInterval(async () => {
         var flushable = await Delta.findAll({
           where: {
             flush_requested_at: {
-              [Sequelize.Op.lt]: new Date() - K.flush_timeout
+              [Op.lt]: new Date() - K.flush_timeout
             }
           }
         })
@@ -325,6 +334,7 @@ Me.prototype.processTx = require('./onchain/tx')
 Me.prototype.flushChannel = require('./offchain/flush_channel')
 Me.prototype.getChannel = require('./offchain/get_channel')
 Me.prototype.updateChannel = require('./offchain/update_channel')
+Me.prototype.ensureAck = require('./offchain/ensure_ack')
 
 module.exports = {
   Me: Me

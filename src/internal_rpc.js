@@ -136,7 +136,8 @@ module.exports = async (ws, msg) => {
           await ch.d.save()
 
           await ch.d.createPayment({
-            status: 'add',
+            type: 'add',
+            status: 'new',
             is_inward: false,
 
             amount: sent_amount,
@@ -145,12 +146,9 @@ module.exports = async (ws, msg) => {
 
             unlocker: unlocker,
             destination: pubkey,
-            invoice: toHex(invoice)
+            invoice: invoice
           })
           await me.flushChannel(ch)
-          //await ch.d.requestFlush()
-
-          //result.confirm = 'Payment sent...'
         }
 
         break
@@ -242,6 +240,16 @@ module.exports = async (ws, msg) => {
         break
       case 'getinfo':
         result.address = me.address
+
+        break
+      case 'invoices':
+        result = await Payment.findAll({
+          where: {
+            type: 'settle',
+            status: 'acked',
+            is_inward: true
+          }
+        })
 
         break
       case 'testnet':

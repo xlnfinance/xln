@@ -18,11 +18,6 @@ module.exports = async function() {
     }
   })
 
-  var reb = [
-    [], // disputes
-    [], // inputs/withdrawals
-    [] // outputs/deposits
-  ]
   var disputes = []
   var withdrawals = []
   var outputs = []

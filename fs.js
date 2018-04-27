@@ -59,11 +59,13 @@ cache = async (i) => {
     cached_result.users = await User.findAll({include: {all: true}})
     cached_result.insurances = await Insurance.findAll({include: {all: true}})
 
+    cached_result.hashlocks = await Hashlock.findAll({include: {all: true}})
+
     cached_result.blocks = (await Block.findAll({
       limit: 500,
       order: [['id', 'desc']],
       where: {
-        meta: {[Sequelize.Op.not]: null}
+        meta: {[Op.not]: null}
       }
     })).map((b) => {
       var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(
@@ -183,7 +185,7 @@ initDashboard = async (a) => {
   l(note(`Touch ${highlight('../restart')} to restart`))
   setInterval(() => {
     fs.stat('../restart', (e, f) => {
-      if (!f) return 
+      if (!f) return
       var restartedAt = restartedAt ? restartedAt : f.atimeMs
 
       if (f && f.atimeMs != restartedAt) {
@@ -214,7 +216,7 @@ initDashboard = async (a) => {
   var Parcel = require('parcel-bundler')
 
   var bundler = new Parcel('wallet/index.html', {
-    logLevel: 2,
+    logLevel: 2
     // for more options https://parceljs.org/api.html
   }).middleware()
 

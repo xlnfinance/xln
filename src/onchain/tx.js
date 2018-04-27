@@ -153,10 +153,12 @@ module.exports = async (tx, meta) => {
       }
     } else if (method == 'revealSecrets') {
       for (var secret of t[1]) {
+        var hash = sha3(secret)
         await Hashlock.create({
-          hash: sha3(secret),
+          hash: hash,
           revealed_at: K.usable_blocks
         })
+        parsed_tx.events.push(['revealSecrets', hash])
       }
     } else if (method == 'disputeWith') {
       for (let dispute of t[1]) {
@@ -203,10 +205,10 @@ module.exports = async (tx, meta) => {
 
           if (
             methodMap(readInt(methodId)) != 'dispute' ||
-            !leftId.equals(ins.leftId) ||
-            !rightId.equals(ins.rightId)
+            !leftId.equals(compared == -1 ? signer.pubkey : partner.pubkey) ||
+            !rightId.equals(compared == -1 ? partner.pubkey : signer.pubkey)
           ) {
-            l('Broken dispute')
+            l('Invalid dispute')
             continue
           }
 

@@ -11,8 +11,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(header)
 
   timestamp = readInt(timestamp)
+  prev_hash = toHex(prev_hash)
 
-  if (K.prev_hash != prev_hash.toString('hex')) {
+  if (K.prev_hash != prev_hash) {
     l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
     return false
   }
@@ -64,7 +65,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   if (me.proposed_block.locked) {
     var locked_prev_hash = r(me.proposed_block.header)[2]
 
-    if (prev_hash.equals(locked_prev_hash)) {
+    if (prev_hash == toHex(locked_prev_hash)) {
       me.proposed_block = {}
     }
   }
@@ -220,7 +221,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   // save final block in blockchain db and broadcast
   await Block.create({
-    prev_hash: Buffer.from(prev_hash, 'hex'),
+    prev_hash: fromHex(prev_hash),
     hash: sha3(header),
 
     precommits: r(precommits), // pack them in rlp for storage

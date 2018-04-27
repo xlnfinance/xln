@@ -1,29 +1,29 @@
 <script>
-import hljs from 'highlight.js'
-import Identicon from 'identicon.js'
+import hljs from "highlight.js";
+import Identicon from "identicon.js";
 
-import Whitepaper from './Whitepaper'
+import Whitepaper from "./Whitepaper";
 
 export default {
   components: {
     Whitepaper
   },
   mounted() {
-    window.app = this
-    FS('load').then(render)
+    window.app = this;
+    FS("load").then(render);
 
     this.interval = setInterval(function() {
-      FS('load').then(render)
-    }, localStorage.auth_code ? 15000 : 30000)
+      FS("load").then(render);
+    }, localStorage.auth_code ? 15000 : 30000);
   },
   destroyed() {
-    clearInterval(this.interval)
+    clearInterval(this.interval);
   },
   data() {
     return {
       auth_code: localStorage.auth_code,
 
-      asset: 'FSD',
+      asset: "FSD",
       peer: 0,
 
       channels: [],
@@ -32,26 +32,26 @@ export default {
       K: false,
       my_member: false,
 
-      pw: '',
-      username: '',
+      pw: "",
+      username: "",
 
       record: false,
 
-      tab: location.hash.substr(1).split('/')[0],
+      tab: location.hash.substr(1).split("/")[0],
 
       install_snippet: false,
 
-      request_amount: '',
+      request_amount: "",
       outs: [
         {
-          to: '',
-          amount: '',
-          invoice: ''
+          to: "",
+          amount: "",
+          invoice: ""
         }
       ],
 
-      off_to: '',
-      off_amount: '',
+      off_to: "",
+      off_amount: "",
 
       my_hub: false,
 
@@ -66,240 +66,240 @@ export default {
       pending_batch: null,
 
       proposal: [
-        'Increase Blocksize After Client Optimization',
+        "Increase Blocksize After Client Optimization",
         `K.blocksize += 1000000`,
-        ''
+        ""
       ],
 
       settings: !localStorage.settings,
 
       outward: {
-        destination: hashargs['address'],
-        amount: hashargs['amount'],
-        invoice: hashargs['invoice']
+        destination: hashargs["address"],
+        amount: hashargs["amount"],
+        invoice: hashargs["invoice"]
       },
 
-      hardfork: ''
-    }
+      hardfork: ""
+    };
   },
   computed: {
     ch: () => {
-      return app.channels ? app.channels[app.peer] : false
+      return app.channels ? app.channels[app.peer] : false;
     }
   },
   methods: {
     icon: (h, s) => {
       return (
-        '<img width=' +
+        "<img width=" +
         s +
-        ' height=' +
+        " height=" +
         s +
         ' src="data:image/png;base64,' +
         new Identicon(h.toString(), s).toString() +
         '">'
-      )
+      );
     },
 
     stream: () => {
-      n = 0
+      n = 0;
       pay = () => {
-        $('.btn-success')[0].click()
-        if (n++ < 100) setTimeout(pay, 2000)
-      }
-      pay()
+        $(".btn-success")[0].click();
+        if (n++ < 100) setTimeout(pay, 2000);
+      };
+      pay();
     },
     hljs: hljs.highlight,
 
-    ivoted: (voters) => {
-      return voters.find((v) => v.id == app.record.id)
+    ivoted: voters => {
+      return voters.find(v => v.id == app.record.id);
     },
 
-    toHexString: (byteArray) => {
+    toHexString: byteArray => {
       return Array.prototype.map
         .call(byteArray, function(byte) {
-          return ('0' + (byte & 0xff).toString(16)).slice(-2)
+          return ("0" + (byte & 0xff).toString(16)).slice(-2);
         })
-        .join('')
+        .join("");
     },
 
     call: function(method, args) {
-      if (method == 'vote') {
-        args.rationale = prompt('Why?')
-        if (!args.rationale) return false
+      if (method == "vote") {
+        args.rationale = prompt("Why?");
+        if (!args.rationale) return false;
       }
 
-      FS(method, args).then(render)
-      return false
+      FS(method, args).then(render);
+      return false;
     },
     rebalance: () => {
       var total = app.outs.reduce(
-        (k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount),
+        (k, v) => k + parseFloat(v.amount.length == 0 ? "0" : v.amount),
         0
-      )
+      );
 
       //if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
-      app.call('rebalance', {
+      app.call("rebalance", {
         partner: app.ch.partner,
         request_amount: app.uncommy(app.request_amount),
         outs: app.outs
-      })
+      });
       // }
     },
-    derive: (f) => {
+    derive: f => {
       var data = {
         username: inputUsername.value,
         password: inputPassword.value
-      }
+      };
 
-      FS('load', data).then(render)
-      return false
+      FS("load", data).then(render);
+      return false;
     },
 
     off_amount_full: () => {
-      var before = app.uncommy(app.off_amount)
-      var fee = Math.round(before / 999)
-      if (fee == 0) fee = 1
-      return app.commy(before + fee)
+      var before = app.uncommy(app.off_amount);
+      var fee = Math.round(before / 999);
+      if (fee == 0) fee = 1;
+      return app.commy(before + fee);
     },
 
-    go: (path) => {
-      if (path == '') {
-        history.pushState('/', null, '/')
+    go: path => {
+      if (path == "") {
+        history.pushState("/", null, "/");
       } else {
-        location.hash = '#' + path
+        location.hash = "#" + path;
       }
-      app.tab = path
+      app.tab = path;
     },
 
-    deltaColor: (d) => {
-      if (d <= -app.K.risk) return '#ff6e7c'
-      if (d >= app.K.risk) return '#5ed679'
+    deltaColor: d => {
+      if (d <= -app.K.risk) return "#ff6e7c";
+      if (d >= app.K.risk) return "#5ed679";
 
-      return ''
+      return "";
     },
 
     dispute_outcome: (ins, parts) => {
-      var o = []
+      var o = [];
       if (parts.insured > 0)
-        o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`)
+        o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`);
       if (parts.they_insured > 0)
-        o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`)
+        o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`);
 
       if (parts.promised > 0)
         o.push(
           `${ins.leftId} owes ${app.commy(parts.promised)} to ${ins.rightId}`
-        )
+        );
       if (parts.they_promised > 0)
         o.push(
           `${ins.rightId} owes ${app.commy(parts.they_promised)} to ${
             ins.leftId
           }`
-        )
+        );
 
-      return o.join(', ')
+      return o.join(", ");
     },
 
     commy: (b, dot = true) => {
-      let prefix = b < 0 ? '-' : ''
+      let prefix = b < 0 ? "-" : "";
 
-      b = Math.abs(b).toString()
+      b = Math.abs(b).toString();
       if (dot) {
         if (b.length == 1) {
-          b = '0.0' + b
+          b = "0.0" + b;
         } else if (b.length == 2) {
-          b = '0.' + b
+          b = "0." + b;
         } else {
-          var insert_dot_at = b.length - 2
-          b = b.slice(0, insert_dot_at) + '.' + b.slice(insert_dot_at)
+          var insert_dot_at = b.length - 2;
+          b = b.slice(0, insert_dot_at) + "." + b.slice(insert_dot_at);
         }
       }
-      return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+      return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     },
-    uncommy: (str) => {
-      if (str.indexOf('.') == -1) str += '.00'
+    uncommy: str => {
+      if (str.indexOf(".") == -1) str += ".00";
 
-      return parseInt(str.replace(/[^0-9]/g, ''))
+      return parseInt(str.replace(/[^0-9]/g, ""));
     },
 
-    timeAgo: (time) => {
+    timeAgo: time => {
       var units = [
         {
-          name: 'second',
+          name: "second",
           limit: 60,
           in_seconds: 1
         },
         {
-          name: 'minute',
+          name: "minute",
           limit: 3600,
           in_seconds: 60
         },
         {
-          name: 'hour',
+          name: "hour",
           limit: 86400,
           in_seconds: 3600
         },
         {
-          name: 'day',
+          name: "day",
           limit: 604800,
           in_seconds: 86400
         },
         {
-          name: 'week',
+          name: "week",
           limit: 2629743,
           in_seconds: 604800
         },
         {
-          name: 'month',
+          name: "month",
           limit: 31556926,
           in_seconds: 2629743
         },
         {
-          name: 'year',
+          name: "year",
           limit: null,
           in_seconds: 31556926
         }
-      ]
-      var diff = (new Date() - new Date(time * 1000)) / 1000
-      if (diff < 5) return 'now'
+      ];
+      var diff = (new Date() - new Date(time * 1000)) / 1000;
+      if (diff < 5) return "now";
 
       var i = 0,
-        unit
+        unit;
       while ((unit = units[i++])) {
         if (diff < unit.limit || !unit.limit) {
-          var diff = Math.floor(diff / unit.in_seconds)
-          return diff + ' ' + unit.name + (diff > 1 ? 's' : '') + ' ago'
+          var diff = Math.floor(diff / unit.in_seconds);
+          return diff + " " + unit.name + (diff > 1 ? "s" : "") + " ago";
         }
       }
     },
 
     toggle: () => {
       if (localStorage.settings) {
-        delete localStorage.settings
+        delete localStorage.settings;
       } else {
-        localStorage.settings = 1
+        localStorage.settings = 1;
       }
 
-      app.settings = !app.settings
+      app.settings = !app.settings;
     },
 
     ts: () => Math.round(new Date() / 1000),
 
-    trim: (str) => {
-      return str ? str.slice(0, 8) + '...' : ''
+    trim: str => {
+      return str ? str.slice(0, 8) + "..." : "";
     },
     payment_status: (status, is_inward) => {
-      if (status == 'settle_sent' || status == 'settle') {
-        return '✔ ' + (is_inward ? 'Received' : 'Paid')
+      if (status == "settle_sent") {
+        return "✔ " + (is_inward ? "Received" : "Paid");
       }
-      if (status == 'fail_sent') {
-        return '❌ ' + (is_inward ? 'Failed' : 'Failed')
+      if (status == "fail_sent") {
+        return "❌ " + (is_inward ? "Failed" : "Failed");
       }
-      if (status == 'add_sent') return '🔒 Pending'
+      if (status == "add_sent") return "🔒 Pending";
 
-      return '🕟 Wait'
+      return "🕟 Wait";
     }
   }
-}
+};
 </script>
 <template>
   <div>
@@ -470,9 +470,9 @@ export default {
             </thead>
             <tbody>
               <tr v-for="h in payments.slice(history_limits[0], history_limits[1])">
-                <td>{{payment_status(h.status, h.is_inward)}}</td>
+                <td>{{h.type}}/{{h.status}}</td>
                 <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                <td>{{h.invoice}}. {{h.destination ? trim(h.destination) : ''}}</td>
+                <td>Hash {{trim(h.hash)}} Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
                 <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
               </tr>
               <tr v-if="payments.length > history_limits[1]">
@@ -661,7 +661,7 @@ export default {
 
                     <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{d[2]}}</span>
 
-                    <span v-else-if="d[0]=='revealSecret'" class="badge badge-danger">Secret revealed: {{d[1]}}</span>
+                    <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Secret revealed: {{trim(d[1])}}</span>
 
                     <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{d[2]}}</span>
 
@@ -730,6 +730,24 @@ export default {
               <th>{{commy(u.ondelta)}}</th>
               <th>{{u.nonce}}</th>
               <th>{{u.dispute_delayed ? "Until "+u.dispute_delayed+" started by "+(u.dispute_left ? u.leftId : u.rightId) : "N/A" }}</th>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else-if="tab=='hashlocks'">
+        <h1>Hashlocks</h1>
+        <p>Each payment with hashlock is atomic and protected from any party misbehaving. If your partner doesn't ack when you return the secret, you must go to blockchain and reveal the secret publicly. It will be stored for a while (about a week) and your hashlock will be considered unlocked. Make sure to end your disputes until the hashlock is deleted from blockchain. It is a global evidence that the payment was executed.</p>
+        <table class="table table-striped">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">Hash</th>
+              <th scope="col">Revealed At</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in hashlocks">
+              <th>{{u.hash}}</th>
+              <th>{{u.revealed_at}}</th>
             </tr>
           </tbody>
         </table>

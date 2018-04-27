@@ -105,7 +105,6 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'prevote' || inputType == 'precommit') {
     var [pubkey, sig, body] = r(msg)
     var [method, header] = r(body)
-    l('body ', method, header)
 
     var m = Members.find((f) => f.block_pubkey.equals(pubkey))
 
@@ -118,7 +117,7 @@ module.exports = async (ws, msg) => {
     }
 
     if (header.length == 0) {
-      return l(`${m.id} voted nil`)
+      return false //l(`${m.id} voted nil`)
     }
 
     if (!me.proposed_block.header) {
@@ -145,7 +144,7 @@ module.exports = async (ws, msg) => {
       var hash = sha3(secret)
       var [box_pubkey, pubkey] = r(msg.slice(1))
       var amount = Math.round(Math.random() * 10000)
-      var invoice = Buffer([1])
+      var invoice = Buffer.alloc(1)
 
       var unlocker_nonce = crypto.randomBytes(24)
       var unlocker_box = nacl.box(
@@ -164,7 +163,8 @@ module.exports = async (ws, msg) => {
       await ch.d.save()
 
       await ch.d.createPayment({
-        status: 'add',
+        type: 'add',
+        status: 'new',
         is_inward: false,
 
         amount: amount,
@@ -213,7 +213,7 @@ module.exports = async (ws, msg) => {
 
       var blocks = await Block.findAll({
         where: {
-          id: {[Sequelize.Op.gte]: last.id}
+          id: {[Op.gte]: last.id}
         },
         limit: sync_limit
       })

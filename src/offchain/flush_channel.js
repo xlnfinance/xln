@@ -22,8 +22,8 @@ module.exports = async (ch, opportunistic = false) => {
   // First, we add a transition to the queue
 
   if (ch.d.status == 'sent') {
-    if (ch.d.flushed_at < new Date() - 10000) {
-      l(`Can't flush, awaiting ack. Repeating our request`)
+    if (ch.d.ack_requested_at < new Date() - 30000) {
+      l(`Can't flush, awaiting ack. Repeating our request?`)
       //me.send(ch.d.partnerId, 'update', ch.d.pending)
     }
     return false
@@ -45,14 +45,14 @@ module.exports = async (ch, opportunistic = false) => {
 
     var pendings = await ch.d.getPayments({
       where: {
-        status: {[Sequelize.Op.or]: ['add', 'settle', 'fail']}
+        status: 'new'
       }
     })
 
     for (var t of pendings) {
-      if (t.status == 'settle' || t.status == 'fail') {
-        if (me.handicap_dontreveal) {
-          l('HANDICAP ON: not revealing our secret to inward')
+      if (t.type == 'settle' || t.type == 'fail') {
+        if (me.CHEAT_dontreveal) {
+          l('CHEAT: not revealing our secret to inward')
           continue
         }
 
@@ -67,14 +67,14 @@ module.exports = async (ch, opportunistic = false) => {
 
         inwards.splice(index, 1)
 
-        if (t.status == 'settle') {
+        if (t.type == 'settle') {
           newState[1][3] += ch.left ? t.amount : -t.amount
           payable += t.amount
           var args = t.secret
         } else {
           var args = t.hash
         }
-      } else if (t.status == 'add') {
+      } else if (t.type == 'add') {
         // todo: this might be not needed as previous checks are sufficient
         if (
           t.amount < K.min_amount ||
@@ -86,12 +86,13 @@ module.exports = async (ch, opportunistic = false) => {
           var inward = await t.getInward()
 
           if (inward) {
-            inward.status = 'fail'
+            inward.type = 'fail'
             await inward.save()
             var notify = await me.getChannel(inward.deltum.partnerId)
             await notify.d.requestFlush()
           }
-          t.status = 'fail_sent'
+          t.type = 'fail'
+          t.status = 'acked'
           await t.save()
 
           continue
@@ -110,12 +111,12 @@ module.exports = async (ch, opportunistic = false) => {
       newState[1][2]++
 
       transitions.push([
-        methodMap(t.status),
+        methodMap(t.type),
         args,
         ec(r(newState), me.id.secretKey)
       ])
 
-      t.status += '_sent'
+      t.status = 'sent'
       await t.save()
     }
 
@@ -137,7 +138,7 @@ module.exports = async (ch, opportunistic = false) => {
   ch.d.offdelta = newState[1][3]
 
   if (transitions.length > 0) {
-    ch.d.flushed_at = new Date()
+    ch.d.ack_requested_at = new Date()
     ch.d.pending = envelope
     ch.d.status = 'sent'
   }

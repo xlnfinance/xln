@@ -18,6 +18,10 @@ module.exports = async (msg) => {
 
   var ch = await me.getChannel(pubkey)
 
+  if (ch.d.status == 'disputed') {
+    return l('We are in a dispute')
+  }
+
   oldState = r(ch.d.signed_state)
   prettyState(oldState)
 
@@ -52,7 +56,25 @@ module.exports = async (msg) => {
   //l(stringify(newState))
   //l(stringify(debugState))
 
-  if (!await ch.d.saveState(newState, ackSig)) {
+  if (await ch.d.saveState(newState, ackSig)) {
+    // our last known state has been acked.
+    l('Update all sent transitions as acked')
+
+    await Payment.update(
+      {
+        status: 'acked'
+      },
+      {
+        where: {
+          status: 'sent',
+          deltumId: ch.d.id
+        }
+      }
+    )
+
+    ch.d.ack_requested_at = null
+    await ch.d.save()
+  } else {
     if (transitions.length == 0) return l('Empty invalid ack')
 
     oldState = r(ch.d.signed_state)
@@ -65,7 +87,7 @@ module.exports = async (msg) => {
     /*
 
     We received an acksig that doesnt match our current state. Apparently the partner sent
-    transitions simultaneously. 
+    transitions at the same time we did. 
 
     Our job is to rollback to last known signed state, check ackSig against it, if true - apply
     partner's transitions, and then reapply the difference we made with OUR transitions
@@ -75,7 +97,15 @@ module.exports = async (msg) => {
 
     */
 
-    if (!await ch.d.saveState(oldState, ackSig)) {
+    if (await ch.d.saveState(oldState, ackSig)) {
+      l('Rollback to old state')
+
+      rollback = [
+        newState[1][2] - oldState[1][2],
+        newState[1][3] - oldState[1][3]
+      ]
+      newState = oldState
+    } else {
       logstate(newState)
       logstate(oldState)
       logstate(debugState)
@@ -85,14 +115,6 @@ module.exports = async (msg) => {
       await me.flushChannel(ch)
 
       return false
-    } else {
-      l('Rollback to old state')
-
-      rollback = [
-        newState[1][2] - oldState[1][2],
-        newState[1][3] - oldState[1][3]
-      ]
-      newState = oldState
     }
   }
 
@@ -108,11 +130,11 @@ module.exports = async (msg) => {
       exp = readInt(exp)
       amount = readInt(amount)
 
-      var new_status = 'add_sent'
+      var new_type = 'add'
 
       if (amount < K.min_amount || amount > receivable) {
         l('Invalid amount ', amount)
-        new_status = 'fail'
+        new_type = 'fail'
       }
 
       if (hash.length != 32) {
@@ -127,7 +149,7 @@ module.exports = async (msg) => {
       // if usable blocks is 10 and default exp is 5, must be between 14-16
 
       if (exp < reveal_until - 1 || exp > reveal_until + 1) {
-        new_status = 'fail'
+        new_type = 'fail'
         l('Expiration is out of supported range')
       }
 
@@ -144,7 +166,8 @@ module.exports = async (msg) => {
       }
 
       var hl = await ch.d.createPayment({
-        status: new_status,
+        type: new_type,
+        status: new_type == 'add' ? 'acked' : 'new',
         is_inward: true,
 
         amount: amount,
@@ -154,7 +177,7 @@ module.exports = async (msg) => {
         unlocker: unlocker
       })
 
-      if (new_status == 'fail') {
+      if (new_type == 'fail') {
         // go to next transition - we don't like this hashlock already
         continue
       }
@@ -170,7 +193,8 @@ module.exports = async (msg) => {
         )
         if (unlocked == null) {
           l('Bad unlocker')
-          hl.status = 'fail'
+          hl.type = 'fail'
+          hl.status = 'new'
         } else {
           var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
           box_amount = readInt(box_amount)
@@ -181,14 +205,14 @@ module.exports = async (msg) => {
           }
 
           //react({confirm: 'Received a payment'})
-          hl.invoice = box_invoice.toString()
+          hl.invoice = box_invoice
 
           hl.secret = box_secret
-          hl.status = 'settle'
+          hl.type = 'settle'
+          hl.status = 'new'
 
           // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our settle on time and the hashlock expires making us lose the money.
           // SECURITY: if after timeout the settle is not acked, go to blockchain ASAP to reveal the preimage!
-          hl.settled_at = new Date()
         }
 
         await hl.save()
@@ -206,7 +230,8 @@ module.exports = async (msg) => {
           await dest_ch.d.save()
 
           await dest_ch.d.createPayment({
-            status: 'add',
+            type: 'add',
+            status: 'new',
             is_inward: false,
 
             amount: outward_amount,
@@ -219,7 +244,8 @@ module.exports = async (msg) => {
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
-          hl.status = 'fail'
+          hl.type = 'fail'
+          hl.status = 'new'
           await hl.save()
         }
       } else {
@@ -265,7 +291,8 @@ module.exports = async (msg) => {
       }))[0]
 
       outward.secret = secret
-      outward.status = m + '_sent'
+      outward.type = m
+      outward.status = 'acked'
 
       await outward.save()
 
@@ -275,7 +302,8 @@ module.exports = async (msg) => {
         l('Found inward ', inward.deltum.partnerId)
 
         inward.secret = secret
-        inward.status = m
+        inward.type = m
+        inward.status = 'new'
         await inward.save()
 
         uniqAdd(inward.deltum.partnerId)
@@ -283,10 +311,8 @@ module.exports = async (msg) => {
         //react({confirm: 'Payment completed'})
       }
 
-      if (me.handicap_dontsettle) {
-        return l(
-          'HANDICAP ON: not settling on a given secret, but pulling from inward'
-        )
+      if (me.CHEAT_dontsettle) {
+        return l('CHEAT: not acking the secret, but pulling from inward')
       }
     }
   }
@@ -305,6 +331,18 @@ module.exports = async (msg) => {
     ch.d.pending = null
   }
 
+  // CHEAT_: storing most profitable outcome for us
+  if (!ch.d.CHEAT_profitable_state) {
+    ch.d.CHEAT_profitable_state = ch.d.signed_state
+    ch.d.CHEAT_profitable_sig = ch.d.sig
+  }
+  var profitable = r(ch.d.CHEAT_profitable_state)
+  var o = readInt(profitable[1][3])
+  if ((ch.left && ch.d.offdelta > o) || (!ch.left && ch.d.offdelta < o)) {
+    ch.d.CHEAT_profitable_state = ch.d.signed_state
+    ch.d.CHEAT_profitable_sig = ch.d.sig
+  }
+
   await ch.d.save()
 
   // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)
@@ -319,15 +357,4 @@ module.exports = async (msg) => {
   }
 
   react()
-
-  /*
-  // TESTNET: storing most profitable outcome for us
-  var profitable = r(ch.d.most_profitable)
-  if (
-    (ch.left && ch.d.offdelta > readInt(profitable[0])) ||
-    (!ch.left && ch.d.offdelta < readInt(profitable[0]))
-  ) {
-    ch.d.most_profitable = r([ch.d.offdelta, ch.d.nonce, ch.d.sig])
-  }
-  */
 }

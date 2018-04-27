@@ -33,14 +33,21 @@ if (fs.existsSync(FS_PATH + '/private/pk.json')) {
   throw 'No auth'
 }
 
-FS = (method, params, cb) => {
-  axios
-    .post(FS_RPC, {
-      method: method,
-      auth_code: auth_code,
-      params: params
-    })
-    .then(cb)
+var processInvoices = async () => {
+  invoices = await FS('invoices')
+  for (var i of invoices) {
+    users[i.invoice] += i.amount
+  }
+
+  setTimeout(processInvoices, 1000)
+}
+
+FS = (method, params = {}) => {
+  return axios.post(FS_RPC, {
+    method: method,
+    auth_code: auth_code,
+    params: params
+  })
 }
 
 commy = (b, dot = true) => {
@@ -60,14 +67,12 @@ commy = (b, dot = true) => {
   return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-FS('getinfo', {}, (r) => {
-  // keep our static address as constant
-  address = r.data.address
-})
-
 require('http')
-  .createServer((req, res) => {
+  .createServer(async (req, res) => {
     cookies = new Cookies(req, res)
+
+    r = await FS('getinfo')
+    address = r.data.address
 
     res.status = 200
 
@@ -118,6 +123,7 @@ require('http')
 
 <script>
 l=console.log
+id = '${id}'
 
 fs_origin = '${LOCAL_FS_RPC}'
 
@@ -159,7 +165,7 @@ window.onload = function(){
       return ('0' + (byte & 0xFF).toString(16)).slice(-2);
     }).join('')
 
-    window.open(fs_origin+'#wallet/invoice='+invoice+"&address=${address}&amount=10")
+    window.open(fs_origin+'#wallet/invoice='+id+"&address=${address}&amount=10")
   
   }
 
@@ -176,20 +182,20 @@ window.onload = function(){
         queryData += data
       })
 
-      req.on('end', function() {
+      req.on('end', async function() {
         var p = JSON.parse(queryData)
 
         l('init ', p)
 
         if (p.deposit_invoice) {
-          FS('invoice', {invoice: p.deposit_invoice}, (r) => {
-            if (r.data.status == 'paid' && r.data.extra == id) {
-              users[id] += r.data.amount
-            } else {
-              console.log('Not paid')
-            }
-            res.end(JSON.stringify({status: 'paid'}))
-          })
+          r = await FS('invoice', {invoice: p.deposit_invoice})
+
+          if (r.data.status == 'paid' && r.data.extra == id) {
+            users[id] += r.data.amount
+          } else {
+            console.log('Not paid')
+          }
+          res.end(JSON.stringify({status: 'paid'}))
         } else if (p.destination) {
           var amount = parseInt(p.out_amount)
           if (users[id] < amount) {
@@ -197,21 +203,15 @@ window.onload = function(){
             return false
           }
           users[id] -= amount
-          FS(
-            'send',
-            {
-              outward: {
-                destination: p.destination,
-                amount: amount,
-                invoice: 'from demo'
-              }
-            },
-            (r) => {
-              l(r.data)
-
-              res.end(JSON.stringify({status: 'paid'}))
+          r = await FS('send', {
+            outward: {
+              destination: p.destination,
+              amount: amount,
+              invoice: 'from demo'
             }
-          )
+          })
+          l(r.data)
+          res.end(JSON.stringify({status: 'paid'}))
         }
       })
     } else {
