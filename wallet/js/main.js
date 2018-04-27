@@ -852,21 +852,18 @@ FS.onready(() => {
               <td colspan="7">
                 <span class="badge badge-warning">By {{batch.signer.id}} ({{commy(batch.tax)}} fee, size {{batch.length}}):</span>&nbsp;
 
-                <template v-for="d in batch.disputes">
-                  <span class="badge badge-primary">{{d[1] == 'started' ? "started a dispute with "+d[0] : "won a dispute with "+d[0] }}: {{dispute_outcome(d[2], d[3])}}
-                  </span>&nbsp;
-                </template>
+                <template v-for="d in batch.events">
+                  &nbsp;
+                  <span v-if="d[0]=='disputeWith'" class="badge badge-primary">{{d[2] == 'started' ? "started a dispute with "+d[1] : "won a dispute with "+d[1] }}: {{dispute_outcome(d[3], d[4])}}
+                  </span>
 
-                <template v-for="d in batch.inputs">
-                  <span class="badge badge-danger">{{commy(d[0])}} from {{d[1]}}</span>&nbsp;
-                </template>
+                  <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{d[2]}}</span>
 
-                <template v-for="d in batch.debts">
-                  <span class="badge badge-dark">{{commy(d[0])}} debt to {{d[1]}}</span>&nbsp;
-                </template>
+                  <span v-else-if="d[0]=='revealSecret'" class="badge badge-danger">Secret revealed: {{d[1]}}</span>
 
-                <template v-for="d in batch.outputs">
-                  <span class="badge badge-success" >{{commy(d[0])}} to {{d[2] ? ((d[1] == batch.signer.id ? '': d[1])+'@'+d[2]) : d[1]}}{{d[3] ? ' for '+d[3] : ''}}</span>&nbsp;
+                  <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{d[2]}}</span>
+
+                  <span v-else-if="d[0]=='depositTo'" class="badge badge-success" >{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': d[2])+'@'+d[3]) : d[2]}}{{d[4] ? ' for '+d[4] : ''}}</span>
                 </template>
 
               </td>

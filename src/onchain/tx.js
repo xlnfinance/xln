@@ -68,12 +68,8 @@ module.exports = async (tx, meta) => {
     tax: tax,
     length: tx.length,
 
-    // channels
-    reveals: [],
-    disputes: [],
-    inputs: [],
-    outputs: [],
-    debts: [],
+    // verified and executed events
+    events: [],
 
     // governance
     proposals: [],
@@ -125,7 +121,7 @@ module.exports = async (tx, meta) => {
         }
 
         // for blockchain explorer
-        parsed_tx.inputs.push([amount, partner.id])
+        parsed_tx.events.push([method, amount, partner.id])
         meta.inputs_volume += amount
 
         ins.insurance -= amount
@@ -164,7 +160,7 @@ module.exports = async (tx, meta) => {
       }
     } else if (method == 'disputeWith') {
       for (let dispute of t[1]) {
-        var [id, sig, dispute_nonce, offdelta, hashlocks] = dispute
+        var [id, sig, state] = dispute
 
         var partner = await User.findById(readInt(id))
         if (!partner) {
@@ -192,36 +188,46 @@ module.exports = async (tx, meta) => {
         }))[0]
 
         if (sig) {
-          var dispute_nonce = readInt(dispute_nonce)
-          var offdelta = readInt(offdelta) // SIGNED int
-
-          var state = r([
-            methodMap('dispute'),
-            compared == -1 ? signer.pubkey : partner.pubkey,
-            compared == -1 ? partner.pubkey : signer.pubkey,
-            dispute_nonce,
-            offdelta,
-            hashlocks
-          ])
-
           if (!ec.verify(state, sig, partner.pubkey)) {
-            l('Invalid offdelta state sig ', state)
+            l('Invalid sig ', state)
             continue
           }
+
+          // see Delta.prototype.getState to see how state it's built
+          var [
+            methodId,
+            [leftId, rightId, nonce, offdelta, asset],
+            left_inwards,
+            right_inwards
+          ] = r(state)
+
+          if (
+            methodMap(readInt(methodId)) != 'dispute' ||
+            !leftId.equals(ins.leftId) ||
+            !rightId.equals(ins.rightId)
+          ) {
+            l('Broken dispute')
+            continue
+          }
+
+          var nonce = readInt(nonce)
+          var offdelta = readInt(offdelta) // SIGNED int
+          var hashlocks = r([left_inwards, right_inwards])
         } else {
           l('New channel? Split with default values')
-          var dispute_nonce = 0
+          var nonce = 0
           var offdelta = 0
+          var hashlocks = null
         }
 
         var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta)
 
         if (ins.dispute_delayed) {
           if (
-            dispute_nonce > ins.dispute_nonce &&
+            nonce > ins.dispute_nonce &&
             ins.dispute_left == (compared == 1)
           ) {
-            parsed_tx.disputes.push([partner.id, 'disputed', ins, offer])
+            parsed_tx.events.push([method, partner.id, 'disputed', ins, offer])
 
             ins.dispute_offdelta = offdelta
             await ins.resolve()
@@ -232,12 +238,15 @@ module.exports = async (tx, meta) => {
         } else {
           // TODO: return to partner their part right away, and our part is delayed
           ins.dispute_offdelta = offdelta
-          ins.dispute_nonce = dispute_nonce
+          ins.dispute_nonce = nonce
+
+          // hashlocks will be verified during resolution
+          ins.dispute_hashlocks = hashlocks
 
           ins.dispute_left = compared == -1
-          ins.dispute_delayed = K.usable_blocks + 9
+          ins.dispute_delayed = K.usable_blocks + K.dispute_delay
 
-          parsed_tx.disputes.push([partner.id, 'started', ins, offer])
+          parsed_tx.events.push([method, partner.id, 'started', ins, offer])
 
           await ins.save()
 
@@ -387,7 +396,8 @@ module.exports = async (tx, meta) => {
           }
         }
 
-        parsed_tx.outputs.push([
+        parsed_tx.events.push([
+          method,
           amount,
           giveTo.id,
           withPartner ? withPartner.id : false,
@@ -413,6 +423,8 @@ module.exports = async (tx, meta) => {
         userId: signer.id
       })
 
+      parsed_tx.events.push([method, new_proposal])
+
       l(`Added new proposal!`)
       K.proposals_created++
     } else if (method == 'vote') {
@@ -429,6 +441,7 @@ module.exports = async (tx, meta) => {
       vote.approval = approval[0] == 1
 
       await vote.save()
+      parsed_tx.events.push([method, vote])
       l(`Voted ${vote.approval} for ${vote.proposalId}`)
     }
   }

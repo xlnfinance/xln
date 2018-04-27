@@ -145,7 +145,7 @@ module.exports = async (ws, msg) => {
 
             unlocker: unlocker,
             destination: pubkey,
-            invoice: invoice.toString()
+            invoice: toHex(invoice)
           })
           await me.flushChannel(ch)
           //await ch.d.requestFlush()

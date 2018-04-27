@@ -76,7 +76,8 @@ module.exports = async (genesis) => {
     flush_timeout: 250,
     min_fee: 1,
     hashlock_exp: 5,
-    max_hashlocks: 10
+    max_hashlocks: 10,
+    dispute_delay: 5
   }
 
   // Defines global Byzantine tolerance parameter

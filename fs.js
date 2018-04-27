@@ -400,8 +400,9 @@ repl = require('repl').start('> ')
 _eval = repl.eval
 
 // top level await in repl
+/*
 repl.eval = (cmd, context, filename, callback) => {
   if (cmd.indexOf('await') != -1)
     cmd = `(function(){ async function _wrap() { console.log(${cmd}) } return _wrap() })()`
   _eval(cmd, context, filename, callback)
-}
+}*/

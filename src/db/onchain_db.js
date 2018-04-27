@@ -42,7 +42,7 @@ User.prototype.payDebts = async function(parsed_tx) {
       this.balance -= d.amount_left
       u.balance += d.amount_left
 
-      parsed_tx.debts.push([d.amount_left, u.id])
+      parsed_tx.events.push(['enforceDebt', d.amount_left, u.id])
 
       await u.save()
       await d.destroy()
@@ -51,7 +51,7 @@ User.prototype.payDebts = async function(parsed_tx) {
       u.balance += this.balance
       this.balance = 0 // this user is broke now!
 
-      parsed_tx.debts.push([this.balance, u.id])
+      parsed_tx.events.push(['enforceDebt', this.balance, u.id])
 
       await u.save()
       await d.save()
@@ -101,6 +101,13 @@ Insurance = sequelize.define('insurance', {
 })
 
 Insurance.prototype.resolve = async function() {
+  if (this.dispute_hashlocks) {
+    var [left_inwards, right_inwards] = r(this.dispute_hashlocks)
+    left_inwards.map((lock) => {
+      //if lock[1] is revealed before lock[2]
+    })
+  }
+
   var resolved = resolveChannel(
     this.insurance,
     this.ondelta + this.dispute_offdelta,

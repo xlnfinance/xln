@@ -102,61 +102,42 @@ module.exports = async (ws, msg) => {
       header: header,
       ordered_tx_body: ordered_tx_body
     }
-  } else if (inputType == 'prevote') {
-    var [pubkey, sig] = r(msg)
-
-    if (me.status != 'prevote') {
-      return l(`${me.status} not prevote`)
-    }
-
-    if (!me.proposed_block.header) {
-      return false
-      //l(`we don't have a block`)
-    }
+  } else if (inputType == 'prevote' || inputType == 'precommit') {
+    var [pubkey, sig, body] = r(msg)
+    var [method, header] = r(body)
+    l('body ', method, header)
 
     var m = Members.find((f) => f.block_pubkey.equals(pubkey))
 
+    if (!m) {
+      return l(`This user is not a member`)
+    }
+
+    if (me.status != inputType) {
+      return l(`${me.status} not ${inputType}`)
+    }
+
+    if (header.length == 0) {
+      return l(`${m.id} voted nil`)
+    }
+
+    if (!me.proposed_block.header) {
+      l('We have no block')
+      return false
+    }
+
     if (
-      m &&
       ec.verify(
-        r([methodMap('prevote'), me.proposed_block.header]),
+        r([methodMap(inputType), me.proposed_block.header]),
         sig,
         pubkey
       )
     ) {
-      m.prevote = sig
+      m[inputType] = sig
       //l(`Received another prevote from  ${m.id}`)
-    } else {
-      l("this sig doesn't work for our block", me.proposed_block)
-    }
-  } else if (inputType == 'precommit') {
-    var [pubkey, sig] = r(msg)
-
-    var m = Members.find((f) => f.block_pubkey.equals(pubkey))
-
-    if (me.status != 'precommit') {
-      return l(`${me.status} not precommit`)
-    }
-
-    if (!me.proposed_block.header) {
-      return false
-      //l(`we don't have a block`)
-    }
-
-    if (
-      m &&
-      ec.verify(
-        r([methodMap('precommit'), me.proposed_block.header]),
-        sig,
-        pubkey
-      )
-    ) {
-      m.precommit = sig
-      //l(`Received another precommit from  ${m.id}`)
     } else {
       l("this sig doesn't work for our block")
     }
-
     // testnet stuff
   } else if (inputType == 'testnet') {
     if (msg[0] == 1) {
