@@ -9,6 +9,10 @@ yarn-error.log*
 private
 data
 
+# Build
+dist/
+.cache
+
 # Runtime data
 pids
 *.pid

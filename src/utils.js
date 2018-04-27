@@ -8,7 +8,11 @@ os = require('os')
 ws = require('ws')
 opn = require('../lib/opn')
 
-chalk = require('chalk') // pretty logs?
+var chalk = require('chalk') // pretty logs?
+highlight = text => `"${chalk.bold(text)}"`
+link = text => `${chalk.underline.white.bold(text)}`
+errmsg = text => `${chalk.red('   [Error]')} ${text}`
+note = text => `${chalk.gray(`  ⠟ ${text}`)}`
 
 // crypto TODO: native version
 crypto = require('crypto')
@@ -79,7 +83,39 @@ logstate = (state) => {
 `
   )
 }
-l = console.log
+
+var _orig_console_log = console.log 
+try {
+  // monkey-patch Parcel Logger to avoid cursor jump https://github.com/parcel-bundler/parcel/blob/0d984a563f72798cc0c08e9a27bc0e6e077a0b47/src/Logger.js
+  var ParcelLogger = require('parcel-bundler/src/Logger')
+  var _orig_parcel_logger_clear = ParcelLogger.clear
+  ParcelLogger.clear = () => {
+    _orig_parcel_logger_clear.call(ParcelLogger)
+    repl.displayPrompt(false) // false = reset cursor
+  }
+} catch (err) {
+  // ignore fails
+}
+
+l = (...args) => {
+  process.stdout.write('\u001B[2K\u001B[G')
+  _orig_console_log(...args)
+  if (global.repl) {
+    repl.displayPrompt(true)
+  }
+}
+
+fatal = (reason) => {
+  global.repl = null
+  l(errmsg(reason))
+  process.exit(1)
+}
+
+gracefulExit = (comment) => {
+  global.repl = null
+  l(note(comment))
+  process.exit(0)
+}
 
 /* Some crazy visualized table log
 function() {

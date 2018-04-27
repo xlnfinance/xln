@@ -180,20 +180,22 @@ invoices = {}
 
 initDashboard = async (a) => {
   // auto reloader for debugging
+  l(note(`Touch ${highlight('../restart')} to restart`))
   setInterval(() => {
     fs.stat('../restart', (e, f) => {
-      if (!f) return l('Touch ../restart file')
+      if (!f) return 
       var restartedAt = restartedAt ? restartedAt : f.atimeMs
 
       if (f && f.atimeMs != restartedAt) {
-        process.exit(0)
+        gracefulExit('restarting')
       }
     })
   }, 1000)
 
-  if (fs.existsSync('data/k.json')) {
+  var kFile = 'data/k.json'
+  if (fs.existsSync(kFile)) {
     l('Loading K data')
-    var json = fs.readFileSync('data/k.json')
+    var json = fs.readFileSync(kFile)
     K = JSON.parse(json)
 
     Members = JSON.parse(json).members // another object ref
@@ -202,13 +204,19 @@ initDashboard = async (a) => {
       m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
     }
   } else {
-    throw 'No K.json'
+    fatal(`Unable to read ${highlight(kFile)}, quitting`)
   }
 
   await privSequelize.sync({force: false})
 
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
+  var Parcel = require('parcel-bundler')
+
+  var bundler = new Parcel('wallet/index.html', {
+    logLevel: 2,
+    // for more options https://parceljs.org/api.html
+  }).middleware()
 
   var cb = function(req, res) {
     if (req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)) {
@@ -238,8 +246,10 @@ initDashboard = async (a) => {
           return RPC.internal_rpc(res, queryData)
         })
       })
-    } else {
+    } else if (req.url == '/sdk.html') {
       serveStatic('./wallet')(req, res, finalhandler(req, res))
+    } else {
+      bundler(req, res, finalhandler(req, res))
     }
   }
 
@@ -297,11 +307,10 @@ initDashboard = async (a) => {
 
   me.processQueue()
   var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
-  l('Open ' + url + ' in your browser')
+  l(note(`Open ${link(url)} in your browser`))
   server.listen(base_port).once('error', function(err) {
     if (err.code === 'EADDRINUSE') {
-      l('port is currently in use')
-      process.exit()
+      fatal(`Port ${highlight(base_port)} is currently in use, quitting`)
     }
   })
 
@@ -394,9 +403,16 @@ base_port = argv.p ? parseInt(argv.p) : 8000
   }
 })()
 
-process.on('unhandledRejection', (r) => console.log(r))
+process.on('unhandledRejection', (err) => {
+  fatal(`Fatal rejection, quitting\n\n${err ? err.stack : err}`)
+})
 
-repl = require('repl').start('> ')
+process.on('uncaughtException', (err) => {
+  fatal(`Fatal exception, quitting\n\n${err ? err.stack : err}`)
+})
+
+l(`\n${note('Welcome to FS REPL!')}`)
+repl = require('repl').start(note(''))
 _eval = repl.eval
 
 // top level await in repl

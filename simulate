@@ -1,12 +1,7 @@
-killall Failsafe
 rm -rf private/* data ../8001 ../8002 ../8003 ../8004 ../8005
 
-mkdir data
-mkdir private
+killall Failsafe 2>/dev/null
 
 node fs --genesis=test
 
-cd ..
-
-fs/sync
-
+./sync

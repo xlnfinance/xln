@@ -192,7 +192,7 @@ class Me {
         : require('http').createServer(cb)
       me.member_server.listen(parseInt(this.my_member.location.split(':')[2]))
 
-      l('Bootstrapping local server at: ' + this.my_member.location)
+      l(`Bootstrapping local server at: ${this.my_member.location}`)
 
       me.external_wss = new ws.Server({
         server: me.member_server,
@@ -200,7 +200,7 @@ class Me {
       })
 
       me.external_wss.on('error', function(err) {
-        console.error(err)
+        fatal(err)
       })
       me.external_wss.on('connection', function(ws) {
         ws.on('message', async (msg) => {

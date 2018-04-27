@@ -233,6 +233,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   })
 
   if (me.request_reload) {
-    process.exit(0) // exit w/o error
+    gracefulExit('reload requested')
   }
 }
