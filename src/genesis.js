@@ -1,7 +1,15 @@
 module.exports = async (genesis) => {
   l('Start genesis')
 
-  await sequelize.sync({force: true})
+  if (!fs.existsSync('data')){
+    fs.mkdirSync('data')
+  }
+  try {
+    await sequelize.sync({ force: true })
+  } catch (err) {
+    l(errmsg(`Cannot sync DB ${highlight(sequelize.options.storage)}`))
+    throw err
+  }
 
   // entity / country / infra
 
@@ -104,7 +112,7 @@ module.exports = async (genesis) => {
       balance: 500000000
     })
 
-    l(username + ' : ' + pw + ' at ' + loc)
+    l(`${username} : ${pw} at ${loc}`)
 
     K.members.push({
       id: user.id,
@@ -131,6 +139,7 @@ module.exports = async (genesis) => {
   var base_rpc = local ? 'ws://' + localhost : 'wss://failsafe.network'
   var base_web = local ? 'http://' + localhost : 'https://failsafe.network'
 
+  l(note('New members:'))
   var seed = await createMember(
     'root',
     toHex(crypto.randomBytes(16)),
@@ -216,5 +225,5 @@ module.exports = async (genesis) => {
     })
   )
 
-  process.exit(0)
+  gracefulExit('Genesis done, quitting')
 }
