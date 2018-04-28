@@ -5,7 +5,7 @@ module.exports = async () => {
   var not_acked = await Delta.findAll({
     where: {
       ack_requested_at: {
-        [Op.lt]: new Date() - 10000,
+        [Op.lt]: new Date() - 20000,
         [Op.ne]: null
       },
       status: {

@@ -199,11 +199,6 @@ module.exports = async (msg) => {
           var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
-          invoices[box_invoice] = {
-            amount: box_amount,
-            asset: 0
-          }
-
           //react({confirm: 'Received a payment'})
           hl.invoice = box_invoice
 
@@ -311,8 +306,11 @@ module.exports = async (msg) => {
         //react({confirm: 'Payment completed'})
       }
 
-      if (me.CHEAT_dontsettle) {
-        return l('CHEAT: not acking the secret, but pulling from inward')
+      if (me.CHEAT_dontack) {
+        l('CHEAT: not acking the secret, but pulling from inward')
+        ch.d.status == 'CHEAT_dontack'
+        await ch.d.save()
+        return
       }
     }
   }

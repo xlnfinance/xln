@@ -12,6 +12,25 @@ See external_rpc for other part of consensus.
 propose > prevote on proposal or nil > precommit if 2/3+ prevotes or nil > commit if 2/3+ precommits and await.
 
 Long term TODO: redundancy reduced gossip. For now with validators <= 100, everyone sends to everyone.
+
+Byzantine (CHEAT_) scenarios for validator to attack network. 
+me.consensus=require('src/byzantine')
+
+Expected security properties:
+1/3- cannot make forks or deadlock consensus
+2/3- cannot make forks w/o powerful network partition
+1/3+ can attempt fork with partion. can deadlock by going offline
+2/3+ can do forks
+
+
+for all scenarios we use 4 nodes: A B C D each with 25% stake. We must tolerate 1 compromised node (A).
+
+1. A gives all three different blocks.
+= no block gains 2/3+ prevotes, next node is honest.
+
+2. A proposes block1 to B C and block2 to D.  
+= block1 gains 3 prevotes, B and C precommit to block 1. A cheats on them and never gossips its own precommit. This round is failed. Next round B is still locked on block1 and proposes block1 again. B C and D all prevote and precommit on it = block1 is committed.
+
 */
 
 module.exports = async () => {
@@ -66,7 +85,7 @@ module.exports = async () => {
       me.mempool = []
 
       // Propose no blocks if mempool is empty
-      if (ordered_tx.length > 0 || K.ts < ts() - 300) {
+      if (ordered_tx.length > 0 || K.ts < ts() - K.skip_empty_blocks) {
         var ordered_tx_body = r(ordered_tx)
 
         var header = r([

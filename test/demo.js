@@ -35,6 +35,7 @@ if (fs.existsSync(FS_PATH + '/private/pk.json')) {
 
 var processInvoices = async () => {
   invoices = await FS('invoices')
+  l(invoices)
   for (var i of invoices) {
     users[i.invoice] += i.amount
   }

@@ -60,6 +60,7 @@ cache = async (i) => {
     cached_result.insurances = await Insurance.findAll({include: {all: true}})
 
     cached_result.hashlocks = await Hashlock.findAll({include: {all: true}})
+    cached_result.assets = await Asset.findAll({include: {all: true}})
 
     cached_result.blocks = (await Block.findAll({
       limit: 500,
@@ -177,8 +178,6 @@ cached_result = {
   history: [],
   my_log: ''
 }
-
-invoices = {}
 
 initDashboard = async (a) => {
   // auto reloader for debugging

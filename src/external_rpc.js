@@ -133,7 +133,7 @@ module.exports = async (ws, msg) => {
       )
     ) {
       m[inputType] = sig
-      //l(`Received another prevote from  ${m.id}`)
+      //l(`Received ${inputType} from ${m.id}`)
     } else {
       l("this sig doesn't work for our block")
     }
@@ -251,10 +251,13 @@ module.exports = async (ws, msg) => {
 
     await ch.d.save()
     l('Received updated limits')
-
-    // other party wants to withdraw onchain
   } else if (inputType == 'requestWithdraw') {
-    // partner asked us for instant withdrawal
+    if (me.CHEAT_dontwithdraw) {
+      // if we dont give withdrawal or are offline for too long, the partner starts dispute
+      return l('CHEAT_dontwithdraw')
+    }
+
+    // partner asked us for instant (mutual) withdrawal
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
 

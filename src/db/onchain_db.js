@@ -82,11 +82,11 @@ Insurance = sequelize.define('insurance', {
   leftId: Sequelize.INTEGER,
   rightId: Sequelize.INTEGER,
 
-  nonce: Sequelize.INTEGER, // for instant withdrawals, increase one by one
-  asset: Sequelize.INTEGER,
+  nonce: {type: Sequelize.INTEGER, defaultValue: 0}, // for instant withdrawals, increase one by one
+  asset: {type: Sequelize.INTEGER, defaultValue: 0},
 
-  insurance: Sequelize.BIGINT, // insurance
-  ondelta: Sequelize.BIGINT, // what hub already insuranceized
+  insurance: {type: Sequelize.BIGINT, defaultValue: 0}, // insurance
+  ondelta: {type: Sequelize.BIGINT, defaultValue: 0}, // what hub already insuranceized
 
   dispute_delayed: Sequelize.INTEGER,
 
@@ -103,9 +103,25 @@ Insurance = sequelize.define('insurance', {
 Insurance.prototype.resolve = async function() {
   if (this.dispute_hashlocks) {
     var [left_inwards, right_inwards] = r(this.dispute_hashlocks)
-    left_inwards.map((lock) => {
-      //if lock[1] is revealed before lock[2]
-    })
+
+    // returns total amount of all revealed (on time) preimages
+    var find_revealed = async (locks) => {
+      var final = 0
+      for (var lock of locks) {
+        var hl = await Hashlock.findOne({
+          where: {
+            hash: lock[1]
+          }
+        })
+        if (hl && hl.revealed_at <= readInt(lock[2])) {
+          final += readInt(lock[0])
+        }
+      }
+      return final
+    }
+
+    this.dispute_offdelta += find_revealed(left_inwards)
+    this.dispute_offdelta -= find_revealed(right_inwards)
   }
 
   var resolved = resolveChannel(
@@ -114,11 +130,10 @@ Insurance.prototype.resolve = async function() {
     true
   )
 
+  l('Resolving with ', resolved)
+
   var left = await User.findById(this.leftId)
   var right = await User.findById(this.rightId)
-
-  // to balance delta into 0
-  this.ondelta = -this.dispute_offdelta
 
   // splitting insurance between users
   left.balance += resolved.insured
@@ -138,9 +153,12 @@ Insurance.prototype.resolve = async function() {
   await right.save()
 
   this.insurance = 0
+  // to balance delta into 0
+  this.ondelta = 0 //-this.dispute_offdelta
+
   this.dispute_delayed = null
   this.dispute_left = null
-  this.dispute_nonce = null
+  //this.dispute_nonce = null
   this.dispute_offdelta = null
 
   await this.save()

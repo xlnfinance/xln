@@ -81,10 +81,13 @@ module.exports = async function() {
       outputs.sort((a, b) => b[0] - a[0])
 
       // anything to broadcast?
-      await me.broadcast([
-        ['withdrawFrom', withdrawals],
-        ['depositTo', outputs]
-      ])
+      me.batch.push(['disputeWith', disputes])
+      me.batch.push(['withdrawFrom', withdrawals])
+      me.batch.push(['depositTo', outputs])
+    }
+
+    if (me.batch.length > 0) {
+      await me.broadcast()
     }
   }, 4000)
 }

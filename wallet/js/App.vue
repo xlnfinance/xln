@@ -382,7 +382,6 @@ export default {
         <p>Usable blocks: {{K.total_blocks}}</p>
         <p>Last block received {{timeAgo(K.ts)}}</p>
         <p>Network created {{timeAgo(K.created_at)}}</p>
-        <p>FSD Market Cap {{ commy(K.assets[0].total_supply) }}</p>
         <p>Transactions: {{K.total_tx}}</p>
         <p>Tx bytes: {{K.total_tx_bytes}}</p>
         <h2>Governance stats</h2>
@@ -567,6 +566,10 @@ export default {
         <br>
         <p>Case 8. Using this button you can ensure you're safe if the hub also tries to cheat on you with most profitable state.</p>
         <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 3 })">Ask Hub to Cheat in Dispute</button>
+
+        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 4 })">CHEAT dontack</button>
+        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 5 })">CHEAT dontreveal</button>
+        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 6 })">CHEAT dontwithdraw</button>
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
@@ -752,13 +755,34 @@ export default {
           </tbody>
         </table>
       </div>
+
+      <div v-else-if="tab=='assets'">
+        <h1>Assets</h1>
+        <p>Digital assets..</p>
+        <table class="table table-striped">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">Ticker</th>
+              <th scope="col">Description</th>
+              <th scope="col">Total Supply</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in assets">
+              <th>{{u.ticker}}</th>
+              <th>{{u.desc}}</th>
+              <th>{{u.total_supply}}</th>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
   <!--
 // delayed features:
 <div class="float-right"><select v-model="asset" class="custom-select custom-select-lg mb-3">
   <option disabled>Select current asset</option>
-  <option v-for="(a,index) in K.assets" :value="a.ticker">{{a.name}}</option>
+  <option v-for="(a,index) in assets" :value="a.ticker">{{a.name}}</option>
 </select></div>
 -->
 </template>

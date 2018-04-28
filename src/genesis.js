@@ -1,11 +1,11 @@
 module.exports = async (genesis) => {
   l('Start genesis')
 
-  if (!fs.existsSync('data')){
+  if (!fs.existsSync('data')) {
     fs.mkdirSync('data')
   }
   try {
-    await sequelize.sync({ force: true })
+    await sequelize.sync({force: true})
   } catch (err) {
     l(errmsg(`Cannot sync DB ${highlight(sequelize.options.storage)}`))
     throw err
@@ -38,6 +38,10 @@ module.exports = async (genesis) => {
 
     blocksize: 20000,
     blocktime: 20,
+    // up to X seconds, validators don't propose blocks if empty
+    // the problem is all delayed actions also happen much later if no blocks made
+    // the problem is all delayed actions also happen much later if no blocks made
+    skip_empty_blocks: 0,
 
     // each genesis is randomized
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),

@@ -378,15 +378,15 @@ methodMap = (i) => {
     'revealSecrets',
     'disputeWith',
     'depositTo',
-
-    'rebalance',
     'propose',
     'vote',
 
+    // prefixes to prove it means what it means
     'dispute', // delayed balance proof
     'withdrawal', // instant offchain signature to withdraw from mutual payment channel
     'setLimits',
 
+    // offchain
     'update', // gives ack and 0 or more transitions on top
 
     'add', // we add hashlock transfer to state.
@@ -408,5 +408,3 @@ methodMap = (i) => {
     return map[i]
   }
 }
-
-allowedOnchain = ['rebalance', 'batch', 'propose', 'vote']

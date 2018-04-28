@@ -60,45 +60,6 @@ module.exports = async (ws, msg) => {
 
       case 'send':
         // TODO: support batch sends
-        /*
-        if (p.pay_invoice) {
-          var inv = p.pay_invoice.split('_')
-          var parsed = {}
-
-          parsed.amount = parseInt(inv[0])
-          parsed.invoice = inv[1]
-          parsed.box_pubkey = inv[2]
-          parsed.pubkey = inv[3]
-          parsed.partners = []
-
-          for (var i = 4; i < inv.length; i++) {
-            parsed.partners.push(parseInt(inv[i]))
-          }
-
-          parsed.trimmedId =
-            inv[2].length == 64 ? inv[2].substr(0, 10) + '...' : inv[2]
-
-          parsed.fee =
-            beforeFees(parsed.amount, [K.hubs[0].fee]) - parsed.amount
-        }
-
-        if (p.dry_run) {
-          react({parsed_invoice: parsed})
-          return false
-        }
-
-        if (parsed.pubkey.length == 64) {
-          var destination = Buffer.from(parsed.pubkey, 'hex')
-        } else {
-          var destination = await User.findById(parseInt(parsed.pubkey))
-          if (destination) {
-            destination = destination.pubkey
-          } else {
-            result.alert = 'This user ID is not found'
-            break
-          }
-        }
-        */
 
         var secret = crypto.randomBytes(32)
         var hash = sha3(secret)
@@ -243,23 +204,38 @@ module.exports = async (ws, msg) => {
 
         break
       case 'invoices':
-        result = await Payment.findAll({
-          where: {
-            type: 'settle',
-            status: 'acked',
-            is_inward: true
+        ;[many, result] = await Payment.update(
+          {
+            status: 'processed'
+          },
+          {
+            where: {
+              type: 'settle',
+              status: 'acked',
+              is_inward: true
+            }
           }
-        })
+        )
+        l('Invoices ', many)
 
         break
       case 'testnet':
-        me.send(
-          Members.find((m) => m.id == p.partner),
-          'testnet',
-          concat(bin([p.action]), r([bin(me.box.publicKey), me.pubkey]))
-        )
+        if (p.action == 4) {
+          me.CHEAT_dontack = 1
+        } else if (p.action == 5) {
+          me.CHEAT_dontreveal = 1
+        } else if (p.action == 6) {
+          me.CHEAT_dontwithdraw = 1
+        } else {
+          me.send(
+            Members.find((m) => m.id == p.partner),
+            'testnet',
+            concat(bin([p.action]), r([bin(me.box.publicKey), me.pubkey]))
+          )
+        }
 
         result.confirm = 'Testnet action triggered'
+
         break
 
       case 'hardfork':
@@ -283,16 +259,6 @@ module.exports = async (ws, msg) => {
         )
 
         result.confirm = 'The hub has been notified about new credit limits'
-
-        break
-
-      // creates and checks status of invoice
-      case 'invoice':
-        if (p.invoice) {
-          // deep clone
-          var result = Object.assign({}, invoices[p.invoice])
-          delete invoices[p.invoice]
-        }
 
         break
 

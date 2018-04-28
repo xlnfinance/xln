@@ -1,5 +1,5 @@
 // Verify and apply transactions to current state.
-// Since we aim to be a settlement layer executed on *all* machines, transactions are sent in big signed batches to optimize load. Also only 1 batch per block is allowed
+// Since we aim to be a settlement layer executed on *all* machines, transactions are sent in big signed batches to optimize load - only 1 batch per user per block is allowed
 
 module.exports = async (tx, meta) => {
   var [id, sig, body] = r(tx)
@@ -53,6 +53,7 @@ module.exports = async (tx, meta) => {
 
   if (me.pubkey.equals(signer.pubkey)) {
     if (PK.pending_batch == toHex(tx)) {
+      l('Added to chain')
       react({confirm: 'Your onchain transaction has been added!'})
       PK.pending_batch = null
     }
@@ -181,11 +182,6 @@ module.exports = async (tx, meta) => {
             leftId: compared == -1 ? signer.id : partner.id,
             rightId: compared == -1 ? partner.id : signer.id
           },
-          defaults: {
-            nonce: 0,
-            insurance: 0,
-            ondelta: 0
-          },
           include: {all: true}
         }))[0]
 
@@ -230,6 +226,7 @@ module.exports = async (tx, meta) => {
             ins.dispute_left == (compared == 1)
           ) {
             parsed_tx.events.push([method, partner.id, 'disputed', ins, offer])
+            ins.dispute_hashlocks = hashlocks
 
             ins.dispute_offdelta = offdelta
             await ins.resolve()
@@ -348,11 +345,6 @@ module.exports = async (tx, meta) => {
               leftId: compared == -1 ? giveTo.id : withPartner.id,
               rightId: compared == -1 ? withPartner.id : giveTo.id
             },
-            defaults: {
-              nonce: 0,
-              insurance: 0,
-              ondelta: 0
-            },
             include: {all: true}
           }))[0]
 
@@ -370,6 +362,8 @@ module.exports = async (tx, meta) => {
             // account creation fees are on user, if any
             var diff = readInt(output[0]) - amount
             ins.ondelta -= diff * compared
+
+            l('After reimburse ', ins.ondelta)
 
             signer.balance += reimburse_tax
           }
@@ -391,11 +385,9 @@ module.exports = async (tx, meta) => {
 
         // onchain payment for specific invoice (to us or one of our channels)
         if (me.pubkey.equals(giveTo.pubkey) && output[3].length > 0) {
-          var invoice = invoices[toHex(output[3])]
+          // TODO: hook into SDK
+
           l('Invoice paid on chain ', output[3])
-          if (invoice && invoice.amount <= amount) {
-            invoice.status = 'paid'
-          }
         }
 
         parsed_tx.events.push([

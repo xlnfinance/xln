@@ -74,24 +74,49 @@ class Me {
     })
   }
 
-  // takes an array of different transactions, puts into a batch, signs and broadcasts
+  // takes an array of different transactions, signs and broadcasts
   async broadcast(transactions) {
-    me.record = await me.byKey()
-
     if (PK.pending_batch) {
       return l('Only 1 tx is supported')
     }
     // TODO: make batch persistent on disk
     transactions = me.batch.concat(transactions)
+    me.batch = []
 
-    l('After merging: ', transactions)
+    // recommended canonical batch structure: 4 money-related arrays before everything else
+    var merged = [
+      [methodMap('revealSecrets'), []],
+      [methodMap('disputeWith'), []],
+      [methodMap('withdrawFrom'), []],
+      [methodMap('depositTo'), []]
+    ]
+    var m
+    // put into one of first arrays or add to the end
+    l(transactions)
+    transactions.map((kv) => {
+      if (!kv) return
 
-    // methodMap on every method name
-    transactions.map((kv) => (kv[0] = methodMap(kv[0])))
+      if (kv[0] == 'revealSecrets') {
+        m = 0
+      } else if (kv[0] == 'disputeWith') {
+        m = 1
+      } else if (kv[0] == 'withdrawFrom') {
+        m = 2
+      } else if (kv[0] == 'depositTo') {
+        m = 3
+      } else if (kv[0] == 'propose' || kv[0] == 'vote') {
+        merged.push([methodMap(kv[0]), kv[1]])
+        return
+      }
+      merged[m][1] = merged[m][1].concat(kv[1])
+    })
 
+    l('After merging: ', merged)
+
+    me.record = await me.byKey()
     var nonce = me.record.nonce
 
-    var to_sign = r([methodMap('batch'), nonce, transactions])
+    var to_sign = r([methodMap('batch'), nonce, merged])
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
