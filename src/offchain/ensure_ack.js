@@ -5,7 +5,7 @@ module.exports = async () => {
   var not_acked = await Delta.findAll({
     where: {
       ack_requested_at: {
-        [Op.lt]: new Date() - 80000,
+        [Op.lt]: new Date() - 120000,
         [Op.ne]: null
       },
       status: {
@@ -25,10 +25,12 @@ module.exports = async () => {
         is_inward: true
       }
     })
-    l('No ack dispute with ', d.id, d.ack_requested_at)
+    l('No ack dispute with ', d.id, new Date() - d.ack_requested_at)
+    continue
 
     var to_reveal = []
     unacked_settles.map(async (s) => {
+      // todo ensure they will still be revealed when resolve() happens
       var unlocked = await Hashlock.findOne({where: {hash: s.hash}})
       if (!unlocked) to_reveal.push(s.secret)
     })

@@ -49,13 +49,10 @@ module.exports = async function() {
         l('Delayed pull')
         ch.d.withdrawal_requested_at = ts()
         await ch.d.save()
-      } else if (ch.d.withdrawal_requested_at + 60 < ts()) {
+      } else if (ch.d.withdrawal_requested_at + 600 < ts()) {
         l('User is offline for too long, or tried to cheat')
         disputes.push(await ch.d.getDispute())
       }
-    } else if (ch.d.status == 'cheat_dispute') {
-      l('User tried to cheat')
-      disputes.push(await ch.d.getDispute())
     }
   }
 

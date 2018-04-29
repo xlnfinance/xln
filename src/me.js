@@ -59,7 +59,12 @@ class Me {
     // l("Setting timeout for queue")
     setTimeout(() => {
       me.processQueue()
-    }, 100)
+    }, 300)
+  }
+
+  async addQueue(job) {
+    // if high load, execute now with semaphores
+    me.queue.push(job)
   }
 
   async byKey(pk) {

@@ -14,18 +14,14 @@ User = sequelize.define('user', {
   username: Sequelize.STRING,
 
   pubkey: Sequelize.CHAR(32).BINARY,
-  nonce: Sequelize.INTEGER,
-  balance: Sequelize.BIGINT // onchain balance: mostly to pay taxes
+  nonce: {type: Sequelize.INTEGER, defaultValue: 0},
+  balance: {type: Sequelize.BIGINT, defaultValue: 0} // onchain balance: mostly to pay taxes
 })
 
 User.idOrKey = async function(id) {
   if (id.length == 32) {
     return (await User.findOrBuild({
-      where: {pubkey: id},
-      defaults: {
-        nonce: 0,
-        balance: 0
-      }
+      where: {pubkey: id}
     }))[0]
   } else {
     return await User.findById(readInt(id))
@@ -179,6 +175,7 @@ Insurance.prototype.resolve = async function() {
   this.ondelta = 0
 
   this.dispute_delayed = null
+  this.dispute_hashlocks = null
   this.dispute_left = null
   //this.dispute_nonce = null
   this.dispute_offdelta = null

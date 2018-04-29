@@ -195,7 +195,10 @@ Delta.prototype.getState = async function() {
 Delta.prototype.getDispute = async function() {
   // post last sig if any
   var partner = await User.idOrKey(this.partnerId)
-  return this.sig ? [partner.id, this.sig, this.signed_state] : [partner.id]
+
+  // the user is not even registered (we'd have to register them first)
+  var id = partner.id ? partner.id : this.partnerId
+  return this.sig ? [id, this.sig, this.signed_state] : [id]
 }
 
 Delta.prototype.startDispute = async function(cheat = false) {

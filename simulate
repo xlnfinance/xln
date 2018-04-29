@@ -8,11 +8,11 @@ sleep 4
 for i in {8001..8010};do 
   rm -rf data$i
   rsync -q -rva --exclude=offchain data/* data$i
-
   cmd="node fs.js -p$i --username=$i --pw=password --datadir=data$i"
-    if (( i < 8004 )); then
-      ttab -t $i ${cmd}
-    else 
-      ${cmd} --silent --monkey &
-    fi
+  if (( i < 8004 )); then
+    ttab -t $i ${cmd}
+  else 
+    ttab -t $i ${cmd} --monkey
+    #${cmd} --monkey &
+  fi
 done

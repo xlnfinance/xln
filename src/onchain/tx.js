@@ -172,9 +172,9 @@ module.exports = async (tx, meta) => {
         var [id, sig, state] = dispute
 
         var partner = await User.idOrKey(id)
-        if (!partner) {
+        if (!partner.id) {
           l('Your partner is not registred')
-          continue
+          await partner.save()
         }
 
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
@@ -375,8 +375,6 @@ module.exports = async (tx, meta) => {
             // account creation fees are on user, if any
             var diff = readInt(output[0]) - amount
             ins.ondelta -= diff * compared
-
-            l('After reimburse ', ins.ondelta)
 
             signer.balance += reimburse_tax
           }

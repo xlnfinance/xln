@@ -122,7 +122,7 @@ module.exports = async (ws, msg) => {
     }
 
     if (!me.proposed_block.header) {
-      l('We have no block')
+      //l('We have no block')
       return false
     }
 

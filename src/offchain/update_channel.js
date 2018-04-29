@@ -58,7 +58,6 @@ module.exports = async (msg) => {
 
   if (await ch.d.saveState(newState, ackSig)) {
     // our last known state has been acked.
-    // l('Update all sent transitions as acked')
 
     await Payment.update(
       {
@@ -73,9 +72,16 @@ module.exports = async (msg) => {
     )
 
     ch.d.ack_requested_at = null
+    //l('Update all sent transitions as acked ', ch.d.ack_requested_at)
     await ch.d.save()
   } else {
-    if (transitions.length == 0) return l('Empty invalid ack')
+    if (transitions.length == 0) {
+      logstate(newState)
+      logstate(oldState)
+      logstate(debugState)
+      logstate(signedState)
+      return l('Empty invalid ack')
+    }
 
     if (ch.d.status == 'merge') {
       return l('Rollback cant rollback')
@@ -145,21 +151,21 @@ module.exports = async (msg) => {
       var reveal_until = K.usable_blocks + K.hashlock_exp
       // if usable blocks is 10 and default exp is 5, must be between 14-16
 
-      if (exp < reveal_until - 1 || exp > reveal_until + 1) {
+      if (exp < reveal_until - 2 || exp > reveal_until + 2) {
         new_type = 'fail'
         l('Expiration is out of supported range')
       }
 
       receivable -= amount
 
-      newState[1][2]++ //nonce
       // push a hashlock
       inwards.push([amount, hash, exp])
 
       // check new state and sig, save
+      newState[1][2]++
       if (!await ch.d.saveState(newState, t[2])) {
         l('Invalid state sig add')
-        break
+        return false
       }
 
       var hl = await ch.d.createPayment({
@@ -175,7 +181,7 @@ module.exports = async (msg) => {
       })
 
       if (new_type == 'fail') {
-        // go to next transition - we don't like this hashlock already
+        // go to next transition - we failed this hashlock already
         continue
       }
 
@@ -218,7 +224,7 @@ module.exports = async (msg) => {
 
         // is online? Is payable?
 
-        if (dest_ch.payable >= outward_amount) {
+        if (me.users[destination] && dest_ch.payable >= outward_amount) {
           await dest_ch.d.save()
 
           await dest_ch.d.createPayment({
@@ -260,7 +266,6 @@ module.exports = async (msg) => {
         break
       }
 
-      newState[1][2]++ //nonce
       outwards.splice(index, 1)
 
       if (m == 'settle') {
@@ -272,6 +277,7 @@ module.exports = async (msg) => {
       }
 
       // check new state and sig, save
+      newState[1][2]++
       if (!await ch.d.saveState(newState, t[2])) {
         l('Invalid state sig at ' + m)
         break

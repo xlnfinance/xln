@@ -129,7 +129,7 @@ module.exports = async (ch, opportunistic = false) => {
     }
 
     if (opportunistic && transitions.length == 0) {
-      return l('Nothing to flush')
+      return //l('Nothing to flush')
     }
   }
 

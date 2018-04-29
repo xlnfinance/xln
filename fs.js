@@ -421,13 +421,19 @@ ZUp5FjKozQ7BD6trZydUDq8bMgeUCLuh2sdCT6sPupKGX6rAyCcdqS3zesc8CeGzEMquFMwxrgnXqebY
 
 if (argv.monkey) {
   monk = setInterval(() => {
-    me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+    /*
+    if (Math.random() > 0.7) {
+      me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+    }
+    */
 
-    me.payChannel({
-      destination: randos[Math.floor(Math.random() * randos.length)],
-      amount: 100 + Math.round(Math.random() * 1000)
+    me.addQueue(async () => {
+      await me.payChannel({
+        destination: randos[Math.floor(Math.random() * randos.length)],
+        amount: 100 + Math.round(Math.random() * 1000)
+      })
     })
-  }, 3000)
+  }, 5000)
 
   setTimeout(() => {
     clearInterval(monk)
