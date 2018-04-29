@@ -227,8 +227,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     l('Rebroadcasting pending tx ', raw)
     me.send(me.next_member(1), 'tx', r([raw]))
   } else {
-    // time to broadcast our next batch then
-    await me.broadcast()
+    // time to broadcast our next batch then. (Delay to ensure validator processed the block)
+    setTimeout(() => {
+      me.broadcast()
+    }, 3000)
   }
 
   if (me.request_reload) {

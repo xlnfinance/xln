@@ -35,6 +35,8 @@ class Me {
 
     this.address = base58.encode(r([bin(me.box.publicKey), me.pubkey]))
 
+    console.log(this.address)
+
     this.record = await this.byKey()
 
     PK.username = username
@@ -117,6 +119,10 @@ class Me {
     l('After merging to broadcast: ', merged)
 
     me.record = await me.byKey()
+    if (!me.record) {
+      //l("You can't broadcast if you are not registred")
+      return false
+    }
     var nonce = me.record.nonce
 
     var to_sign = r([methodMap('batch'), nonce, merged])
@@ -360,6 +366,7 @@ Me.prototype.consensus = require('./onchain/consensus')
 Me.prototype.processBlock = require('./onchain/block')
 Me.prototype.processTx = require('./onchain/tx')
 
+Me.prototype.payChannel = require('./offchain/pay_channel')
 Me.prototype.flushChannel = require('./offchain/flush_channel')
 Me.prototype.getChannel = require('./offchain/get_channel')
 Me.prototype.updateChannel = require('./offchain/update_channel')

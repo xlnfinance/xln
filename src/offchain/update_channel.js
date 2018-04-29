@@ -293,12 +293,19 @@ module.exports = async (msg) => {
       if (inward) {
         l('Found inward ', inward.deltum.partnerId)
 
-        inward.secret = secret
-        inward.type = m
-        inward.status = 'new'
-        await inward.save()
+        if (inward.deltum.status == 'disputed') {
+          l(
+            'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
+          )
+          me.batch.push('revealSecrets', [secret])
+        } else {
+          inward.secret = secret
+          inward.type = m
+          inward.status = 'new'
+          await inward.save()
 
-        uniqAdd(inward.deltum.partnerId)
+          uniqAdd(inward.deltum.partnerId)
+        }
       } else {
         //react({confirm: 'Payment completed'})
       }

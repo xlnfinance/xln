@@ -62,7 +62,7 @@ cache = async (i) => {
       limit: 500,
       order: [['id', 'desc']],
       where: {
-        meta: {[Op.not]: null}
+        //meta: {[Op.not]: null}
       }
     })).map((b) => {
       var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(
@@ -408,6 +408,31 @@ require('./src/db/offchain_db')
     initDashboard()
   }
 })()
+
+var randos = `ZUp5Maa1vtb3rfTzsa7qnoU3yLEEGAfWuVvPPyJcgEbA1Dxncds6T3HFwxTFYmMC3LwbcPKvRPM9mmaVRaFACciUcFcD6
+ZUp5KM5NFCHpnn1HYb9y3UtgLU2kSuV1MyCCTYiKSqh3TpAYGuBkHsWsVvHGBMDYHZVJHZyAfLaHSUf73tmj2Bb4Tk5UQ
+ZUp5CQqYJj2i8nnKqk5PD1qPff622Bgm6U7BRwQkHzkcRhkrq8TLKusFcC9FSMsmMENPiJck3HyrSNXmoUdYmaxStq24w
+ZUp59nsh1i2cmNr1ZwySV3BTK1uRLdCzG6wSHfi4evje6YeRhKp48h9bJx14ZQzuH4bThyFQzrkqinB993Ptp89CLVPoi
+ZUp5HrKt4oJVaf77ZrB41U29AFq8WhgpWvc69GLoLV6SZMNdaDH1hXCcJCWj3EqzT7CiCAf1SEzShd6SnwXPqVRHDRtNH
+ZUp57UFAjLTjfdg4qNJGpus5SMitgbumrMDgeLfswNQrCWEXNrmFdThUFdYzwKXi8fifNssXHe9HyupBHtMzGnBgp5s2L
+ZUp5FjKozQ7BD6trZydUDq8bMgeUCLuh2sdCT6sPupKGX6rAyCcdqS3zesc8CeGzEMquFMwxrgnXqebYwfid4NbA6wxnY`.split(
+  '\n'
+)
+
+if (argv.monkey) {
+  monk = setInterval(() => {
+    me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+
+    me.payChannel({
+      destination: randos[Math.floor(Math.random() * randos.length)],
+      amount: 100 + Math.round(Math.random() * 1000)
+    })
+  }, 3000)
+
+  setTimeout(() => {
+    clearInterval(monk)
+  }, 300000)
+}
 
 process.on('unhandledRejection', (err) => {
   fatal(`Fatal rejection, quitting\n\n${err ? err.stack : err}`)

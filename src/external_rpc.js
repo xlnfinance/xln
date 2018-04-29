@@ -90,6 +90,7 @@ module.exports = async (ws, msg) => {
 
     // no precommits means dry run
     if (!await me.processBlock([], header, ordered_tx_body)) {
+      //l('Bad block proposed')
       return false
     }
 
@@ -140,43 +141,11 @@ module.exports = async (ws, msg) => {
     // testnet stuff
   } else if (inputType == 'testnet') {
     if (msg[0] == 1) {
-      var secret = crypto.randomBytes(32)
-      var hash = sha3(secret)
-      var [box_pubkey, pubkey] = r(msg.slice(1))
-      var amount = Math.round(Math.random() * 10000)
-      var invoice = Buffer.alloc(1)
-
-      var unlocker_nonce = crypto.randomBytes(24)
-      var unlocker_box = nacl.box(
-        r([amount, secret, invoice]),
-        unlocker_nonce,
-        box_pubkey,
-        me.box.secretKey
-      )
-      var unlocker = r([
-        bin(unlocker_box),
-        unlocker_nonce,
-        bin(me.box.publicKey)
-      ])
-      var ch = await me.getChannel(pubkey)
-
-      await ch.d.save()
-
-      await ch.d.createPayment({
-        type: 'add',
-        status: 'new',
-        is_inward: false,
-
-        amount: amount,
-        hash: hash,
-        exp: K.usable_blocks + K.hashlock_exp,
-
-        unlocker: unlocker,
-        destination: pubkey,
-        invoice: invoice
+      await me.payChannel({
+        destination: msg.slice(1),
+        amount: 100 + Math.round(Math.random() * 1000),
+        invoice: Buffer.alloc(1)
       })
-
-      await me.flushChannel(ch)
     }
 
     if (msg[0] == 2) {

@@ -25,6 +25,10 @@ module.exports = async (ch, opportunistic = false) => {
     return false
   }
 
+  if (ch.d.status == 'disputed') {
+    return false
+  }
+
   if (ch.d.status == 'sent') {
     if (ch.d.ack_requested_at < new Date() - 30000) {
       l(`Can't flush, awaiting ack. Repeating our request?`)

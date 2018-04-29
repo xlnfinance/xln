@@ -650,9 +650,9 @@ export default {
                 <td>{{b.built_by}}</td>
                 <td>{{timeAgo(b.timestamp)}}</td>
                 <td>{{b.total_tx}}</td>
-                <td>{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>
+                <td v-if="b.meta">{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>
               </tr>
-              <tr v-for="batch in b.meta.parsed_tx">
+              <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
                 <td colspan="7">
                   <span class="badge badge-warning">By {{batch.signer.id}} ({{commy(batch.tax)}} fee, size {{batch.length}}):</span>&nbsp;
                   <template v-for="d in batch.events">
@@ -670,7 +670,7 @@ export default {
                   </template>
                 </td>
               </tr>
-              <tr v-if="b.meta.cron.length > 0">
+              <tr v-if="b.meta && b.meta.cron.length > 0">
                 <td colspan="7">
                   <template v-for="m in b.meta.cron">
                     <span v-if="m[0] == 'autodispute'" class="badge badge-primary">Dispute auto-resolved: {{dispute_outcome(m[1], m[2])}}</span>

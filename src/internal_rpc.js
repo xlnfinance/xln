@@ -60,58 +60,7 @@ module.exports = async (ws, msg) => {
 
       case 'send':
         // TODO: support batch sends
-
-        var secret = crypto.randomBytes(32)
-        var hash = sha3(secret)
-
-        var invoice = p.outward.invoice
-          ? bin(p.outward.invoice)
-          : crypto.randomBytes(32)
-
-        var [box_pubkey, pubkey] = r(base58.decode(p.outward.destination))
-        var amount = parseInt(p.outward.amount)
-        var via = fromHex(K.hubs[0].pubkey)
-        var sent_amount = beforeFees(amount, [K.hubs[0].fee])
-
-        var unlocker_nonce = crypto.randomBytes(24)
-        var unlocker_box = nacl.box(
-          r([amount, secret, invoice]),
-          unlocker_nonce,
-          box_pubkey,
-          me.box.secretKey
-        )
-        var unlocker = r([
-          bin(unlocker_box),
-          unlocker_nonce,
-          bin(me.box.publicKey)
-        ])
-        var ch = await me.getChannel(via)
-
-        if (amount > ch.payable) {
-          result.alert = `Not enough funds`
-        } else if (amount > K.max_amount) {
-          result.alert = `Maximum payment is $${commy(K.max_amount)}`
-        } else if (amount < K.min_amount) {
-          result.alert = `Minimum payment is $${commy(K.min_amount)}`
-        } else {
-          await ch.d.save()
-
-          await ch.d.createPayment({
-            type: 'add',
-            status: 'new',
-            is_inward: false,
-
-            amount: sent_amount,
-            hash: hash,
-            exp: K.usable_blocks + K.hashlock_exp,
-
-            unlocker: unlocker,
-            destination: pubkey,
-            invoice: invoice
-          })
-          await me.flushChannel(ch)
-        }
-
+        await me.payChannel(p.outward)
         break
 
       case 'rebalance':
@@ -232,7 +181,7 @@ module.exports = async (ws, msg) => {
           me.send(
             Members.find((m) => m.id == p.partner),
             'testnet',
-            concat(bin([p.action]), r([bin(me.box.publicKey), me.pubkey]))
+            concat(bin([p.action]), bin(me.address))
           )
         }
 
