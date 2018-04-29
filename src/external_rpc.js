@@ -90,7 +90,7 @@ module.exports = async (ws, msg) => {
 
     // no precommits means dry run
     if (!await me.processBlock([], header, ordered_tx_body)) {
-      return l('Invalid block header: ', header)
+      return false
     }
 
     // consensus operations are in-memory for now
@@ -199,7 +199,7 @@ module.exports = async (ws, msg) => {
     if (chain.length == sync_limit) {
       sync()
     } else {
-      fs.writeFileSync('data/k.json', stringify(K))
+      fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
     }
   } else if (inputType == 'sync') {
     var last = await Block.findOne({

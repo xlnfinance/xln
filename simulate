@@ -1,7 +1,12 @@
-rm -rf private/* data ../8001 ../8002 ../8003 ../8004 ../8005
-
+rm -rf data
 killall Failsafe 2>/dev/null
 
 node fs --genesis=test
 
-./sync
+ttab -t 8433 "node fs.js -p8433"
+
+for i in {8001..8003};do 
+  rm -rf data$i
+  rsync -q -rva --exclude=offchain data/* data$i
+  ttab -t $i "node fs.js -p$i --username=$i --pw=password --datadir=data$i"
+done

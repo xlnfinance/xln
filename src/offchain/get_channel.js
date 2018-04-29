@@ -27,7 +27,7 @@ module.exports = async (partner = Members[0].pubkey) => {
   ch.hub = my_hub(partner) || {handle: toHex(partner).substr(0, 10)}
 
   // ch stands for Channel, d for Delta record, yes
-  ch.d = (await Delta.findOrCreate({
+  ch.d = (await Delta.findOrBuild({
     where: {
       myId: me.pubkey,
       partnerId: partner

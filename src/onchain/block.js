@@ -89,16 +89,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     K.total_tx_bytes += ordered_tx[i].length
   }
 
-  // Ensure our last broadcasted batch was added
-  if (PK.pending_batch) {
-    var raw = fromHex(PK.pending_batch)
-    l('Rebroadcasting pending tx ', raw)
-    me.send(me.next_member(1), 'tx', r([raw]))
-  } else {
-    // time to broadcast our next batch then
-    await me.broadcast()
-  }
-
   K.ts = timestamp
   K.prev_hash = toHex(sha3(header))
 
@@ -170,7 +160,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   // only members do snapshots, as they require extra computations
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
-    fs.writeFileSync('data/k.json', stringify(K))
+    fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
 
     var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
 
@@ -180,7 +170,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
         sync: false,
         portable: true,
         noMtime: true,
-        file: 'private/' + filename,
+        file: datadir + '/offchain/' + filename,
         filter: (path, stat) => {
           // must be deterministic
           stat.mtime = null
@@ -188,10 +178,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           stat.ctime = null
           stat.birthtime = null
 
-          // skip /private and irrelevant things
+          // Skip offchain db, replicated datadirs and irrelevant things
           if (
             path.startsWith('./.') ||
-            path.match(/(private|DS_Store|node_modules|test)/)
+            path.match(/(data[0-9]+|data\/offchain|DS_Store|node_modules|test)/)
           ) {
             return false
           } else {
@@ -203,12 +193,19 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       (_) => {
         if (old_height > 1) {
           // genesis state is stored for analytics and member bootstraping
-          fs.unlink('private/Failsafe-' + old_height + '.tar.gz')
+          fs.unlink(datadir + '/offchain/Failsafe-' + old_height + '.tar.gz')
           l('Removed old snapshot and created ' + filename)
         }
       }
     )
   }
+
+  // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
+  await Hashlock.destroy({
+    where: {
+      revealed_at: K.usable_blocks - K.hashlock_keepalive
+    }
+  })
 
   // save final block in blockchain db and broadcast
   await Block.create({
@@ -223,6 +220,16 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     meta:
       meta.parsed_tx.length + meta.cron.length > 0 ? JSON.stringify(meta) : null
   })
+
+  // Ensure our last broadcasted batch was added
+  if (PK.pending_batch) {
+    var raw = fromHex(PK.pending_batch)
+    l('Rebroadcasting pending tx ', raw)
+    me.send(me.next_member(1), 'tx', r([raw]))
+  } else {
+    // time to broadcast our next batch then
+    await me.broadcast()
+  }
 
   if (me.request_reload) {
     gracefulExit('reload requested')

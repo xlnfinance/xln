@@ -316,6 +316,7 @@ module.exports = async (ws, msg) => {
       react(result, json.id)
     }
   } else {
+    // the request is not authorized with auth_code - just send public explorer data
     ws.send(
       JSON.stringify({
         result: cached_result,

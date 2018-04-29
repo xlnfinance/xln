@@ -58,7 +58,7 @@ module.exports = async (msg) => {
 
   if (await ch.d.saveState(newState, ackSig)) {
     // our last known state has been acked.
-    l('Update all sent transitions as acked')
+    // l('Update all sent transitions as acked')
 
     await Payment.update(
       {
@@ -76,9 +76,6 @@ module.exports = async (msg) => {
     await ch.d.save()
   } else {
     if (transitions.length == 0) return l('Empty invalid ack')
-
-    oldState = r(ch.d.signed_state)
-    prettyState(oldState)
 
     if (ch.d.status == 'merge') {
       return l('Rollback cant rollback')
@@ -101,8 +98,8 @@ module.exports = async (msg) => {
       l('Rollback to old state')
 
       rollback = [
-        newState[1][2] - oldState[1][2],
-        newState[1][3] - oldState[1][3]
+        newState[1][2] - oldState[1][2], // nonce diff
+        newState[1][3] - oldState[1][3] // offdelta diff
       ]
       newState = oldState
     } else {
@@ -111,8 +108,8 @@ module.exports = async (msg) => {
       logstate(debugState)
       logstate(signedState)
 
-      l('Dead lock! Trying to recover by sending last ack')
-      await me.flushChannel(ch)
+      l('Dead lock?! Trying to recover by sending last ack')
+      //await me.flushChannel(ch)
 
       return false
     }
@@ -172,7 +169,7 @@ module.exports = async (msg) => {
 
         amount: amount,
         hash: hash,
-        exp: reveal_until,
+        exp: exp,
 
         unlocker: unlocker
       })
@@ -231,7 +228,7 @@ module.exports = async (msg) => {
 
             amount: outward_amount,
             hash: hash,
-            exp: exp,
+            exp: reveal_until, // the outgoing exp is a little bit longer
 
             unlocker: unlocker,
             destination: destination

@@ -1,9 +1,6 @@
 module.exports = async (genesis) => {
   l('Start genesis')
 
-  if (!fs.existsSync('data')) {
-    fs.mkdirSync('data')
-  }
   try {
     await sequelize.sync({force: true})
   } catch (err) {
@@ -18,8 +15,9 @@ module.exports = async (genesis) => {
     // global network pepper to protect derivation from rainbow tables
     network_name: 'main',
 
-    usable_blocks: 0,
-    total_blocks: 0,
+    usable_blocks: 0, // blocks that have some extra space (to ensure disputes add on-time)
+    total_blocks: 0, // total number of blocks full or not
+
     total_tx: 0,
     total_bytes: 0,
 
@@ -88,8 +86,11 @@ module.exports = async (genesis) => {
     hubs: [],
     flush_timeout: 250,
     min_fee: 1,
-    hashlock_exp: 5,
-    max_hashlocks: 10,
+
+    hashlock_exp: 5, // how many blocks a user needs to be a able to reveal
+    hashlock_keepalive: 10, // for how many blocks onchain keeps it unlocked since reveal
+    max_hashlocks: 10, // we don't want overweight huge dispute strings
+
     dispute_delay: 5
   }
 
@@ -225,10 +226,10 @@ module.exports = async (genesis) => {
 */
 
   var json = stringify(K)
-  fs.writeFileSync('data/k.json', json)
+  fs.writeFileSync(datadir + '/onchain/k.json', json)
 
   fs.writeFileSync(
-    'private/pk.json',
+    datadir + '/offchain/pk.json',
     JSON.stringify({
       username: 'root',
       seed: seed.toString('hex'),

@@ -37,7 +37,9 @@ module.exports = async (tx, meta) => {
       return {error: 'Only few tx per block per account currently allowed'}
     } else {
       if (signer.nonce != nonce) {
-        return {error: 'Invalid nonce during dry run'}
+        return {
+          error: `Invalid nonce during dry run ${signer.nonce} vs ${nonce}`
+        }
       }
 
       // Mark this user to deny subsequent tx
@@ -156,8 +158,10 @@ module.exports = async (tx, meta) => {
       for (var secret of t[1]) {
         var hash = sha3(secret)
         var [hl, is_created] = await Hashlock.findOrCreate({
-          hash: hash,
-          revealed_at: K.usable_blocks
+          where: {
+            hash: hash,
+            revealed_at: K.usable_blocks
+          }
         })
         if (is_created) {
           parsed_tx.events.push(['revealSecrets', hash])
@@ -167,7 +171,7 @@ module.exports = async (tx, meta) => {
       for (let dispute of t[1]) {
         var [id, sig, state] = dispute
 
-        var partner = await User.findById(readInt(id))
+        var partner = await User.idOrKey(id)
         if (!partner) {
           l('Your partner is not registred')
           continue
@@ -229,13 +233,15 @@ module.exports = async (tx, meta) => {
         if (ins.dispute_delayed) {
           // the other party sends counterproof
           if (ins.dispute_left == (compared == 1)) {
+            // TODO: any punishment for cheating for starting party?
+            // we don't want to slash everything like in LN, but some fee would help
             parsed_tx.events.push([method, partner.id, 'disputed', ins, offer])
             ins.dispute_hashlocks = hashlocks
 
             ins.dispute_nonce = nonce
             ins.dispute_offdelta = offdelta
             await ins.resolve(parsed_tx)
-            l('Resolving with fraud proof')
+            l('Resolved with fraud proof')
           } else {
             l('Old nonce or same counterparty')
           }
@@ -261,10 +267,10 @@ module.exports = async (tx, meta) => {
             await ch.d.save()
 
             if (
-              (ch.left && offdelta < ch.d.offdelta) ||
-              (!ch.left && offdelta > ch.d.offdelta)
+              ch.d.signed_state &&
+              readInt(r(ch.d.signed_state)[1][2]) > ins.dispute_nonce
             ) {
-              l('Unprofitable proof posted!')
+              l('Our last signed nonce is higher!')
               await ch.d.startDispute()
             }
           }
@@ -272,6 +278,7 @@ module.exports = async (tx, meta) => {
       }
     } else if (method == 'depositTo') {
       await signer.payDebts(parsed_tx)
+      // there's a tiny bias here, the hub always gets reimbursed more than tax paid
       var reimburse_tax = 1 + Math.floor(tax / t[1].length)
 
       for (var output of t[1]) {
@@ -359,7 +366,8 @@ module.exports = async (tx, meta) => {
           signer.balance -= amount
 
           if (my_hub) {
-            // hubs get reimbursed for rebalancing
+            // The hub gets reimbursed for rebalancing users.
+            // Otherwise it would be harder to collect fee from participants
             // TODO: attack vector, the user may not endorsed this rebalance
             ins.insurance -= reimburse_tax
             if (compared == 1) ins.ondelta -= reimburse_tax

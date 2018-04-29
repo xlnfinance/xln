@@ -30,7 +30,7 @@ module.exports = async () => {
     var to_reveal = []
     unacked_settles.map(async (s) => {
       var unlocked = await Hashlock.findOne({where: {hash: s.hash}})
-      if (!unlocked) to_revel.push(s.secret)
+      if (!unlocked) to_reveal.push(s.secret)
     })
 
     me.batch.push(['revealSecrets', to_reveal])

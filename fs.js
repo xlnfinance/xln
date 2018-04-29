@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-
 require('./src/utils')
-
-require('./src/db/onchain_db')
-require('./src/db/offchain_db')
 
 // Defines promised/insured for both users based on insurance and delta=(ondelta+offdelta)
 // There are 3 major scenarios of delta position
@@ -112,7 +108,7 @@ cache = async (i) => {
   // TODO: read hash just after snapshot generation
   if (me.my_member && K.last_snapshot_height) {
     var filename = `Failsafe-${K.last_snapshot_height}.tar.gz`
-    var cmd = 'shasum -a 256 private/' + filename
+    var cmd = `shasum -a 256 ${datadir}/offchain/${filename}`
 
     require('child_process').exec(cmd, async (er, out, err) => {
       if (out.length == 0) {
@@ -193,7 +189,7 @@ initDashboard = async (a) => {
     })
   }, 1000)
 
-  var kFile = 'data/k.json'
+  var kFile = datadir + '/onchain/k.json'
   if (fs.existsSync(kFile)) {
     l('Loading K data')
     var json = fs.readFileSync(kFile)
@@ -221,7 +217,7 @@ initDashboard = async (a) => {
 
   var cb = function(req, res) {
     if (req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)) {
-      var file = 'private' + req.url
+      var file = datadir + '/offchain' + req.url
       var stat = fs.statSync(file)
       res.writeHeader(200, {'Content-Length': stat.size})
       var fReadStream = fs.createReadStream(file)
@@ -286,8 +282,8 @@ initDashboard = async (a) => {
 
   repl.context.me = me
 
-  if (fs.existsSync('private/pk.json')) {
-    PK = JSON.parse(fs.readFileSync('private/pk.json'))
+  if (fs.existsSync(datadir + '/offchain/pk.json')) {
+    PK = JSON.parse(fs.readFileSync(datadir + '/offchain/pk.json'))
   } else {
     // used to authenticate browser sessions to this daemon
     PK = {
@@ -307,7 +303,7 @@ initDashboard = async (a) => {
   }
 
   me.processQueue()
-  var url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
+  var url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
   l(note(`Open ${link(url)} in your browser`))
   server.listen(base_port).once('error', function(err) {
     if (err.code === 'EADDRINUSE') {
@@ -379,13 +375,22 @@ argv = require('minimist')(process.argv.slice(2), {
   string: ['username', 'pw']
 })
 
+datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8000
+
+if (!fs.existsSync('data')) {
+  fs.mkdirSync('data')
+  fs.mkdirSync('data/onchain')
+  fs.mkdirSync('data/offchain')
+}
+require('./src/db/onchain_db')
+require('./src/db/offchain_db')
 ;(async () => {
   if (argv.console) {
     initDashboard()
   } else if (argv.genesis) {
     require('./src/genesis')(argv.genesis)
-  } else if (argv.cluster || true) {
+  } else if (argv.cluster) {
     var cluster = require('cluster')
     if (cluster.isMaster) {
       cluster.fork()

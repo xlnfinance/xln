@@ -1,11 +1,11 @@
 // Offchain database - local and private stuff
 
-if (!fs.existsSync('private')) fs.mkdirSync('private')
+if (!fs.existsSync(datadir + '/offchain')) fs.mkdirSync(datadir + '/offchain')
 
 var base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
-  storage: 'private/db.sqlite',
+  storage: datadir + '/offchain/db.sqlite',
   define: {timestamps: true}, // we don't mind timestamps in offchain db
   operatorsAliases: false,
   logging: false
@@ -33,7 +33,10 @@ Delta = privSequelize.define('delta', {
   ondelta: Sequelize.INTEGER,
 
   offdelta: Sequelize.INTEGER,
-  asset: Sequelize.INTEGER,
+  asset: {
+    type: Sequelize.INTEGER,
+    defaultValue: 0
+  },
 
   soft_limit: Sequelize.INTEGER,
   hard_limit: Sequelize.INTEGER, // we trust up to
@@ -195,26 +198,18 @@ Delta.prototype.getDispute = async function() {
   return this.sig ? [partner.id, this.sig, this.signed_state] : [partner.id]
 }
 
-Delta.prototype.startDispute = async function(cheat) {
-  if (cheat) {
-    if (this.CHEAT_profitable_state) {
-      me.batch.push([
-        ['disputeWith', [this.partnerId, this.sig, this.CHEAT_profitable_state]]
-      ])
-    } else {
-      l('No profitable state stored')
-    }
-    return false
-  }
-
-  if (me.my_hub) {
-    this.status = 'cheat_dispute'
-    // we don't broadcast dispute right away and wait until periodic rebalance
+Delta.prototype.startDispute = async function(cheat = false) {
+  if (cheat && this.CHEAT_profitable_state) {
+    var d = [
+      this.partnerId,
+      this.CHEAT_profitable_sig,
+      this.CHEAT_profitable_state
+    ]
   } else {
-    this.status = 'disputed'
-    me.batch.push(['disputeWith', [await this.getDispute()]])
+    var d = await this.getDispute()
   }
-
+  this.status = 'disputed'
+  me.batch.push(['disputeWith', [d]])
   await this.save()
 }
 

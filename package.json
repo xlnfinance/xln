@@ -32,17 +32,17 @@
   "dependencies": {
     "base-x": "3.0.4",
     "bn.js": "4.11.8",
-    "chalk": "2.3.2",
-    "finalhandler": "1.1.0",
+    "chalk": "2.4.1",
+    "finalhandler": "1.1.1",
     "keccak": "1.4.0",
-    "prettier": "1.12.0",
+    "prettier": "1.12.1",
     "rlp": "2.0.0",
-    "sequelize": "4.35.2",
+    "sequelize": "4.37.6",
     "serve-static": "1.13.2",
-    "sqlite3": "3.1.13",
-    "tar": "4.4.0",
+    "sqlite3": "4.0.0",
+    "tar": "4.4.1",
     "tweetnacl": "1.0.0",
-    "ws": "3.2.0"
+    "ws": "5.1.1"
   },
   "devDependencies": {
     "babel-plugin-transform-es2015-modules-strip": "0.1.1",

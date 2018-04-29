@@ -2,7 +2,7 @@
 var base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
-  storage: 'data/db.sqlite',
+  storage: datadir + '/onchain/db.sqlite',
   define: {timestamps: false},
   operatorsAliases: false,
   logging: false

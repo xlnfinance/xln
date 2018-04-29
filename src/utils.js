@@ -69,17 +69,19 @@ prettyState = (state) => {
 
 logstate = (state) => {
   if (!state[1]) return false
+  var hash = toHex(sha3(r(state)))
+
   var trim = (ad) => toHex(ad).substr(0, 4)
 
   l(
     `
-| ${trim(state[1][0])} | ${trim(state[1][1])}
+| ${trim(state[1][0])} | ${trim(state[1][1])} | Hash ${trim(hash)}
 ------
 | #${state[1][2]}  |  ${state[1][3]} | ${state[1][4]}
 ------
-| ${state[2].map((h) => trim(h[1])).join(', ')} 
+| ${state[2].map((h) => h[0] + '/' + trim(h[1]) + '/' + h[2]).join(', ')} 
 ------
-| ${state[3].map((h) => trim(h[1])).join(', ')}
+| ${state[3].map((h) => h[0] + '/' + trim(h[1]) + '/' + h[2]).join(', ')}
 `
   )
 }
@@ -187,7 +189,7 @@ current_db_hash = () => {
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
   .from(
     child_process
-      .execSync('shasum -a 256 data/db.sqlite')
+      .execSync('shasum -a 256 datadir+/onchain/db.sqlite')
       .toString()
       .split(' ')[0],
     'hex'

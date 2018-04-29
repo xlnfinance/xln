@@ -9,7 +9,7 @@ require('../assets/dist/js/bootstrap.min.js')
 window.l = console.log
 window.ts = () => Math.round(new Date() / 1000)
 
-window.hashargs = location.hash.split('/')[1]
+window.hashargs = location.hash.split('?')[1]
 
 hashargs = hashargs
   ? hashargs
@@ -20,6 +20,11 @@ hashargs = hashargs
         return pre
       }, {})
   : {}
+
+if (hashargs.auth_code) {
+  localStorage.auth_code = hashargs.auth_code.replace(/[^a-z0-9]/g, '')
+  history.replaceState(null, null, '/#wallet')
+}
 
 window.renderRisk = (hist) => {
   var precision = 100 // devide time by
@@ -121,15 +126,38 @@ window.render = (r) => {
   }
 }
 
-FS.resolvers.push(render)
+window.FS = (method, params = {}) => {
+  return new Promise((resolve, reject) => {
+    var id = FS.resolvers.push(resolve) - 1
 
-FS.onready(() => {
+    FS.ws.send(
+      JSON.stringify({
+        method: method,
+        params: params,
+        id: id,
+        auth_code: localStorage.auth_code,
+        is_wallet: true // not all internal_rpc clients are wallets
+      })
+    )
+  })
+}
 
-  window.notyf = new Notyf({delay: 4000})
+FS.ws = new WebSocket(
+  (location.protocol == 'http:' ? 'ws://' : 'wss://') + location.host
+)
+FS.resolvers = [render, render]
+
+FS.ws.onmessage = (m) => {
+  var data = JSON.parse(m.data)
+  render(data.result)
+}
+
+FS.ws.onopen = () => {
+  window.notyf = new Notyf({ delay: 4000 })
 
   // App is available as `window.app`
   new Vue({
     el: '#app',
-    render: (h) => h(App),
+    render: (h) => h(App)
   })
-})
+}

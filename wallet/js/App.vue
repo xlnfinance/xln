@@ -10,10 +10,10 @@ export default {
   },
   mounted() {
     window.app = this;
-    FS("load").then(render);
+    app.call("load");
 
     this.interval = setInterval(function() {
-      FS("load").then(render);
+      app.call("load");
     }, localStorage.auth_code ? 15000 : 30000);
   },
   destroyed() {
@@ -151,7 +151,7 @@ export default {
         password: inputPassword.value
       };
 
-      FS("load", data).then(render);
+      app.call("load", data);
       return false;
     },
 

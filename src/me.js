@@ -39,7 +39,7 @@ class Me {
 
     PK.username = username
     PK.seed = seed.toString('hex')
-    fs.writeFileSync('private/pk.json', JSON.stringify(PK))
+    fs.writeFileSync(datadir + '/offchain/pk.json', JSON.stringify(PK))
   }
 
   // all callbacks are processed one by one for race condition safety (for now)

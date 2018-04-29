@@ -166,7 +166,7 @@ window.onload = function(){
       return ('0' + (byte & 0xFF).toString(16)).slice(-2);
     }).join('')
 
-    window.open(fs_origin+'#wallet/invoice='+id+"&address=${address}&amount=10")
+    window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
   
   }
 

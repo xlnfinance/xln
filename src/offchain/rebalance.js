@@ -40,11 +40,8 @@ module.exports = async function() {
 
         withdrawals.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
       } else if (me.users[ch.d.partnerId]) {
-        l(
-          `We can pull payment from ${toHex(
-            ch.d.partnerId
-          )} and use next rebalance`
-        )
+        // they either get added in this rebalance or next one
+
         me.send(ch.d.partnerId, 'requestWithdraw', me.envelope(ch.insured))
 
         checkBack.push(ch.d.partnerId)
@@ -88,5 +85,5 @@ module.exports = async function() {
     if (me.batch.length > 0) {
       await me.broadcast()
     }
-  }, 4000)
+  }, 5000)
 }
