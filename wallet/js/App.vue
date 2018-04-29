@@ -334,12 +334,12 @@ export default {
             <ul class="dropdown-menu">
               <li><a class="nav-link" @click="go('blockchain_explorer')">Blockchain</a></li>
               <li><a class="nav-link" @click="go('account_explorer')">Accounts</a></li>
-              <li><a class="nav-link" @click="go('channel_explorer')" href="#">Channels</a></li>
-              <li><a class="nav-link" @click="go('help')" href="#">Network</a></li>
-              <li><a class="nav-link" @click="go('gov')" href="#">Governance</a></li>
-              <li><a class="nav-link" @click="go('assets')" href="#">Assets</a></li>
-              <li><a class="nav-link" @click="go('hubs')" href="#">Hubs</a></li>
-              <li><a class="nav-link" @click="go('hashlocks')" href="#">Hashlocks</a></li>
+              <li><a class="nav-link" @click="go('channel_explorer')">Channels</a></li>
+              <li><a class="nav-link" @click="go('hashlocks')">Hashlocks</a></li>
+              <li><a class="nav-link" @click="go('help')">Network</a></li>
+              <li><a class="nav-link" @click="go('gov')">Governance</a></li>
+              <li><a class="nav-link" @click="go('assets')">Assets</a></li>
+              <li><a class="nav-link" @click="go('hubs')">Hubs</a></li>
             </ul>
           </li>
         </ul>
@@ -408,7 +408,7 @@ export default {
             <hr />
           </div>
           <template v-if="channels.length > 0" v-for="(ch, index) in channels">
-            <h2 style="display:inline-block">Balance @{{ch.hub.handle}}: {{commy(ch.payable)}}</h2>
+            <h2 style="display:inline-block">Balance @{{ch.hub.handle}} ({{ch.d.status}}): {{commy(ch.payable)}}</h2>
             <small v-if="ch.payable > 0">
               = {{commy(ch.insurance)}} insurance 
               {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
@@ -595,10 +595,8 @@ export default {
           <textarea class="form-control" v-model="proposal[1]" rows="2" id="comment"></textarea>
         </div>
         <div class="form-group">
-          <label for="comment">Path to .patch (optional):</label>
-          <input class="form-control" v-model="proposal[2]" placeholder="after.patch" rows="2" id="comment"></input>
-          <small>1. Prepare two directories <b>rm -rf before after && cp -r 1 before && cp -r before after</b>
-        <br>2. Edit code in "after", test it, then <b>diff -Naur before after > after.patch</b></small>
+          <input class="form-check-input" type="checkbox" v-model="proposal[2]"> Add patch fs vs 8001
+          
         </div>
         <p v-if="my_member">
           <button @click="call('propose', proposal)" class="btn btn-warning">Propose</button>
@@ -756,9 +754,32 @@ export default {
         </table>
       </div>
 
+      <div v-else-if="tab=='hubs'">
+        <h1>Hubs</h1>
+        <p>Any user can have a payment channel with any other user. However for effective routing some users get thoroughly verified and offered inside the wallet to have channel with. Similarly to banks, using same hub with recipients is cheaper then sending money cross-hub. Hubs have no priveleges over regular users and follow exact same rules and cannot steal your money like a bank. If your hub is compromised the uninsured balances may be lost, but insured are protected.</p>
+        <table class="table table-striped">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Name</th>
+              <th scope="col">Fee</th>
+              <th scope="col">Location</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in K.hubs">
+              <th>{{u.id}}</th>
+              <th>{{u.name}}</th>
+              <th>{{u.fee}}</th>
+              <th>{{u.location}}</th>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       <div v-else-if="tab=='assets'">
         <h1>Assets</h1>
-        <p>Digital assets..</p>
+        <p>Digital assets is the name for all kinds of currencies, tokens, stock and colored coins you can create on top of the system. Each asset has it's own issuer, some assets can be capped, some assets can be even frozen by their issuer (Freeze/NoFreeze).</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>

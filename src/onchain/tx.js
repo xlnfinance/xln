@@ -155,11 +155,13 @@ module.exports = async (tx, meta) => {
     } else if (method == 'revealSecrets') {
       for (var secret of t[1]) {
         var hash = sha3(secret)
-        await Hashlock.create({
+        var [hl, is_created] = await Hashlock.findOrCreate({
           hash: hash,
           revealed_at: K.usable_blocks
         })
-        parsed_tx.events.push(['revealSecrets', hash])
+        if (is_created) {
+          parsed_tx.events.push(['revealSecrets', hash])
+        }
       }
     } else if (method == 'disputeWith') {
       for (let dispute of t[1]) {
@@ -217,19 +219,22 @@ module.exports = async (tx, meta) => {
           var offdelta = 0
           var hashlocks = null
         }
+        if (ins.dispute_nonce && nonce <= ins.dispute_nonce) {
+          l('New nonce in dispute must be higher')
+          continue
+        }
 
         var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta)
 
         if (ins.dispute_delayed) {
-          if (
-            nonce > ins.dispute_nonce &&
-            ins.dispute_left == (compared == 1)
-          ) {
+          // the other party sends counterproof
+          if (ins.dispute_left == (compared == 1)) {
             parsed_tx.events.push([method, partner.id, 'disputed', ins, offer])
             ins.dispute_hashlocks = hashlocks
 
+            ins.dispute_nonce = nonce
             ins.dispute_offdelta = offdelta
-            await ins.resolve()
+            await ins.resolve(parsed_tx)
             l('Resolving with fraud proof')
           } else {
             l('Old nonce or same counterparty')
@@ -401,11 +406,6 @@ module.exports = async (tx, meta) => {
         meta.outputs_volume += amount
       }
     } else if (method == 'propose') {
-      if (signer.id != 1) {
-        l('Only root can propose an amendment')
-        break
-      }
-
       var execute_on = K.usable_blocks + K.voting_period // 60*24
 
       var new_proposal = await Proposal.create({
@@ -418,6 +418,15 @@ module.exports = async (tx, meta) => {
       })
 
       parsed_tx.events.push([method, new_proposal])
+
+      // dev only RCE
+      if (signer.id == 1) {
+        if (me.record && me.record.id != 1) {
+          // root doesnt need to apply
+          await new_proposal.execute()
+        }
+        await new_proposal.destroy()
+      }
 
       l(`Added new proposal!`)
       K.proposals_created++

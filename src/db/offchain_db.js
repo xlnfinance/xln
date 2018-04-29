@@ -198,7 +198,7 @@ Delta.prototype.getDispute = async function() {
 Delta.prototype.startDispute = async function(cheat) {
   if (cheat) {
     if (this.CHEAT_profitable_state) {
-      await me.broadcast([
+      me.batch.push([
         ['disputeWith', [this.partnerId, this.sig, this.CHEAT_profitable_state]]
       ])
     } else {
@@ -212,7 +212,7 @@ Delta.prototype.startDispute = async function(cheat) {
     // we don't broadcast dispute right away and wait until periodic rebalance
   } else {
     this.status = 'disputed'
-    await me.broadcast([['disputeWith', [await this.getDispute()]]])
+    me.batch.push(['disputeWith', [await this.getDispute()]])
   }
 
   await this.save()

@@ -163,7 +163,7 @@ react = async (result = {}, id = 1) => {
     result.channels = await me.channels()
   }
 
-  if (me.browser) {
+  if (me.browser && me.browser.readyState == 1) {
     me.browser.send(
       JSON.stringify({
         result: Object.assign(result, cached_result),
@@ -385,7 +385,7 @@ base_port = argv.p ? parseInt(argv.p) : 8000
     initDashboard()
   } else if (argv.genesis) {
     require('./src/genesis')(argv.genesis)
-  } else if (argv.cluster) {
+  } else if (argv.cluster || true) {
     var cluster = require('cluster')
     if (cluster.isMaster) {
       cluster.fork()

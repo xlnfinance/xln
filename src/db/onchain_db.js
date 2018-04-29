@@ -78,6 +78,28 @@ Proposal = sequelize.define('proposal', {
   kindof: Sequelize.STRING
 })
 
+Proposal.prototype.execute = async function() {
+  if (this.code) {
+    await eval(`(async function() { ${this.code} })()`)
+  }
+
+  if (this.patch.length > 0) {
+    me.request_reload = true
+    try {
+      var pr = require('child_process').exec(
+        'patch -p1',
+        (error, stdout, stderr) => {
+          console.log(error, stdout, stderr)
+        }
+      )
+      pr.stdin.write(this.patch)
+      pr.stdin.end()
+    } catch (e) {
+      l(e)
+    }
+  }
+}
+
 Insurance = sequelize.define('insurance', {
   leftId: Sequelize.INTEGER,
   rightId: Sequelize.INTEGER,
@@ -113,6 +135,7 @@ Insurance.prototype.resolve = async function() {
             hash: lock[1]
           }
         })
+
         if (hl && hl.revealed_at <= readInt(lock[2])) {
           final += readInt(lock[0])
         }
@@ -120,8 +143,8 @@ Insurance.prototype.resolve = async function() {
       return final
     }
 
-    this.dispute_offdelta += find_revealed(left_inwards)
-    this.dispute_offdelta -= find_revealed(right_inwards)
+    this.dispute_offdelta += await find_revealed(left_inwards)
+    this.dispute_offdelta -= await find_revealed(right_inwards)
   }
 
   var resolved = resolveChannel(
@@ -153,8 +176,7 @@ Insurance.prototype.resolve = async function() {
   await right.save()
 
   this.insurance = 0
-  // to balance delta into 0
-  this.ondelta = 0 //-this.dispute_offdelta
+  this.ondelta = 0
 
   this.dispute_delayed = null
   this.dispute_left = null
@@ -178,8 +200,8 @@ Insurance.prototype.resolve = async function() {
     ch.d.they_soft_limit = 0
     ch.d.they_hard_limit = 0
 
-    ch.d.status = 'ready'
-    await ch.d.save()
+    ch.d.status = 'master'
+    await ch.d.destroy()
   }
 }
 

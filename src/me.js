@@ -74,14 +74,12 @@ class Me {
     })
   }
 
-  // takes an array of different transactions, signs and broadcasts
-  async broadcast(transactions) {
+  // adds tx to batch, signs and broadcasts
+  async broadcast() {
     if (PK.pending_batch) {
       return l('Only 1 tx is supported')
     }
     // TODO: make batch persistent on disk
-    transactions = me.batch.concat(transactions)
-    me.batch = []
 
     // recommended canonical batch structure: 4 money-related arrays before everything else
     var merged = [
@@ -92,9 +90,8 @@ class Me {
     ]
     var m
     // put into one of first arrays or add to the end
-    l(transactions)
-    transactions.map((kv) => {
-      if (!kv) return
+    me.batch.map((kv) => {
+      //if (!kv) return
 
       if (kv[0] == 'revealSecrets') {
         m = 0
@@ -104,14 +101,20 @@ class Me {
         m = 2
       } else if (kv[0] == 'depositTo') {
         m = 3
+        // these methods have non mergeable args
       } else if (kv[0] == 'propose' || kv[0] == 'vote') {
         merged.push([methodMap(kv[0]), kv[1]])
         return
       }
       merged[m][1] = merged[m][1].concat(kv[1])
     })
+    // remove empty transactions
+    merged = merged.filter((m) => m[1].length > 0)
+    if (merged.length == 0) {
+      return false
+    }
 
-    l('After merging: ', merged)
+    l('After merging to broadcast: ', merged)
 
     me.record = await me.byKey()
     var nonce = me.record.nonce
@@ -122,6 +125,7 @@ class Me {
 
     // saving locally to ensure it is added, and rebroadcast if needed
     PK.pending_batch = toHex(signed_batch)
+    me.batch = []
 
     if (me.my_member && me.my_member == me.next_member()) {
       me.mempool.push(signed_batch)

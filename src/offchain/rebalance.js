@@ -14,7 +14,6 @@ module.exports = async function() {
   var deltas = await Delta.findAll({
     where: {
       myId: me.pubkey
-      //status: 'ready'
     }
   })
 

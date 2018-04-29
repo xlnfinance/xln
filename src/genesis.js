@@ -13,6 +13,7 @@ module.exports = async (genesis) => {
 
   // entity / country / infra
 
+  // K is a handy config JSON
   K = {
     // global network pepper to protect derivation from rainbow tables
     network_name: 'main',
@@ -192,6 +193,13 @@ module.exports = async (genesis) => {
 
     handle: 'jp',
     name: '@jp (Japan)'
+  })
+
+  await Asset.create({
+    ticker: 'FRD',
+    desc: 'Failsafe Dollar',
+    issuerId: 1,
+    total_supply: 1000
   })
 
   var left =

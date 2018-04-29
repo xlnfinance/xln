@@ -308,8 +308,9 @@ module.exports = async (msg) => {
 
       if (me.CHEAT_dontack) {
         l('CHEAT: not acking the secret, but pulling from inward')
-        ch.d.status == 'CHEAT_dontack'
+        ch.d.status = 'CHEAT_dontack'
         await ch.d.save()
+        react()
         return
       }
     }

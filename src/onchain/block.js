@@ -1,7 +1,7 @@
 // Block processing code. Verifies precommits sigs then executes tx in it one by one
 module.exports = async (precommits, header, ordered_tx_body) => {
   if (header.length < 64 || header.length > 200) {
-    return l('Invalid header length')
+    return l('Invalid header length: ', r(header))
   }
 
   if (ordered_tx_body.length > K.blocksize) {
@@ -89,11 +89,14 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     K.total_tx_bytes += ordered_tx[i].length
   }
 
-  // Current user ensures their tx was finalized
+  // Ensure our last broadcasted batch was added
   if (PK.pending_batch) {
     var raw = fromHex(PK.pending_batch)
     l('Rebroadcasting pending tx ', raw)
     me.send(me.next_member(1), 'tx', r([raw]))
+  } else {
+    // time to broadcast our next batch then
+    await me.broadcast()
   }
 
   K.ts = timestamp
@@ -158,19 +161,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
 
     if (approved >= K.majority) {
-      await eval(`(async function() { ${job.code} })()`)
-      if (job.patch.length > 0) {
-        me.request_reload = true
-        var pr = require('child_process').exec(
-          'patch -p1',
-          (error, stdout, stderr) => {
-            console.log(error, stdout, stderr)
-          }
-        )
-        pr.stdin.write(job.patch)
-        pr.stdin.end()
-      }
-
+      await job.execute()
       meta.cron.push(['executed', job.desc, job.code, job.patch])
     }
 

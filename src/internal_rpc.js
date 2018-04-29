@@ -180,7 +180,8 @@ module.exports = async (ws, msg) => {
             if (ch.d.input_sig) {
               ins.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
 
-              await me.broadcast([['withdrawFrom', ins], ['depositTo', outs]])
+              me.batch.push(['withdrawFrom', ins])
+              me.batch.push(['depositTo', outs])
               react({confirm: 'Onchain rebalance tx sent'})
             } else {
               react({
@@ -190,7 +191,8 @@ module.exports = async (ws, msg) => {
             }
           }, 3000)
         } else if (outs.length > 0) {
-          await me.broadcast([['withdrawFrom', ins], ['depositTo', outs]])
+          me.batch.push(['withdrawFrom', ins])
+          me.batch.push(['depositTo', outs])
           react({confirm: 'Rebalanced'})
         } else {
           react({alert: 'No action specified'})
@@ -266,17 +268,24 @@ module.exports = async (ws, msg) => {
         if (p[0].length <= 1) throw 'Rationale is required'
 
         if (p[2]) {
-          // diff -urB . ../yo
-          p[2] = fs.readFileSync('../' + p[2])
+          // for some reason execSync throws but gives result
+          try {
+            // exclude all non-JS files for now
+            p[2] = child_process.execSync(
+              'diff  -Naur --exclude=*{.cache,data,dist,Failsafe.app,node_modules,private,spec,.git}  ../8001 . '
+            )
+          } catch (err) {
+            p[2] = err.stdout
+          }
         }
 
-        result.confirm = await me.broadcast([['propose', p]])
+        me.batch.push(['propose', p])
+        result.confirm = 'Proposed'
         break
 
       case 'vote':
-        result.confirm = await me.broadcast([
-          ['vote', [p.id, p.approval, p.rationale]]
-        ])
+        me.batch.push(['vote', [p.id, p.approval, p.rationale]])
+        result.confirm = 'Voted'
 
         break
 
