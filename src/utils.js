@@ -67,11 +67,28 @@ prettyState = (state) => {
   })
 }
 
+trim = (ad) => toHex(ad).substr(0, 4)
+
+logtr = (transitions) => {
+  try {
+    for (var t of transitions) {
+      var m = methodMap(readInt(t[0]))
+
+      if (m == 'add') {
+        var info = `add ${readInt(t[1][0])} ${trim(t[1][1])} ${readInt(
+          t[1][2]
+        )} ${trim(t[1][3])}`
+      } else {
+        var info = `${m} ${trim(t[1][1])}`
+      }
+      l(`${info}`)
+    }
+  } catch (e) {}
+}
+
 logstate = (state) => {
   if (!state[1]) return false
   var hash = toHex(sha3(r(state)))
-
-  var trim = (ad) => toHex(ad).substr(0, 4)
 
   l(
     `

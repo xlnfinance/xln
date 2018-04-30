@@ -34,7 +34,7 @@ module.exports = async (tx, meta) => {
       // Why only 1 tx/block? Two reasons:
       // * it's an extra hassle to ensure the account has money to cover subsequent w/o applying old ones. It would require fast rollbacks / reorganizations
       // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway
-      return {error: 'Only few tx per block per account currently allowed'}
+      return {error: 'Only 1 tx per block per user allowed'}
     } else {
       if (signer.nonce != nonce) {
         return {
@@ -157,13 +157,21 @@ module.exports = async (tx, meta) => {
     } else if (method == 'revealSecrets') {
       for (var secret of t[1]) {
         var hash = sha3(secret)
-        var [hl, is_created] = await Hashlock.findOrCreate({
+        var hl = await Hashlock.findOne({
           where: {
-            hash: hash,
-            revealed_at: K.usable_blocks
+            hash: hash
           }
         })
-        if (is_created) {
+        if (hl) {
+          // make it live longer
+          hl.delete_at += K.hashlock_keepalive
+          await hl.save()
+        } else {
+          await Hashlock.create({
+            hash: hash,
+            revealed_at: K.usable_blocks,
+            delete_at: K.usable_blocks + K.hashlock_keepalive
+          })
           parsed_tx.events.push(['revealSecrets', hash])
         }
       }

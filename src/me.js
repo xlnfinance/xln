@@ -64,7 +64,8 @@ class Me {
 
   async addQueue(job) {
     // if high load, execute now with semaphores
-    me.queue.push(job)
+    await job()
+    //me.queue.push(job)
   }
 
   async byKey(pk) {
@@ -83,6 +84,20 @@ class Me {
 
   // adds tx to batch, signs and broadcasts
   async broadcast() {
+    me.record = await me.byKey()
+    if (!me.record) {
+      //l("You can't broadcast if you are not registred")
+      return false
+    }
+
+    if (this.my_hub) require('./offchain/rebalance')()
+    /*
+      if (this.my_hub) {
+        me.intervals.push(
+          setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
+        )
+      }*/
+
     if (PK.pending_batch) {
       return l('Only 1 tx is supported')
     }
@@ -123,11 +138,6 @@ class Me {
 
     l('After merging to broadcast: ', merged)
 
-    me.record = await me.byKey()
-    if (!me.record) {
-      //l("You can't broadcast if you are not registred")
-      return false
-    }
     var nonce = me.record.nonce
 
     var to_sign = r([methodMap('batch'), nonce, merged])
@@ -253,7 +263,7 @@ class Me {
       })
       me.external_wss.on('connection', function(ws) {
         ws.on('message', async (msg) => {
-          me.queue.push(async () => {
+          me.addQueue(async () => {
             return RPC.external_rpc(ws, msg)
           })
           /*var unlock = await mutex('external_rpc')
@@ -267,12 +277,6 @@ class Me {
           // we need to have connections ready to all members
           this.send(m, 'auth', me.envelope(methodMap('auth')))
         }
-      }
-
-      if (this.my_hub) {
-        me.intervals.push(
-          setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
-        )
       }
     } else {
       // keep connection to all hubs
@@ -339,7 +343,7 @@ class Me {
       me.users[m.pubkey] = new WebSocketClient()
 
       me.users[m.pubkey].onmessage = async (tx) => {
-        this.queue.push(async () => {
+        this.addQueue(async () => {
           return RPC.external_rpc(me.users[m.pubkey], bin(tx))
         })
         /*var unlock = await mutex('external_rpc')

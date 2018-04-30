@@ -203,7 +203,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
   await Hashlock.destroy({
     where: {
-      revealed_at: K.usable_blocks - K.hashlock_keepalive
+      delete_at: K.usable_blocks
     }
   })
 

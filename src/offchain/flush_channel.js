@@ -1,8 +1,8 @@
 // Flush all pending transitions to state channel. Types:
 /*
 Payment lifecycles:
-outward payments: add > (we just added) > added (it is in canonical state) > settled or failed
-inward payments: added > (we received it with transitions) > settle/fail (pending) > settled/failed
+outward payments: add/new > (we just added) > add/sent > add/acked > settle or fail/acked
+inward payments: add/acked > (we received it with transitions) > settle or fail/new > sent > acked
 
 add - add outward hashlock
 settle - unlock inward hashlock by providing secret
@@ -15,18 +15,18 @@ during merge: no transitions can be applied, otherwise deadlock could happen
 */
 
 module.exports = async (ch, opportunistic = false) => {
-  //await sleep(2000)
+  var _ = await lock(toHex(ch.d.partnerId))
 
   var ch = await me.getChannel(ch.d.partnerId)
 
   // First, we add a transition to the queue
 
   if (ch.d.status == 'CHEAT_dontack') {
-    return false
+    return _()
   }
 
   if (ch.d.status == 'disputed') {
-    return false
+    return _()
   }
 
   if (ch.d.status == 'sent') {
@@ -34,7 +34,7 @@ module.exports = async (ch, opportunistic = false) => {
       l(`Can't flush, awaiting ack. Repeating our request?`)
       //me.send(ch.d.partnerId, 'update', ch.d.pending)
     }
-    return false
+    return _()
   }
 
   var newState = await ch.d.getState()
@@ -96,8 +96,9 @@ module.exports = async (ch, opportunistic = false) => {
           if (inward) {
             inward.type = 'fail'
             await inward.save()
-            var notify = await me.getChannel(inward.deltum.partnerId)
-            await notify.d.requestFlush()
+            await me.flushChannel(inward.deltum.partnerId)
+            //var notify = await me.getChannel(inward.deltum.partnerId)
+            //await notify.d.requestFlush()
           }
           t.type = 'fail'
           t.status = 'acked'
@@ -129,7 +130,7 @@ module.exports = async (ch, opportunistic = false) => {
     }
 
     if (opportunistic && transitions.length == 0) {
-      return //l('Nothing to flush')
+      return _() //l('Nothing to flush')
     }
   }
 
@@ -156,4 +157,6 @@ module.exports = async (ch, opportunistic = false) => {
   if (!me.send(ch.d.partnerId, 'update', envelope)) {
     //l(`${partner} not online, deliver later?`)
   }
+
+  return _()
 }

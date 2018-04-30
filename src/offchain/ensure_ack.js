@@ -30,9 +30,14 @@ module.exports = async () => {
 
     var to_reveal = []
     unacked_settles.map(async (s) => {
-      // todo ensure they will still be revealed when resolve() happens
+      // ensure they will still be revealed when resolve() happens. Extend lifetime if needed
       var unlocked = await Hashlock.findOne({where: {hash: s.hash}})
-      if (!unlocked) to_reveal.push(s.secret)
+      if (
+        !unlocked ||
+        unlocked.delete_at < K.usable_blocks + K.dispute_delay + 5
+      ) {
+        to_reveal.push(s.secret)
+      }
     })
 
     me.batch.push(['revealSecrets', to_reveal])

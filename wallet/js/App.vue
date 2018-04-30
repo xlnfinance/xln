@@ -325,6 +325,9 @@ export default {
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">Onchain</a>
           </li>
+          <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='exchange' }">
+            <a class="nav-link" @click="go('exchange')">Exchange</a>
+          </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
             <a class="nav-link" @click="go('testnet')">Testnet</a>
           </li>
@@ -570,6 +573,10 @@ export default {
         <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 4 })">CHEAT dontack</button>
         <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 5 })">CHEAT dontreveal</button>
         <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 6 })">CHEAT dontwithdraw</button>
+      </div>
+      <div v-else-if="tab=='exchange'">
+        <h3>Trustless Exchange</h3>
+        Asset you want to sell. Asset you want to buy.
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>

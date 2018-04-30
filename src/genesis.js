@@ -30,13 +30,17 @@ module.exports = async (genesis) => {
     snapshot_after_bytes: 1000000,
     proposals_created: 0,
 
+    // cents per byte of tx
     tax: 1,
 
     account_creation_fee: 100,
     standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
     blocksize: 20000,
-    blocktime: 20,
+    blocktime: 10,
+    step_latency: 2, // how long is each consensus step: propose, prevote...
+    gossip_delay: 500, // anti clock skew, give others time to change state
+
     // up to X seconds, validators don't propose blocks if empty
     // the problem is all delayed actions also happen much later if no blocks made
     // the problem is all delayed actions also happen much later if no blocks made
@@ -56,29 +60,6 @@ module.exports = async (genesis) => {
 
     created_at: ts(),
 
-    assets: [
-      {
-        ticker: 'FSD',
-        name: 'Failsafe Dollar',
-        total_supply: 1000
-      },
-      {
-        ticker: 'FSB',
-        name: 'Failsafe Bond (2030)',
-        total_supply: 0
-      },
-      {
-        ticker: 'ACME',
-        name: 'ACME Company Stock',
-        total_supply: 0
-      },
-      {
-        ticker: 'RURABC',
-        name: 'Ruble (ABC Bank)',
-        total_supply: 0
-      }
-    ],
-
     min_amount: 100,
     max_amount: 300000,
 
@@ -89,9 +70,8 @@ module.exports = async (genesis) => {
 
     hashlock_exp: 5, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 10, // for how many blocks onchain keeps it unlocked since reveal
-    max_hashlocks: 10, // we don't want overweight huge dispute strings
-
-    dispute_delay: 5
+    max_hashlocks: 1000, // we don't want overweight huge dispute strings
+    hashlock_service_fee: 100 // the one who adds hashlock pays for it
   }
 
   // Defines global Byzantine tolerance parameter

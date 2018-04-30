@@ -15,7 +15,9 @@ User = sequelize.define('user', {
 
   pubkey: Sequelize.CHAR(32).BINARY,
   nonce: {type: Sequelize.INTEGER, defaultValue: 0},
-  balance: {type: Sequelize.BIGINT, defaultValue: 0} // onchain balance: mostly to pay taxes
+
+  // onchain balance
+  balance: {type: Sequelize.BIGINT, defaultValue: 0}
 })
 
 User.idOrKey = async function(id) {
@@ -222,7 +224,8 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 Hashlock = sequelize.define('hashlock', {
   alg: Sequelize.INTEGER, // sha256, sha3?
   hash: Sequelize.TEXT,
-  revealed_at: Sequelize.INTEGER
+  revealed_at: Sequelize.INTEGER,
+  delete_at: Sequelize.INTEGER
 })
 
 // Assets represent all numerical balances: currencies, tokens, shares, stocks.
@@ -234,3 +237,19 @@ Asset = sequelize.define('asset', {
   issuerId: Sequelize.INTEGER,
   total_supply: Sequelize.INTEGER
 })
+
+// standalone "onchain balance"
+Balance = sequelize.define('balance', {
+  balance: Sequelize.INTEGER
+})
+
+Balance.belongsTo(User)
+Balance.belongsTo(Asset)
+
+// onchain exchange order: user X sells Y of asset A in exchange for asset B at rate R
+Order = sequelize.define('order', {
+  amount: Sequelize.INTEGER
+})
+
+Order.belongsTo(User)
+Order.belongsTo(Asset)

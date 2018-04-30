@@ -16,10 +16,13 @@ module.exports = async (msg) => {
     return false
   }
 
+  var _ = await lock(toHex(pubkey))
+
   var ch = await me.getChannel(pubkey)
 
   if (ch.d.status == 'disputed') {
-    return l('We are in a dispute')
+    l('We are in a dispute')
+    return _()
   }
 
   oldState = r(ch.d.signed_state)
@@ -76,15 +79,17 @@ module.exports = async (msg) => {
     await ch.d.save()
   } else {
     if (transitions.length == 0) {
+      l('Empty invalid ack')
+      return _()
       logstate(newState)
       logstate(oldState)
       logstate(debugState)
       logstate(signedState)
-      return l('Empty invalid ack')
     }
 
     if (ch.d.status == 'merge') {
-      return l('Rollback cant rollback')
+      l('Rollback cant rollback')
+      return _()
     }
 
     /*
@@ -117,9 +122,11 @@ module.exports = async (msg) => {
       l('Dead lock?! Trying to recover by sending last ack')
       //await me.flushChannel(ch)
 
-      return false
+      return _()
     }
   }
+
+  logtr(transitions)
 
   var outwards = newState[ch.left ? 3 : 2]
   var inwards = newState[ch.left ? 2 : 3]
@@ -141,11 +148,13 @@ module.exports = async (msg) => {
       }
 
       if (hash.length != 32) {
-        return l('Hash must be 32 bytes')
+        l('Hash must be 32 bytes')
+        return _()
       }
 
       if (inwards.length >= K.max_hashlocks) {
-        return l('You try to set too many hashlocks')
+        l('You try to set too many hashlocks')
+        return _()
       }
 
       var reveal_until = K.usable_blocks + K.hashlock_exp
@@ -165,7 +174,7 @@ module.exports = async (msg) => {
       newState[1][2]++
       if (!await ch.d.saveState(newState, t[2])) {
         l('Invalid state sig add')
-        return false
+        return _()
       }
 
       var hl = await ch.d.createPayment({
@@ -321,7 +330,7 @@ module.exports = async (msg) => {
         ch.d.status = 'CHEAT_dontack'
         await ch.d.save()
         react()
-        return
+        return _()
       }
     }
   }
@@ -353,6 +362,8 @@ module.exports = async (msg) => {
   }
 
   await ch.d.save()
+
+  _()
 
   // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)
   // Otherwise give forced ack to the partner

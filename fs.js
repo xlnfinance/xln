@@ -138,6 +138,11 @@ fi
 
 // Flush an object to browser websocket
 react = async (result = {}, id = 1) => {
+  // no alive browser socket
+  if (!me.browser || me.browser.readyState != 1) {
+    return false
+  }
+
   await cache()
 
   if (me.id) {
@@ -159,14 +164,12 @@ react = async (result = {}, id = 1) => {
     result.channels = await me.channels()
   }
 
-  if (me.browser && me.browser.readyState == 1) {
-    me.browser.send(
-      JSON.stringify({
-        result: Object.assign(result, cached_result),
-        id: id
-      })
-    )
-  }
+  me.browser.send(
+    JSON.stringify({
+      result: Object.assign(result, cached_result),
+      id: id
+    })
+  )
 }
 
 // TODO: Move from memory to persistent DB
@@ -378,6 +381,10 @@ argv = require('minimist')(process.argv.slice(2), {
 datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8000
 
+lock = require('util').promisify(
+  require('./lib/lock')(require('redis').createClient({prefix: base_port}))
+)
+
 if (!fs.existsSync('data')) {
   fs.mkdirSync('data')
   fs.mkdirSync('data/onchain')
@@ -412,10 +419,7 @@ require('./src/db/offchain_db')
 var randos = `ZUp5Maa1vtb3rfTzsa7qnoU3yLEEGAfWuVvPPyJcgEbA1Dxncds6T3HFwxTFYmMC3LwbcPKvRPM9mmaVRaFACciUcFcD6
 ZUp5KM5NFCHpnn1HYb9y3UtgLU2kSuV1MyCCTYiKSqh3TpAYGuBkHsWsVvHGBMDYHZVJHZyAfLaHSUf73tmj2Bb4Tk5UQ
 ZUp5CQqYJj2i8nnKqk5PD1qPff622Bgm6U7BRwQkHzkcRhkrq8TLKusFcC9FSMsmMENPiJck3HyrSNXmoUdYmaxStq24w
-ZUp59nsh1i2cmNr1ZwySV3BTK1uRLdCzG6wSHfi4evje6YeRhKp48h9bJx14ZQzuH4bThyFQzrkqinB993Ptp89CLVPoi
-ZUp5HrKt4oJVaf77ZrB41U29AFq8WhgpWvc69GLoLV6SZMNdaDH1hXCcJCWj3EqzT7CiCAf1SEzShd6SnwXPqVRHDRtNH
-ZUp57UFAjLTjfdg4qNJGpus5SMitgbumrMDgeLfswNQrCWEXNrmFdThUFdYzwKXi8fifNssXHe9HyupBHtMzGnBgp5s2L
-ZUp5FjKozQ7BD6trZydUDq8bMgeUCLuh2sdCT6sPupKGX6rAyCcdqS3zesc8CeGzEMquFMwxrgnXqebYwfid4NbA6wxnY`.split(
+ZUp59nsh1i2cmNr1ZwySV3BTK1uRLdCzG6wSHfi4evje6YeRhKp48h9bJx14ZQzuH4bThyFQzrkqinB993Ptp89CLVPoi`.split(
   '\n'
 )
 
@@ -430,14 +434,14 @@ if (argv.monkey) {
     me.addQueue(async () => {
       await me.payChannel({
         destination: randos[Math.floor(Math.random() * randos.length)],
-        amount: 100 + Math.round(Math.random() * 1000)
+        amount: 100 + Math.round(Math.random() * 100)
       })
     })
-  }, 5000)
+  }, 1000)
 
   setTimeout(() => {
     clearInterval(monk)
-  }, 300000)
+  }, 60000)
 }
 
 process.on('unhandledRejection', (err) => {
@@ -451,11 +455,3 @@ process.on('uncaughtException', (err) => {
 l(`\n${note('Welcome to FS REPL!')}`)
 repl = require('repl').start(note(''))
 _eval = repl.eval
-
-// top level await in repl
-/*
-repl.eval = (cmd, context, filename, callback) => {
-  if (cmd.indexOf('await') != -1)
-    cmd = `(function(){ async function _wrap() { console.log(${cmd}) } return _wrap() })()`
-  _eval(cmd, context, filename, callback)
-}*/

@@ -36,20 +36,18 @@ module.exports = async () => {
 
   var phase
 
-  if (second < 5) {
+  if (second < K.step_latency) {
     phase = 'propose'
-  } else if (second < 10) {
+  } else if (second < K.step_latency * 2) {
     phase = 'prevote'
-  } else if (second < 15) {
+  } else if (second < K.step_latency * 3) {
     phase = 'precommit'
-  } else if (second < 25) {
+  } else {
     phase = 'await'
   }
 
-  var gossip_delay = 2000 // anti clock skew, give others time to change state
-
   if (me.status == 'await' && phase == 'propose') {
-    me.status = 'propose'
+    me.status = phase
 
     if (me.my_member == me.next_member()) {
       //l(`it's our turn to propose, gossip new block`)
@@ -104,20 +102,20 @@ module.exports = async () => {
 
         setTimeout(() => {
           me.gossip('propose', propose)
-        }, gossip_delay)
+        }, K.gossip_delay)
       }
     }
   } else if (me.status == 'propose' && phase == 'prevote') {
-    me.status = 'prevote'
+    me.status = phase
 
     // gossip your prevotes for block or nil
     var prevotable = me.proposed_block ? me.proposed_block.header : 0
 
     setTimeout(() => {
       me.gossip('prevote', me.block_envelope(methodMap('prevote'), prevotable))
-    }, gossip_delay)
+    }, K.gossip_delay)
   } else if (me.status == 'prevote' && phase == 'precommit') {
-    me.status = 'precommit'
+    me.status = phase
 
     // gossip your precommits if have 2/3+ prevotes or nil
 
@@ -143,9 +141,9 @@ module.exports = async () => {
         'precommit',
         me.block_envelope(methodMap('precommit'), precommitable)
       )
-    }, gossip_delay)
+    }, K.gossip_delay)
   } else if (me.status == 'precommit' && phase == 'await') {
-    me.status = 'await'
+    me.status = phase
 
     // if have 2/3+ precommits, commit the block and share
     var shares = 0
@@ -177,12 +175,12 @@ module.exports = async () => {
           me.proposed_block.ordered_tx_body
         ]
       ])
-      me.queue.push(async () => {
+      me.addQueue(async () => {
         return RPC.external_rpc(null, concat(inputMap('chain'), chain))
       })
       me.proposed_block = {}
     }
   }
 
-  setTimeout(me.consensus, 1000) // watch for new events in 1 s
+  setTimeout(me.consensus, 200) // watch for new events in 1 s
 }
