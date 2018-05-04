@@ -50,7 +50,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     ) {
       shares += Members[i].shares
     } else {
-      l(`${i} missed a precommit for `, precommit_body)
+      //l(`${i} missed a precommit for `, precommit_body)
     }
   }
 

@@ -47,62 +47,51 @@ cache = async (i) => {
 
     cached_result.current_db_hash = current_db_hash().toString('hex')
 
-    cached_result.proposals = await Proposal.findAll({
-      order: [['id', 'DESC']],
-      include: {all: true}
-    })
+    await Promise.all([
+      async () => {
+        cached_result.proposals = await Proposal.findAll({
+          order: [['id', 'DESC']],
+          include: {all: true}
+        })
+      },
+      async () => {
+        cached_result.users = await User.findAll({include: {all: true}})
+      },
+      async () => {
+        cached_result.insurances = await Insurance.findAll({
+          include: {all: true}
+        })
+      },
+      async () => {
+        cached_result.hashlocks = await Hashlock.findAll({include: {all: true}})
+      },
+      async () => {
+        cached_result.assets = await Asset.findAll({include: {all: true}})
+      },
+      async () => {
+        cached_result.blocks = (await Block.findAll({
+          limit: 500,
+          order: [['id', 'desc']],
+          where: {
+            meta: {[Op.not]: null}
+          }
+        })).map((b) => {
+          var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(
+            b.header
+          )
 
-    cached_result.users = await User.findAll({include: {all: true}})
-    cached_result.insurances = await Insurance.findAll({include: {all: true}})
-
-    cached_result.hashlocks = await Hashlock.findAll({include: {all: true}})
-    cached_result.assets = await Asset.findAll({include: {all: true}})
-
-    cached_result.blocks = (await Block.findAll({
-      limit: 500,
-      order: [['id', 'desc']],
-      where: {
-        //meta: {[Op.not]: null}
-      }
-    })).map((b) => {
-      var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(
-        b.header
-      )
-
-      return {
-        id: b.id,
-        prev_hash: toHex(b.prev_hash),
-        hash: toHex(b.hash),
-        built_by: readInt(built_by),
-        timestamp: readInt(timestamp),
-        meta: JSON.parse(b.meta),
-        total_tx: b.total_tx
-      }
-    })
-
-    cached_result.payments = await Payment.findAll({
-      order: [['id', 'desc']],
-      include: {all: true}
-    })
-
-    if (me.my_hub) {
-      var deltas = await Delta.findAll({where: {myId: me.record.id}})
-      var promised = 0
-      for (var d of deltas) {
-        var ch = await me.getChannel(d.userId)
-        if (ch.delta > 0) promised += ch.promised
-      }
-
-      if (
-        cached_result.history[0] &&
-        cached_result.history[0].delta != promised
-      ) {
-        cached_result.history.unshift({
-          date: new Date(),
-          delta: promised
+          return {
+            id: b.id,
+            prev_hash: toHex(b.prev_hash),
+            hash: toHex(b.hash),
+            built_by: readInt(built_by),
+            timestamp: readInt(timestamp),
+            meta: JSON.parse(b.meta),
+            total_tx: b.total_tx
+          }
         })
       }
-    }
+    ])
   }
 
   // TODO: read hash just after snapshot generation
@@ -140,12 +129,38 @@ fi
 react = async (result = {}, id = 1) => {
   // no alive browser socket
   if (!me.browser || me.browser.readyState != 1) {
-    return false
+    return l('No working me.browser')
   }
 
-  await cache()
+  cache()
 
   if (me.id) {
+    if (me.my_hub) {
+      /*
+      var deltas = await Delta.findAll({where: {myId: me.record.id}})
+      var promised = 0
+      for (var d of deltas) {
+        var ch = await me.getChannel(d.userId)
+        if (ch.delta > 0) promised += ch.promised
+      }
+
+      if (
+        cached_result.history[0] &&
+        cached_result.history[0].delta != promised
+      ) {
+        cached_result.history.unshift({
+          date: new Date(),
+          delta: promised
+        })
+      }
+      */
+    }
+
+    result.payments = await Payment.findAll({
+      order: [['id', 'desc']],
+      include: {all: true}
+    })
+
     result.record = await me.byKey()
 
     result.username = me.username
@@ -164,12 +179,16 @@ react = async (result = {}, id = 1) => {
     result.channels = await me.channels()
   }
 
-  me.browser.send(
-    JSON.stringify({
-      result: Object.assign(result, cached_result),
-      id: id
-    })
-  )
+  try {
+    me.browser.send(
+      JSON.stringify({
+        result: Object.assign(result, cached_result),
+        id: id
+      })
+    )
+  } catch (e) {
+    l('Failed browser send')
+  }
 }
 
 // TODO: Move from memory to persistent DB
@@ -242,7 +261,7 @@ initDashboard = async (a) => {
       })
 
       req.on('end', function() {
-        me.queue.push(async () => {
+        me.addQueue(async () => {
           return RPC.internal_rpc(res, queryData)
         })
       })
@@ -305,7 +324,7 @@ initDashboard = async (a) => {
     await me.start()
   }
 
-  me.processQueue()
+  //me.processQueue()
   var url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
   l(note(`Open ${link(url)} in your browser`))
   server.listen(base_port).once('error', function(err) {
@@ -325,7 +344,7 @@ initDashboard = async (a) => {
   internal_wss.on('connection', function(ws) {
     ws.on('message', (msg) => {
       // internal requests go in the beginning of the queue
-      me.queue.unshift(async () => {
+      me.addQueue(async () => {
         return RPC.internal_rpc(ws, msg)
       })
     })
@@ -416,39 +435,71 @@ require('./src/db/offchain_db')
   }
 })()
 
-var randos = `ZUp5Maa1vtb3rfTzsa7qnoU3yLEEGAfWuVvPPyJcgEbA1Dxncds6T3HFwxTFYmMC3LwbcPKvRPM9mmaVRaFACciUcFcD6
+var randos = `ZUp5FjKozQ7BD6trZydUDq8bMgeUCLuh2sdCT6sPupKGX6rAyCcdqS3zesc8CeGzEMquFMwxrgnXqebYwfid4NbA6wxnY
 ZUp5KM5NFCHpnn1HYb9y3UtgLU2kSuV1MyCCTYiKSqh3TpAYGuBkHsWsVvHGBMDYHZVJHZyAfLaHSUf73tmj2Bb4Tk5UQ
+ZUp59nsh1i2cmNr1ZwySV3BTK1uRLdCzG6wSHfi4evje6YeRhKp48h9bJx14ZQzuH4bThyFQzrkqinB993Ptp89CLVPoi
+ZUp5HrKt4oJVaf77ZrB41U29AFq8WhgpWvc69GLoLV6SZMNdaDH1hXCcJCWj3EqzT7CiCAf1SEzShd6SnwXPqVRHDRtNH
 ZUp5CQqYJj2i8nnKqk5PD1qPff622Bgm6U7BRwQkHzkcRhkrq8TLKusFcC9FSMsmMENPiJck3HyrSNXmoUdYmaxStq24w
-ZUp59nsh1i2cmNr1ZwySV3BTK1uRLdCzG6wSHfi4evje6YeRhKp48h9bJx14ZQzuH4bThyFQzrkqinB993Ptp89CLVPoi`.split(
-  '\n'
-)
+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`
+  .split('\n')
+  .slice(0, 5)
 
 if (argv.monkey) {
-  monk = setInterval(() => {
-    /*
-    if (Math.random() > 0.7) {
-      me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
-    }
-    */
-
-    me.addQueue(async () => {
-      await me.payChannel({
-        destination: randos[Math.floor(Math.random() * randos.length)],
-        amount: 100 + Math.round(Math.random() * 100)
-      })
-    })
-  }, 1000)
-
   setTimeout(() => {
-    clearInterval(monk)
-  }, 60000)
+    me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+
+    randos.splice(randos.indexOf(me.address), 1) // remove our addr
+
+    monk = setInterval(() => {
+      /*
+      if (Math.random() > 0.7) {
+        me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+      }
+      */
+
+      me.addQueue(async () => {
+        return me.payChannel({
+          destination: randos[Math.floor(Math.random() * randos.length)],
+          amount: 100 + Math.round(Math.random() * 10) //$1-2
+        })
+      })
+    }, 7000)
+
+    setTimeout(() => {
+      clearInterval(monk)
+    }, 300000)
+  }, 20000)
 }
 
 process.on('unhandledRejection', (err) => {
+  if (err.name == 'SequelizeTimeoutError') return l(err)
+
   fatal(`Fatal rejection, quitting\n\n${err ? err.stack : err}`)
 })
 
 process.on('uncaughtException', (err) => {
+  if (err.name == 'SequelizeTimeoutError') return l(err)
   fatal(`Fatal exception, quitting\n\n${err ? err.stack : err}`)
 })
 

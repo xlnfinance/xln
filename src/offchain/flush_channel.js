@@ -14,10 +14,16 @@ opportunistic flush: flushes only if there are any transitions (used after recei
 during merge: no transitions can be applied, otherwise deadlock could happen
 */
 
-module.exports = async (ch, opportunistic = false) => {
-  var _ = await lock(toHex(ch.d.partnerId))
+module.exports = async (pubkey, opportunistic = false) => {
+  let _ = await lock(pubkey)
+  loff(
+    `--- Start flush ${trim(pubkey)} ${opportunistic ? 'opportunistic' : ''}`
+  )
+  //let _ = () => {}
 
-  var ch = await me.getChannel(ch.d.partnerId)
+  let ch = await me.getChannel(pubkey)
+  let flushable = []
+  let all = []
 
   // First, we add a transition to the queue
 
@@ -30,46 +36,53 @@ module.exports = async (ch, opportunistic = false) => {
   }
 
   if (ch.d.status == 'sent') {
-    if (ch.d.ack_requested_at < new Date() - 30000) {
-      l(`Can't flush, awaiting ack. Repeating our request?`)
+    loff(
+      `=== End flush ${trim(
+        pubkey
+      )} CANT flush, awaiting ack. Repeating our request?`
+    )
+
+    if (ch.d.ack_requested_at < new Date() - 10000) {
       //me.send(ch.d.partnerId, 'update', ch.d.pending)
     }
     return _()
   }
 
-  var newState = await ch.d.getState()
-  var ackSig = ec(r(newState), me.id.secretKey)
-  var debugState = r(r(newState))
+  let newState = await ch.d.getState()
+  let ackSig = ec(r(newState), me.id.secretKey)
+  let debugState = r(r(newState))
 
   // array of actions to apply to canonical state
-  var transitions = []
+  let transitions = []
 
   // merge cannot add new transitions because expects another ack
   // in merge mode all you do is ack last (merged) state
   if (ch.d.status == 'master') {
-    var inwards = newState[ch.left ? 2 : 3]
-    var outwards = newState[ch.left ? 3 : 2]
-    var payable = ch.payable
+    let inwards = newState[ch.left ? 2 : 3]
+    let outwards = newState[ch.left ? 3 : 2]
+    let payable = ch.payable
 
-    var pendings = await ch.d.getPayments({
+    let pendings = await ch.d.getPayments({
       where: {
         status: 'new'
       }
     })
 
-    for (var t of pendings) {
+    for (let t of pendings) {
+      // what arguments this transition has
+      let args = []
       if (t.type == 'settle' || t.type == 'fail') {
         if (me.CHEAT_dontreveal) {
-          l('CHEAT: not revealing our secret to inward')
+          loff('CHEAT: not revealing our secret to inward')
           continue
         }
 
         // the beginning is same for both transitions
-        var index = inwards.findIndex((hl) => hl[1].equals(t.hash))
-        var hl = inwards[index]
+        let index = inwards.findIndex((hl) => hl[1].equals(t.hash))
+        let hl = inwards[index]
 
         if (!hl) {
-          l('No such hashlock')
+          loff('No such hashlock')
           continue
         }
 
@@ -78,43 +91,44 @@ module.exports = async (ch, opportunistic = false) => {
         if (t.type == 'settle') {
           newState[1][3] += ch.left ? t.amount : -t.amount
           payable += t.amount
-          var args = t.secret
+          args = t.secret
         } else {
-          var args = t.hash
+          args = t.hash
         }
       } else if (t.type == 'add') {
         // todo: this might be not needed as previous checks are sufficient
         if (
           t.amount < K.min_amount ||
+          t.amount > K.max_amount ||
           t.amount > payable ||
           t.destination.equals(me.pubkey) ||
           outwards.length >= K.max_hashlocks
         ) {
-          l('error cannot transit this amount. Failing inward.')
-          var inward = await t.getInward()
+          loff('error cannot transit this amount. Failing inward.')
+          let inward = await t.getInward()
 
           if (inward) {
             inward.type = 'fail'
-            await inward.save()
-            await me.flushChannel(inward.deltum.partnerId)
-            //var notify = await me.getChannel(inward.deltum.partnerId)
+            all.push(inward.save())
+            flushable.push(inward.deltum.partnerId)
+            //let notify = await me.getChannel(inward.deltum.partnerId)
             //await notify.d.requestFlush()
           }
           t.type = 'fail'
           t.status = 'acked'
-          await t.save()
+          all.push(t.save())
 
           continue
         }
         if (outwards.length >= K.max_hashlocks) {
-          l('Cannot set so many hashlocks now, maybe later')
+          loff('Cannot set so many hashlocks now, try later')
           //continue
         }
         // decrease payable and add the hashlock to state
         payable -= t.amount
         outwards.push(t.toLock())
 
-        var args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
+        args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
       }
       // increment nonce after each transition
       newState[1][2]++
@@ -126,16 +140,18 @@ module.exports = async (ch, opportunistic = false) => {
       ])
 
       t.status = 'sent'
-      await t.save()
+      all.push(t.save())
     }
 
     if (opportunistic && transitions.length == 0) {
-      return _() //l('Nothing to flush')
+      loff(`=== End flush ${trim(pubkey)}: Nothing to flush`)
+      _()
+      return
     }
   }
 
   // transitions: method, args, sig, new state
-  var envelope = me.envelope(
+  let envelope = me.envelope(
     methodMap('update'),
     ackSig,
     transitions,
@@ -152,11 +168,17 @@ module.exports = async (ch, opportunistic = false) => {
     ch.d.status = 'sent'
   }
 
-  await ch.d.save()
+  all.push(ch.d.save())
+
+  loff(`=== End flush ${transitions.length} tr to ${trim(pubkey)}`)
+
+  Promise.all(all).then(() => {
+    _()
+  })
 
   if (!me.send(ch.d.partnerId, 'update', envelope)) {
     //l(`${partner} not online, deliver later?`)
   }
 
-  return _()
+  flushable.map((fl) => me.flushChannel(fl))
 }

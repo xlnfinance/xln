@@ -1,63 +1,41 @@
 // Receives an ack and set of transitions to execute on top of it by the partner
-module.exports = async (msg) => {
-  var [pubkey, sig, body] = r(msg)
-
-  if (!ec.verify(body, sig, pubkey)) {
-    return l('Wrong input')
-  }
-
-  // ackSig defines the sig of last known state between two parties.
-  // then each transitions contains an action and an ackSig after action is committed
-  // debugState/signedState are purely for debug phase
-  var [method, ackSig, transitions, debugState, signedState] = r(body)
-
-  if (methodMap(readInt(method)) != 'update') {
-    l('Invalid update input')
-    return false
-  }
-
-  var _ = await lock(toHex(pubkey))
-
-  var ch = await me.getChannel(pubkey)
+module.exports = async (
+  pubkey,
+  ackSig,
+  transitions,
+  debugState,
+  signedState
+) => {
+  let ch = await me.getChannel(pubkey)
 
   if (ch.d.status == 'disputed') {
-    l('We are in a dispute')
-    return _()
+    loff('We are in a dispute')
+    return
   }
 
-  oldState = r(ch.d.signed_state)
+  let oldState = r(ch.d.signed_state)
   prettyState(oldState)
 
   prettyState(debugState)
   prettyState(signedState)
 
   // first, clone what they can pay and decrement
-  var receivable = ch.they_payable
+  let receivable = ch.they_payable
 
   // an array of partners we need to ack or flush changes at the end of processing
-  var flushable = []
+  let flushable = []
 
   // indexOf doesn't work with Buffers
-  var uniqAdd = (add) => {
+  let uniqAdd = (add) => {
     if (!flushable.find((f) => f.equals(add))) {
       flushable.push(add)
     }
   }
 
   // this is state we are on right now.
-  var newState = await ch.d.getState()
+  let newState = await ch.d.getState()
 
-  var rollback = [0, 0]
-
-  if (newState[1][2] != debugState[1][2]) {
-    l(
-      `# ${newState[1][2]} vs ${debugState[1][2]} vs ${oldState[1][2]}. ${
-        transitions.length
-      }`
-    )
-  }
-  //l(stringify(newState))
-  //l(stringify(debugState))
+  let rollback = [0, 0]
 
   if (await ch.d.saveState(newState, ackSig)) {
     // our last known state has been acked.
@@ -75,21 +53,26 @@ module.exports = async (msg) => {
     )
 
     ch.d.ack_requested_at = null
-    //l('Update all sent transitions as acked ', ch.d.ack_requested_at)
+    loff('Update all sent transitions as acked ', ch.d.ack_requested_at)
     await ch.d.save()
   } else {
     if (transitions.length == 0) {
-      l('Empty invalid ack')
-      return _()
       logstate(newState)
       logstate(oldState)
       logstate(debugState)
       logstate(signedState)
+
+      loff('Empty invalid ack')
+      return
     }
 
     if (ch.d.status == 'merge') {
-      l('Rollback cant rollback')
-      return _()
+      logstate(newState)
+      logstate(oldState)
+      logstate(debugState)
+      logstate(signedState)
+      gracefulExit('Rollback cant rollback')
+      return
     }
 
     /*
@@ -106,7 +89,7 @@ module.exports = async (msg) => {
     */
 
     if (await ch.d.saveState(oldState, ackSig)) {
-      l('Rollback to old state')
+      loff('Rollback to old state')
 
       rollback = [
         newState[1][2] - oldState[1][2], // nonce diff
@@ -119,50 +102,50 @@ module.exports = async (msg) => {
       logstate(debugState)
       logstate(signedState)
 
-      l('Dead lock?! Trying to recover by sending last ack')
+      gracefulExit('Deadlock?!')
       //await me.flushChannel(ch)
 
-      return _()
+      return
     }
   }
 
-  logtr(transitions)
+  //logtr(transitions)
 
-  var outwards = newState[ch.left ? 3 : 2]
-  var inwards = newState[ch.left ? 2 : 3]
+  let outwards = newState[ch.left ? 3 : 2]
+  let inwards = newState[ch.left ? 2 : 3]
   // we apply a transition to canonical state, if sig is valid - execute the action
-  for (var t of transitions) {
-    var m = methodMap(readInt(t[0]))
+  for (let t of transitions) {
+    let m = methodMap(readInt(t[0]))
 
     if (m == 'add') {
-      var [amount, hash, exp, destination, unlocker] = t[1]
+      let [amount, hash, exp, destination, unlocker] = t[1]
 
       exp = readInt(exp)
       amount = readInt(amount)
 
-      var new_type = 'add'
+      let new_type = 'add'
 
       if (amount < K.min_amount || amount > receivable) {
-        l('Invalid amount ', amount)
+        loff('Error: invalid amount ', amount)
         new_type = 'fail'
       }
 
       if (hash.length != 32) {
-        l('Hash must be 32 bytes')
-        return _()
+        loff('Error: Hash must be 32 bytes')
+        return
       }
 
       if (inwards.length >= K.max_hashlocks) {
-        l('You try to set too many hashlocks')
-        return _()
+        loff('Error: too many hashlocks')
+        return
       }
 
-      var reveal_until = K.usable_blocks + K.hashlock_exp
+      let reveal_until = K.usable_blocks + K.hashlock_exp
       // if usable blocks is 10 and default exp is 5, must be between 14-16
 
-      if (exp < reveal_until - 2 || exp > reveal_until + 2) {
+      if (exp < reveal_until - 3 || exp > reveal_until + 3) {
         new_type = 'fail'
-        l('Expiration is out of supported range')
+        loff('Error: exp is out of supported range')
       }
 
       receivable -= amount
@@ -173,12 +156,13 @@ module.exports = async (msg) => {
       // check new state and sig, save
       newState[1][2]++
       if (!await ch.d.saveState(newState, t[2])) {
-        l('Invalid state sig add')
-        return _()
+        loff('Error: Invalid state sig add')
+        return
       }
 
-      var hl = await ch.d.createPayment({
+      let hl = await ch.d.createPayment({
         type: new_type,
+        // we either add add/acked or fail/new
         status: new_type == 'add' ? 'acked' : 'new',
         is_inward: true,
 
@@ -197,18 +181,18 @@ module.exports = async (msg) => {
       // pay to unlocker
       if (destination.equals(me.pubkey)) {
         unlocker = r(unlocker)
-        var unlocked = nacl.box.open(
+        let unlocked = nacl.box.open(
           unlocker[0],
           unlocker[1],
           unlocker[2],
           me.box.secretKey
         )
         if (unlocked == null) {
-          l('Bad unlocker')
+          loff('Error: Bad unlocker')
           hl.type = 'fail'
           hl.status = 'new'
         } else {
-          var [box_amount, box_secret, box_invoice] = r(bin(unlocked))
+          let [box_amount, box_secret, box_invoice] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
           //react({confirm: 'Received a payment'})
@@ -226,16 +210,14 @@ module.exports = async (msg) => {
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub) {
-        l(`Forward ${amount} to peer or other hub ${toHex(destination)}`)
-        var outward_amount = afterFees(amount, me.my_hub.fee)
+        loff(`Forward ${amount} to ${trim(destination)}`)
+        let outward_amount = afterFees(amount, me.my_hub.fee)
 
-        var dest_ch = await me.getChannel(destination)
+        let dest_ch = await me.getChannel(destination)
 
         // is online? Is payable?
 
         if (me.users[destination] && dest_ch.payable >= outward_amount) {
-          await dest_ch.d.save()
-
           await dest_ch.d.createPayment({
             type: 'add',
             status: 'new',
@@ -256,22 +238,16 @@ module.exports = async (msg) => {
           await hl.save()
         }
       } else {
-        l('We arent receiver and arent a hub O_O')
+        loff('Error: arent receiver and arent a hub O_O')
       }
     } else if (m == 'settle' || m == 'fail') {
-      if (m == 'settle') {
-        var secret = t[1]
-        var hash = sha3(secret)
-      } else {
-        var secret = null
-        var hash = t[1]
-      }
+      let [secret, hash] = m == 'settle' ? [t[1], sha3(t[1])] : [null, t[1]]
 
-      var index = outwards.findIndex((hl) => hl[1].equals(hash))
-      var hl = outwards[index]
+      let index = outwards.findIndex((hl) => hl[1].equals(hash))
+      let hl = outwards[index]
 
       if (!hl) {
-        l('No such hashlock')
+        loff('Error: No such hashlock')
         break
       }
 
@@ -288,11 +264,11 @@ module.exports = async (msg) => {
       // check new state and sig, save
       newState[1][2]++
       if (!await ch.d.saveState(newState, t[2])) {
-        l('Invalid state sig at ' + m)
+        gracefulExit('Error: Invalid state sig at ' + m)
         break
       }
 
-      var outward = (await ch.d.getPayments({
+      let outward = (await ch.d.getPayments({
         where: {hash: hash, is_inward: false},
         include: {all: true}
       }))[0]
@@ -303,13 +279,13 @@ module.exports = async (msg) => {
 
       await outward.save()
 
-      var inward = await outward.getInward()
+      let inward = await outward.getInward()
 
       if (inward) {
-        l('Found inward ', inward.deltum.partnerId)
+        loff(`Found inward ${trim(inward.deltum.partnerId)}`)
 
         if (inward.deltum.status == 'disputed') {
-          l(
+          loff(
             'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
           )
           me.batch.push('revealSecrets', [secret])
@@ -330,7 +306,7 @@ module.exports = async (msg) => {
         ch.d.status = 'CHEAT_dontack'
         await ch.d.save()
         react()
-        return _()
+        return
       }
     }
   }
@@ -341,8 +317,8 @@ module.exports = async (msg) => {
     ch.d.offdelta += rollback[1]
     ch.d.status = 'merge'
 
-    var st = await ch.d.getState()
-    l('After rollback we are at: ')
+    let st = await ch.d.getState()
+    loff('After rollback we are at: ')
     logstate(st)
   } else {
     ch.d.status = 'master'
@@ -354,27 +330,16 @@ module.exports = async (msg) => {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
-  var profitable = r(ch.d.CHEAT_profitable_state)
-  var o = readInt(profitable[1][3])
+  let profitable = r(ch.d.CHEAT_profitable_state)
+  let o = readInt(profitable[1][3])
   if ((ch.left && ch.d.offdelta > o) || (!ch.left && ch.d.offdelta < o)) {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
 
   await ch.d.save()
-
-  _()
+  return flushable
 
   // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)
   // Otherwise give forced ack to the partner
-  await me.flushChannel(ch, transitions.length == 0)
-
-  for (var fl of flushable) {
-    var ch = await me.getChannel(fl)
-    // can be opportunistic also
-    await me.flushChannel(ch, true)
-    //await ch.d.requestFlush()
-  }
-
-  react()
 }

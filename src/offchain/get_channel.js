@@ -27,7 +27,7 @@ module.exports = async (partner = Members[0].pubkey, asset = 0) => {
   ch.hub = my_hub(partner) || {handle: toHex(partner).substr(0, 10)}
 
   // ch stands for Channel, d for Delta record, yes
-  ch.d = (await Delta.findOrBuild({
+  var created = await Delta.findOrCreate({
     where: {
       myId: me.pubkey,
       partnerId: partner,
@@ -47,9 +47,12 @@ module.exports = async (partner = Members[0].pubkey, asset = 0) => {
 
       they_soft_limit: my_hub(me.pubkey) ? K.risk : 0,
       they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0
-    },
-    include: {all: true}
-  }))[0]
+    }
+  })
+  if (created[1]) loff(`Creating channel ${trim(partner)}`)
+  ch.d = created[0]
+
+  //await ch.d.save()
 
   var user = await me.byKey(partner)
   if (user) {

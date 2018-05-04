@@ -27,8 +27,6 @@ module.exports = async (opts) => {
   } else if (amount < K.min_amount) {
     react({alert: `Minimum payment is $${commy(K.min_amount)}`})
   } else {
-    await ch.d.save()
-
     await ch.d.createPayment({
       type: 'add',
       status: 'new',
@@ -42,6 +40,9 @@ module.exports = async (opts) => {
       destination: pubkey,
       invoice: invoice
     })
-    await me.flushChannel(ch)
+
+    await me.flushChannel(ch.d.partnerId)
+
+    react()
   }
 }

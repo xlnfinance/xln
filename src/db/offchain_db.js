@@ -2,17 +2,43 @@
 
 if (!fs.existsSync(datadir + '/offchain')) fs.mkdirSync(datadir + '/offchain')
 
-var base_db = {
+let base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
   storage: datadir + '/offchain/db.sqlite',
   define: {timestamps: true}, // we don't mind timestamps in offchain db
   operatorsAliases: false,
-  logging: false
+
+  logging: false,
+
+  pool: {
+    max: 1,
+    min: 0,
+    acquire: 30000,
+    idle: 10000
+  }
 }
+/*
+let base_db = {
+  dialect: 'postgres',
+  host: 'localhost',
+  // dialectModulePath: 'sqlite3',
+  storage: datadir + '/offchain/db.sqlite',
+  define: {timestamps: true}, // we don't mind timestamps in offchain db
+  operatorsAliases: false,
 
+  logging: false,
+
+  pool: {
+    max: 1,
+    min: 0,
+    acquire: 30000,
+    idle: 10000
+  }
+}
+*/
 privSequelize = new Sequelize('', '', 'password', base_db)
-
+l('Reading db ', base_db.storage)
 // Encapsulates relationship with counterparty: offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
@@ -134,7 +160,7 @@ Delta.prototype.saveState = async function(state, ackSig) {
     this.signed_state = canonical
     //l('Saving State Snapshot:')
     //logstate(state)
-    await this.save()
+    //TODO await this.save()
     return true
   } else {
     return false
@@ -145,8 +171,7 @@ Delta.prototype.requestFlush = async function() {
   if (!this.flush_requested_at) {
     //this.flush_requested_at = new Date()
     //await this.save()
-    var ch = await me.getChannel(this.partnerId)
-    await me.flushChannel(ch)
+    await me.flushChannel(this.partnerId)
   }
 }
 

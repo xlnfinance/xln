@@ -35,6 +35,8 @@
     "chalk": "2.4.1",
     "finalhandler": "1.1.1",
     "keccak": "1.4.0",
+    "npm": "6.0.0",
+    "pg": "7.4.2",
     "prettier": "1.12.1",
     "rlp": "2.0.0",
     "sequelize": "4.37.6",

@@ -10,11 +10,18 @@ export default {
   },
   mounted() {
     window.app = this;
+
+    window.onscroll = function(ev) {
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight) {
+        app.history_limit += 20;
+      }
+    };
+
     app.call("load");
 
     this.interval = setInterval(function() {
       app.call("load");
-    }, localStorage.auth_code ? 15000 : 30000);
+    }, localStorage.auth_code ? 10000 : 30000);
   },
   destroyed() {
     clearInterval(this.interval);
@@ -23,7 +30,7 @@ export default {
     return {
       auth_code: localStorage.auth_code,
 
-      asset: "FSD",
+      asset: 0,
       peer: 0,
 
       channels: [],
@@ -57,7 +64,7 @@ export default {
 
       limits: [100, 1000],
 
-      history_limits: [0, 10],
+      history_limit: 10,
 
       blocks: [],
       users: [],
@@ -101,9 +108,9 @@ export default {
     },
 
     stream: () => {
-      n = 0;
+      var n = 0;
       pay = () => {
-        $(".btn-success")[0].click();
+        $(".btn-success").click();
         if (n++ < 100) setTimeout(pay, 2000);
       };
       pay();
@@ -349,6 +356,13 @@ export default {
         <span v-if="pending_batch">Pending onchain batch</span> &nbsp;
         <span>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
         <div v-if="pubkey">
+
+          <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6">
+            <option disabled>Select current asset</option>
+            <option v-for="(a,index) in assets" :value="index">{{a.desc}} ({{a.ticker}})</option>
+          </select></span>
+
+
           <button type="button" class="btn btn-info" @click="call('sync')">Sync</button>
           &nbsp;
           <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
@@ -470,18 +484,24 @@ export default {
                 <th>Date</th>
               </tr>
             </thead>
-            <tbody>
-              <tr v-for="h in payments.slice(history_limits[0], history_limits[1])">
-                <td>{{h.type}}/{{h.status}}</td>
-                <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                <td>Hash {{trim(h.hash)}} Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
-                <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
+
+              <!--transition-group name="list" tag="tbody"></transition-group>-->
+              <tbody>
+
+                <tr v-bind:key="h.id" v-for="h in payments.slice(0, history_limit)">
+                  <td>{{h.type}}/{{h.status}}</td>
+                  <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
+                  <td>Hash {{trim(h.hash)}} Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
+                  <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
+                </tr>
+              </tbody>
+
+              <tr v-if="payments.length > history_limit">
+                <td colspan="7" align="center"><a @click="history_limit += 20">Show More</a></td>
               </tr>
-              <tr v-if="payments.length > history_limits[1]">
-                <td colspan="7" align="center"><a @click="history_limits[1] += 20">Show More</a></td>
-              </tr>
-            </tbody>
+
           </table>
+
         </template>
         <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
           <label for="inputUsername" class="sr-only">Username</label>
@@ -806,11 +826,4 @@ export default {
       </div>
     </div>
   </div>
-  <!--
-// delayed features:
-<div class="float-right"><select v-model="asset" class="custom-select custom-select-lg mb-3">
-  <option disabled>Select current asset</option>
-  <option v-for="(a,index) in assets" :value="a.ticker">{{a.name}}</option>
-</select></div>
--->
 </template>

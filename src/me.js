@@ -59,13 +59,22 @@ class Me {
     // l("Setting timeout for queue")
     setTimeout(() => {
       me.processQueue()
-    }, 300)
+    }, 50)
   }
 
   async addQueue(job) {
+    job()
     // if high load, execute now with semaphores
-    await job()
     //me.queue.push(job)
+    /*
+    var j = await lock('job')
+    await job()
+    j()
+
+    if (me.queue.length == 1) {
+      me.processQueue()
+    }
+    */
   }
 
   async byKey(pk) {
@@ -90,7 +99,11 @@ class Me {
       return false
     }
 
-    if (this.my_hub) require('./offchain/rebalance')()
+    if (false) {
+      require('./offchain/rebalance')()
+      // enforces hashlocks
+      me.ensureAck()
+    }
     /*
       if (this.my_hub) {
         me.intervals.push(
@@ -211,11 +224,10 @@ class Me {
     }
 
     await cache()
+    me.processQueue()
 
+    /*
     this.intervals.push(setInterval(cache, 10000))
-
-    // enforces hashlocks
-    this.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
 
     this.intervals.push(
       setInterval(async () => {
@@ -228,11 +240,9 @@ class Me {
         })
 
         for (var fl of flushable) {
-          var ch = await me.getChannel(fl.partnerId)
           //l('Flushing channel for ', fl.partnerId)
-          ch.d.flush_requested_at = null
-          await ch.d.save()
-          await me.flushChannel(ch)
+          //ch.d.flush_requested_at = null
+          await me.flushChannel(fl.partnerId)
         }
 
         if (flushable.length > 0) {
@@ -240,6 +250,7 @@ class Me {
         }
       }, K.flush_timeout)
     )
+    */
 
     if (this.my_member) {
       me.consensus()
@@ -343,7 +354,7 @@ class Me {
       me.users[m.pubkey] = new WebSocketClient()
 
       me.users[m.pubkey].onmessage = async (tx) => {
-        this.addQueue(async () => {
+        me.addQueue(async () => {
           return RPC.external_rpc(me.users[m.pubkey], bin(tx))
         })
         /*var unlock = await mutex('external_rpc')

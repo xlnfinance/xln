@@ -1,5 +1,5 @@
 // Onchain database - every full node has exact same copy
-var base_db = {
+let base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
   storage: datadir + '/onchain/db.sqlite',
@@ -9,6 +9,7 @@ var base_db = {
 }
 
 sequelize = new Sequelize('', '', 'password', base_db)
+l('Reading db ', base_db.storage)
 
 User = sequelize.define('user', {
   username: Sequelize.STRING,
@@ -31,9 +32,9 @@ User.idOrKey = async function(id) {
 }
 
 User.prototype.payDebts = async function(parsed_tx) {
-  var debts = await this.getDebts()
+  let debts = await this.getDebts()
 
-  for (var d of debts) {
+  for (let d of debts) {
     var u = await User.findById(d.oweTo)
 
     if (d.amount_left <= this.balance) {
@@ -84,7 +85,7 @@ Proposal.prototype.execute = async function() {
   if (this.patch.length > 0) {
     me.request_reload = true
     try {
-      var pr = require('child_process').exec(
+      let pr = require('child_process').exec(
         'patch -p1',
         (error, stdout, stderr) => {
           console.log(error, stdout, stderr)

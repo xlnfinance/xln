@@ -8,8 +8,6 @@ module.exports = async (genesis) => {
     throw err
   }
 
-  // entity / country / infra
-
   // K is a handy config JSON
   K = {
     // global network pepper to protect derivation from rainbow tables
@@ -42,7 +40,6 @@ module.exports = async (genesis) => {
     gossip_delay: 500, // anti clock skew, give others time to change state
 
     // up to X seconds, validators don't propose blocks if empty
-    // the problem is all delayed actions also happen much later if no blocks made
     // the problem is all delayed actions also happen much later if no blocks made
     skip_empty_blocks: 0,
 
@@ -165,6 +162,7 @@ module.exports = async (genesis) => {
     name: '@main (Main)'
   })
 
+  /*
   K.hubs.push({
     id: K.members[3].id,
     location: K.members[3].location,
@@ -174,7 +172,7 @@ module.exports = async (genesis) => {
 
     handle: 'jp',
     name: '@jp (Japan)'
-  })
+  })*/
 
   await Asset.create({
     ticker: 'FRD',

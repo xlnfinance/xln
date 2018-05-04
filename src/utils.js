@@ -124,6 +124,9 @@ l = (...args) => {
   }
 }
 
+// offchain logs
+loff = (text) => l(`${chalk.green(`       ⠟ ${text}`)}`)
+
 fatal = (reason) => {
   global.repl = null
   l(errmsg(reason))

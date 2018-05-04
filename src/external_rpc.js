@@ -38,7 +38,7 @@ module.exports = async (ws, msg) => {
         me.users[pubkey].instance = ws
       }
 
-      if (me.my_hub) {
+      /*if (me.my_hub) {
         var ch = await me.getChannel(pubkey)
         ch.d.last_online = new Date()
 
@@ -49,7 +49,7 @@ module.exports = async (ws, msg) => {
           me.send(pubkey, 'requestWithdraw', me.envelope(ch.insured))
         }
         await ch.d.save()
-      }
+      }*/
     } else {
       return false
     }
@@ -72,7 +72,7 @@ module.exports = async (ws, msg) => {
     var [pubkey, sig, header, ordered_tx_body] = r(msg)
 
     if (me.status != 'propose') {
-      return l(`${me.status} not propose`)
+      return //l(`${me.status} not propose`)
     }
 
     // ensure the proposer is the current one
@@ -114,7 +114,7 @@ module.exports = async (ws, msg) => {
     }
 
     if (me.status != inputType) {
-      return l(`${me.status} not ${inputType}`)
+      return //l(`${me.status} not ${inputType}`)
     }
 
     if (header.length == 0) {
@@ -143,7 +143,7 @@ module.exports = async (ws, msg) => {
     if (msg[0] == 1) {
       await me.payChannel({
         destination: msg.slice(1),
-        amount: 1000 + Math.round(Math.random() * 8000),
+        amount: 50000, //1000 + Math.round(Math.random() * 8000),
         invoice: Buffer.alloc(1)
       })
     }
@@ -230,6 +230,7 @@ module.exports = async (ws, msg) => {
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
 
+    //var _ = await lock(pubkey)
     var ch = await me.getChannel(pubkey)
 
     var amount = readInt(r(body)[0])
@@ -288,6 +289,46 @@ module.exports = async (ws, msg) => {
     await ch.d.save()
   } else if (inputType == 'update') {
     // New payment arrived
-    await me.updateChannel(msg)
+    var [pubkey, sig, body] = r(msg)
+
+    if (!ec.verify(body, sig, pubkey)) {
+      return l('Wrong input')
+    }
+
+    // ackSig defines the sig of last known state between two parties.
+    // then each transitions contains an action and an ackSig after action is committed
+    // debugState/signedState are purely for debug phase
+    var [method, ackSig, transitions, debugState, signedState] = r(body)
+
+    if (methodMap(readInt(method)) != 'update') {
+      loff('Invalid update input')
+      return false
+    }
+
+    var _ = await lock(pubkey)
+    loff(`--- Start update ${trim(pubkey)}`)
+
+    var flushable = await me.updateChannel(
+      pubkey,
+      ackSig,
+      transitions,
+      debugState,
+      signedState
+    )
+    loff(`=== End update ${trim(pubkey)}`)
+    _()
+
+    var flushed = []
+    await me.flushChannel(pubkey, transitions.length == 0)
+    if (flushable) {
+      for (var fl of flushable) {
+        // can be opportunistic also
+        await me.flushChannel(fl, true)
+        //await ch.d.requestFlush()
+      }
+    }
+    react()
+
+    //Promise.all(flushed).then(react)
   }
 }
