@@ -289,7 +289,7 @@ module.exports = async (ws, msg) => {
     await ch.d.save()
   } else if (inputType == 'update') {
     // New payment arrived
-    var [pubkey, sig, body] = r(msg)
+    let [pubkey, sig, body] = r(msg)
 
     if (!ec.verify(body, sig, pubkey)) {
       return l('Wrong input')
@@ -298,37 +298,39 @@ module.exports = async (ws, msg) => {
     // ackSig defines the sig of last known state between two parties.
     // then each transitions contains an action and an ackSig after action is committed
     // debugState/signedState are purely for debug phase
-    var [method, ackSig, transitions, debugState, signedState] = r(body)
+    let [method, ackSig, transitions, debugState, signedState] = r(body)
 
     if (methodMap(readInt(method)) != 'update') {
       loff('Invalid update input')
       return false
     }
 
-    var _ = await lock(pubkey)
-    loff(`--- Start update ${trim(pubkey)}`)
+    let flushable = await q(pubkey, async () => {
+      loff(`--- Start update ${trim(pubkey)}`)
 
-    var flushable = await me.updateChannel(
-      pubkey,
-      ackSig,
-      transitions,
-      debugState,
-      signedState
-    )
-    loff(`=== End update ${trim(pubkey)}`)
-    _()
+      var flushable = await me.updateChannel(
+        pubkey,
+        ackSig,
+        transitions,
+        debugState,
+        signedState
+      )
+      loff(`=== End update ${trim(pubkey)}`)
+      return flushable
+    })
 
-    var flushed = []
-    await me.flushChannel(pubkey, transitions.length == 0)
+    var flushed = [me.flushChannel(pubkey, transitions.length == 0)]
+
     if (flushable) {
       for (var fl of flushable) {
         // can be opportunistic also
-        await me.flushChannel(fl, true)
+        flushed.push(me.flushChannel(fl, true))
         //await ch.d.requestFlush()
       }
     }
+    await Promise.all(flushed)
     react()
 
-    //Promise.all(flushed).then(react)
+    return //
   }
 }

@@ -37,6 +37,8 @@ class Me {
 
     console.log(this.address)
 
+    this.inq = false
+
     this.record = await this.byKey()
 
     PK.username = username
@@ -47,31 +49,44 @@ class Me {
   // all callbacks are processed one by one for race condition safety (for now)
   async processQueue() {
     // first in first out - call rpc with ws and msg
-    var action
-    while ((action = this.queue.shift())) {
+    /*
+    while (me.queue.length > 0) {
       try {
-        await action()
+        //l('Start job', shifted)
+        //let started = new Date()
+        await me.queue.shift()()
+        //l(`Jobs ${me.queue.length}.`, returned, new Date() - started)
       } catch (e) {
         l(e)
       }
     }
-
-    // l("Setting timeout for queue")
-    setTimeout(() => {
-      me.processQueue()
-    }, 50)
+    delete me.queue
+    
+    */
+    //loff(`Setting timeout for queue ${me.queue.length}`)
+    //setTimeout(() => {
+    //  me.processQueue()
+    //}, 50)
   }
 
   async addQueue(job) {
-    job()
+    //job()
     // if high load, execute now with semaphores
-    //me.queue.push(job)
     /*
     var j = await lock('job')
     await job()
     j()
+    */
 
-    if (me.queue.length == 1) {
+    //q('main', job)
+    job()
+
+    /*
+
+    if (me.queue) {
+      me.queue.push(job)
+    } else {
+      me.queue = [job]
       me.processQueue()
     }
     */
@@ -224,7 +239,10 @@ class Me {
     }
 
     await cache()
+
+    //setInterval(() => {
     me.processQueue()
+    //}, 100)
 
     /*
     this.intervals.push(setInterval(cache, 10000))
@@ -277,9 +295,6 @@ class Me {
           me.addQueue(async () => {
             return RPC.external_rpc(ws, msg)
           })
-          /*var unlock = await mutex('external_rpc')
-          await RPC.external_rpc(ws, msg)
-          unlock()*/
         })
       })
 

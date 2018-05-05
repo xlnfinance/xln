@@ -35,6 +35,7 @@
     "chalk": "2.4.1",
     "finalhandler": "1.1.1",
     "keccak": "1.4.0",
+    "mysql2": "1.5.3",
     "npm": "6.0.0",
     "pg": "7.4.2",
     "prettier": "1.12.1",

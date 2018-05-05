@@ -1,7 +1,7 @@
 // Offchain database - local and private stuff
 
 if (!fs.existsSync(datadir + '/offchain')) fs.mkdirSync(datadir + '/offchain')
-
+/*
 let base_db = {
   dialect: 'sqlite',
   // dialectModulePath: 'sqlite3',
@@ -9,26 +9,8 @@ let base_db = {
   define: {timestamps: true}, // we don't mind timestamps in offchain db
   operatorsAliases: false,
 
-  logging: false,
-
-  pool: {
-    max: 1,
-    min: 0,
-    acquire: 30000,
-    idle: 10000
-  }
-}
-/*
-let base_db = {
-  dialect: 'postgres',
-  host: 'localhost',
-  // dialectModulePath: 'sqlite3',
-  storage: datadir + '/offchain/db.sqlite',
-  define: {timestamps: true}, // we don't mind timestamps in offchain db
-  operatorsAliases: false,
-
-  logging: false,
-
+  logging: false
+  
   pool: {
     max: 1,
     min: 0,
@@ -37,22 +19,46 @@ let base_db = {
   }
 }
 */
-privSequelize = new Sequelize('', '', 'password', base_db)
-l('Reading db ', base_db.storage)
+
+let base_db = {
+  dialect: 'mysql',
+  host: 'localhost',
+  // dialectModulePath: 'sqlite3',
+  //storage: datadir + '/offchain/db.sqlite',
+  define: {timestamps: true}, // we don't mind timestamps in offchain db
+  operatorsAliases: false,
+
+  logging: false
+}
+
+/* Make sure they exist: 
+create database data;
+create database data8001;
+create database data8002;
+create database data8003;
+create database data8004;
+create database data8005;
+create database data8006;
+create database data8007;
+create database data8008;
+*/
+
+privSequelize = new Sequelize(datadir, 'root', '', base_db)
+l('Reading offchain db ')
 // Encapsulates relationship with counterparty: offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
 // we name our things "value", and counterparty's "they_value"
 Delta = privSequelize.define('delta', {
   // between who and who
-  myId: Sequelize.CHAR(32).BINARY,
-  partnerId: Sequelize.CHAR(32).BINARY,
+  myId: Sequelize.BLOB,
+  partnerId: Sequelize.BLOB,
 
   // higher nonce is valid
   nonce: Sequelize.INTEGER,
   status: Sequelize.TEXT,
 
-  pending: Sequelize.TEXT,
+  pending: Sequelize.BLOB,
 
   // TODO: clone from Insurance table to Delta to avoid double querying both dbs
   insurance: Sequelize.INTEGER,
@@ -78,14 +84,14 @@ Delta = privSequelize.define('delta', {
   they_input_amount: Sequelize.INTEGER,
 
   input_amount: Sequelize.INTEGER,
-  input_sig: Sequelize.TEXT, // we store a withdrawal sig to use in next rebalance
+  input_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
 
-  sig: Sequelize.TEXT,
-  signed_state: Sequelize.TEXT,
+  sig: Sequelize.BLOB,
+  signed_state: Sequelize.BLOB,
 
   // All the safety Byzantine checks start with cheat_
-  CHEAT_profitable_state: Sequelize.TEXT,
-  CHEAT_profitable_sig: Sequelize.TEXT,
+  CHEAT_profitable_state: Sequelize.BLOB,
+  CHEAT_profitable_sig: Sequelize.BLOB,
 
   // 4th type of balance, equivalent traditional balance in a bank. For pocket change.
   // Exists for convenience like pulling payments when the user is offline.
@@ -103,29 +109,25 @@ Payment = privSequelize.define('payment', {
   // no inward = sender, no outward = receiver, otherwise = mediator
   is_inward: Sequelize.BOOLEAN,
 
-  // in mediated transfer, pull funds from previous inward
-  // pull_from: Sequelize.INTEGER,
-  //outward: Sequelize.TEXT,
-
-  // outward = inward - fee
+  // in outward it is inward amount - fee
   amount: Sequelize.INTEGER,
   // hash is same for inward and outward
-  hash: Sequelize.TEXT,
+  hash: Sequelize.BLOB,
   // best by block
   exp: Sequelize.INTEGER,
   // asset type
   asset: Sequelize.INTEGER,
 
   // who is recipient
-  destination: Sequelize.TEXT,
+  destination: Sequelize.BLOB,
   // string to be decrypted by outward
-  unlocker: Sequelize.TEXT,
+  unlocker: Sequelize.BLOB,
 
   // user-specified or randomly generated private message
-  invoice: Sequelize.TEXT,
+  invoice: Sequelize.BLOB,
 
   // secret that unlocks hash
-  secret: Sequelize.TEXT
+  secret: Sequelize.BLOB
 })
 
 Delta.hasMany(Payment)
@@ -243,14 +245,14 @@ Delta.prototype.startDispute = async function(cheat = false) {
 
 Block = privSequelize.define('block', {
   // sigs that authorize block
-  precommits: Sequelize.CHAR.BINARY,
+  precommits: Sequelize.BLOB,
   // header with merkle roots in it
-  header: Sequelize.CHAR.BINARY,
+  header: Sequelize.BLOB,
   // array of tx in block
-  ordered_tx_body: Sequelize.CHAR.BINARY,
+  ordered_tx_body: Sequelize.BLOB,
 
-  hash: Sequelize.CHAR(32).BINARY,
-  prev_hash: Sequelize.CHAR(32).BINARY,
+  hash: Sequelize.BLOB,
+  prev_hash: Sequelize.BLOB,
   meta: Sequelize.TEXT,
 
   total_tx: Sequelize.INTEGER

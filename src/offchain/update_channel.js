@@ -7,6 +7,7 @@ module.exports = async (
   signedState
 ) => {
   let ch = await me.getChannel(pubkey)
+  let all = []
 
   if (ch.d.status == 'disputed') {
     loff('We are in a dispute')
@@ -40,21 +41,22 @@ module.exports = async (
   if (await ch.d.saveState(newState, ackSig)) {
     // our last known state has been acked.
 
-    await Payment.update(
-      {
-        status: 'acked'
-      },
-      {
-        where: {
-          status: 'sent',
-          deltumId: ch.d.id
+    all.push(
+      Payment.update(
+        {
+          status: 'acked'
+        },
+        {
+          where: {
+            status: 'sent',
+            deltumId: ch.d.id
+          }
         }
-      }
+      )
     )
 
     ch.d.ack_requested_at = null
-    loff('Update all sent transitions as acked ', ch.d.ack_requested_at)
-    await ch.d.save()
+    //loff('Update all sent transitions as acked ')
   } else {
     if (transitions.length == 0) {
       logstate(newState)
@@ -71,7 +73,8 @@ module.exports = async (
       logstate(oldState)
       logstate(debugState)
       logstate(signedState)
-      gracefulExit('Rollback cant rollback')
+      loff('Rollback cant rollback')
+      //gracefulExit('Rollback cant rollback')
       return
     }
 
@@ -89,7 +92,7 @@ module.exports = async (
     */
 
     if (await ch.d.saveState(oldState, ackSig)) {
-      loff('Rollback to old state')
+      loff(`Start merge ${trim(pubkey)}`)
 
       rollback = [
         newState[1][2] - oldState[1][2], // nonce diff
@@ -102,7 +105,8 @@ module.exports = async (
       logstate(debugState)
       logstate(signedState)
 
-      gracefulExit('Deadlock?!')
+      loff('Deadlock?!')
+      //gracefulExit('Deadlock?!')
       //await me.flushChannel(ch)
 
       return
@@ -132,18 +136,18 @@ module.exports = async (
 
       if (hash.length != 32) {
         loff('Error: Hash must be 32 bytes')
-        return
+        break
       }
 
       if (inwards.length >= K.max_hashlocks) {
         loff('Error: too many hashlocks')
-        return
+        break
       }
 
       let reveal_until = K.usable_blocks + K.hashlock_exp
       // if usable blocks is 10 and default exp is 5, must be between 14-16
 
-      if (exp < reveal_until - 3 || exp > reveal_until + 3) {
+      if (exp < reveal_until - 30 || exp > reveal_until + 30) {
         new_type = 'fail'
         loff('Error: exp is out of supported range')
       }
@@ -157,7 +161,7 @@ module.exports = async (
       newState[1][2]++
       if (!await ch.d.saveState(newState, t[2])) {
         loff('Error: Invalid state sig add')
-        return
+        break
       }
 
       let hl = await ch.d.createPayment({
@@ -210,7 +214,7 @@ module.exports = async (
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub) {
-        loff(`Forward ${amount} to ${trim(destination)}`)
+        //loff(`Forward ${amount} to ${trim(destination)}`)
         let outward_amount = afterFees(amount, me.my_hub.fee)
 
         let dest_ch = await me.getChannel(destination)
@@ -316,16 +320,13 @@ module.exports = async (
     ch.d.nonce += rollback[0]
     ch.d.offdelta += rollback[1]
     ch.d.status = 'merge'
-
-    let st = await ch.d.getState()
-    loff('After rollback we are at: ')
-    logstate(st)
   } else {
     ch.d.status = 'master'
     ch.d.pending = null
   }
 
   // CHEAT_: storing most profitable outcome for us
+  /*
   if (!ch.d.CHEAT_profitable_state) {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
@@ -336,8 +337,17 @@ module.exports = async (
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
+  */
 
-  await ch.d.save()
+  all.push(ch.d.save())
+
+  await Promise.all(all)
+
+  ch.d.getState().then((st) => {
+    loff(`After ${rollback[0] > 0 ? 'merge' : 'update'}: `)
+    logstate(st)
+  })
+
   return flushable
 
   // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)

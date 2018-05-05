@@ -3,22 +3,15 @@ sleep = async function(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-mutex = async function(key) {
-  return new Promise((resolve) => {
-    // we resolve from mutex with a fn that fn() unlocks given key
-    var unlock = () => {
-      resolve(() => mutex.unlock(key))
-    }
-
-    if (mutex.queue[key]) {
-      l('added to queue ', key)
-      mutex.queue[key].push(unlock)
-    } else {
-      l('init the queue, resolve now ', key)
-      mutex.queue[key] = []
-      unlock()
-    }
-  })
+mutex = async function(key, fn) {
+  if (mutex.queue[key]) {
+    l(`added to queue ${key}`)
+    mutex.queue[key].push(fn)
+  } else {
+    l(`init queue ${key}`)
+    mutex.queue[key] = []
+    unlock()
+  }
 }
 
 mutex.queue = {}

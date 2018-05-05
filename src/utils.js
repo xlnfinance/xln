@@ -204,6 +204,51 @@ sleep = async function(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// critical section for "key"
+q = async function(key, job) {
+  return new Promise(async (resolve) => {
+    key = 'key_' + key.toString()
+
+    if (q.q[key]) {
+      q.q[key].push([job, resolve])
+    } else {
+      q.q[key] = [[job, resolve]]
+
+      while (q.q[key].length > 0) {
+        try {
+          let [got_job, got_resolve] = q.q[key].shift()
+          got_resolve(await got_job())
+        } catch (e) {
+          l(e)
+        }
+      }
+      delete q.q[key]
+    }
+  })
+}
+q.q = {}
+
+/*
+
+q("hi", async ()=>{
+  await sleep(1000)
+  console.log(1)
+  await sleep(1000)
+}).then(()=>{console.log(11)})
+
+q("hi", async ()=>{
+  await sleep(1000)
+  console.log(2)
+  await sleep(1000)
+})
+
+q("hi", async ()=>{
+  await sleep(1000)
+  console.log(3)
+  await sleep(1000)
+})
+
+*/
 current_db_hash = () => {
   return Buffer.alloc(1)
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
@@ -319,37 +364,6 @@ usage = () => {
   return Object.assign(process.cpuUsage(), process.memoryUsage(), {
     uptime: process.uptime()
   })
-}
-
-mutex = async function(key) {
-  return new Promise((resolve) => {
-    // we resolve from mutex with a fn that fn() unlocks given key
-    var unlock = () => {
-      resolve(() => mutex.unlock(key))
-    }
-
-    if (mutex.queue[key]) {
-      l('added to queue ', key)
-      mutex.queue[key].push(unlock)
-    } else {
-      l('init the queue, resolve now ', key)
-      mutex.queue[key] = []
-      unlock()
-    }
-  })
-}
-
-mutex.queue = {}
-mutex.unlock = async function(key) {
-  if (!mutex.queue[key]) {
-    l('Fail: there was no lock')
-  } else if (mutex.queue[key].length > 0) {
-    l('shifting from', mutex.queue[key])
-    mutex.queue[key].shift()()
-  } else {
-    l('delete queue', key)
-    delete mutex.queue[key]
-  }
 }
 
 // tells external RPC how to parse this request

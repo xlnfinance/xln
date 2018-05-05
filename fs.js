@@ -47,51 +47,60 @@ cache = async (i) => {
 
     cached_result.current_db_hash = current_db_hash().toString('hex')
 
-    await Promise.all([
-      async () => {
-        cached_result.proposals = await Proposal.findAll({
-          order: [['id', 'DESC']],
-          include: {all: true}
-        })
-      },
-      async () => {
-        cached_result.users = await User.findAll({include: {all: true}})
-      },
-      async () => {
-        cached_result.insurances = await Insurance.findAll({
-          include: {all: true}
-        })
-      },
-      async () => {
-        cached_result.hashlocks = await Hashlock.findAll({include: {all: true}})
-      },
-      async () => {
-        cached_result.assets = await Asset.findAll({include: {all: true}})
-      },
-      async () => {
-        cached_result.blocks = (await Block.findAll({
-          limit: 500,
-          order: [['id', 'desc']],
-          where: {
-            meta: {[Op.not]: null}
-          }
-        })).map((b) => {
-          var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(
-            b.header
-          )
+    await Promise.all(
+      [
+        async () => {
+          cached_result.proposals = await Proposal.findAll({
+            order: [['id', 'DESC']],
+            include: {all: true}
+          })
+        },
+        async () => {
+          cached_result.users = await User.findAll({include: {all: true}})
+        },
+        async () => {
+          cached_result.insurances = await Insurance.findAll({
+            include: {all: true}
+          })
+        },
+        async () => {
+          cached_result.hashlocks = await Hashlock.findAll({
+            include: {all: true}
+          })
+        },
+        async () => {
+          cached_result.assets = await Asset.findAll({include: {all: true}})
+        },
+        async () => {
+          cached_result.blocks = (await Block.findAll({
+            limit: 500,
+            order: [['id', 'desc']],
+            where: {
+              meta: {[Op.not]: null}
+            }
+          })).map((b) => {
+            var [
+              methodId,
+              built_by,
+              prev_hash,
+              timestamp,
+              tx_root,
+              db_hash
+            ] = r(b.header)
 
-          return {
-            id: b.id,
-            prev_hash: toHex(b.prev_hash),
-            hash: toHex(b.hash),
-            built_by: readInt(built_by),
-            timestamp: readInt(timestamp),
-            meta: JSON.parse(b.meta),
-            total_tx: b.total_tx
-          }
-        })
-      }
-    ])
+            return {
+              id: b.id,
+              prev_hash: toHex(b.prev_hash),
+              hash: toHex(b.hash),
+              built_by: readInt(built_by),
+              timestamp: readInt(timestamp),
+              meta: JSON.parse(b.meta),
+              total_tx: b.total_tx
+            }
+          })
+        }
+      ].map((d) => d())
+    )
   }
 
   // TODO: read hash just after snapshot generation
@@ -132,7 +141,7 @@ react = async (result = {}, id = 1) => {
     return l('No working me.browser')
   }
 
-  cache()
+  //cache()
 
   if (me.id) {
     if (me.my_hub) {
@@ -226,7 +235,7 @@ initDashboard = async (a) => {
     fatal(`Unable to read ${highlight(kFile)}, quitting`)
   }
 
-  await privSequelize.sync({force: false})
+  await privSequelize.sync({force: true})
 
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
@@ -434,10 +443,12 @@ require('./src/db/offchain_db')
     initDashboard()
   }
 })()
-
+/*ZUp5GSscc9zLNKesiGEUtUcKsmYrBNCsmibQPb929LZ7nLhdixAZJsY5ZuS6NDYR498mBkJqhbMZNUdhTSqWnPbLp5u5M
+ZUp5HbyPB49FR87eP2sdN2PPrWHc48DjFXnTbFsJHrBKhV7tkTiS3JNwVXeRevExTgVtU6TgwPm3smBjTcpTpzBU2AB5s
+ZUp5FuK7HDYtktQFmCqbRihTn8woVjycMbTmtxqCvJKsq99GF9FwAXPN7uTJWswn4oTfMAey9G4c5DSTr7GvJzsq895Pc
+*/
 var randos = `ZUp5FjKozQ7BD6trZydUDq8bMgeUCLuh2sdCT6sPupKGX6rAyCcdqS3zesc8CeGzEMquFMwxrgnXqebYwfid4NbA6wxnY
 ZUp5KM5NFCHpnn1HYb9y3UtgLU2kSuV1MyCCTYiKSqh3TpAYGuBkHsWsVvHGBMDYHZVJHZyAfLaHSUf73tmj2Bb4Tk5UQ
-ZUp59nsh1i2cmNr1ZwySV3BTK1uRLdCzG6wSHfi4evje6YeRhKp48h9bJx14ZQzuH4bThyFQzrkqinB993Ptp89CLVPoi
 ZUp5HrKt4oJVaf77ZrB41U29AFq8WhgpWvc69GLoLV6SZMNdaDH1hXCcJCWj3EqzT7CiCAf1SEzShd6SnwXPqVRHDRtNH
 ZUp5CQqYJj2i8nnKqk5PD1qPff622Bgm6U7BRwQkHzkcRhkrq8TLKusFcC9FSMsmMENPiJck3HyrSNXmoUdYmaxStq24w
 ZUp57UFAjLTjfdg4qNJGpus5SMitgbumrMDgeLfswNQrCWEXNrmFdThUFdYzwKXi8fifNssXHe9HyupBHtMzGnBgp5s2L
@@ -463,7 +474,7 @@ ZUp5HJFebrN9FKRxjNvqQiHFceAFDwUuJFZaTn9w84yr64svaFZQuXbgeNTqbjhJAPwoiV3vcHbo7X4H
 ZUp5RpextE85rX1wPTgJZ5r5tbw9dDRHUUSxsSSTER5EDT4GzojDGM9E1jFxGdXZMgPyjy9S6tJ4byjHW9wE6uobuHN8h
 ZUp5MQ1RsiUhjvcRf16Vb3Prhp6aLHMxksyRDwgsAii3qro7XiFnXdBmpAzuMRWykHzcaL8Re3Pmm5yhKH1H69KBAJxsB`
   .split('\n')
-  .slice(0, 5)
+  .slice(0, 4)
 
 if (argv.monkey) {
   setTimeout(() => {
@@ -484,12 +495,12 @@ if (argv.monkey) {
           amount: 100 + Math.round(Math.random() * 10) //$1-2
         })
       })
-    }, 7000)
+    }, 500)
 
     setTimeout(() => {
       clearInterval(monk)
-    }, 300000)
-  }, 20000)
+    }, 20000)
+  }, 5000)
 }
 
 process.on('unhandledRejection', (err) => {
