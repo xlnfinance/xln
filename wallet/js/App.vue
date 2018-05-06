@@ -294,16 +294,19 @@ export default {
     trim: str => {
       return str ? str.slice(0, 8) + "..." : "";
     },
-    payment_status: (status, is_inward) => {
-      if (status == "settle_sent") {
-        return "✔ " + (is_inward ? "Received" : "Paid");
+    payment_status: (type, status) => {
+      var s = "";
+      if (type == "settle") {
+        s = "✔";
       }
-      if (status == "fail_sent") {
-        return "❌ " + (is_inward ? "Failed" : "Failed");
+      if (type == "fail") {
+        s = "❌";
       }
-      if (status == "add_sent") return "🔒 Pending";
-
-      return "🕟 Wait";
+      if (type == "add") {
+        s = "🔒";
+      }
+      // new and sent are considered "pending" statuses
+      return s + (status == "acked" ? "" : "🕟");
     }
   }
 };
@@ -489,7 +492,7 @@ export default {
               <tbody>
 
                 <tr v-bind:key="h.id" v-for="h in payments.slice(0, history_limit)">
-                  <td>{{h.type}}/{{h.status}}</td>
+                  <td v-bind:title="h.type+h.status">{{payment_status(h.type, h.status)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
                   <td>Hash {{trim(h.hash)}} Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
                   <td>{{ new Date(h.createdAt).toLocaleString() }}</td>

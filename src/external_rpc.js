@@ -237,7 +237,6 @@ module.exports = async (ws, msg) => {
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
 
-    //var _ = await lock(pubkey)
     var ch = await me.getChannel(pubkey)
 
     var amount = readInt(r(body)[0])
@@ -313,7 +312,7 @@ module.exports = async (ws, msg) => {
     }
 
     let flushable = await q(pubkey, async () => {
-      loff(`--- Start update ${trim(pubkey)}`)
+      //loff(`--- Start update ${trim(pubkey)}`)
 
       var flushable = await me.updateChannel(
         pubkey,
@@ -322,7 +321,7 @@ module.exports = async (ws, msg) => {
         debugState,
         signedState
       )
-      loff(`=== End update ${trim(pubkey)}`)
+      //loff(`=== End update ${trim(pubkey)}`)
       return flushable
     })
 
