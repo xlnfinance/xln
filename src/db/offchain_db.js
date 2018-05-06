@@ -40,7 +40,7 @@ str+='create database data'+i+';'
     logging: false,
 
     retry: {
-      max: 10
+      max: 20
     },
     pool: {
       max: 10,

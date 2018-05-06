@@ -128,13 +128,11 @@ window.render = r => {
 
 window.FS = (method, params = {}) => {
   return new Promise((resolve, reject) => {
-    var id = FS.resolvers.push(resolve) - 1;
-
     FS.ws.send(
       JSON.stringify({
         method: method,
         params: params,
-        id: id,
+        id: 1,
         auth_code: localStorage.auth_code,
         is_wallet: true // not all internal_rpc clients are wallets
       })
@@ -145,7 +143,6 @@ window.FS = (method, params = {}) => {
 FS.ws = new WebSocket(
   (location.protocol == "http:" ? "ws://" : "wss://") + location.host
 );
-FS.resolvers = [render, render];
 
 FS.ws.onmessage = m => {
   var data = JSON.parse(m.data);

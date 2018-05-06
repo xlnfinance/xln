@@ -136,19 +136,19 @@ fi
 }
 
 // Flush an object to browser websocket
-react = async (result = {}, id = 1) => {
-  // no alive browser socket
-  if (!me.browser || me.browser.readyState != 1) {
+react = async (result = {}, force = false) => {
+  // hubs dont react OR no alive browser socket
+  if ((me.my_hub && !force) || !me.browser || me.browser.readyState != 1) {
     return //l('No working me.browser')
   }
 
-  if (new Date() - me.last_react < 50) {
-    // reacting too often is bad for performance
-    return false
+  if (new Date() - me.last_react < 500) {
+    l('reacting too often is bad for performance')
+    //return false
   }
   me.last_react = new Date()
 
-  //cache()
+  //await cache()
 
   if (me.id) {
     if (me.my_hub) {
@@ -172,14 +172,15 @@ react = async (result = {}, id = 1) => {
       */
     }
 
-    result.payments = await Payment.findAll({
-      order: [['id', 'desc']],
-      include: {all: true}
-    })
+    ;[result.payments, result.channels, result.record] = await Promise.all([
+      Payment.findAll({
+        order: [['id', 'desc']],
+        include: {all: true}
+      }),
+      me.channels(),
+      me.byKey()
+    ])
 
-    result.record = await me.byKey()
-
-    result.username = me.username
     /*
           var offered_partners = (await me.channels())
             .sort((a, b) => b.they_payable - a.they_payable)
@@ -191,26 +192,24 @@ react = async (result = {}, id = 1) => {
     result.pubkey = toHex(me.pubkey)
 
     result.pending_batch = PK.pending_batch
-
-    result.channels = await me.channels()
   }
 
   try {
     me.browser.send(
       JSON.stringify({
-        result: Object.assign(result, cached_result),
-        id: id
+        result: Object.assign(result, cached_result)
       })
     )
   } catch (e) {
-    l('Failed browser send')
+    l(e)
   }
 }
 
 // TODO: Move from memory to persistent DB
 cached_result = {
   history: [],
-  my_log: ''
+  my_log: '',
+  settle_tps: 0
 }
 
 initDashboard = async (a) => {
@@ -450,32 +449,12 @@ for (let i = 8001; i < 8200; i++){
   addr.push(me.address)
 }
 */
-
-if (argv.monkey) {
-  randos = fs
-    .readFileSync('./test/randos.txt')
-    .toString()
-    .split('\n')
-    .slice(3, parseInt(argv.monkey) - 8000)
-
-  if (randos.length > 0) {
-    l('Setting up randomly paying monkey...')
-    setTimeout(() => {
-      randos.splice(randos.indexOf(me.address), 1) // remove our addr
-
-      monk = setInterval(() => {
-        me.payChannel({
-          destination: randos[Math.floor(Math.random() * randos.length)],
-          amount: 100 + Math.round(Math.random() * 30) //$1-2
-        })
-      }, 1000)
-
-      setTimeout(() => {
-        clearInterval(monk)
-      }, 60000)
-    }, 5000)
-  }
-}
+randos = fs
+  .readFileSync('./test/randos.txt')
+  .toString()
+  .split('\n')
+  .slice(3, parseInt(argv.monkey) - 8000)
+l('Loaded randos: ' + randos.length)
 
 let ooops = (err) => {
   if (err.name == 'SequelizeTimeoutError') return

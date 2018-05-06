@@ -91,7 +91,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 10 == 0 || ordered_tx.length > 0)
+  if (K.total_blocks % 50 == 0 || ordered_tx.length > 0)
     l(
       `${base_port}: Processed block ${K.total_blocks} by ${readInt(
         built_by

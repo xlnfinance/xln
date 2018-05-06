@@ -262,7 +262,7 @@ module.exports = async (ws, msg) => {
     if (ws.end) {
       ws.end(JSON.stringify(result))
     } else {
-      react(result, json.id)
+      react(result)
     }
   } else {
     // the request is not authorized with auth_code - just send public explorer data

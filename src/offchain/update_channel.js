@@ -287,6 +287,13 @@ module.exports = async (
           )
           me.batch.push('revealSecrets', [secret])
         } else {
+          // how much fee we just made by mediating the transfer?
+          me.metrics.fees.current += inward.amount - outward.amount
+          // add to total volume
+          me.metrics.volume.current += inward.amount
+          // add to settled payments
+          me.metrics.settle.current += 1
+
           inward.secret = secret
           inward.type = m
           inward.status = 'new'
@@ -319,7 +326,7 @@ module.exports = async (
   }
 
   // CHEAT_: storing most profitable outcome for us
-  /*
+
   if (!ch.d.CHEAT_profitable_state) {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
@@ -330,7 +337,6 @@ module.exports = async (
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
-  */
 
   all.push(ch.d.save())
 

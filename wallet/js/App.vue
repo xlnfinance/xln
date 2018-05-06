@@ -63,6 +63,7 @@ export default {
       my_hub: false,
 
       limits: [100, 1000],
+      metrics: {},
 
       history_limit: 10,
 
@@ -366,6 +367,8 @@ export default {
           </select></span>
 
 
+
+
           <button type="button" class="btn btn-info" @click="call('sync')">Sync</button>
           &nbsp;
           <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
@@ -381,6 +384,10 @@ export default {
       </div>
       <div v-else-if="tab=='help'">
         <h1>Network</h1>
+        <h2>This Node Metrics</h2>
+
+        <p v-for="(obj, index) in metrics"><b>{{index}}</b> last minute: {{obj.last_avg}} (max {{obj.max}}, total {{obj.total}}). Avgs: {{obj.avgs.join(', ')}}</p>
+
         <h2>Validators</h2>
         <ul>
           <li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b></li>

@@ -16,9 +16,7 @@ during merge: no transitions can be applied, otherwise deadlock could happen
 
 module.exports = async (pubkey, opportunistic = false) => {
   return q(pubkey, async () => {
-    loff(
-      `--- Start flush ${trim(pubkey)} ${opportunistic ? 'opportunistic' : ''}`
-    )
+    //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey)
     let flushable = []
@@ -35,7 +33,7 @@ module.exports = async (pubkey, opportunistic = false) => {
     }
 
     if (ch.d.status == 'sent') {
-      loff(`=== End flush ${trim(pubkey)} CANT`)
+      //loff(`=== End flush ${trim(pubkey)} CANT`)
 
       if (ch.d.ack_requested_at < new Date() - 4000) {
         //me.send(ch.d.partnerId, 'update', ch.d.pending)
@@ -100,6 +98,9 @@ module.exports = async (pubkey, opportunistic = false) => {
             outwards.length >= K.max_hashlocks
           ) {
             loff('error cannot transit this amount. Failing inward.')
+
+            me.metrics.fail.current++
+
             t.type = 'fail'
             t.status = 'acked'
             all.push(t.save())

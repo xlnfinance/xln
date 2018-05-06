@@ -15,6 +15,25 @@ class Me {
     this.queue = []
     this.batch = []
 
+    // generic metric boilerplate: contains array of averages per minute over time
+    let getMetric = () => {
+      return {
+        max: 0,
+        started: new Date(),
+        total: 0,
+        current: 0,
+        last_avg: 0,
+        avgs: []
+      }
+    }
+
+    this.metrics = {
+      volume: getMetric(),
+      fail: getMetric(),
+      settle: getMetric(),
+      fees: getMetric()
+    }
+
     this.intervals = []
 
     this.proposed_block = {}
@@ -38,6 +57,12 @@ class Me {
     if (argv.monkey) {
       l('Get loaded balance from testnet before simulation')
       me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+      randos.splice(randos.indexOf(me.address), 1) // *except our addr
+
+      if (randos.length > 0) {
+        l('Setting up randomly paying monkey...')
+        me.payRando()
+      }
     }
 
     this.last_react = new Date()
@@ -76,12 +101,19 @@ class Me {
       // enforces hashlocks
       me.ensureAck()
     }
-    /*
-      if (this.my_hub) {
-        me.intervals.push(
-          setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
-        )
-      }*/
+
+    if (this.my_hub) {
+      me.intervals.push(
+        setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
+      )
+
+      // hubs have force react regularly
+      me.intervals.push(
+        setInterval(() => {
+          react({}, true)
+        }, 1000)
+      )
+    }
 
     if (PK.pending_batch) {
       return l('Only 1 tx is supported')
@@ -265,6 +297,8 @@ class Me {
 
     l('Set up sync')
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
+
+    me.intervals.push(setInterval(me.updateMetrics, 60000))
   }
 
   // takes channels with supported hubs (verified and custom ones)
@@ -287,6 +321,35 @@ class Me {
     }
 
     return channels
+  }
+
+  payRando(counter = 0) {
+    me.payChannel({
+      destination: randos[Math.floor(Math.random() * randos.length)],
+      amount: 100 + Math.round(Math.random() * 300)
+    })
+
+    if (counter < 100) {
+      setTimeout(() => {
+        me.payRando(counter + 1)
+      }, Math.round(Math.random() * 10000)) // in next 0..10s
+    }
+  }
+
+  updateMetrics() {
+    for (let name of Object.keys(me.metrics)) {
+      let m = me.metrics[name]
+      m.total += m.current
+      m.last_avg = Math.round(m.current)
+
+      if (m.last_avg > m.max) {
+        m.max = m.last_avg
+      }
+      m.avgs.push(m.last_avg)
+      m.current = 0 // zero the counter for next period
+    }
+
+    cached_result.metrics = me.metrics
   }
 
   // a generic interface to send a websocket message to some user or member
