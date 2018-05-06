@@ -169,8 +169,8 @@ module.exports = async (pubkey, opportunistic = false) => {
 
     me.send(ch.d.partnerId, 'update', envelope)
 
-    //await Promise.all(all)
+    await Promise.all(all)
     loff(`=== End flush ${transitions.length} tr to ${trim(pubkey)}`)
-    return Promise.all(all) //Promise.all(flushable.map((fl) => me.flushChannel(fl)))
+    return Promise.all(flushable.map((fl) => me.flushChannel(fl)))
   })
 }

@@ -76,7 +76,7 @@ cache = async (i) => {
             limit: 500,
             order: [['id', 'desc']],
             where: {
-              meta: {[Op.not]: null}
+              //  meta: {[Op.ne]: null}
             }
           })).map((b) => {
             var [
@@ -98,6 +98,7 @@ cache = async (i) => {
               total_tx: b.total_tx
             }
           })
+          return true
         }
       ].map((d) => d())
     )
@@ -138,8 +139,14 @@ fi
 react = async (result = {}, id = 1) => {
   // no alive browser socket
   if (!me.browser || me.browser.readyState != 1) {
-    return l('No working me.browser')
+    return //l('No working me.browser')
   }
+
+  if (new Date() - me.last_react < 50) {
+    // reacting too often is bad for performance
+    return false
+  }
+  me.last_react = new Date()
 
   //cache()
 
@@ -235,7 +242,8 @@ initDashboard = async (a) => {
     fatal(`Unable to read ${highlight(kFile)}, quitting`)
   }
 
-  await privSequelize.sync({force: true})
+  // if we use mysql, need to explicitly reset db
+  await privSequelize.sync({force: !!argv.mysql})
 
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
@@ -270,9 +278,7 @@ initDashboard = async (a) => {
       })
 
       req.on('end', function() {
-        me.addQueue(async () => {
-          return RPC.internal_rpc(res, queryData)
-        })
+        RPC.internal_rpc(res, queryData)
       })
     } else if (req.url == '/sdk.html') {
       serveStatic('./wallet')(req, res, finalhandler(req, res))
@@ -333,7 +339,6 @@ initDashboard = async (a) => {
     await me.start()
   }
 
-  //me.processQueue()
   var url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
   l(note(`Open ${link(url)} in your browser`))
   server.listen(base_port).once('error', function(err) {
@@ -352,10 +357,7 @@ initDashboard = async (a) => {
   })
   internal_wss.on('connection', function(ws) {
     ws.on('message', (msg) => {
-      // internal requests go in the beginning of the queue
-      me.addQueue(async () => {
-        return RPC.internal_rpc(ws, msg)
-      })
+      RPC.internal_rpc(ws, msg)
     })
   })
 }
@@ -443,76 +445,49 @@ require('./src/db/offchain_db')
     initDashboard()
   }
 })()
-/*ZUp5GSscc9zLNKesiGEUtUcKsmYrBNCsmibQPb929LZ7nLhdixAZJsY5ZuS6NDYR498mBkJqhbMZNUdhTSqWnPbLp5u5M
-ZUp5HbyPB49FR87eP2sdN2PPrWHc48DjFXnTbFsJHrBKhV7tkTiS3JNwVXeRevExTgVtU6TgwPm3smBjTcpTpzBU2AB5s
-ZUp5FuK7HDYtktQFmCqbRihTn8woVjycMbTmtxqCvJKsq99GF9FwAXPN7uTJWswn4oTfMAey9G4c5DSTr7GvJzsq895Pc
+/* Get randos:
+var addr = []
+for (let i = 8001; i < 8200; i++){
+  let username = i.toString()
+  let seed = await derive(username, 'password')
+  await me.init(username, seed)  
+  addr.push(me.address)
+}
 */
-var randos = `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`
-  .split('\n')
-  .slice(0, 4)
 
 if (argv.monkey) {
-  setTimeout(() => {
-    me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+  randos = fs
+    .readFileSync('./test/randos.txt')
+    .toString()
+    .split('\n')
+    .slice(3, parseInt(argv.monkey) - 8000)
 
-    randos.splice(randos.indexOf(me.address), 1) // remove our addr
-
-    monk = setInterval(() => {
-      /*
-      if (Math.random() > 0.7) {
-        me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
-      }
-      */
-
-      me.addQueue(async () => {
-        return me.payChannel({
-          destination: randos[Math.floor(Math.random() * randos.length)],
-          amount: 100 + Math.round(Math.random() * 10) //$1-2
-        })
-      })
-    }, 500)
-
+  if (randos.length > 0) {
+    l('Setting up randomly paying monkey...')
     setTimeout(() => {
-      clearInterval(monk)
-    }, 20000)
-  }, 5000)
+      randos.splice(randos.indexOf(me.address), 1) // remove our addr
+
+      monk = setInterval(() => {
+        me.payChannel({
+          destination: randos[Math.floor(Math.random() * randos.length)],
+          amount: 100 + Math.round(Math.random() * 30) //$1-2
+        })
+      }, 1000)
+
+      setTimeout(() => {
+        clearInterval(monk)
+      }, 60000)
+    }, 5000)
+  }
 }
 
-process.on('unhandledRejection', (err) => {
-  if (err.name == 'SequelizeTimeoutError') return l(err)
-
-  fatal(`Fatal rejection, quitting\n\n${err ? err.stack : err}`)
-})
-
-process.on('uncaughtException', (err) => {
-  if (err.name == 'SequelizeTimeoutError') return l(err)
-  fatal(`Fatal exception, quitting\n\n${err ? err.stack : err}`)
-})
+let ooops = (err) => {
+  if (err.name == 'SequelizeTimeoutError') return
+  l(base_port, err)
+  //fatal(`Fatal rejection, quitting`)
+}
+process.on('unhandledRejection', ooops)
+process.on('uncaughtException', ooops)
 
 l(`\n${note('Welcome to FS REPL!')}`)
 repl = require('repl').start(note(''))

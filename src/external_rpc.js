@@ -158,18 +158,25 @@ module.exports = async (ws, msg) => {
 
     // sync requests latest blocks, chain returns chain
   } else if (inputType == 'chain') {
-    var chain = r(msg)
+    await q('onchain', async () => {
+      var chain = r(msg)
 
-    for (var block of chain) {
-      await me.processBlock(block[0], block[1], block[2])
-    }
+      var started = K.total_blocks
+      for (var block of chain) {
+        await me.processBlock(block[0], block[1], block[2])
+      }
 
-    // dirty hack to not backup k.json until all blocks are synced
-    if (chain.length == sync_limit) {
-      sync()
-    } else {
-      fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
-    }
+      // dirty hack to not backup k.json until all blocks are synced
+      if (chain.length == sync_limit) {
+        sync()
+      } else {
+        fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
+        if (K.total_blocks - started > 0) {
+          // something new happened - cache
+          cache()
+        }
+      }
+    })
   } else if (inputType == 'sync') {
     var last = await Block.findOne({
       where: {

@@ -8,7 +8,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return l('Too long block')
   }
 
-  var [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(header)
+  let [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(header)
 
   timestamp = readInt(timestamp)
   prev_hash = toHex(prev_hash)
@@ -41,9 +41,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return l('Not valid number of precommits')
   }
 
-  var shares = 0
-  var precommit_body = r([methodMap('precommit'), header])
-  for (var i = 0; i < Members.length; i++) {
+  let shares = 0
+  let precommit_body = r([methodMap('precommit'), header])
+  for (let i = 0; i < Members.length; i++) {
     if (
       precommits[i].length == 64 &&
       ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)
@@ -71,22 +71,19 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   // List of events/metadata about current block, used on Explorer page
-  var meta = {
+  let meta = {
     inputs_volume: 0,
     outputs_volume: 0,
     parsed_tx: [],
     cron: []
   }
 
-  var ordered_tx = r(ordered_tx_body)
+  let ordered_tx = r(ordered_tx_body)
 
   // Processing transactions one by one
   // Long term TODO: parallel execution with pessimistic locks
-  for (var i = 0; i < ordered_tx.length; i++) {
-    var obj = await me.processTx(ordered_tx[i], meta)
-
-    K.total_tx++
-    K.total_tx_bytes += ordered_tx[i].length
+  for (let i = 0; i < ordered_tx.length; i++) {
+    await me.processTx(ordered_tx[i], meta)
   }
 
   K.ts = timestamp
@@ -94,17 +91,19 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 50 == 0)
+  if (K.total_blocks % 10 == 0 || ordered_tx.length > 0)
     l(
-      `Processed block ${K.total_blocks} by ${readInt(
+      `${base_port}: Processed block ${K.total_blocks} by ${readInt(
         built_by
       )}. Signed shares: ${shares}, tx: ${ordered_tx.length}`
     )
 
+  // todo: define what is considered a "usable" block
   if (ordered_tx_body.length < K.blocksize - 1000) {
     K.usable_blocks++
   }
 
+  K.total_tx += ordered_tx.length
   K.total_bytes += ordered_tx_body.length
   K.bytes_since_last_snapshot += ordered_tx_body.length
 
@@ -217,6 +216,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     ordered_tx_body: ordered_tx_body,
 
     total_tx: ordered_tx.length,
+
+    // did anything happen in this block?
     meta:
       meta.parsed_tx.length + meta.cron.length > 0 ? JSON.stringify(meta) : null
   })

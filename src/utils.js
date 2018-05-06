@@ -86,6 +86,16 @@ logtr = (transitions) => {
   } catch (e) {}
 }
 
+logstates = (a, b, c, d) => {
+  l('Our state')
+  logstate(a)
+  l('Our signed state')
+  logstate(b)
+  l('Their state')
+  logstate(c)
+  l('Their signed state')
+  logstate(d)
+}
 logstate = (state) => {
   if (!state[1]) return false
   var hash = toHex(sha3(r(state)))

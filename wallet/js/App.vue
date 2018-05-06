@@ -400,7 +400,7 @@ export default {
         <p>Last block received {{timeAgo(K.ts)}}</p>
         <p>Network created {{timeAgo(K.created_at)}}</p>
         <p>Transactions: {{K.total_tx}}</p>
-        <p>Tx bytes: {{K.total_tx_bytes}}</p>
+        <p>Total bytes: {{K.total_bytes}}</p>
         <h2>Governance stats</h2>
         <p>Proposals created: {{K.proposals_created}}</p>
         <h2>Hard Fork</h2>

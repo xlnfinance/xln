@@ -59,20 +59,15 @@ module.exports = async (
     //loff('Update all sent transitions as acked ')
   } else {
     if (transitions.length == 0) {
-      logstate(newState)
-      logstate(oldState)
-      logstate(debugState)
-      logstate(signedState)
+      logstates(newState, oldState, debugState, signedState)
 
       loff('Empty invalid ack')
       return
     }
 
     if (ch.d.status == 'merge') {
-      logstate(newState)
-      logstate(oldState)
-      logstate(debugState)
-      logstate(signedState)
+      logstates(newState, oldState, debugState, signedState)
+
       loff('Rollback cant rollback')
       //gracefulExit('Rollback cant rollback')
       return
@@ -91,7 +86,7 @@ module.exports = async (
 
     */
 
-    if (await ch.d.saveState(oldState, ackSig)) {
+    if (ch.d.signed_state && (await ch.d.saveState(oldState, ackSig))) {
       loff(`Start merge ${trim(pubkey)}`)
 
       rollback = [
@@ -100,10 +95,7 @@ module.exports = async (
       ]
       newState = oldState
     } else {
-      logstate(newState)
-      logstate(oldState)
-      logstate(debugState)
-      logstate(signedState)
+      logstates(newState, oldState, debugState, signedState)
 
       loff('Deadlock?!')
       //gracefulExit('Deadlock?!')
@@ -174,7 +166,8 @@ module.exports = async (
         hash: hash,
         exp: exp,
 
-        unlocker: unlocker
+        unlocker: unlocker,
+        destination: destination
       })
 
       if (new_type == 'fail') {
@@ -343,10 +336,12 @@ module.exports = async (
 
   await Promise.all(all)
 
+  /*
   ch.d.getState().then((st) => {
     loff(`After ${rollback[0] > 0 ? 'merge' : 'update'}: `)
     logstate(st)
   })
+  */
 
   return flushable
 

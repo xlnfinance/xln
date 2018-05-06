@@ -1,50 +1,61 @@
 // Offchain database - local and private stuff
 
 if (!fs.existsSync(datadir + '/offchain')) fs.mkdirSync(datadir + '/offchain')
-/*
-let base_db = {
-  dialect: 'sqlite',
-  // dialectModulePath: 'sqlite3',
-  storage: datadir + '/offchain/db.sqlite',
-  define: {timestamps: true}, // we don't mind timestamps in offchain db
-  operatorsAliases: false,
 
-  logging: false
-  
-  pool: {
-    max: 1,
-    min: 0,
-    acquire: 30000,
-    idle: 10000
+if (argv.mysql) {
+  var base_db = {
+    dialect: 'mysql',
+    host: 'localhost',
+    define: {timestamps: true}, // we don't mind timestamps in offchain db
+    operatorsAliases: false,
+
+    logging: false,
+    retry: {
+      max: 10
+    }
+    /*
+    pool: {
+      max: 10,
+      min: 0,
+      acquire: 10000,
+      idle: 10000
+    }*/
   }
-}
-*/
-
-let base_db = {
-  dialect: 'mysql',
-  host: 'localhost',
-  // dialectModulePath: 'sqlite3',
-  //storage: datadir + '/offchain/db.sqlite',
-  define: {timestamps: true}, // we don't mind timestamps in offchain db
-  operatorsAliases: false,
-
-  logging: false
-}
-
-/* Make sure they exist: 
+  /* Make sure mysql dbs exist: 
 create database data;
-create database data8001;
-create database data8002;
-create database data8003;
-create database data8004;
-create database data8005;
-create database data8006;
-create database data8007;
-create database data8008;
+str = ''
+for(i=8001;i<8200;i++){
+str+='create database data'+i+';'
+}
 */
+  privSequelize = new Sequelize(datadir, 'root', '', base_db)
+} else {
+  var base_db = {
+    dialect: 'sqlite',
+    // dialectModulePath: 'sqlite3',
+    storage: datadir + '/offchain/db.sqlite',
+    define: {timestamps: true}, // we don't mind timestamps in offchain db
+    operatorsAliases: false,
 
-privSequelize = new Sequelize(datadir, 'root', '', base_db)
-l('Reading offchain db ')
+    logging: false,
+
+    retry: {
+      max: 10
+    },
+    pool: {
+      max: 10,
+      min: 0,
+      acquire: 10000,
+      idle: 10000
+    }
+  }
+  privSequelize = new Sequelize('root', 'root', '', base_db)
+}
+
+// ensure db exists
+//privSequelize.query('CREATE DATABASE ' + datadir).catch(l)
+
+l('Reading offchain db :' + base_db.dialect)
 // Encapsulates relationship with counterparty: offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
@@ -244,6 +255,9 @@ Delta.prototype.startDispute = async function(cheat = false) {
 }
 
 Block = privSequelize.define('block', {
+  hash: Sequelize.BLOB,
+  prev_hash: Sequelize.BLOB,
+
   // sigs that authorize block
   precommits: Sequelize.BLOB,
   // header with merkle roots in it
@@ -251,9 +265,7 @@ Block = privSequelize.define('block', {
   // array of tx in block
   ordered_tx_body: Sequelize.BLOB,
 
-  hash: Sequelize.BLOB,
-  prev_hash: Sequelize.BLOB,
+  // happened events stored in JSON
   meta: Sequelize.TEXT,
-
   total_tx: Sequelize.INTEGER
 })

@@ -35,61 +35,18 @@ class Me {
 
     this.address = base58.encode(r([bin(me.box.publicKey), me.pubkey]))
 
-    console.log(this.address)
+    if (argv.monkey) {
+      l('Get loaded balance from testnet before simulation')
+      me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
+    }
 
-    this.inq = false
+    this.last_react = new Date()
 
     this.record = await this.byKey()
 
     PK.username = username
     PK.seed = seed.toString('hex')
     fs.writeFileSync(datadir + '/offchain/pk.json', JSON.stringify(PK))
-  }
-
-  // all callbacks are processed one by one for race condition safety (for now)
-  async processQueue() {
-    // first in first out - call rpc with ws and msg
-    /*
-    while (me.queue.length > 0) {
-      try {
-        //l('Start job', shifted)
-        //let started = new Date()
-        await me.queue.shift()()
-        //l(`Jobs ${me.queue.length}.`, returned, new Date() - started)
-      } catch (e) {
-        l(e)
-      }
-    }
-    delete me.queue
-    
-    */
-    //loff(`Setting timeout for queue ${me.queue.length}`)
-    //setTimeout(() => {
-    //  me.processQueue()
-    //}, 50)
-  }
-
-  async addQueue(job) {
-    //job()
-    // if high load, execute now with semaphores
-    /*
-    var j = await lock('job')
-    await job()
-    j()
-    */
-
-    //q('main', job)
-    job()
-
-    /*
-
-    if (me.queue) {
-      me.queue.push(job)
-    } else {
-      me.queue = [job]
-      me.processQueue()
-    }
-    */
   }
 
   async byKey(pk) {
@@ -238,14 +195,7 @@ class Me {
       this.my_hub = K.hubs.find((m) => m.id == this.record.id)
     }
 
-    await cache()
-
-    //setInterval(() => {
-    me.processQueue()
-    //}, 100)
-
     /*
-    this.intervals.push(setInterval(cache, 10000))
 
     this.intervals.push(
       setInterval(async () => {
@@ -292,9 +242,7 @@ class Me {
       })
       me.external_wss.on('connection', function(ws) {
         ws.on('message', async (msg) => {
-          me.addQueue(async () => {
-            return RPC.external_rpc(ws, msg)
-          })
+          RPC.external_rpc(ws, msg)
         })
       })
 
@@ -312,6 +260,8 @@ class Me {
         }
       })
     }
+
+    cache()
 
     l('Set up sync')
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
@@ -369,12 +319,7 @@ class Me {
       me.users[m.pubkey] = new WebSocketClient()
 
       me.users[m.pubkey].onmessage = async (tx) => {
-        me.addQueue(async () => {
-          return RPC.external_rpc(me.users[m.pubkey], bin(tx))
-        })
-        /*var unlock = await mutex('external_rpc')
-        await RPC.external_rpc(me.users[m.pubkey], bin(tx))
-        unlock()*/
+        RPC.external_rpc(me.users[m.pubkey], bin(tx))
       }
 
       me.users[m.pubkey].onerror = function(e) {
