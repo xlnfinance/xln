@@ -1,5 +1,8 @@
 import Vue from "vue";
 
+import Trend from "vuetrend";
+Vue.use(Trend);
+
 import App from "./App";
 
 window.jQuery = require("../assets/assets/js/vendor/jquery-slim.min.js");

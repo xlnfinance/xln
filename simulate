@@ -6,14 +6,14 @@ if node fs --genesis=test | grep "Genesis done"; then
 
   # replace --monkey number in 3 places
 
-  for i in {8001..8030};do 
+  for i in {8001..8008};do 
     rsync -q -rva --exclude=offchain data/* data$i
-    cmd="node --experimental-repl-await fs.js -p$i --username=$i --pw=password --datadir=data$i --mysql"
+    cmd="node --experimental-repl-await fs.js -p$i --username=$i --pw=password --datadir=data$i "
     if (( i < 8004 )); then
       ttab -t $i ${cmd}
     else 
-      #ttab -t $i ${cmd} --monkey=8030
-      ${cmd} --monkey=8030 --silent &
+      #ttab -t $i ${cmd} --monkey=8008
+      ${cmd} --monkey=8008 --silent &
     fi
   done
 fi

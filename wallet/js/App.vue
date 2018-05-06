@@ -1,3 +1,4 @@
+</script>
 <script>
 import hljs from "highlight.js";
 import Identicon from "identicon.js";
@@ -342,6 +343,11 @@ export default {
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
             <a class="nav-link" @click="go('testnet')">Testnet</a>
           </li>
+
+          <li class="nav-item" v-bind:class="{ active: tab=='metrics' }">
+            <a class="nav-link" @click="go('metrics')">Metrics</a>
+          </li>
+
           <li class="nav-item dropdown">
             <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#">Explorers
         <span class="caret"></span></a>
@@ -382,11 +388,24 @@ export default {
       <div v-if="tab==''">
         <Whitepaper />
       </div>
+      <div v-else-if="tab=='metrics'">
+        <h2>Node Metrics for last 1 min</h2>
+
+        <p v-for="(obj, index) in metrics">
+          <b>Average {{index}}/s</b>: {{obj.last_avg}} (max {{obj.max}}, total {{obj.total}}).
+          <trend
+            :data="obj.avgs.slice(obj.avgs.length-60)"
+            :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
+            auto-draw
+            :min="0"
+            smooth>
+          </trend>
+        </p>
+
+
+      </div>
       <div v-else-if="tab=='help'">
         <h1>Network</h1>
-        <h2>This Node Metrics</h2>
-
-        <p v-for="(obj, index) in metrics"><b>{{index}}</b> last minute: {{obj.last_avg}} (max {{obj.max}}, total {{obj.total}}). Avgs: {{obj.avgs.join(', ')}}</p>
 
         <h2>Validators</h2>
         <ul>

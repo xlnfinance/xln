@@ -34,6 +34,8 @@ class Me {
       fees: getMetric()
     }
 
+    this.updateMetricsInterval = 1000
+
     this.intervals = []
 
     this.proposed_block = {}
@@ -298,7 +300,7 @@ class Me {
     l('Set up sync')
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
 
-    me.intervals.push(setInterval(me.updateMetrics, 60000))
+    me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
   }
 
   // takes channels with supported hubs (verified and custom ones)

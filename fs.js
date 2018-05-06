@@ -143,7 +143,7 @@ react = async (result = {}, force = false) => {
   }
 
   if (new Date() - me.last_react < 500) {
-    l('reacting too often is bad for performance')
+    //l('reacting too often is bad for performance')
     //return false
   }
   me.last_react = new Date()
