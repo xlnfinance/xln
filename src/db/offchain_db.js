@@ -11,17 +11,16 @@ if (argv.mysql) {
 
     logging: false,
     retry: {
-      max: 10
-    }
-    /*
+      max: 20
+    },
     pool: {
       max: 10,
       min: 0,
       acquire: 10000,
       idle: 10000
-    }*/
+    }
   }
-  /* Make sure mysql dbs exist: 
+  /* Make sure mysql dbs exist:  postgres://homakov:@localhost:5432/datadir
 create database data;
 str = ''
 for(i=8001;i<8200;i++){
@@ -203,14 +202,17 @@ Delta.prototype.getState = async function() {
         {type: 'fail', status: 'new'}
       ],
       is_inward: true
-    }
+    },
+    // explicit order because of postgres https://github.com/sequelize/sequelize/issues/9289
+    order: [['id', 'ASC']]
   })).map((t) => t.toLock())
 
   var outwards = (await this.getPayments({
     where: {
       [Op.or]: [{type: 'add', status: 'sent'}, {type: 'add', status: 'acked'}],
       is_inward: false
-    }
+    },
+    order: [['id', 'ASC']]
   })).map((t) => t.toLock())
 
   var state = [

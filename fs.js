@@ -76,7 +76,7 @@ cache = async (i) => {
             limit: 500,
             order: [['id', 'desc']],
             where: {
-              //  meta: {[Op.ne]: null}
+              meta: {[Op.ne]: null}
             }
           })).map((b) => {
             var [

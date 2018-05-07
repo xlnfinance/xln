@@ -23,7 +23,8 @@ module.exports = async () => {
           [Op.ne]: 'acked'
         },
         is_inward: true
-      }
+      },
+      order: [['id', 'ASC']]
     })
     l('No ack dispute with ', d.id, new Date() - d.ack_requested_at)
     continue

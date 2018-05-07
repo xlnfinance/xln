@@ -344,8 +344,7 @@ module.exports = async (
 
   /*
   ch.d.getState().then((st) => {
-    loff(`After ${rollback[0] > 0 ? 'merge' : 'update'}: `)
-    logstate(st)
+    loff(`After ${rollback[0] > 0 ? 'merge' : 'update'}: `, ascii_state(st))
   })
   */
 

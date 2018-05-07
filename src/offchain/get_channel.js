@@ -2,12 +2,12 @@
 // then derives a ton of info about current channel - who owns what, what's promised, what's insiured etc
 
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
-module.exports = async (partner = Members[0].pubkey, asset = 0) => {
+module.exports = async (partner, asset = 0) => {
   // accepts pubkey only
-  var compared = Buffer.compare(me.pubkey, partner)
+  let compared = Buffer.compare(me.pubkey, partner)
   if (compared == 0) return false
 
-  var ch = {
+  let ch = {
     // default insurance
     insurance: 0,
     ondelta: 0,
@@ -23,11 +23,11 @@ module.exports = async (partner = Members[0].pubkey, asset = 0) => {
 
   me.record = await me.byKey()
 
-  var my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
+  let my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
   ch.hub = my_hub(partner) || {handle: toHex(partner).substr(0, 10)}
 
   // ch stands for Channel, d for Delta record, yes
-  var created = await Delta.findOrCreate({
+  let created = await Delta.findOrCreate({
     where: {
       myId: me.pubkey,
       partnerId: partner,
@@ -54,7 +54,7 @@ module.exports = async (partner = Members[0].pubkey, asset = 0) => {
 
   //await ch.d.save()
 
-  var user = await me.byKey(partner)
+  let user = await me.byKey(partner)
   if (user) {
     ch.partner = user.id
     if (me.record) {
@@ -80,11 +80,18 @@ module.exports = async (partner = Members[0].pubkey, asset = 0) => {
   Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
   // We reduce payable by total amount of unresolved hashlocks in either direction
-  var state = await ch.d.getState()
-  var left_inwards = 0
+  let state = await ch.d.getState()
+  let left_inwards = 0
   state[2].map((a) => (left_inwards += a[0]))
-  var right_inwards = 0
+  let right_inwards = 0
   state[3].map((a) => (right_inwards += a[0]))
+
+  ch.ascii_state = ascii_state(state)
+  if (ch.d.signed_state) {
+    let st = r(ch.d.signed_state)
+    prettyState(st)
+    ch.ascii_signed_state = ascii_state(st)
+  }
 
   ch.payable =
     ch.insured -

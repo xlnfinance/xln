@@ -1,24 +1,25 @@
+// short helper to create a Payment on some delta and flush the channel right after it
 module.exports = async (opts) => {
-  var secret = crypto.randomBytes(32)
-  var hash = sha3(secret)
+  let secret = crypto.randomBytes(32)
+  let hash = sha3(secret)
 
-  var invoice = opts.invoice ? bin(opts.invoice) : crypto.randomBytes(32)
+  let invoice = opts.invoice ? bin(opts.invoice) : crypto.randomBytes(32)
 
-  var [box_pubkey, pubkey] = r(base58.decode(opts.destination.toString()))
-  var amount = parseInt(opts.amount)
+  let [box_pubkey, pubkey] = r(base58.decode(opts.destination.toString()))
+  let amount = parseInt(opts.amount)
 
-  var via = me.my_hub ? pubkey : fromHex(K.hubs[0].pubkey)
-  var sent_amount = beforeFees(amount, [K.hubs[0].fee])
+  let via = me.my_hub ? pubkey : fromHex(K.hubs[0].pubkey)
+  let sent_amount = beforeFees(amount, [K.hubs[0].fee])
 
-  var unlocker_nonce = crypto.randomBytes(24)
-  var unlocker_box = nacl.box(
+  let unlocker_nonce = crypto.randomBytes(24)
+  let unlocker_box = nacl.box(
     r([amount, secret, invoice]),
     unlocker_nonce,
     box_pubkey,
     me.box.secretKey
   )
-  var unlocker = r([bin(unlocker_box), unlocker_nonce, bin(me.box.publicKey)])
-  var ch = await me.getChannel(via)
+  let unlocker = r([bin(unlocker_box), unlocker_nonce, bin(me.box.publicKey)])
+  let ch = await me.getChannel(via)
 
   if (amount > ch.payable) {
     react({alert: `Not enough funds`})

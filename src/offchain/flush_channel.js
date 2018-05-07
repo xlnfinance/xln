@@ -58,7 +58,8 @@ module.exports = async (pubkey, opportunistic = false) => {
       let pendings = await ch.d.getPayments({
         where: {
           status: 'new'
-        }
+        },
+        order: [['id', 'ASC']]
       })
 
       for (let t of pendings) {

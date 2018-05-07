@@ -479,6 +479,9 @@ export default {
                 </div>
               </div>
             </p>
+            
+            <pre v-html="ch.ascii_state"></pre>
+            <pre class="pull-right" v-html="ch.ascii_signed_state"></pre>
           </template>
           <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
           <div class="col-sm-6">

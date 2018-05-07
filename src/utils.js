@@ -87,21 +87,16 @@ logtr = (transitions) => {
 }
 
 logstates = (a, b, c, d) => {
-  l('Our state')
-  logstate(a)
-  l('Our signed state')
-  logstate(b)
-  l('Their state')
-  logstate(c)
-  l('Their signed state')
-  logstate(d)
+  l('Our state', ascii_state(a))
+  l('Our signed state', ascii_state(b))
+  l('Their state', ascii_state(c))
+  l('Their signed state', ascii_state(d))
 }
-logstate = (state) => {
+ascii_state = (state) => {
   if (!state[1]) return false
-  var hash = toHex(sha3(r(state)))
+  let hash = toHex(sha3(r(state)))
 
-  l(
-    `
+  return `
 | ${trim(state[1][0])} | ${trim(state[1][1])} | Hash ${trim(hash)}
 ------
 | #${state[1][2]}  |  ${state[1][3]} | ${state[1][4]}
@@ -110,7 +105,6 @@ logstate = (state) => {
 ------
 | ${state[3].map((h) => h[0] + '/' + trim(h[1]) + '/' + h[2]).join(', ')}
 `
-  )
 }
 
 var _orig_console_log = console.log

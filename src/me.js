@@ -33,6 +33,7 @@ class Me {
       settle: getMetric(),
       fees: getMetric()
     }
+    cached_result.metrics = this.metrics
 
     this.updateMetricsInterval = 1000
 
@@ -55,17 +56,6 @@ class Me {
     this.box = nacl.box.keyPair.fromSecretKey(this.seed)
 
     this.address = base58.encode(r([bin(me.box.publicKey), me.pubkey]))
-
-    if (argv.monkey) {
-      l('Get loaded balance from testnet before simulation')
-      me.send(Members[0], 'testnet', concat(bin([1]), bin(me.address)))
-      randos.splice(randos.indexOf(me.address), 1) // *except our addr
-
-      if (randos.length > 0) {
-        l('Setting up randomly paying monkey...')
-        me.payRando()
-      }
-    }
 
     this.last_react = new Date()
 
@@ -99,22 +89,10 @@ class Me {
     }
 
     if (false) {
+      // rebalances spenders and receivers
       require('./offchain/rebalance')()
       // enforces hashlocks
       me.ensureAck()
-    }
-
-    if (this.my_hub) {
-      me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
-      )
-
-      // hubs have force react regularly
-      me.intervals.push(
-        setInterval(() => {
-          react({}, true)
-        }, 1000)
-      )
     }
 
     if (PK.pending_batch) {
@@ -255,8 +233,6 @@ class Me {
     */
 
     if (this.my_member) {
-      me.consensus()
-
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
       me.member_server = cert
@@ -286,6 +262,9 @@ class Me {
           this.send(m, 'auth', me.envelope(methodMap('auth')))
         }
       }
+
+      // only members need to run consensus
+      me.consensus()
     } else {
       // keep connection to all hubs
       Members.map((m) => {
@@ -297,10 +276,56 @@ class Me {
 
     cache()
 
-    l('Set up sync')
+    l('Setting up intervals')
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
 
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
+
+    if (me.my_hub) {
+      me.intervals.push(
+        setInterval(require('./offchain/rebalance'), K.blocktime * 2000)
+      )
+
+      // hubs have force react regularly
+      me.intervals.push(
+        setInterval(() => {
+          react({}, true)
+        }, 1000)
+      )
+    }
+
+    if (argv.monkey) {
+      // if we are hub: plan a test check, otherwise start paying randomly.
+      if (me.my_hub) {
+        setTimeout(() => {
+          // making sure in 30 sec that all test payments were successful by looking at the metrics
+          if (
+            me.metrics.settle.total == 100 &&
+            me.metrics.fail.total == 0 &&
+            me.metrics.volume.total > 1000
+          ) {
+            l('Success!')
+          } else {
+            l('Fail! ', me.metrics)
+          }
+        }, 30000)
+      } else {
+        l('Get loaded balance from testnet before simulation:' + me.address)
+        randos.splice(randos.indexOf(me.address), 1) // *except our addr
+
+        setTimeout(() => {
+          me.send(
+            fromHex(K.hubs[0].pubkey),
+            'testnet',
+            concat(bin([1]), bin(me.address))
+          )
+        }, 4000)
+
+        setTimeout(() => {
+          me.payRando()
+        }, 8000)
+      }
+    }
   }
 
   // takes channels with supported hubs (verified and custom ones)
@@ -325,16 +350,17 @@ class Me {
     return channels
   }
 
-  payRando(counter = 0) {
+  payRando(counter = 1) {
+    l('Rando payment ' + counter)
     me.payChannel({
       destination: randos[Math.floor(Math.random() * randos.length)],
       amount: 100 + Math.round(Math.random() * 300)
     })
 
-    if (counter < 100) {
+    if (counter < 20) {
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(Math.random() * 10000)) // in next 0..10s
+      }, Math.round(Math.random() * 1000)) // in next 0..1s
     }
   }
 
@@ -350,8 +376,6 @@ class Me {
       m.avgs.push(m.last_avg)
       m.current = 0 // zero the counter for next period
     }
-
-    cached_result.metrics = me.metrics
   }
 
   // a generic interface to send a websocket message to some user or member
