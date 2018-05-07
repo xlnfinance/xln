@@ -232,7 +232,7 @@ class Me {
     )
     */
 
-    if (this.my_member) {
+    if (me.my_member) {
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
       me.member_server = cert
@@ -264,6 +264,7 @@ class Me {
       }
 
       // only members need to run consensus
+      l('Starting consensus reactor engine')
       me.consensus()
     } else {
       // keep connection to all hubs
@@ -274,11 +275,9 @@ class Me {
       })
     }
 
-    cache()
-
     l('Setting up intervals')
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
-
+    me.intervals.push(setInterval(cache, K.blocktime * 1000))
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
 
     if (me.my_hub) {

@@ -2,7 +2,7 @@
 // then derives a ton of info about current channel - who owns what, what's promised, what's insiured etc
 
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
-module.exports = async (partner, asset = 0) => {
+module.exports = async (partner, asset = 1) => {
   // accepts pubkey only
   let compared = Buffer.compare(me.pubkey, partner)
   if (compared == 0) return false

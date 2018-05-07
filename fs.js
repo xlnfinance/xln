@@ -156,7 +156,7 @@ react = async (result = {}, force = false) => {
       var deltas = await Delta.findAll({where: {myId: me.record.id}})
       var promised = 0
       for (var d of deltas) {
-        var ch = await me.getChannel(d.userId)
+        var ch = await me.getChannel(d.userId, 1)
         if (ch.delta > 0) promised += ch.promised
       }
 
@@ -244,6 +244,8 @@ initDashboard = async (a) => {
   // if we use mysql, need to explicitly reset db
   await privSequelize.sync({force: !!argv.mysql})
 
+  l('Preparing Parcel')
+
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
   var Parcel = require('parcel-bundler')
@@ -287,7 +289,7 @@ initDashboard = async (a) => {
   }
 
   // this serves dashboard HTML page
-  var on_server = fs.existsSync(
+  let on_server = fs.existsSync(
     '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
   )
 
@@ -449,12 +451,14 @@ for (let i = 8001; i < 8200; i++){
   addr.push(me.address)
 }
 */
-randos = fs
-  .readFileSync('./test/randos.txt')
-  .toString()
-  .split('\n')
-  .slice(3, parseInt(argv.monkey) - 8000)
-l('Loaded randos: ' + randos.length)
+if (argv.monkey) {
+  randos = fs
+    .readFileSync('./test/randos.txt')
+    .toString()
+    .split('\n')
+    .slice(3, parseInt(argv.monkey) - 8000)
+  l('Loaded randos: ' + randos.length)
+}
 
 let ooops = (err) => {
   if (err.name == 'SequelizeTimeoutError') return

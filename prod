@@ -1,14 +1,13 @@
 forever stopall
 killall Failsafe 2>/dev/null
 
-rm -rf data 
+rm -rf data*
 npm i
 node fs --genesis=test
 
-forever start fs.js -p443 --silent
+forever start fs.js -p443 --silent --mysql
 
 for i in {8001..8003};do 
-  rm -rf data$i
   rsync -q -rva --exclude=offchain data/* data$i
-  forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i
+  forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i --mysql
 done

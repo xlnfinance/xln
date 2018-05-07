@@ -19,7 +19,7 @@ module.exports = async (opts) => {
     me.box.secretKey
   )
   let unlocker = r([bin(unlocker_box), unlocker_nonce, bin(me.box.publicKey)])
-  let ch = await me.getChannel(via)
+  let ch = await me.getChannel(via, opts.asset)
 
   if (amount > ch.payable) {
     react({alert: `Not enough funds`})

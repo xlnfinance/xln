@@ -39,7 +39,7 @@ module.exports = async (ws, msg) => {
       }
 
       /*if (me.my_hub) {
-        var ch = await me.getChannel(pubkey)
+        var ch = await me.getChannel(pubkey, 1)
         ch.d.last_online = new Date()
 
         // testnet: instead of cloud backups hub shares latest state
@@ -220,7 +220,7 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    var ch = await me.getChannel(pubkey)
+    var ch = await me.getChannel(pubkey, 1)
 
     ch.d.they_soft_limit = readInt(limits[1])
     ch.d.they_hard_limit = readInt(limits[2])

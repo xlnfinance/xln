@@ -176,9 +176,16 @@ module.exports = async (genesis) => {
 
   await Asset.create({
     ticker: 'FRD',
-    desc: 'Failsafe Dollar',
+    desc: 'Dollar',
     issuerId: 1,
     total_supply: 1000
+  })
+
+  await Asset.create({
+    ticker: 'FRB',
+    desc: 'Bond',
+    issuerId: 1,
+    total_supply: 100000000
   })
 
   var left =

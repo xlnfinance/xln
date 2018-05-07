@@ -5,29 +5,38 @@ if (!fs.existsSync(datadir + '/offchain')) fs.mkdirSync(datadir + '/offchain')
 if (argv.mysql) {
   var base_db = {
     dialect: 'mysql',
-    host: 'localhost',
+    host: '127.0.0.1',
     define: {timestamps: true}, // we don't mind timestamps in offchain db
     operatorsAliases: false,
 
     logging: false,
     retry: {
-      max: 20
-    },
-    pool: {
-      max: 10,
-      min: 0,
-      acquire: 10000,
-      idle: 10000
+      max: 5
     }
+    /*
+    pool: {
+      max: 5,
+      min: 0,
+      acquire: 5000,
+      idle: 5000
+    }*/
   }
-  /* Make sure mysql dbs exist:  postgres://homakov:@localhost:5432/datadir
+  /* Set new mysql pw:
+use mysql;
+update user set authentication_string=password(''), plugin='mysql_native_password' where user='root';
+ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '123123';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '123123';
+SELECT plugin FROM mysql.user WHERE User = 'root';
+
+
+Make sure mysql dbs exist:  postgres://homakov:@localhost:5432/datadir
 create database data;
 str = ''
 for(i=8001;i<8200;i++){
 str+='create database data'+i+';'
 }
 */
-  privSequelize = new Sequelize(datadir, 'root', '', base_db)
+  privSequelize = new Sequelize(datadir, 'root', '123123', base_db)
 } else {
   var base_db = {
     dialect: 'sqlite',
