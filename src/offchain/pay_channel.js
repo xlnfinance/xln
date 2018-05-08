@@ -32,6 +32,7 @@ module.exports = async (opts) => {
       type: 'add',
       status: 'new',
       is_inward: false,
+      asset: opts.asset,
 
       amount: sent_amount,
       hash: hash,
@@ -42,7 +43,7 @@ module.exports = async (opts) => {
       invoice: invoice
     })
 
-    await me.flushChannel(ch.d.partnerId)
+    await me.flushChannel(ch.d.partnerId, opts.asset)
 
     react()
   }

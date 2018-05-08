@@ -5,9 +5,10 @@ rm -rf data*
 npm i
 node fs --genesis=test
 
-forever start fs.js -p443 --silent --mysql
+db=mysql:root:123123
+forever start fs.js -p443 --silent --db=$db
 
 for i in {8001..8003};do 
   rsync -q -rva --exclude=offchain data/* data$i
-  forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i --mysql
+  forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i  --db=$db
 done

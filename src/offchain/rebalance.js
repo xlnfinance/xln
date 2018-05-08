@@ -31,11 +31,11 @@ module.exports = async function() {
     // finding who's gone beyond soft limit
     // soft limit can be raised over K.risk to pay less fees
     if (ch.promised >= Math.max(K.risk, ch.d.they_soft_limit)) {
-      l('Addint output for our promise ', ch.d.partnerId)
+      //l('Adding output for our promise ', ch.d.partnerId)
       outputs.push([ch.promised, ch.d.myId, ch.d.partnerId, 0])
     } else if (ch.insured >= K.risk) {
       if (ch.d.input_sig) {
-        l('we already have input to use')
+        //l('We already have input to use')
         // method, user, hub, nonce, amount
 
         withdrawals.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])

@@ -2,9 +2,10 @@
 
 if (!fs.existsSync(datadir + '/offchain')) fs.mkdirSync(datadir + '/offchain')
 
-if (argv.mysql) {
+if (argv.db) {
+  let db_info = argv.db.split(':')
   var base_db = {
-    dialect: 'mysql',
+    dialect: db_info[0],
     host: '127.0.0.1',
     define: {timestamps: true}, // we don't mind timestamps in offchain db
     operatorsAliases: false,
@@ -36,7 +37,7 @@ for(i=8001;i<8200;i++){
 str+='create database data'+i+';'
 }
 */
-  privSequelize = new Sequelize(datadir, 'root', '123123', base_db)
+  privSequelize = new Sequelize(datadir, db_info[1], db_info[2], base_db)
 } else {
   var base_db = {
     dialect: 'sqlite',
@@ -192,7 +193,7 @@ Delta.prototype.requestFlush = async function() {
   if (!this.flush_requested_at) {
     //this.flush_requested_at = new Date()
     //await this.save()
-    await me.flushChannel(this.partnerId)
+    await me.flushChannel(this.partnerId, 1)
   }
 }
 

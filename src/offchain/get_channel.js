@@ -61,7 +61,8 @@ module.exports = async (partner, asset = 1) => {
       ch.ins = await Insurance.find({
         where: {
           leftId: ch.left ? me.record.id : user.id,
-          rightId: ch.left ? user.id : me.record.id
+          rightId: ch.left ? user.id : me.record.id,
+          asset: asset
         }
       })
     }
@@ -86,11 +87,11 @@ module.exports = async (partner, asset = 1) => {
   let right_inwards = 0
   state[3].map((a) => (right_inwards += a[0]))
 
-  ch.ascii_state = ascii_state(state)
+  ch.ascii_states = ascii_state(state)
   if (ch.d.signed_state) {
     let st = r(ch.d.signed_state)
     prettyState(st)
-    ch.ascii_signed_state = ascii_state(st)
+    ch.ascii_states += '\n' + ascii_state(st)
   }
 
   ch.payable =

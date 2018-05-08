@@ -14,11 +14,11 @@ opportunistic flush: flushes only if there are any transitions (used after recei
 during merge: no transitions can be applied, otherwise deadlock could happen
 */
 
-module.exports = async (pubkey, opportunistic = false) => {
+module.exports = async (pubkey, asset = 1, opportunistic = false) => {
   return q(pubkey, async () => {
     //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
 
-    let ch = await me.getChannel(pubkey)
+    let ch = await me.getChannel(pubkey, asset)
     let flushable = []
     let all = []
 
@@ -112,7 +112,7 @@ module.exports = async (pubkey, opportunistic = false) => {
                   inward.type = 'fail'
                   flushable.push(inward.deltum.partnerId)
                   return inward.save()
-                  //let notify = await me.getChannel(inward.deltum.partnerId)
+                  //let notify = await me.getChannel(inward.deltum.partnerId, asset)
                   //await notify.d.requestFlush()
                 }
               })
@@ -152,6 +152,7 @@ module.exports = async (pubkey, opportunistic = false) => {
     // transitions: method, args, sig, new state
     let envelope = me.envelope(
       methodMap('update'),
+      asset,
       ackSig,
       transitions,
       debugState, // our current state
@@ -173,6 +174,6 @@ module.exports = async (pubkey, opportunistic = false) => {
 
     await Promise.all(all)
     loff(`=== End flush ${transitions.length} tr to ${trim(pubkey)}`)
-    return Promise.all(flushable.map((fl) => me.flushChannel(fl)))
+    return Promise.all(flushable.map((fl) => me.flushChannel(fl, asset)))
   })
 }

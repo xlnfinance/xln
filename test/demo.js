@@ -14,9 +14,9 @@ users = {}
 nacl = require('../lib/nacl')
 
 // define merchant node path
-FS_PATH = fs.existsSync('/root/8002/private/pk.json')
-  ? '/root/8002'
-  : '/Users/homakov/work/8002'
+FS_PATH = fs.existsSync('/root/fs/data8002/offchain/pk.json')
+  ? '/root/fs/data8002/offchain'
+  : '/Users/homakov/work/fs/data8002/offchain'
 
 FS_RPC = 'http://127.0.0.1:8002/rpc'
 
@@ -25,19 +25,21 @@ l(FS_PATH)
 // pointing browser SDK to user node
 LOCAL_FS_RPC = 'http://127.0.0.1:8001'
 
-if (fs.existsSync(FS_PATH + '/private/pk.json')) {
-  auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/private/pk.json'))
-    .auth_code
+if (fs.existsSync(FS_PATH + '/pk.json')) {
+  auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/pk.json')).auth_code
   l('Auth code to our node: ' + auth_code)
 } else {
   throw 'No auth'
 }
 
 var processInvoices = async () => {
-  invoices = await FS('invoices')
-  l(invoices)
-  for (var i of invoices) {
-    users[i.invoice] += i.amount
+  r = await FS('invoices')
+  for (var i of r.data.acked) {
+    let uid = Buffer.from(i.invoice, 'hex').toString()
+    l(uid)
+    if (users.hasOwnProperty(uid)) {
+      users[uid] += i.amount
+    }
   }
 
   setTimeout(processInvoices, 1000)
@@ -50,6 +52,12 @@ FS = (method, params = {}) => {
     params: params
   })
 }
+setTimeout(async () => {
+  r = await FS('getinfo')
+  address = r.data.address
+  l('Our address: ' + address)
+  processInvoices()
+}, 1000)
 
 commy = (b, dot = true) => {
   let prefix = b < 0 ? '-' : ''
@@ -72,9 +80,6 @@ require('http')
   .createServer(async (req, res) => {
     cookies = new Cookies(req, res)
 
-    r = await FS('getinfo')
-    address = r.data.address
-
     res.status = 200
 
     var id = cookies.get('id')
@@ -84,16 +89,9 @@ require('http')
         id = rand()
         cookies.set('id', id)
       }
-      if (!users[id]) users[id] = Math.round(Math.random() * 1000000)
-
-      require('serve-static')('../wallet')(
-        req,
-        res,
-        require('finalhandler')(req, res)
-      )
+      if (!users[id]) users[id] = 0 // Math.round(Math.random() * 1000000)
 
       res.end(`
-
 
 <!DOCTYPE html>
 <html lang="en">
@@ -133,15 +131,6 @@ var fallback = setTimeout(()=>{
 }, 3000)
 
 
-window.addEventListener('message', function(e){
-  if(e.origin == fs_origin){
-    l(e.data)
-    location.reload()
-  }
-})
-
-
-
 </script>
 <script>
 
@@ -166,7 +155,17 @@ window.onload = function(){
       return ('0' + (byte & 0xFF).toString(16)).slice(-2);
     }).join('')
 
-    window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
+    fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
+
+    window.addEventListener('message', function(e){
+      if(e.origin == fs_origin){
+        l(e.data)
+        fs_w.close()
+
+        location.reload()
+      }
+    })
+
   
   }
 
@@ -208,7 +207,8 @@ window.onload = function(){
             outward: {
               destination: p.destination,
               amount: amount,
-              invoice: 'from demo'
+              invoice: 'from demo',
+              asset: 1
             }
           })
           l(r.data)
@@ -216,6 +216,11 @@ window.onload = function(){
         }
       })
     } else {
+      require('serve-static')('../wallet')(
+        req,
+        res,
+        require('finalhandler')(req, res)
+      )
     }
   })
   .listen(3010)

@@ -222,7 +222,7 @@ class Me {
         for (var fl of flushable) {
           //l('Flushing channel for ', fl.partnerId)
           //ch.d.flush_requested_at = null
-          await me.flushChannel(fl.partnerId)
+          await me.flushChannel(fl.partnerId, 1)
         }
 
         if (flushable.length > 0) {
@@ -303,9 +303,9 @@ class Me {
             me.metrics.fail.total == 0 &&
             me.metrics.volume.total > 1000
           ) {
-            l('Success!')
+            l('Test Success!')
           } else {
-            l('Fail! ', me.metrics)
+            l('Test Fail!', me.metrics)
           }
         }, 30000)
       } else {
@@ -316,7 +316,7 @@ class Me {
           me.send(
             fromHex(K.hubs[0].pubkey),
             'testnet',
-            concat(bin([1]), bin(me.address))
+            concat(bin([1, 1]), bin(me.address)) //action 1 asset 1
           )
         }, 4000)
 
@@ -329,12 +329,16 @@ class Me {
 
   // takes channels with supported hubs (verified and custom ones)
   async channels() {
-    var channels = []
+    let channels = []
+
+    let assets = await Asset.findAll()
 
     for (var m of K.hubs) {
       if (!me.record || me.record.id != m.id) {
-        var ch = await me.getChannel(fromHex(m.pubkey))
-        channels.push(ch)
+        for (let asset of assets) {
+          var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
+          channels.push(ch)
+        }
       }
     }
 
@@ -350,16 +354,16 @@ class Me {
   }
 
   payRando(counter = 1) {
-    l('Rando payment ' + counter)
     me.payChannel({
       destination: randos[Math.floor(Math.random() * randos.length)],
-      amount: 100 + Math.round(Math.random() * 300)
+      amount: 100 + Math.round(Math.random() * 300),
+      asset: 1
     })
 
     if (counter < 20) {
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(Math.random() * 1000)) // in next 0..1s
+      }, Math.round(Math.random() * 500)) // in next 0..1s
     }
   }
 

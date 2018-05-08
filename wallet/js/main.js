@@ -115,10 +115,20 @@ window.render = r => {
   if (r.alert) notyf.alert(r.alert);
   if (r.confirm) notyf.confirm(r.confirm);
 
-  if (r.already_opened) {
+  if (r.already_opened && false) {
     document.body.innerHTML =
       "<b>The wallet is already opened in another tab. Only one instance of wallet is allowed.</b>";
     return false;
+  }
+
+  if (
+    r.payments[0] &&
+    r.payments[0].status == "acked" &&
+    r.payments[0].type == "settle"
+  ) {
+    if (opener) {
+      opener.postMessage({ status: "paid" }, "*");
+    }
   }
 
   Object.assign(window.app, r);

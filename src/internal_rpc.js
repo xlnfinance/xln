@@ -23,7 +23,7 @@ module.exports = async (ws, msg) => {
       }
     }
 
-    var p = json.params
+    let p = json.params
 
     switch (json.method) {
       case 'load':
@@ -155,7 +155,15 @@ module.exports = async (ws, msg) => {
 
         break
       case 'invoices':
-        ;[many, result] = await Payment.update(
+        result.acked = await Payment.findAll({
+          where: {
+            type: 'settle',
+            status: 'acked',
+            is_inward: true
+          }
+        })
+
+        await Payment.update(
           {
             status: 'processed'
           },
@@ -167,7 +175,6 @@ module.exports = async (ws, msg) => {
             }
           }
         )
-        l('Invoices ', many)
 
         break
       case 'testnet':
@@ -181,7 +188,7 @@ module.exports = async (ws, msg) => {
           me.send(
             Members.find((m) => m.id == p.partner),
             'testnet',
-            concat(bin([p.action]), bin(me.address))
+            concat(bin([p.action, p.asset]), bin(me.address))
           )
         }
 

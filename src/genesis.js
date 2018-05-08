@@ -194,13 +194,23 @@ module.exports = async (genesis) => {
       fromHex(K.members[0].pubkey)
     ) == -1
 
-  // preload 2@3 channel
+  // preload 2@3 channel FRD and FRB
   await Insurance.create({
     leftId: left ? 2 : 1,
     rightId: left ? 1 : 2,
     insurance: 1000000,
     ondelta: left ? 1000000 : 0,
-    nonce: 0
+    nonce: 0,
+    asset: 1
+  })
+
+  await Insurance.create({
+    leftId: left ? 2 : 1,
+    rightId: left ? 1 : 2,
+    insurance: 2000000,
+    ondelta: left ? 2000000 : 0,
+    nonce: 0,
+    asset: 2
   })
 
   /*

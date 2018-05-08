@@ -242,7 +242,7 @@ initDashboard = async (a) => {
   }
 
   // if we use mysql, need to explicitly reset db
-  await privSequelize.sync({force: !!argv.mysql})
+  await privSequelize.sync({force: !!argv.db})
 
   l('Preparing Parcel')
 

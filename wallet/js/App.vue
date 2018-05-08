@@ -31,9 +31,9 @@ export default {
     return {
       auth_code: localStorage.auth_code,
 
-      asset: 0,
+      asset: 1,
       peer: 0,
-
+      assets: [],
       channels: [],
 
       pubkey: false,
@@ -88,7 +88,11 @@ export default {
         invoice: hashargs["invoice"]
       },
 
-      hardfork: ""
+      hardfork: "",
+
+      // useful for visual debugging
+      dev_mode: false,
+      ascii_states: ""
     };
   },
   computed: {
@@ -364,12 +368,12 @@ export default {
           </li>
         </ul>
         <span v-if="pending_batch">Pending onchain batch</span> &nbsp;
-        <span>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
+        <small>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</small> &nbsp;
         <div v-if="pubkey">
 
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6">
             <option disabled>Select current asset</option>
-            <option v-for="(a,index) in assets" :value="index">{{a.desc}} ({{a.ticker}})</option>
+            <option v-for="(a,index) in assets" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
           </select></span>
 
 
@@ -380,11 +384,23 @@ export default {
           <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
           </button>
           &nbsp;
-          <span v-html="icon(pubkey,32)"></span>
+          <span @click="dev_mode=!dev_mode" v-html="icon(pubkey,32)"></span>
         </div>
       </div>
     </nav>
     <div class="container">
+      <div class="tpstrend" @click="go('metrics')">
+      <trend
+        v-if="my_hub"
+        :data="metrics.settle.avgs.slice(metrics.settle.avgs.length-60)"
+        :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
+        auto-draw
+        :min=0
+        :width=120
+        :height=30>
+      </trend>
+      </div>
+
       <div v-if="tab==''">
         <Whitepaper />
       </div>
@@ -454,7 +470,7 @@ export default {
             <hr />
           </div>
           <template v-if="channels.length > 0" v-for="(ch, index) in channels">
-            <h2 style="display:inline-block">Balance @{{ch.hub.handle}} ({{ch.d.status}}): {{commy(ch.payable)}}</h2>
+            <h2 style="display:inline-block">{{assets[ch.d.asset-1].ticker}} Balance @{{ch.hub.handle}} <span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
             <small v-if="ch.payable > 0">
               = {{commy(ch.insurance)}} insurance 
               {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
@@ -480,8 +496,7 @@ export default {
               </div>
             </p>
             
-            <pre v-html="ch.ascii_state"></pre>
-            <pre class="pull-right" v-html="ch.ascii_signed_state"></pre>
+            <pre v-if="dev_mode" v-html="ch.ascii_states"></pre>
           </template>
           <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
           <div class="col-sm-6">
@@ -501,10 +516,10 @@ export default {
               </div>
             </p>
             <p>
-              <button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, amount: uncommy(outward.amount), invoice: outward.invoice}})">Pay Now → </button>
+              <button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, asset: asset, amount: uncommy(outward.amount), invoice: outward.invoice}})">Pay Now → </button>
             </p>
             <p>
-              <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 1 })">Testnet Faucet</button>
+              <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1 })">Testnet Faucet</button>
             </p>
           </div>
           <table v-if="payments.length > 0" class="table">

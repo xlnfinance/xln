@@ -2,6 +2,12 @@
   max-width: 600px;
 }
 
+.tpstrend {
+  position: fixed;
+  top: 95%;
+  left: 10px;
+}
+
 .list-item {
   display: inline-block;
   margin-right: 10px;

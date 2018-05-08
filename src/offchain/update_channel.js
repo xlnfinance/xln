@@ -1,12 +1,13 @@
 // Receives an ack and set of transitions to execute on top of it by the partner
 module.exports = async (
   pubkey,
+  asset,
   ackSig,
   transitions,
   debugState,
   signedState
 ) => {
-  let ch = await me.getChannel(pubkey)
+  let ch = await me.getChannel(pubkey, asset)
   let all = []
 
   if (ch.d.status == 'disputed') {
@@ -210,7 +211,7 @@ module.exports = async (
         //loff(`Forward ${amount} to ${trim(destination)}`)
         let outward_amount = afterFees(amount, me.my_hub.fee)
 
-        let dest_ch = await me.getChannel(destination)
+        let dest_ch = await me.getChannel(destination, asset)
 
         // is online? Is payable?
 

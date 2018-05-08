@@ -142,9 +142,10 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'testnet') {
     if (msg[0] == 1) {
       await me.payChannel({
-        destination: msg.slice(1),
+        destination: msg.slice(2),
         amount: 20000, //1000 + Math.round(Math.random() * 8000),
-        invoice: Buffer.alloc(1)
+        invoice: Buffer.alloc(1),
+        asset: msg[1]
       })
     }
 
@@ -304,7 +305,8 @@ module.exports = async (ws, msg) => {
     // ackSig defines the sig of last known state between two parties.
     // then each transitions contains an action and an ackSig after action is committed
     // debugState/signedState are purely for debug phase
-    let [method, ackSig, transitions, debugState, signedState] = r(body)
+    let [method, asset, ackSig, transitions, debugState, signedState] = r(body)
+    asset = readInt(asset)
 
     if (methodMap(readInt(method)) != 'update') {
       loff('Invalid update input')
@@ -316,6 +318,7 @@ module.exports = async (ws, msg) => {
 
       var flushable = await me.updateChannel(
         pubkey,
+        asset,
         ackSig,
         transitions,
         debugState,
@@ -325,12 +328,12 @@ module.exports = async (ws, msg) => {
       return flushable
     })
 
-    var flushed = [me.flushChannel(pubkey, transitions.length == 0)]
+    var flushed = [me.flushChannel(pubkey, asset, transitions.length == 0)]
 
     if (flushable) {
       for (var fl of flushable) {
         // can be opportunistic also
-        flushed.push(me.flushChannel(fl, true))
+        flushed.push(me.flushChannel(fl, asset, true))
         //await ch.d.requestFlush()
       }
     }

@@ -5,6 +5,7 @@ module.exports = async (tx, meta) => {
   var [id, sig, body] = r(tx)
 
   var signer = await User.findById(readInt(id))
+  var asset = 1 // default asset id
 
   if (!signer) {
     return {error: "This user doesn't exist"}
@@ -100,7 +101,8 @@ module.exports = async (tx, meta) => {
         var ins = await Insurance.find({
           where: {
             leftId: compared == -1 ? signer.id : partner.id,
-            rightId: compared == -1 ? partner.id : signer.id
+            rightId: compared == -1 ? partner.id : signer.id,
+            asset: asset
           },
           include: {all: true}
         })
@@ -194,7 +196,8 @@ module.exports = async (tx, meta) => {
         var ins = (await Insurance.findOrBuild({
           where: {
             leftId: compared == -1 ? signer.id : partner.id,
-            rightId: compared == -1 ? partner.id : signer.id
+            rightId: compared == -1 ? partner.id : signer.id,
+            asset: asset
           },
           include: {all: true}
         }))[0]
@@ -363,7 +366,8 @@ module.exports = async (tx, meta) => {
           var ins = (await Insurance.findOrBuild({
             where: {
               leftId: compared == -1 ? giveTo.id : withPartner.id,
-              rightId: compared == -1 ? withPartner.id : giveTo.id
+              rightId: compared == -1 ? withPartner.id : giveTo.id,
+              asset: asset
             },
             include: {all: true}
           }))[0]

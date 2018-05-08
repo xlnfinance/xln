@@ -26,8 +26,8 @@ module.exports = async () => {
       },
       order: [['id', 'ASC']]
     })
+
     l('No ack dispute with ', d.id, new Date() - d.ack_requested_at)
-    continue
 
     var to_reveal = []
     unacked_settles.map(async (s) => {
