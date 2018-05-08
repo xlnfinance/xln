@@ -49,6 +49,11 @@ RPC = {
   external_rpc: require('./external_rpc')
 }
 
+// it's just handier when Buffer is stringified into hex vs Type: Buffer..
+Buffer.prototype.toJSON = function() {
+  return this.toString('hex')
+}
+
 prettyState = (state) => {
   if (!state[1]) return false
   state[1][2] = readInt(state[1][2])

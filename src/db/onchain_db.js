@@ -12,12 +12,12 @@ sequelize = new Sequelize('', '', 'password', base_db)
 l('Reading db ', base_db.storage)
 
 User = sequelize.define('user', {
-  username: Sequelize.STRING,
+  username: Sequelize.STRING, // to be used in DNS later, currently barely used
 
   pubkey: Sequelize.CHAR(32).BINARY,
   nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
-  // onchain balance
+  // onchain FRD balance
   balance: {type: Sequelize.BIGINT, defaultValue: 0}
 })
 
@@ -29,6 +29,14 @@ User.idOrKey = async function(id) {
   } else {
     return await User.findById(readInt(id))
   }
+}
+
+User.prototype.getBalance = async function(asset) {
+  return this.getBalances({where: {asset: asset}})
+}
+
+User.prototype.setBalance = async function(asset, value) {
+  return this.setBalances({where: {asset: asset}}, {balance: value})
 }
 
 User.prototype.payDebts = async function(parsed_tx) {
@@ -243,7 +251,8 @@ Asset = sequelize.define('asset', {
 Balance = sequelize.define('balance', {
   balance: Sequelize.INTEGER
 })
-
+User.hasMany(Balance)
+Asset.hasMany(Balance)
 Balance.belongsTo(User)
 Balance.belongsTo(Asset)
 

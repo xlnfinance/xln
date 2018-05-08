@@ -328,12 +328,24 @@ module.exports = async (ws, msg) => {
       return flushable
     })
 
+    /*
+    We MUST ack if there were any transitions, otherwise if it was ack w/o transitions 
+    to ourselves then do an opportunistic flush (flush if any). Forced ack here would lead to recursive ack pingpong!
+    Flushable are other channels that were impacted by this update (e.g. pass forward fail/settle)
+    Sometimes sender is already included in flushable, so don't flush twice
+
+    */
+
     var flushed = [me.flushChannel(pubkey, asset, transitions.length == 0)]
 
     if (flushable) {
       for (var fl of flushable) {
         // can be opportunistic also
-        flushed.push(me.flushChannel(fl, asset, true))
+        if (!fl.equals(pubkey)) {
+          flushed.push(me.flushChannel(fl, asset, true))
+        } else {
+          loff('Tried to flush twice')
+        }
         //await ch.d.requestFlush()
       }
     }

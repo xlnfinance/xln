@@ -32,7 +32,7 @@ export default {
       auth_code: localStorage.auth_code,
 
       asset: 1,
-      peer: 0,
+      peer: 1,
       assets: [],
       channels: [],
 
@@ -97,7 +97,12 @@ export default {
   },
   computed: {
     ch: () => {
-      return app.channels ? app.channels[app.peer] : false;
+      // find current channel for selected asset and hub
+      return app.channels
+        ? app.channels.find(
+            c => c.partner == app.peer && c.d.asset == app.asset
+          )
+        : false;
     }
   },
   methods: {
@@ -348,36 +353,30 @@ export default {
             <a class="nav-link" @click="go('testnet')">Testnet</a>
           </li>
 
-          <li class="nav-item" v-bind:class="{ active: tab=='metrics' }">
-            <a class="nav-link" @click="go('metrics')">Metrics</a>
-          </li>
 
           <li class="nav-item dropdown">
-            <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#">Explorers
+            <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">Explorers
         <span class="caret"></span></a>
             <ul class="dropdown-menu">
-              <li><a class="nav-link" @click="go('blockchain_explorer')">Blockchain</a></li>
-              <li><a class="nav-link" @click="go('account_explorer')">Accounts</a></li>
-              <li><a class="nav-link" @click="go('channel_explorer')">Channels</a></li>
+              <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">Blockchain</a></li>
+              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">Accounts</a></li>
+              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect channels between different users and hubs">Channels</a></li>
               <li><a class="nav-link" @click="go('hashlocks')">Hashlocks</a></li>
-              <li><a class="nav-link" @click="go('help')">Network</a></li>
-              <li><a class="nav-link" @click="go('gov')">Governance</a></li>
-              <li><a class="nav-link" @click="go('assets')">Assets</a></li>
-              <li><a class="nav-link" @click="go('hubs')">Hubs</a></li>
+              <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">Network</a></li>
+              <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">Governance</a></li>
+              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">Assets</a></li>
+              <li><a class="nav-link" @click="go('hubs')" title="Hubs that instantly process payments. Run your own!">Hubs</a></li>
+              <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">Metrics</a></li>
             </ul>
           </li>
         </ul>
-        <span v-if="pending_batch">Pending onchain batch</span> &nbsp;
+        <small v-if="pending_batch">Pending onchain batch</small> &nbsp;
         <small>Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</small> &nbsp;
         <div v-if="pubkey">
-
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6">
             <option disabled>Select current asset</option>
             <option v-for="(a,index) in assets" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
           </select></span>
-
-
-
 
           <button type="button" class="btn btn-info" @click="call('sync')">Sync</button>
           &nbsp;
@@ -389,26 +388,27 @@ export default {
       </div>
     </nav>
     <div class="container">
-      <div class="tpstrend" @click="go('metrics')">
-      <trend
-        v-if="my_hub"
-        :data="metrics.settle.avgs.slice(metrics.settle.avgs.length-60)"
-        :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
-        auto-draw
-        :min=0
-        :width=120
-        :height=30>
-      </trend>
+      <div title="Tps in last 5 minutes" class="tpstrend" @click="go('metrics')" v-if="my_hub">
+        <trend
+          :data="metrics.settle.avgs.slice(metrics.settle.avgs.length-300)"
+          :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
+          auto-draw
+          :min=0
+          :width=200
+          :height=50>
+        </trend>
       </div>
 
       <div v-if="tab==''">
         <Whitepaper />
       </div>
       <div v-else-if="tab=='metrics'">
-        <h2>Node Metrics for last 1 min</h2>
+        <h2>Node Metrics</h2>
 
         <p v-for="(obj, index) in metrics">
-          <b>Average {{index}}/s</b>: {{obj.last_avg}} (max {{obj.max}}, total {{obj.total}}).
+          <b v-if="['settle','fail'].indexOf(index) == -1">Average {{index}}/s: {{commy(obj.last_avg)}} (max {{commy(obj.max)}}, total {{commy(obj.total)}}).</b>
+          <b v-else>Average {{index}}/s: {{obj.last_avg}} (max {{obj.max}}, total {{obj.total}}).</b>
+
           <trend
             :data="obj.avgs.slice(obj.avgs.length-60)"
             :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
@@ -564,7 +564,7 @@ export default {
         <h3>Uninsured Limits</h3>
         <select v-model="peer" class="custom-select custom-select-lg mb-3">
           <option disabled>Select current hub</option>
-          <option v-for="(a,index) in channels" :value="index">{{a.hub.handle}}</option>
+          <option v-for="(a,index) in channels" v-if="a.d.asset == asset" :value="a.hub.id">{{a.hub.handle}}</option>
         </select>
         <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
         <p>
@@ -866,7 +866,7 @@ export default {
             <tr v-for="u in assets">
               <th>{{u.ticker}}</th>
               <th>{{u.desc}}</th>
-              <th>{{u.total_supply}}</th>
+              <th>{{commy(u.total_supply)}}</th>
             </tr>
           </tbody>
         </table>

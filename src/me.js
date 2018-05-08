@@ -277,6 +277,7 @@ class Me {
 
     l('Setting up intervals')
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
+    await cache()
     me.intervals.push(setInterval(cache, K.blocktime * 1000))
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
 
@@ -313,11 +314,7 @@ class Me {
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
         setTimeout(() => {
-          me.send(
-            fromHex(K.hubs[0].pubkey),
-            'testnet',
-            concat(bin([1, 1]), bin(me.address)) //action 1 asset 1
-          )
+          me.getCoins()
         }, 4000)
 
         setTimeout(() => {
@@ -325,6 +322,14 @@ class Me {
         }, 8000)
       }
     }
+  }
+
+  getCoins() {
+    me.send(
+      fromHex(K.hubs[0].pubkey),
+      'testnet',
+      concat(bin([1, 1]), bin(me.address)) //action 1 asset 1
+    )
   }
 
   // takes channels with supported hubs (verified and custom ones)
@@ -360,10 +365,12 @@ class Me {
       asset: 1
     })
 
-    if (counter < 20) {
+    if (counter % 50 == 0) me.getCoins()
+
+    if (counter < 20 || on_server) {
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(Math.random() * 500)) // in next 0..1s
+      }, Math.round(on_server ? 5000 : 500)) // in next 0..1s
     }
   }
 

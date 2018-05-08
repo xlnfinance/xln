@@ -8,7 +8,12 @@ node fs --genesis=test
 db=mysql:root:123123
 forever start fs.js -p443 --silent --db=$db
 
-for i in {8001..8003};do 
+for i in {8001..8008};do 
   rsync -q -rva --exclude=offchain data/* data$i
-  forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i  --db=$db
+  cmd="forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i --db=$db"
+  if (( i < 8004 )); then
+    ${cmd}
+  else 
+    ${cmd} --monkey=8008
+  fi
 done

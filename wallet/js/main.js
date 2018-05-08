@@ -121,14 +121,15 @@ window.render = r => {
     return false;
   }
 
+  // verify if opener-initiated last hashargs payment succeded
   if (
+    opener &&
+    r.payments &&
     r.payments[0] &&
     r.payments[0].status == "acked" &&
     r.payments[0].type == "settle"
   ) {
-    if (opener) {
-      opener.postMessage({ status: "paid" }, "*");
-    }
+    opener.postMessage({ status: "paid" }, "*");
   }
 
   Object.assign(window.app, r);

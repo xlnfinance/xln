@@ -1,3 +1,5 @@
+rm -rf data* .cache dist
+
 rsync . root@failsafe.network:~/fs -rv --exclude '.git' --exclude 'node_modules' --exclude 'dist'  --exclude '.cache'
 
 ssh root@failsafe.network <<'ENDSSH'

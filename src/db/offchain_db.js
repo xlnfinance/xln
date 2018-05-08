@@ -180,9 +180,7 @@ Delta.prototype.saveState = async function(state, ackSig) {
 
     this.sig = ackSig
     this.signed_state = canonical
-    //l('Saving State Snapshot:')
-    //logstate(state)
-    //TODO await this.save()
+    //state is not saved in db just yet, ensure to save later!
     return true
   } else {
     return false
