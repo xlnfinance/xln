@@ -15,27 +15,29 @@ module.exports = async (
     return
   }
 
-  let oldState = r(ch.d.signed_state)
-  prettyState(oldState)
-
-  prettyState(debugState)
-  prettyState(signedState)
-
   // first, clone what they can pay and decrement
   let receivable = ch.they_payable
 
   // an array of partners we need to ack or flush changes at the end of processing
-  let flushable = []
+  var flushable = []
 
   // indexOf doesn't work with Buffers
   let uniqAdd = (add) => {
-    if (!flushable.find((f) => f.equals(add))) {
+    if (flushable.find((f) => f.equals(add))) {
+      loff('Already scheduled for flush')
+    } else {
       flushable.push(add)
     }
   }
 
   // this is state we are on right now.
   let newState = await ch.d.getState()
+
+  let oldState = r(ch.d.signed_state)
+  prettyState(oldState)
+
+  prettyState(debugState)
+  prettyState(signedState)
 
   let rollback = [0, 0]
 
@@ -59,18 +61,16 @@ module.exports = async (
     ch.d.ack_requested_at = null
     //loff('Update all sent transitions as acked ')
   } else {
-    if (transitions.length == 0) {
+    if (ch.d.status == 'merge') {
+      // we are in merge and yet we just received ackSig that doesnt ack latest state
+      loff('Rollback cant rollback')
       logstates(newState, oldState, debugState, signedState)
-
-      loff('Empty invalid ack')
+      //gracefulExit('Rollback cant rollback')
       return
     }
-
-    if (ch.d.status == 'merge') {
+    if (transitions.length == 0) {
+      loff('Empty invalid ack, ' + ch.d.status)
       logstates(newState, oldState, debugState, signedState)
-
-      loff('Rollback cant rollback')
-      //gracefulExit('Rollback cant rollback')
       return
     }
 
@@ -106,7 +106,7 @@ module.exports = async (
     }
   }
 
-  //logtr(transitions)
+  //ascii_tr(transitions)
 
   let outwards = newState[ch.left ? 3 : 2]
   let inwards = newState[ch.left ? 2 : 3]
@@ -344,11 +344,9 @@ module.exports = async (
   await Promise.all(all)
 
   /*
-  ch.d.getState().then((st) => {
-    loff(`After ${rollback[0] > 0 ? 'merge' : 'update'}: `, ascii_state(st))
-  })
+  let st = await ch.d.getState()
+  loff(`After ${rollback[0] > 0 ? 'merge' : 'update'}: ${ascii_state(st)}`)
   */
-
   return flushable
 
   // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)

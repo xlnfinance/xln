@@ -74,23 +74,6 @@ prettyState = (state) => {
 
 trim = (ad) => toHex(ad).substr(0, 4)
 
-logtr = (transitions) => {
-  try {
-    for (var t of transitions) {
-      var m = methodMap(readInt(t[0]))
-
-      if (m == 'add') {
-        var info = `add ${readInt(t[1][0])} ${trim(t[1][1])} ${readInt(
-          t[1][2]
-        )} ${trim(t[1][3])}`
-      } else {
-        var info = `${m} ${trim(t[1][1])}`
-      }
-      l(`${info}`)
-    }
-  } catch (e) {}
-}
-
 logstates = (a, b, c, d) => {
   l('Our state', ascii_state(a))
   l('Our signed state', ascii_state(b))
@@ -110,6 +93,23 @@ ascii_state = (state) => {
 ------
 | ${state[3].map((h) => h[0] + '/' + trim(h[1]) + '/' + h[2]).join(', ')}
 `
+}
+
+ascii_tr = (transitions) => {
+  try {
+    for (var t of transitions) {
+      var m = methodMap(readInt(t[0]))
+
+      if (m == 'add') {
+        var info = `add ${readInt(t[1][0])} ${trim(t[1][1])} ${readInt(
+          t[1][2]
+        )} ${trim(t[1][3])}`
+      } else {
+        var info = `${m} ${trim(t[1][1])}`
+      }
+      l(`${info}`)
+    }
+  } catch (e) {}
 }
 
 var _orig_console_log = console.log
@@ -216,7 +216,7 @@ sleep = async function(ms) {
 // critical section for "key"
 q = async function(key, job) {
   return new Promise(async (resolve) => {
-    key = 'key_' + key.toString()
+    key = 'key_' + JSON.stringify(key)
 
     if (q.q[key]) {
       q.q[key].push([job, resolve])

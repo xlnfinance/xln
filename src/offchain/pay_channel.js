@@ -43,7 +43,7 @@ module.exports = async (opts) => {
       invoice: invoice
     })
 
-    await me.flushChannel(ch.d.partnerId, opts.asset)
+    await me.flushChannel(ch.d.partnerId, opts.asset, true)
 
     react()
   }

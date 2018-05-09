@@ -11,12 +11,14 @@ fail - delete inward hashlock for some reason.
 This module has 3 types of behavior:
 regular flush: flushes ack with or without transitions
 opportunistic flush: flushes only if there are any transitions (used after receiving empty ack response)
-during merge: no transitions can be applied, otherwise deadlock could happen
+during merge: no transitions can be applied, otherwise deadlock could happen.
+
+Always flush opportunistically, unless you are acking your direct partner who sent tx to you.
 */
 
-module.exports = async (pubkey, asset = 1, opportunistic = false) => {
-  return q(pubkey, async () => {
-    //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
+module.exports = async (pubkey, asset, opportunistic) => {
+  return q([pubkey, asset], async () => {
+    loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
     let flushable = []
@@ -33,7 +35,7 @@ module.exports = async (pubkey, asset = 1, opportunistic = false) => {
     }
 
     if (ch.d.status == 'sent') {
-      //loff(`=== End flush ${trim(pubkey)} CANT`)
+      loff(`=== End flush ${trim(pubkey)} CANT`)
 
       if (ch.d.ack_requested_at < new Date() - 4000) {
         //me.send(ch.d.partnerId, 'update', ch.d.pending)
@@ -76,7 +78,7 @@ module.exports = async (pubkey, asset = 1, opportunistic = false) => {
           let hl = inwards[index]
 
           if (!hl) {
-            loff('No such hashlock')
+            loff('error No such hashlock')
             continue
           }
 
@@ -121,7 +123,7 @@ module.exports = async (pubkey, asset = 1, opportunistic = false) => {
             continue
           }
           if (outwards.length >= K.max_hashlocks) {
-            loff('Cannot set so many hashlocks now, try later')
+            loff('error Cannot set so many hashlocks now, try later')
             //continue
           }
           // decrease payable and add the hashlock to state
@@ -147,6 +149,10 @@ module.exports = async (pubkey, asset = 1, opportunistic = false) => {
         loff(`=== End flush ${trim(pubkey)}: Nothing to flush`)
         return
       }
+    } else if (ch.d.status == 'merge') {
+      loff('In merge, no tr')
+      // important trick: only merge flush once to avoid bombing with equal acks
+      if (opportunistic) return
     }
 
     // transitions: method, args, sig, new state
@@ -155,8 +161,8 @@ module.exports = async (pubkey, asset = 1, opportunistic = false) => {
       asset,
       ackSig,
       transitions,
-      debugState, // our current state
-      r(ch.d.signed_state) // our last signed state
+      debugState, // state we started with
+      r(ch.d.signed_state) // signed state we started with
     )
 
     ch.d.nonce = newState[1][2]
@@ -169,11 +175,10 @@ module.exports = async (pubkey, asset = 1, opportunistic = false) => {
     }
 
     all.push(ch.d.save())
-
+    await Promise.all(all)
     me.send(ch.d.partnerId, 'update', envelope)
 
-    await Promise.all(all)
     loff(`=== End flush ${transitions.length} tr to ${trim(pubkey)}`)
-    return Promise.all(flushable.map((fl) => me.flushChannel(fl, asset)))
+    return Promise.all(flushable.map((fl) => me.flushChannel(fl, asset, true)))
   })
 }

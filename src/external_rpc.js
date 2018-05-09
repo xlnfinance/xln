@@ -143,7 +143,7 @@ module.exports = async (ws, msg) => {
     if (msg[0] == 1) {
       await me.payChannel({
         destination: msg.slice(2),
-        amount: 20000, //1000 + Math.round(Math.random() * 8000),
+        amount: 60000, //1000 + Math.round(Math.random() * 8000),
         invoice: Buffer.alloc(1),
         asset: msg[1]
       })
@@ -313,8 +313,8 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    let flushable = await q(pubkey, async () => {
-      //loff(`--- Start update ${trim(pubkey)}`)
+    let flushable = await q([pubkey, asset], async () => {
+      loff(`--- Start update ${trim(pubkey)} - ${transitions.length}`)
 
       var flushable = await me.updateChannel(
         pubkey,
@@ -324,7 +324,7 @@ module.exports = async (ws, msg) => {
         debugState,
         signedState
       )
-      //loff(`=== End update ${trim(pubkey)}`)
+      loff(`=== End update ${trim(pubkey)}`)
       return flushable
     })
 

@@ -76,7 +76,8 @@ class Me {
     }
 
     return await User.findOne({
-      where: {pubkey: bin(pk)}
+      where: {pubkey: bin(pk)},
+      include: {all: true}
     })
   }
 
@@ -222,7 +223,7 @@ class Me {
         for (var fl of flushable) {
           //l('Flushing channel for ', fl.partnerId)
           //ch.d.flush_requested_at = null
-          await me.flushChannel(fl.partnerId, 1)
+          await me.flushChannel(fl.partnerId, 1, true)
         }
 
         if (flushable.length > 0) {
@@ -277,7 +278,7 @@ class Me {
 
     l('Setting up intervals')
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
-    await cache()
+    cache()
     me.intervals.push(setInterval(cache, K.blocktime * 1000))
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
 
@@ -300,26 +301,30 @@ class Me {
         setTimeout(() => {
           // making sure in 30 sec that all test payments were successful by looking at the metrics
           if (
-            me.metrics.settle.total == 100 &&
+            me.metrics.settle.total == 200 &&
             me.metrics.fail.total == 0 &&
             me.metrics.volume.total > 1000
           ) {
-            l('Test Success!')
+            var alert = 'Test Success!'
           } else {
-            l('Test Fail!', me.metrics)
+            var alert = `Test Fail! ${me.metrics.settle.total} tx`
           }
-        }, 30000)
+          l(alert)
+          child_process.exec(
+            `osascript -e 'display notification "${alert}" with title "Test result"'`
+          )
+        }, 40000)
       } else {
         l('Get loaded balance from testnet before simulation:' + me.address)
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
         setTimeout(() => {
           me.getCoins()
-        }, 4000)
+        }, 5000)
 
         setTimeout(() => {
           me.payRando()
-        }, 8000)
+        }, 10000)
       }
     }
   }
@@ -361,16 +366,20 @@ class Me {
   payRando(counter = 1) {
     me.payChannel({
       destination: randos[Math.floor(Math.random() * randos.length)],
-      amount: 100 + Math.round(Math.random() * 300),
+      amount: 100 + Math.round(Math.random() * 30),
       asset: 1
     })
-
-    if (counter % 50 == 0) me.getCoins()
-
-    if (counter < 20 || on_server) {
+    // run on server infinitely and with longer delays
+    // but for local tests limit requests and run faster
+    if (on_server) {
+      if (counter % 50 == 0) me.getCoins()
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(on_server ? 5000 : 500)) // in next 0..1s
+      }, Math.round(2000 + Math.random() * 3000))
+    } else if (counter < 40) {
+      setTimeout(() => {
+        me.payRando(counter + 1)
+      }, Math.round(200))
     }
   }
 
@@ -442,8 +451,8 @@ class Me {
 }
 
 Me.prototype.consensus = require('./onchain/consensus')
-Me.prototype.processBlock = require('./onchain/block')
-Me.prototype.processTx = require('./onchain/tx')
+Me.prototype.processBlock = require('./onchain/process_block')
+Me.prototype.processTx = require('./onchain/process_tx')
 
 Me.prototype.payChannel = require('./offchain/pay_channel')
 Me.prototype.flushChannel = require('./offchain/flush_channel')

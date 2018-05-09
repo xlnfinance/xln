@@ -6,14 +6,15 @@ npm i
 node fs --genesis=test
 
 db=mysql:root:123123
-forever start fs.js -p443 --silent --db=$db
+maxport=8050
 
-for i in {8001..8008};do 
+forever start fs.js -p443 --silent --db=$db
+for i in $(seq 8001 $maxport); do 
   rsync -q -rva --exclude=offchain data/* data$i
   cmd="forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i --db=$db"
   if (( i < 8004 )); then
     ${cmd}
   else 
-    ${cmd} --monkey=8008
+    ${cmd} --monkey=$maxport
   fi
 done

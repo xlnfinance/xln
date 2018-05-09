@@ -191,7 +191,7 @@ Delta.prototype.requestFlush = async function() {
   if (!this.flush_requested_at) {
     //this.flush_requested_at = new Date()
     //await this.save()
-    await me.flushChannel(this.partnerId, 1)
+    await me.flushChannel(this.partnerId, 1, true)
   }
 }
 

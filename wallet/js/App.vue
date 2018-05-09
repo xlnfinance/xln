@@ -388,13 +388,13 @@ export default {
       </div>
     </nav>
     <div class="container">
-      <div title="Tps in last 5 minutes" class="tpstrend" @click="go('metrics')" v-if="my_hub">
+      <div title="Tps in last 5 minutes" class="tpstrend hidden-xs hidden-sm" @click="go('metrics')" v-if="my_hub">
         <trend
           :data="metrics.settle.avgs.slice(metrics.settle.avgs.length-300)"
           :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
           auto-draw
           :min=0
-          :width=200
+          :width=150
           :height=50>
         </trend>
       </div>
@@ -811,7 +811,7 @@ export default {
       </div>
       <div v-else-if="tab=='hashlocks'">
         <h1>Hashlocks</h1>
-        <p>Each payment with hashlock is atomic and protected from any party misbehaving. If your partner doesn't ack when you return the secret, you must go to blockchain and reveal the secret publicly. It will be stored for a while (about a week) and your hashlock will be considered unlocked. Make sure to end your disputes until the hashlock is deleted from blockchain. It is a global evidence that the payment was executed.</p>
+        <p>Each payment with hashlock is atomic and protected from any party misbehaving. If your partner doesn't ack when you return the secret, your wallet reveals the secret to blockchain publicly. It will be stored for a while (about a week) and your hashlock will be considered unlocked. Make sure to end your disputes until the hashlock is deleted from blockchain. It is a global evidence that the payment was executed.</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>

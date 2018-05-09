@@ -3,19 +3,18 @@ killall Failsafe 2>/dev/null
 
 if node fs --genesis=test | grep "Genesis done"; then
   db=mysql:root:123123
-  ttab -t 8433 "node fs.js -p8433 --monkey --db=$db"
+  maxport=8008
 
+  ttab -t 8433 "node fs.js -p8433 --monkey=$maxport --db=$db"
 
-  # replace --monkey number in 3 places
-
-  for i in {8001..8008};do 
+  for i in $(seq 8001 $maxport); do 
     rsync -q -rva --exclude=offchain data/* data$i
     cmd="node --experimental-repl-await fs.js -p$i --username=$i --pw=password --datadir=data$i "
     if (( i < 8004 )); then
       ttab -t $i ${cmd}
     else 
-      #ttab -t $i ${cmd} --monkey=8008
-      ${cmd} --monkey=8008 --silent &
+      #ttab -t $i ${cmd} --monkey=$maxport
+      ${cmd} --monkey=$maxport --silent &
     fi
   done
 fi
