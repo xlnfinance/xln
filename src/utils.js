@@ -112,25 +112,8 @@ ascii_tr = (transitions) => {
   } catch (e) {}
 }
 
-var _orig_console_log = console.log
-try {
-  // monkey-patch Parcel Logger to avoid cursor jump https://github.com/parcel-bundler/parcel/blob/0d984a563f72798cc0c08e9a27bc0e6e077a0b47/src/Logger.js
-  var ParcelLogger = require('parcel-bundler/src/Logger')
-  var _orig_parcel_logger_clear = ParcelLogger.clear
-  ParcelLogger.clear = () => {
-    _orig_parcel_logger_clear.call(ParcelLogger)
-    repl.displayPrompt(false) // false = reset cursor
-  }
-} catch (err) {
-  // ignore fails
-}
-
 l = (...args) => {
-  process.stdout.write('\u001B[2K\u001B[G')
-  _orig_console_log(...args)
-  if (global.repl) {
-    repl.displayPrompt(true)
-  }
+  console.log(...args)
 }
 
 // offchain logs

@@ -68,16 +68,48 @@ initDashboard = async (a) => {
   // if we use mysql, need to explicitly reset db
   await privSequelize.sync({force: !!argv.db})
 
-  l('Preparing Parcel')
-
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
-  var Parcel = require('parcel-bundler')
 
-  var bundler = new Parcel('wallet/index.html', {
-    logLevel: 2
-    // for more options https://parceljs.org/api.html
-  }).middleware()
+  var bundler
+  if (argv['wallet-url']) {
+    let walletUrl = argv['wallet-url']
+    let http = require('http')
+    let proxy = require('http-proxy').createProxyServer({
+      target: walletUrl,
+    })
+    bundler = (req, res) => proxy.web(req, res, {}, finalhandler(req, res))
+    let retries = 0
+    while (true) {
+      const statusCode = await new Promise((resolve) => {
+        http.get(walletUrl, (res) => {
+          const { statusCode } = res
+          resolve(statusCode)
+        })
+      })
+      if (statusCode !== 200) {
+        if (retries > 0) {
+          l(note(`Waiting for Parcel (HTTP ${statusCode})`))
+        }
+        if (retries > 5) {
+          throw new Error('No parcel on ' + walletUrl)
+        }
+        await sleep(1000 * Math.pow(1.5, retries))
+        retries++
+        continue
+      }
+      l(note('Parcel: OK'))
+      break
+    }
+  } else if (process.env === 'production') {
+    bundler = serveStatic('./dist')
+  } else {
+    let Parcel = require('parcel-bundler')
+    bundler = new Parcel('wallet/index.html', {
+      logLevel: 2
+      // for more options https://parceljs.org/api.html
+    }).middleware()
+  }
 
   var cb = function(req, res) {
     if (req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)) {
@@ -267,7 +299,7 @@ var addr = []
 for (let i = 8001; i < 8200; i++){
   let username = i.toString()
   let seed = await derive(username, 'password')
-  await me.init(username, seed)  
+  await me.init(username, seed)
   addr.push(me.address)
 }
 */
@@ -282,7 +314,7 @@ if (argv.monkey) {
 
 let ooops = (err) => {
   if (err.name == 'SequelizeTimeoutError') return
-  l(base_port, err)
+  l(errmsg(err))
   //fatal(`Fatal rejection, quitting`)
 }
 process.on('unhandledRejection', ooops)

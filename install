@@ -1,1 +1,2 @@
-npm i && cd wallet && npm i
+npm i
+cd wallet && npm i; cd ..

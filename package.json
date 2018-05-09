@@ -27,6 +27,7 @@
   ],
   "scripts": {
     "prettier": "prettier --write src/**/*.js wallet/js/**/*.vue",
+    "build": "parcel build wallet",
     "test": "jasmine"
   },
   "dependencies": {
@@ -37,6 +38,7 @@
     "keccak": "1.4.0",
     "mysql2": "1.5.3",
     "pg": "7.4.2",
+    "pm2": "2.10.3",
     "prettier": "1.12.1",
     "rlp": "2.0.0",
     "sequelize": "4.37.6",
@@ -48,6 +50,7 @@
   },
   "devDependencies": {
     "babel-plugin-transform-es2015-modules-strip": "0.1.1",
+    "http-proxy": "1.17.0",
     "jasmine": "3.1.0",
     "parcel-bundler": "1.7.1",
     "vue-hot-reload-api": "2.3.0"
