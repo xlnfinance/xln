@@ -1,15 +1,23 @@
+#!/bin/bash
+set -e
+
 rm -rf data*
-killall Failsafe 2>/dev/null
+
+killall Failsafe 2>/dev/null || true
+
+if [[ `node -v` =~ v10 ]]; then
+  nodeflags=--experimental-repl-await
+fi
 
 if node fs --genesis=test | grep "Genesis done"; then
   db=mysql:root:123123
   maxport=8008
 
-  ttab -t 8433 "node fs.js -p8433 --monkey=$maxport --db=$db"
+  ttab -t 8433 "node $nodeflags fs.js -p8433 --monkey=$maxport --db=$db"
 
   for i in $(seq 8001 $maxport); do 
     rsync -q -rva --exclude=offchain data/* data$i
-    cmd="node --experimental-repl-await fs.js -p$i --username=$i --pw=password --datadir=data$i "
+    cmd="node $nodeflags fs.js -p$i --username=$i --pw=password --datadir=data$i "
     if (( i < 8004 )); then
       ttab -t $i ${cmd}
     else 

@@ -10,5 +10,11 @@
   "devDependencies": {
     "@vue/component-compiler-utils": "1.1.0",
     "vue-template-compiler": "2.5.16"
+  },
+  "prettier": {
+    "semi": false,
+    "bracketSpacing": false,
+    "singleQuote": true,
+    "arrowParens": "always"
   }
 }

@@ -95,6 +95,15 @@ export default {
       ascii_states: ""
     };
   },
+  watch: {
+    record(val) {
+      let title = 'Failsafe'
+      if (val && val.username) {
+        title = `Failsafe: ${val.username}`
+      }
+      document.title = title
+    }
+  },
   computed: {
     ch: () => {
       // find current channel for selected asset and hub
