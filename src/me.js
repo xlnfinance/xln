@@ -38,7 +38,7 @@ class Me {
     this.updateMetricsInterval = 1000
 
     this.intervals = []
-
+    // used to store current block to be added to chain
     this.proposed_block = {}
   }
 
@@ -87,13 +87,6 @@ class Me {
     if (!me.record) {
       //l("You can't broadcast if you are not registred")
       return false
-    }
-
-    if (false) {
-      // rebalances spenders and receivers
-      require('./offchain/rebalance')()
-      // enforces hashlocks
-      me.ensureAck()
     }
 
     if (PK.pending_batch) {
@@ -277,9 +270,17 @@ class Me {
     }
 
     l('Setting up intervals')
+    // request latest blocks from nearest validator
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
-    cache()
+    // cache onchain data regularly to present in Explorers
     me.intervals.push(setInterval(cache, K.blocktime * 1000))
+    cache()
+    snapshotHash()
+
+    // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
+    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
+
+    // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
 
     if (me.my_hub) {
@@ -298,33 +299,33 @@ class Me {
     if (argv.monkey) {
       // if we are hub: plan a test check, otherwise start paying randomly.
       if (me.my_hub) {
-        setTimeout(() => {
+        setTimeout(async () => {
           // making sure in 30 sec that all test payments were successful by looking at the metrics
-          if (
-            me.metrics.settle.total == 200 &&
-            me.metrics.fail.total == 0 &&
-            me.metrics.volume.total > 1000
-          ) {
-            var alert = 'Test Success!'
-          } else {
-            var alert = `Test Fail! ${me.metrics.settle.total} tx`
-          }
+          var alert = me.metrics.settle.total + '/200 settled'
+          let monkey5 = await Insurance.findOne({
+            where: {
+              [Op.or]: [{leftId: 5}, {rightId: 5}]
+            }
+          })
+          // must be >100 after expected rebalance
+          alert += `\n\nMonkey5: ${monkey5 ? monkey5.insurance : 'N/A'}`
+
           l(alert)
           child_process.exec(
             `osascript -e 'display notification "${alert}" with title "Test result"'`
           )
-        }, 40000)
+        }, 50000)
       } else {
         l('Get loaded balance from testnet before simulation:' + me.address)
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
         setTimeout(() => {
           me.getCoins()
-        }, 5000)
+        }, 6000)
 
         setTimeout(() => {
           me.payRando()
-        }, 10000)
+        }, 13000)
       }
     }
   }
@@ -372,10 +373,11 @@ class Me {
     // run on server infinitely and with longer delays
     // but for local tests limit requests and run faster
     if (on_server) {
-      if (counter % 50 == 0) me.getCoins()
+      // replenish with testnet faucet once in a while
+      if (counter % 200 == 30) me.getCoins()
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(2000 + Math.random() * 3000))
+      }, Math.round(200 + Math.random() * 2000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)

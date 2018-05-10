@@ -31,6 +31,7 @@ User.idOrKey = async function(id) {
   }
 }
 
+//todo: scope-ify
 User.prototype.getBalance = async function(asset) {
   return this.getBalances({where: {asset: asset}})
 }
@@ -247,7 +248,7 @@ Asset = sequelize.define('asset', {
   total_supply: Sequelize.INTEGER
 })
 
-// standalone "onchain balance"
+// standalone "onchain balance" (not stored in a channel)
 Balance = sequelize.define('balance', {
   balance: Sequelize.INTEGER
 })
@@ -258,8 +259,12 @@ Balance.belongsTo(Asset)
 
 // onchain exchange order: user X sells Y of asset A in exchange for asset B at rate R
 Order = sequelize.define('order', {
-  amount: Sequelize.INTEGER
+  amount: Sequelize.INTEGER,
+  rate: Sequelize.INTEGER
 })
+User.hasMany(Order)
+Asset.hasMany(Order)
 
 Order.belongsTo(User)
-Order.belongsTo(Asset)
+Order.belongsTo(Asset, {through: 'seller'})
+Order.belongsTo(Asset, {through: 'buyer'})

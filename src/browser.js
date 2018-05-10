@@ -68,36 +68,6 @@ cache = async (i) => {
       ].map((d) => d())
     )
   }
-
-  // TODO: read hash just after snapshot generation
-  if (me.my_member && K.last_snapshot_height) {
-    var filename = `Failsafe-${K.last_snapshot_height}.tar.gz`
-    var cmd = `shasum -a 256 ${datadir}/offchain/${filename}`
-
-    require('child_process').exec(cmd, async (er, out, err) => {
-      if (out.length == 0) {
-        l('This state doesnt exist')
-        return false
-      }
-
-      var out_hash = out.split(' ')[0]
-
-      var our_location =
-        me.my_member.location.indexOf(localhost) != -1
-          ? `http://${localhost}:8000/`
-          : `https://failsafe.network/`
-
-      cached_result.install_snippet = `id=fs
-f=${filename}
-mkdir $id && cd $id && curl ${our_location}$f -o $f
-if [[ -x /usr/bin/sha256sum ]] && sha256sum $f || shasum -a 256 $f | grep \\
-  ${out_hash}; then
-  tar -xzf $f && rm $f && ./install
-  node fs -p8001
-fi
-`
-    })
-  }
 }
 
 // Flush an object to browser websocket
@@ -170,6 +140,38 @@ react = async (result = {}, force = false) => {
     )
   } catch (e) {
     l(e)
+  }
+}
+
+// Eats memory. Do it only at bootstrap or after generating a new snapshot
+snapshotHash = async () => {
+  if (me.my_member && K.last_snapshot_height) {
+    var filename = `Failsafe-${K.last_snapshot_height}.tar.gz`
+    var cmd = `shasum -a 256 ${datadir}/offchain/${filename}`
+
+    require('child_process').exec(cmd, async (er, out, err) => {
+      if (out.length == 0) {
+        l('This state doesnt exist')
+        return false
+      }
+
+      var out_hash = out.split(' ')[0]
+
+      var our_location =
+        me.my_member.location.indexOf(localhost) != -1
+          ? `http://${localhost}:8000/`
+          : `https://failsafe.network/`
+
+      cached_result.install_snippet = `id=fs
+f=${filename}
+mkdir $id && cd $id && curl ${our_location}$f -o $f
+if [[ -x /usr/bin/sha256sum ]] && sha256sum $f || shasum -a 256 $f | grep \\
+  ${out_hash}; then
+  tar -xzf $f && rm $f && ./install
+  node fs -p8001
+fi
+`
+    })
   }
 }
 

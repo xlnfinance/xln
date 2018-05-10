@@ -42,7 +42,7 @@ module.exports = async function() {
       } else if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
 
-        me.send(ch.d.partnerId, 'requestWithdraw', me.envelope(ch.insured))
+        me.send(ch.d.partnerId, 'requestWithdrawFrom', me.envelope(ch.insured))
 
         checkBack.push(ch.d.partnerId)
       } else if (ch.d.withdrawal_requested_at == null) {

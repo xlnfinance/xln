@@ -76,7 +76,7 @@ export default {
 
       proposal: [
         "Increase Blocksize After Client Optimization",
-        `K.blocksize += 1000000`,
+        `K.blocksize += 1000000;`,
         ""
       ],
 
@@ -121,7 +121,7 @@ export default {
     stream: () => {
       var n = 0;
       pay = () => {
-        $(".btn-success").click();
+        $(".btn-success").clic();
         if (n++ < 100) setTimeout(pay, 2000);
       };
       pay();
@@ -155,7 +155,7 @@ export default {
         0
       );
 
-      //if(confirm("Total outputs: $"+app.commy(total)+". Do you want to broadcast your transaction?")){
+      //if(confirm("Total outputs:$"+app.commy(total)+". Do you want to broadcast your transaction?")){
       app.call("rebalance", {
         partner: app.ch.partner,
         request_amount: app.uncommy(app.request_amount),
@@ -362,6 +362,7 @@ export default {
               <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">Accounts</a></li>
               <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect channels between different users and hubs">Channels</a></li>
               <li><a class="nav-link" @click="go('hashlocks')">Hashlocks</a></li>
+              <li><a class="nav-link" @click="go('validators')">Validators</a></li>
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">Network</a></li>
               <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">Governance</a></li>
               <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">Assets</a></li>
@@ -420,13 +421,16 @@ export default {
 
 
       </div>
-      <div v-else-if="tab=='help'">
-        <h1>Network</h1>
-
-        <h2>Validators</h2>
+      <div v-else-if="tab=='validators'">
+        <h1>Validators</h1>
         <ul>
           <li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b></li>
         </ul>
+      </div>
+      <div v-else-if="tab=='help'">
+        <h1>Network</h1>
+
+
         <h2>Current network settings</h2>
         <p>Blocktime: {{K.blocktime}} seconds</p>
         <p>Blocksize: {{K.blocksize}} bytes</p>

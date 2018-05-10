@@ -121,7 +121,7 @@ module.exports = async (ws, msg) => {
             react({alert: 'More than you can withdraw from insured'})
             break
           }
-          me.send(partner, 'requestWithdraw', me.envelope(p.request_amount))
+          me.send(partner, 'requestWithdrawFrom', me.envelope(p.request_amount))
 
           // waiting for the response
           setTimeout(async () => {

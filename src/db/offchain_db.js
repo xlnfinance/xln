@@ -224,7 +224,7 @@ Delta.prototype.getState = async function() {
   })).map((t) => t.toLock())
 
   var state = [
-    methodMap('dispute'),
+    methodMap('disputeWith'),
     [
       left ? this.myId : this.partnerId,
       left ? this.partnerId : this.myId,

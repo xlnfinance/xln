@@ -5,7 +5,7 @@ module.exports = async (tx, meta) => {
   var [id, sig, body] = r(tx)
 
   var signer = await User.findById(readInt(id))
-  var asset = 1 // default asset id
+  var asset = 1 // default asset id, can be changed many times with setAsset directive
 
   if (!signer) {
     return {error: "This user doesn't exist"}
@@ -72,12 +72,8 @@ module.exports = async (tx, meta) => {
     tax: tax,
     length: tx.length,
 
-    // verified and executed events
-    events: [],
-
-    // governance
-    proposals: [],
-    votes: []
+    // valid and executed events
+    events: []
   }
 
   // at some point, we should apply strategy pattern here.
@@ -85,7 +81,10 @@ module.exports = async (tx, meta) => {
   for (var t of transactions) {
     var method = methodMap(readInt(t[0]))
 
-    if (method == 'withdrawFrom') {
+    if (method == 'setAsset') {
+      // all subsequent transactions are now implied to use this asset
+      asset = readInt(t[1])
+    } else if (method == 'withdrawFrom') {
       //require('./methods/withdraw_from')(t[1])
 
       var my_hub = K.hubs.find((h) => h.id == signer.id)
@@ -113,11 +112,12 @@ module.exports = async (tx, meta) => {
         }
 
         var body = r([
-          methodMap('withdrawal'),
+          methodMap('withdrawFrom'),
           ins.leftId,
           ins.rightId,
           ins.nonce,
-          amount
+          amount,
+          ins.asset
         ])
 
         if (!ec.verify(body, input[2], partner.pubkey)) {
@@ -127,9 +127,11 @@ module.exports = async (tx, meta) => {
 
         // for blockchain explorer
         parsed_tx.events.push([method, amount, partner.id])
-        meta.inputs_volume += amount
+        meta.inputs_volume += amount // todo: asset-specific
 
         ins.insurance -= amount
+        // if signer is left and reduces insurance, move ondelta to the left too
+        // .====| reduce insurance .==--| reduce ondelta .==|
         if (compared == -1) ins.ondelta -= amount
 
         signer.balance += amount
@@ -217,7 +219,7 @@ module.exports = async (tx, meta) => {
           ] = r(state)
 
           if (
-            methodMap(readInt(methodId)) != 'dispute' ||
+            methodMap(readInt(methodId)) != 'disputeWith' ||
             !leftId.equals(compared == -1 ? signer.pubkey : partner.pubkey) ||
             !rightId.equals(compared == -1 ? partner.pubkey : signer.pubkey)
           ) {
@@ -273,6 +275,7 @@ module.exports = async (tx, meta) => {
 
           if (me.pubkey.equals(partner.pubkey)) {
             l('Channel with us is disputed')
+            // now our job is to ensure our inward hashlocks are unlocked and that we get most profitable outcome
             var ch = await me.getChannel(signer.pubkey)
             ch.d.status = 'disputed'
             await ch.d.save()
@@ -423,6 +426,7 @@ module.exports = async (tx, meta) => {
 
         meta.outputs_volume += amount
       }
+    } else if (method == 'sellFor') {
     } else if (method == 'propose') {
       var execute_on = K.usable_blocks + K.voting_period // 60*24
 

@@ -46,7 +46,7 @@ module.exports = async (ws, msg) => {
         //me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
 
         if (ch.withdrawal_requested_at) {
-          me.send(pubkey, 'requestWithdraw', me.envelope(ch.insured))
+          me.send(pubkey, 'requestWithdrawFrom', me.envelope(ch.insured))
         }
         await ch.d.save()
       }*/
@@ -71,13 +71,20 @@ module.exports = async (ws, msg) => {
   } else if (inputType == 'propose') {
     var [pubkey, sig, header, ordered_tx_body] = r(msg)
 
-    if (me.status != 'propose') {
+    var m = Members.find((f) => f.block_pubkey.equals(pubkey))
+
+    if (me.status != inputType || !m) {
       return //l(`${me.status} not propose`)
     }
 
+    if (header.length == 0) {
+      return //l(`${m.id} voted nil`)
+    }
+
     // ensure the proposer is the current one
-    if (!me.next_member().block_pubkey.equals(pubkey)) {
-      return l('You are not the current proposer')
+    let proposer = me.next_member()
+    if (m != proposer) {
+      return l(`You ${m.id} are not the current proposer ${proposer.id}`)
     }
 
     if (!ec.verify(header, sig, pubkey)) {
@@ -85,12 +92,15 @@ module.exports = async (ws, msg) => {
     }
 
     if (me.proposed_block.locked) {
-      return l('We are still precommited to previous block.')
+      return l(
+        'We are still locked on previous block:',
+        me.proposed_block.header
+      )
     }
 
     // no precommits means dry run
     if (!await me.processBlock([], header, ordered_tx_body)) {
-      //l('Bad block proposed')
+      l('Bad block proposed')
       return false
     }
 
@@ -109,21 +119,17 @@ module.exports = async (ws, msg) => {
 
     var m = Members.find((f) => f.block_pubkey.equals(pubkey))
 
-    if (!m) {
-      return l(`This user is not a member`)
-    }
-
-    if (me.status != inputType) {
+    if (me.status != inputType || !m) {
       return //l(`${me.status} not ${inputType}`)
     }
 
     if (header.length == 0) {
-      return false //l(`${m.id} voted nil`)
+      return //l(`${m.id} voted nil`)
     }
 
     if (!me.proposed_block.header) {
       //l('We have no block')
-      return false
+      return
     }
 
     if (
@@ -136,14 +142,18 @@ module.exports = async (ws, msg) => {
       m[inputType] = sig
       //l(`Received ${inputType} from ${m.id}`)
     } else {
-      l("this sig doesn't work for our block")
+      l(
+        `This sig by ${m.id} doesn't work for our block ${toHex(
+          me.proposed_block.header
+        )}`
+      )
     }
     // testnet stuff
   } else if (inputType == 'testnet') {
     if (msg[0] == 1) {
       await me.payChannel({
         destination: msg.slice(2),
-        amount: 60000, //1000 + Math.round(Math.random() * 8000),
+        amount: 20000, //1000 + Math.round(Math.random() * 8000),
         invoice: Buffer.alloc(1),
         asset: msg[1]
       })
@@ -228,7 +238,7 @@ module.exports = async (ws, msg) => {
 
     await ch.d.save()
     l('Received updated limits')
-  } else if (inputType == 'requestWithdraw') {
+  } else if (inputType == 'requestWithdrawFrom') {
     if (me.CHEAT_dontwithdraw) {
       // if we dont give withdrawal or are offline for too long, the partner starts dispute
       return l('CHEAT_dontwithdraw')
@@ -253,11 +263,12 @@ module.exports = async (ws, msg) => {
     }
 
     var input = r([
-      methodMap('withdrawal'),
+      methodMap('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
-      amount
+      amount,
+      ch.asset
     ])
 
     ch.d.they_input_amount = amount
@@ -266,23 +277,24 @@ module.exports = async (ws, msg) => {
 
     me.send(
       pubkey,
-      'withdrawal',
+      'withdrawFrom',
       r([me.pubkey, ec(input, me.id.secretKey), r([amount])])
     )
 
     // other party gives withdrawal onchain
-  } else if (inputType == 'withdrawal') {
+  } else if (inputType == 'withdrawFrom') {
     var [pubkey, sig, body] = r(msg)
 
     var ch = await me.getChannel(pubkey)
     var amount = readInt(r(body)[0])
 
     var input = r([
-      methodMap('withdrawal'),
+      methodMap('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
-      amount
+      amount,
+      ch.asset
     ])
 
     if (!ec.verify(input, sig, pubkey)) {

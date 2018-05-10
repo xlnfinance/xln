@@ -66,6 +66,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     var locked_prev_hash = r(me.proposed_block.header)[2]
 
     if (prev_hash == toHex(locked_prev_hash)) {
+      //l('Just unlocked from previous proposed block')
       me.proposed_block = {}
     }
   }
@@ -159,6 +160,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   // only members do snapshots, as they require extra computations
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
+    // it's important to flush current K to disk before snapshot
     fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
 
     var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
@@ -195,6 +197,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           fs.unlink(datadir + '/offchain/Failsafe-' + old_height + '.tar.gz')
           l('Removed old snapshot and created ' + filename)
         }
+        snapshotHash()
       }
     )
   }

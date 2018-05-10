@@ -37,7 +37,7 @@ module.exports = async (genesis) => {
     blocksize: 20000,
     blocktime: 10,
     step_latency: 2, // how long is each consensus step: propose, prevote...
-    gossip_delay: 500, // anti clock skew, give others time to change state
+    gossip_delay: 1000, // anti clock skew, give others time to change state
 
     // up to X seconds, validators don't propose blocks if empty
     // the problem is all delayed actions also happen much later if no blocks made
@@ -93,6 +93,12 @@ module.exports = async (genesis) => {
       username: username,
       nonce: 0,
       balance: 500000000
+    })
+
+    Balance.create({
+      balance: 500000000,
+      assetId: 1,
+      userId: user.id
     })
 
     l(`${username} : ${pw} at ${loc}`)

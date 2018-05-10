@@ -391,8 +391,8 @@ inputMap = (i) => {
     'chain', // return X blocks since given prev_hash
 
     'update', // new input to state machine
-    'requestWithdraw',
-    'withdrawal',
+    'requestWithdrawFrom',
+    'withdrawFrom',
     'ack',
     'setLimits',
 
@@ -412,24 +412,21 @@ methodMap = (i) => {
     'placeholder',
 
     // consensus
-    'propose',
+    'propose', // same word used to propose amendments
     'prevote',
     'precommit',
+    'vote',
 
     // onchain transactions
     'batch', // all transactions are batched one by one
 
-    'withdrawFrom',
-    'revealSecrets',
-    'disputeWith',
-    'depositTo',
-    'propose',
-    'vote',
+    'disputeWith', // defines signed state (balance proof). Used only as last resort!
+    'withdrawFrom', // mutual *instant* withdrawal proof. Used during normal cooperation.
 
-    // prefixes to prove it means what it means
-    'dispute', // delayed balance proof
-    'withdrawal', // instant offchain signature to withdraw from mutual payment channel
-    'setLimits',
+    'revealSecrets', // reveal secrets if partner has not acked our settle
+    'depositTo', // send money to some channel or user
+
+    'setLimits', // define credit limits to partner
 
     // offchain
     'update', // gives ack and 0 or more transitions on top

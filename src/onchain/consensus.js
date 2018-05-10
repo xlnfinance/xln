@@ -175,10 +175,11 @@ module.exports = async () => {
           me.proposed_block.ordered_tx_body
         ]
       ])
+      // we don't call processBlock directly to avoid races
       RPC.external_rpc(null, concat(inputMap('chain'), chain))
-      me.proposed_block = {}
+      //me.proposed_block = {}
     }
   }
 
-  setTimeout(me.consensus, 200) // watch for new events in 1 s
+  setTimeout(me.consensus, 500) // watch for new events in 1 s
 }
