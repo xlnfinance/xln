@@ -260,7 +260,7 @@ Delta.prototype.startDispute = async function(cheat = false) {
     var d = await this.getDispute()
   }
   this.status = 'disputed'
-  me.batch.push(['disputeWith', [d]])
+  me.batch.push(['disputeWith', this.asset, [d]])
   await this.save()
 }
 

@@ -27,22 +27,35 @@ module.exports = async function() {
 
   for (var d of deltas) {
     var ch = await me.getChannel(d.partnerId)
+    var asset = ch.d.asset
 
     // finding who's gone beyond soft limit
     // soft limit can be raised over K.risk to pay less fees
     if (ch.promised >= Math.max(K.risk, ch.d.they_soft_limit)) {
       //l('Adding output for our promise ', ch.d.partnerId)
-      outputs.push([ch.promised, ch.d.myId, ch.d.partnerId, 0])
+      me.batch.push([
+        'depositTo',
+        asset,
+        [[ch.promised, ch.d.myId, ch.d.partnerId, 0]]
+      ])
     } else if (ch.insured >= K.risk) {
       if (ch.d.input_sig) {
         //l('We already have input to use')
         // method, user, hub, nonce, amount
 
-        withdrawals.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
+        me.batch.push([
+          'withdrawFrom',
+          asset,
+          [ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]
+        ])
       } else if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
 
-        me.send(ch.d.partnerId, 'requestWithdrawFrom', me.envelope(ch.insured))
+        me.send(
+          ch.d.partnerId,
+          'requestWithdrawFrom',
+          me.envelope(ch.insured, asset)
+        )
 
         checkBack.push(ch.d.partnerId)
       } else if (ch.d.withdrawal_requested_at == null) {
@@ -51,36 +64,28 @@ module.exports = async function() {
         await ch.d.save()
       } else if (ch.d.withdrawal_requested_at + 600 < ts()) {
         l('User is offline for too long, or tried to cheat')
-        disputes.push(await ch.d.getDispute())
+        me.batch.push(['disputeWith', asset, [await ch.d.getDispute()]])
       }
     }
   }
 
   // checking on all inputs we expected to get, then rebalance
   setTimeout(async () => {
-    for (var partnerId of checkBack) {
-      var ch = await me.getChannel(partnerId)
+    for (var [partnerId, asset] of checkBack) {
+      var ch = await me.getChannel(partnerId, asset)
       if (ch.d.input_sig) {
-        withdrawals.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
+        me.batch.push([
+          'withdrawFrom',
+          asset,
+          [ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]
+        ])
       } else {
         ch.d.withdrawal_requested_at = ts()
         await ch.d.save()
       }
     }
 
-    if (withdrawals.length + disputes.length + outputs.length > 0) {
-      // sorting, bigger amounts are prioritized
-      withdrawals.sort((a, b) => b[0] - a[0])
-      outputs.sort((a, b) => b[0] - a[0])
-
-      // anything to broadcast?
-      me.batch.push(['disputeWith', disputes])
-      me.batch.push(['withdrawFrom', withdrawals])
-      me.batch.push(['depositTo', outputs])
-    }
-
-    if (me.batch.length > 0) {
-      await me.broadcast()
-    }
+    // broadcast will be automatic
+    // await me.broadcast()
   }, 5000)
 }

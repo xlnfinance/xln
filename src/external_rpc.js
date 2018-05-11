@@ -77,7 +77,7 @@ module.exports = async (ws, msg) => {
       return //l(`${me.status} not propose`)
     }
 
-    if (header.length == 0) {
+    if (header.length < 5) {
       return //l(`${m.id} voted nil`)
     }
 
@@ -123,7 +123,7 @@ module.exports = async (ws, msg) => {
       return //l(`${me.status} not ${inputType}`)
     }
 
-    if (header.length == 0) {
+    if (header.length < 5) {
       return //l(`${m.id} voted nil`)
     }
 
@@ -217,7 +217,7 @@ module.exports = async (ws, msg) => {
       // l("No blocks to sync after " + msg.toString('hex'))
     }
 
-    // Other party defines credit limit to us (hub)
+    // Other party defines credit limit to us
   } else if (inputType == 'setLimits') {
     var [pubkey, sig, body] = r(msg)
 
@@ -248,9 +248,11 @@ module.exports = async (ws, msg) => {
     var [pubkey, sig, body] = r(msg)
     if (!ec.verify(body, sig, pubkey)) return false
 
-    var ch = await me.getChannel(pubkey)
+    var [amount, asset] = r(body)
+    amount = readInt(amount)
+    asset = readInt(asset)
 
-    var amount = readInt(r(body)[0])
+    var ch = await me.getChannel(pubkey, asset)
 
     if (ch.d.they_input_amount > 0) {
       l('Peer already has withdrawal from us')
@@ -268,7 +270,7 @@ module.exports = async (ws, msg) => {
       ch.ins.rightId,
       ch.nonce,
       amount,
-      ch.asset
+      ch.ins.asset
     ])
 
     ch.d.they_input_amount = amount
@@ -278,15 +280,19 @@ module.exports = async (ws, msg) => {
     me.send(
       pubkey,
       'withdrawFrom',
-      r([me.pubkey, ec(input, me.id.secretKey), r([amount])])
+      r([me.pubkey, ec(input, me.id.secretKey), r([amount, asset])])
     )
 
     // other party gives withdrawal onchain
+    //todo: ensure no conflicts happen if two parties withdraw from each other at the same time
   } else if (inputType == 'withdrawFrom') {
     var [pubkey, sig, body] = r(msg)
 
-    var ch = await me.getChannel(pubkey)
-    var amount = readInt(r(body)[0])
+    var [amount, asset] = r(body)
+    amount = readInt(amount)
+    asset = readInt(asset)
+
+    var ch = await me.getChannel(pubkey, asset)
 
     var input = r([
       methodMap('withdrawFrom'),
@@ -294,7 +300,7 @@ module.exports = async (ws, msg) => {
       ch.ins.rightId,
       ch.nonce,
       amount,
-      ch.asset
+      ch.ins.asset
     ])
 
     if (!ec.verify(input, sig, pubkey)) {

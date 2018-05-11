@@ -1,31 +1,31 @@
 </script>
 <script>
-import hljs from "highlight.js";
-import Identicon from "identicon.js";
+import hljs from 'highlight.js'
+import Identicon from 'identicon.js'
 
-import Whitepaper from "./Whitepaper";
+import Whitepaper from './Whitepaper'
 
 export default {
   components: {
     Whitepaper
   },
   mounted() {
-    window.app = this;
+    window.app = this
 
     window.onscroll = function(ev) {
       if (window.innerHeight + window.scrollY >= document.body.offsetHeight) {
-        app.history_limit += 20;
+        app.history_limit += 20
       }
-    };
+    }
 
-    app.call("load");
+    app.call('load')
 
     this.interval = setInterval(function() {
-      app.call("load");
-    }, localStorage.auth_code ? 10000 : 30000);
+      app.call('load')
+    }, localStorage.auth_code ? 10000 : 30000)
   },
   destroyed() {
-    clearInterval(this.interval);
+    clearInterval(this.interval)
   },
   data() {
     return {
@@ -40,26 +40,26 @@ export default {
       K: false,
       my_member: false,
 
-      pw: "",
-      username: "",
+      pw: '',
+      username: '',
 
       record: false,
 
-      tab: location.hash.substr(1).split("/")[0],
+      tab: location.hash.substr(1).split('/')[0],
 
       install_snippet: false,
 
-      request_amount: "",
+      request_amount: '',
       outs: [
         {
-          to: "",
-          amount: "",
-          invoice: ""
+          to: '',
+          amount: '',
+          invoice: ''
         }
       ],
 
-      off_to: "",
-      off_amount: "",
+      off_to: '',
+      off_amount: '',
 
       my_hub: false,
 
@@ -75,25 +75,25 @@ export default {
       pending_batch: null,
 
       proposal: [
-        "Increase Blocksize After Client Optimization",
+        'Increase Blocksize After Client Optimization',
         `K.blocksize += 1000000;`,
-        ""
+        ''
       ],
 
       settings: !localStorage.settings,
 
       outward: {
-        destination: hashargs["address"],
-        amount: hashargs["amount"],
-        invoice: hashargs["invoice"]
+        destination: hashargs['address'],
+        amount: hashargs['amount'],
+        invoice: hashargs['invoice']
       },
 
-      hardfork: "",
+      hardfork: '',
 
       // useful for visual debugging
       dev_mode: false,
-      ascii_states: ""
-    };
+      ascii_states: ''
+    }
   },
   watch: {
     record(val) {
@@ -109,227 +109,228 @@ export default {
       // find current channel for selected asset and hub
       return app.channels
         ? app.channels.find(
-            c => c.partner == app.peer && c.d.asset == app.asset
+            (c) => c.partner == app.peer && c.d.asset == app.asset
           )
-        : false;
+        : false
     }
   },
   methods: {
     icon: (h, s) => {
       return (
-        "<img width=" +
+        '<img width=' +
         s +
-        " height=" +
+        ' height=' +
         s +
         ' src="data:image/png;base64,' +
         new Identicon(h.toString(), s).toString() +
         '">'
-      );
+      )
     },
 
     stream: () => {
-      var n = 0;
+      var n = 0
       pay = () => {
-        $(".btn-success").clic();
-        if (n++ < 100) setTimeout(pay, 2000);
-      };
-      pay();
+        $('.btn-success').clic()
+        if (n++ < 100) setTimeout(pay, 2000)
+      }
+      pay()
     },
     hljs: hljs.highlight,
 
-    ivoted: voters => {
-      return voters.find(v => v.id == app.record.id);
+    ivoted: (voters) => {
+      return voters.find((v) => v.id == app.record.id)
     },
 
-    toHexString: byteArray => {
+    toHexString: (byteArray) => {
       return Array.prototype.map
         .call(byteArray, function(byte) {
-          return ("0" + (byte & 0xff).toString(16)).slice(-2);
+          return ('0' + (byte & 0xff).toString(16)).slice(-2)
         })
-        .join("");
+        .join('')
     },
 
     call: function(method, args) {
-      if (method == "vote") {
-        args.rationale = prompt("Why?");
-        if (!args.rationale) return false;
+      if (method == 'vote') {
+        args.rationale = prompt('Why?')
+        if (!args.rationale) return false
       }
 
-      FS(method, args).then(render);
-      return false;
+      FS(method, args).then(render)
+      return false
     },
     rebalance: () => {
       var total = app.outs.reduce(
-        (k, v) => k + parseFloat(v.amount.length == 0 ? "0" : v.amount),
+        (k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount),
         0
-      );
+      )
 
       //if(confirm("Total outputs:$"+app.commy(total)+". Do you want to broadcast your transaction?")){
-      app.call("rebalance", {
+      app.call('rebalance', {
         partner: app.ch.partner,
         request_amount: app.uncommy(app.request_amount),
-        outs: app.outs
-      });
+        outs: app.outs,
+        asset: app.asset
+      })
       // }
     },
-    derive: f => {
+    derive: (f) => {
       var data = {
         username: inputUsername.value,
         password: inputPassword.value
-      };
+      }
 
-      app.call("load", data);
-      return false;
+      app.call('load', data)
+      return false
     },
 
     off_amount_full: () => {
-      var before = app.uncommy(app.off_amount);
-      var fee = Math.round(before / 999);
-      if (fee == 0) fee = 1;
-      return app.commy(before + fee);
+      var before = app.uncommy(app.off_amount)
+      var fee = Math.round(before / 999)
+      if (fee == 0) fee = 1
+      return app.commy(before + fee)
     },
 
-    go: path => {
-      if (path == "") {
-        history.pushState("/", null, "/");
+    go: (path) => {
+      if (path == '') {
+        history.pushState('/', null, '/')
       } else {
-        location.hash = "#" + path;
+        location.hash = '#' + path
       }
-      app.tab = path;
+      app.tab = path
     },
 
-    deltaColor: d => {
-      if (d <= -app.K.risk) return "#ff6e7c";
-      if (d >= app.K.risk) return "#5ed679";
+    deltaColor: (d) => {
+      if (d <= -app.K.risk) return '#ff6e7c'
+      if (d >= app.K.risk) return '#5ed679'
 
-      return "";
+      return ''
     },
 
     dispute_outcome: (ins, parts) => {
-      var o = [];
+      var o = []
       if (parts.insured > 0)
-        o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`);
+        o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`)
       if (parts.they_insured > 0)
-        o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`);
+        o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`)
 
       if (parts.promised > 0)
         o.push(
           `${ins.leftId} owes ${app.commy(parts.promised)} to ${ins.rightId}`
-        );
+        )
       if (parts.they_promised > 0)
         o.push(
           `${ins.rightId} owes ${app.commy(parts.they_promised)} to ${
             ins.leftId
           }`
-        );
+        )
 
-      return o.join(", ");
+      return o.join(', ')
     },
 
     commy: (b, dot = true) => {
-      let prefix = b < 0 ? "-" : "";
+      let prefix = b < 0 ? '-' : ''
 
-      b = Math.abs(b).toString();
+      b = Math.abs(b).toString()
       if (dot) {
         if (b.length == 1) {
-          b = "0.0" + b;
+          b = '0.0' + b
         } else if (b.length == 2) {
-          b = "0." + b;
+          b = '0.' + b
         } else {
-          var insert_dot_at = b.length - 2;
-          b = b.slice(0, insert_dot_at) + "." + b.slice(insert_dot_at);
+          var insert_dot_at = b.length - 2
+          b = b.slice(0, insert_dot_at) + '.' + b.slice(insert_dot_at)
         }
       }
-      return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     },
-    uncommy: str => {
-      if (str.indexOf(".") == -1) str += ".00";
+    uncommy: (str) => {
+      if (str.indexOf('.') == -1) str += '.00'
 
-      return parseInt(str.replace(/[^0-9]/g, ""));
+      return parseInt(str.replace(/[^0-9]/g, ''))
     },
 
-    timeAgo: time => {
+    timeAgo: (time) => {
       var units = [
         {
-          name: "second",
+          name: 'second',
           limit: 60,
           in_seconds: 1
         },
         {
-          name: "minute",
+          name: 'minute',
           limit: 3600,
           in_seconds: 60
         },
         {
-          name: "hour",
+          name: 'hour',
           limit: 86400,
           in_seconds: 3600
         },
         {
-          name: "day",
+          name: 'day',
           limit: 604800,
           in_seconds: 86400
         },
         {
-          name: "week",
+          name: 'week',
           limit: 2629743,
           in_seconds: 604800
         },
         {
-          name: "month",
+          name: 'month',
           limit: 31556926,
           in_seconds: 2629743
         },
         {
-          name: "year",
+          name: 'year',
           limit: null,
           in_seconds: 31556926
         }
-      ];
-      var diff = (new Date() - new Date(time * 1000)) / 1000;
-      if (diff < 5) return "now";
+      ]
+      var diff = (new Date() - new Date(time * 1000)) / 1000
+      if (diff < 5) return 'now'
 
       var i = 0,
-        unit;
+        unit
       while ((unit = units[i++])) {
         if (diff < unit.limit || !unit.limit) {
-          var diff = Math.floor(diff / unit.in_seconds);
-          return diff + " " + unit.name + (diff > 1 ? "s" : "") + " ago";
+          var diff = Math.floor(diff / unit.in_seconds)
+          return diff + ' ' + unit.name + (diff > 1 ? 's' : '') + ' ago'
         }
       }
     },
 
     toggle: () => {
       if (localStorage.settings) {
-        delete localStorage.settings;
+        delete localStorage.settings
       } else {
-        localStorage.settings = 1;
+        localStorage.settings = 1
       }
 
-      app.settings = !app.settings;
+      app.settings = !app.settings
     },
 
     ts: () => Math.round(new Date() / 1000),
 
-    trim: str => {
-      return str ? str.slice(0, 8) + "..." : "";
+    trim: (str) => {
+      return str ? str.slice(0, 8) + '...' : ''
     },
     payment_status: (type, status) => {
-      var s = "";
-      if (type == "settle") {
-        s = "✔";
+      var s = ''
+      if (type == 'settle') {
+        s = '✔'
       }
-      if (type == "fail") {
-        s = "❌";
+      if (type == 'fail') {
+        s = '❌'
       }
-      if (type == "add") {
-        s = "🔒";
+      if (type == 'add') {
+        s = '🔒'
       }
       // new and sent are considered "pending" statuses
-      return s + (status == "acked" ? "" : "🕟");
+      return s + (status == 'acked' ? '' : '🕟')
     }
   }
-};
+}
 </script>
 <template>
   <div>
@@ -744,8 +745,12 @@ export default {
                   <span class="badge badge-warning">By {{batch.signer.id}} ({{commy(batch.tax)}} fee, size {{batch.length}}):</span>&nbsp;
                   <template v-for="d in batch.events">
                     &nbsp;
+
                     <span v-if="d[0]=='disputeWith'" class="badge badge-primary">{{d[2] == 'started' ? "started a dispute with "+d[1] : "won a dispute with "+d[1] }}: {{dispute_outcome(d[3], d[4])}}
                     </span>
+
+
+                    <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">Set asset: {{assets.find(a=>a.id==d[1]).ticker}}</span>
 
                     <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{d[2]}}</span>
 

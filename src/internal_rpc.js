@@ -66,6 +66,7 @@ module.exports = async (ws, msg) => {
       case 'rebalance':
         var ins = []
         var outs = []
+        var asset = parseInt(p.asset)
 
         for (o of p.outs) {
           // split by @
@@ -121,7 +122,11 @@ module.exports = async (ws, msg) => {
             react({alert: 'More than you can withdraw from insured'})
             break
           }
-          me.send(partner, 'requestWithdrawFrom', me.envelope(p.request_amount))
+          me.send(
+            partner,
+            'requestWithdrawFrom',
+            me.envelope(p.request_amount, asset)
+          )
 
           // waiting for the response
           setTimeout(async () => {
@@ -129,8 +134,8 @@ module.exports = async (ws, msg) => {
             if (ch.d.input_sig) {
               ins.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
 
-              me.batch.push(['withdrawFrom', ins])
-              me.batch.push(['depositTo', outs])
+              me.batch.push(['withdrawFrom', asset, ins])
+              me.batch.push(['depositTo', asset, outs])
               react({confirm: 'Onchain rebalance tx sent'})
             } else {
               react({
@@ -140,8 +145,8 @@ module.exports = async (ws, msg) => {
             }
           }, 3000)
         } else if (outs.length > 0) {
-          me.batch.push(['withdrawFrom', ins])
-          me.batch.push(['depositTo', outs])
+          me.batch.push(['withdrawFrom', asset, ins])
+          me.batch.push(['depositTo', asset, outs])
           react({confirm: 'Rebalanced'})
         } else {
           react({alert: 'No action specified'})

@@ -5,7 +5,6 @@ module.exports = async (tx, meta) => {
   var [id, sig, body] = r(tx)
 
   var signer = await User.findById(readInt(id))
-  var asset = 1 // default asset id, can be changed many times with setAsset directive
 
   if (!signer) {
     return {error: "This user doesn't exist"}
@@ -17,6 +16,7 @@ module.exports = async (tx, meta) => {
 
   var [methodId, nonce, transactions] = r(body)
   nonce = readInt(nonce)
+  var asset = 1 // default asset id, can be changed many times with setAsset directive
 
   if (methodMap(readInt(methodId)) != 'batch') {
     return {error: 'Only batched tx are supported'}
@@ -83,7 +83,12 @@ module.exports = async (tx, meta) => {
 
     if (method == 'setAsset') {
       // all subsequent transactions are now implied to use this asset
-      asset = readInt(t[1])
+      // ensure this asset exists
+      let assetRecord = await Asset.findById(readInt(t[1][0]))
+      if (assetRecord) {
+        asset = assetRecord.id
+        parsed_tx.events.push([method, asset])
+      }
     } else if (method == 'withdrawFrom') {
       //require('./methods/withdraw_from')(t[1])
 
@@ -97,7 +102,7 @@ module.exports = async (tx, meta) => {
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
         if (compared == 0) continue
 
-        var ins = await Insurance.find({
+        var ins = await Insurance.findOne({
           where: {
             leftId: compared == -1 ? signer.id : partner.id,
             rightId: compared == -1 ? partner.id : signer.id,
@@ -121,7 +126,7 @@ module.exports = async (tx, meta) => {
         ])
 
         if (!ec.verify(body, input[2], partner.pubkey)) {
-          l('Wrong signature by partner ', ins.nonce)
+          l('Invalid signature by partner ', ins.nonce)
           continue
         }
 

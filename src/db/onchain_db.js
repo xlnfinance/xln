@@ -113,7 +113,7 @@ Insurance = sequelize.define('insurance', {
   rightId: Sequelize.INTEGER,
 
   nonce: {type: Sequelize.INTEGER, defaultValue: 0}, // for instant withdrawals, increase one by one
-  asset: {type: Sequelize.INTEGER, defaultValue: 0},
+  asset: {type: Sequelize.INTEGER, defaultValue: 1},
 
   insurance: {type: Sequelize.BIGINT, defaultValue: 0}, // insurance
   ondelta: {type: Sequelize.BIGINT, defaultValue: 0}, // what hub already insuranceized

@@ -398,27 +398,30 @@ methodMap = (i) => {
     'propose', // same word used to propose amendments
     'prevote',
     'precommit',
-    'vote',
 
     // onchain transactions
     'batch', // all transactions are batched one by one
 
+    // methods below are per-assets (ie should have setAsset directive beforehand)
+    'setAsset',
     'disputeWith', // defines signed state (balance proof). Used only as last resort!
     'withdrawFrom', // mutual *instant* withdrawal proof. Used during normal cooperation.
+    'depositTo', // send money to some channel or user
+    'sellFor',
 
     'revealSecrets', // reveal secrets if partner has not acked our settle
-    'depositTo', // send money to some channel or user
-
-    'setLimits', // define credit limits to partner
+    'vote',
 
     // offchain
     'update', // gives ack and 0 or more transitions on top
+
+    'setLimits', // define credit limits to partner
 
     'add', // we add hashlock transfer to state.
     'settle', // we've got the secret so please unlock and apply to base offdelta
     'fail', // couldn't get secret for <reason>, delete hashlock
 
-    // same, but off-the-canonical-state
+    // same, but off-the-canonical-state and risky (intermediary may not pass forward)
     'addrisk',
     'settlerisk',
     'failrisk',

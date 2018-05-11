@@ -95,32 +95,50 @@ class Me {
     // TODO: make batch persistent on disk
 
     // recommended canonical batch structure: 4 money-related arrays before everything else
-    var merged = [
-      [methodMap('revealSecrets'), []],
-      [methodMap('disputeWith'), []],
-      [methodMap('withdrawFrom'), []],
-      [methodMap('depositTo'), []]
-    ]
-    var m
+    var merged = [[methodMap('revealSecrets'), []]]
+
+    var per_asset = {}
     // put into one of first arrays or add to the end
     me.batch.map((kv) => {
       //if (!kv) return
 
       if (kv[0] == 'revealSecrets') {
-        m = 0
-      } else if (kv[0] == 'disputeWith') {
-        m = 1
-      } else if (kv[0] == 'withdrawFrom') {
-        m = 2
-      } else if (kv[0] == 'depositTo') {
-        m = 3
-        // these methods have non mergeable args
+        // revealed secrets are not per-assets
+        merged[0][1] = merged[0][1].concat(kv[1])
       } else if (kv[0] == 'propose' || kv[0] == 'vote') {
+        // these methods are not batchable and must go separately
         merged.push([methodMap(kv[0]), kv[1]])
-        return
+      } else {
+        // asset specific actions
+
+        if (!per_asset[kv[1]]) {
+          per_asset[kv[1]] = [[], [], [], [], [], []]
+        }
+        let ind = [
+          'disputeWith',
+          'withdrawFrom',
+          'depositTo',
+          'sellFor'
+        ].indexOf(kv[0])
+        per_asset[kv[1]][ind] = per_asset[kv[1]][ind].concat(kv[2])
       }
-      merged[m][1] = merged[m][1].concat(kv[1])
     })
+
+    // finally merging per-asset batches
+    for (var i in per_asset) {
+      if (per_asset.hasOwnProperty(i)) {
+        // sort withdraws and deposits (easier to analyze)
+        per_asset[i][1].sort((a, b) => b[0] - a[0])
+        per_asset[i][2].sort((a, b) => b[0] - a[0])
+
+        merged.push([methodMap('setAsset'), [parseInt(i)]])
+        merged.push([methodMap('disputeWith'), per_asset[i][0]])
+        merged.push([methodMap('withdrawFrom'), per_asset[i][1]])
+        merged.push([methodMap('depositTo'), per_asset[i][2]])
+        merged.push([methodMap('sellFor'), per_asset[i][3]])
+      }
+    }
+
     // remove empty transactions
     merged = merged.filter((m) => m[1].length > 0)
     if (merged.length == 0) {
@@ -308,7 +326,9 @@ class Me {
             }
           })
           // must be >100 after expected rebalance
-          alert += `\n\nMonkey5: ${monkey5 ? monkey5.insurance : 'N/A'}`
+          alert += `\n\nMonkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n`
+
+          alert += `blocks: ${await Block.count()}\n`
 
           l(alert)
           child_process.exec(

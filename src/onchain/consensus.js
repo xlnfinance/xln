@@ -136,12 +136,14 @@ module.exports = async () => {
       var precommitable = 0
     }
 
-    setTimeout(() => {
-      me.gossip(
-        'precommit',
-        me.block_envelope(methodMap('precommit'), precommitable)
-      )
-    }, K.gossip_delay)
+    if (!me.CHEAT_dontprecommit) {
+      setTimeout(() => {
+        me.gossip(
+          'precommit',
+          me.block_envelope(methodMap('precommit'), precommitable)
+        )
+      }, K.gossip_delay)
+    }
   } else if (me.status == 'precommit' && phase == 'await') {
     me.status = phase
 

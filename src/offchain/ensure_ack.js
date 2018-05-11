@@ -42,7 +42,7 @@ module.exports = async () => {
     })
 
     me.batch.push(['revealSecrets', to_reveal])
-    me.batch.push(['disputeWith', [await d.getDispute()]])
+    me.batch.push(['disputeWith', d.asset, [await d.getDispute()]])
 
     d.status = 'disputed'
 
