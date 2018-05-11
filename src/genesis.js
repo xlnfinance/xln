@@ -31,6 +31,7 @@ module.exports = async (genesis) => {
     // cents per byte of tx
     tax: 1,
 
+    // manually priced actions to prevent spam
     account_creation_fee: 100,
     standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
@@ -53,10 +54,12 @@ module.exports = async (genesis) => {
 
     collected_tax: 0,
 
+    // latest block done at
     ts: 0,
-
+    bond_maturity: ts() + 300, // when all bonds turn into dollars
     created_at: ts(),
 
+    // sanity limits for offchain payments
     min_amount: 100,
     max_amount: 300000,
 
@@ -65,6 +68,7 @@ module.exports = async (genesis) => {
     flush_timeout: 250,
     min_fee: 1,
 
+    // hashlock-related
     hashlock_exp: 5, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 10, // for how many blocks onchain keeps it unlocked since reveal
     max_hashlocks: 1000, // we don't want overweight huge dispute strings
@@ -92,7 +96,8 @@ module.exports = async (genesis) => {
       pubkey: me.pubkey,
       username: username,
       nonce: 0,
-      balance: 500000000
+      balance: 500000000,
+      balances: `{"2": 5000000}`
     })
     /*
 

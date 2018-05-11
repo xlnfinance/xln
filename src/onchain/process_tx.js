@@ -128,7 +128,7 @@ module.exports = async (tx, meta) => {
         ])
 
         if (!ec.verify(body, input[2], partner.pubkey)) {
-          l('Invalid signature by partner ', ins.nonce)
+          l('Invalid withdrawal sig by partner ', ins.nonce, input)
           continue
         }
 
@@ -298,14 +298,17 @@ module.exports = async (tx, meta) => {
         }
       }
     } else if (method == 'depositTo') {
-      await signer.payDebts(parsed_tx)
+      await signer.payDebts(asset, parsed_tx)
       // there's a tiny bias here, the hub always gets reimbursed more than tax paid
       var reimburse_tax = 1 + Math.floor(tax / t[1].length)
 
       for (var output of t[1]) {
         amount = readInt(output[0])
 
-        if (amount > signer.asset(asset)) continue
+        if (amount > signer.asset(asset)) {
+          l(`Trying to deposit ${amount} but has ${signer.asset(asset)}`)
+          continue
+        }
 
         var giveTo = await User.idOrKey(output[1])
         var withPartner =
@@ -315,7 +318,10 @@ module.exports = async (tx, meta) => {
 
         if (!giveTo.id) {
           // you must be registered first using asset 1
-          if (asset != 1) continue
+          if (asset != 1) {
+            l('Not 1 asset')
+            continue
+          }
 
           if (!withPartner) {
             if (amount < K.account_creation_fee) continue
@@ -324,7 +330,10 @@ module.exports = async (tx, meta) => {
 
             signer.asset(asset, -amount)
           } else {
-            if (!withPartner.id) continue
+            if (!withPartner.id) {
+              l("Both partners don't exist")
+              continue
+            }
 
             var fee = K.standalone_balance + K.account_creation_fee
             if (amount < fee) continue
@@ -342,7 +351,10 @@ module.exports = async (tx, meta) => {
             if (!withPartner.id) {
               var fee = K.standalone_balance + K.account_creation_fee
               if (amount < fee) continue
-              if (asset != 1) continue
+              if (asset != 1) {
+                l('Not 1 asset')
+                continue
+              }
 
               withPartner.asset(asset, K.standalone_balance)
               amount -= fee

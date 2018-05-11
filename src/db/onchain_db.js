@@ -58,26 +58,27 @@ User.prototype.asset = function(asset, diff) {
   }
 }
 
-User.prototype.payDebts = async function(parsed_tx) {
+User.prototype.payDebts = async function(asset, parsed_tx) {
   let debts = await this.getDebts()
 
   for (let d of debts) {
     var u = await User.findById(d.oweTo)
 
-    if (d.amount_left <= this.balance) {
-      this.balance -= d.amount_left
-      u.balance += d.amount_left
+    if (d.amount_left <= this.asset(asset)) {
+      this.asset(asset, -d.amount_left)
+      u.asset(asset, d.amount_left)
 
       parsed_tx.events.push(['enforceDebt', d.amount_left, u.id])
 
       await u.save()
       await d.destroy()
     } else {
-      d.amount_left -= this.balance
-      u.balance += this.balance
-      this.balance = 0 // this user is broke now!
+      let full = this.asset(asset)
+      d.amount_left -= full
+      u.asset(asset, full)
+      this.asset(asset, -full) // this user's balance is 0 now!
 
-      parsed_tx.events.push(['enforceDebt', this.balance, u.id])
+      parsed_tx.events.push(['enforceDebt', full, u.id])
 
       await u.save()
       await d.save()
@@ -185,8 +186,8 @@ Insurance.prototype.resolve = async function() {
   var right = await User.findById(this.rightId)
 
   // splitting insurance between users
-  left.balance += resolved.insured
-  right.balance += resolved.they_insured
+  left.asset(this.asset, resolved.insured)
+  right.asset(this.asset, resolved.they_insured)
 
   // anybody owes to anyone?
   if (resolved.promised > 0 || resolved.they_promised > 0) {

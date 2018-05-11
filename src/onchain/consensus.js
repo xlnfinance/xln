@@ -136,7 +136,9 @@ module.exports = async () => {
       var precommitable = 0
     }
 
-    if (!me.CHEAT_dontprecommit) {
+    if (me.CHEAT_dontprecommit) {
+      l('We are in CHEAT and dont precommit ever')
+    } else {
       setTimeout(() => {
         me.gossip(
           'precommit',

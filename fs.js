@@ -76,16 +76,22 @@ initDashboard = async (a) => {
     let walletUrl = argv['wallet-url']
     let http = require('http')
     let proxy = require('http-proxy').createProxyServer({
-      target: walletUrl,
+      target: walletUrl
     })
     bundler = (req, res) => proxy.web(req, res, {}, finalhandler(req, res))
     let retries = 0
+
     while (true) {
       const statusCode = await new Promise((resolve) => {
-        http.get(walletUrl, (res) => {
-          const { statusCode } = res
-          resolve(statusCode)
-        })
+        l('Reaching wallet ', walletUrl)
+        http
+          .get(walletUrl, (res) => {
+            const {statusCode} = res
+            resolve(statusCode)
+          })
+          .on('error', (e) => {
+            resolve(404)
+          })
       })
       if (statusCode !== 200) {
         if (retries > 0) {

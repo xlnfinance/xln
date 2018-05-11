@@ -149,10 +149,15 @@ export default {
         .join('')
     },
 
-    call: function(method, args) {
+    call: function(method, args = {}) {
       if (method == 'vote') {
         args.rationale = prompt('Why?')
         if (!args.rationale) return false
+      }
+
+      if (app) {
+        // share automatically scoped asset we work with now
+        args.asset = app.asset
       }
 
       FS(method, args).then(render)
@@ -421,7 +426,7 @@ export default {
           <b v-else>Average {{index}}/s: {{obj.last_avg}} (max {{obj.max}}, total {{obj.total}}).</b>
 
           <trend
-            :data="obj.avgs.slice(obj.avgs.length-60)"
+            :data="obj.avgs.slice(obj.avgs.length-300)"
             :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
             auto-draw
             :min="0"

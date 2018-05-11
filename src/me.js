@@ -287,6 +287,11 @@ class Me {
       })
     }
 
+    if (argv.CHEAT) {
+      // byzantine and testing flags
+      argv.CHEAT.split(',').map((flag) => (me['CHEAT_' + flag] = true))
+    }
+
     l('Setting up intervals')
     // request latest blocks from nearest validator
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
@@ -303,7 +308,7 @@ class Me {
 
     if (me.my_hub) {
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 2000)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
       )
 
       // hubs have force react regularly
