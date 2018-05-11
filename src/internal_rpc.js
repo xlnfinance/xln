@@ -51,7 +51,8 @@ module.exports = async (ws, msg) => {
 
       case 'dispute':
         var ch = await me.getChannel(
-          Members.find((m) => m.id == p.partner).pubkey
+          Members.find((m) => m.id == p.partner).pubkey,
+          p.asset
         )
         await ch.d.startDispute(p.profitable)
 
@@ -117,7 +118,7 @@ module.exports = async (ws, msg) => {
 
         if (p.request_amount > 0) {
           var partner = Members.find((m) => m.id == p.partner)
-          var ch = await me.getChannel(partner.pubkey)
+          var ch = await me.getChannel(partner.pubkey, asset)
           if (p.request_amount > ch.insured) {
             react({alert: 'More than you can withdraw from insured'})
             break
@@ -130,7 +131,7 @@ module.exports = async (ws, msg) => {
 
           // waiting for the response
           setTimeout(async () => {
-            var ch = await me.getChannel(partner.pubkey)
+            var ch = await me.getChannel(partner.pubkey, asset)
             if (ch.d.input_sig) {
               ins.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
 
@@ -209,7 +210,7 @@ module.exports = async (ws, msg) => {
       case 'setLimits':
         var m = Members.find((m) => m.id == p.partner)
 
-        var ch = await me.getChannel(m.pubkey)
+        var ch = await me.getChannel(m.pubkey, p.asset)
 
         ch.d.soft_limit = parseInt(p.limits[0]) * 100
         ch.d.hard_limit = parseInt(p.limits[1]) * 100
@@ -218,7 +219,12 @@ module.exports = async (ws, msg) => {
         me.send(
           m,
           'setLimits',
-          me.envelope(methodMap('setLimits'), ch.d.soft_limit, ch.d.hard_limit)
+          me.envelope(
+            methodMap('setLimits'),
+            ch.d.asset,
+            ch.d.soft_limit,
+            ch.d.hard_limit
+          )
         )
 
         result.confirm = 'The hub has been notified about new credit limits'

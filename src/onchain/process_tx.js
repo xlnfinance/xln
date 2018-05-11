@@ -26,7 +26,7 @@ module.exports = async (tx, meta) => {
   var tax = Math.round(K.tax * tx.length)
 
   // only asset=1 balance is used for tax
-  if (signer.balance < tax) {
+  if (signer.asset(1) < tax) {
     return {error: 'Not enough FRD balance to cover tx fee'}
   }
 
@@ -64,7 +64,7 @@ module.exports = async (tx, meta) => {
   }
 
   // Tx is valid, can take the fee
-  signer.balance -= tax
+  signer.asset(1, -tax)
   K.collected_tax += tax
 
   var parsed_tx = {
@@ -99,6 +99,7 @@ module.exports = async (tx, meta) => {
         var amount = readInt(input[0])
 
         var partner = await User.idOrKey(input[1])
+        l('input ', input)
 
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
         if (compared == 0) continue
@@ -140,7 +141,7 @@ module.exports = async (tx, meta) => {
         // .====| reduce insurance .==--| reduce ondelta .==|
         if (compared == -1) ins.ondelta -= amount
 
-        signer.balance += amount
+        signer.asset(asset, amount)
 
         ins.nonce++
 
@@ -156,7 +157,7 @@ module.exports = async (tx, meta) => {
           }
 
           if (me.record.id == signer.id) {
-            var ch = await me.getChannel(partner.pubkey)
+            var ch = await me.getChannel(partner.pubkey, asset)
             // they planned to withdraw and they did. Nullify hold amount
             ch.d.input_amount = 0
             ch.d.input_sig = null
@@ -282,7 +283,7 @@ module.exports = async (tx, meta) => {
           if (me.pubkey.equals(partner.pubkey)) {
             l('Channel with us is disputed')
             // now our job is to ensure our inward hashlocks are unlocked and that we get most profitable outcome
-            var ch = await me.getChannel(signer.pubkey)
+            var ch = await me.getChannel(signer.pubkey, asset)
             ch.d.status = 'disputed'
             await ch.d.save()
 
@@ -304,7 +305,7 @@ module.exports = async (tx, meta) => {
       for (var output of t[1]) {
         amount = readInt(output[0])
 
-        if (amount > signer.balance) continue
+        if (amount > signer.asset(asset)) continue
 
         var giveTo = await User.idOrKey(output[1])
         var withPartner =
@@ -313,20 +314,24 @@ module.exports = async (tx, meta) => {
         // here we ensure both parties are registred, and take needed fees
 
         if (!giveTo.id) {
+          // you must be registered first using asset 1
+          if (asset != 1) continue
+
           if (!withPartner) {
             if (amount < K.account_creation_fee) continue
-            giveTo.balance = amount - K.account_creation_fee
 
-            signer.balance -= amount
+            giveTo.asset(asset, amount - K.account_creation_fee)
+
+            signer.asset(asset, -amount)
           } else {
             if (!withPartner.id) continue
 
             var fee = K.standalone_balance + K.account_creation_fee
             if (amount < fee) continue
 
-            giveTo.balance = K.standalone_balance
+            giveTo.asset(asset, K.standalone_balance)
             amount -= fee
-            signer.balance -= fee
+            signer.asset(asset, -fee)
           }
 
           await giveTo.save()
@@ -337,10 +342,11 @@ module.exports = async (tx, meta) => {
             if (!withPartner.id) {
               var fee = K.standalone_balance + K.account_creation_fee
               if (amount < fee) continue
+              if (asset != 1) continue
 
-              withPartner.balance = K.standalone_balance
+              withPartner.asset(asset, K.standalone_balance)
               amount -= fee
-              signer.balance -= fee
+              signer.asset(asset, -fee)
               await withPartner.save()
               // now it has id
 
@@ -362,8 +368,8 @@ module.exports = async (tx, meta) => {
             }
           } else {
             if (giveTo.id == signer.id) continue
-            giveTo.balance += amount
-            signer.balance -= amount
+            giveTo.asset(asset, amount)
+            signer.asset(asset, -amount)
             await giveTo.save()
           }
         }
@@ -384,7 +390,7 @@ module.exports = async (tx, meta) => {
           ins.insurance += amount
           if (compared == -1) ins.ondelta += amount
 
-          signer.balance -= amount
+          signer.asset(asset, -amount)
 
           if (my_hub) {
             // The hub gets reimbursed for rebalancing users.
@@ -397,7 +403,8 @@ module.exports = async (tx, meta) => {
             var diff = readInt(output[0]) - amount
             ins.ondelta -= diff * compared
 
-            signer.balance += reimburse_tax
+            signer.asset(asset, reimburse_tax)
+            // todo take from onchain balance instead
           }
 
           await ins.save()

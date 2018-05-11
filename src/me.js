@@ -376,7 +376,7 @@ class Me {
     var deltas = await Delta.findAll()
     for (var d of deltas) {
       if (!K.hubs.find((h) => fromHex(h.pubkey).equals(d.partnerId))) {
-        var ch = await me.getChannel(d.partnerId)
+        var ch = await me.getChannel(d.partnerId, d.asset)
         channels.push(ch)
       }
     }

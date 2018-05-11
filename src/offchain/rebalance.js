@@ -26,8 +26,9 @@ module.exports = async function() {
   var checkBack = []
 
   for (var d of deltas) {
-    var ch = await me.getChannel(d.partnerId)
-    var asset = ch.d.asset
+    var asset = d.asset
+
+    var ch = await me.getChannel(d.partnerId, asset)
 
     // finding who's gone beyond soft limit
     // soft limit can be raised over K.risk to pay less fees

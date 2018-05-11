@@ -657,7 +657,13 @@ export default {
       </div>
       <div v-else-if="tab=='exchange'">
         <h3>Trustless Exchange</h3>
+        <p>Fairlayer comes pre-equipped with two kinds of trustless exchanges built into the protocol: onchain and offchain exchanges.</p>
+        <p>Onchain one is completely zero-trust and is great for large atomic swaps between two assets, but always incurs an expensive onchain fee because blocks can only fit a few transactions. This exchange is available today. </p>
+        <p>The offchain exchange is completely instant, scalable and has tiny fees, but on another hand sometimes increases your uninsured balance. Still, it's a lot more secure than centralized exchanges but with same speed and cost. Will be available later this year.</p>
         Asset you want to sell. Asset you want to buy.
+
+
+        You want to sell {{assets[asset-1].ticker}}
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
@@ -784,7 +790,8 @@ export default {
               <th scope="col">Icon</th>
               <th scope="col">ID</th>
               <th scope="col">Pubkey</th>
-              <th scope="col">Onchain Balance</th>
+              <th scope="col">Onchain FRD</th>
+              <th scope="col">Assets</th>
               <th scope="col">Nonce</th>
               <th scope="col">Debts</th>
             </tr>
@@ -795,6 +802,7 @@ export default {
               <th scope="row">{{u.id}}</th>
               <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
               <td>{{commy(u.balance)}}</td>
+              <td>{{u.balances}}</td>
               <td>{{u.nonce}}</td>
               <td>{{u.debts.length}}</td>
             </tr>

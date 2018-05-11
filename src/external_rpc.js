@@ -231,10 +231,10 @@ module.exports = async (ws, msg) => {
       return false
     }
 
-    var ch = await me.getChannel(pubkey, 1)
+    var ch = await me.getChannel(pubkey, readInt(limits[1]))
 
-    ch.d.they_soft_limit = readInt(limits[1])
-    ch.d.they_hard_limit = readInt(limits[2])
+    ch.d.they_soft_limit = readInt(limits[2])
+    ch.d.they_hard_limit = readInt(limits[3])
 
     await ch.d.save()
     l('Received updated limits')

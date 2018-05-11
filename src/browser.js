@@ -91,7 +91,7 @@ react = async (result = {}, force = false) => {
       var deltas = await Delta.findAll({where: {myId: me.record.id}})
       var promised = 0
       for (var d of deltas) {
-        var ch = await me.getChannel(d.userId, 1)
+        var ch = await me.getChannel(d.userId, d.asset)
         if (ch.delta > 0) promised += ch.promised
       }
 
