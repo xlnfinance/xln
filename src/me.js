@@ -329,8 +329,8 @@ class Me {
           alert += `\n\nMonkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n`
 
           alert += `blocks: ${await Block.count()}\n`
-
           l(alert)
+
           child_process.exec(
             `osascript -e 'display notification "${alert}" with title "Test result"'`
           )

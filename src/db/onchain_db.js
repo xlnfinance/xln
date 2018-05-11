@@ -18,7 +18,9 @@ User = sequelize.define('user', {
   nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
   // onchain FRD balance
-  balance: {type: Sequelize.BIGINT, defaultValue: 0}
+  balance: {type: Sequelize.BIGINT, defaultValue: 0},
+  // all other assets
+  balances: {type: Sequelize.TEXT}
 })
 
 User.idOrKey = async function(id) {
@@ -31,13 +33,29 @@ User.idOrKey = async function(id) {
   }
 }
 
-//todo: scope-ify
-User.prototype.getBalance = async function(asset) {
-  return this.getBalances({where: {asset: asset}})
-}
-
-User.prototype.setBalance = async function(asset, value) {
-  return this.setBalances({where: {asset: asset}}, {balance: value})
+User.prototype.asset = function(asset, diff) {
+  if (asset == 1) {
+    // the default FRD is just a column
+    if (diff) {
+      return (this.balance += diff)
+    } else {
+      return this.balance
+    }
+  } else {
+    // read and write on the fly
+    let bals = JSON.parse(this.balances || '{}')
+    if (diff) {
+      if (!bals[asset]) {
+        bals[asset] = 0
+      }
+      bals[asset] += diff
+      this.balances = stringify(bals)
+      return bals[asset]
+    } else {
+      // 0 by default
+      return bals[asset] ? bals[asset] : 0
+    }
+  }
 }
 
 User.prototype.payDebts = async function(parsed_tx) {
@@ -249,13 +267,14 @@ Asset = sequelize.define('asset', {
 })
 
 // standalone "onchain balance" (not stored in a channel)
+/*
 Balance = sequelize.define('balance', {
   balance: Sequelize.INTEGER
 })
 User.hasMany(Balance)
 Asset.hasMany(Balance)
 Balance.belongsTo(User)
-Balance.belongsTo(Asset)
+Balance.belongsTo(Asset)*/
 
 // onchain exchange order: user X sells Y of asset A in exchange for asset B at rate R
 Order = sequelize.define('order', {

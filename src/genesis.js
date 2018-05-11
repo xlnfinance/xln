@@ -94,12 +94,13 @@ module.exports = async (genesis) => {
       nonce: 0,
       balance: 500000000
     })
+    /*
 
     Balance.create({
       balance: 500000000,
       assetId: 1,
       userId: user.id
-    })
+    })*/
 
     l(`${username} : ${pw} at ${loc}`)
 

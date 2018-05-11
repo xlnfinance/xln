@@ -3,7 +3,7 @@
 <article>
   <section id="intro">
     <div class="intro-header">
-      <h1>Failsafe: the First Scalable Blockchain</h1>
+      <h1>Fairlayer: Double-Layered Payment Network</h1>
     </div>
   </section>
 

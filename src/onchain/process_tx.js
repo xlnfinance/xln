@@ -25,8 +25,9 @@ module.exports = async (tx, meta) => {
   // gas/tax estimation is very straighforward for now, later methods' pricing can be fine tuned
   var tax = Math.round(K.tax * tx.length)
 
+  // only asset=1 balance is used for tax
   if (signer.balance < tax) {
-    return {error: 'Not enough balance to cover tx fee'}
+    return {error: 'Not enough FRD balance to cover tx fee'}
   }
 
   // This is just checking, so no need to apply

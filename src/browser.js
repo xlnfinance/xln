@@ -115,9 +115,6 @@ react = async (result = {}, force = false) => {
       me.channels(),
       me.byKey()
     ])
-    if (result.record) {
-      result.balances = await result.record.getBalances()
-    }
 
     /*
           var offered_partners = (await me.channels())
