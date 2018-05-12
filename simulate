@@ -7,7 +7,9 @@ rm -rf data*
 
 killall Failsafe 2>/dev/null || true
 
-alias pm2=node_modules/.bin/pm2
+function pm2() {
+  node_modules/.bin/pm2 "$@"
+}
 
 if node fs --genesis=test | grep "Genesis done"; then
   maxport=8008
