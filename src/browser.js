@@ -40,9 +40,11 @@ cache = async (i) => {
           cached_result.blocks = (await Block.findAll({
             limit: 500,
             order: [['id', 'desc']],
-            where: {
-              meta: {[Op.ne]: null}
-            }
+            where: me.show_empty_blocks
+              ? {}
+              : {
+                  meta: {[Op.ne]: null}
+                }
           })).map((b) => {
             var [
               methodId,

@@ -47,7 +47,7 @@ module.exports = async function() {
         me.batch.push([
           'withdrawFrom',
           asset,
-          [ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]
+          [[ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]]
         ])
       } else if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
@@ -78,7 +78,7 @@ module.exports = async function() {
         me.batch.push([
           'withdrawFrom',
           asset,
-          [ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]
+          [[ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]]
         ])
       } else {
         ch.d.withdrawal_requested_at = ts()

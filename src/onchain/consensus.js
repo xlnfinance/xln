@@ -55,51 +55,51 @@ module.exports = async () => {
       if (me.proposed_block.locked) {
         // We precommited to previous block, keep proposing it
         var {header, ordered_tx_body} = me.proposed_block
-      }
+      } else {
+        // otherwise build new block from your mempool
+        var ordered_tx = []
+        var total_size = 0
+        for (var candidate of me.mempool) {
+          if (total_size + candidate.length > K.blocksize) break
 
-      // processing mempool
-      var ordered_tx = []
-      var total_size = 0
+          var result = await me.processTx(candidate, {dry_run: true})
+          if (result.success) {
+            ordered_tx.push(candidate)
+            total_size += candidate.length
+          } else {
+            //l(result.error)
+            // punish submitter ip
+          }
+        }
+        // sort by fee
 
-      var meta = {dry_run: true}
+        // flush it or pass leftovers to next validator
+        me.mempool = []
 
-      for (var candidate of me.mempool) {
-        if (total_size + candidate.length > K.blocksize) break
+        // Propose no blocks if mempool is empty
+        if (ordered_tx.length > 0 || K.ts < ts() - K.skip_empty_blocks) {
+          var ordered_tx_body = r(ordered_tx)
 
-        var result = await me.processTx(candidate, meta)
-        if (result.success) {
-          ordered_tx.push(candidate)
-          total_size += candidate.length
+          var header = r([
+            methodMap('propose'),
+            me.record.id,
+            Buffer.from(K.prev_hash, 'hex'),
+            ts(),
+            sha3(ordered_tx_body),
+            current_db_hash()
+          ])
         } else {
-          //l(result.error)
-          // punish submitter ip
+          var header = false
         }
       }
-      // sort by fee
 
-      // flush it
-      me.mempool = []
-
-      // Propose no blocks if mempool is empty
-      if (ordered_tx.length > 0 || K.ts < ts() - K.skip_empty_blocks) {
-        var ordered_tx_body = r(ordered_tx)
-
-        var header = r([
-          methodMap('propose'),
-          me.record.id,
-          Buffer.from(K.prev_hash, 'hex'),
-          ts(),
-          sha3(ordered_tx_body),
-          current_db_hash()
-        ])
-
+      if (header && !me.CHEAT_dontpropose) {
         var propose = r([
           bin(me.block_keypair.publicKey),
           bin(ec(header, me.block_keypair.secretKey)),
           header,
           ordered_tx_body
         ])
-
         setTimeout(() => {
           me.gossip('propose', propose)
         }, K.gossip_delay)

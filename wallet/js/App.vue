@@ -822,6 +822,7 @@ export default {
             <tr>
               <th scope="col">Left ID</th>
               <th scope="col">Right ID</th>
+              <th scope="col">Asset</th>
               <th scope="col">Insurance</th>
               <th scope="col">Ondelta</th>
               <th scope="col">Withdrawal Nonce</th>
@@ -832,6 +833,7 @@ export default {
             <tr v-for="u in insurances">
               <th>{{u.leftId}}</th>
               <th>{{u.rightId}}</th>
+              <th>{{u.asset}}</th>
               <th>{{commy(u.insurance)}}</th>
               <th>{{commy(u.ondelta)}}</th>
               <th>{{u.nonce}}</th>

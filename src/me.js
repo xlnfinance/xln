@@ -324,16 +324,19 @@ class Me {
       if (me.my_hub) {
         setTimeout(async () => {
           // making sure in 30 sec that all test payments were successful by looking at the metrics
-          var alert = me.metrics.settle.total + '/200 settled'
+
           let monkey5 = await Insurance.findOne({
             where: {
               [Op.or]: [{leftId: 5}, {rightId: 5}]
             }
           })
           // must be >100 after expected rebalance
-          alert += `\n\nMonkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n`
+          var alert = `${me.metrics.settle.total}/200 settled
+          Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}
+          Blocks: ${await Block.count()}
+          
+          `
 
-          alert += `blocks: ${await Block.count()}\n`
           l(alert)
 
           child_process.exec(

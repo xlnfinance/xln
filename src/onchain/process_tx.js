@@ -99,7 +99,10 @@ module.exports = async (tx, meta) => {
         var amount = readInt(input[0])
 
         var partner = await User.idOrKey(input[1])
-        l('input ', input)
+        if (!partner) {
+          l('Cant withdraw from nonexistent partner')
+          continue
+        }
 
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
         if (compared == 0) continue
