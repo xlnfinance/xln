@@ -17,12 +17,9 @@ module.exports = async function() {
     }
   })
 
-  var disputes = []
-  var withdrawals = []
-  var outputs = []
-
   me.record = await me.byKey()
 
+  // we request withdrawals and check in few seconds for them
   var checkBack = []
 
   for (var d of deltas) {
@@ -58,7 +55,7 @@ module.exports = async function() {
           me.envelope(ch.insured, asset)
         )
 
-        checkBack.push(ch.d.partnerId)
+        checkBack.push([ch.d.partnerId, asset])
       } else if (ch.d.withdrawal_requested_at == null) {
         l('Delayed pull')
         ch.d.withdrawal_requested_at = ts()
@@ -77,7 +74,7 @@ module.exports = async function() {
       if (ch.d.input_sig) {
         me.batch.push([
           'withdrawFrom',
-          asset,
+          ch.d.asset,
           [[ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]]
         ])
       } else {

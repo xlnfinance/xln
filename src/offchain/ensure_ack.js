@@ -1,11 +1,12 @@
 // This method ensures all settled hashlocks were acked on time. If we don't get ack on time, the hashlock may expire and we lose the money, that's why we must go to blockchain asap to reveal the secret to hashlock
 module.exports = async () => {
   //l('Checking who has not acked')
+  if (PK.pending_batch) return l('Pending batch')
 
   var not_acked = await Delta.findAll({
     where: {
       ack_requested_at: {
-        [Op.lt]: new Date() - 120000,
+        [Op.lt]: new Date() - K.dispute_if_no_ack, // 2 minutes to ack
         [Op.ne]: null
       },
       status: {

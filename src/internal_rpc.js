@@ -8,7 +8,8 @@ module.exports = async (ws, msg) => {
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
 
-  if (json.auth_code == PK.auth_code) {
+  // temporary: no auth code in dev mode for non roots
+  if (json.auth_code == PK.auth_code || base_port != 433) {
     if (ws.send && json.is_wallet && me.browser != ws) {
       if (me.browser && me.browser.readyState == 1) {
         ws.send(
@@ -280,7 +281,11 @@ module.exports = async (ws, msg) => {
     if (ws.end) {
       ws.end(JSON.stringify(result))
     } else {
-      react(result)
+      ws.send(
+        JSON.stringify({
+          result: result
+        })
+      )
     }
   } else {
     // the request is not authorized with auth_code - just send public explorer data

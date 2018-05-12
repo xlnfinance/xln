@@ -1,7 +1,7 @@
 // Block processing code. Verifies precommits sigs then executes tx in it one by one
 module.exports = async (precommits, header, ordered_tx_body) => {
   if (header.length < 64 || header.length > 200) {
-    return l('Invalid header length: ', r(header))
+    return l('Invalid header length: ', precommits, header, ordered_tx_body)
   }
 
   if (ordered_tx_body.length > K.blocksize) {
@@ -41,6 +41,15 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return l('Not valid number of precommits')
   }
 
+  // List of events/metadata about current block, used on Explorer page
+  let meta = {
+    inputs_volume: 0,
+    outputs_volume: 0,
+    parsed_tx: [],
+    cron: [],
+    missed_validators: []
+  }
+
   let shares = 0
   let precommit_body = r([methodMap('precommit'), header])
   for (let i = 0; i < Members.length; i++) {
@@ -50,7 +59,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     ) {
       shares += Members[i].shares
     } else {
-      //l(`${i} missed a precommit for `, precommit_body)
+      meta.missed_validators.push(Members[i].id)
     }
   }
 
@@ -69,14 +78,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       //l('Just unlocked from previous proposed block')
       me.proposed_block = {}
     }
-  }
-
-  // List of events/metadata about current block, used on Explorer page
-  let meta = {
-    inputs_volume: 0,
-    outputs_volume: 0,
-    parsed_tx: [],
-    cron: []
   }
 
   let ordered_tx = r(ordered_tx_body)
@@ -222,7 +223,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
     // did anything happen in this block?
     meta:
-      meta.parsed_tx.length + meta.cron.length > 0 ? JSON.stringify(meta) : null
+      meta.parsed_tx.length + meta.cron.length + meta.missed_validators.length >
+      0
+        ? JSON.stringify(meta)
+        : null
   })
 
   // Ensure our last broadcasted batch was added

@@ -169,6 +169,7 @@ module.exports = async (tx, meta) => {
         }
       }
     } else if (method == 'revealSecrets') {
+      // someone tries to cheat in an atomic payment? Reveal the secrets onchain and dispute!
       for (var secret of t[1]) {
         var hash = sha3(secret)
         var hl = await Hashlock.findOne({
@@ -184,6 +185,7 @@ module.exports = async (tx, meta) => {
           await Hashlock.create({
             hash: hash,
             revealed_at: K.usable_blocks,
+            // we don't want the evidence to be stored forever, obviously
             delete_at: K.usable_blocks + K.hashlock_keepalive
           })
           parsed_tx.events.push(['revealSecrets', hash])
@@ -456,6 +458,9 @@ module.exports = async (tx, meta) => {
       }
     } else if (method == 'sellFor') {
     } else if (method == 'propose') {
+      // temporary protection
+      if (signer.id != 1) continue
+
       var execute_on = K.usable_blocks + K.voting_period // 60*24
 
       var new_proposal = await Proposal.create({

@@ -18,7 +18,7 @@ Always flush opportunistically, unless you are acking your direct partner who se
 
 module.exports = async (pubkey, asset, opportunistic) => {
   return q([pubkey, asset], async () => {
-    loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
+    //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
     let flushable = []
@@ -35,7 +35,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     }
 
     if (ch.d.status == 'sent') {
-      loff(`=== End flush ${trim(pubkey)} CANT`)
+      //loff(`=== End flush ${trim(pubkey)} CANT`)
 
       if (ch.d.ack_requested_at < new Date() - 4000) {
         //me.send(ch.d.partnerId, 'update', ch.d.pending)
@@ -150,7 +150,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
         return
       }
     } else if (ch.d.status == 'merge') {
-      loff('In merge, no tr')
+      //loff('In merge, no tr')
       // important trick: only merge flush once to avoid bombing with equal acks
       if (opportunistic) return
     }
@@ -178,7 +178,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     await Promise.all(all)
     me.send(ch.d.partnerId, 'update', envelope)
 
-    loff(`=== End flush ${transitions.length} tr to ${trim(pubkey)}`)
+    //loff(`=== End flush ${transitions.length} tr to ${trim(pubkey)}`)
     return Promise.all(flushable.map((fl) => me.flushChannel(fl, asset, true)))
   })
 }

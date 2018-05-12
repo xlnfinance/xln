@@ -165,6 +165,8 @@ Insurance.prototype.resolve = async function() {
 
         if (hl && hl.revealed_at <= readInt(lock[2])) {
           final += readInt(lock[0])
+        } else {
+          l('Failed to unlock: ', lock)
         }
       }
       return final

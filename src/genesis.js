@@ -36,8 +36,8 @@ module.exports = async (genesis) => {
     standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
     blocksize: 20000,
-    blocktime: 10,
-    step_latency: 2, // how long is each consensus step: propose, prevote...
+    blocktime: 15,
+    step_latency: 4, // how long is each consensus step: propose, prevote...
     gossip_delay: 1000, // anti clock skew, give others time to change state
 
     // up to X seconds, validators don't propose blocks if empty
@@ -69,10 +69,11 @@ module.exports = async (genesis) => {
     min_fee: 1,
 
     // hashlock-related
-    hashlock_exp: 5, // how many blocks a user needs to be a able to reveal
-    hashlock_keepalive: 10, // for how many blocks onchain keeps it unlocked since reveal
+    hashlock_exp: 10, // how many blocks a user needs to be a able to reveal
+    hashlock_keepalive: 1000, // for how many blocks onchain keeps it unlocked since reveal
     max_hashlocks: 1000, // we don't want overweight huge dispute strings
-    hashlock_service_fee: 100 // the one who adds hashlock pays for it
+    hashlock_service_fee: 100, // the one who adds hashlock pays for it
+    dispute_if_no_ack: 120000 // ms, how long we wait for ack before going to blockchain
   }
 
   // Defines global Byzantine tolerance parameter

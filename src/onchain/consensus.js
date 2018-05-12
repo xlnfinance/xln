@@ -93,16 +93,21 @@ module.exports = async () => {
         }
       }
 
-      if (header && !me.CHEAT_dontpropose) {
+      if (header) {
         var propose = r([
           bin(me.block_keypair.publicKey),
           bin(ec(header, me.block_keypair.secretKey)),
           header,
           ordered_tx_body
         ])
-        setTimeout(() => {
-          me.gossip('propose', propose)
-        }, K.gossip_delay)
+
+        if (me.CHEAT_dontpropose) {
+          l('CHEAT_dontpropose')
+        } else {
+          setTimeout(() => {
+            me.gossip('propose', propose)
+          }, K.gossip_delay)
+        }
       }
     }
   } else if (me.status == 'propose' && phase == 'prevote') {
@@ -137,7 +142,7 @@ module.exports = async () => {
     }
 
     if (me.CHEAT_dontprecommit) {
-      l('We are in CHEAT and dont precommit ever')
+      //l('We are in CHEAT and dont precommit ever')
     } else {
       setTimeout(() => {
         me.gossip(

@@ -120,6 +120,9 @@ class Me {
           'depositTo',
           'sellFor'
         ].indexOf(kv[0])
+        if (ind == -1) {
+          fatal('Unknown method')
+        }
         per_asset[kv[1]][ind] = per_asset[kv[1]][ind].concat(kv[2])
       }
     })
@@ -301,7 +304,7 @@ class Me {
     snapshotHash()
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
+    //me.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -333,9 +336,7 @@ class Me {
           // must be >100 after expected rebalance
           var alert = `${me.metrics.settle.total}/200 settled
           Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}
-          Blocks: ${await Block.count()}
-          
-          `
+          Blocks: ${await Block.count()}`
 
           l(alert)
 

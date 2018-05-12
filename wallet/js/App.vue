@@ -404,7 +404,7 @@ export default {
       </div>
     </nav>
     <div class="container">
-      <div title="Tps in last 5 minutes" class="tpstrend hidden-xs hidden-sm" @click="go('metrics')" v-if="my_hub">
+      <div title="Tps in last 5 minutes" class="tpstrend visible-lg-4" @click="go('metrics')" v-if="my_hub">
         <trend
           :data="metrics.settle.avgs.slice(metrics.settle.avgs.length-300)"
           :gradient="['#6fa8dc', '#42b983', '#2c3e50']"
@@ -735,6 +735,7 @@ export default {
               <th scope="col">Prev Hash</th>
               <th scope="col">Hash</th>
               <th scope="col">Relayed By</th>
+              <th scope="col">Missed Validators</th>
               <th scope="col">Relayed At</th>
               <th scope="col">Total Tx</th>
               <th scope="col">Inputs / Outputs Volume</th>
@@ -747,6 +748,7 @@ export default {
                 <td>{{b.prev_hash.substr(0,10)}}</td>
                 <td>{{b.hash.substr(0,10)}}</td>
                 <td>{{b.built_by}}</td>
+                <td>{{b.meta ? b.meta.missed_validators : ''}}</td>
                 <td>{{timeAgo(b.timestamp)}}</td>
                 <td>{{b.total_tx}}</td>
                 <td v-if="b.meta">{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>

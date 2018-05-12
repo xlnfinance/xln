@@ -408,6 +408,7 @@ methodMap = (i) => {
     'withdrawFrom', // mutual *instant* withdrawal proof. Used during normal cooperation.
     'depositTo', // send money to some channel or user
     'sellFor',
+    'cancelOrder',
 
     'revealSecrets', // reveal secrets if partner has not acked our settle
     'vote',
