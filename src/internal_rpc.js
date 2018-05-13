@@ -9,13 +9,12 @@ module.exports = async (ws, msg) => {
   // strong coupling between the console and the browser client
 
   // temporary: no auth code in dev mode for non roots
-  if (json.auth_code == PK.auth_code || base_port != 433) {
+  if (json.auth_code == PK.auth_code) {
     if (ws.send && json.is_wallet && me.browser != ws) {
       if (me.browser && me.browser.readyState == 1) {
         ws.send(
           JSON.stringify({
-            result: {already_opened: true},
-            id: json.id
+            result: {already_opened: true}
           })
         )
       } else {
@@ -204,7 +203,8 @@ module.exports = async (ws, msg) => {
         break
 
       case 'hardfork':
-        eval(p.hardfork)
+        //security: ensure it's not RCE and put extra safeguards
+        //eval(p.hardfork)
         result.confirm = 'Executed'
         break
 
@@ -269,8 +269,7 @@ module.exports = async (ws, msg) => {
           JSON.stringify({
             result: toHex(
               nacl.sign(Buffer.from(json.proxyOrigin), me.id.secretKey)
-            ),
-            id: json.id
+            )
           })
         )
         return false
@@ -281,18 +280,18 @@ module.exports = async (ws, msg) => {
     if (ws.end) {
       ws.end(JSON.stringify(result))
     } else {
-      ws.send(
+      /*ws.send(
         JSON.stringify({
-          result: result
+          result: Object.assign(result, cached_result)
         })
-      )
+      )*/
+      react(result)
     }
   } else {
     // the request is not authorized with auth_code - just send public explorer data
     ws.send(
       JSON.stringify({
-        result: cached_result,
-        id: json.id
+        result: cached_result
       })
     )
   }

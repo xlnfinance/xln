@@ -53,25 +53,28 @@ module.exports = async () => {
       //l(`it's our turn to propose, gossip new block`)
 
       if (me.proposed_block.locked) {
-        // We precommited to previous block, keep proposing it
+        l(`We precommited to previous block, keep proposing it`)
         var {header, ordered_tx_body} = me.proposed_block
       } else {
         // otherwise build new block from your mempool
         var ordered_tx = []
         var total_size = 0
         for (var candidate of me.mempool) {
-          if (total_size + candidate.length > K.blocksize) break
+          if (total_size + candidate.length > K.blocksize) {
+            l(`The block is out of space, stop adding tx`)
+            break
+          }
 
           var result = await me.processTx(candidate, {dry_run: true})
           if (result.success) {
             ordered_tx.push(candidate)
             total_size += candidate.length
           } else {
-            //l(result.error)
+            l(`Bad tx in mempool`)
             // punish submitter ip
           }
         }
-        // sort by fee
+        // sort by fee (optimize for profits)
 
         // flush it or pass leftovers to next validator
         me.mempool = []

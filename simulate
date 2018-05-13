@@ -12,7 +12,7 @@ function pm2() {
 }
 
 if node fs --genesis=test | grep "Genesis done"; then
-  maxport=8008
+  maxport=8020
 
   for i in $(seq 8001 $maxport); do
     rsync -q -rva --exclude=offchain data/* data$i

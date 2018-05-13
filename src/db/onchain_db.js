@@ -151,6 +151,7 @@ Insurance = sequelize.define('insurance', {
 
 Insurance.prototype.resolve = async function() {
   if (this.dispute_hashlocks) {
+    // are there any hashlocks attached to this dispute? Check for unlocked ones
     var [left_inwards, right_inwards] = r(this.dispute_hashlocks)
 
     // returns total amount of all revealed (on time) preimages
@@ -163,8 +164,12 @@ Insurance.prototype.resolve = async function() {
           }
         })
 
-        if (hl && hl.revealed_at <= readInt(lock[2])) {
-          final += readInt(lock[0])
+        if (hl) {
+          if (hl.revealed_at <= readInt(lock[2])) {
+            final += readInt(lock[0])
+          } else {
+            l('Revealed too late ', lock)
+          }
         } else {
           l('Failed to unlock: ', lock)
         }
@@ -181,8 +186,6 @@ Insurance.prototype.resolve = async function() {
     this.ondelta + this.dispute_offdelta,
     true
   )
-
-  l('Resolving with ', resolved)
 
   var left = await User.findById(this.leftId)
   var right = await User.findById(this.rightId)
@@ -235,6 +238,8 @@ Insurance.prototype.resolve = async function() {
     ch.d.ack_requested_at = null
     await ch.d.save()
   }
+
+  return resolved
 }
 
 Vote = sequelize.define('vote', {

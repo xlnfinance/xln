@@ -28,7 +28,7 @@ module.exports = async (ws, msg) => {
     var [pubkey, sig, body] = r(msg)
 
     if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
-      if (pubkey.equals(me.pubkey)) return false
+      //if (pubkey.equals(me.pubkey)) return false
 
       // wrap in custom WebSocketClient if it is a raw ws object
       if (ws.instance) {
@@ -59,13 +59,13 @@ module.exports = async (ws, msg) => {
     // why would we be asked to add tx to block?
     if (!me.my_member) return false
 
-    if (me.my_member == me.next_member(1)) {
-      r(msg).map((tx) => {
-        me.mempool.push(tx)
-      })
-    } else {
-      me.send(me.next_member(1), 'tx', msg)
-    }
+    //if (me.my_member == me.next_member(1)) {
+    r(msg).map((tx) => {
+      me.mempool.push(tx)
+    })
+    //} else {
+    //  me.send(me.next_member(1), 'tx', msg)
+    //}
 
     // another member wants a sig
   } else if (inputType == 'propose') {
@@ -94,7 +94,8 @@ module.exports = async (ws, msg) => {
     if (me.proposed_block.locked) {
       return l(
         'We are still locked on previous block:',
-        me.proposed_block.header
+        me.proposed_block.header,
+        header
       )
     }
 
@@ -332,7 +333,7 @@ module.exports = async (ws, msg) => {
     }
 
     let flushable = await q([pubkey, asset], async () => {
-      loff(`--- Start update ${trim(pubkey)} - ${transitions.length}`)
+      //loff(`--- Start update ${trim(pubkey)} - ${transitions.length}`)
 
       var flushable = await me.updateChannel(
         pubkey,
@@ -342,7 +343,7 @@ module.exports = async (ws, msg) => {
         debugState,
         signedState
       )
-      loff(`=== End update ${trim(pubkey)}`)
+      //loff(`=== End update ${trim(pubkey)}`)
       return flushable
     })
 
@@ -368,7 +369,9 @@ module.exports = async (ws, msg) => {
       }
     }
     await Promise.all(flushed)
-    react()
+
+    // use lazy react for external requests
+    react({}, false)
 
     return //
   }

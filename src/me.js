@@ -126,6 +126,7 @@ class Me {
         per_asset[kv[1]][ind] = per_asset[kv[1]][ind].concat(kv[2])
       }
     })
+    me.batch = []
 
     // finally merging per-asset batches
     for (var i in per_asset) {
@@ -156,15 +157,14 @@ class Me {
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
+    //if (me.my_member && me.my_member == me.next_member()) {
+    //  me.mempool.push(signed_batch)
+    //} else {
+    me.send(me.next_member(true), 'tx', r([signed_batch]))
+    //}
+
     // saving locally to ensure it is added, and rebroadcast if needed
     PK.pending_batch = toHex(signed_batch)
-    me.batch = []
-
-    if (me.my_member && me.my_member == me.next_member()) {
-      me.mempool.push(signed_batch)
-    } else {
-      me.send(me.next_member(), 'tx', r([signed_batch]))
-    }
   }
 
   // tell all validators the same thing
@@ -317,8 +317,8 @@ class Me {
       // hubs have force react regularly
       me.intervals.push(
         setInterval(() => {
-          react({}, true)
-        }, 1000)
+          react({})
+        }, 5000)
       )
     }
 
@@ -396,7 +396,7 @@ class Me {
   payRando(counter = 1) {
     me.payChannel({
       destination: randos[Math.floor(Math.random() * randos.length)],
-      amount: 100 + Math.round(Math.random() * 30),
+      amount: 100 + Math.round(Math.random() * (on_server ? 5000 : 50)),
       asset: 1
     })
     // run on server infinitely and with longer delays
@@ -406,7 +406,7 @@ class Me {
       if (counter % 200 == 30) me.getCoins()
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(200 + Math.random() * 2000))
+      }, Math.round(1000 + Math.random() * 10000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)

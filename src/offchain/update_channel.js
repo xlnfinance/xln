@@ -24,7 +24,7 @@ module.exports = async (
   // indexOf doesn't work with Buffers
   let uniqAdd = (add) => {
     if (flushable.find((f) => f.equals(add))) {
-      loff('Already scheduled for flush')
+      //loff('Already scheduled for flush')
     } else {
       flushable.push(add)
     }
@@ -280,7 +280,7 @@ module.exports = async (
       let inward = await outward.getInward()
 
       if (inward) {
-        loff(`Found inward ${trim(inward.deltum.partnerId)}`)
+        //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
 
         if (inward.deltum.status == 'disputed') {
           loff(
@@ -310,7 +310,7 @@ module.exports = async (
         l('CHEAT: not acking the secret, but pulling from inward')
         ch.d.status = 'CHEAT_dontack'
         await ch.d.save()
-        react()
+        react({}, false) // lazy react
         return
       }
     }

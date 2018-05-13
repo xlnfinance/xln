@@ -146,7 +146,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
       }
 
       if (opportunistic && transitions.length == 0) {
-        loff(`=== End flush ${trim(pubkey)}: Nothing to flush`)
+        //loff(`=== End flush ${trim(pubkey)}: Nothing to flush`)
         return
       }
     } else if (ch.d.status == 'merge') {

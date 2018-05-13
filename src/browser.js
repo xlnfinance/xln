@@ -72,10 +72,10 @@ cache = async (i) => {
   }
 }
 
-// Flush an object to browser websocket
-react = async (result = {}, force = false) => {
+// Flush an object to browser websocket. Send force=false for lazy react (for high-tps nodes like hubs)
+react = async (result = {}, force = true) => {
   // hubs dont react OR no alive browser socket
-  if ((me.my_hub && !force) || !me.browser || me.browser.readyState != 1) {
+  if (me.my_hub && !force) {
     return //l('No working me.browser')
   }
 
@@ -119,17 +119,18 @@ react = async (result = {}, force = false) => {
     ])
 
     /*
-          var offered_partners = (await me.channels())
-            .sort((a, b) => b.they_payable - a.they_payable)
-            .filter((a) => a.they_payable >= amount)
-            .map((a) => a.partner)
-            .join('_')
-            */
+    var offered_partners = (await me.channels())
+      .sort((a, b) => b.they_payable - a.they_payable)
+      .filter((a) => a.they_payable >= amount)
+      .map((a) => a.partner)
+      .join('_')
+      */
     result.address = me.address
     result.pubkey = toHex(me.pubkey)
-
     result.pending_batch = PK.pending_batch
   }
+
+  if (!me.browser || me.browser.readyState != 1) return
 
   try {
     me.browser.send(

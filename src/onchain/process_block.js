@@ -93,7 +93,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 50 == 0 || ordered_tx.length > 0)
+  if (K.total_blocks % 100 == 0 || ordered_tx.length > 0)
     l(
       `${base_port}: Processed block ${K.total_blocks} by ${readInt(
         built_by
@@ -125,13 +125,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   })
 
   for (let ins of disputes) {
-    meta.cron.push([
-      'autodispute',
-      ins,
-      resolveChannel(ins.insurance, ins.ondelta + ins.dispute_offdelta)
-    ])
-
-    await ins.resolve()
+    meta.cron.push(['autodispute', ins, await ins.resolve()])
   }
 
   // Executing onchaing gov proposals that are due
@@ -181,9 +175,12 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           stat.birthtime = null
 
           // Skip offchain db, replicated datadirs and irrelevant things
+          // Todo: use whitelist instead?
           if (
             path.startsWith('./.') ||
-            path.match(/(data[0-9]+|data\/offchain|DS_Store|node_modules|test)/)
+            path.match(
+              /(data[0-9]+|data\/offchain|DS_Store|node_modules|test|dist|private)/
+            )
           ) {
             return false
           } else {
@@ -210,35 +207,42 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
   })
 
-  // save final block in blockchain db and broadcast
-  await Block.create({
-    prev_hash: fromHex(prev_hash),
-    hash: sha3(header),
+  // save final block in offchain db. Required for members, optional for everyone else (aka "pruning" mode)
+  // it is fine to delete a block after grace period ~3 months.
+  if (me.my_member || me.save_blocks) {
+    await Block.create({
+      prev_hash: fromHex(prev_hash),
+      hash: sha3(header),
 
-    precommits: r(precommits), // pack them in rlp for storage
-    header: header,
-    ordered_tx_body: ordered_tx_body,
+      precommits: r(precommits), // pack them in rlp for storage
+      header: header,
+      ordered_tx_body: ordered_tx_body,
 
-    total_tx: ordered_tx.length,
+      total_tx: ordered_tx.length,
 
-    // did anything happen in this block?
-    meta:
-      meta.parsed_tx.length + meta.cron.length + meta.missed_validators.length >
-      0
-        ? JSON.stringify(meta)
-        : null
-  })
+      // did anything happen in this block?
+      meta:
+        meta.parsed_tx.length +
+          meta.cron.length +
+          meta.missed_validators.length >
+        0
+          ? JSON.stringify(meta)
+          : null
+    })
+  }
 
   // Ensure our last broadcasted batch was added
   if (PK.pending_batch) {
     var raw = fromHex(PK.pending_batch)
-    l('Rebroadcasting pending tx ', raw)
-    me.send(me.next_member(1), 'tx', r([raw]))
+    l('Rebroadcasting pending tx ', raw.length)
+
+    //me.send(me.next_member(), 'tx', r([raw]))
+    me.send(me.next_member(true), 'tx', r([raw]))
   } else {
     // time to broadcast our next batch then. (Delay to ensure validator processed the block)
-    setTimeout(() => {
-      me.broadcast()
-    }, 3000)
+    //setTimeout(() => {
+    me.broadcast()
+    //}, 500)
   }
 
   if (me.request_reload) {

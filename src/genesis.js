@@ -25,7 +25,7 @@ module.exports = async (genesis) => {
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 1000000,
+    snapshot_after_bytes: 100000,
     proposals_created: 0,
 
     // cents per byte of tx
@@ -36,8 +36,8 @@ module.exports = async (genesis) => {
     standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
     blocksize: 20000,
-    blocktime: 15,
-    step_latency: 4, // how long is each consensus step: propose, prevote...
+    blocktime: 20,
+    step_latency: 5, // how long is each consensus step: propose, prevote, precommit, await is the rest
     gossip_delay: 1000, // anti clock skew, give others time to change state
 
     // up to X seconds, validators don't propose blocks if empty
@@ -49,8 +49,6 @@ module.exports = async (genesis) => {
 
     risk: 10000, // recommended rebalance limit
     hard_limit: 100000, // how much can a user lose if hub is insolvent?
-
-    dispute_delay: 5, // in how many blocks disputes are considered final
 
     collected_tax: 0,
 
@@ -68,12 +66,13 @@ module.exports = async (genesis) => {
     flush_timeout: 250,
     min_fee: 1,
 
-    // hashlock-related
-    hashlock_exp: 10, // how many blocks a user needs to be a able to reveal
+    // hashlock and dispute-related
+    dispute_delay: 20, // in how many blocks disputes are considered final
+    hashlock_exp: 20, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 1000, // for how many blocks onchain keeps it unlocked since reveal
     max_hashlocks: 1000, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
-    dispute_if_no_ack: 120000 // ms, how long we wait for ack before going to blockchain
+    dispute_if_no_ack: 60000 // ms, how long we wait for ack before going to blockchain
   }
 
   // Defines global Byzantine tolerance parameter

@@ -6,7 +6,7 @@ module.exports = async () => {
   var not_acked = await Delta.findAll({
     where: {
       ack_requested_at: {
-        [Op.lt]: new Date() - K.dispute_if_no_ack, // 2 minutes to ack
+        [Op.lt]: new Date() - K.dispute_if_no_ack, // 1 min to ack
         [Op.ne]: null
       },
       status: {
@@ -28,7 +28,7 @@ module.exports = async () => {
       order: [['id', 'ASC']]
     })
 
-    l('No ack dispute with ', d.id, new Date() - d.ack_requested_at)
+    l('No ack dispute with ', d.id, d.status, new Date() - d.ack_requested_at)
 
     var to_reveal = []
     unacked_settles.map(async (s) => {

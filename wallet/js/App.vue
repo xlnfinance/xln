@@ -188,11 +188,19 @@ export default {
       return false
     },
 
-    off_amount_full: () => {
-      var before = app.uncommy(app.off_amount)
-      var fee = Math.round(before / 999)
-      if (fee == 0) fee = 1
-      return app.commy(before + fee)
+    to_ticker: (assetId) => {
+      let asset = app.assets.find((a) => a.id == assetId)
+
+      return asset ? asset.ticker : 'N/A'
+    },
+    parse_balances: (balances) => {
+      if (balances) {
+        return Object.entries(JSON.parse(balances))
+          .map((kv) => app.to_ticker(kv[0]) + ': ' + app.commy(kv[1]))
+          .join(', ')
+      } else {
+        return ''
+      }
     },
 
     go: (path) => {
@@ -489,7 +497,7 @@ export default {
             <hr />
           </div>
           <template v-if="channels.length > 0" v-for="(ch, index) in channels">
-            <h2 style="display:inline-block">{{assets[ch.d.asset-1].ticker}} Balance @{{ch.hub.handle}} <span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
+            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}} <span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
             <small v-if="ch.payable > 0">
               = {{commy(ch.insurance)}} insurance 
               {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
@@ -668,7 +676,7 @@ export default {
         Asset you want to sell. Asset you want to buy.
 
 
-        You want to sell {{assets[asset-1].ticker}}
+        You want to sell {{to_ticker(asset)}}
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
@@ -735,8 +743,7 @@ export default {
               <th scope="col">Prev Hash</th>
               <th scope="col">Hash</th>
               <th scope="col">Relayed By</th>
-              <th scope="col">Missed Validators</th>
-              <th scope="col">Relayed At</th>
+
               <th scope="col">Total Tx</th>
               <th scope="col">Inputs / Outputs Volume</th>
             </tr>
@@ -747,9 +754,8 @@ export default {
                 <td>{{b.id}}</td>
                 <td>{{b.prev_hash.substr(0,10)}}</td>
                 <td>{{b.hash.substr(0,10)}}</td>
-                <td>{{b.built_by}}</td>
-                <td>{{b.meta ? b.meta.missed_validators : ''}}</td>
-                <td>{{timeAgo(b.timestamp)}}</td>
+                <td>{{b.built_by}} ({{timeAgo(b.timestamp)}})</td>
+
                 <td>{{b.total_tx}}</td>
                 <td v-if="b.meta">{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>
               </tr>
@@ -763,7 +769,7 @@ export default {
                     </span>
 
 
-                    <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">Set asset: {{assets.find(a=>a.id==d[1]).ticker}}</span>
+                    <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">Set asset: {{to_ticker(d[1])}}</span>
 
                     <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{d[2]}}</span>
 
@@ -775,13 +781,16 @@ export default {
                   </template>
                 </td>
               </tr>
-              <tr v-if="b.meta && b.meta.cron.length > 0">
-                <td colspan="7">
-                  <template v-for="m in b.meta.cron">
+              <tr v-if="b.meta">
+                <td v-if="b.meta.cron.length + b.meta.missed_validators.length > 0"  colspan="7">
+                  <template v-if="b.meta.cron.length > 0" v-for="m in b.meta.cron">
                     <span v-if="m[0] == 'autodispute'" class="badge badge-primary">Dispute auto-resolved: {{dispute_outcome(m[1], m[2])}}</span>
                     <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
                     <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span> &nbsp;
                   </template>
+
+                  <span v-if="b.meta.missed_validators.length > 0" class="badge badge-danger">Missed signatures from validators: {{b.meta.missed_validators.join(', ')}}</span>
+
                 </td>
               </tr>
             </template>
@@ -798,7 +807,7 @@ export default {
               <th scope="col">ID</th>
               <th scope="col">Pubkey</th>
               <th scope="col">Onchain FRD</th>
-              <th scope="col">Assets</th>
+              <th scope="col">Onchain Assets</th>
               <th scope="col">Nonce</th>
               <th scope="col">Debts</th>
             </tr>
@@ -808,8 +817,9 @@ export default {
               <th v-html="icon(u.pubkey,30)"></th>
               <th scope="row">{{u.id}}</th>
               <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
+
               <td>{{commy(u.balance)}}</td>
-              <td>{{u.balances}}</td>
+              <td>{{parse_balances(u.balances)}}</td>
               <td>{{u.nonce}}</td>
               <td>{{u.debts.length}}</td>
             </tr>
@@ -835,7 +845,7 @@ export default {
             <tr v-for="u in insurances">
               <th>{{u.leftId}}</th>
               <th>{{u.rightId}}</th>
-              <th>{{u.asset}}</th>
+              <th>{{to_ticker(u.asset)}}</th>
               <th>{{commy(u.insurance)}}</th>
               <th>{{commy(u.ondelta)}}</th>
               <th>{{u.nonce}}</th>

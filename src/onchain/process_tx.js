@@ -58,7 +58,7 @@ module.exports = async (tx, meta) => {
   if (me.pubkey.equals(signer.pubkey)) {
     if (PK.pending_batch == toHex(tx)) {
       l('Added to chain')
-      react({confirm: 'Your onchain transaction has been added!'})
+      react({confirm: 'Your onchain transaction has been added!'}, false)
       PK.pending_batch = null
     }
   }
@@ -253,19 +253,23 @@ module.exports = async (tx, meta) => {
           continue
         }
 
-        var offer = resolveChannel(ins.insurance, ins.ondelta + offdelta)
-
         if (ins.dispute_delayed) {
           // the other party sends counterproof
           if (ins.dispute_left == (compared == 1)) {
             // TODO: any punishment for cheating for starting party?
             // we don't want to slash everything like in LN, but some fee would help
-            parsed_tx.events.push([method, partner.id, 'disputed', ins, offer])
             ins.dispute_hashlocks = hashlocks
 
             ins.dispute_nonce = nonce
             ins.dispute_offdelta = offdelta
-            await ins.resolve(parsed_tx)
+
+            parsed_tx.events.push([
+              method,
+              partner.id,
+              'disputed',
+              ins,
+              await ins.resolve()
+            ])
             l('Resolved with fraud proof')
           } else {
             l('Old nonce or same counterparty')
@@ -281,7 +285,13 @@ module.exports = async (tx, meta) => {
           ins.dispute_left = compared == -1
           ins.dispute_delayed = K.usable_blocks + K.dispute_delay
 
-          parsed_tx.events.push([method, partner.id, 'started', ins, offer])
+          parsed_tx.events.push([
+            method,
+            partner.id,
+            'started',
+            ins,
+            resolveChannel(ins.insurance, ins.ondelta + offdelta)
+          ])
 
           await ins.save()
 
