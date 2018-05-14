@@ -736,7 +736,7 @@ export default {
         <p>Blockchain is a chain of blocks, which contain transactions. These transactions were publicly broadcasted and executed on every full node, including yours. On this page you will see only last few blocks that your node processed, after a while they are deleted from your machine - you aren't required to store them.</p>
         <p>Empty blocks are omitted. Under each block you will see what happened: transactions submitted by users and some automatic events.</p>
         <p>If you want to review historical blocks from the beginning go to an explorer of any of the validators listed under Network.</p>
-        <table class="table">
+        <table v-if="blocks.length>0" class="table">
           <thead class="thead-dark">
             <tr>
               <th scope="col">#</th>
@@ -796,6 +796,9 @@ export default {
             </template>
           </tbody>
         </table>
+        <div v-else>
+        <p><b>You're not a validator, so your node is not required to store blocks - they are pruned immediately after execution. If you want to see historical blockchain events visit Explorer on any validator website.</b></p>
+        </div>
       </div>
       <div v-else-if="tab=='account_explorer'">
         <h1>Account Explorer</h1>
@@ -862,12 +865,14 @@ export default {
             <tr>
               <th scope="col">Hash</th>
               <th scope="col">Revealed At</th>
+              <th scope="col">Delete At</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="u in hashlocks">
               <th>{{u.hash}}</th>
               <th>{{u.revealed_at}}</th>
+              <th>{{u.delete_at}}</th>
             </tr>
           </tbody>
         </table>

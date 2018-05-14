@@ -91,8 +91,6 @@ module.exports = async (tx, meta) => {
         parsed_tx.events.push([method, asset])
       }
     } else if (method == 'withdrawFrom') {
-      //require('./methods/withdraw_from')(t[1])
-
       var my_hub = K.hubs.find((h) => h.id == signer.id)
 
       for (var input of t[1]) {
@@ -116,11 +114,6 @@ module.exports = async (tx, meta) => {
           include: {all: true}
         })
 
-        if (!ins || amount > ins.insurance) {
-          l(`Invalid amount ${ins.insurance} vs ${amount}`)
-          continue
-        }
-
         var body = r([
           methodMap('withdrawFrom'),
           ins.leftId,
@@ -132,6 +125,11 @@ module.exports = async (tx, meta) => {
 
         if (!ec.verify(body, input[2], partner.pubkey)) {
           l('Invalid withdrawal sig by partner ', ins.nonce, input)
+          continue
+        }
+
+        if (!ins || amount > ins.insurance) {
+          l(`Invalid amount ${ins.insurance} vs ${amount}`)
           continue
         }
 
@@ -153,7 +151,7 @@ module.exports = async (tx, meta) => {
         // was this input related to us?
         if (me.record) {
           if (me.record.id == partner.id) {
-            var ch = await me.getChannel(signer.pubkey)
+            var ch = await me.getChannel(signer.pubkey, asset)
             // they planned to withdraw and they did. Nullify hold amount
             ch.d.they_input_amount = 0
             await ch.d.save()
@@ -161,7 +159,7 @@ module.exports = async (tx, meta) => {
 
           if (me.record.id == signer.id) {
             var ch = await me.getChannel(partner.pubkey, asset)
-            // they planned to withdraw and they did. Nullify hold amount
+            // we planned to withdraw and they did. Nullify hold amount
             ch.d.input_amount = 0
             ch.d.input_sig = null
             await ch.d.save()

@@ -38,7 +38,7 @@ cache = async (i) => {
         },
         async () => {
           cached_result.blocks = (await Block.findAll({
-            limit: 500,
+            limit: 100,
             order: [['id', 'desc']],
             where: me.show_empty_blocks
               ? {}

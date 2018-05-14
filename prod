@@ -11,7 +11,8 @@ npm run build
 
 node fs --genesis=test
 
-db=mysql:root:123123
+#db=mysql:root:123123
+db=postgres:postgres:123123
 maxport=8008
 
 NODE_ENV=production forever start fs.js -p443 --silent --db=$db

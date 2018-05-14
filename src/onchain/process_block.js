@@ -8,6 +8,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return l('Too long block')
   }
 
+  var all = []
+
   let [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(header)
 
   timestamp = readInt(timestamp)
@@ -119,14 +121,16 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   // Auto resolving disputes that are due
-  let disputes = await Insurance.findAll({
-    where: {dispute_delayed: K.usable_blocks},
-    include: {all: true}
-  })
-
-  for (let ins of disputes) {
-    meta.cron.push(['autodispute', ins, await ins.resolve()])
-  }
+  all.push(
+    Insurance.findAll({
+      where: {dispute_delayed: K.usable_blocks},
+      include: {all: true}
+    }).then(async (insurances) => {
+      for (let ins of insurances) {
+        meta.cron.push(['autodispute', ins, await ins.resolve()])
+      }
+    })
+  )
 
   // Executing onchaing gov proposals that are due
   let jobs = await Proposal.findAll({
@@ -174,12 +178,12 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           stat.ctime = null
           stat.birthtime = null
 
-          // Skip offchain db, replicated datadirs and irrelevant things
+          // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
           // Todo: use whitelist instead?
           if (
             path.startsWith('./.') ||
             path.match(
-              /(data[0-9]+|data\/offchain|DS_Store|node_modules|test|dist|private)/
+              /^\.\/(data[0-9]+|data\/offchain|\.DS_Store|node_modules|wallet\/node_modules|dist|tools)/
             )
           ) {
             return false
@@ -201,51 +205,45 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
-  await Hashlock.destroy({
-    where: {
-      delete_at: K.usable_blocks
-    }
-  })
+  all.push(
+    Hashlock.destroy({
+      where: {
+        delete_at: K.usable_blocks
+      }
+    })
+  )
 
   // save final block in offchain db. Required for members, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
-  if (me.my_member || me.save_blocks) {
-    await Block.create({
-      prev_hash: fromHex(prev_hash),
-      hash: sha3(header),
+  if (me.my_member || !me.prune) {
+    all.push(
+      Block.create({
+        prev_hash: fromHex(prev_hash),
+        hash: sha3(header),
 
-      precommits: r(precommits), // pack them in rlp for storage
-      header: header,
-      ordered_tx_body: ordered_tx_body,
+        precommits: r(precommits), // pack them in rlp for storage
+        header: header,
+        ordered_tx_body: ordered_tx_body,
 
-      total_tx: ordered_tx.length,
+        total_tx: ordered_tx.length,
 
-      // did anything happen in this block?
-      meta:
-        meta.parsed_tx.length +
-          meta.cron.length +
-          meta.missed_validators.length >
-        0
-          ? JSON.stringify(meta)
-          : null
-    })
+        // did anything happen in this block?
+        meta:
+          meta.parsed_tx.length +
+            meta.cron.length +
+            meta.missed_validators.length >
+          0
+            ? JSON.stringify(meta)
+            : null
+      })
+    )
   }
 
-  // Ensure our last broadcasted batch was added
-  if (PK.pending_batch) {
-    var raw = fromHex(PK.pending_batch)
-    l('Rebroadcasting pending tx ', raw.length)
-
-    //me.send(me.next_member(), 'tx', r([raw]))
-    me.send(me.next_member(true), 'tx', r([raw]))
-  } else {
-    // time to broadcast our next batch then. (Delay to ensure validator processed the block)
-    //setTimeout(() => {
-    me.broadcast()
-    //}, 500)
-  }
+  await Promise.all(all)
 
   if (me.request_reload) {
     gracefulExit('reload requested')
   }
+
+  return true
 }

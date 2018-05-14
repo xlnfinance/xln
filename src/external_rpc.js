@@ -175,7 +175,10 @@ module.exports = async (ws, msg) => {
 
       var started = K.total_blocks
       for (var block of chain) {
-        await me.processBlock(block[0], block[1], block[2])
+        if (!await me.processBlock(block[0], block[1], block[2])) {
+          l('Bad chain?')
+          break
+        }
       }
 
       // dirty hack to not backup k.json until all blocks are synced
@@ -186,6 +189,18 @@ module.exports = async (ws, msg) => {
         if (K.total_blocks - started > 0) {
           // something new happened - cache
           cache()
+
+          // Ensure our last broadcasted batch was added
+          if (PK.pending_batch) {
+            var raw = fromHex(PK.pending_batch)
+            l('Rebroadcasting pending tx ', raw.length)
+            me.send(me.next_member(true), 'tx', r([raw]))
+          } else {
+            // time to broadcast our next batch then. (Delay to ensure validator processed the block)
+            //setTimeout(() => {
+            me.broadcast()
+            //}, 500)
+          }
         }
       }
     })
@@ -197,21 +212,15 @@ module.exports = async (ws, msg) => {
     })
 
     if (last) {
-      //l('Sharing blocks since ' + last.id)
-
-      var blocks = await Block.findAll({
+      let chain = (await Block.findAll({
         where: {
           id: {[Op.gte]: last.id}
         },
+        order: [['id', 'ASC']],
         limit: sync_limit
+      })).map((b) => {
+        return [r(b.precommits), b.header, b.ordered_tx_body]
       })
-
-      var chain = []
-
-      for (var b of blocks) {
-        // unpack precommits
-        chain.push([r(b.precommits), b.header, b.ordered_tx_body])
-      }
 
       ws.send(concat(inputMap('chain'), r(chain)))
     } else {

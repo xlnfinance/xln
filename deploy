@@ -1,6 +1,6 @@
 rm -rf data*
 
-rsync . root@failsafe.network:~/fs -rv --delete --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'
+rsync . root@failsafe.network:~/fs -rv  --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'
 
 ssh root@failsafe.network <<'ENDSSH'
 cd ~/fs

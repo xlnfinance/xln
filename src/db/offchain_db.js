@@ -12,17 +12,25 @@ if (argv.db) {
 
     logging: false,
     retry: {
-      max: 5
-    }
-    /*
+      max: 10
+    },
     pool: {
-      max: 5,
+      max: base_port == 443 ? 50 : 10,
       min: 0,
-      acquire: 5000,
-      idle: 5000
-    }*/
+      acquire: 20000,
+      idle: 20000,
+      evict: 30000,
+      handleDisconnects: true
+    }
   }
-  /* Set new mysql pw:
+
+  /* Helpful stats:
+show status like '%used_connections%';
+show variables like 'max_connections';
+show variables like 'open_files_limit';
+ulimit -n 10000
+
+Set new mysql pw:
 use mysql;
 update user set authentication_string=password(''), plugin='mysql_native_password' where user='root';
 ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '123123';
@@ -30,7 +38,8 @@ ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '123123';
 SELECT plugin FROM mysql.user WHERE User = 'root';
 
 
-Make sure mysql dbs exist:  postgres://homakov:@localhost:5432/datadir
+Create databases before usage in simulation:
+
 create database data;
 str = ''
 for(i=8001;i<8200;i++){

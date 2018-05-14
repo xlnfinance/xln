@@ -300,7 +300,9 @@ class Me {
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
     // cache onchain data regularly to present in Explorers
     me.intervals.push(setInterval(cache, K.blocktime * 1000))
+
     cache()
+    sync()
     snapshotHash()
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
@@ -403,10 +405,9 @@ class Me {
     // but for local tests limit requests and run faster
     if (on_server) {
       // replenish with testnet faucet once in a while
-      if (counter % 200 == 30) me.getCoins()
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(1000 + Math.random() * 10000))
+      }, Math.round(1000 + Math.random() * 6000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)

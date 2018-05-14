@@ -281,7 +281,7 @@ require('./src/db/offchain_db')
   if (argv.console) {
     initDashboard()
   } else if (argv.genesis) {
-    require('./src/genesis')(argv.genesis)
+    require('./tools/genesis')(argv.genesis)
   } else if (argv.cluster) {
     var cluster = require('cluster')
     if (cluster.isMaster) {
@@ -311,7 +311,7 @@ for (let i = 8001; i < 8200; i++){
 */
 if (argv.monkey) {
   randos = fs
-    .readFileSync('./test/randos.txt')
+    .readFileSync('./tools/randos.txt')
     .toString()
     .split('\n')
     .slice(3, parseInt(argv.monkey) - 8000)

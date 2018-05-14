@@ -91,7 +91,8 @@ module.exports = async (partner, asset = 1) => {
   if (ch.d.signed_state) {
     let st = r(ch.d.signed_state)
     prettyState(st)
-    ch.ascii_states += '\n' + ascii_state(st)
+    st = ascii_state(st)
+    ch.ascii_states += '\n' + (st == ch.ascii_state ? '(same)' : st)
   }
 
   ch.payable =

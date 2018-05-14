@@ -22,6 +22,9 @@ module.exports = async (opts) => {
   let ch = await me.getChannel(via, opts.asset)
 
   if (amount > ch.payable) {
+    // get some!
+    me.getCoins()
+
     react({alert: `Not enough funds`})
   } else if (amount > K.max_amount) {
     react({alert: `Maximum payment is $${commy(K.max_amount)}`})
