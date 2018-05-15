@@ -465,6 +465,13 @@ module.exports = async (tx, meta) => {
         meta.outputs_volume += amount
       }
     } else if (method == 'sellFor') {
+      // similar to depositTo but sends money to an Order object
+      var [sellAsset, amount, buyAsset, rate] = t[1]
+      readInts(sellAsset, amount, buyAsset, rate)
+
+      let sellerOwns = signer.asset(asset)
+
+      var order = await Order.create({})
     } else if (method == 'propose') {
       // temporary protection
       if (signer.id != 1) continue

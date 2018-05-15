@@ -1,6 +1,9 @@
 // Offchain database - local and private stuff
-
-if (!fs.existsSync(datadir + '/offchain')) fs.mkdirSync(datadir + '/offchain')
+var use_force = false
+if (!fs.existsSync(datadir + '/offchain')) {
+  fs.mkdirSync(datadir + '/offchain')
+  use_force = true
+}
 
 if (argv.db) {
   let db_info = argv.db.split(':')
@@ -15,7 +18,7 @@ if (argv.db) {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 50 : 10,
+      max: base_port == 443 ? 30 : 5,
       min: 0,
       acquire: 20000,
       idle: 20000,
@@ -40,8 +43,7 @@ SELECT plugin FROM mysql.user WHERE User = 'root';
 
 Create databases before usage in simulation:
 
-create database data;
-str = ''
+str = 'create database data;'
 for(i=8001;i<8200;i++){
 str+='create database data'+i+';'
 }
@@ -73,7 +75,8 @@ str+='create database data'+i+';'
 // ensure db exists
 //privSequelize.query('CREATE DATABASE ' + datadir).catch(l)
 
-l('Reading offchain db :' + base_db.dialect)
+privSequelize.sync({force: use_force})
+l('Reading and syncing ' + use_force + ' offchain db: ' + base_db.dialect)
 // Encapsulates relationship with counterparty: offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
@@ -208,29 +211,7 @@ Delta.prototype.getState = async function() {
   var left = Buffer.compare(this.myId, this.partnerId) == -1
 
   // builds current canonical state.
-  // status="new" settle and fail are still present in state
-
-  var inwards = (await this.getPayments({
-    where: {
-      [Op.or]: [
-        {type: 'add', status: 'sent'},
-        {type: 'add', status: 'acked'},
-        {type: 'settle', status: 'new'},
-        {type: 'fail', status: 'new'}
-      ],
-      is_inward: true
-    },
-    // explicit order because of postgres https://github.com/sequelize/sequelize/issues/9289
-    order: [['id', 'ASC']]
-  })).map((t) => t.toLock())
-
-  var outwards = (await this.getPayments({
-    where: {
-      [Op.or]: [{type: 'add', status: 'sent'}, {type: 'add', status: 'acked'}],
-      is_inward: false
-    },
-    order: [['id', 'ASC']]
-  })).map((t) => t.toLock())
+  // Note that "new" settle and fail are still present in state
 
   var state = [
     methodMap('disputeWith'),
@@ -242,9 +223,24 @@ Delta.prototype.getState = async function() {
       this.asset
     ],
     // 2 is inwards for left, 3 for right
-    left ? inwards : outwards,
-    left ? outwards : inwards
+    [],
+    []
   ]
+  ;(await this.getPayments({
+    where: {
+      [Op.or]: [
+        {type: 'add', status: 'sent'},
+        {type: 'add', status: 'acked'},
+        {type: 'settle', status: 'new'},
+        {type: 'fail', status: 'new'}
+      ]
+    },
+    // explicit order because of postgres https://github.com/sequelize/sequelize/issues/9289
+    order: [['id', 'ASC']]
+  })).map((t) => {
+    // this == works like XOR. [2] gets all inwards for left and [3] for right
+    state[t.is_inward == left ? 2 : 3].push(t.toLock())
+  })
 
   return state
 }

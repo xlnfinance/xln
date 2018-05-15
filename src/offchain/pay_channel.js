@@ -21,6 +21,11 @@ module.exports = async (opts) => {
   let unlocker = r([bin(unlocker_box), unlocker_nonce, bin(me.box.publicKey)])
   let ch = await me.getChannel(via, opts.asset)
 
+  if (!ch.d) {
+    l('No such delta')
+    return false
+  }
+
   if (amount > ch.payable) {
     // get some!
     me.getCoins()

@@ -87,12 +87,16 @@ export default {
         amount: hashargs['amount'],
         invoice: hashargs['invoice']
       },
+      order: {
+        amount: 0,
+        rate: 0,
+        asset_to_buy: 0
+      },
 
       hardfork: '',
 
       // useful for visual debugging
-      dev_mode: false,
-      ascii_states: ''
+      dev_mode: false
     }
   },
   watch: {
@@ -163,7 +167,7 @@ export default {
       FS(method, args).then(render)
       return false
     },
-    rebalance: () => {
+    onchain: () => {
       var total = app.outs.reduce(
         (k, v) => k + parseFloat(v.amount.length == 0 ? '0' : v.amount),
         0
@@ -174,7 +178,8 @@ export default {
         partner: app.ch.partner,
         request_amount: app.uncommy(app.request_amount),
         outs: app.outs,
-        asset: app.asset
+        asset: app.asset,
+        order: app.order
       })
       // }
     },
@@ -192,6 +197,15 @@ export default {
       let asset = app.assets.find((a) => a.id == assetId)
 
       return asset ? asset.ticker : 'N/A'
+    },
+    getAsset: (asset) => {
+      if (asset == 1) {
+        return app.commy(app.record.balance)
+      } else {
+        // todo make ".00" optional for assets
+        var bal = JSON.parse(app.record.balances)[asset]
+        return app.commy(bal ? bal : 0)
+      }
     },
     parse_balances: (balances) => {
       if (balances) {
@@ -488,11 +502,13 @@ export default {
       <div v-else-if="tab=='wallet'">
         <template v-if="pubkey">
           <h2 class="alert alert-danger" v-if="pending_batch">Please wait until your onchain transaction is added to the blockchain.</h2>
-          <h2 class="alert alert-danger" v-if="K.ts < ts() - 600">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
-          <h2 class="alert alert-danger" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
+
+          <h2 class="alert alert-danger" v-if="K.ts < ts() - 600">Payments can fail, please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
+
+          <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
           <div v-if="record">
-            <h2>Balance onchain: <b>{{commy(record.balance)}}</b></h2>
+            <h2>Balance {{to_ticker(asset)}} onchain: <b>{{getAsset(asset)}}</b></h2>
             <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with any hub. Your onchain ID: <b>{{record.id}}</b></p>
             <hr />
           </div>
@@ -610,23 +626,39 @@ export default {
       </div>
       <div v-else-if="tab=='onchain'">
         <div v-if="record && ch">
-          <h3>Onchain Actions</h3>
-          <p>Onchain balance: {{commy(record.balance)}}</p>
-          <small v-if="ch.insured>0">Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your onchain balance.</small>
-          <p v-if="ch.insured>0">
-            <input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to Withdraw">
+          <h1>Onchain Operations</h1>
+          <p>Onchain {{to_ticker(asset)}} balance: {{getAsset(asset)}}</p>
+          
+          <template v-if="ch.insured>0">
+          <h3 >Withdraw from hub</h3>
+          <small>Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your onchain balance.</small>
+          <p>
+            <input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to withdraw">
           </p>
-          <small>Deposits to other users or channels.</small>
+          </template>
+
+          <h3>Deposits to other users or channels</h3>
           <p v-for="out in outs">
-            <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to Send">
+            <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit">
             <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
             <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Invoice (optional)">
           </p>
           <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">Add Deposit</button>
           </p>
+
+          <h3>Trustless Exchange</h3>
+          <p>Asset you are selling: {{to_ticker(asset)}}</p>
+          <p><input style="width:300px" type="number" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell">
+          </p>
+          <p>Asset you are buying:</p>
+            <select v-model="order.asset_to_buy">
+              <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
+            </select>
+          <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"></p>
+
           <p>
-            <button type="button" class="btn btn-warning" @click="rebalance()">Rebalance Onchain</button>
+            <button type="button" class="btn btn-warning" @click="onchain()">Execute Onchain</button>
           </p>
           <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
           </p>

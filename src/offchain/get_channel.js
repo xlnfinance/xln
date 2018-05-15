@@ -52,8 +52,6 @@ module.exports = async (partner, asset = 1) => {
   if (created[1]) loff(`Creating channel ${trim(partner)}`)
   ch.d = created[0]
 
-  //await ch.d.save()
-
   let user = await me.byKey(partner)
   if (user) {
     ch.partner = user.id
@@ -81,6 +79,7 @@ module.exports = async (partner, asset = 1) => {
   Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
   // We reduce payable by total amount of unresolved hashlocks in either direction
+  // TODO optimization, getState is heavy on db so precache hashlock amounts
   let state = await ch.d.getState()
   let left_inwards = 0
   state[2].map((a) => (left_inwards += a[0]))
@@ -92,7 +91,7 @@ module.exports = async (partner, asset = 1) => {
     let st = r(ch.d.signed_state)
     prettyState(st)
     st = ascii_state(st)
-    ch.ascii_states += '\n' + (st == ch.ascii_state ? '(same)' : st)
+    ch.ascii_states += st == ch.ascii_state ? '(same)' : st
   }
 
   ch.payable =

@@ -98,6 +98,8 @@ class Me {
     var merged = [[methodMap('revealSecrets'), []]]
 
     var per_asset = {}
+    // rare requests that we don't see need to merge & optimize
+    let not_mergeable = ['propose', 'vote', 'sellFor', 'cancelOrder']
     // put into one of first arrays or add to the end
     me.batch.map((kv) => {
       //if (!kv) return
@@ -105,21 +107,16 @@ class Me {
       if (kv[0] == 'revealSecrets') {
         // revealed secrets are not per-assets
         merged[0][1] = merged[0][1].concat(kv[1])
-      } else if (kv[0] == 'propose' || kv[0] == 'vote') {
+      } else if (not_mergeable.indexOf(kv[0]) != -1) {
         // these methods are not batchable and must go separately
         merged.push([methodMap(kv[0]), kv[1]])
       } else {
         // asset specific actions
 
         if (!per_asset[kv[1]]) {
-          per_asset[kv[1]] = [[], [], [], [], [], []]
+          per_asset[kv[1]] = [[], [], []]
         }
-        let ind = [
-          'disputeWith',
-          'withdrawFrom',
-          'depositTo',
-          'sellFor'
-        ].indexOf(kv[0])
+        let ind = ['disputeWith', 'withdrawFrom', 'depositTo'].indexOf(kv[0])
         if (ind == -1) {
           fatal('Unknown method')
         }
@@ -129,17 +126,21 @@ class Me {
     me.batch = []
 
     // finally merging per-asset batches
+    var multiasset = false
     for (var i in per_asset) {
       if (per_asset.hasOwnProperty(i)) {
         // sort withdraws and deposits (easier to analyze)
         per_asset[i][1].sort((a, b) => b[0] - a[0])
         per_asset[i][2].sort((a, b) => b[0] - a[0])
 
-        merged.push([methodMap('setAsset'), [parseInt(i)]])
+        if (i != '1' || multiasset) {
+          // 1 is default anyway
+          merged.push([methodMap('setAsset'), [parseInt(i)]])
+        }
         merged.push([methodMap('disputeWith'), per_asset[i][0]])
         merged.push([methodMap('withdrawFrom'), per_asset[i][1]])
         merged.push([methodMap('depositTo'), per_asset[i][2]])
-        merged.push([methodMap('sellFor'), per_asset[i][3]])
+        multiasset = true
       }
     }
 
@@ -311,9 +312,23 @@ class Me {
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
 
+    me.intervals.push(
+      setInterval(() => {
+        // clean up old payments: all acked fails and settles
+        Payment.destroy({
+          where: {
+            [Op.or]: [
+              {type: 'settle', status: 'acked'},
+              {type: 'fail', status: 'acked'}
+            ]
+          }
+        })
+      }, 60000)
+    )
+
     if (me.my_hub) {
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 2000)
       )
 
       // hubs have force react regularly
@@ -336,9 +351,12 @@ class Me {
             }
           })
           // must be >100 after expected rebalance
-          var alert = `${me.metrics.settle.total}/200 settled
-          Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}
-          Blocks: ${await Block.count()}`
+          var alert = `${me.metrics.settle.total}/200 settled\n
+Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n
+Blocks: ${await Block.count()}\n
+Deltas: ${await Delta.count()}\n
+Payments: ${await Payment.count()}\n
+          `
 
           l(alert)
 

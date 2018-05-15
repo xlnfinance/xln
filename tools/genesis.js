@@ -1,4 +1,4 @@
-module.exports = async (genesis) => {
+module.exports = async () => {
   l('Start genesis')
 
   try {

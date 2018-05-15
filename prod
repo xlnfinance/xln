@@ -9,11 +9,12 @@ rm -rf data*
 
 npm run build
 
-node fs --genesis=test
 
 #db=mysql:root:123123
 db=postgres:postgres:123123
-maxport=8008
+maxport=8016
+
+node fs --genesis=test --db=$db
 
 NODE_ENV=production forever start fs.js -p443 --silent --db=$db
 for i in $(seq 8001 $maxport); do

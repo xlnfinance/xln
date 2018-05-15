@@ -290,8 +290,11 @@ Order = sequelize.define('order', {
   rate: Sequelize.INTEGER
 })
 User.hasMany(Order)
-Asset.hasMany(Order)
-
 Order.belongsTo(User)
-Order.belongsTo(Asset, {through: 'seller'})
-Order.belongsTo(Asset, {through: 'buyer'})
+
+Asset.hasMany(Order, {as: 'sellOrders'})
+Asset.hasMany(Order, {as: 'buyOrders'})
+Order.belongsTo(Asset, {as: 'sellAsset'})
+Order.belongsTo(Asset, {as: 'buyAsset'})
+
+Order.prototype.match = async function() {}

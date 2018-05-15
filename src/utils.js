@@ -266,6 +266,11 @@ readInt = (i) => {
   }
 }
 
+// source changing version
+readInts = () => {
+  Object.values(arguments).map((arg) => (arg = readInt(arg)))
+}
+
 toHex = (inp) => Buffer.from(inp).toString('hex')
 fromHex = (inp) => Buffer.from(inp, 'hex')
 bin = (data) => Buffer.from(data)

@@ -153,6 +153,25 @@ module.exports = async (ws, msg) => {
           react({alert: 'No action specified'})
         }
 
+        p.order.amount = parseInt(p.order.amount)
+
+        if (p.order.amount > 0) {
+          if (p.order.amount > me.record.asset(asset) + p.request_amount) {
+            // more than you can theoretically have even after withdrawal
+            react({alert: 'Not enough funds to trade this amount'})
+          } else {
+            me.batch.push([
+              'sellFor',
+              [
+                asset,
+                p.order.amount,
+                parseInt(p.order.asset_to_buy),
+                parseInt(p.order.rate)
+              ]
+            ])
+          }
+        }
+
         return false
 
         break

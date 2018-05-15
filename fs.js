@@ -38,6 +38,7 @@ on_server = fs.existsSync(
 )
 initDashboard = async (a) => {
   // auto reloader for debugging
+  /*
   l(note(`Touch ${highlight('../restart')} to restart`))
   setInterval(() => {
     fs.stat('../restart', (e, f) => {
@@ -48,7 +49,7 @@ initDashboard = async (a) => {
         gracefulExit('restarting')
       }
     })
-  }, 1000)
+  }, 1000)*/
 
   var kFile = datadir + '/onchain/k.json'
   if (fs.existsSync(kFile)) {
@@ -64,9 +65,6 @@ initDashboard = async (a) => {
   } else {
     fatal(`Unable to read ${highlight(kFile)}, quitting`)
   }
-
-  // if we use mysql, need to explicitly reset db
-  await privSequelize.sync({force: !!argv.db})
 
   var finalhandler = require('finalhandler')
   var serveStatic = require('serve-static')
@@ -176,8 +174,6 @@ initDashboard = async (a) => {
 
   me = new Me()
 
-  repl.context.me = me
-
   if (fs.existsSync(datadir + '/offchain/pk.json')) {
     PK = JSON.parse(fs.readFileSync(datadir + '/offchain/pk.json'))
   } else {
@@ -219,6 +215,10 @@ initDashboard = async (a) => {
       RPC.internal_rpc(ws, msg)
     })
   })
+
+  if (repl) {
+    repl.context.me = me
+  }
 }
 
 derive = async (username, pw) => {
@@ -273,7 +273,6 @@ base_port = argv.p ? parseInt(argv.p) : 8000
 if (!fs.existsSync('data')) {
   fs.mkdirSync('data')
   fs.mkdirSync('data/onchain')
-  fs.mkdirSync('data/offchain')
 }
 require('./src/db/onchain_db')
 require('./src/db/offchain_db')
@@ -281,7 +280,7 @@ require('./src/db/offchain_db')
   if (argv.console) {
     initDashboard()
   } else if (argv.genesis) {
-    require('./tools/genesis')(argv.genesis)
+    require('./tools/genesis')()
   } else if (argv.cluster) {
     var cluster = require('cluster')
     if (cluster.isMaster) {
@@ -320,8 +319,8 @@ if (argv.monkey) {
 
 let ooops = (err) => {
   if (err.name == 'SequelizeTimeoutError') return
-  l(errmsg(err))
-  //fatal(`Fatal rejection, quitting`)
+  l(err)
+  fatal(`Fatal rejection, quitting`)
 }
 process.on('unhandledRejection', ooops)
 process.on('uncaughtException', ooops)
