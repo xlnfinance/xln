@@ -70,7 +70,7 @@ module.exports = async () => {
     dispute_delay: 20, // in how many blocks disputes are considered final
     hashlock_exp: 20, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 1000, // for how many blocks onchain keeps it unlocked since reveal
-    max_hashlocks: 1000, // we don't want overweight huge dispute strings
+    max_hashlocks: 300, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
     dispute_if_no_ack: 60000 // ms, how long we wait for ack before going to blockchain
   }

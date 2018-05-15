@@ -273,7 +273,7 @@ readInts = () => {
 
 toHex = (inp) => Buffer.from(inp).toString('hex')
 fromHex = (inp) => Buffer.from(inp, 'hex')
-bin = (data) => Buffer.from(data)
+bin = (data) => Buffer.from(typeof data == 'number' ? [data] : data)
 sha3 = (a) =>
   keccak('keccak256')
     .update(bin(a))
@@ -363,40 +363,9 @@ usage = () => {
   })
 }
 
-// tells external RPC how to parse this request
-inputMap = (i) => {
-  var map = [
-    'auth', // this socket belongs to my pubkey
-
-    // consensus
-    'propose',
-    'prevote',
-    'precommit',
-
-    'tx', // propose array of tx to add to block
-
-    'sync', // i want to sync since this prev_hash
-    'chain', // return X blocks since given prev_hash
-
-    'update', // new input to state machine
-    'requestWithdrawFrom',
-    'withdrawFrom',
-    'ack',
-    'setLimits',
-
-    'testnet'
-  ]
-  if (typeof i === 'string') {
-    // buffer friendly
-    return Buffer.from([map.indexOf(i)])
-  } else {
-    return map[i]
-  }
-}
-
 // enumerator of all methods and tx types in the system
 methodMap = (i) => {
-  var map = [
+  let map = [
     'placeholder',
 
     // consensus
@@ -432,11 +401,19 @@ methodMap = (i) => {
     'settlerisk',
     'failrisk',
 
-    'auth' // any kind of offchain auth signatures between peers
+    // offchain inputs
+    'auth', // any kind of offchain auth signatures between peers
+    'tx', // propose array of tx to add to block
+    'sync', // i want to sync since this prev_hash
+    'chain', // return X blocks since given prev_hash
+    'requestWithdrawFrom',
+    'ack',
+    'testnet'
   ]
 
   if (typeof i === 'string') {
-    if (map.indexOf(i) == -1) throw 'No such method: ' + i
+    i = i.trim()
+    if (map.indexOf(i) == -1) throw `No such method: "${i}"`
     return map.indexOf(i)
   } else {
     return map[i]

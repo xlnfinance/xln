@@ -4,11 +4,12 @@ forever stopall
 killall Failsafe 2>/dev/null
 
 rm -rf data*
-node fs --genesis=test
 
 db=mysql:root:123123
-maxport=8012
+maxport=8008
 
+
+node fs --genesis=test --db=$db
 ttab 'node fs.js -p8443  --db=$db'
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i

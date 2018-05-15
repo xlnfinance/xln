@@ -210,11 +210,13 @@ module.exports = async (ws, msg) => {
         } else if (p.action == 6) {
           me.CHEAT_dontwithdraw = 1
         } else {
+          me.getCoins()
+          /*
           me.send(
             Members.find((m) => m.id == p.partner),
             'testnet',
             concat(bin([p.action, p.asset]), bin(me.address))
-          )
+          )*/
         }
 
         result.confirm = 'Testnet action triggered'

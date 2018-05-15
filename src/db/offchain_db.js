@@ -81,86 +81,125 @@ l('Reading and syncing ' + use_force + ' offchain db: ' + base_db.dialect)
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
 // we name our things "value", and counterparty's "they_value"
-Delta = privSequelize.define('delta', {
-  // between who and who
-  myId: Sequelize.BLOB,
-  partnerId: Sequelize.BLOB,
+Delta = privSequelize.define(
+  'delta',
+  {
+    // between who and who
+    myId: Sequelize.BLOB,
+    partnerId: Sequelize.BLOB,
 
-  // higher nonce is valid
-  nonce: Sequelize.INTEGER,
-  status: Sequelize.TEXT,
+    // higher nonce is valid
+    nonce: Sequelize.INTEGER,
+    status: Sequelize.ENUM(
+      'master',
+      'sent',
+      'merge',
+      'disputed',
+      'CHEAT_dontack'
+    ),
 
-  pending: Sequelize.BLOB,
+    pending: Sequelize.BLOB,
 
-  // TODO: clone from Insurance table to Delta to avoid double querying both dbs
-  insurance: Sequelize.INTEGER,
-  ondelta: Sequelize.INTEGER,
+    // TODO: clone from Insurance table to Delta to avoid double querying both dbs
+    insurance: Sequelize.INTEGER,
+    ondelta: Sequelize.INTEGER,
 
-  offdelta: Sequelize.INTEGER,
-  asset: {
-    type: Sequelize.INTEGER,
-    defaultValue: 0
+    offdelta: Sequelize.INTEGER,
+    asset: {
+      type: Sequelize.INTEGER,
+      defaultValue: 0
+    },
+
+    soft_limit: Sequelize.INTEGER,
+    hard_limit: Sequelize.INTEGER, // we trust up to
+
+    they_soft_limit: Sequelize.INTEGER,
+    they_hard_limit: Sequelize.INTEGER, // they trust us
+
+    flush_requested_at: Sequelize.DATE,
+    ack_requested_at: Sequelize.DATE,
+    last_online: Sequelize.DATE,
+    withdrawal_requested_at: Sequelize.DATE,
+
+    they_input_amount: Sequelize.INTEGER,
+
+    input_amount: Sequelize.INTEGER,
+    input_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
+
+    sig: Sequelize.BLOB,
+    signed_state: Sequelize.BLOB,
+
+    // All the safety Byzantine checks start with cheat_
+    CHEAT_profitable_state: Sequelize.BLOB,
+    CHEAT_profitable_sig: Sequelize.BLOB,
+
+    // 4th type of balance, equivalent traditional balance in a bank. For pocket change.
+    // Exists for convenience like pulling payments when the user is offline.
+    custodian_balance: {
+      type: Sequelize.INTEGER,
+      defaultValue: 0
+    }
   },
-
-  soft_limit: Sequelize.INTEGER,
-  hard_limit: Sequelize.INTEGER, // we trust up to
-
-  they_soft_limit: Sequelize.INTEGER,
-  they_hard_limit: Sequelize.INTEGER, // they trust us
-
-  flush_requested_at: Sequelize.DATE,
-  ack_requested_at: Sequelize.DATE,
-  last_online: Sequelize.DATE,
-  withdrawal_requested_at: Sequelize.DATE,
-
-  they_input_amount: Sequelize.INTEGER,
-
-  input_amount: Sequelize.INTEGER,
-  input_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
-
-  sig: Sequelize.BLOB,
-  signed_state: Sequelize.BLOB,
-
-  // All the safety Byzantine checks start with cheat_
-  CHEAT_profitable_state: Sequelize.BLOB,
-  CHEAT_profitable_sig: Sequelize.BLOB,
-
-  // 4th type of balance, equivalent traditional balance in a bank. For pocket change.
-  // Exists for convenience like pulling payments when the user is offline.
-  custodian_balance: {
-    type: Sequelize.INTEGER,
-    defaultValue: 0
+  {
+    /*
+    indexes: [
+      {
+        fields: [
+          {
+            attribute: 'partnerId',
+            length: 32
+          }
+        ]
+      }
+    ]
+    */
   }
-})
+)
 
-Payment = privSequelize.define('payment', {
-  // add/settle/fail
-  type: Sequelize.TEXT,
-  // new>sent>acked
-  status: Sequelize.TEXT,
-  // no inward = sender, no outward = receiver, otherwise = mediator
-  is_inward: Sequelize.BOOLEAN,
+Payment = privSequelize.define(
+  'payment',
+  {
+    // add/settle/fail
+    type: Sequelize.ENUM('add', 'settle', 'fail'),
+    // new>sent>acked
+    status: Sequelize.ENUM('new', 'sent', 'acked'),
+    // no inward = sender, no outward = receiver, otherwise = mediator
+    is_inward: Sequelize.BOOLEAN,
 
-  // in outward it is inward amount - fee
-  amount: Sequelize.INTEGER,
-  // hash is same for inward and outward
-  hash: Sequelize.BLOB,
-  // best by block
-  exp: Sequelize.INTEGER,
-  // asset type
-  asset: Sequelize.INTEGER,
+    // in outward it is inward amount - fee
+    amount: Sequelize.INTEGER,
+    // hash is same for inward and outward
+    hash: Sequelize.BLOB,
+    // best by block
+    exp: Sequelize.INTEGER,
+    // asset type
+    asset: Sequelize.INTEGER,
 
-  // who is recipient
-  destination: Sequelize.BLOB,
-  // string to be decrypted by outward
-  unlocker: Sequelize.BLOB,
+    // who is recipient
+    destination: Sequelize.BLOB,
+    // string to be decrypted by outward
+    unlocker: Sequelize.BLOB,
 
-  // user-specified or randomly generated private message
-  invoice: Sequelize.BLOB,
+    // user-specified or randomly generated private message
+    invoice: Sequelize.BLOB,
 
-  // secret that unlocks hash
-  secret: Sequelize.BLOB
-})
+    // secret that unlocks hash
+    secret: Sequelize.BLOB
+  },
+  {
+    indexes: [
+      {
+        fields: [
+          'type',
+          'status'
+          /*
+          {attribute: 'type', length: 8},
+          {attribute: 'status', length: 8}*/
+        ]
+      }
+    ]
+  }
+)
 
 Delta.hasMany(Payment)
 Payment.belongsTo(Delta)
@@ -178,7 +217,7 @@ Payment.prototype.getInward = async function() {
   })
 }
 
-Delta.prototype.saveState = async function(state, ackSig) {
+Delta.prototype.saveState = function(state, ackSig) {
   // canonical state representation
   var canonical = r(state)
   if (ec.verify(canonical, ackSig, this.partnerId)) {
@@ -235,6 +274,7 @@ Delta.prototype.getState = async function() {
         {type: 'fail', status: 'new'}
       ]
     },
+    //limit: 1000,
     // explicit order because of postgres https://github.com/sequelize/sequelize/issues/9289
     order: [['id', 'ASC']]
   })).map((t) => {

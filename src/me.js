@@ -307,7 +307,7 @@ class Me {
     snapshotHash()
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    //me.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
+    //me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -328,7 +328,7 @@ class Me {
 
     if (me.my_hub) {
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 2000)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 3000)
       )
 
       // hubs have force react regularly
@@ -365,21 +365,21 @@ Payments: ${await Payment.count()}\n
           )
         }, 50000)
       } else {
-        l('Get loaded balance from testnet before simulation:' + me.address)
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
         setTimeout(() => {
           me.getCoins()
-        }, 6000)
+        }, 5000)
 
         setTimeout(() => {
           me.payRando()
-        }, 13000)
+        }, 10000)
       }
     }
   }
 
   getCoins() {
+    l('Using faucet')
     me.send(
       fromHex(K.hubs[0].pubkey),
       'testnet',
@@ -413,10 +413,10 @@ Payments: ${await Payment.count()}\n
     return channels
   }
 
-  payRando(counter = 1) {
-    me.payChannel({
+  async payRando(counter = 1) {
+    await me.payChannel({
       destination: randos[Math.floor(Math.random() * randos.length)],
-      amount: 100 + Math.round(Math.random() * (on_server ? 5000 : 50)),
+      amount: 100 + Math.round(Math.random() * (on_server ? 1000 : 50)),
       asset: 1
     })
     // run on server infinitely and with longer delays
@@ -450,7 +450,7 @@ Payments: ${await Payment.count()}\n
   // a generic interface to send a websocket message to some user or member
 
   send(m, method, tx) {
-    tx = concat(inputMap(method), tx)
+    tx = concat(bin([methodMap(method)]), tx)
 
     // regular pubkey
     if (m instanceof Buffer) {
@@ -462,7 +462,7 @@ Payments: ${await Payment.count()}\n
         if (member) {
           m = member
         } else {
-          // not online
+          l(m, 'not online')
           return false
         }
       }
@@ -486,7 +486,7 @@ Payments: ${await Payment.count()}\n
       me.users[m.pubkey].onopen = function(e) {
         if (me.id) {
           me.users[m.pubkey].send(
-            concat(inputMap('auth'), me.envelope(methodMap('auth')))
+            concat(bin(methodMap('auth')), me.envelope(methodMap('auth')))
           )
         }
 

@@ -180,16 +180,21 @@ module.exports = async () => {
       //l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
     } else {
       // adding to our external queue to avoid race conditions
-      var chain = r([
-        [
-          precommits,
-          me.proposed_block.header,
-          me.proposed_block.ordered_tx_body
-        ]
-      ])
       // we don't call processBlock directly to avoid races
-      RPC.external_rpc(null, concat(inputMap('chain'), chain))
-      //me.proposed_block = {}
+      RPC.external_rpc(
+        null,
+        concat(
+          bin(methodMap('chain')),
+          r([
+            [
+              precommits,
+              me.proposed_block.header,
+              me.proposed_block.ordered_tx_body
+            ]
+          ])
+        )
+      )
+      me.proposed_block = {}
     }
   }
 

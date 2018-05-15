@@ -112,7 +112,8 @@ react = async (result = {}, force = true) => {
     ;[result.payments, result.channels, result.record] = await Promise.all([
       Payment.findAll({
         order: [['id', 'desc']],
-        include: {all: true}
+        include: {all: true},
+        limit: 300
       }),
       me.channels(),
       me.byKey()

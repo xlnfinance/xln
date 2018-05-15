@@ -43,7 +43,8 @@ module.exports = async (pubkey, asset, opportunistic) => {
       return
     }
 
-    let newState = await ch.d.getState()
+    //let newState = await ch.d.getState()
+    let newState = ch.state
     let ackSig = ec(r(newState), me.id.secretKey)
     let debugState = r(r(newState))
 
@@ -61,6 +62,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
         where: {
           status: 'new'
         },
+        //limit: 200,
         order: [['id', 'ASC']]
       })
 

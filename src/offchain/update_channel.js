@@ -31,7 +31,8 @@ module.exports = async (
   }
 
   // this is state we are on right now.
-  let newState = await ch.d.getState()
+  //let newState = await ch.d.getState()
+  let newState = ch.state
 
   let oldState = r(ch.d.signed_state)
   prettyState(oldState)
@@ -41,7 +42,7 @@ module.exports = async (
 
   let rollback = [0, 0]
 
-  if (await ch.d.saveState(newState, ackSig)) {
+  if (ch.d.saveState(newState, ackSig)) {
     // our last known state has been acked.
 
     all.push(
@@ -87,7 +88,7 @@ module.exports = async (
 
     */
 
-    if (ch.d.signed_state && (await ch.d.saveState(oldState, ackSig))) {
+    if (ch.d.signed_state && ch.d.saveState(oldState, ackSig)) {
       loff(`Start merge ${trim(pubkey)}`)
 
       rollback = [
@@ -152,7 +153,7 @@ module.exports = async (
 
       // check new state and sig, save
       newState[1][2]++
-      if (!await ch.d.saveState(newState, t[2])) {
+      if (!ch.d.saveState(newState, t[2])) {
         loff('Error: Invalid state sig add')
         break
       }
@@ -261,7 +262,7 @@ module.exports = async (
 
       // check new state and sig, save
       newState[1][2]++
-      if (!await ch.d.saveState(newState, t[2])) {
+      if (!ch.d.saveState(newState, t[2])) {
         gracefulExit('Error: Invalid state sig at ' + m)
         break
       }

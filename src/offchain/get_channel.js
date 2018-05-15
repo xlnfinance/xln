@@ -5,7 +5,10 @@
 module.exports = async (partner, asset = 1) => {
   // accepts pubkey only
   let compared = Buffer.compare(me.pubkey, partner)
-  if (compared == 0) return false
+  if (compared == 0) {
+    l('Channel to self?')
+    return false
+  }
 
   let ch = {
     // default insurance
@@ -49,8 +52,10 @@ module.exports = async (partner, asset = 1) => {
       they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0
     }
   })
-  if (created[1]) loff(`Creating channel ${trim(partner)}`)
+
   ch.d = created[0]
+  if (created[1])
+    loff(`Creating channel ${trim(partner)} - ${asset}: ${ch.d.id}`)
 
   let user = await me.byKey(partner)
   if (user) {
@@ -72,21 +77,20 @@ module.exports = async (partner, asset = 1) => {
     ch.nonce = ch.ins.nonce
   }
 
-  // ch.d.state = JSON.parse(ch.d.state)
-
   ch.delta = ch.ondelta + ch.d.offdelta
 
   Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
 
   // We reduce payable by total amount of unresolved hashlocks in either direction
   // TODO optimization, getState is heavy on db so precache hashlock amounts
-  let state = await ch.d.getState()
-  let left_inwards = 0
-  state[2].map((a) => (left_inwards += a[0]))
-  let right_inwards = 0
-  state[3].map((a) => (right_inwards += a[0]))
+  ch.state = await ch.d.getState()
 
-  ch.ascii_states = ascii_state(state)
+  let left_inwards = 0
+  ch.state[2].map((a) => (left_inwards += a[0]))
+  let right_inwards = 0
+  ch.state[3].map((a) => (right_inwards += a[0]))
+
+  ch.ascii_states = ascii_state(ch.state)
   if (ch.d.signed_state) {
     let st = r(ch.d.signed_state)
     prettyState(st)

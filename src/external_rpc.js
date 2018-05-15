@@ -9,7 +9,7 @@ module.exports = async (ws, msg) => {
     return false
   }
 
-  var inputType = inputMap(msg[0])
+  var inputType = methodMap(msg[0])
 
   // how many blocks to share at once
   var sync_limit = 1000
@@ -21,9 +21,10 @@ module.exports = async (ws, msg) => {
     ['update', 'chain', 'sync', 'propose', 'prevote', 'precommit'].indexOf(
       inputType
     ) == -1
-  )
-    l('External RPC: ' + inputType)
-*/
+  )*/
+
+  //l('External RPC: ' + inputType)
+
   if (inputType == 'auth') {
     var [pubkey, sig, body] = r(msg)
 
@@ -43,7 +44,7 @@ module.exports = async (ws, msg) => {
         ch.d.last_online = new Date()
 
         // testnet: instead of cloud backups hub shares latest state
-        //me.send(pubkey, 'ack', me.envelope(0, ec(ch.d.getState(), me.id.secretKey)))
+        //me.send(pubkey, 'ack', me.envelope(0, ec(await ch.d.getState(), me.id.secretKey)))
 
         if (ch.withdrawal_requested_at) {
           me.send(pubkey, 'requestWithdrawFrom', me.envelope(ch.insured))
@@ -51,6 +52,7 @@ module.exports = async (ws, msg) => {
         await ch.d.save()
       }*/
     } else {
+      l('Invalid auth attempt')
       return false
     }
 
@@ -222,7 +224,7 @@ module.exports = async (ws, msg) => {
         return [r(b.precommits), b.header, b.ordered_tx_body]
       })
 
-      ws.send(concat(inputMap('chain'), r(chain)))
+      ws.send(concat(bin(methodMap('chain')), r(chain)))
     } else {
       // l("No blocks to sync after " + msg.toString('hex'))
     }
