@@ -1,7 +1,7 @@
 const {readdirSync} = require('fs')
 
-//let db = 'mysql:root:123123'
-let db = 'postgres:postgres:123123'
+let db = 'mysql:root:123123'
+//let db = 'postgres:postgres:123123'
 
 let walletPort = '26678'
 

@@ -368,8 +368,8 @@ Payments: ${await Payment.count()}\n
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
         setTimeout(() => {
-          me.getCoins()
-        }, 5000)
+          me.getCoins(1)
+        }, 7000)
 
         setTimeout(() => {
           me.payRando()
@@ -418,7 +418,7 @@ Payments: ${await Payment.count()}\n
   async payRando(counter = 1) {
     await me.payChannel({
       destination: randos[Math.floor(Math.random() * randos.length)],
-      amount: 100 + Math.round(Math.random() * (on_server ? 1000 : 50)),
+      amount: 100 + Math.round(Math.random() * 50),
       asset: 1
     })
     // run on server infinitely and with longer delays
@@ -427,11 +427,11 @@ Payments: ${await Payment.count()}\n
       // replenish with testnet faucet once in a while
 
       //if (ch.payable < 3000 && argv.monkey && !me.my_hub) {
-      if (counter % 300 == 10) me.getCoins()
+      //if (counter % 300 == 10) me.getCoins()
 
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(1000 + Math.random() * 6000))
+      }, Math.round(1000 + Math.random() * 5000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)

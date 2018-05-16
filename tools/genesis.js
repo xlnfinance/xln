@@ -48,7 +48,7 @@ module.exports = async () => {
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
 
     risk: 10000, // recommended rebalance limit
-    hard_limit: 100000, // how much can a user lose if hub is insolvent?
+    hard_limit: 100000000, // how much can a user lose if hub is insolvent?
 
     collected_tax: 0,
 
@@ -59,7 +59,7 @@ module.exports = async () => {
 
     // sanity limits for offchain payments
     min_amount: 100,
-    max_amount: 300000,
+    max_amount: 300000000,
 
     members: [],
     hubs: [],
@@ -99,8 +99,8 @@ module.exports = async () => {
       pubkey: me.pubkey,
       username: username,
       nonce: 0,
-      balance: 500000000,
-      balances: `{"2": 5000000}`
+      balance: 10000000000,
+      balances: `{"2": 10000000000}`
     })
     /*
 

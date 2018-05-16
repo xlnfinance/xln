@@ -69,7 +69,7 @@ str+='create database data'+i+';'
 // ensure db exists
 //privSequelize.query('CREATE DATABASE ' + datadir).catch(l)
 
-l('Reading and syncing ' + use_force + ' offchain db: ' + base_db.dialect)
+l('Reading and syncing offchain db: ' + base_db.dialect)
 // Encapsulates relationship with counterparty: offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
