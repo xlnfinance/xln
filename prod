@@ -1,6 +1,7 @@
 #!/bin/bash
 
 forever stopall
+pm2 delete all
 killall Failsafe 2>/dev/null
 
 rm -rf data*
@@ -16,13 +17,13 @@ maxport=8018
 
 node fs --genesis=test --db=$db
 
-NODE_ENV=production forever start fs.js -p443 --silent --db=$db
+pm2 start fs.js --name fs -- -p443 --silent --wallet-dist --db=$db
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i
-  cmd="forever start fs.js -p$i --username=$i --pw=password --silent --datadir=data$i --db=$db"
+  cmd="pm2 start fs.js --name fs$i -- -p$i --username=$i --pw=password --silent --datadir=data$i --wallet-dist --db=$db"
   if (( i < 8004 )); then
-    NODE_ENV=production ${cmd}
+    ${cmd}
   else
-    NODE_ENV=production ${cmd} --monkey=$maxport
+    ${cmd} --monkey=$maxport
   fi
 done

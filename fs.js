@@ -105,7 +105,7 @@ initDashboard = async (a) => {
       l(note('Parcel: OK'))
       break
     }
-  } else if (process.env === 'production') {
+  } else if (argv['wallet-dist']) {
     bundler = serveStatic('./dist')
   } else {
     let Parcel = require('parcel-bundler')
