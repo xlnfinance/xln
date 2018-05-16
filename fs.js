@@ -275,8 +275,17 @@ if (!fs.existsSync('data')) {
   fs.mkdirSync('data/onchain')
 }
 require('./src/db/onchain_db')
+
+use_force = false
+if (!fs.existsSync(datadir + '/offchain')) {
+  fs.mkdirSync(datadir + '/offchain')
+  use_force = true
+}
+
 require('./src/db/offchain_db')
 ;(async () => {
+  await privSequelize.sync({force: use_force})
+
   if (argv.console) {
     initDashboard()
   } else if (argv.genesis) {

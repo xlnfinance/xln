@@ -2,12 +2,17 @@
 // then derives a ton of info about current channel - who owns what, what's promised, what's insiured etc
 
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
-module.exports = async (partner, asset = 1) => {
+module.exports = async (partner, asset) => {
   // accepts pubkey only
   let compared = Buffer.compare(me.pubkey, partner)
   if (compared == 0) {
     l('Channel to self?')
     return false
+  }
+  if (!(asset > 0)) {
+    l('Invalid asset id', asset)
+    asset = 1
+    //return false
   }
 
   let ch = {
@@ -40,7 +45,6 @@ module.exports = async (partner, asset = 1) => {
       nonce: 0,
       status: 'master',
       offdelta: 0,
-      asset: asset,
 
       input_amount: 0,
       they_input_amount: 0,
@@ -54,8 +58,9 @@ module.exports = async (partner, asset = 1) => {
   })
 
   ch.d = created[0]
-  if (created[1])
+  if (created[1]) {
     loff(`Creating channel ${trim(partner)} - ${asset}: ${ch.d.id}`)
+  }
 
   let user = await me.byKey(partner)
   if (user) {
@@ -95,7 +100,9 @@ module.exports = async (partner, asset = 1) => {
     let st = r(ch.d.signed_state)
     prettyState(st)
     st = ascii_state(st)
-    ch.ascii_states += st == ch.ascii_state ? '(same)' : st
+    if (st != ch.ascii_states) {
+      ch.ascii_states += st == ch.ascii_state ? '(same)' : st
+    }
   }
 
   ch.payable =

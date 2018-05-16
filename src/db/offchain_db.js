@@ -1,10 +1,4 @@
 // Offchain database - local and private stuff
-var use_force = false
-if (!fs.existsSync(datadir + '/offchain')) {
-  fs.mkdirSync(datadir + '/offchain')
-  use_force = true
-}
-
 if (argv.db) {
   let db_info = argv.db.split(':')
   var base_db = {
@@ -18,7 +12,7 @@ if (argv.db) {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 30 : 5,
+      max: base_port == 443 ? 30 : 3,
       min: 0,
       acquire: 20000,
       idle: 20000,
@@ -75,7 +69,6 @@ str+='create database data'+i+';'
 // ensure db exists
 //privSequelize.query('CREATE DATABASE ' + datadir).catch(l)
 
-privSequelize.sync({force: use_force})
 l('Reading and syncing ' + use_force + ' offchain db: ' + base_db.dialect)
 // Encapsulates relationship with counterparty: offdelta and last signatures
 // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
@@ -107,7 +100,7 @@ Delta = privSequelize.define(
     offdelta: Sequelize.INTEGER,
     asset: {
       type: Sequelize.INTEGER,
-      defaultValue: 0
+      defaultValue: 1
     },
 
     soft_limit: Sequelize.INTEGER,
@@ -173,7 +166,10 @@ Payment = privSequelize.define(
     // best by block
     exp: Sequelize.INTEGER,
     // asset type
-    asset: Sequelize.INTEGER,
+    asset: {
+      type: Sequelize.INTEGER,
+      defaultValue: 1
+    },
 
     // who is recipient
     destination: Sequelize.BLOB,

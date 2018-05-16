@@ -102,7 +102,11 @@ module.exports = async (pubkey, asset, opportunistic) => {
             t.destination.equals(me.pubkey) ||
             outwards.length >= K.max_hashlocks
           ) {
-            loff('error cannot transit this amount. Failing inward.')
+            loff(
+              `error cannot transit ${t.amount}/${payable}. Locks ${
+                outwards.length
+              }.`
+            )
 
             me.metrics.fail.current++
 
@@ -116,8 +120,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
                   inward.type = 'fail'
                   flushable.push(inward.deltum.partnerId)
                   return inward.save()
-                  //let notify = await me.getChannel(inward.deltum.partnerId, asset)
-                  //await notify.d.requestFlush()
                 }
               })
             )

@@ -6,6 +6,7 @@ set -o pipefail
 rm -rf data*
 
 killall Failsafe 2>/dev/null || true
+forever stopall
 
 function pm2() {
   node_modules/.bin/pm2 "$@"

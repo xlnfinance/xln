@@ -328,7 +328,7 @@ class Me {
 
     if (me.my_hub) {
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 3000)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 1500)
       )
 
       // hubs have force react regularly
@@ -378,12 +378,12 @@ Payments: ${await Payment.count()}\n
     }
   }
 
-  getCoins() {
+  getCoins(asset = 1) {
     l('Using faucet')
     me.send(
       fromHex(K.hubs[0].pubkey),
       'testnet',
-      concat(bin([1, 1]), bin(me.address)) //action 1 asset 1
+      concat(bin([1, asset]), bin(me.address)) //action 1 asset 1
     )
   }
 
@@ -392,6 +392,7 @@ Payments: ${await Payment.count()}\n
     let channels = []
 
     let assets = await Asset.findAll()
+    // all assets with all hubs
 
     for (var m of K.hubs) {
       if (!me.record || me.record.id != m.id) {
@@ -402,6 +403,7 @@ Payments: ${await Payment.count()}\n
       }
     }
 
+    // find all existing channels (if you are hub)
     var deltas = await Delta.findAll()
     for (var d of deltas) {
       if (!K.hubs.find((h) => fromHex(h.pubkey).equals(d.partnerId))) {
@@ -423,6 +425,10 @@ Payments: ${await Payment.count()}\n
     // but for local tests limit requests and run faster
     if (on_server) {
       // replenish with testnet faucet once in a while
+
+      //if (ch.payable < 3000 && argv.monkey && !me.my_hub) {
+      if (counter % 300 == 10) me.getCoins()
+
       setTimeout(() => {
         me.payRando(counter + 1)
       }, Math.round(1000 + Math.random() * 6000))

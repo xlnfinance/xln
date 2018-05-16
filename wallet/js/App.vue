@@ -203,8 +203,12 @@ export default {
         return app.commy(app.record.balance)
       } else {
         // todo make ".00" optional for assets
-        var bal = JSON.parse(app.record.balances)[asset]
-        return app.commy(bal ? bal : 0)
+        if (app.record.balances) {
+          var bal = JSON.parse(app.record.balances)[asset]
+          return app.commy(bal ? bal : 0)
+        } else {
+          return app.commy(0)
+        }
       }
     },
     parse_balances: (balances) => {

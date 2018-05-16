@@ -210,7 +210,7 @@ module.exports = async (ws, msg) => {
         } else if (p.action == 6) {
           me.CHEAT_dontwithdraw = 1
         } else {
-          me.getCoins()
+          me.getCoins(p.asset)
           /*
           me.send(
             Members.find((m) => m.id == p.partner),

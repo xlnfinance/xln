@@ -64,13 +64,16 @@ module.exports = async () => {
     members: [],
     hubs: [],
     flush_timeout: 250,
+
+    // global wide fee sanity limits
     min_fee: 1,
+    max_fee: 5000,
 
     // hashlock and dispute-related
     dispute_delay: 20, // in how many blocks disputes are considered final
     hashlock_exp: 20, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 1000, // for how many blocks onchain keeps it unlocked since reveal
-    max_hashlocks: 300, // we don't want overweight huge dispute strings
+    max_hashlocks: 20, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
     dispute_if_no_ack: 60000 // ms, how long we wait for ack before going to blockchain
   }
@@ -168,7 +171,7 @@ module.exports = async () => {
     location: K.members[0].location,
     pubkey: K.members[0].pubkey,
 
-    fee: 0.015,
+    fee: 0.008,
 
     handle: 'main',
     name: '@main (Main)'
@@ -180,7 +183,7 @@ module.exports = async () => {
     location: K.members[3].location,
     pubkey: K.members[3].pubkey,
 
-    fee: 0.001,
+    fee: 0.005,
 
     handle: 'jp',
     name: '@jp (Japan)'

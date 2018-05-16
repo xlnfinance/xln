@@ -178,7 +178,7 @@ module.exports = async () => {
       if (!me.proposed_block.locked) me.proposed_block = {}
 
       //l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
-    } else {
+    } else if (me.proposed_block.header) {
       // adding to our external queue to avoid race conditions
       // we don't call processBlock directly to avoid races
       RPC.external_rpc(

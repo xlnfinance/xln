@@ -162,14 +162,6 @@ module.exports = async (ws, msg) => {
       })
     }
 
-    if (msg[0] == 2) {
-      ;(await me.getChannel(pubkey)).d.startDispute()
-    }
-
-    if (msg[0] == 3) {
-      ;(await me.getChannel(pubkey)).d.startDispute(true)
-    }
-
     // sync requests latest blocks, chain returns chain
   } else if (inputType == 'chain') {
     await q('onchain', async () => {

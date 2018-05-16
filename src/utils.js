@@ -84,10 +84,9 @@ ascii_state = (state) => {
   if (!state[1]) return false
   let hash = toHex(sha3(r(state)))
 
-  return `
-| ${trim(state[1][0])} | ${trim(state[1][1])} | Hash ${trim(hash)}
-------
-| #${state[1][2]}  |  ${state[1][3]} | ${state[1][4]}
+  return `Hash ${trim(hash)} | ${trim(state[1][0])} | ${trim(state[1][1])} | #${
+    state[1][2]
+  } | ${state[1][3]} | ${state[1][4]}
 ------
 | ${state[2].map((h) => h[0] + '/' + trim(h[1]) + '/' + h[2]).join(', ')} 
 ------
@@ -308,6 +307,7 @@ beforeFees = (amount, fees) => {
   for (var fee of fees) {
     new_amount = Math.round(amount * (1 + fee))
     if (new_amount == amount) new_amount = amount + K.min_fee
+    if (new_amount > amount + K.max_fee) new_amount = amount + K.max_fee
     amount = new_amount
   }
 
@@ -318,6 +318,7 @@ afterFees = (amount, fees) => {
   for (var fee of fees) {
     var fee = Math.round(amount / (1 + fee) * fee)
     if (fee == 0) fee = K.min_fee
+    if (fee > K.max_fee) fee = K.max_fee
     amount = amount - fee
   }
   return amount

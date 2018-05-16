@@ -13,11 +13,6 @@ module.exports = async (opts) => {
     let sent_amount = beforeFees(amount, [K.hubs[0].fee])
     let ch = await me.getChannel(via, opts.asset)
 
-    if (ch.payable < 3000 && argv.monkey && !me.my_hub) {
-      me.getCoins()
-      await sleep(3000)
-    }
-
     let unlocker_nonce = crypto.randomBytes(24)
     let unlocker_box = nacl.box(
       r([amount, secret, invoice]),
