@@ -150,8 +150,6 @@ class Me {
       return false
     }
 
-    l('After merging to broadcast: ', merged)
-
     var nonce = me.record.nonce
 
     var to_sign = r([methodMap('batch'), nonce, merged])
@@ -161,6 +159,7 @@ class Me {
     //if (me.my_member && me.my_member == me.next_member()) {
     //  me.mempool.push(signed_batch)
     //} else {
+    l('After merging to broadcast: ', merged, me.next_member(true).id)
     me.send(me.next_member(true), 'tx', r([signed_batch]))
     //}
 
@@ -180,18 +179,21 @@ class Me {
     var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
     var searchIndex = 0
 
-    for (var i in Members) {
+    for (var i = 0; i < Members.length; i++) {
       searchIndex += Members[i].shares
 
       if (searchIndex > currentIndex) {
         var current = Members[i]
 
-        if (searchIndex > currentIndex + 1) {
-          // next slot is still theirs
+        if (currentIndex + 1 == K.total_shares) {
+          // go back to 0
+          var next = Members[0]
+        } else if (currentIndex + 1 < searchIndex) {
+          // same member
           var next = current
         } else {
-          // take next member or rewind back to 0
-          var next = Members[(i + 1) % K.members.length]
+          // next member
+          var next = Members[i + 1]
         }
         break
       }
@@ -335,7 +337,7 @@ class Me {
       me.intervals.push(
         setInterval(() => {
           react({})
-        }, 5000)
+        }, 10000)
       )
     }
 
@@ -369,7 +371,7 @@ Payments: ${await Payment.count()}\n
 
         setTimeout(() => {
           me.getCoins(1)
-        }, 7000)
+        }, 6000)
 
         setTimeout(() => {
           me.payRando()

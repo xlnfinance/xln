@@ -49,6 +49,8 @@ module.exports = async () => {
   if (me.status == 'await' && phase == 'propose') {
     me.status = phase
 
+    l('Next round', me.next_member().id, me.next_member(true).id)
+
     if (me.my_member == me.next_member()) {
       //l(`it's our turn to propose, gossip new block`)
 

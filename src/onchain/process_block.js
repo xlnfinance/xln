@@ -87,7 +87,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // Processing transactions one by one
   // Long term TODO: parallel execution with pessimistic locks
   for (let i = 0; i < ordered_tx.length; i++) {
-    await me.processTx(ordered_tx[i], meta)
+    l(await me.processTx(ordered_tx[i], meta))
   }
 
   K.ts = timestamp

@@ -88,9 +88,9 @@ export default {
         invoice: hashargs['invoice']
       },
       order: {
-        amount: 0,
-        rate: 0,
-        asset_to_buy: 0
+        amount: '',
+        rate: '',
+        asset_to_buy: ''
       },
 
       hardfork: '',
@@ -611,34 +611,37 @@ export default {
         <h3>Uninsured Limits</h3>
         <select v-model="peer" class="custom-select custom-select-lg mb-3">
           <option disabled>Select current hub</option>
-          <option v-for="(a,index) in channels" v-if="a.d.asset == asset" :value="a.hub.id">{{a.hub.handle}}</option>
+          <option v-for="(a,index) in channels" v-if="a.d.asset == asset" :value="a.partner">{{a.hub.handle}}</option>
         </select>
-        <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
-        <p>
-          <label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
-          <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
-        </p>
-        <p>
-          <label>Hard limit (currently {{commy(ch.d.hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
-          <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]">
-        </p>
-        <p>
-          <button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.peer})" href="#">Save Uninsured Limits</button>
-        </p>
-        <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
-        <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
+
+        <template v-if="ch">
+          <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>uninsured limits</b> below. </p>
+          <p>
+            <label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
+            <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
+          </p>
+          <p>
+            <label>Hard limit (currently {{commy(ch.d.hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
+            <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]">
+          </p>
+          <p>
+            <button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.peer})" href="#">Save Uninsured Limits</button>
+          </p>
+          <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
+          <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
+        </template>
       </div>
       <div v-else-if="tab=='onchain'">
-        <div v-if="record && ch">
+        <div v-if="record">
           <h1>Onchain Operations</h1>
           <p>Onchain {{to_ticker(asset)}} balance: {{getAsset(asset)}}</p>
           
-          <template v-if="ch.insured>0">
-          <h3 >Withdraw from hub</h3>
-          <small>Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your onchain balance.</small>
-          <p>
-            <input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to withdraw">
-          </p>
+          <template v-if="ch && ch.insured>0">
+            <h3>Withdraw from hub</h3>
+            <small>Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your onchain balance.</small>
+            <p>
+              <input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to withdraw">
+            </p>
           </template>
 
           <h3>Deposits to other users or channels</h3>
@@ -652,11 +655,14 @@ export default {
           </p>
 
           <h3>Trustless Exchange</h3>
+
+
           <p>Asset you are selling: {{to_ticker(asset)}}</p>
           <p><input style="width:300px" type="number" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell">
           </p>
           <p>Asset you are buying:</p>
-            <select v-model="order.asset_to_buy">
+            <select v-model="order.asset_to_buy" class="mt-3">
+              <option selected disabled>Select asset to buy</option>
               <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
             </select>
           <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"></p>
@@ -664,16 +670,20 @@ export default {
           <p>
             <button type="button" class="btn btn-warning" @click="onchain()">Execute Onchain</button>
           </p>
-          <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
-          </p>
-          <p>After a timeout money will arrive to your onchain balance, then you will be able to move it to another hub.</p>
-          <p v-if="ch.d.status == 'disputed'">
-            Please wait for dispute resolution. <span v-if="ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span>
-          </p>
-          <p v-else-if="record && record.balance >= K.standalone_balance">
-            <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
-          </p>
-          <p v-else>To start onchain dispute you must be registred onchain and have on your onchain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your onchain balance.</p>
+
+
+          <template v-if="ch">
+            <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
+            </p>
+            <p>After a timeout money will arrive to your onchain balance, then you will be able to move it to another hub.</p>
+            <p v-if="ch.d.status == 'disputed'">
+              Please wait for dispute resolution. <span v-if="ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span>
+            </p>
+            <p v-else-if="record && record.balance >= K.standalone_balance">
+              <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
+            </p>
+            <p v-else>To start onchain dispute you must be registred onchain and have on your onchain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your onchain balance.</p>
+          </template>
         </div>
         <div v-else>
           <h3>Registration</h3>

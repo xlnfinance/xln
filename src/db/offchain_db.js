@@ -12,7 +12,7 @@ if (argv.db) {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 20 : 2,
+      max: base_port == 443 ? 30 : 1,
       min: 0,
       acquire: 20000,
       idle: 20000,

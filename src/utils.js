@@ -130,55 +130,6 @@ gracefulExit = (comment) => {
   process.exit(0)
 }
 
-/* Some crazy visualized table log
-function() {
-  var a = Object.values(arguments)
-  console.log.call(console, a)
-  cached_result.my_log += a.toString()
-}
-
-  var stamp = parseFloat(process.hrtime().join('.')).toFixed(6)
-  var str = base_port + ': ' + stamp + ' - ' + a.toString() + '\n'
-
-  var chunks = []
-  var chunkSize = 30
-
-  while (str) {
-    if (str.length < chunkSize) {
-      chunks.push(str)
-      break
-    } else {
-      chunks.push(str.substr(0, chunkSize))
-      str = str.substr(chunkSize)
-    }
-  }
-
-  tolog = '\n\n'
-
-  var pos = [8433, 8001, 8002, 8003].indexOf(base_port)
-  if (pos == -1) return false
-
-  chunks.map((ch) => {
-    tolog += Array(chunkSize * pos + 1).join(' ') + ch + '\n'
-  })
-
-  var path = '/tmp/log',
-    buffer = new Buffer(tolog)
-
-  fs.open(path, 'a', function(err, fd) {
-    if (err) {
-      throw 'error opening file: ' + err
-    }
-
-    fs.write(fd, buffer, 0, buffer.length, null, function(err) {
-      if (err) throw 'error writing file: ' + err
-      fs.close(fd, function() {
-        //console.log('file written')
-      })
-    })
-  })
-}*/
-
 child_process = require('child_process')
 
 // Amazing lib to forget about binary encoding: https://github.com/ethereum/wiki/wiki/RLP
@@ -384,6 +335,8 @@ methodMap = (i) => {
     'depositTo', // send money to some channel or user
     'sellFor',
     'cancelOrder',
+    'createAsset',
+    'createHub',
 
     'revealSecrets', // reveal secrets if partner has not acked our settle
     'vote',
