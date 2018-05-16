@@ -12,7 +12,7 @@ if (argv.db) {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 30 : 3,
+      max: base_port == 443 ? 20 : 2,
       min: 0,
       acquire: 20000,
       idle: 20000,
@@ -152,11 +152,8 @@ Delta = privSequelize.define(
 Payment = privSequelize.define(
   'payment',
   {
-    // add/settle/fail
     type: Sequelize.ENUM('add', 'settle', 'fail'),
-    // new>sent>acked
-    status: Sequelize.ENUM('new', 'sent', 'acked'),
-    // no inward = sender, no outward = receiver, otherwise = mediator
+    status: Sequelize.ENUM('new', 'sent', 'acked', 'processed'),
     is_inward: Sequelize.BOOLEAN,
 
     // in outward it is inward amount - fee
@@ -187,7 +184,8 @@ Payment = privSequelize.define(
       {
         fields: [
           'type',
-          'status'
+          'status',
+          'is_inward'
           /*
           {attribute: 'type', length: 8},
           {attribute: 'status', length: 8}*/
