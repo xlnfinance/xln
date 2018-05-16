@@ -89,7 +89,7 @@ module.exports = async (
     */
 
     if (ch.d.signed_state && ch.d.saveState(oldState, ackSig)) {
-      loff(`Start merge ${trim(pubkey)}`)
+      //loff(`Start merge ${trim(pubkey)}`)
 
       rollback = [
         newState[1][2] - oldState[1][2], // nonce diff
