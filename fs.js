@@ -216,9 +216,9 @@ initDashboard = async (a) => {
     })
   })
 
-  if (repl) {
-    repl.context.me = me
-  }
+  l(`\n${note('Welcome to FS REPL!')}`)
+  repl = require('repl').start(note(''))
+  repl.context.me = me
 }
 
 derive = async (username, pw) => {
@@ -333,7 +333,3 @@ let ooops = (err) => {
 }
 process.on('unhandledRejection', ooops)
 process.on('uncaughtException', ooops)
-
-l(`\n${note('Welcome to FS REPL!')}`)
-repl = require('repl').start(note(''))
-_eval = repl.eval
