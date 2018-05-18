@@ -7,8 +7,11 @@ let base_db = {
   operatorsAliases: false,
 
   logging: (str, time) => {
-    loff(time + ' (on) ' + (parseInt(time) > 100 ? str : str.substr(0, 20)))
+    if (parseInt(time) > 200) {
+      loff(time + ' (off) ' + str)
+    }
   },
+
   benchmark: true
 }
 

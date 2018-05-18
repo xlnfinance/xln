@@ -112,8 +112,7 @@ module.exports = async (tx, meta) => {
             leftId: compared == -1 ? signer.id : partner.id,
             rightId: compared == -1 ? partner.id : signer.id,
             asset: asset
-          },
-          include: {all: true}
+          }
         })
 
         var body = r([
@@ -414,8 +413,7 @@ module.exports = async (tx, meta) => {
               leftId: compared == -1 ? giveTo.id : withPartner.id,
               rightId: compared == -1 ? withPartner.id : giveTo.id,
               asset: asset
-            },
-            include: {all: true}
+            }
           }))[0]
 
           ins.insurance += amount

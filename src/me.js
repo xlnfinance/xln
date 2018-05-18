@@ -35,7 +35,7 @@ class Me {
     }
     cached_result.metrics = this.metrics
 
-    this.updateMetricsInterval = 5000
+    this.updateMetricsInterval = 1000
 
     this.intervals = []
     // used to store current block to be added to chain
@@ -311,7 +311,7 @@ class Me {
     }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
+    //me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -331,9 +331,11 @@ class Me {
     )
 
     if (me.my_hub) {
+      /*
       me.intervals.push(
         setInterval(require('./offchain/rebalance'), K.blocktime * 4000)
       )
+      */
 
       // hubs have force react regularly
       me.intervals.push(
@@ -435,7 +437,7 @@ Payments: ${await Payment.count()}\n
 
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(1000 + Math.random() * 5000))
+      }, Math.round(1000 + Math.random() * 3000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)

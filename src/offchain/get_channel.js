@@ -66,12 +66,21 @@ module.exports = async (partner, asset) => {
   if (user) {
     ch.partner = user.id
     if (me.record) {
+      /*
       ch.ins = await Insurance.find({
         where: {
           leftId: ch.left ? me.record.id : user.id,
           rightId: ch.left ? user.id : me.record.id,
           asset: asset
         }
+      })
+      */
+      ch.ins = Insurance.build({
+        leftId: ch.left ? me.record.id : user.id,
+        rightId: ch.left ? user.id : me.record.id,
+        asset: asset,
+        insurance: 100000000000,
+        ondelta: 50000000000
       })
     }
   }

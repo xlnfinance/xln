@@ -139,9 +139,8 @@ module.exports = async (
       }
 
       let reveal_until = K.usable_blocks + K.hashlock_exp
-      // if usable blocks is 10 and default exp is 5, must be between 14-16
-
-      if (exp < reveal_until - 30 || exp > reveal_until + 30) {
+      // safe ranges when we can accept hashlock exp
+      if (exp < reveal_until - 2 || exp > reveal_until + 5) {
         new_type = m == 'add' ? 'fail' : 'failrisk'
         loff('Error: exp is out of supported range')
       }
@@ -185,12 +184,13 @@ module.exports = async (
       // pay to unlocker
       if (destination.equals(me.pubkey)) {
         unlocker = r(unlocker)
-        let unlocked = nacl.box.open(
+        let unlocked = unlocker[0]
+        /*nacl.box.open(
           unlocker[0],
           unlocker[1],
           unlocker[2],
           me.box.secretKey
-        )
+        )*/
         if (unlocked == null) {
           loff('Error: Bad unlocker')
           hl.type = m == 'add' ? 'fail' : 'failrisk'
@@ -229,7 +229,7 @@ module.exports = async (
 
             amount: outward_amount,
             hash: hash,
-            exp: reveal_until, // the outgoing exp is a little bit longer
+            exp: exp, // the outgoing exp is a little bit longer
 
             unlocker: unlocker,
             destination: destination

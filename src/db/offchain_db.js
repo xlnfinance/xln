@@ -8,7 +8,9 @@ if (argv.db) {
     operatorsAliases: false,
 
     logging: (str, time) => {
-      loff(time + ' (off) ' + (parseInt(time) > 100 ? str : str.substr(0, 20)))
+      if (parseInt(time) > 200) {
+        loff(time + ' (off) ' + str)
+      }
     },
     benchmark: true,
 
@@ -16,7 +18,7 @@ if (argv.db) {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 10 : 1,
+      max: base_port == 443 ? 40 : 1,
       min: 0,
       acquire: 10000,
       idle: 10000,

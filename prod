@@ -4,20 +4,19 @@ forever stopall
 pm2 delete all
 killall Failsafe 2>/dev/null
 
+rm isolate*
 rm -rf data*
 
-./install
-
+#./install
 npm run build
-
 
 db=mysql:root:123123
 #db=postgres:postgres:123123
-maxport=8022
+maxport=8080
 
 node fs --genesis=test --db=$db
+pm2 start fs.js --node-args="--prof" --name fs -- -p443 --silent --wallet-dist --db=$db
 
-pm2 start fs.js --name fs -- -p443 --silent --wallet-dist --db=$db
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i
   cmd="pm2 start fs.js --name fs$i -- -p$i --username=$i --pw=password --silent --datadir=data$i --wallet-dist --db=$db"
@@ -27,3 +26,6 @@ for i in $(seq 8001 $maxport); do
     ${cmd} --monkey=$maxport
   fi
 done
+
+#node --prof fs.js -p443 --silent --wallet-dist --db=$db
+
