@@ -258,8 +258,7 @@ module.exports = async (
           hash: hash,
           is_inward: false,
           type: m.includes('risk') ? 'addrisk' : 'add'
-        },
-        include: {all: true}
+        }
       }))[0]
 
       if (!outward) {
@@ -303,8 +302,9 @@ module.exports = async (
 
       if (inward) {
         //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
+        var inward_d = await Delta.findById(inward.deltumId)
 
-        if (inward.deltum.status == 'disputed') {
+        if (inward_d.status == 'disputed') {
           loff(
             'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
           )
@@ -322,7 +322,7 @@ module.exports = async (
           inward.status = 'new'
           await inward.save()
 
-          uniqAdd(inward.deltum.partnerId)
+          uniqAdd(inward_d.partnerId)
         }
       } else {
         //react({confirm: 'Payment completed'})

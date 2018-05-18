@@ -21,8 +21,6 @@ base58 = require('base-x')(
   '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 )
 
-keccak = require('keccak')
-
 nacl = require('../lib/nacl')
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = nacl.sign.detached.verify
@@ -146,6 +144,8 @@ sleep = async function(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+var {performance} = require('perf_hooks')
+
 // critical section for "key"
 q = async function(key, job) {
   return new Promise(async (resolve) => {
@@ -159,7 +159,9 @@ q = async function(key, job) {
       while (q.q[key].length > 0) {
         try {
           let [got_job, got_resolve] = q.q[key].shift()
+          let started = performance.now()
           got_resolve(await got_job())
+          //l('Section took: ' + (performance.now() - started))
         } catch (e) {
           l(e)
         }

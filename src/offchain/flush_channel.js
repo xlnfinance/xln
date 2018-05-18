@@ -125,15 +125,16 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
             me.metrics.fail.current++
 
-            t.type = 'fail'
+            t.type = t.type == 'add' ? 'fail' : 'failrisk'
             t.status = 'acked'
             all.push(t.save())
 
             all.push(
-              t.getInward().then((inward) => {
+              t.getInward().then(async (inward) => {
                 if (inward) {
-                  inward.type = 'fail'
-                  flushable.push(inward.deltum.partnerId)
+                  inward.type = t.type == 'add' ? 'fail' : 'failrisk'
+                  var d = await Delta.findOne(inward.deltumId)
+                  flushable.push(d.partnerId)
                   return inward.save()
                 }
               })

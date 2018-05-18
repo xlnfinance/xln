@@ -5,23 +5,134 @@ let base_db = {
   storage: datadir + '/onchain/db.sqlite',
   define: {timestamps: false},
   operatorsAliases: false,
-  logging: false
+
+  logging: (str, time) => {
+    loff(time + ' (on) ' + (parseInt(time) > 100 ? str : str.substr(0, 20)))
+  },
+  benchmark: true
 }
 
 sequelize = new Sequelize('', '', 'password', base_db)
 l('Reading db ', base_db.storage)
 
-User = sequelize.define('user', {
-  username: Sequelize.STRING, // to be used in DNS later, currently barely used
+// >>> Schemes
 
-  pubkey: Sequelize.CHAR(32).BINARY,
-  nonce: {type: Sequelize.INTEGER, defaultValue: 0},
+User = sequelize.define(
+  'user',
+  {
+    username: Sequelize.STRING, // to be used in DNS later, currently barely used
 
-  // onchain FRD balance
-  balance: {type: Sequelize.BIGINT, defaultValue: 0},
-  // all other assets
-  balances: {type: Sequelize.TEXT}
+    pubkey: Sequelize.CHAR(32).BINARY,
+    nonce: {type: Sequelize.INTEGER, defaultValue: 0},
+
+    // onchain FRD balance
+    balance: {type: Sequelize.BIGINT, defaultValue: 0},
+    // all other assets
+    balances: {type: Sequelize.TEXT}
+  },
+  {
+    indexes: [
+      {
+        fields: [{attribute: 'pubkey', length: 32}]
+      }
+    ]
+  }
+)
+
+Insurance = sequelize.define(
+  'insurance',
+  {
+    leftId: Sequelize.INTEGER,
+    rightId: Sequelize.INTEGER,
+
+    nonce: {type: Sequelize.INTEGER, defaultValue: 0}, // for instant withdrawals, increase one by one
+    asset: {type: Sequelize.INTEGER, defaultValue: 1},
+
+    insurance: {type: Sequelize.BIGINT, defaultValue: 0}, // insurance
+    ondelta: {type: Sequelize.BIGINT, defaultValue: 0}, // what hub already insuranceized
+
+    dispute_delayed: Sequelize.INTEGER,
+
+    // increased offchain. When disputed, higher one is true
+    dispute_nonce: Sequelize.INTEGER,
+    dispute_offdelta: Sequelize.INTEGER,
+    // two arrays of hashlocks, inwards for left and inwards for right
+    dispute_hashlocks: Sequelize.TEXT,
+
+    // started by left user?
+    dispute_left: Sequelize.BOOLEAN
+  },
+  {
+    indexes: [
+      {
+        fields: ['leftId', 'rightId', 'asset']
+      }
+    ]
+  }
+)
+
+Proposal = sequelize.define('proposal', {
+  desc: Sequelize.TEXT,
+  code: Sequelize.TEXT,
+  patch: Sequelize.TEXT,
+
+  delayed: Sequelize.INTEGER, //cron
+
+  kindof: Sequelize.STRING
 })
+
+Vote = sequelize.define('vote', {
+  rationale: Sequelize.TEXT,
+  approval: Sequelize.BOOLEAN // approval or denial
+})
+
+Debt = sequelize.define('debt', {
+  amount_left: Sequelize.INTEGER,
+  oweTo: Sequelize.INTEGER
+})
+
+Order = sequelize.define('order', {
+  amount: Sequelize.INTEGER,
+  rate: Sequelize.INTEGER
+})
+
+// Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
+// Primarily used in atomic swaps and mediated transfers. Based on Sprites concept
+// They are are stored for a few days and unlock a specific action
+Hashlock = sequelize.define('hashlock', {
+  alg: Sequelize.INTEGER, // sha256, sha3?
+  hash: Sequelize.TEXT,
+  revealed_at: Sequelize.INTEGER,
+  delete_at: Sequelize.INTEGER
+})
+
+// Assets represent all numerical balances: currencies, tokens, shares, stocks.
+// Anyone can create and issue their own asset (like ERC20, but not programmable)
+Asset = sequelize.define('asset', {
+  ticker: Sequelize.TEXT,
+  desc: Sequelize.TEXT,
+
+  issuerId: Sequelize.INTEGER,
+  total_supply: Sequelize.INTEGER
+})
+
+// >>> Relations
+
+Debt.belongsTo(User)
+User.hasMany(Debt)
+
+User.hasMany(Order)
+Order.belongsTo(User)
+
+Asset.hasMany(Order, {as: 'sellOrders'})
+Asset.hasMany(Order, {as: 'buyOrders'})
+Order.belongsTo(Asset, {as: 'sellAsset'})
+Order.belongsTo(Asset, {as: 'buyAsset'})
+
+Proposal.belongsTo(User)
+Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
+
+// >>> Model methods
 
 User.idOrKey = async function(id) {
   if (id.length == 32) {
@@ -87,24 +198,6 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
   }
 }
 
-Debt = sequelize.define('debt', {
-  amount_left: Sequelize.INTEGER,
-  oweTo: Sequelize.INTEGER
-})
-
-Debt.belongsTo(User)
-User.hasMany(Debt)
-
-Proposal = sequelize.define('proposal', {
-  desc: Sequelize.TEXT,
-  code: Sequelize.TEXT,
-  patch: Sequelize.TEXT,
-
-  delayed: Sequelize.INTEGER, //cron
-
-  kindof: Sequelize.STRING
-})
-
 Proposal.prototype.execute = async function() {
   if (this.code) {
     await eval(`(async function() { ${this.code} })()`)
@@ -126,28 +219,6 @@ Proposal.prototype.execute = async function() {
     }
   }
 }
-
-Insurance = sequelize.define('insurance', {
-  leftId: Sequelize.INTEGER,
-  rightId: Sequelize.INTEGER,
-
-  nonce: {type: Sequelize.INTEGER, defaultValue: 0}, // for instant withdrawals, increase one by one
-  asset: {type: Sequelize.INTEGER, defaultValue: 1},
-
-  insurance: {type: Sequelize.BIGINT, defaultValue: 0}, // insurance
-  ondelta: {type: Sequelize.BIGINT, defaultValue: 0}, // what hub already insuranceized
-
-  dispute_delayed: Sequelize.INTEGER,
-
-  // increased offchain. When disputed, higher one is true
-  dispute_nonce: Sequelize.INTEGER,
-  dispute_offdelta: Sequelize.INTEGER,
-  // two arrays of hashlocks, inwards for left and inwards for right
-  dispute_hashlocks: Sequelize.TEXT,
-
-  // started by left user?
-  dispute_left: Sequelize.BOOLEAN
-})
 
 Insurance.prototype.resolve = async function() {
   if (this.dispute_hashlocks) {
@@ -241,60 +312,5 @@ Insurance.prototype.resolve = async function() {
 
   return resolved
 }
-
-Vote = sequelize.define('vote', {
-  rationale: Sequelize.TEXT,
-  approval: Sequelize.BOOLEAN // approval or denial
-})
-
-Proposal.belongsTo(User)
-
-// User.belongsToMany(User, {through: Insurance, as: 'left'})
-// User.belongsToMany(User, {through: Insurance, as: 'right'})
-
-Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
-
-// Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
-// Primarily used in atomic swaps and mediated transfers. Based on Sprites concept
-// They are are stored for a few days and unlock a specific action
-Hashlock = sequelize.define('hashlock', {
-  alg: Sequelize.INTEGER, // sha256, sha3?
-  hash: Sequelize.TEXT,
-  revealed_at: Sequelize.INTEGER,
-  delete_at: Sequelize.INTEGER
-})
-
-// Assets represent all numerical balances: currencies, tokens, shares, stocks.
-// Anyone can create and issue their own asset (like ERC20, but not programmable)
-Asset = sequelize.define('asset', {
-  ticker: Sequelize.TEXT,
-  desc: Sequelize.TEXT,
-
-  issuerId: Sequelize.INTEGER,
-  total_supply: Sequelize.INTEGER
-})
-
-// standalone "onchain balance" (not stored in a channel)
-/*
-Balance = sequelize.define('balance', {
-  balance: Sequelize.INTEGER
-})
-User.hasMany(Balance)
-Asset.hasMany(Balance)
-Balance.belongsTo(User)
-Balance.belongsTo(Asset)*/
-
-// onchain exchange order: user X sells Y of asset A in exchange for asset B at rate R
-Order = sequelize.define('order', {
-  amount: Sequelize.INTEGER,
-  rate: Sequelize.INTEGER
-})
-User.hasMany(Order)
-Order.belongsTo(User)
-
-Asset.hasMany(Order, {as: 'sellOrders'})
-Asset.hasMany(Order, {as: 'buyOrders'})
-Order.belongsTo(Asset, {as: 'sellAsset'})
-Order.belongsTo(Asset, {as: 'buyAsset'})
 
 Order.prototype.match = async function() {}

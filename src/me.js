@@ -35,7 +35,7 @@ class Me {
     }
     cached_result.metrics = this.metrics
 
-    this.updateMetricsInterval = 1000
+    this.updateMetricsInterval = 5000
 
     this.intervals = []
     // used to store current block to be added to chain
@@ -302,7 +302,7 @@ class Me {
     // request latest blocks from nearest validator
     me.intervals.push(setInterval(sync, K.blocktime * 1000))
     // cache onchain data regularly to present in Explorers
-    me.intervals.push(setInterval(cache, K.blocktime * 1000))
+    me.intervals.push(setInterval(cache, K.blocktime * 2000))
 
     cache()
     if (K.total_blocks > 1) {

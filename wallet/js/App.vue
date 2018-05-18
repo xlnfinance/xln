@@ -136,9 +136,9 @@ export default {
 
     stream: () => {
       var n = 0
-      pay = () => {
-        $('.btn-success').clic()
-        if (n++ < 100) setTimeout(pay, 2000)
+      var pay = () => {
+        document.querySelector('.btn-success').click()
+        if (n++ < 100) setTimeout(pay, 1000)
       }
       pay()
     },

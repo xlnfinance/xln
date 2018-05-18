@@ -7,15 +7,19 @@ if (argv.db) {
     define: {timestamps: true}, // we don't mind timestamps in offchain db
     operatorsAliases: false,
 
-    logging: false,
+    logging: (str, time) => {
+      loff(time + ' (off) ' + (parseInt(time) > 100 ? str : str.substr(0, 20)))
+    },
+    benchmark: true,
+
     retry: {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 30 : 1,
+      max: base_port == 443 ? 10 : 1,
       min: 0,
-      acquire: 20000,
-      idle: 20000,
+      acquire: 10000,
+      idle: 10000,
       evict: 30000,
       handleDisconnects: true
     }
@@ -194,13 +198,16 @@ Payment = privSequelize.define(
     indexes: [
       {
         fields: [
-          'type',
-          'status',
-          'is_inward'
+          'type'
+          // 'status',
+          // 'is_inward'
           /*
           {attribute: 'type', length: 8},
           {attribute: 'status', length: 8}*/
         ]
+      },
+      {
+        fields: ['status']
       }
     ]
   }
@@ -216,9 +223,8 @@ Payment.prototype.toLock = function() {
 }
 
 Payment.prototype.getInward = async function() {
-  return await Payment.findOne({
-    where: {hash: this.hash, is_inward: true, asset: this.asset},
-    include: {all: true}
+  return Payment.findOne({
+    where: {hash: this.hash, is_inward: true, asset: this.asset}
   })
 }
 

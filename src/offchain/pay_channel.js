@@ -37,7 +37,7 @@ module.exports = async (opts) => {
     } else {
       await ch.d.createPayment({
         type: opts.addrisk ? 'addrisk' : 'add',
-        lazy_until: opts.lazy ? +new Date() + 5000 : null,
+        lazy_until: opts.lazy ? +new Date() + 30000 : null,
 
         status: 'new',
         is_inward: false,
