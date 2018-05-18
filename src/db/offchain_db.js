@@ -134,27 +134,38 @@ Delta = privSequelize.define(
     }
   },
   {
-    /*
     indexes: [
       {
         fields: [
           {
             attribute: 'partnerId',
             length: 32
+          },
+          {
+            attribute: 'asset'
           }
         ]
       }
     ]
-    */
   }
 )
 
 Payment = privSequelize.define(
   'payment',
   {
-    type: Sequelize.ENUM('add', 'settle', 'fail'),
+    type: Sequelize.ENUM(
+      'add',
+      'settle',
+      'fail',
+      'addrisk',
+      'settlerisk',
+      'failrisk'
+    ),
     status: Sequelize.ENUM('new', 'sent', 'acked', 'processed'),
     is_inward: Sequelize.BOOLEAN,
+
+    // streaming payments
+    lazy_until: Sequelize.DATE,
 
     // in outward it is inward amount - fee
     amount: Sequelize.INTEGER,

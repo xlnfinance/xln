@@ -156,7 +156,7 @@ module.exports = async (ws, msg) => {
     if (msg[0] == 1) {
       await me.payChannel({
         destination: msg.slice(2),
-        amount: 10000000 + Math.round(Math.random() * 8000),
+        amount: 10000000,
         invoice: Buffer.alloc(1),
         asset: msg[1]
       })

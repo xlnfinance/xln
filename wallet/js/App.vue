@@ -87,6 +87,9 @@ export default {
         amount: hashargs['amount'],
         invoice: hashargs['invoice']
       },
+      addrisk: false,
+      lazy: false,
+
       order: {
         amount: '',
         rate: '',
@@ -348,13 +351,13 @@ export default {
     },
     payment_status: (type, status) => {
       var s = ''
-      if (type == 'settle') {
+      if (type == 'settle' || type == 'settlerisk') {
         s = '✔'
       }
-      if (type == 'fail') {
+      if (type == 'fail' || type == 'failrisk') {
         s = '❌'
       }
-      if (type == 'add') {
+      if (type == 'add' || type == 'addrisk') {
         s = '🔒'
       }
       // new and sent are considered "pending" statuses
@@ -507,7 +510,7 @@ export default {
         <template v-if="pubkey">
           <h2 class="alert alert-danger" v-if="pending_batch">Please wait until your onchain transaction is added to the blockchain.</h2>
 
-          <h2 class="alert alert-danger" v-if="K.ts < ts() - 600">Payments can fail, please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
+          <h2 class="alert alert-danger" v-if="K.ts < ts() - 600">Please wait until your node is fully synced. <br>Last known block: {{timeAgo(K.ts)}}</h2>
 
           <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
@@ -563,7 +566,7 @@ export default {
               </div>
             </p>
             <p>
-              <button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, asset: asset, amount: uncommy(outward.amount), invoice: outward.invoice}})">Pay Now → </button>
+              <button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, asset: asset, amount: uncommy(outward.amount), invoice: outward.invoice, addrisk: addrisk, lazy: lazy}})">Pay Now → </button>
             </p>
             <p>
               <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1 })">Testnet Faucet</button>
@@ -949,7 +952,18 @@ export default {
 
       <div v-else-if="tab=='assets'">
         <h1>Assets</h1>
-        <p>Digital assets is the name for all kinds of currencies, tokens, stock and colored coins you can create on top of the system. Each asset has it's own issuer, some assets can be capped, some assets can be even frozen by their issuer (Freeze/NoFreeze).</p>
+        <p>Digital assets is the name for all kinds of currencies, tokens, stock and colored coins you can create on top of the system.</p>
+        <template v-if="record">
+
+          <div class="form-group">
+            <label for="comment">Ticker:</label>
+            <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input>
+          </div>
+          
+        </template>
+
+
+
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>

@@ -93,8 +93,23 @@ module.exports = async (pubkey, asset, opportunistic) => {
           } else {
             args = t.hash
           }
-        } else if (t.type == 'add') {
-          // todo: this might be not needed as previous checks are sufficient
+        } else if (t.type == 'settlerisk' || t.type == 'failrisk') {
+          if (t.type == 'failrisk') {
+            newState[1][3] += ch.left ? -t.amount : t.amount
+            args = t.hash
+          } else {
+            args = t.secret
+          }
+        } else if (t.type == 'add' || t.type == 'addrisk') {
+          if (
+            t.lazy_until &&
+            t.lazy_until > new Date() &&
+            payable - ch.insurance < t.amount
+          ) {
+            l('Still lazy, wait')
+            continue
+          }
+
           if (
             t.amount < K.min_amount ||
             t.amount > K.max_amount ||
@@ -132,7 +147,13 @@ module.exports = async (pubkey, asset, opportunistic) => {
           }
           // decrease payable and add the hashlock to state
           payable -= t.amount
-          outwards.push(t.toLock())
+          if (t.type == 'add') {
+            // add hashlock to canonical state
+            outwards.push(t.toLock())
+          } else {
+            // store hashlock off-state as "verbal agreement"
+            newState[1][3] += ch.left ? -t.amount : t.amount
+          }
 
           args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
         }

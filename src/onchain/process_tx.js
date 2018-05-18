@@ -57,7 +57,7 @@ module.exports = async (tx, meta) => {
 
   if (me.pubkey.equals(signer.pubkey)) {
     if (PK.pending_batch == toHex(tx)) {
-      l('Added to chain')
+      //l('Added to chain')
       react({confirm: 'Your onchain transaction has been added!'}, false)
       PK.pending_batch = null
     }
@@ -91,6 +91,8 @@ module.exports = async (tx, meta) => {
         parsed_tx.events.push([method, asset])
       }
     } else if (method == 'withdrawFrom') {
+      // withdraw money from a channel by providing a sig of your partner
+      // you can only withdraw from insured balance
       var my_hub = K.hubs.find((h) => h.id == signer.id)
 
       for (var input of t[1]) {
@@ -168,6 +170,7 @@ module.exports = async (tx, meta) => {
       }
     } else if (method == 'revealSecrets') {
       // someone tries to cheat in an atomic payment? Reveal the secrets onchain and dispute!
+      // can be used not just for channels but any atomic actions. Stored according to Sprites approach
       for (var secret of t[1]) {
         var hash = sha3(secret)
         var hl = await Hashlock.findOne({
@@ -190,6 +193,7 @@ module.exports = async (tx, meta) => {
         }
       }
     } else if (method == 'disputeWith') {
+      // our partner is unresponsive, so we provide dispute proof/state (signed offdelta, nonce, hashlocks etc all in one)
       for (let dispute of t[1]) {
         var [id, sig, state] = dispute
 
@@ -223,7 +227,7 @@ module.exports = async (tx, meta) => {
           // see Delta.prototype.getState to see how state it's built
           var [
             methodId,
-            [leftId, rightId, nonce, offdelta, asset],
+            [leftId, rightId, dispute_nonce, offdelta, dispute_asset],
             left_inwards,
             right_inwards
           ] = r(state)
@@ -231,23 +235,24 @@ module.exports = async (tx, meta) => {
           if (
             methodMap(readInt(methodId)) != 'disputeWith' ||
             !leftId.equals(compared == -1 ? signer.pubkey : partner.pubkey) ||
-            !rightId.equals(compared == -1 ? partner.pubkey : signer.pubkey)
+            !rightId.equals(compared == -1 ? partner.pubkey : signer.pubkey) ||
+            readInt(dispute_asset) != asset
           ) {
             l('Invalid dispute')
             continue
           }
 
-          var nonce = readInt(nonce)
+          var dispute_nonce = readInt(dispute_nonce)
           var offdelta = readInt(offdelta) // SIGNED int
           var hashlocks = r([left_inwards, right_inwards])
         } else {
           l('New channel? Split with default values')
-          var nonce = 0
+          var dispute_nonce = 0
           var offdelta = 0
           var hashlocks = null
         }
-        if (ins.dispute_nonce && nonce <= ins.dispute_nonce) {
-          l('New nonce in dispute must be higher')
+        if (ins.dispute_nonce && dispute_nonce <= ins.dispute_nonce) {
+          l(`New nonce in dispute must be higher ${asset}`)
           continue
         }
 
@@ -258,7 +263,7 @@ module.exports = async (tx, meta) => {
             // we don't want to slash everything like in LN, but some fee would help
             ins.dispute_hashlocks = hashlocks
 
-            ins.dispute_nonce = nonce
+            ins.dispute_nonce = dispute_nonce
             ins.dispute_offdelta = offdelta
 
             parsed_tx.events.push([
@@ -275,7 +280,7 @@ module.exports = async (tx, meta) => {
         } else {
           // TODO: return to partner their part right away, and our part is delayed
           ins.dispute_offdelta = offdelta
-          ins.dispute_nonce = nonce
+          ins.dispute_nonce = dispute_nonce
 
           // hashlocks will be verified during resolution
           ins.dispute_hashlocks = hashlocks
@@ -299,18 +304,19 @@ module.exports = async (tx, meta) => {
             var ch = await me.getChannel(signer.pubkey, asset)
             ch.d.status = 'disputed'
             await ch.d.save()
-
-            if (
-              ch.d.signed_state &&
-              readInt(r(ch.d.signed_state)[1][2]) > ins.dispute_nonce
-            ) {
-              l('Our last signed nonce is higher!')
+            var our_nonce = ch.d.signed_state
+              ? readInt(r(ch.d.signed_state)[1][2])
+              : 0
+            //!me.CHEAT_dontack
+            if (our_nonce > ins.dispute_nonce && !me.CHEAT_dontack) {
+              l('Our last signed nonce is higher! ' + our_nonce)
               await ch.d.startDispute()
             }
           }
         }
       }
     } else if (method == 'depositTo') {
+      // deposit from our onchain balance to another onchain balance or channel from some side
       await signer.payDebts(asset, parsed_tx)
       // there's a tiny bias here, the hub always gets reimbursed more than tax paid
       var reimburse_tax = 1 + Math.floor(tax / t[1].length)
@@ -421,14 +427,13 @@ module.exports = async (tx, meta) => {
             // The hub gets reimbursed for rebalancing users.
             // Otherwise it would be harder to collect fee from participants
             // TODO: attack vector, the user may not endorsed this rebalance
-            ins.insurance -= reimburse_tax
-            if (compared == 1) ins.ondelta -= reimburse_tax
 
-            // account creation fees are on user, if any
             var diff = readInt(output[0]) - amount
-            ins.ondelta -= diff * compared
 
-            signer.asset(asset, reimburse_tax)
+            ins.insurance -= reimburse_tax + diff
+            if (compared == 1) ins.ondelta -= reimburse_tax + diff
+
+            signer.asset(1, reimburse_tax + diff)
             // todo take from onchain balance instead
           }
 
@@ -465,13 +470,15 @@ module.exports = async (tx, meta) => {
         meta.outputs_volume += amount
       }
     } else if (method == 'sellFor') {
-      // similar to depositTo but sends money to an Order object
+      // onchain exchange to sell an asset for another one.
       var [sellAsset, amount, buyAsset, rate] = t[1]
       readInts(sellAsset, amount, buyAsset, rate)
 
       let sellerOwns = signer.asset(asset)
 
       var order = await Order.create({})
+    } else if (method == 'createAsset') {
+    } else if (method == 'createHub') {
     } else if (method == 'propose') {
       // temporary protection
       if (signer.id != 1) continue

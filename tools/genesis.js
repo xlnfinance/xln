@@ -25,7 +25,7 @@ module.exports = async () => {
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 100000,
+    snapshot_after_bytes: 50000,
     proposals_created: 0,
 
     // cents per byte of tx
@@ -70,8 +70,8 @@ module.exports = async () => {
     max_fee: 5000,
 
     // hashlock and dispute-related
-    dispute_delay: 20, // in how many blocks disputes are considered final
-    hashlock_exp: 20, // how many blocks a user needs to be a able to reveal
+    dispute_delay: 8, // in how many blocks disputes are considered final
+    hashlock_exp: 4, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 1000, // for how many blocks onchain keeps it unlocked since reveal
     max_hashlocks: 20, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
@@ -86,7 +86,6 @@ module.exports = async () => {
   K.total_shares = K.tolerance * 3 + 1
 
   K.majority = K.total_shares - K.tolerance
-  //K.total_shares%3==0?K.total_shares*2/3+1:Math.ceil(K.total_shares*2/3)
 
   // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
 

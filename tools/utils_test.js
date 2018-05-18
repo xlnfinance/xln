@@ -15,3 +15,15 @@ q('test', testq)
 q('test', testq)
 q('test', testq)
 q('test', testq)
+
+//test fees calculation
+fees = [0.0000001, 0.000002, Math.random(), Math.random()]
+
+for (var i = 0; i < 9999999; i++) {
+  var am = i
+  var after = afterFees(beforeFees(i, fees), fees.reverse())
+
+  if (i != after) {
+    console.log(i, after)
+  }
+}

@@ -50,7 +50,7 @@ class Me {
     this.id = nacl.sign.keyPair.fromSeed(this.seed)
     this.pubkey = bin(this.id.publicKey)
 
-    this.block_keypair = nacl.sign.keyPair.fromSeed(kmac(this.seed, 'block'))
+    this.block_keypair = nacl.sign.keyPair.fromSeed(sha3('block' + this.seed))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
 
     this.box = nacl.box.keyPair.fromSecretKey(this.seed)
@@ -156,12 +156,11 @@ class Me {
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
-    //if (me.my_member && me.my_member == me.next_member()) {
-    //  me.mempool.push(signed_batch)
-    //} else {
-    l('After merging to broadcast: ', merged, me.next_member(true).id)
-    me.send(me.next_member(true), 'tx', r([signed_batch]))
-    //}
+    if (me.my_member && me.my_member == me.next_member(true)) {
+      me.mempool.push(signed_batch)
+    } else {
+      me.send(me.next_member(true), 'tx', r([signed_batch]))
+    }
 
     // saving locally to ensure it is added, and rebroadcast if needed
     PK.pending_batch = toHex(signed_batch)
@@ -174,6 +173,7 @@ class Me {
     })
   }
 
+  // returns validator making block right now, use skip=true to get validator for next slot
   next_member(skip = false) {
     var now = ts()
     var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
@@ -305,11 +305,13 @@ class Me {
     me.intervals.push(setInterval(cache, K.blocktime * 1000))
 
     cache()
-    sync()
-    snapshotHash()
+    if (K.total_blocks > 1) {
+      snapshotHash()
+      sync()
+    }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    //me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
+    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -325,12 +327,12 @@ class Me {
             ]
           }
         })
-      }, 60000)
+      }, 120000)
     )
 
     if (me.my_hub) {
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 1500)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 4000)
       )
 
       // hubs have force react regularly

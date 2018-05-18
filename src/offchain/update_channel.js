@@ -115,17 +115,17 @@ module.exports = async (
   for (let t of transitions) {
     let m = methodMap(readInt(t[0]))
 
-    if (m == 'add') {
+    if (m == 'add' || m == 'addrisk') {
       let [amount, hash, exp, destination, unlocker] = t[1]
 
       exp = readInt(exp)
       amount = readInt(amount)
 
-      let new_type = 'add'
+      let new_type = m
 
       if (amount < K.min_amount || amount > receivable) {
         loff('Error: invalid amount ', amount)
-        new_type = 'fail'
+        new_type = m == 'add' ? 'fail' : 'failrisk'
       }
 
       if (hash.length != 32) {
@@ -142,14 +142,19 @@ module.exports = async (
       // if usable blocks is 10 and default exp is 5, must be between 14-16
 
       if (exp < reveal_until - 30 || exp > reveal_until + 30) {
-        new_type = 'fail'
+        new_type = m == 'add' ? 'fail' : 'failrisk'
         loff('Error: exp is out of supported range')
       }
 
       receivable -= amount
 
-      // push a hashlock
-      inwards.push([amount, hash, exp])
+      if (m == 'add') {
+        // push a hashlock in-state
+        inwards.push([amount, hash, exp])
+      } else {
+        // off-state
+        newState[1][3] += ch.left ? amount : -amount
+      }
 
       // check new state and sig, save
       newState[1][2]++
@@ -160,8 +165,8 @@ module.exports = async (
 
       let hl = await ch.d.createPayment({
         type: new_type,
-        // we either add add/acked or fail/new
-        status: new_type == 'add' ? 'acked' : 'new',
+        // we either add add/addrisk or fail right away
+        status: new_type == m ? 'acked' : 'new',
         is_inward: true,
 
         amount: amount,
@@ -172,7 +177,7 @@ module.exports = async (
         destination: destination
       })
 
-      if (new_type == 'fail') {
+      if (new_type != m) {
         // go to next transition - we failed this hashlock already
         continue
       }
@@ -188,7 +193,7 @@ module.exports = async (
         )
         if (unlocked == null) {
           loff('Error: Bad unlocker')
-          hl.type = 'fail'
+          hl.type = m == 'add' ? 'fail' : 'failrisk'
           hl.status = 'new'
         } else {
           let [box_amount, box_secret, box_invoice] = r(bin(unlocked))
@@ -198,7 +203,7 @@ module.exports = async (
           hl.invoice = box_invoice
 
           hl.secret = box_secret
-          hl.type = 'settle'
+          hl.type = m == 'add' ? 'settle' : 'settlerisk'
           hl.status = 'new'
 
           // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our settle on time and the hashlock expires making us lose the money.
@@ -218,7 +223,7 @@ module.exports = async (
 
         if (me.users[destination] && dest_ch.payable >= outward_amount) {
           await dest_ch.d.createPayment({
-            type: 'add',
+            type: m,
             status: 'new',
             is_inward: false,
 
@@ -232,32 +237,53 @@ module.exports = async (
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
-          hl.type = 'fail'
+          hl.type = m == 'add' ? 'fail' : 'failrisk'
           hl.status = 'new'
           await hl.save()
         }
       } else {
         loff('Error: arent receiver and arent a hub O_O')
       }
-    } else if (m == 'settle' || m == 'fail') {
-      let [secret, hash] = m == 'settle' ? [t[1], sha3(t[1])] : [null, t[1]]
+    } else if (
+      m == 'settle' ||
+      m == 'fail' ||
+      m == 'settlerisk' ||
+      m == 'failrisk'
+    ) {
+      let [secret, hash] =
+        m == 'settle' || m == 'settlerisk' ? [t[1], sha3(t[1])] : [null, t[1]]
 
-      let index = outwards.findIndex((hl) => hl[1].equals(hash))
-      let hl = outwards[index]
+      let outward = (await ch.d.getPayments({
+        where: {
+          hash: hash,
+          is_inward: false,
+          type: m.includes('risk') ? 'addrisk' : 'add'
+        },
+        include: {all: true}
+      }))[0]
 
-      if (!hl) {
-        loff('Error: No such hashlock')
+      if (!outward) {
+        loff('Error: No such payment')
         break
       }
 
-      outwards.splice(index, 1)
+      // todo check expirations
 
-      if (m == 'settle') {
-        // secret was provided - remove & apply hashlock on offdelta
-        newState[1][3] += ch.left ? -hl[0] : hl[0]
-        receivable += hl[0]
-      } else {
-        // secret wasn't provided, delete lock
+      if (m == 'settle' || m == 'fail') {
+        let index = outwards.findIndex((hl) => hl[1].equals(hash))
+        let hl = outwards[index]
+        outwards.splice(index, 1)
+
+        if (m == 'settle') {
+          // secret was provided - remove & apply hashlock on offdelta
+          newState[1][3] += ch.left ? -outward.amount : outward.amount
+          receivable += outward.amount
+        } else {
+          // secret wasn't provided, just delete lock
+        }
+      } else if (m == 'failrisk') {
+        // note that settlerisk is not state changing at all, and failrisk is refund
+        newState[1][3] += ch.left ? outward.amount : -outward.amount
       }
 
       // check new state and sig, save
@@ -266,11 +292,6 @@ module.exports = async (
         gracefulExit('Error: Invalid state sig at ' + m)
         break
       }
-
-      let outward = (await ch.d.getPayments({
-        where: {hash: hash, is_inward: false},
-        include: {all: true}
-      }))[0]
 
       outward.secret = secret
       outward.type = m

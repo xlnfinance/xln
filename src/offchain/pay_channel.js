@@ -9,8 +9,14 @@ module.exports = async (opts) => {
   let amount = parseInt(opts.amount)
 
   var ch = await q([pubkey, opts.asset], async () => {
-    let via = me.my_hub ? pubkey : fromHex(K.hubs[0].pubkey)
-    let sent_amount = beforeFees(amount, [K.hubs[0].fee])
+    // if we are hub making a payment, don't add the fees on top
+    if (me.my_hub) {
+      var via = pubkey
+      var sent_amount = amount
+    } else {
+      var via = fromHex(K.hubs[0].pubkey)
+      var sent_amount = beforeFees(amount, [K.hubs[0].fee])
+    }
     let ch = await me.getChannel(via, opts.asset)
 
     let unlocker_nonce = crypto.randomBytes(24)
@@ -30,7 +36,9 @@ module.exports = async (opts) => {
       react({alert: `Minimum payment is $${commy(K.min_amount)}`}, false)
     } else {
       await ch.d.createPayment({
-        type: 'add',
+        type: opts.addrisk ? 'addrisk' : 'add',
+        lazy_until: opts.lazy ? +new Date() + 5000 : null,
+
         status: 'new',
         is_inward: false,
         asset: opts.asset,

@@ -87,7 +87,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // Processing transactions one by one
   // Long term TODO: parallel execution with pessimistic locks
   for (let i = 0; i < ordered_tx.length; i++) {
-    l(await me.processTx(ordered_tx[i], meta))
+    let result = await me.processTx(ordered_tx[i], meta)
+    if (!result.success) l(result)
   }
 
   K.ts = timestamp
@@ -179,9 +180,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           stat.birthtime = null
 
           // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
-          // Todo: use whitelist instead?
+          // No dotfiles
           if (
-            path.startsWith('./.') ||
+            path.includes('/.') ||
             path.match(
               /^\.\/(data[0-9]+|data\/offchain|\.DS_Store|node_modules|wallet\/node_modules|dist|tools)/
             )
@@ -213,33 +214,31 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     })
   )
 
+  await Promise.all(all)
+
   // save final block in offchain db. Required for members, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
   if (me.my_member || !me.prune) {
-    all.push(
-      Block.create({
-        prev_hash: fromHex(prev_hash),
-        hash: sha3(header),
+    await Block.create({
+      prev_hash: fromHex(prev_hash),
+      hash: sha3(header),
 
-        precommits: r(precommits), // pack them in rlp for storage
-        header: header,
-        ordered_tx_body: ordered_tx_body,
+      precommits: r(precommits), // pack them in rlp for storage
+      header: header,
+      ordered_tx_body: ordered_tx_body,
 
-        total_tx: ordered_tx.length,
+      total_tx: ordered_tx.length,
 
-        // did anything happen in this block?
-        meta:
-          meta.parsed_tx.length +
-            meta.cron.length +
-            meta.missed_validators.length >
-          0
-            ? JSON.stringify(meta)
-            : null
-      })
-    )
+      // did anything happen in this block?
+      meta:
+        meta.parsed_tx.length +
+          meta.cron.length +
+          meta.missed_validators.length >
+        0
+          ? JSON.stringify(meta)
+          : null
+    })
   }
-
-  await Promise.all(all)
 
   if (me.request_reload) {
     gracefulExit('reload requested')

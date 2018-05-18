@@ -170,27 +170,6 @@ q = async function(key, job) {
 }
 q.q = {}
 
-/*
-
-q("hi", async ()=>{
-  await sleep(1000)
-  console.log(1)
-  await sleep(1000)
-}).then(()=>{console.log(11)})
-
-q("hi", async ()=>{
-  await sleep(1000)
-  console.log(2)
-  await sleep(1000)
-})
-
-q("hi", async ()=>{
-  await sleep(1000)
-  console.log(3)
-  await sleep(1000)
-})
-
-*/
 current_db_hash = () => {
   return Buffer.alloc(1)
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
@@ -224,36 +203,12 @@ readInts = () => {
 toHex = (inp) => Buffer.from(inp).toString('hex')
 fromHex = (inp) => Buffer.from(inp, 'hex')
 bin = (data) => Buffer.from(typeof data == 'number' ? [data] : data)
-sha3 = (a) =>
-  keccak('keccak256')
-    .update(bin(a))
-    .digest()
 
-// TODO: not proper alg
-kmac = (key, msg) =>
-  keccak('keccak256')
-    .update(key)
-    .update(bin(msg))
-    .digest()
+js_sha3 = require('js-sha3')
+sha3 = (a) => bin(js_sha3.sha3_256.digest(a))
 
 ts = () => Math.round(new Date() / 1000)
 
-/*
-TODO: Add to test spec - arbitrary number of hops with random fee policy, 
-must always correctly guess amount to send for the recipient to get exact invoice amount
-
-fees = [0.0000001, 0.000002, Math.random(), Math.random()]
-
-for(var i = 0; i< 9999999;i++){
-  var am = i
-  var after = afterFees(beforeFees(i, fees), fees.reverse())
-
-  if (i != after){
-    console.log(i, after)
-  }
-
-}
-*/
 beforeFees = (amount, fees) => {
   for (var fee of fees) {
     new_amount = Math.round(amount * (1 + fee))
@@ -350,7 +305,7 @@ methodMap = (i) => {
     'settle', // we've got the secret so please unlock and apply to base offdelta
     'fail', // couldn't get secret for <reason>, delete hashlock
 
-    // same, but off-the-canonical-state and risky (intermediary may not pass forward)
+    // same, but off-canonical-state and risky (receiver is not required to return secret to claim money)
     'addrisk',
     'settlerisk',
     'failrisk',
