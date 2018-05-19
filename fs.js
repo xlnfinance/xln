@@ -5,32 +5,90 @@ require('./src/browser')
 // This is the most important function in the whole project. Make sure you understand it!
 // Defines how payment channels work, based on "insurance" and delta=("ondelta"+"offdelta")
 // There are 3 major scenarios of delta position
-// . is 0 point, | is delta, = is insurance, - is promised
+// . is 0 point, | is delta, = is insured, - is uninsured
 // 4,6  .====--| (left user owns entire insurance, has 2 uninsured)
 // 4,2  .==|==   (left and right both have 2 insured)
 // 4,-2 |--.==== (right owns entire insurance, 2 in uninsured balance)
 resolveChannel = (insurance, delta, is_left = true) => {
   var parts = {
     // left user promises only with negative delta, scenario 3
-    promised: delta < 0 ? -delta : 0,
+    they_uninsured: delta < 0 ? -delta : 0,
     insured: delta > insurance ? insurance : delta > 0 ? delta : 0,
     they_insured:
       delta > insurance ? 0 : delta > 0 ? insurance - delta : insurance,
-    // right user promises when delta goes beyond insurance, scenario 1
-    they_promised: delta > insurance ? delta - insurance : 0
+    // right user promises when delta > insurance, scenario 1
+    uninsured: delta > insurance ? delta - insurance : 0
   }
 
   // default view is left. if current user is right, simply reverse
   if (!is_left) {
     ;[
-      parts.promised,
+      parts.they_uninsured,
       parts.insured,
       parts.they_insured,
-      parts.they_promised
-    ] = [parts.they_promised, parts.they_insured, parts.insured, parts.promised]
+      parts.uninsured
+    ] = [
+      parts.uninsured,
+      parts.they_insured,
+      parts.insured,
+      parts.they_uninsured
+    ]
   }
 
   return parts
+}
+
+refresh = function(ch) {
+  Object.assign(
+    ch,
+    resolveChannel(ch.insurance, ch.ondelta + ch.d.offdelta, ch.left)
+  )
+
+  // Canonical state
+  ch.state = [
+    methodMap('disputeWith'),
+    [
+      ch.left ? ch.d.myId : ch.d.partnerId,
+      ch.left ? ch.d.partnerId : ch.d.myId,
+      ch.d.nonce,
+      ch.d.offdelta,
+      ch.d.asset
+    ],
+    ch[ch.left ? 'inwards' : 'outwards'].map((t) => t.toLock()),
+    ch[ch.left ? 'outwards' : 'inwards'].map((t) => t.toLock())
+  ]
+
+  // inputs are like bearer cheques and can be used any minute, so we deduct them
+  ch.payable =
+    ch.insured +
+    ch.uninsured +
+    ch.d.they_hard_limit -
+    ch.they_uninsured -
+    ch.d.input_amount
+  //ch.outwards.reduce((a, b) => a + b.amount)
+
+  ch.they_payable =
+    ch.they_insured +
+    ch.they_uninsured +
+    ch.d.hard_limit -
+    ch.uninsured -
+    ch.d.they_input_amount
+  //ch.inwards.reduce((a, b) => a.amount + b.amount)
+
+  // All stuff we show in the progress bar in the wallet
+  ch.bar = ch.they_uninsured + ch.insured + ch.they_insured + ch.uninsured
+
+  ch.ascii_states = ascii_state(ch.state)
+  if (ch.d.signed_state) {
+    let st = r(ch.d.signed_state)
+    prettyState(st)
+    st = ascii_state(st)
+    if (st != ch.ascii_states) {
+      ch.ascii_states += st
+    }
+  }
+
+  return ch.state
 }
 
 on_server = fs.existsSync(

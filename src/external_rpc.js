@@ -44,7 +44,7 @@ module.exports = async (ws, msg) => {
         ch.d.last_online = new Date()
 
         // testnet: instead of cloud backups hub shares latest state
-        //me.send(pubkey, 'ack', me.envelope(0, ec(await ch.d.getState(), me.id.secretKey)))
+        //me.send(pubkey, 'ack', me.envelope(0, ec(ch.state, me.id.secretKey)))
 
         if (ch.withdrawal_requested_at) {
           me.send(pubkey, 'requestWithdrawFrom', me.envelope(ch.insured))
@@ -320,25 +320,26 @@ module.exports = async (ws, msg) => {
     // New payment arrived
     let [pubkey, sig, body] = r(msg)
 
+    /*
     if (!ec.verify(body, sig, pubkey)) {
       return l('Wrong input')
     }
+    */
 
     // ackSig defines the sig of last known state between two parties.
     // then each transitions contains an action and an ackSig after action is committed
     // debugState/signedState are purely for debug phase
     let [method, asset, ackSig, transitions, debugState, signedState] = r(body)
-    asset = readInt(asset)
-
     if (methodMap(readInt(method)) != 'update') {
       loff('Invalid update input')
       return false
     }
 
+    asset = readInt(asset)
+
     let flushable = await q([pubkey, asset], async () => {
       //loff(`--- Start update ${trim(pubkey)} - ${transitions.length}`)
-
-      var flushable = await me.updateChannel(
+      return me.updateChannel(
         pubkey,
         asset,
         ackSig,
@@ -346,8 +347,6 @@ module.exports = async (ws, msg) => {
         debugState,
         signedState
       )
-      //loff(`=== End update ${trim(pubkey)}`)
-      return flushable
     })
 
     /*

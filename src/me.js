@@ -10,6 +10,8 @@ class Me {
     this.status = 'await'
 
     this.users = {}
+    this.cached = {}
+
     this.hubs = {}
 
     this.queue = []
@@ -59,8 +61,6 @@ class Me {
 
     this.last_react = new Date()
 
-    this.record = await this.byKey()
-
     PK.username = username
     PK.seed = seed.toString('hex')
     fs.writeFileSync(datadir + '/offchain/pk.json', JSON.stringify(PK))
@@ -76,8 +76,7 @@ class Me {
     }
 
     return await User.findOne({
-      where: {pubkey: bin(pk)},
-      include: {all: true}
+      where: {pubkey: bin(pk)}
     })
   }
 
@@ -369,17 +368,17 @@ Payments: ${await Payment.count()}\n
           child_process.exec(
             `osascript -e 'display notification "${alert}" with title "Test result"'`
           )
-        }, 50000)
+        }, 60000)
       } else {
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
         setTimeout(() => {
           me.getCoins(1)
-        }, 6000)
+        }, 8000)
 
         setTimeout(() => {
           me.payRando()
-        }, 10000)
+        }, 16000)
       }
     }
   }
@@ -400,21 +399,23 @@ Payments: ${await Payment.count()}\n
     let assets = await Asset.findAll()
     // all assets with all hubs
 
-    for (var m of K.hubs) {
-      if (!me.record || me.record.id != m.id) {
-        for (let asset of assets) {
-          var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
+    if (me.my_hub) {
+      // find all existing channels (if you are hub)
+      var deltas = await Delta.findAll()
+      for (var d of deltas) {
+        if (!K.hubs.find((h) => fromHex(h.pubkey).equals(d.partnerId))) {
+          var ch = await me.getChannel(d.partnerId, d.asset)
           channels.push(ch)
         }
       }
-    }
-
-    // find all existing channels (if you are hub)
-    var deltas = await Delta.findAll()
-    for (var d of deltas) {
-      if (!K.hubs.find((h) => fromHex(h.pubkey).equals(d.partnerId))) {
-        var ch = await me.getChannel(d.partnerId, d.asset)
-        channels.push(ch)
+    } else {
+      for (var m of K.hubs) {
+        if (!me.record || me.record.id != m.id) {
+          for (let asset of assets) {
+            var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
+            channels.push(ch)
+          }
+        }
       }
     }
 
@@ -437,7 +438,7 @@ Payments: ${await Payment.count()}\n
 
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(1000 + Math.random() * 3000))
+      }, Math.round(1000 + Math.random() * 1000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)

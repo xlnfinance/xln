@@ -24,17 +24,13 @@ cache = async (i) => {
           cached_result.users = await User.findAll({include: {all: true}})
         },
         async () => {
-          cached_result.insurances = await Insurance.findAll({
-            include: {all: true}
-          })
+          cached_result.insurances = await Insurance.findAll()
         },
         async () => {
-          cached_result.hashlocks = await Hashlock.findAll({
-            include: {all: true}
-          })
+          cached_result.hashlocks = await Hashlock.findAll()
         },
         async () => {
-          cached_result.assets = await Asset.findAll({include: {all: true}})
+          cached_result.assets = await Asset.findAll()
         },
         async () => {
           cached_result.blocks = (await Block.findAll({
@@ -91,19 +87,19 @@ react = async (result = {}, force = true) => {
     if (me.my_hub) {
       /*
       var deltas = await Delta.findAll({where: {myId: me.record.id}})
-      var promised = 0
+      var they_uninsured = 0
       for (var d of deltas) {
         var ch = await me.getChannel(d.userId, d.asset)
-        if (ch.delta > 0) promised += ch.promised
+        if (ch.they_uninsured > 0) they_uninsured += ch.they_uninsured
       }
 
       if (
         cached_result.history[0] &&
-        cached_result.history[0].delta != promised
+        cached_result.history[0].delta != they_uninsured
       ) {
         cached_result.history.unshift({
           date: new Date(),
-          delta: promised
+          delta: they_uninsured
         })
       }
       */

@@ -7,8 +7,8 @@ let base_db = {
   operatorsAliases: false,
 
   logging: (str, time) => {
-    if (parseInt(time) > 200) {
-      loff(time + ' (off) ' + str)
+    if (parseInt(time) > 300) {
+      loff(time + ' (on) ' + str)
     }
   },
 

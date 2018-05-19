@@ -247,15 +247,15 @@ export default {
       if (parts.they_insured > 0)
         o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`)
 
-      if (parts.promised > 0)
+      if (parts.they_uninsured > 0)
         o.push(
-          `${ins.leftId} owes ${app.commy(parts.promised)} to ${ins.rightId}`
-        )
-      if (parts.they_promised > 0)
-        o.push(
-          `${ins.rightId} owes ${app.commy(parts.they_promised)} to ${
-            ins.leftId
+          `${ins.leftId} owes ${app.commy(parts.they_uninsured)} to ${
+            ins.rightId
           }`
+        )
+      if (parts.uninsured > 0)
+        o.push(
+          `${ins.rightId} owes ${app.commy(parts.uninsured)} to ${ins.leftId}`
         )
 
       return o.join(', ')
@@ -523,15 +523,15 @@ export default {
             <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}} <span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
             <small v-if="ch.payable > 0">
               = {{commy(ch.insurance)}} insurance 
-              {{ch.they_promised > 0 ? "+ "+commy(ch.they_promised)+" uninsured" : ''}}
+              {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
               {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}}
             </small>
             <p>
               <div v-if="ch.bar > 0">
                 <div class="progress" style="max-width:1400px">
-                  <div v-bind:style="{ width: Math.round(ch.promised*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
-                    -{{commy(ch.promised)}} (we promised)
+                  <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
+                    -{{commy(ch.they_uninsured)}} (they uninsured)
                   </div>
                   <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
                     {{commy(ch.insured)}} (insured)
@@ -539,8 +539,8 @@ export default {
                   <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
                     -{{commy(ch.they_insured)}} (spent)
                   </div>
-                  <div v-bind:style="{ width: Math.round(ch.they_promised*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
-                    +{{commy(ch.they_promised)}} (uninsured)
+                  <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
+                    +{{commy(ch.uninsured)}} (uninsured)
                   </div>
                 </div>
               </div>
@@ -676,7 +676,7 @@ export default {
 
 
           <template v-if="ch">
-            <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.they_promised)}} (<b>uninsured</b> balance) if the hub is completely compromised.
+            <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.uninsured)}} (<b>uninsured</b> balance) if the hub is completely compromised.
             </p>
             <p>After a timeout money will arrive to your onchain balance, then you will be able to move it to another hub.</p>
             <p v-if="ch.d.status == 'disputed'">

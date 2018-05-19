@@ -15,9 +15,6 @@ module.exports = async (
     return
   }
 
-  // first, clone what they can pay and decrement
-  let receivable = ch.they_payable
-
   // an array of partners we need to ack or flush changes at the end of processing
   var flushable = []
 
@@ -30,10 +27,6 @@ module.exports = async (
     }
   }
 
-  // this is state we are on right now.
-  //let newState = await ch.d.getState()
-  let newState = ch.state
-
   let oldState = r(ch.d.signed_state)
   prettyState(oldState)
 
@@ -42,8 +35,9 @@ module.exports = async (
 
   let rollback = [0, 0]
 
-  if (ch.d.saveState(newState, ackSig)) {
+  if (ch.d.saveState(ch.state, ackSig)) {
     // our last known state has been acked.
+    ch.sent.map((t) => (t.status = 'acked'))
 
     all.push(
       Payment.update(
@@ -65,13 +59,13 @@ module.exports = async (
     if (ch.d.status == 'merge') {
       // we are in merge and yet we just received ackSig that doesnt ack latest state
       loff('Rollback cant rollback')
-      logstates(newState, oldState, debugState, signedState)
+      logstates(ch.state, oldState, debugState, signedState)
       //gracefulExit('Rollback cant rollback')
       return
     }
     if (transitions.length == 0) {
       loff('Empty invalid ack, ' + ch.d.status)
-      logstates(newState, oldState, debugState, signedState)
+      logstates(ch.state, oldState, debugState, signedState)
       return
     }
 
@@ -92,12 +86,19 @@ module.exports = async (
       //loff(`Start merge ${trim(pubkey)}`)
 
       rollback = [
-        newState[1][2] - oldState[1][2], // nonce diff
-        newState[1][3] - oldState[1][3] // offdelta diff
+        ch.d.nonce - oldState[1][2], // nonce diff
+        ch.d.offdelta - oldState[1][3] // offdelta diff
       ]
-      newState = oldState
+      ch.d.nonce = oldState[1][2]
+      ch.d.offdelta = oldState[1][3]
+
+      // rolling back to last signed hashlocks
+      ch.inwards = ch.old_inwards
+      ch.outwards = ch.old_outwards
+
+      refresh(ch)
     } else {
-      logstates(newState, oldState, debugState, signedState)
+      logstates(ch.state, oldState, debugState, signedState)
 
       loff('Deadlock?!')
       //gracefulExit('Deadlock?!')
@@ -108,9 +109,6 @@ module.exports = async (
   }
 
   //ascii_tr(transitions)
-
-  let outwards = newState[ch.left ? 3 : 2]
-  let inwards = newState[ch.left ? 2 : 3]
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (let t of transitions) {
     let m = methodMap(readInt(t[0]))
@@ -118,12 +116,11 @@ module.exports = async (
     if (m == 'add' || m == 'addrisk') {
       let [amount, hash, exp, destination, unlocker] = t[1]
 
-      exp = readInt(exp)
-      amount = readInt(amount)
+      ;[exp, amount] = [exp, amount].map(readInt)
 
       let new_type = m
 
-      if (amount < K.min_amount || amount > receivable) {
+      if (amount < K.min_amount || amount > ch.they_payable) {
         loff('Error: invalid amount ', amount)
         new_type = m == 'add' ? 'fail' : 'failrisk'
       }
@@ -133,7 +130,7 @@ module.exports = async (
         break
       }
 
-      if (inwards.length >= K.max_hashlocks) {
+      if (ch.inwards.length >= K.max_hashlocks) {
         loff('Error: too many hashlocks')
         break
       }
@@ -145,24 +142,8 @@ module.exports = async (
         loff('Error: exp is out of supported range')
       }
 
-      receivable -= amount
-
-      if (m == 'add') {
-        // push a hashlock in-state
-        inwards.push([amount, hash, exp])
-      } else {
-        // off-state
-        newState[1][3] += ch.left ? amount : -amount
-      }
-
-      // check new state and sig, save
-      newState[1][2]++
-      if (!ch.d.saveState(newState, t[2])) {
-        loff('Error: Invalid state sig add')
-        break
-      }
-
-      let hl = await ch.d.createPayment({
+      // don't save in db just yet
+      let hl = Payment.build({
         type: new_type,
         // we either add add/addrisk or fail right away
         status: new_type == m ? 'acked' : 'new',
@@ -173,8 +154,28 @@ module.exports = async (
         exp: exp,
 
         unlocker: unlocker,
-        destination: destination
+        destination: destination,
+
+        deltumId: ch.d.id
       })
+      ch.payments.push(hl)
+
+      if (m == 'add') {
+        // push a hashlock in-state
+        ch.inwards.push(hl)
+      } else {
+        // off-state
+        ch.d.offdelta += ch.left ? amount : -amount
+      }
+
+      // check new state and sig, save
+      ch.d.nonce++
+      if (!ch.d.saveState(refresh(ch), t[2])) {
+        loff('Error: Invalid state sig add')
+        break
+      }
+
+      await hl.save()
 
       if (new_type != m) {
         // go to next transition - we failed this hashlock already
@@ -199,7 +200,6 @@ module.exports = async (
           let [box_amount, box_secret, box_invoice] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
-          //react({confirm: 'Received a payment'})
           hl.invoice = box_invoice
 
           hl.secret = box_secret
@@ -253,6 +253,7 @@ module.exports = async (
       let [secret, hash] =
         m == 'settle' || m == 'settlerisk' ? [t[1], sha3(t[1])] : [null, t[1]]
 
+      /*
       let outward = (await ch.d.getPayments({
         where: {
           hash: hash,
@@ -265,40 +266,40 @@ module.exports = async (
         loff('Error: No such payment')
         break
       }
+      */
 
       // todo check expirations
+      let index = ch.outwards.findIndex((hl) => hl.hash.equals(hash))
+      let hl = ch.outwards[index]
 
       if (m == 'settle' || m == 'fail') {
-        let index = outwards.findIndex((hl) => hl[1].equals(hash))
-        let hl = outwards[index]
-        outwards.splice(index, 1)
+        ch.outwards.splice(index, 1)
 
         if (m == 'settle') {
           // secret was provided - remove & apply hashlock on offdelta
-          newState[1][3] += ch.left ? -outward.amount : outward.amount
-          receivable += outward.amount
+          ch.d.offdelta += ch.left ? -hl.amount : hl.amount
         } else {
           // secret wasn't provided, just delete lock
         }
       } else if (m == 'failrisk') {
         // note that settlerisk is not state changing at all, and failrisk is refund
-        newState[1][3] += ch.left ? outward.amount : -outward.amount
+        ch.d.offdelta += ch.left ? hl.amount : -hl.amount
       }
 
       // check new state and sig, save
-      newState[1][2]++
-      if (!ch.d.saveState(newState, t[2])) {
+      ch.d.nonce++
+
+      hl.secret = secret
+      hl.type = m
+      hl.status = 'acked'
+      if (!ch.d.saveState(refresh(ch), t[2])) {
         gracefulExit('Error: Invalid state sig at ' + m)
         break
       }
 
-      outward.secret = secret
-      outward.type = m
-      outward.status = 'acked'
+      await hl.save()
 
-      await outward.save()
-
-      let inward = await outward.getInward()
+      let inward = await hl.getInward()
 
       if (inward) {
         //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
@@ -311,7 +312,7 @@ module.exports = async (
           me.batch.push('revealSecrets', [secret])
         } else {
           // how much fee we just made by mediating the transfer?
-          me.metrics.fees.current += inward.amount - outward.amount
+          me.metrics.fees.current += inward.amount - hl.amount
           // add to total volume
           me.metrics.volume.current += inward.amount
           // add to settled payments
@@ -342,6 +343,15 @@ module.exports = async (
   if (rollback[0] > 0) {
     ch.d.nonce += rollback[0]
     ch.d.offdelta += rollback[1]
+    /*
+    for (var t of ch.sent) {
+      if (t.type == 'add') {
+        ch.outwards.push(t)
+      } else {
+        ch.inwards = ch.inwards.filter((c) => c != t)
+      }
+    }*/
+
     ch.d.status = 'merge'
   } else {
     ch.d.status = 'master'
@@ -365,10 +375,6 @@ module.exports = async (
 
   await Promise.all(all)
 
-  /*
-  let st = await ch.d.getState()
-  loff(`After ${rollback[0] > 0 ? 'merge' : 'update'}: ${ascii_state(st)}`)
-  */
   return flushable
 
   // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)

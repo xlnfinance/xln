@@ -17,8 +17,6 @@ module.exports = async function() {
     }
   })
 
-  me.record = await me.byKey()
-
   // we request withdrawals and check in few seconds for them
   var checkBack = []
 
@@ -29,12 +27,12 @@ module.exports = async function() {
 
     // finding who's gone beyond soft limit
     // soft limit can be raised over K.risk to pay less fees
-    if (ch.promised >= Math.max(K.risk, ch.d.they_soft_limit)) {
+    if (ch.they_uninsured >= Math.max(K.risk, ch.d.they_soft_limit)) {
       //l('Adding output for our promise ', ch.d.partnerId)
       me.batch.push([
         'depositTo',
         asset,
-        [[ch.promised, ch.d.myId, ch.d.partnerId, 0]]
+        [[ch.they_uninsured, ch.d.myId, ch.d.partnerId, 0]]
       ])
     } else if (ch.insured >= K.risk) {
       if (ch.d.input_sig) {

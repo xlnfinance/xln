@@ -1,4 +1,4 @@
-// Flush all pending transitions to state channel. Types:
+// Flush all new transitions to state channel. Types:
 /*
 Payment lifecycles:
 outward payments: add/new > (we just added) > add/sent > add/acked > settle or fail/acked
@@ -43,10 +43,8 @@ module.exports = async (pubkey, asset, opportunistic) => {
       return
     }
 
-    //let newState = await ch.d.getState()
-    let newState = ch.state
-    let ackSig = ec(r(newState), me.id.secretKey)
-    let debugState = r(r(newState))
+    let ackSig = ec(r(ch.state), me.id.secretKey)
+    let debugState = r(r(ch.state))
 
     // array of actions to apply to canonical state
     let transitions = []
@@ -54,19 +52,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     // merge cannot add new transitions because expects another ack
     // in merge mode all you do is ack last (merged) state
     if (ch.d.status == 'master') {
-      let inwards = newState[ch.left ? 2 : 3]
-      let outwards = newState[ch.left ? 3 : 2]
-      let payable = ch.payable
-
-      let pendings = await ch.d.getPayments({
-        where: {
-          status: 'new'
-        },
-        //limit: 200,
-        order: [['id', 'ASC']]
-      })
-
-      for (let t of pendings) {
+      for (let t of ch.new) {
         // what arguments this transition has
         let args = []
         if (t.type == 'settle' || t.type == 'fail') {
@@ -76,26 +62,25 @@ module.exports = async (pubkey, asset, opportunistic) => {
           }
 
           // the beginning is same for both transitions
-          let index = inwards.findIndex((hl) => hl[1].equals(t.hash))
-          let hl = inwards[index]
+          let index = ch.inwards.findIndex((hl) => hl.hash.equals(t.hash))
+          let hl = ch.inwards[index]
 
           if (!hl) {
             loff('error No such hashlock')
             continue
           }
 
-          inwards.splice(index, 1)
+          ch.inwards.splice(index, 1)
 
           if (t.type == 'settle') {
-            newState[1][3] += ch.left ? t.amount : -t.amount
-            payable += t.amount
+            ch.d.offdelta += ch.left ? t.amount : -t.amount
             args = t.secret
           } else {
             args = t.hash
           }
         } else if (t.type == 'settlerisk' || t.type == 'failrisk') {
           if (t.type == 'failrisk') {
-            newState[1][3] += ch.left ? -t.amount : t.amount
+            ch.d.offdelta += ch.left ? -t.amount : t.amount
             args = t.hash
           } else {
             args = t.secret
@@ -104,7 +89,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
           if (
             t.lazy_until &&
             t.lazy_until > new Date() &&
-            payable - ch.insurance < t.amount
+            ch.payable - ch.insurance < t.amount
           ) {
             l('Still lazy, wait')
             continue
@@ -113,13 +98,13 @@ module.exports = async (pubkey, asset, opportunistic) => {
           if (
             t.amount < K.min_amount ||
             t.amount > K.max_amount ||
-            t.amount > payable ||
+            t.amount > ch.payable ||
             t.destination.equals(me.pubkey) ||
-            outwards.length >= K.max_hashlocks
+            ch.outwards.length >= K.max_hashlocks
           ) {
             loff(
-              `error cannot transit ${t.amount}/${payable}. Locks ${
-                outwards.length
+              `error cannot transit ${t.amount}/${ch.payable}. Locks ${
+                ch.outwards.length
               }.`
             )
 
@@ -133,7 +118,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
               t.getInward().then(async (inward) => {
                 if (inward) {
                   inward.type = t.type == 'add' ? 'fail' : 'failrisk'
-                  var d = await Delta.findOne(inward.deltumId)
+                  var d = await Delta.findById(inward.deltumId)
                   flushable.push(d.partnerId)
                   return inward.save()
                 }
@@ -142,29 +127,27 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
             continue
           }
-          if (outwards.length >= K.max_hashlocks) {
+          if (ch.outwards.length >= K.max_hashlocks) {
             loff('error Cannot set so many hashlocks now, try later')
             //continue
           }
-          // decrease payable and add the hashlock to state
-          payable -= t.amount
           if (t.type == 'add') {
             // add hashlock to canonical state
-            outwards.push(t.toLock())
+            ch.outwards.push(t)
           } else {
             // store hashlock off-state as "verbal agreement"
-            newState[1][3] += ch.left ? -t.amount : t.amount
+            ch.d.offdelta += ch.left ? -t.amount : t.amount
           }
 
           args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
         }
         // increment nonce after each transition
-        newState[1][2]++
+        ch.d.nonce++
 
         transitions.push([
           methodMap(t.type),
           args,
-          ec(r(newState), me.id.secretKey)
+          ec(r(refresh(ch)), me.id.secretKey)
         ])
 
         t.status = 'sent'
@@ -190,9 +173,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
       debugState, // state we started with
       r(ch.d.signed_state) // signed state we started with
     )
-
-    ch.d.nonce = newState[1][2]
-    ch.d.offdelta = newState[1][3]
 
     if (transitions.length > 0) {
       ch.d.ack_requested_at = new Date()

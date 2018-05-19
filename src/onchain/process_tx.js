@@ -469,8 +469,7 @@ module.exports = async (tx, meta) => {
       }
     } else if (method == 'sellFor') {
       // onchain exchange to sell an asset for another one.
-      var [sellAsset, amount, buyAsset, rate] = t[1]
-      readInts(sellAsset, amount, buyAsset, rate)
+      var [sellAsset, amount, buyAsset, rate] = t[1].map(readInt)
 
       let sellerOwns = signer.asset(asset)
 
@@ -479,7 +478,8 @@ module.exports = async (tx, meta) => {
     } else if (method == 'createHub') {
     } else if (method == 'propose') {
       // temporary protection
-      if (signer.id != 1) continue
+      //if (signer.id != 1)
+      continue
 
       var execute_on = K.usable_blocks + K.voting_period // 60*24
 

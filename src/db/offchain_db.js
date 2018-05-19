@@ -8,7 +8,7 @@ if (argv.db) {
     operatorsAliases: false,
 
     logging: (str, time) => {
-      if (parseInt(time) > 200) {
+      if (parseInt(time) > 300) {
         loff(time + ' (off) ' + str)
       }
     },
@@ -234,17 +234,10 @@ Delta.prototype.saveState = function(state, ackSig) {
   // canonical state representation
   var canonical = r(state)
   if (ec.verify(canonical, ackSig, this.partnerId)) {
-    this.nonce = state[1][2]
-    this.offdelta = state[1][3]
-
-    if (this.sig && ackSig.equals(this.sig)) {
-      //l(`Already saved ackSig`)
-      return true
-    }
-
+    //this.nonce = state[1][2]
+    //this.offdelta = state[1][3]
     this.sig = ackSig
     this.signed_state = canonical
-    //state is not saved in db just yet, ensure to save later!
     return true
   } else {
     return false
@@ -257,45 +250,6 @@ Delta.prototype.requestFlush = async function() {
     //await this.save()
     await me.flushChannel(this.partnerId, 1, true)
   }
-}
-
-Delta.prototype.getState = async function() {
-  var left = Buffer.compare(this.myId, this.partnerId) == -1
-
-  // builds current canonical state.
-  // Note that "new" settle and fail are still present in state
-
-  var state = [
-    methodMap('disputeWith'),
-    [
-      left ? this.myId : this.partnerId,
-      left ? this.partnerId : this.myId,
-      this.nonce,
-      this.offdelta,
-      this.asset
-    ],
-    // 2 is inwards for left, 3 for right
-    [],
-    []
-  ]
-  ;(await this.getPayments({
-    where: {
-      [Op.or]: [
-        {type: 'add', status: 'sent'},
-        {type: 'add', status: 'acked'},
-        {type: 'settle', status: 'new'},
-        {type: 'fail', status: 'new'}
-      ]
-    },
-    //limit: 1000,
-    // explicit order because of postgres https://github.com/sequelize/sequelize/issues/9289
-    order: [['id', 'ASC']]
-  })).map((t) => {
-    // this == works like XOR. [2] gets all inwards for left and [3] for right
-    state[t.is_inward == left ? 2 : 3].push(t.toLock())
-  })
-
-  return state
 }
 
 Delta.prototype.getDispute = async function() {

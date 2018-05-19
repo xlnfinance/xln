@@ -1,8 +1,13 @@
 // This method gets Insurance from onchain db, Delta from offchain db
-// then derives a ton of info about current channel - who owns what, what's promised, what's insiured etc
+// then derives a ton of info about current channel: (un)insured balances
 
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
 module.exports = async (partner, asset) => {
+  var key = stringify([partner, asset])
+  if (me.cached[key]) {
+    return me.cached[key]
+  }
+
   // accepts pubkey only
   let compared = Buffer.compare(me.pubkey, partner)
   if (compared == 0) {
@@ -28,8 +33,6 @@ module.exports = async (partner, asset) => {
         (me.users[partner].instance &&
           me.users[partner].instance.readyState == 1))
   }
-
-  me.record = await me.byKey()
 
   let my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
   ch.hub = my_hub(partner) || {handle: toHex(partner).substr(0, 10)}
@@ -62,9 +65,9 @@ module.exports = async (partner, asset) => {
     loff(`Creating channel ${trim(partner)} - ${asset}: ${ch.d.id}`)
   }
 
-  let user = await me.byKey(partner)
-  if (user) {
-    ch.partner = user.id
+  //let user = await me.byKey(partner)
+  if (true) {
+    ch.partner = 1 //user.id
     if (me.record) {
       /*
       ch.ins = await Insurance.find({
@@ -76,8 +79,8 @@ module.exports = async (partner, asset) => {
       })
       */
       ch.ins = Insurance.build({
-        leftId: ch.left ? me.record.id : user.id,
-        rightId: ch.left ? user.id : me.record.id,
+        leftId: ch.left ? me.record.id : ch.partner,
+        rightId: ch.left ? ch.partner : me.record.id,
         asset: asset,
         insurance: 100000000000,
         ondelta: 50000000000
@@ -91,47 +94,58 @@ module.exports = async (partner, asset) => {
     ch.nonce = ch.ins.nonce
   }
 
-  ch.delta = ch.ondelta + ch.d.offdelta
+  ch.payments = await ch.d.getPayments({
+    where: {
+      // move to NOT
+      [Op.or]: [
+        {type: 'add', status: 'new'}, // pending
+        {type: 'add', status: 'sent'}, // in state
+        {type: 'add', status: 'acked'}, // in state
+        {type: 'settle', status: 'new'}, // in state & pending
+        {type: 'settle', status: 'sent'}, // sent
+        {type: 'fail', status: 'new'}, // in state & pending
+        {type: 'fail', status: 'sent'} // sent
+      ]
+    },
+    //limit: 1000,
+    // explicit order because of postgres https://github.com/sequelize/sequelize/issues/9289
+    order: [['id', 'ASC']]
+  })
 
-  Object.assign(ch, resolveChannel(ch.insurance, ch.delta, ch.left))
+  // filter all payments by some trait
+  ch.inwards = []
+  ch.outwards = []
+  ch.old_inwards = []
+  ch.old_outwards = []
+  ch.new = []
+  ch.sent = []
 
-  // We reduce payable by total amount of unresolved hashlocks in either direction
-  // TODO optimization, getState is heavy on db so precache hashlock amounts
-  ch.state = await ch.d.getState()
+  for (var t of ch.payments) {
+    var typestatus = t.type + t.status
 
-  let left_inwards = 0
-  ch.state[2].map((a) => (left_inwards += a[0]))
-  let right_inwards = 0
-  ch.state[3].map((a) => (right_inwards += a[0]))
+    if (['addsent', 'addacked', 'settlenew', 'failnew'].includes(typestatus)) {
+      ch[t.is_inward ? 'inwards' : 'outwards'].push(t)
+    }
 
-  ch.ascii_states = ascii_state(ch.state)
-  if (ch.d.signed_state) {
-    let st = r(ch.d.signed_state)
-    prettyState(st)
-    st = ascii_state(st)
-    if (st != ch.ascii_states) {
-      ch.ascii_states += st == ch.ascii_state ? '(same)' : st
+    if (
+      ['addacked', 'settlenew', 'failnew', 'settlesent', 'failsent'].includes(
+        typestatus
+      )
+    ) {
+      ch[t.is_inward ? 'old_inwards' : 'old_outwards'].push(t)
+    }
+
+    if (t.status == 'new') {
+      ch.new.push(t)
+    }
+
+    if (t.status == 'sent') {
+      ch.sent.push(t)
     }
   }
 
-  ch.payable =
-    ch.insured -
-    ch.d.input_amount +
-    ch.they_promised +
-    (ch.d.they_hard_limit - ch.promised) -
-    (ch.left ? right_inwards : left_inwards)
+  refresh(ch)
 
-  ch.they_payable =
-    ch.they_insured -
-    ch.d.they_input_amount +
-    ch.promised +
-    (ch.d.hard_limit - ch.they_promised) -
-    (ch.left ? left_inwards : right_inwards)
-
-  // inputs are like bearer cheques and can be used any minute, so we deduct them
-
-  // All stuff we show in the progress bar in the wallet
-  ch.bar = ch.promised + ch.insured + ch.they_insured + ch.they_promised
-
+  //me.cached[key] = ch
   return ch
 }

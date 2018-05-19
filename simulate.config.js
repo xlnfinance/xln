@@ -5,9 +5,9 @@ let db = 'mysql:root:123123'
 
 let walletPort = '26678'
 
-let nodeFlags = ''
+let nodeFlags = ' '
 if (process.version.split('.')[0] === 'v10') {
-  nodeFlags = '--experimental-repl-await'
+  nodeFlags += '--experimental-repl-await'
 }
 
 // dataDirs = [8001, 8002, 8003, 8004]
@@ -28,6 +28,7 @@ module.exports = {
       script: './fs.js',
       watch: false,
       autorestart: false,
+      node_args: nodeFlags,
       args: [
         '-p8433',
         '--wallet-url=http://localhost:' + walletPort,
