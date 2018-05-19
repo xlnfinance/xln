@@ -21,6 +21,8 @@ module.exports = async (pubkey, asset, opportunistic) => {
     //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
+    refresh(ch)
+
     let flushable = []
     let all = []
 
@@ -43,7 +45,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
       return
     }
 
-    let ackSig = ec(r(ch.state), me.id.secretKey)
+    let ackSig = ec(r(refresh(ch)), me.id.secretKey)
     let debugState = r(r(ch.state))
 
     // array of actions to apply to canonical state
@@ -52,25 +54,27 @@ module.exports = async (pubkey, asset, opportunistic) => {
     // merge cannot add new transitions because expects another ack
     // in merge mode all you do is ack last (merged) state
     if (ch.d.status == 'master') {
-      for (let t of ch.new) {
+      for (let t of ch.payments) {
+        if (t.status != 'new') continue
+
         // what arguments this transition has
         let args = []
         if (t.type == 'settle' || t.type == 'fail') {
+          /*
           if (me.CHEAT_dontreveal) {
             loff('CHEAT: not revealing our secret to inward')
             continue
-          }
+          }*/
 
           // the beginning is same for both transitions
-          let index = ch.inwards.findIndex((hl) => hl.hash.equals(t.hash))
-          let hl = ch.inwards[index]
+          /*
+          let hl = remove(ch.inwards, t.hash)
 
           if (!hl) {
             loff('error No such hashlock')
             continue
           }
-
-          ch.inwards.splice(index, 1)
+          */
 
           if (t.type == 'settle') {
             ch.d.offdelta += ch.left ? t.amount : -t.amount
@@ -78,13 +82,14 @@ module.exports = async (pubkey, asset, opportunistic) => {
           } else {
             args = t.hash
           }
+          /*
         } else if (t.type == 'settlerisk' || t.type == 'failrisk') {
           if (t.type == 'failrisk') {
             ch.d.offdelta += ch.left ? -t.amount : t.amount
             args = t.hash
           } else {
             args = t.secret
-          }
+          }*/
         } else if (t.type == 'add' || t.type == 'addrisk') {
           /*
           if (
@@ -115,16 +120,14 @@ module.exports = async (pubkey, asset, opportunistic) => {
             t.status = 'acked'
             all.push(t.save())
 
-            all.push(
-              t.getInward().then(async (inward) => {
-                if (inward) {
-                  inward.type = t.type == 'add' ? 'fail' : 'failrisk'
-                  var d = await Delta.findById(inward.deltumId)
-                  flushable.push(d.partnerId)
-                  return inward.save()
-                }
-              })
-            )
+            if (t.inward_pubkey) {
+              var inward = await me.getChannel(t.inward_pubkey, ch.d.asset)
+              var hl = inward.inwards.find((hl) => hl.hash.equals(t.hash))
+              hl.type = t.type == 'add' ? 'fail' : 'failrisk'
+              all.push(hl.save())
+
+              flushable.push(inward.d.partnerId)
+            }
 
             continue
           }
@@ -132,16 +135,21 @@ module.exports = async (pubkey, asset, opportunistic) => {
             loff('error Cannot set so many hashlocks now, try later')
             //continue
           }
+          /*
           if (t.type == 'add') {
             // add hashlock to canonical state
             ch.outwards.push(t)
           } else {
             // store hashlock off-state as "verbal agreement"
             ch.d.offdelta += ch.left ? -t.amount : t.amount
-          }
+          }*/
 
           args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
         }
+
+        t.status = 'sent'
+        all.push(t.save())
+
         // increment nonce after each transition
         ch.d.nonce++
 
@@ -150,9 +158,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
           args,
           ec(r(refresh(ch)), me.id.secretKey)
         ])
-
-        t.status = 'sent'
-        all.push(t.save())
       }
 
       if (opportunistic && transitions.length == 0) {

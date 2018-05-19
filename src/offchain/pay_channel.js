@@ -36,22 +36,24 @@ module.exports = async (opts) => {
     } else if (amount < K.min_amount) {
       react({alert: `Minimum payment is $${commy(K.min_amount)}`}, false)
     } else {
-      await ch.d.createPayment({
-        type: opts.addrisk ? 'addrisk' : 'add',
-        lazy_until: opts.lazy ? +new Date() + 30000 : null,
+      ch.payments.push(
+        await ch.d.createPayment({
+          type: opts.addrisk ? 'addrisk' : 'add',
+          lazy_until: opts.lazy ? +new Date() + 30000 : null,
 
-        status: 'new',
-        is_inward: false,
-        asset: opts.asset,
+          status: 'new',
+          is_inward: false,
+          asset: opts.asset,
 
-        amount: sent_amount,
-        hash: hash,
-        exp: K.usable_blocks + K.hashlock_exp,
+          amount: sent_amount,
+          hash: hash,
+          exp: K.usable_blocks + K.hashlock_exp,
 
-        unlocker: unlocker,
-        destination: pubkey,
-        invoice: invoice
-      })
+          unlocker: unlocker,
+          destination: pubkey,
+          invoice: invoice
+        })
+      )
     }
     return ch
   })

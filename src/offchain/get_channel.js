@@ -3,10 +3,17 @@
 
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
 module.exports = async (partner, asset) => {
+  let ch
+
   var key = stringify([partner, asset])
   if (me.cached[key]) {
-    return me.cached[key]
+    ch = me.cached[key]
+    refresh(ch)
+
+    return ch
   }
+
+  l('Loading channel from db: ', key)
 
   // accepts pubkey only
   let compared = Buffer.compare(me.pubkey, partner)
@@ -20,12 +27,14 @@ module.exports = async (partner, asset) => {
     //return false
   }
 
-  let ch = {
+  ch = {
     // default insurance
     insurance: 0,
     ondelta: 0,
     nonce: 0,
     left: compared == -1,
+
+    rollback: [0, 0], // used in merge situations
 
     online:
       me.users[partner] &&
@@ -112,40 +121,9 @@ module.exports = async (partner, asset) => {
     order: [['id', 'ASC']]
   })
 
-  // filter all payments by some trait
-  ch.inwards = []
-  ch.outwards = []
-  ch.old_inwards = []
-  ch.old_outwards = []
-  ch.new = []
-  ch.sent = []
-
-  for (var t of ch.payments) {
-    var typestatus = t.type + t.status
-
-    if (['addsent', 'addacked', 'settlenew', 'failnew'].includes(typestatus)) {
-      ch[t.is_inward ? 'inwards' : 'outwards'].push(t)
-    }
-
-    if (
-      ['addacked', 'settlenew', 'failnew', 'settlesent', 'failsent'].includes(
-        typestatus
-      )
-    ) {
-      ch[t.is_inward ? 'old_inwards' : 'old_outwards'].push(t)
-    }
-
-    if (t.status == 'new') {
-      ch.new.push(t)
-    }
-
-    if (t.status == 'sent') {
-      ch.sent.push(t)
-    }
-  }
-
   refresh(ch)
 
-  //me.cached[key] = ch
+  me.cached[key] = ch
+  l('Saved in cache ', key)
   return ch
 }

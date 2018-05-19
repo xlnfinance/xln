@@ -39,6 +39,36 @@ resolveChannel = (insurance, delta, is_left = true) => {
 }
 
 refresh = function(ch) {
+  // filter all payments by some trait
+  ch.inwards = []
+  ch.outwards = []
+
+  var hashlock_hold = [0, 0]
+
+  for (var t of ch.payments) {
+    var typestatus = t.type + t.status
+
+    var mask = ['addacked', 'settlenew', 'failnew'].concat(
+      ch.rollback[0] > 0 ? ['settlesent', 'failsent'] : 'addsent'
+    )
+
+    if (mask.includes(typestatus)) {
+      ch[t.is_inward ? 'inwards' : 'outwards'].push(t)
+      hashlock_hold[t.is_inward ? 0 : 1] += t.amount
+    }
+
+    /*
+
+    if (
+      ['addacked', 'settlenew', 'failnew', 'settlesent', 'failsent'].includes(
+        typestatus
+      )
+    ) {
+      ch[t.is_inward ? 'old_inwards' : 'old_outwards'].push(t)
+    }
+    */
+  }
+
   Object.assign(
     ch,
     resolveChannel(ch.insurance, ch.ondelta + ch.d.offdelta, ch.left)
@@ -64,16 +94,16 @@ refresh = function(ch) {
     ch.uninsured +
     ch.d.they_hard_limit -
     ch.they_uninsured -
-    ch.d.input_amount
-  //ch.outwards.reduce((a, b) => a + b.amount)
+    ch.d.input_amount -
+    hashlock_hold[1]
 
   ch.they_payable =
     ch.they_insured +
     ch.they_uninsured +
     ch.d.hard_limit -
     ch.uninsured -
-    ch.d.they_input_amount
-  //ch.inwards.reduce((a, b) => a.amount + b.amount)
+    ch.d.they_input_amount -
+    hashlock_hold[0]
 
   // All stuff we show in the progress bar in the wallet
   ch.bar = ch.they_uninsured + ch.insured + ch.they_insured + ch.uninsured
@@ -90,6 +120,13 @@ refresh = function(ch) {
 
   return ch.state
 }
+
+/*
+
+remove = (locks, hash) => {
+  let index = locks.findIndex((hl) => hl.hash.equals(hash))
+  return index == -1 ? false : locks.splice(index, 1)[0]
+}*/
 
 on_server = fs.existsSync(
   '/etc/letsencrypt/live/failsafe.network/fullchain.pem'

@@ -33,11 +33,11 @@ module.exports = async (
   prettyState(debugState)
   prettyState(signedState)
 
-  let rollback = [0, 0]
-
-  if (ch.d.saveState(ch.state, ackSig)) {
+  if (ch.d.saveState(refresh(ch), ackSig)) {
     // our last known state has been acked.
-    ch.sent.map((t) => (t.status = 'acked'))
+    ch.payments.map((t) => {
+      if (t.status == 'sent') t.status = 'acked'
+    })
 
     all.push(
       Payment.update(
@@ -85,18 +85,18 @@ module.exports = async (
     if (ch.d.signed_state && ch.d.saveState(oldState, ackSig)) {
       //loff(`Start merge ${trim(pubkey)}`)
 
-      rollback = [
+      ch.rollback = [
         ch.d.nonce - oldState[1][2], // nonce diff
         ch.d.offdelta - oldState[1][3] // offdelta diff
       ]
       ch.d.nonce = oldState[1][2]
       ch.d.offdelta = oldState[1][3]
 
+      /*
       // rolling back to last signed hashlocks
       ch.inwards = ch.old_inwards
       ch.outwards = ch.old_outwards
-
-      refresh(ch)
+      */
     } else {
       logstates(ch.state, oldState, debugState, signedState)
 
@@ -115,7 +115,6 @@ module.exports = async (
 
     if (m == 'add' || m == 'addrisk') {
       let [amount, hash, exp, destination, unlocker] = t[1]
-
       ;[exp, amount] = [exp, amount].map(readInt)
 
       let new_type = m
@@ -137,10 +136,13 @@ module.exports = async (
 
       let reveal_until = K.usable_blocks + K.hashlock_exp
       // safe ranges when we can accept hashlock exp
+
+      /*
       if (exp < reveal_until - 2 || exp > reveal_until + 5) {
         new_type = m == 'add' ? 'fail' : 'failrisk'
         loff('Error: exp is out of supported range')
       }
+      */
 
       // don't save in db just yet
       let hl = Payment.build({
@@ -160,6 +162,8 @@ module.exports = async (
       })
       ch.payments.push(hl)
 
+      /*
+
       if (m == 'add') {
         // push a hashlock in-state
         ch.inwards.push(hl)
@@ -167,11 +171,14 @@ module.exports = async (
         // off-state
         ch.d.offdelta += ch.left ? amount : -amount
       }
+      */
 
       // check new state and sig, save
       ch.d.nonce++
       if (!ch.d.saveState(refresh(ch), t[2])) {
         loff('Error: Invalid state sig add')
+        logstates(ch.state, oldState, debugState, signedState)
+
         break
       }
 
@@ -222,18 +229,21 @@ module.exports = async (
         // is online? Is payable?
 
         if (me.users[destination] && dest_ch.payable >= outward_amount) {
-          await dest_ch.d.createPayment({
-            type: m,
-            status: 'new',
-            is_inward: false,
+          dest_ch.payments.push(
+            await dest_ch.d.createPayment({
+              type: m,
+              status: 'new',
+              is_inward: false,
 
-            amount: outward_amount,
-            hash: hash,
-            exp: exp, // the outgoing exp is a little bit longer
+              amount: outward_amount,
+              hash: hash,
+              exp: exp, // the outgoing exp is a little bit longer
 
-            unlocker: unlocker,
-            destination: destination
-          })
+              unlocker: unlocker,
+              destination: destination,
+              inward_pubkey: pubkey
+            })
+          )
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
@@ -269,12 +279,10 @@ module.exports = async (
       */
 
       // todo check expirations
-      let index = ch.outwards.findIndex((hl) => hl.hash.equals(hash))
-      let hl = ch.outwards[index]
+      let hl = ch.outwards.find((hl) => hl.hash.equals(hash))
+      if (!hl) continue
 
       if (m == 'settle' || m == 'fail') {
-        ch.outwards.splice(index, 1)
-
         if (m == 'settle') {
           // secret was provided - remove & apply hashlock on offdelta
           ch.d.offdelta += ch.left ? -hl.amount : hl.amount
@@ -286,49 +294,50 @@ module.exports = async (
         ch.d.offdelta += ch.left ? hl.amount : -hl.amount
       }
 
-      // check new state and sig, save
-      ch.d.nonce++
-
       hl.secret = secret
       hl.type = m
       hl.status = 'acked'
+
+      ch.d.nonce++
       if (!ch.d.saveState(refresh(ch), t[2])) {
         gracefulExit('Error: Invalid state sig at ' + m)
         break
       }
 
-      await hl.save()
+      all.push(hl.save())
 
-      let inward = await hl.getInward()
-
-      if (inward) {
+      if (hl.inward_pubkey) {
         //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
-        var inward_d = await Delta.findById(inward.deltumId)
+        var inward = await me.getChannel(hl.inward_pubkey, ch.d.asset)
 
-        if (inward_d.status == 'disputed') {
+        if (inward.d.status == 'disputed') {
           loff(
             'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
           )
           me.batch.push('revealSecrets', [secret])
         } else {
+          /*
           // how much fee we just made by mediating the transfer?
           me.metrics.fees.current += inward.amount - hl.amount
           // add to total volume
           me.metrics.volume.current += inward.amount
-          // add to settled payments
+          // add to settled payments*/
           me.metrics.settle.current += 1
 
-          inward.secret = secret
-          inward.type = m
-          inward.status = 'new'
-          await inward.save()
+          var inhl = inward.payments.find((inhl) => inhl.hash.equals(hl.hash))
 
-          uniqAdd(inward_d.partnerId)
+          inhl.secret = secret
+          inhl.type = m
+          inhl.status = 'new'
+          await inhl.save()
+
+          uniqAdd(hl.inward_pubkey)
         }
       } else {
         //react({confirm: 'Payment completed'})
       }
 
+      /*
       if (me.CHEAT_dontack) {
         l('CHEAT: not acking the secret, but pulling from inward')
         ch.d.status = 'CHEAT_dontack'
@@ -336,13 +345,12 @@ module.exports = async (
         react({}, false) // lazy react
         return
       }
+      */
     }
   }
 
   // since we applied partner's diffs, all we need is to add the diff of our own transitions
-  if (rollback[0] > 0) {
-    ch.d.nonce += rollback[0]
-    ch.d.offdelta += rollback[1]
+  if (ch.rollback[0] > 0) {
     /*
     for (var t of ch.sent) {
       if (t.type == 'add') {
@@ -352,6 +360,14 @@ module.exports = async (
       }
     }*/
 
+    ch.d.nonce += ch.rollback[0]
+    ch.d.offdelta += ch.rollback[1]
+
+    // leaving rollback mode: our sents will auto appear in state
+    ch.rollback = [0, 0]
+
+    l('After rollback ', ascii_state(refresh(ch)))
+
     ch.d.status = 'merge'
   } else {
     ch.d.status = 'master'
@@ -359,7 +375,7 @@ module.exports = async (
   }
 
   // CHEAT_: storing most profitable outcome for us
-
+  /*
   if (!ch.d.CHEAT_profitable_state) {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
@@ -370,6 +386,7 @@ module.exports = async (
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
+  */
 
   all.push(ch.d.save())
 

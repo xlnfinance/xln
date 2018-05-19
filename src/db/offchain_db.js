@@ -18,7 +18,7 @@ if (argv.db) {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 40 : 1,
+      max: base_port == 443 ? 50 : 1,
       min: 0,
       acquire: 10000,
       idle: 10000,
@@ -193,6 +193,9 @@ Payment = privSequelize.define(
     // user-specified or randomly generated private message
     invoice: Sequelize.BLOB,
 
+    // who caused us to make this payment (if we're hub)?
+    inward_pubkey: Sequelize.BLOB,
+
     // secret that unlocks hash
     secret: Sequelize.BLOB
   },
@@ -222,12 +225,6 @@ Payment.belongsTo(Delta)
 
 Payment.prototype.toLock = function() {
   return [this.amount, this.hash, this.exp]
-}
-
-Payment.prototype.getInward = async function() {
-  return Payment.findOne({
-    where: {hash: this.hash, is_inward: true, asset: this.asset}
-  })
 }
 
 Delta.prototype.saveState = function(state, ackSig) {
