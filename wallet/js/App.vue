@@ -367,6 +367,7 @@ export default {
 }
 </script>
 <template>
+  
   <div>
     <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
       <a class="navbar-brand" href="#">Fairlayer</a>

@@ -4,7 +4,7 @@ forever stopall
 pm2 delete all
 killall Failsafe 2>/dev/null
 
-rm isolate*
+rm -rf isolate*
 rm -rf data*
 
 #./install
@@ -12,7 +12,7 @@ npm run build
 
 db=mysql:root:123123
 #db=postgres:postgres:123123
-maxport=8020
+maxport=8050
 
 node fs --genesis=test --db=$db
 pm2 start fs.js --node-args="--prof" --name fs -- -p443 --silent --wallet-dist --db=$db

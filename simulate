@@ -4,6 +4,7 @@ set -o errexit
 set -o pipefail
 
 rm -rf data*
+rm -rf isolate*
 
 killall Failsafe 2>/dev/null || true
 forever stopall

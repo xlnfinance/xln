@@ -1,5 +1,5 @@
 rm -rf data*
-rm isolate*
+rm -rf isolate*
 
 rsync . root@failsafe.network:~/fs -rv  --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'
 

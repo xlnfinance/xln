@@ -86,6 +86,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
             args = t.secret
           }
         } else if (t.type == 'add' || t.type == 'addrisk') {
+          /*
           if (
             t.lazy_until &&
             t.lazy_until > new Date() &&
@@ -93,7 +94,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
           ) {
             l('Still lazy, wait')
             continue
-          }
+          }*/
 
           if (
             t.amount < K.min_amount ||
