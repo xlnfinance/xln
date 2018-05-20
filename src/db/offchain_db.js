@@ -20,8 +20,8 @@ if (argv.db) {
     pool: {
       max: base_port == 443 ? 50 : 1,
       min: 0,
-      acquire: 10000,
-      idle: 10000,
+      acquire: 20000,
+      idle: 20000,
       evict: 30000,
       handleDisconnects: true
     }

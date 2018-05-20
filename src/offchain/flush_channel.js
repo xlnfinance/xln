@@ -45,6 +45,8 @@ module.exports = async (pubkey, asset, opportunistic) => {
       return
     }
 
+    await sleep(200)
+
     let ackSig = ec(r(refresh(ch)), me.id.secretKey)
     let debugState = r(r(ch.state))
 
@@ -182,15 +184,19 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
     if (transitions.length > 0) {
       ch.d.ack_requested_at = new Date()
-      ch.d.pending = envelope
+      //ch.d.pending = envelope
       ch.d.status = 'sent'
+      loff(
+        `=== End flush ${transitions.length} tr to ${trim(pubkey)}. Envelope: ${
+          envelope.length
+        } bytes`
+      )
     }
 
     all.push(ch.d.save())
     await Promise.all(all)
     me.send(ch.d.partnerId, 'update', envelope)
 
-    //loff(`=== End flush ${transitions.length} tr to ${trim(pubkey)}`)
     return Promise.all(flushable.map((fl) => me.flushChannel(fl, asset, true)))
   })
 }

@@ -171,7 +171,14 @@ q = async function(key, job) {
         try {
           let [got_job, got_resolve] = q.q[key].shift()
           let started = performance.now()
+
+          //let deadlock = setTimeout(function() {
+          //  fatal('Deadlock in q ' + key)
+          //}, 20000)
+
           got_resolve(await got_job())
+
+          //clearTimeout(deadlock)
           //l('Section took: ' + (performance.now() - started))
         } catch (e) {
           l(e)
@@ -270,8 +277,6 @@ concat = function() {
   return Buffer.concat(Object.values(arguments))
 }
 
-process.title = 'Failsafe'
-
 usage = () => {
   return Object.assign(process.cpuUsage(), process.memoryUsage(), {
     uptime: process.uptime()
@@ -317,6 +322,10 @@ methodMap = (i) => {
     'addrisk',
     'settlerisk',
     'failrisk',
+
+    // fail reasons
+    'failOffline',
+    'failNoCapacity',
 
     // offchain inputs
     'auth', // any kind of offchain auth signatures between peers

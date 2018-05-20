@@ -365,6 +365,8 @@ argv = require('minimist')(process.argv.slice(2), {
 datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8000
 
+process.title = 'Failsafe ' + base_port
+
 if (!fs.existsSync('data')) {
   fs.mkdirSync('data')
   fs.mkdirSync('data/onchain')
