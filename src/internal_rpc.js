@@ -180,10 +180,10 @@ module.exports = async (ws, msg) => {
 
         break
       case 'invoices':
-        result.acked = await Payment.findAll({
+        result.ack = await Payment.findAll({
           where: {
             type: 'del',
-            status: 'acked',
+            status: 'ack',
             is_inward: true
           }
         })
@@ -195,7 +195,7 @@ module.exports = async (ws, msg) => {
           {
             where: {
               type: 'del',
-              status: 'acked',
+              status: 'ack',
               is_inward: true
             }
           }

@@ -7,14 +7,15 @@ rm -rf data*
 rm -rf isolate*
 
 killall Failsafe 2>/dev/null || true
-forever stopall
+
+pm2 flush
 
 function pm2() {
   node_modules/.bin/pm2 "$@"
 }
 # TODO move genesis to simulate.config
 if node fs --genesis=test --db=mysql:root:123123 | grep "Genesis done"; then
-  maxport=8008
+  maxport=8028
   echo "Generating with maxport $maxport"
 
   for i in $(seq 8001 $maxport); do

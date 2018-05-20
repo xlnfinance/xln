@@ -47,7 +47,7 @@ refresh = function(ch) {
 
   /*
   ch.payments = ch.payments.filter(
-    (t) => !(t.status == 'acked' && t.type == 'settle')
+    (t) => !(t.status == 'ack' && t.type == 'settle')
   )*/
   let filtered_settled = []
 
@@ -58,16 +58,18 @@ refresh = function(ch) {
 
     var typestatus = t.type + t.status
 
-    var mask = ['addacked', 'delnew'].concat(
+    var mask = ['addack', 'delnew'].concat(
       ch.rollback[0] > 0 ? 'delsent' : 'addsent'
     )
 
     if (mask.includes(typestatus)) {
       ch[t.is_inward ? 'inwards' : 'outwards'].push(t)
       hashlock_hold[t.is_inward ? 0 : 1] += t.amount
+
+      //l('In state ', t.id)
     }
 
-    if (typestatus == 'delacked') {
+    if (typestatus == 'delack') {
       //delete(ch.payments[i])
       filtered_settled.push(t)
       //l('Delete ', i)
@@ -76,7 +78,7 @@ refresh = function(ch) {
     /*
 
     if (
-      ['addacked', 'delnew', 'delsent'].includes(
+      ['addack', 'delnew', 'delsent'].includes(
         typestatus
       )
     ) {
@@ -138,6 +140,8 @@ refresh = function(ch) {
   if (ch.payments.length != startedl) {
     l(startedl, ch.payments.length, filtered_settled.length)
   }
+
+  //l('checkup \n', ch.ascii_states)
 
   return ch.state
 }
@@ -445,7 +449,7 @@ if (argv.monkey) {
 }
 
 let ooops = (err) => {
-  if (err.name == 'SequelizeTimeoutError') return
+  //if (err.name == 'SequelizeTimeoutError') return
   l(err)
   fatal(`Fatal rejection, quitting`)
 }

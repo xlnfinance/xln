@@ -259,7 +259,9 @@ class Me {
 
       l(`Bootstrapping local server at: ${this.my_member.location}`)
 
-      me.external_wss = new ws.Server({
+      // lowtps/hightps
+
+      me.external_wss = new (base_port == 84331 ? require('uws') : ws).Server({
         server: me.member_server,
         maxPayload: 64 * 1024 * 1024
       })
@@ -320,7 +322,7 @@ class Me {
         // clean up old payments: all acked fails and settles
         Payment.destroy({
           where: {
-            [Op.or]: [{type: 'del', status: 'acked'}]
+            [Op.or]: [{type: 'del', status: 'ack'}]
           }
         })
       }, 120000)
@@ -422,7 +424,7 @@ Payments: ${await Payment.count()}\n
   async payRando(counter = 1) {
     await me.payChannel({
       destination: randos[Math.floor(Math.random() * randos.length)],
-      amount: 100 + Math.round(Math.random() * 50),
+      amount: 100 + Math.round(Math.random() * 100),
       asset: 1
     })
     // run on server infinitely and with longer delays
@@ -435,7 +437,7 @@ Payments: ${await Payment.count()}\n
 
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(1000 + Math.random() * 1000))
+      }, Math.round(2000 + Math.random() * 5000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)
@@ -460,12 +462,14 @@ Payments: ${await Payment.count()}\n
   // a generic interface to send a websocket message to some user or member
 
   send(m, method, tx) {
-    tx = concat(bin([methodMap(method)]), tx)
+    var msg = concat(bin([methodMap(method)]), tx)
 
     // regular pubkey
     if (m instanceof Buffer) {
+      //if (method == 'update') l(`Sending to ${trim(m)} `, toHex(sha3(tx)))
+
       if (me.users[m]) {
-        me.users[m].send(tx)
+        me.users[m].send(msg)
         return true
       } else {
         var member = Members.find((f) => f.pubkey.equals(m))
@@ -482,12 +486,12 @@ Payments: ${await Payment.count()}\n
     //l(`Invoking ${method} in member ${m.id}`)
 
     if (me.users[m.pubkey]) {
-      return me.users[m.pubkey].send(tx)
+      return me.users[m.pubkey].send(msg)
     } else {
       me.users[m.pubkey] = new WebSocketClient()
 
-      me.users[m.pubkey].onmessage = async (tx) => {
-        RPC.external_rpc(me.users[m.pubkey], bin(tx))
+      me.users[m.pubkey].onmessage = async (msg) => {
+        RPC.external_rpc(me.users[m.pubkey], bin(msg))
       }
 
       me.users[m.pubkey].onerror = function(e) {
@@ -500,7 +504,7 @@ Payments: ${await Payment.count()}\n
           )
         }
 
-        me.users[m.pubkey].send(tx)
+        me.users[m.pubkey].send(msg)
       }
 
       me.users[m.pubkey].open(m.location)

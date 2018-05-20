@@ -358,7 +358,7 @@ export default {
         s = '🔒'
       }
       // new and sent are considered "pending" statuses
-      return s + (t.status == 'acked' ? '' : '🕟')
+      return s + (t.status == 'ack' ? '' : '🕟')
     }
   }
 }

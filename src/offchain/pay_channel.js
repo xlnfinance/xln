@@ -46,7 +46,7 @@ module.exports = async (opts) => {
         asset: opts.asset,
 
         amount: sent_amount,
-        hash: hash,
+        hash: bin(hash),
         exp: K.usable_blocks + K.hashlock_exp,
 
         unlocker: unlocker,

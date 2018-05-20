@@ -160,7 +160,7 @@ Payment = privSequelize.define(
   'payment',
   {
     type: Sequelize.ENUM('add', 'del', 'addrisk', 'delrisk'),
-    status: Sequelize.ENUM('new', 'sent', 'acked', 'processed'),
+    status: Sequelize.ENUM('new', 'sent', 'ack', 'processed'),
     is_inward: Sequelize.BOOLEAN,
 
     // streaming payments
@@ -177,6 +177,8 @@ Payment = privSequelize.define(
       type: Sequelize.INTEGER,
       defaultValue: 1
     },
+    // secret that unlocks hash
+    secret: Sequelize.BLOB,
 
     // who is recipient
     destination: Sequelize.BLOB,
@@ -187,25 +189,19 @@ Payment = privSequelize.define(
     invoice: Sequelize.BLOB,
 
     // who caused us to make this payment (if we're hub)?
-    inward_pubkey: Sequelize.BLOB,
-
-    // secret that unlocks hash
-    secret: Sequelize.BLOB
+    inward_pubkey: Sequelize.BLOB
   },
   {
     indexes: [
       {
         fields: [
-          'type'
-          // 'status',
+          'type',
+          'status'
           // 'is_inward'
           /*
           {attribute: 'type', length: 8},
           {attribute: 'status', length: 8}*/
         ]
-      },
-      {
-        fields: ['status']
       }
     ]
   }
@@ -266,18 +262,28 @@ Delta.prototype.startDispute = async function(cheat = false) {
   await this.save()
 }
 
-Block = privSequelize.define('block', {
-  hash: Sequelize.BLOB,
-  prev_hash: Sequelize.BLOB,
+Block = privSequelize.define(
+  'block',
+  {
+    hash: Sequelize.BLOB,
+    prev_hash: Sequelize.BLOB,
 
-  // sigs that authorize block
-  precommits: Sequelize.BLOB,
-  // header with merkle roots in it
-  header: Sequelize.BLOB,
-  // array of tx in block
-  ordered_tx_body: Sequelize.BLOB,
+    // sigs that authorize block
+    precommits: Sequelize.BLOB,
+    // header with merkle roots in it
+    header: Sequelize.BLOB,
+    // array of tx in block
+    ordered_tx_body: Sequelize.BLOB,
 
-  // happened events stored in JSON
-  meta: Sequelize.TEXT,
-  total_tx: Sequelize.INTEGER
-})
+    // happened events stored in JSON
+    meta: Sequelize.TEXT,
+    total_tx: Sequelize.INTEGER
+  },
+  {
+    indexes: [
+      {
+        fields: [{attribute: 'prev_hash', length: 32}]
+      }
+    ]
+  }
+)

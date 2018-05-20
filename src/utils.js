@@ -79,10 +79,10 @@ prettyState = (state) => {
 trim = (ad) => toHex(ad).substr(0, 4)
 
 logstates = (a, b, c, d) => {
-  l('Our state', ascii_state(a))
-  l('Our signed state', ascii_state(b))
-  l('Their state', ascii_state(c))
-  l('Their signed state', ascii_state(d))
+  l('Our state\n', ascii_state(a))
+  l('Our signed state\n', ascii_state(b))
+  l('Their state\n', ascii_state(c))
+  l('Their signed state\n', ascii_state(d))
 }
 ascii_state = (state) => {
   if (!state[1]) return false
@@ -90,7 +90,7 @@ ascii_state = (state) => {
 
   let locks = (hl) => {
     return hl
-      .map((h) => h[0] + '/' + (h[1] ? trim(h[1]) : 'N/A') + '/' + h[2])
+      .map((h) => h[0] + '/' + (h[1] ? toHex(h[1]) : 'N/A') + '/' + h[2])
       .join(', ')
   }
 
@@ -183,6 +183,7 @@ q = async function(key, job) {
           //l('Section took: ' + (performance.now() - started))
         } catch (e) {
           l(e)
+          fatal('Error in q')
         }
       }
       delete q.q[key]
@@ -228,7 +229,7 @@ sha3 = (a) =>
     .digest()
 */
 js_sha3 = require('js-sha3')
-sha3 = (a) => bin(js_sha3.sha3_256.digest(a))
+sha3 = (a) => bin(js_sha3.sha3_256.digest(bin(a)))
 
 ts = () => Math.round(new Date() / 1000)
 

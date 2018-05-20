@@ -12,14 +12,14 @@ npm run build
 
 db=mysql:root:123123
 #db=postgres:postgres:123123
-maxport=8030
+maxport=8015
 
 node fs --genesis=test --db=$db
-pm2 start fs.js --node-args="--prof" --name fs -- -p443 --silent --wallet-dist --db=$db
+pm2 start fs.js --no-autorestart --node-args="--prof" --name fs -- -p443 --silent --wallet-dist --db=$db
 
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i
-  cmd="pm2 start fs.js --name fs$i -- -p$i --username=$i --pw=password --silent --datadir=data$i --wallet-dist --db=$db"
+  cmd="pm2 start fs.js --no-autorestart --name fs$i -- -p$i --username=$i --pw=password --silent --datadir=data$i --wallet-dist --db=$db"
   if (( i < 8004 )); then
     ${cmd}
   else

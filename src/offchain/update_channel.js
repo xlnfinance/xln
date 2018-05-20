@@ -34,22 +34,22 @@ module.exports = async (
   prettyState(signedState)
 
   if (ch.d.saveState(refresh(ch), ackSig)) {
-    // our last known state has been acked.
+    // our last known state has been ack.
     ch.payments.map((t, ind) => {
-      if (t.status == 'sent') t.status = 'acked'
+      if (t.status == 'sent') t.status = 'ack'
 
-      if (t.status == 'acked' && t.type == 'del') {
-        ..l('Delete lock ' + ind)
+      if (t.type + t.status == 'delack') {
+        //l('Delete lock ' + ind)
         //ch.payments.splice(ind, 1)
       }
     })
 
-    //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delacked')
+    //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
     all.push(
       Payment.update(
         {
-          status: 'acked'
+          status: 'ack'
         },
         {
           where: {
@@ -61,18 +61,18 @@ module.exports = async (
     )
 
     ch.d.ack_requested_at = null
-    //loff('Update all sent transitions as acked ')
+    //loff('Update all sent transitions as ack')
   } else {
     if (ch.d.status == 'merge') {
       // we are in merge and yet we just received ackSig that doesnt ack latest state
       loff('Rollback cant rollback')
       logstates(ch.state, oldState, debugState, signedState)
-      //gracefulExit('Rollback cant rollback')
+      fatal('Rollback cant rollback')
       return
     }
     if (transitions.length == 0) {
-      loff('Empty invalid ack, ' + ch.d.status)
       logstates(ch.state, oldState, debugState, signedState)
+      fatal('Empty invalid ack ' + ch.d.status)
       return
     }
 
@@ -107,7 +107,7 @@ module.exports = async (
     } else {
       logstates(ch.state, oldState, debugState, signedState)
 
-      loff('Deadlock?!')
+      fatal('Deadlock?!')
       //gracefulExit('Deadlock?!')
       //await me.flushChannel(ch)
 
@@ -152,14 +152,14 @@ module.exports = async (
       */
 
       // don't save in db just yet
-      let hl = Payment.build({
+      let inward_hl = Payment.build({
         type: new_type,
         // we either add add/addrisk or del right away
-        status: new_type == m ? 'acked' : 'new',
+        status: new_type == m ? 'ack' : 'new',
         is_inward: true,
 
         amount: amount,
-        hash: hash,
+        hash: bin(hash),
         exp: exp,
 
         unlocker: unlocker,
@@ -167,7 +167,10 @@ module.exports = async (
 
         deltumId: ch.d.id
       })
-      ch.payments.push(hl)
+      ch.payments.push(inward_hl)
+
+      //l(ascii_state(refresh(ch)))
+      //l('Hash got ' + toHex(inward_hl.hash))
 
       /*
 
@@ -189,7 +192,7 @@ module.exports = async (
         break
       }
 
-      await hl.save()
+      await inward_hl.save()
 
       if (new_type != m) {
         // go to next transition - we failed this hashlock already
@@ -208,23 +211,23 @@ module.exports = async (
         )*/
         if (unlocked == null) {
           loff('Error: Bad unlocker')
-          hl.type = m == 'add' ? 'del' : 'delrisk'
-          hl.status = 'new'
+          inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+          inward_hl.status = 'new'
         } else {
           let [box_amount, box_secret, box_invoice] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
-          hl.invoice = box_invoice
+          inward_hl.invoice = box_invoice
 
-          hl.secret = box_secret
-          hl.type = m == 'add' ? 'del' : 'delrisk'
-          hl.status = 'new'
+          inward_hl.secret = box_secret
+          inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+          inward_hl.status = 'new'
 
           // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our del on time and the hashlock expires making us lose the money.
-          // SECURITY: if after timeout the del is not acked, go to blockchain ASAP to reveal the preimage!
+          // SECURITY: if after timeout the del is not ack, go to blockchain ASAP to reveal the preimage!
         }
 
-        await hl.save()
+        await inward_hl.save()
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub) {
@@ -243,28 +246,31 @@ module.exports = async (
               is_inward: false,
 
               amount: outward_amount,
-              hash: hash,
+              hash: bin(hash),
               exp: exp, // the outgoing exp is a little bit longer
 
               unlocker: unlocker,
               destination: destination,
-              inward_pubkey: pubkey
+              inward_pubkey: bin(pubkey)
             })
           )
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
-          hl.type = m == 'add' ? 'del' : 'delrisk'
-          hl.status = 'new'
-          await hl.save()
+          inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+          inward_hl.status = 'new'
+          await inward_hl.save()
         }
       } else {
         loff('Error: arent receiver and arent a hub O_O')
       }
     } else if (m == 'del' || m == 'delrisk') {
-      let [hash, outcome] = t[1]
-      let valid = outcome.length == K.secret_len && sha3(outcome).equals(hash)
+      var [hash, outcome] = t[1]
+      var valid = outcome.length == K.secret_len && sha3(outcome).equals(hash)
 
+      if (!valid) {
+        l('Failed payment', t[1])
+      }
       /*
       let outward = (await ch.d.getPayments({
         where: {
@@ -281,34 +287,37 @@ module.exports = async (
       */
 
       // todo check expirations
-      let hl = ch.outwards.find((hl) => hl.hash.equals(hash))
-      if (!hl) continue
+      var outward_hl = ch.outwards.find((hl) => hl.hash.equals(hash))
+      if (!outward_hl) {
+        fatal('No such hashlock ', hash)
+        continue
+      }
 
       if (valid && m == 'del') {
         // secret was provided - remove & apply hashlock on offdelta
-        ch.d.offdelta += ch.left ? -hl.amount : hl.amount
+        ch.d.offdelta += ch.left ? -outward_hl.amount : outward_hl.amount
         me.metrics.settle.current += 1
       } else if (!valid && m == 'delrisk') {
         // delrisk fail is refund
-        ch.d.offdelta += ch.left ? hl.amount : -hl.amount
+        ch.d.offdelta += ch.left ? outward_hl.amount : -outward_hl.amount
         me.metrics.fail.current += 1
       }
 
-      hl.secret = outcome
-      hl.type = m
-      hl.status = 'acked'
+      outward_hl.type = m
+      outward_hl.status = 'ack'
+      outward_hl.secret = valid ? outcome : null
 
       ch.d.nonce++
       if (!ch.d.saveState(refresh(ch), t[2])) {
-        gracefulExit('Error: Invalid state sig at ' + m)
+        fatal('Error: Invalid state sig at ' + m)
         break
       }
 
-      all.push(hl.save())
+      all.push(outward_hl.save())
 
-      if (hl.inward_pubkey) {
+      if (outward_hl.inward_pubkey) {
         //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
-        var inward = await me.getChannel(hl.inward_pubkey, ch.d.asset)
+        var inward = await me.getChannel(outward_hl.inward_pubkey, ch.d.asset)
 
         if (inward.d.status == 'disputed' && valid) {
           loff(
@@ -323,14 +332,26 @@ module.exports = async (
           me.metrics.volume.current += inward.amount
           // add to settled payments*/
 
-          var inhl = inward.payments.find((inhl) => inhl.hash.equals(hl.hash))
+          var pull_hl = inward.inwards.find((hl) => hl.hash.equals(hash))
 
-          inhl.secret = outcome
-          inhl.type = m
-          inhl.status = 'new'
-          await inhl.save()
+          if (!pull_hl) {
+            l(
+              `Not found pull`,
+              trim(pubkey),
+              toHex(hash),
+              valid,
+              inward.rollback,
+              ascii_state(inward.state)
+            )
+            //fatal('Not found pull hl')
+          }
 
-          uniqAdd(hl.inward_pubkey)
+          pull_hl.secret = valid ? outcome : null
+          pull_hl.type = 'del'
+          pull_hl.status = 'new'
+          await pull_hl.save()
+
+          uniqAdd(outward_hl.inward_pubkey)
         }
       } else {
         //react({confirm: 'Payment completed'})
@@ -365,7 +386,7 @@ module.exports = async (
     // leaving rollback mode: our sents will auto appear in state
     ch.rollback = [0, 0]
 
-    l('After rollback ', ascii_state(refresh(ch)))
+    //l('After rollback ', ascii_state(refresh(ch)))
 
     ch.d.status = 'merge'
   } else {

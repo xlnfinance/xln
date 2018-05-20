@@ -21,7 +21,7 @@ module.exports = async () => {
       where: {
         type: 'settle',
         status: {
-          [Op.ne]: 'acked'
+          [Op.ne]: 'ack'
         },
         is_inward: true
       },

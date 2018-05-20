@@ -1,8 +1,9 @@
 // External RPC processes requests to our node coming from outside world.
 // Also implements validator and hub functionality
 
-module.exports = async (ws, msg) => {
-  msg = bin(msg)
+module.exports = async (ws, input) => {
+  var msg = Buffer.from(input)
+
   // sanity checks 10mb
   if (msg.length > 10000000) {
     l(`too long input ${msg.length}`)
@@ -12,7 +13,7 @@ module.exports = async (ws, msg) => {
   var inputType = methodMap(msg[0])
 
   // how many blocks to share at once
-  var sync_limit = 1000
+  var sync_limit = 100
 
   msg = msg.slice(1)
 
@@ -107,6 +108,8 @@ module.exports = async (ws, msg) => {
       return false
     }
 
+    l('Got block ', toHex(header))
+
     // consensus operations are in-memory for now
     //l("Saving proposed block")
     me.proposed_block = {
@@ -200,6 +203,7 @@ module.exports = async (ws, msg) => {
     })
   } else if (inputType == 'sync') {
     var last = await Block.findOne({
+      attributes: ['id'],
       where: {
         prev_hash: msg
       }
@@ -207,6 +211,7 @@ module.exports = async (ws, msg) => {
 
     if (last) {
       let chain = (await Block.findAll({
+        attributes: ['precommits', 'header', 'ordered_tx_body'],
         where: {
           id: {[Op.gte]: last.id}
         },
@@ -320,11 +325,11 @@ module.exports = async (ws, msg) => {
     // New payment arrived
     let [pubkey, sig, body] = r(msg)
 
-    /*
     if (!ec.verify(body, sig, pubkey)) {
       return l('Wrong input')
     }
-    */
+
+    //l(msg.length, ' from ', trim(pubkey), toHex(sha3(msg)))
 
     // ackSig defines the sig of last known state between two parties.
     // then each transitions contains an action and an ackSig after action is committed

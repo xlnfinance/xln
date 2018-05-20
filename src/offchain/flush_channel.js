@@ -1,8 +1,8 @@
 // Flush all new transitions to state channel. Types:
 /*
 Payment lifecycles:
-outward payments: add/new > (we just added) > add/sent > add/acked > del/acked
-inward payments: add/acked > (we received it with transitions) > del/new > sent > acked
+outward payments: addnew > addsent > addack > delack
+inward payments: addack > delnew > delsent > delack
 
 add - add outward hashlock
 del - remove inward hashlock by providing secret or reason of failure
@@ -50,16 +50,14 @@ module.exports = async (pubkey, asset, opportunistic) => {
     let debugState = r(r(ch.state))
 
     // array of actions to apply to canonical state
-    let transitions = []
+    var transitions = []
 
     // merge cannot add new transitions because expects another ack
     // in merge mode all you do is ack last (merged) state
     if (ch.d.status == 'master') {
-      for (let t of ch.payments) {
+      for (var t of ch.payments) {
         if (t.status != 'new') continue
 
-        // what arguments this transition has
-        let args = []
         if (t.type == 'del') {
           /*
           if (me.CHEAT_dontreveal) {
@@ -77,10 +75,10 @@ module.exports = async (pubkey, asset, opportunistic) => {
           }
           */
 
-          if (t.secret.length == K.secret_len) {
+          if (t.secret && t.secret.length == K.secret_len) {
             ch.d.offdelta += ch.left ? t.amount : -t.amount
           }
-          args = [t.hash, t.secret]
+          var args = [t.hash, t.secret]
           /*
         } else if (t.type == 'delrisk') {
           if (t.secret) {
@@ -113,15 +111,16 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
             me.metrics.fail.current++
 
-            t.type = t.type == 'add' ? 'del' : 'delrisk'
-            t.status = 'acked'
+            t.type = 'del'
+            t.status = 'ack'
             all.push(t.save())
 
             if (t.inward_pubkey) {
               var inward = await me.getChannel(t.inward_pubkey, ch.d.asset)
-              var hl = inward.inwards.find((hl) => hl.hash.equals(t.hash))
-              hl.type = t.type == 'add' ? 'del' : 'delrisk'
-              all.push(hl.save())
+              var pull_hl = inward.inwards.find((hl) => hl.hash.equals(t.hash))
+              pull_hl.type = 'del'
+              pull_hl.status = 'new'
+              all.push(pull_hl.save())
 
               flushable.push(inward.d.partnerId)
             }
@@ -140,6 +139,8 @@ module.exports = async (pubkey, asset, opportunistic) => {
             // store hashlock off-state as "verbal agreement"
             ch.d.offdelta += ch.left ? -t.amount : t.amount
           }*/
+
+          //l('Hash sent ' + toHex(t.hash))
 
           args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
         }
@@ -182,9 +183,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
       //ch.d.pending = envelope
       ch.d.status = 'sent'
       loff(
-        `=== End flush ${transitions.length} tr to ${trim(pubkey)}. Envelope: ${
-          envelope.length
-        } bytes`
+        `=== End flush ${transitions.length} (${envelope.length}) to ${trim(
+          pubkey
+        )}`
       )
     }
 

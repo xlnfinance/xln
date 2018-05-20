@@ -10,6 +10,8 @@ module.exports = async (pubkey, asset) => {
     var key = stringify([pubkey, asset])
     if (me.cached[key]) {
       ch = me.cached[key]
+      //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
+
       refresh(ch)
 
       return ch
@@ -111,14 +113,8 @@ module.exports = async (pubkey, asset) => {
 
     ch.payments = await ch.d.getPayments({
       where: {
-        // move to NOT del acked
-        [Op.or]: [
-          {type: 'add', status: 'new'}, // pending
-          {type: 'add', status: 'sent'}, // in state
-          {type: 'add', status: 'acked'}, // in state
-          {type: 'del', status: 'new'}, // in state & pending
-          {type: 'del', status: 'sent'} // sent
-        ]
+        // delack is archive
+        [Op.or]: [{type: {[Op.ne]: 'del'}}, {status: {[Op.ne]: 'ack'}}]
       },
       //limit: 1000,
       // explicit order because of postgres https://github.com/sequelize/sequelize/issues/9289
