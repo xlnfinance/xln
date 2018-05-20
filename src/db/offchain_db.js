@@ -159,14 +159,7 @@ Delta = privSequelize.define(
 Payment = privSequelize.define(
   'payment',
   {
-    type: Sequelize.ENUM(
-      'add',
-      'settle',
-      'fail',
-      'addrisk',
-      'settlerisk',
-      'failrisk'
-    ),
+    type: Sequelize.ENUM('add', 'del', 'addrisk', 'delrisk'),
     status: Sequelize.ENUM('new', 'sent', 'acked', 'processed'),
     is_inward: Sequelize.BOOLEAN,
 

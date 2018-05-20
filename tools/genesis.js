@@ -70,6 +70,7 @@ module.exports = async () => {
     max_fee: 5000,
 
     // hashlock and dispute-related
+    secret_len: 32,
     dispute_delay: 8, // in how many blocks disputes are considered final
     hashlock_exp: 4, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 1000, // for how many blocks onchain keeps it unlocked since reveal

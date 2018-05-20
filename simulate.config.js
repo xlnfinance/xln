@@ -34,6 +34,7 @@ module.exports = {
         '--wallet-url=http://localhost:' + walletPort,
         '--monkey=8008',
         '--db=' + db,
+        //'--silent',
         //'--CHEAT=dontprecommit',
 
         '--color' // `--color` for chalk

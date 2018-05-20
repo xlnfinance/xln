@@ -27,6 +27,7 @@ nacl = require('../lib/nacl')
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = nacl.sign.detached.verify
 */
+
 ec = (a, b) => concat(Buffer.alloc(32), sha3(a))
 ec.verify = (a, b, c) => ec(a).equals(b)
 
@@ -219,6 +220,13 @@ toHex = (inp) => Buffer.from(inp).toString('hex')
 fromHex = (inp) => Buffer.from(inp, 'hex')
 bin = (data) => Buffer.from(typeof data == 'number' ? [data] : data)
 
+/*
+sha3 = (a) =>
+  crypto
+    .createHash('sha256')
+    .update(bin(a))
+    .digest()
+*/
 js_sha3 = require('js-sha3')
 sha3 = (a) => bin(js_sha3.sha3_256.digest(a))
 
@@ -306,7 +314,7 @@ methodMap = (i) => {
     'createAsset',
     'createHub',
 
-    'revealSecrets', // reveal secrets if partner has not acked our settle
+    'revealSecrets', // reveal secrets if partner has not acked our del settle
     'vote',
 
     // offchain
@@ -315,13 +323,11 @@ methodMap = (i) => {
     'setLimits', // define credit limits to partner
 
     'add', // we add hashlock transfer to state.
-    'settle', // we've got the secret so please unlock and apply to base offdelta
-    'fail', // couldn't get secret for <reason>, delete hashlock
+    'del', // we've got the secret or couldn't get secret for <reason>
 
     // same, but off-canonical-state and risky (receiver is not required to return secret to claim money)
     'addrisk',
-    'settlerisk',
-    'failrisk',
+    'delrisk',
 
     // fail reasons
     'failOffline',

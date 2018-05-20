@@ -352,7 +352,7 @@ module.exports = async (ws, msg) => {
     /*
     We MUST ack if there were any transitions, otherwise if it was ack w/o transitions 
     to ourselves then do an opportunistic flush (flush if any). Forced ack here would lead to recursive ack pingpong!
-    Flushable are other channels that were impacted by this update (e.g. pass forward fail/settle)
+    Flushable are other channels that were impacted by this update
     Sometimes sender is already included in flushable, so don't flush twice
 
     */

@@ -111,15 +111,13 @@ module.exports = async (pubkey, asset) => {
 
     ch.payments = await ch.d.getPayments({
       where: {
-        // move to NOT
+        // move to NOT del acked
         [Op.or]: [
           {type: 'add', status: 'new'}, // pending
           {type: 'add', status: 'sent'}, // in state
           {type: 'add', status: 'acked'}, // in state
-          {type: 'settle', status: 'new'}, // in state & pending
-          {type: 'settle', status: 'sent'}, // sent
-          {type: 'fail', status: 'new'}, // in state & pending
-          {type: 'fail', status: 'sent'} // sent
+          {type: 'del', status: 'new'}, // in state & pending
+          {type: 'del', status: 'sent'} // sent
         ]
       },
       //limit: 1000,

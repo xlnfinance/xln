@@ -1,12 +1,11 @@
 // Flush all new transitions to state channel. Types:
 /*
 Payment lifecycles:
-outward payments: add/new > (we just added) > add/sent > add/acked > settle or fail/acked
-inward payments: add/acked > (we received it with transitions) > settle or fail/new > sent > acked
+outward payments: add/new > (we just added) > add/sent > add/acked > del/acked
+inward payments: add/acked > (we received it with transitions) > del/new > sent > acked
 
 add - add outward hashlock
-settle - unlock inward hashlock by providing secret
-fail - delete inward hashlock for some reason.
+del - remove inward hashlock by providing secret or reason of failure
 
 This module has 3 types of behavior:
 regular flush: flushes ack with or without transitions
@@ -45,7 +44,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
       return
     }
 
-    await sleep(200)
+    //await sleep(200)
 
     let ackSig = ec(r(refresh(ch)), me.id.secretKey)
     let debugState = r(r(ch.state))
@@ -61,7 +60,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
         // what arguments this transition has
         let args = []
-        if (t.type == 'settle' || t.type == 'fail') {
+        if (t.type == 'del') {
           /*
           if (me.CHEAT_dontreveal) {
             loff('CHEAT: not revealing our secret to inward')
@@ -78,20 +77,16 @@ module.exports = async (pubkey, asset, opportunistic) => {
           }
           */
 
-          if (t.type == 'settle') {
+          if (t.secret.length == K.secret_len) {
             ch.d.offdelta += ch.left ? t.amount : -t.amount
-            args = t.secret
-          } else {
-            args = t.hash
           }
+          args = [t.hash, t.secret]
           /*
-        } else if (t.type == 'settlerisk' || t.type == 'failrisk') {
-          if (t.type == 'failrisk') {
+        } else if (t.type == 'delrisk') {
+          if (t.secret) {
             ch.d.offdelta += ch.left ? -t.amount : t.amount
-            args = t.hash
-          } else {
-            args = t.secret
-          }*/
+          }
+          args = [t.hash, t.secret]*/
         } else if (t.type == 'add' || t.type == 'addrisk') {
           /*
           if (
@@ -118,14 +113,14 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
             me.metrics.fail.current++
 
-            t.type = t.type == 'add' ? 'fail' : 'failrisk'
+            t.type = t.type == 'add' ? 'del' : 'delrisk'
             t.status = 'acked'
             all.push(t.save())
 
             if (t.inward_pubkey) {
               var inward = await me.getChannel(t.inward_pubkey, ch.d.asset)
               var hl = inward.inwards.find((hl) => hl.hash.equals(t.hash))
-              hl.type = t.type == 'add' ? 'fail' : 'failrisk'
+              hl.type = t.type == 'add' ? 'del' : 'delrisk'
               all.push(hl.save())
 
               flushable.push(inward.d.partnerId)

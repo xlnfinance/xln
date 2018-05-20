@@ -349,19 +349,16 @@ export default {
     trim: (str) => {
       return str ? str.slice(0, 8) + '...' : ''
     },
-    payment_status: (type, status) => {
+    payment_status: (t) => {
       var s = ''
-      if (type == 'settle' || type == 'settlerisk') {
-        s = '✔'
+      if (t.type == 'del' || t.type == 'delrisk') {
+        s = t.secret ? '✔' : '❌'
       }
-      if (type == 'fail' || type == 'failrisk') {
-        s = '❌'
-      }
-      if (type == 'add' || type == 'addrisk') {
+      if (t.type == 'add' || t.type == 'addrisk') {
         s = '🔒'
       }
       // new and sent are considered "pending" statuses
-      return s + (status == 'acked' ? '' : '🕟')
+      return s + (t.status == 'acked' ? '' : '🕟')
     }
   }
 }
@@ -587,7 +584,7 @@ export default {
               <tbody>
 
                 <tr v-bind:key="h.id" v-for="h in payments.slice(0, history_limit)">
-                  <td v-bind:title="h.type+h.status">{{payment_status(h.type, h.status)}}</td>
+                  <td v-bind:title="h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
                   <td>Hash {{trim(h.hash)}} Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
                   <td>{{ new Date(h.createdAt).toLocaleString() }}</td>

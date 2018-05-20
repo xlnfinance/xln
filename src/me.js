@@ -320,10 +320,7 @@ class Me {
         // clean up old payments: all acked fails and settles
         Payment.destroy({
           where: {
-            [Op.or]: [
-              {type: 'settle', status: 'acked'},
-              {type: 'fail', status: 'acked'}
-            ]
+            [Op.or]: [{type: 'del', status: 'acked'}]
           }
         })
       }, 120000)

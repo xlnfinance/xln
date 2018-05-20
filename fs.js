@@ -43,13 +43,23 @@ refresh = function(ch) {
   ch.inwards = []
   ch.outwards = []
 
-  var hashlock_hold = [0, 0]
+  let hashlock_hold = [0, 0]
 
-  for (var t of ch.payments) {
+  /*
+  ch.payments = ch.payments.filter(
+    (t) => !(t.status == 'acked' && t.type == 'settle')
+  )*/
+  let filtered_settled = []
+
+  var startedl = ch.payments.length
+
+  for (let i = 0; i < ch.payments.length; i++) {
+    let t = ch.payments[i]
+
     var typestatus = t.type + t.status
 
-    var mask = ['addacked', 'settlenew', 'failnew'].concat(
-      ch.rollback[0] > 0 ? ['settlesent', 'failsent'] : 'addsent'
+    var mask = ['addacked', 'delnew'].concat(
+      ch.rollback[0] > 0 ? 'delsent' : 'addsent'
     )
 
     if (mask.includes(typestatus)) {
@@ -57,10 +67,16 @@ refresh = function(ch) {
       hashlock_hold[t.is_inward ? 0 : 1] += t.amount
     }
 
+    if (typestatus == 'delacked') {
+      //delete(ch.payments[i])
+      filtered_settled.push(t)
+      //l('Delete ', i)
+    }
+
     /*
 
     if (
-      ['addacked', 'settlenew', 'failnew', 'settlesent', 'failsent'].includes(
+      ['addacked', 'delnew', 'delsent'].includes(
         typestatus
       )
     ) {
@@ -116,6 +132,11 @@ refresh = function(ch) {
     if (st != ch.ascii_states) {
       ch.ascii_states += st
     }
+  }
+
+  //ch.payments = filtered_settled
+  if (ch.payments.length != startedl) {
+    l(startedl, ch.payments.length, filtered_settled.length)
   }
 
   return ch.state

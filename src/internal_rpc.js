@@ -182,7 +182,7 @@ module.exports = async (ws, msg) => {
       case 'invoices':
         result.acked = await Payment.findAll({
           where: {
-            type: 'settle',
+            type: 'del',
             status: 'acked',
             is_inward: true
           }
@@ -194,7 +194,7 @@ module.exports = async (ws, msg) => {
           },
           {
             where: {
-              type: 'settle',
+              type: 'del',
               status: 'acked',
               is_inward: true
             }

@@ -35,9 +35,16 @@ module.exports = async (
 
   if (ch.d.saveState(refresh(ch), ackSig)) {
     // our last known state has been acked.
-    ch.payments.map((t) => {
+    ch.payments.map((t, ind) => {
       if (t.status == 'sent') t.status = 'acked'
+
+      if (t.status == 'acked' && t.type == 'del') {
+        ..l('Delete lock ' + ind)
+        //ch.payments.splice(ind, 1)
+      }
     })
+
+    //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delacked')
 
     all.push(
       Payment.update(
@@ -121,7 +128,7 @@ module.exports = async (
 
       if (amount < K.min_amount || amount > ch.they_payable) {
         loff('Error: invalid amount ', amount)
-        new_type = m == 'add' ? 'fail' : 'failrisk'
+        new_type = m == 'add' ? 'del' : 'delrisk'
       }
 
       if (hash.length != 32) {
@@ -139,7 +146,7 @@ module.exports = async (
 
       /*
       if (exp < reveal_until - 2 || exp > reveal_until + 5) {
-        new_type = m == 'add' ? 'fail' : 'failrisk'
+        new_type = m == 'add' ? 'del' : 'delrisk'
         loff('Error: exp is out of supported range')
       }
       */
@@ -147,7 +154,7 @@ module.exports = async (
       // don't save in db just yet
       let hl = Payment.build({
         type: new_type,
-        // we either add add/addrisk or fail right away
+        // we either add add/addrisk or del right away
         status: new_type == m ? 'acked' : 'new',
         is_inward: true,
 
@@ -201,7 +208,7 @@ module.exports = async (
         )*/
         if (unlocked == null) {
           loff('Error: Bad unlocker')
-          hl.type = m == 'add' ? 'fail' : 'failrisk'
+          hl.type = m == 'add' ? 'del' : 'delrisk'
           hl.status = 'new'
         } else {
           let [box_amount, box_secret, box_invoice] = r(bin(unlocked))
@@ -210,11 +217,11 @@ module.exports = async (
           hl.invoice = box_invoice
 
           hl.secret = box_secret
-          hl.type = m == 'add' ? 'settle' : 'settlerisk'
+          hl.type = m == 'add' ? 'del' : 'delrisk'
           hl.status = 'new'
 
-          // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our settle on time and the hashlock expires making us lose the money.
-          // SECURITY: if after timeout the settle is not acked, go to blockchain ASAP to reveal the preimage!
+          // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our del on time and the hashlock expires making us lose the money.
+          // SECURITY: if after timeout the del is not acked, go to blockchain ASAP to reveal the preimage!
         }
 
         await hl.save()
@@ -247,21 +254,16 @@ module.exports = async (
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
-          hl.type = m == 'add' ? 'fail' : 'failrisk'
+          hl.type = m == 'add' ? 'del' : 'delrisk'
           hl.status = 'new'
           await hl.save()
         }
       } else {
         loff('Error: arent receiver and arent a hub O_O')
       }
-    } else if (
-      m == 'settle' ||
-      m == 'fail' ||
-      m == 'settlerisk' ||
-      m == 'failrisk'
-    ) {
-      let [secret, hash] =
-        m == 'settle' || m == 'settlerisk' ? [t[1], sha3(t[1])] : [null, t[1]]
+    } else if (m == 'del' || m == 'delrisk') {
+      let [hash, outcome] = t[1]
+      let valid = outcome.length == K.secret_len && sha3(outcome).equals(hash)
 
       /*
       let outward = (await ch.d.getPayments({
@@ -282,19 +284,17 @@ module.exports = async (
       let hl = ch.outwards.find((hl) => hl.hash.equals(hash))
       if (!hl) continue
 
-      if (m == 'settle' || m == 'fail') {
-        if (m == 'settle') {
-          // secret was provided - remove & apply hashlock on offdelta
-          ch.d.offdelta += ch.left ? -hl.amount : hl.amount
-        } else {
-          // secret wasn't provided, just delete lock
-        }
-      } else if (m == 'failrisk') {
-        // note that settlerisk is not state changing at all, and failrisk is refund
+      if (valid && m == 'del') {
+        // secret was provided - remove & apply hashlock on offdelta
+        ch.d.offdelta += ch.left ? -hl.amount : hl.amount
+        me.metrics.settle.current += 1
+      } else if (!valid && m == 'delrisk') {
+        // delrisk fail is refund
         ch.d.offdelta += ch.left ? hl.amount : -hl.amount
+        me.metrics.fail.current += 1
       }
 
-      hl.secret = secret
+      hl.secret = outcome
       hl.type = m
       hl.status = 'acked'
 
@@ -310,11 +310,11 @@ module.exports = async (
         //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
         var inward = await me.getChannel(hl.inward_pubkey, ch.d.asset)
 
-        if (inward.d.status == 'disputed') {
+        if (inward.d.status == 'disputed' && valid) {
           loff(
             'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
           )
-          me.batch.push('revealSecrets', [secret])
+          me.batch.push('revealSecrets', [outcome])
         } else {
           /*
           // how much fee we just made by mediating the transfer?
@@ -322,11 +322,10 @@ module.exports = async (
           // add to total volume
           me.metrics.volume.current += inward.amount
           // add to settled payments*/
-          me.metrics.settle.current += 1
 
           var inhl = inward.payments.find((inhl) => inhl.hash.equals(hl.hash))
 
-          inhl.secret = secret
+          inhl.secret = outcome
           inhl.type = m
           inhl.status = 'new'
           await inhl.save()
