@@ -3,6 +3,8 @@
 // Called once in a while to cache current state of everything and flush it to browser
 // TODO: better way to keep app reactive?
 cache = async (i) => {
+  if (me.headless()) return
+
   if (K) {
     cached_result.my_hub = me.my_hub
 
@@ -70,6 +72,8 @@ cache = async (i) => {
 
 // Flush an object to browser websocket. Send force=false for lazy react (for high-tps nodes like hubs)
 react = async (result = {}, force = true) => {
+  if (me.headless()) return
+
   // hubs dont react OR no alive browser socket
   if (me.my_hub && !force) {
     return //l('No working me.browser')
@@ -105,6 +109,7 @@ react = async (result = {}, force = true) => {
       */
     }
 
+    await me.syncdb()
     ;[result.payments, result.channels, result.record] = await Promise.all([
       Payment.findAll({
         order: [['id', 'desc']],
@@ -127,7 +132,7 @@ react = async (result = {}, force = true) => {
     result.pending_batch = PK.pending_batch
   }
 
-  if (!me.browser || me.browser.readyState != 1) return
+  if (me.headless()) return
 
   try {
     me.browser.send(

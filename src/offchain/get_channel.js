@@ -124,7 +124,7 @@ module.exports = async (pubkey, asset) => {
     refresh(ch)
 
     me.cached[key] = ch
-    l('Saved in cache ', key)
+    //l('Saved in cache ', key)
     return ch
   })
 }

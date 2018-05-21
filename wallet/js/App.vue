@@ -584,7 +584,7 @@ export default {
               <tbody>
 
                 <tr v-bind:key="h.id" v-for="h in payments.slice(0, history_limit)">
-                  <td v-bind:title="h.type+h.status">{{payment_status(h)}}</td>
+                  <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
                   <td>Hash {{trim(h.hash)}} Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
                   <td>{{ new Date(h.createdAt).toLocaleString() }}</td>

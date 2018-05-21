@@ -448,10 +448,15 @@ if (argv.monkey) {
   l('Loaded randos: ' + randos.length)
 }
 
-let ooops = (err) => {
+let ooops = async (err) => {
   //if (err.name == 'SequelizeTimeoutError') return
+  //flush changes to db
+  await me.syncdb()
+
   l(err)
   fatal(`Fatal rejection, quitting`)
 }
+
 process.on('unhandledRejection', ooops)
 process.on('uncaughtException', ooops)
+process.on('exit', ooops)

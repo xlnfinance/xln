@@ -66,6 +66,11 @@ class Me {
     fs.writeFileSync(datadir + '/offchain/pk.json', JSON.stringify(PK))
   }
 
+  // returns true if no active browser ws now
+  headless() {
+    return !me.browser || me.browser.readyState != 1
+  }
+
   async byKey(pk) {
     if (!pk) {
       if (this.id) {
@@ -397,6 +402,27 @@ Payments: ${await Payment.count()}\n
       'testnet',
       concat(bin([1, asset]), bin(me.address)) //action 1 asset 1
     )
+  }
+
+  async syncdb() {
+    return q('syncdb', async () => {
+      var all = []
+
+      // saving all deltas and corresponding payment objects to db
+      // it only saves changed records, so call save() on everything
+      // todo ensure proper order of id
+
+      for (var ch of Object.values(me.cached)) {
+        all.push(ch.d.save())
+        ch.payments.map((p) => all.push(p.save()))
+
+        //await ch.d.save()
+        //for (var t of ch.payments) {
+        //  await t.save()
+        //}
+      }
+      return await Promise.all(all)
+    })
   }
 
   // takes channels with supported hubs (verified and custom ones)

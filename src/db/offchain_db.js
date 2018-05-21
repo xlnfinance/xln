@@ -197,14 +197,7 @@ Payment = privSequelize.define(
   {
     indexes: [
       {
-        fields: [
-          'type',
-          'status'
-          // 'is_inward'
-          /*
-          {attribute: 'type', length: 8},
-          {attribute: 'status', length: 8}*/
-        ]
+        fields: ['type', 'status']
       }
     ]
   }
@@ -264,6 +257,8 @@ Delta.prototype.startDispute = async function(cheat = false) {
   me.batch.push(['disputeWith', this.asset, [d]])
   await this.save()
 }
+
+// used primarily by validators and explorers to store historical blocks. Regular users don't have to store blocks ("pruning" mode)
 
 Block = privSequelize.define(
   'block',

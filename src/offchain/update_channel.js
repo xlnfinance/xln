@@ -46,26 +46,27 @@ module.exports = async (
 
     //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
-    all.push(
-      Payment.update(
-        {
-          status: 'ack'
-        },
-        {
-          where: {
-            status: 'sent',
-            deltumId: ch.d.id
+    if (argv.syncdb) {
+      all.push(
+        Payment.update(
+          {
+            status: 'ack'
+          },
+          {
+            where: {
+              status: 'sent',
+              deltumId: ch.d.id
+            }
           }
-        }
+        )
       )
-    )
+    }
 
     ch.d.ack_requested_at = null
     //loff('Update all sent transitions as ack')
   } else {
     if (ch.d.status == 'merge') {
       // we are in merge and yet we just received ackSig that doesnt ack latest state
-      loff('Rollback cant rollback')
       logstates(ch.state, oldState, debugState, signedState)
       fatal('Rollback cant rollback')
       return
@@ -231,21 +232,23 @@ module.exports = async (
         // is online? Is payable?
 
         if (me.users[destination] && dest_ch.payable >= outward_amount) {
-          dest_ch.payments.push(
-            await dest_ch.d.createPayment({
-              type: m,
-              status: 'new',
-              is_inward: false,
+          var outward_hl = Payment.build({
+            deltumId: dest_ch.d.id,
+            type: m,
+            status: 'new',
+            is_inward: false,
 
-              amount: outward_amount,
-              hash: bin(hash),
-              exp: exp, // the outgoing exp is a little bit longer
+            amount: outward_amount,
+            hash: bin(hash),
+            exp: exp, // the outgoing exp is a little bit longer
 
-              unlocker: unlocker,
-              destination: destination,
-              inward_pubkey: bin(pubkey)
-            })
-          )
+            unlocker: unlocker,
+            destination: destination,
+            inward_pubkey: bin(pubkey)
+          })
+          dest_ch.payments.push(outward_hl)
+
+          if (argv.syncdb) all.push(outward_hl.save())
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
@@ -261,7 +264,7 @@ module.exports = async (
         loff('Error: arent receiver and arent a hub O_O')
       }
 
-      all.push(inward_hl.save())
+      if (argv.syncdb) all.push(inward_hl.save())
     } else if (m == 'del' || m == 'delrisk') {
       var [hash, outcome] = t[1]
 
@@ -271,21 +274,6 @@ module.exports = async (
         var valid = false
         outcome = null
       }
-
-      /*
-      let outward = (await ch.d.getPayments({
-        where: {
-          hash: hash,
-          is_inward: false,
-          type: m.includes('risk') ? 'addrisk' : 'add'
-        }
-      }))[0]
-
-      if (!outward) {
-        loff('Error: No such payment')
-        break
-      }
-      */
 
       // todo check expirations
       var outward_hl = ch.outwards.find((hl) => hl.hash.equals(hash))
@@ -314,7 +302,7 @@ module.exports = async (
         break
       }
 
-      all.push(outward_hl.save())
+      if (argv.syncdb) all.push(outward_hl.save())
 
       if (outward_hl.inward_pubkey) {
         //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
@@ -350,7 +338,7 @@ module.exports = async (
           pull_hl.secret = outcome
           pull_hl.type = 'del'
           pull_hl.status = 'new'
-          all.push(pull_hl.save())
+          if (argv.syncdb) all.push(pull_hl.save())
 
           uniqAdd(outward_hl.inward_pubkey)
         }
@@ -409,9 +397,10 @@ module.exports = async (
   }
   */
 
-  all.push(ch.d.save())
-
-  await Promise.all(all)
+  if (argv.syncdb) {
+    all.push(ch.d.save())
+    await Promise.all(all)
+  }
 
   return flushable
 
