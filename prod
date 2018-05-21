@@ -12,7 +12,7 @@ killall Failsafe 2>/dev/null
 rm -rf isolate*
 rm -rf data*
 
-#./install
+./install
 npm run build
 
 db=mysql:root:123123

@@ -1,5 +1,7 @@
 {
   "private": true,
+  "name": "wallet",
+  "version": "0.0.0",
   "dependencies": {
     "axios": "0.18.0",
     "highlight.js": "9.12.0",

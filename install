@@ -1,2 +1,1 @@
-npm i
-cd wallet && npm i; cd ..
+yarn
