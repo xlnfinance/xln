@@ -1,27 +1,5 @@
 {
   "private": true,
-  "standard": {
-    "globals": [
-      "assert",
-      "fs",
-      "http",
-      "os",
-      "ws",
-      "opn",
-      "crypto",
-      "js_sha3",
-      "nacl",
-      "me",
-      "ec",
-      "K",
-      "readInt",
-      "l",
-      "bin",
-      "Members",
-      "r",
-      "methodMap"
-    ]
-  },
   "workspaces": ["wallet"],
   "ignore": [
     "wallet/"
