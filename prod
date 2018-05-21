@@ -1,7 +1,12 @@
 #!/bin/bash
 
-forever stopall
+# Rotate logs for clarity
+if [ -f /etc/logrotate.d/pm2-root ]; then
+  logrotate -f /etc/logrotate.d/pm2-root
+fi
+
 pm2 delete all
+
 killall Failsafe 2>/dev/null
 
 rm -rf isolate*

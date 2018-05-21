@@ -8,8 +8,6 @@ rm -rf isolate*
 
 killall Failsafe 2>/dev/null || true
 
-pm2 flush
-
 function pm2() {
   node_modules/.bin/pm2 "$@"
 }
@@ -22,6 +20,7 @@ if node fs --genesis=test --db=mysql:root:123123 | grep "Genesis done"; then
     rsync -q -rva --exclude=offchain data/* data$i
   done
 
+  pm2 flush
   pm2 delete all || true
   pm2 start simulate.config.js
   pm2 attach $(node -p "`pm2 id fs`[0]")
