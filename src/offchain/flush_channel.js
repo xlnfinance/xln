@@ -20,20 +20,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
     //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
-    refresh(ch)
 
     let flushable = []
     let all = []
-
-    // First, we add a transition to the queue
-
-    if (ch.d.status == 'CHEAT_dontack') {
-      return
-    }
-
-    if (ch.d.status == 'disputed') {
-      return
-    }
 
     if (ch.d.status == 'sent') {
       //loff(`=== End flush ${trim(pubkey)} CANT`)
@@ -44,7 +33,13 @@ module.exports = async (pubkey, asset, opportunistic) => {
       return
     }
 
-    //await sleep(200)
+    if (ch.d.status == 'CHEAT_dontack') {
+      return
+    }
+
+    if (ch.d.status == 'disputed') {
+      return
+    }
 
     let ackSig = ec(r(refresh(ch)), me.id.secretKey)
     let debugState = r(r(ch.state))
@@ -55,6 +50,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
     // merge cannot add new transitions because expects another ack
     // in merge mode all you do is ack last (merged) state
     if (ch.d.status == 'master') {
+      // hub waits a bit in case destination returns secret quickly
+      if (me.my_hub && !opportunistic) await sleep(50)
+
       for (var t of ch.payments) {
         if (t.status != 'new') continue
 

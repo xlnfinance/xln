@@ -128,6 +128,9 @@ Delta = privSequelize.define(
     sig: Sequelize.BLOB,
     signed_state: Sequelize.BLOB,
 
+    signed_nonce: Sequelize.INTEGER,
+    signed_offdelta: Sequelize.INTEGER,
+
     // All the safety Byzantine checks start with cheat_
     CHEAT_profitable_state: Sequelize.BLOB,
     CHEAT_profitable_sig: Sequelize.BLOB,

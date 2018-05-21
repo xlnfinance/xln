@@ -116,7 +116,7 @@ module.exports = async (ws, input) => {
       proposer: pubkey,
       sig: sig,
 
-      header: header,
+      header: bin(header),
       ordered_tx_body: ordered_tx_body
     }
   } else if (inputType == 'prevote' || inputType == 'precommit') {
@@ -149,7 +149,7 @@ module.exports = async (ws, input) => {
       //l(`Received ${inputType} from ${m.id}`)
     } else {
       l(
-        `This sig by ${m.id} doesn't work for our block ${toHex(
+        `This ${inputType} by ${m.id} doesn't work for our block ${toHex(
           me.proposed_block.header
         )}`
       )
@@ -273,13 +273,13 @@ module.exports = async (ws, input) => {
       return false
     }
 
-    var input = r([
+    var withdrawal = r([
       methodMap('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
       amount,
-      ch.ins.asset
+      ch.d.asset
     ])
 
     ch.d.they_input_amount = amount
@@ -289,7 +289,7 @@ module.exports = async (ws, input) => {
     me.send(
       pubkey,
       'withdrawFrom',
-      r([me.pubkey, ec(input, me.id.secretKey), r([amount, asset])])
+      r([me.pubkey, ec(withdrawal, me.id.secretKey), r([amount, asset])])
     )
 
     // other party gives withdrawal onchain
@@ -297,23 +297,21 @@ module.exports = async (ws, input) => {
   } else if (inputType == 'withdrawFrom') {
     var [pubkey, sig, body] = r(msg)
 
-    var [amount, asset] = r(body)
-    amount = readInt(amount)
-    asset = readInt(asset)
+    var [amount, asset] = r(body).map(readInt)
 
     var ch = await me.getChannel(pubkey, asset)
 
-    var input = r([
+    var withdrawal = [
       methodMap('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
       amount,
-      ch.ins.asset
-    ])
+      ch.d.asset
+    ]
 
-    if (!ec.verify(input, sig, pubkey)) {
-      l('Invalid withdrawal')
+    if (!ec.verify(r(withdrawal), sig, pubkey)) {
+      l('Invalid withdrawal ', withdrawal)
       return false
     }
 

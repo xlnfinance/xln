@@ -355,7 +355,7 @@ class Me {
             }
           })
           // must be >100 after expected rebalance
-          var alert = `${me.metrics.settle.total}/200 settled\n
+          var alert = `${me.metrics.settle.total}/${me.metrics.fail.total}\n
 Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n
 Blocks: ${await Block.count()}\n
 Deltas: ${await Delta.count()}\n
@@ -373,11 +373,19 @@ Payments: ${await Payment.count()}\n
 
         setTimeout(() => {
           me.getCoins(1)
-        }, 8000)
+        }, 6000)
 
         setTimeout(() => {
           me.payRando()
-        }, 16000)
+
+          // intended to fail
+          me.payChannel({
+            destination:
+              'ZUp5PARsn4X2xs8fEjYSRtWSTQqgkMnVax7CaLsBmp9kR36Jqon7NbqCakQ5jQ9w1t5gtGo3zfhTtQ2123123123DJJjZ',
+            amount: 100,
+            asset: 1
+          })
+        }, 17000)
       }
     }
   }

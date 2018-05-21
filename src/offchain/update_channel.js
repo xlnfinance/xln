@@ -192,15 +192,9 @@ module.exports = async (
         break
       }
 
-      await inward_hl.save()
-
       if (new_type != m) {
         // go to next transition - we failed this hashlock already
-        continue
-      }
-
-      // pay to unlocker
-      if (destination.equals(me.pubkey)) {
+      } else if (destination.equals(me.pubkey)) {
         unlocker = r(unlocker)
         let unlocked = unlocker[0]
         /*nacl.box.open(
@@ -226,8 +220,6 @@ module.exports = async (
           // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our del on time and the hashlock expires making us lose the money.
           // SECURITY: if after timeout the del is not ack, go to blockchain ASAP to reveal the preimage!
         }
-
-        await inward_hl.save()
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub) {
@@ -259,18 +251,27 @@ module.exports = async (
         } else {
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
-          await inward_hl.save()
+
+          me.metrics.fail.current++
         }
       } else {
+        inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+        inward_hl.status = 'new'
+
         loff('Error: arent receiver and arent a hub O_O')
       }
+
+      all.push(inward_hl.save())
     } else if (m == 'del' || m == 'delrisk') {
       var [hash, outcome] = t[1]
-      var valid = outcome.length == K.secret_len && sha3(outcome).equals(hash)
 
-      if (!valid) {
-        l('Failed payment', t[1])
+      if (outcome.length == K.secret_len && sha3(outcome).equals(hash)) {
+        var valid = true
+      } else {
+        var valid = false
+        outcome = null
       }
+
       /*
       let outward = (await ch.d.getPayments({
         where: {
@@ -296,16 +297,16 @@ module.exports = async (
       if (valid && m == 'del') {
         // secret was provided - remove & apply hashlock on offdelta
         ch.d.offdelta += ch.left ? -outward_hl.amount : outward_hl.amount
-        me.metrics.settle.current += 1
       } else if (!valid && m == 'delrisk') {
         // delrisk fail is refund
         ch.d.offdelta += ch.left ? outward_hl.amount : -outward_hl.amount
-        me.metrics.fail.current += 1
       }
+
+      me.metrics[valid ? 'settle' : 'fail'].current++
 
       outward_hl.type = m
       outward_hl.status = 'ack'
-      outward_hl.secret = valid ? outcome : null
+      outward_hl.secret = outcome
 
       ch.d.nonce++
       if (!ch.d.saveState(refresh(ch), t[2])) {
@@ -346,10 +347,10 @@ module.exports = async (
             //fatal('Not found pull hl')
           }
 
-          pull_hl.secret = valid ? outcome : null
+          pull_hl.secret = outcome
           pull_hl.type = 'del'
           pull_hl.status = 'new'
-          await pull_hl.save()
+          all.push(pull_hl.save())
 
           uniqAdd(outward_hl.inward_pubkey)
         }
