@@ -411,12 +411,11 @@ Payments: ${await Payment.count()}\n
   }
 
   async syncdb() {
-    return q('syncdb', async () => {
+    await q('syncdb', async () => {
       var all = []
 
       // saving all deltas and corresponding payment objects to db
       // it only saves changed records, so call save() on everything
-      // todo ensure proper order of id
 
       for (var key in me.cached) {
         var ch = me.cached[key]
@@ -437,6 +436,10 @@ Payments: ${await Payment.count()}\n
       }
       return await Promise.all(all)
     })
+
+    l('All channels has been synced to db')
+
+    return true
   }
 
   // takes channels with supported hubs (verified and custom ones)
@@ -485,7 +488,7 @@ Payments: ${await Payment.count()}\n
 
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(2000 + Math.random() * 5000))
+      }, Math.round(1000 + Math.random() * 2000))
     } else if (counter < 40) {
       setTimeout(() => {
         me.payRando(counter + 1)

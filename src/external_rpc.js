@@ -2,7 +2,7 @@
 // Also implements validator and hub functionality
 
 module.exports = async (ws, input) => {
-  var msg = Buffer.from(input).slice(0)
+  var msg = input // Buffer.from(input).slice(0)
 
   // sanity checks 10mb
   if (msg.length > 10000000) {

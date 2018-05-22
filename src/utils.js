@@ -23,14 +23,15 @@ base58 = require('base-x')(
 
 nacl = require('../lib/nacl')
 
-/*
-ec = (a, b) => bin(nacl.sign.detached(a, b))
-ec.verify = nacl.sign.detached.verify
-*/
 encrypt_box = nacl.box
 open_box = nacl.box.open
+ec = (a, b) => bin(nacl.sign.detached(a, b))
+ec.verify = nacl.sign.detached.verify
+
+/*
 ec = (a, b) => concat(Buffer.alloc(32), sha3(a))
 ec.verify = (a, b, c) => ec(a).equals(b)
+*/
 
 // encoders
 BN = require('bn.js')
