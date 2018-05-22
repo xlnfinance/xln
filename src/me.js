@@ -310,7 +310,8 @@ class Me {
     // cache onchain data regularly to present in Explorers
     me.intervals.push(setInterval(cache, K.blocktime * 2000))
 
-    cache()
+    cache(true)
+
     if (K.total_blocks > 1) {
       snapshotHash()
       sync()
@@ -322,6 +323,7 @@ class Me {
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
 
+    /*
     me.intervals.push(
       setInterval(() => {
         // clean up old payments: all acked fails and settles
@@ -332,6 +334,7 @@ class Me {
         })
       }, 120000)
     )
+    */
 
     if (me.my_hub) {
       /*
@@ -412,9 +415,17 @@ Payments: ${await Payment.count()}\n
       // it only saves changed records, so call save() on everything
       // todo ensure proper order of id
 
-      for (var ch of Object.values(me.cached)) {
+      for (var key in me.cached) {
+        var ch = me.cached[key]
         all.push(ch.d.save())
         ch.payments.map((p) => all.push(p.save()))
+
+        ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
+
+        if (ch.last_used < ts() - 100) {
+          delete me.cached[key]
+          l('Evict from memory idle channel: ' + key)
+        }
 
         //await ch.d.save()
         //for (var t of ch.payments) {

@@ -197,13 +197,13 @@ module.exports = async (
         // go to next transition - we failed this hashlock already
       } else if (destination.equals(me.pubkey)) {
         unlocker = r(unlocker)
-        let unlocked = unlocker[0]
-        /*nacl.box.open(
+        let unlocked = open_box(
           unlocker[0],
           unlocker[1],
           unlocker[2],
           me.box.secretKey
-        )*/
+        )
+
         if (unlocked == null) {
           loff('Error: Bad unlocker')
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'

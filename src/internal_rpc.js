@@ -107,9 +107,7 @@ module.exports = async (ws, msg) => {
               outs.push([
                 amount,
                 userId,
-                to[1]
-                  ? Members.find((m) => m.hub && m.hub.handle == to[1]).id
-                  : 0,
+                to[1] ? parseInt(to[1]) : 0,
                 o.invoice ? Buffer.from(o.invoice, 'hex') : 0
               ])
             }

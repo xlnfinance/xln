@@ -115,6 +115,11 @@ module.exports = async (tx, meta) => {
           }
         })
 
+        if (!ins || amount > ins.insurance) {
+          l(`Invalid amount ${ins.insurance} vs ${amount}`)
+          continue
+        }
+
         var body = r([
           methodMap('withdrawFrom'),
           ins.leftId,
@@ -126,11 +131,6 @@ module.exports = async (tx, meta) => {
 
         if (!ec.verify(body, input[2], partner.pubkey)) {
           l('Invalid withdrawal sig by partner ', ins.nonce, input)
-          continue
-        }
-
-        if (!ins || amount > ins.insurance) {
-          l(`Invalid amount ${ins.insurance} vs ${amount}`)
           continue
         }
 
@@ -150,21 +150,19 @@ module.exports = async (tx, meta) => {
         await ins.save()
 
         // was this input related to us?
-        if (me.record) {
-          if (me.record.id == partner.id) {
-            var ch = await me.getChannel(signer.pubkey, asset)
-            // they planned to withdraw and they did. Nullify hold amount
-            ch.d.they_input_amount = 0
-            await ch.d.save()
-          }
+        if (me.record && [partner.id, signer.id].includes(me.record.id)) {
+          var ch = await me.getChannel(
+            me.record.id == partner.id ? signer.pubkey : partner.pubkey,
+            asset
+          )
+          // they planned to withdraw and they did. Nullify hold amount
+          ch.d.they_input_amount = 0
+          ch.d.input_amount = 0
+          ch.d.input_sig = null
 
-          if (me.record.id == signer.id) {
-            var ch = await me.getChannel(partner.pubkey, asset)
-            // we planned to withdraw and they did. Nullify hold amount
-            ch.d.input_amount = 0
-            ch.d.input_sig = null
-            await ch.d.save()
-          }
+          ch.ins = ins
+
+          if (argv.syncdb) ch.d.save()
         }
       }
     } else if (method == 'revealSecrets') {
@@ -436,6 +434,23 @@ module.exports = async (tx, meta) => {
           }
 
           await ins.save()
+
+          if (me.pubkey) {
+            if (
+              withPartner.pubkey.equals(me.pubkey) ||
+              giveTo.pubkey.equals(me.pubkey)
+            ) {
+              // hot reload
+              // todo ensure it's in memory yet
+              var ch = await me.getChannel(
+                withPartner.pubkey.equals(me.pubkey)
+                  ? giveTo.pubkey
+                  : withPartner.pubkey,
+                asset
+              )
+              ch.ins = ins
+            }
+          }
 
           // rebalance by hub for our account = reimburse hub fees
           /*

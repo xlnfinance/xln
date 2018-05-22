@@ -87,6 +87,12 @@ refresh = function(ch) {
     */
   }
 
+  if (ch.ins) {
+    ch.insurance = ch.ins.insurance
+    ch.ondelta = ch.ins.ondelta
+    ch.nonce = ch.ins.nonce
+  }
+
   Object.assign(
     ch,
     resolveChannel(ch.insurance, ch.ondelta + ch.d.offdelta, ch.left)

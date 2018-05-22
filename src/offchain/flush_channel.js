@@ -181,11 +181,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
       ch.d.ack_requested_at = new Date()
       //ch.d.pending = envelope
       ch.d.status = 'sent'
-      loff(
-        `=== End flush ${transitions.length} (${envelope.length}) to ${trim(
-          pubkey
-        )}`
-      )
+      //loff(`=== flush ${transitions.length} (${envelope.length}) ${trim(pubkey)}`)
     }
 
     if (argv.syncdb) {

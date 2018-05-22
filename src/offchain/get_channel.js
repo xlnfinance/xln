@@ -12,6 +12,8 @@ module.exports = async (pubkey, asset) => {
       ch = me.cached[key]
       //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
+      ch.last_used = ts()
+
       refresh(ch)
 
       return ch
@@ -43,6 +45,8 @@ module.exports = async (pubkey, asset) => {
       left: compared == -1,
 
       rollback: [0, 0], // used in merge situations
+
+      last_used: ts(), // for eviction from memory
 
       online:
         me.users[pubkey] &&
@@ -82,19 +86,22 @@ module.exports = async (pubkey, asset) => {
       loff(`Creating channel ${trim(pubkey)} - ${asset}: ${ch.d.id}`)
     }
 
-    //let user = await me.byKey(pubkey)
-    if (true) {
-      ch.partner = 1 //user.id
+    let user = await User.findOne({
+      attributes: ['id'],
+      where: {pubkey: pubkey}
+    })
+    if (user) {
+      ch.partner = user.id
       if (me.record) {
-        /*
-      ch.ins = await Insurance.find({
-        where: {
-          leftId: ch.left ? me.record.id : user.id,
-          rightId: ch.left ? user.id : me.record.id,
-          asset: asset
-        }
-      })
-      */
+        ch.ins = await Insurance.find({
+          where: {
+            leftId: ch.left ? me.record.id : user.id,
+            rightId: ch.left ? user.id : me.record.id,
+            asset: asset
+          }
+        })
+
+        /* convenient for tests to forget about insurance
         ch.ins = Insurance.build({
           leftId: ch.left ? me.record.id : ch.partner,
           rightId: ch.left ? ch.partner : me.record.id,
@@ -102,13 +109,8 @@ module.exports = async (pubkey, asset) => {
           insurance: 100000000000,
           ondelta: 50000000000
         })
+        */
       }
-    }
-
-    if (ch.ins) {
-      ch.insurance = ch.ins.insurance
-      ch.ondelta = ch.ins.ondelta
-      ch.nonce = ch.ins.nonce
     }
 
     ch.payments = await ch.d.getPayments({

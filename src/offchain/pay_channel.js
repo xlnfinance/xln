@@ -21,13 +21,13 @@ module.exports = async (opts) => {
     let ch = await me.getChannel(via, opts.asset)
 
     let unlocker_nonce = crypto.randomBytes(24)
-    let unlocker_box = r([amount, secret, invoice])
-    /*nacl.box(
+    let unlocker_box = encrypt_box(
       r([amount, secret, invoice]),
       unlocker_nonce,
       box_pubkey,
       me.box.secretKey
-    )*/
+    )
+
     let unlocker = r([bin(unlocker_box), unlocker_nonce, bin(me.box.publicKey)])
 
     if (amount > ch.payable) {
