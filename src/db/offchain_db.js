@@ -258,6 +258,10 @@ Delta.prototype.startDispute = async function(cheat = false) {
   await this.save()
 }
 
+Delta.prototype.getChannel = async function() {
+  return await me.getChannel(this.partnerId, this.asset, this)
+}
+
 // used primarily by validators and explorers to store historical blocks. Regular users don't have to store blocks ("pruning" mode)
 
 Block = privSequelize.define(

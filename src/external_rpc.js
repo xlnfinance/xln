@@ -2,7 +2,7 @@
 // Also implements validator and hub functionality
 
 module.exports = async (ws, input) => {
-  var msg = Buffer.from(input)
+  var msg = Buffer.from(input).slice(0)
 
   // sanity checks 10mb
   if (msg.length > 10000000) {
@@ -104,7 +104,7 @@ module.exports = async (ws, input) => {
 
     // no precommits means dry run
     if (!await me.processBlock([], header, ordered_tx_body)) {
-      l('Bad block proposed')
+      l('Bad block proposed ' + toHex(header))
       return false
     }
 
@@ -245,8 +245,8 @@ module.exports = async (ws, input) => {
     ch.d.they_soft_limit = readInt(limits[2])
     ch.d.they_hard_limit = readInt(limits[3])
 
-    await ch.d.save()
     l('Received updated limits')
+    if (argv.syncdb) ch.d.save()
   } else if (inputType == 'requestWithdrawFrom') {
     if (me.CHEAT_dontwithdraw) {
       // if we dont give withdrawal or are offline for too long, the partner starts dispute
@@ -283,7 +283,7 @@ module.exports = async (ws, input) => {
     ])
 
     ch.d.they_input_amount = amount
-    await ch.d.save()
+    if (argv.syncdb) ch.d.save()
     l('Gave withdrawal for ' + amount)
 
     me.send(
@@ -318,7 +318,8 @@ module.exports = async (ws, input) => {
     l('Got withdrawal for ' + amount)
     ch.d.input_amount = amount
     ch.d.input_sig = sig
-    await ch.d.save()
+
+    if (argv.syncdb) ch.d.save()
   } else if (inputType == 'update') {
     // New payment arrived
     let [pubkey, sig, body] = r(msg)

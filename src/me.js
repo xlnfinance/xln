@@ -260,13 +260,18 @@ class Me {
       me.member_server = cert
         ? require('https').createServer(cert, cb)
         : require('http').createServer(cb)
-      me.member_server.listen(parseInt(this.my_member.location.split(':')[2]))
+      var member_port = parseInt(this.my_member.location.split(':')[2])
+      me.member_server.listen(member_port)
 
       l(`Bootstrapping local server at: ${this.my_member.location}`)
 
       // lowtps/hightps
 
       me.external_wss = new (base_port == 84331 ? require('uws') : ws).Server({
+        //noServer: true,
+        //port: member_port,
+        clientTracking: false,
+        perMessageDeflate: false,
         server: me.member_server,
         maxPayload: 64 * 1024 * 1024
       })
@@ -337,11 +342,9 @@ class Me {
     */
 
     if (me.my_hub) {
-      /*
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 4000)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 5000)
       )
-      */
 
       // hubs have force react regularly
       me.intervals.push(

@@ -2,7 +2,7 @@
 // then derives a ton of info about current channel: (un)insured balances
 
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
-module.exports = async (pubkey, asset) => {
+module.exports = async (pubkey, asset, delta = false) => {
   // this critical section protects from simultaneous getChannel and doublesaved db records
   return await q(['get', pubkey, asset], async () => {
     let ch
@@ -58,32 +58,36 @@ module.exports = async (pubkey, asset) => {
     let my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
     ch.hub = my_hub(pubkey) || {handle: toHex(pubkey).substr(0, 10)}
 
-    // ch stands for Channel, d for Delta record, yes
-    let created = await Delta.findOrCreate({
-      where: {
-        myId: me.pubkey,
-        partnerId: pubkey,
-        asset: asset
-      },
-      defaults: {
-        nonce: 0,
-        status: 'master',
-        offdelta: 0,
+    if (delta) {
+      ch.d = delta
+    } else {
+      // ch stands for Channel, d for Delta record, yes
+      let created = await Delta.findOrCreate({
+        where: {
+          myId: me.pubkey,
+          partnerId: pubkey,
+          asset: asset
+        },
+        defaults: {
+          nonce: 0,
+          status: 'master',
+          offdelta: 0,
 
-        input_amount: 0,
-        they_input_amount: 0,
+          input_amount: 0,
+          they_input_amount: 0,
 
-        soft_limit: my_hub(pubkey) ? K.risk : 0,
-        hard_limit: my_hub(pubkey) ? K.hard_limit : 0,
+          soft_limit: my_hub(pubkey) ? K.risk : 0,
+          hard_limit: my_hub(pubkey) ? K.hard_limit : 0,
 
-        they_soft_limit: my_hub(me.pubkey) ? K.risk : 0,
-        they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0
+          they_soft_limit: my_hub(me.pubkey) ? K.risk : 0,
+          they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0
+        }
+      })
+
+      ch.d = created[0]
+      if (created[1]) {
+        loff(`Creating channel ${trim(pubkey)} - ${asset}: ${ch.d.id}`)
       }
-    })
-
-    ch.d = created[0]
-    if (created[1]) {
-      loff(`Creating channel ${trim(pubkey)} - ${asset}: ${ch.d.id}`)
     }
 
     let user = await User.findOne({

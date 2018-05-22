@@ -184,7 +184,9 @@ q = async function(key, job) {
           //l('Section took: ' + (performance.now() - started))
         } catch (e) {
           l(e)
-          fatal('Error in q')
+          setTimeout(() => {
+            fatal('Error in q')
+          }, 100)
         }
       }
       delete q.q[key]

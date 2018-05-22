@@ -51,7 +51,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     // in merge mode all you do is ack last (merged) state
     if (ch.d.status == 'master') {
       // hub waits a bit in case destination returns secret quickly
-      if (me.my_hub && !opportunistic) await sleep(50)
+      if (me.my_hub && !opportunistic) await sleep(150)
 
       for (var t of ch.payments) {
         if (t.status != 'new') continue
