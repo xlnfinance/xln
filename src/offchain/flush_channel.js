@@ -20,6 +20,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
+    ch.last_used = ts()
 
     let flushable = []
     let all = []

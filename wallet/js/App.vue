@@ -36,6 +36,9 @@ export default {
       assets: [],
       channels: [],
 
+      new_asset: {ticker: 'XYZ'},
+      new_hub: {},
+
       pubkey: false,
       K: false,
       my_member: false,

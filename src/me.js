@@ -261,7 +261,7 @@ class Me {
         ? require('https').createServer(cert, cb)
         : require('http').createServer(cb)
       var member_port = parseInt(this.my_member.location.split(':')[2])
-      //me.member_server.listen(member_port)
+      me.member_server.listen(member_port)
 
       l(`Bootstrapping local server at: ${this.my_member.location}`)
 
@@ -270,11 +270,11 @@ class Me {
 
       me.external_wss = new (base_port == 8433 ? require('uws') : ws).Server({
         //noServer: true,
-        port: member_port,
+        //port: member_port,
         clientTracking: false,
-        perMessageDeflate: false
-        //server: me.member_server,
-        //maxPayload: 64 * 1024 * 1024
+        perMessageDeflate: false,
+        server: me.member_server,
+        maxPayload: 64 * 1024 * 1024
       })
 
       me.external_wss.on('error', function(err) {
@@ -282,7 +282,7 @@ class Me {
       })
       me.external_wss.on('connection', function(ws) {
         ws.on('message', (msg) => {
-          RPC.external_rpc(ws, msg)
+          RPC.external_rpc(ws, bin(msg))
         })
       })
 
@@ -425,7 +425,7 @@ Payments: ${await Payment.count()}\n
 
         ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
-        if (ch.last_used < ts() - 100) {
+        if (ch.last_used < ts() - 60) {
           delete me.cached[key]
           l('Evict from memory idle channel: ' + key)
         }
@@ -438,7 +438,7 @@ Payments: ${await Payment.count()}\n
       return await Promise.all(all)
     })
 
-    l('All channels has been synced to db')
+    //l('All channels has been synced to db')
 
     return true
   }
@@ -543,7 +543,7 @@ Payments: ${await Payment.count()}\n
       me.users[m.pubkey] = new WebSocketClient()
 
       me.users[m.pubkey].onmessage = (msg) => {
-        RPC.external_rpc(me.users[m.pubkey], msg)
+        RPC.external_rpc(me.users[m.pubkey], bin(msg))
       }
 
       me.users[m.pubkey].onerror = function(e) {

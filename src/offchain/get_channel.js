@@ -12,8 +12,6 @@ module.exports = async (pubkey, asset, delta = false) => {
       ch = me.cached[key]
       //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
-      ch.last_used = ts()
-
       refresh(ch)
 
       return ch

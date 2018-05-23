@@ -6,7 +6,7 @@ module.exports = async (opts) => {
 
     let invoice = opts.invoice ? bin(opts.invoice) : crypto.randomBytes(32)
 
-    l('paying ', opts.destination.length, toHex(opts.destination))
+    //l('paying ', opts.destination.length, toHex(opts.destination))
 
     let [box_pubkey, pubkey] = r(base58.decode(opts.destination.toString()))
     let amount = parseInt(opts.amount)

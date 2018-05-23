@@ -1,14 +1,7 @@
 // External RPC processes requests to our node coming from outside world.
 // Also implements validator and hub functionality
 
-module.exports = async (ws, input) => {
-  if (input instanceof ArrayBuffer) {
-    var msg = new Buffer(input.byteLength)
-    Buffer.from(input).copy(msg)
-  } else {
-    var msg = input
-  }
-
+module.exports = async (ws, msg) => {
   // sanity checks 10mb
   if (msg.length > 10000000) {
     l(`too long input ${msg.length}`)
@@ -113,7 +106,7 @@ module.exports = async (ws, input) => {
       return false
     }
 
-    l('Got block ', toHex(header))
+    //l('Got block ', toHex(header))
 
     // consensus operations are in-memory for now
     //l("Saving proposed block")
@@ -161,7 +154,7 @@ module.exports = async (ws, input) => {
     }
     // testnet stuff
   } else if (inputType == 'testnet') {
-    l('Testnet trigger')
+    //l('Testnet trigger')
     if (msg[0] == 1) {
       await me.payChannel({
         destination: msg.slice(2),

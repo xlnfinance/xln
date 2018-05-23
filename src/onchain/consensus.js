@@ -109,7 +109,7 @@ module.exports = async () => {
         if (me.CHEAT_dontpropose) {
           l('CHEAT_dontpropose')
         } else {
-          l('Broadcast header ', toHex(header))
+          //l('Broadcast header ', toHex(header))
 
           setTimeout(() => {
             me.gossip('propose', propose)
