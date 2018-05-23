@@ -261,7 +261,7 @@ class Me {
         ? require('https').createServer(cert, cb)
         : require('http').createServer(cb)
       var member_port = parseInt(this.my_member.location.split(':')[2])
-      me.member_server.listen(member_port)
+      //me.member_server.listen(member_port)
 
       l(`Bootstrapping local server at: ${this.my_member.location}`)
 
@@ -270,18 +270,18 @@ class Me {
 
       me.external_wss = new (base_port == 8433 ? require('uws') : ws).Server({
         //noServer: true,
-        //port: member_port,
+        port: member_port,
         clientTracking: false,
-        //perMessageDeflate: false,
-        server: me.member_server,
-        maxPayload: 64 * 1024 * 1024
+        perMessageDeflate: false
+        //server: me.member_server,
+        //maxPayload: 64 * 1024 * 1024
       })
 
       me.external_wss.on('error', function(err) {
         fatal(err)
       })
       me.external_wss.on('connection', function(ws) {
-        ws.on('message', async (msg) => {
+        ws.on('message', (msg) => {
           RPC.external_rpc(ws, msg)
         })
       })
@@ -490,7 +490,7 @@ Payments: ${await Payment.count()}\n
       setTimeout(() => {
         me.payRando(counter + 1)
       }, Math.round(1000 + Math.random() * 2000))
-    } else if (counter < 40) {
+    } else if (counter < 20) {
       setTimeout(() => {
         me.payRando(counter + 1)
       }, Math.round(200))
@@ -518,7 +518,7 @@ Payments: ${await Payment.count()}\n
 
     // regular pubkey
     if (m instanceof Buffer) {
-      //if (method == 'update') l(`Sending to ${trim(m)} `, toHex(sha3(tx)))
+      if (method == 'update') l(`Sending to ${trim(m)} `, toHex(sha3(tx)))
 
       if (me.users[m]) {
         me.users[m].send(msg)
@@ -542,8 +542,8 @@ Payments: ${await Payment.count()}\n
     } else {
       me.users[m.pubkey] = new WebSocketClient()
 
-      me.users[m.pubkey].onmessage = async (msg) => {
-        RPC.external_rpc(me.users[m.pubkey], bin(msg))
+      me.users[m.pubkey].onmessage = (msg) => {
+        RPC.external_rpc(me.users[m.pubkey], msg)
       }
 
       me.users[m.pubkey].onerror = function(e) {
