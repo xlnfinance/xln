@@ -1,6 +1,8 @@
 {
   "private": true,
-  "workspaces": ["wallet"],
+  "workspaces": [
+    "wallet"
+  ],
   "ignore": [
     "wallet/"
   ],
@@ -25,6 +27,7 @@
     "sqlite3": "4.0.0",
     "tar": "4.4.2",
     "tweetnacl": "1.0.0",
+    "uws": "10.148.0",
     "ws": "5.1.1"
   },
   "devDependencies": {

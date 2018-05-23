@@ -320,8 +320,6 @@ initDashboard = async (a) => {
     await me.start()
   }
 
-  var url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
-  l(note(`Open ${link(url)} in your browser`))
   server.listen(base_port).once('error', function(err) {
     if (err.code === 'EADDRINUSE') {
       fatal(`Port ${highlight(base_port)} is currently in use, quitting`)
@@ -329,8 +327,7 @@ initDashboard = async (a) => {
   })
 
   // opn doesn't work in SSH console
-  if (base_port != 443 && !argv.silent) opn(url)
-
+  if (base_port != 443 && !argv.silent) openBrowser()
   internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
   internal_wss.on('error', function(err) {
@@ -452,6 +449,12 @@ if (argv.monkey) {
     .split('\n')
     .slice(3, parseInt(argv.monkey) - 8000)
   l('Loaded randos: ' + randos.length)
+}
+
+openBrowser = () => {
+  var url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
+  l(note(`Open ${link(url)} in your browser`))
+  opn(url)
 }
 
 let ooops = async (err) => {

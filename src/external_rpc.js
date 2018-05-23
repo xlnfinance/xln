@@ -156,6 +156,7 @@ module.exports = async (ws, input) => {
     }
     // testnet stuff
   } else if (inputType == 'testnet') {
+    l('Testnet trigger')
     if (msg[0] == 1) {
       await me.payChannel({
         destination: msg.slice(2),

@@ -266,12 +266,13 @@ class Me {
       l(`Bootstrapping local server at: ${this.my_member.location}`)
 
       // lowtps/hightps
+      //(base_port == 8433 ? require('uws') : ws)
 
-      me.external_wss = new (base_port == 84331 ? require('uws') : ws).Server({
+      me.external_wss = new (base_port == 8433 ? require('uws') : ws).Server({
         //noServer: true,
         //port: member_port,
         clientTracking: false,
-        perMessageDeflate: false,
+        //perMessageDeflate: false,
         server: me.member_server,
         maxPayload: 64 * 1024 * 1024
       })
