@@ -97,7 +97,7 @@ export default {
       order: {
         amount: '',
         rate: '',
-        buyAssetId: ''
+        buyAssetId: 2
       },
 
       hardfork: '',
@@ -418,7 +418,7 @@ export default {
           </li>
         </ul>
         <small v-if="pending_batch">Pending onchain batch</small> &nbsp;
-        <span @click="call('sync')" v-bind:class="[badge, K.ts > ts() - K.safe_sync_delay ? badge-light : badge-danger]">Last block: #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
+        <span @click="call('sync')" v-bind:class='["badge", K.ts > ts() - K.safe_sync_delay ? "badge-light" : "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6">
             <option disabled>Select current asset</option>
@@ -667,14 +667,16 @@ export default {
           <h3>Trustless Exchange</h3>
 
 
-          <p>Asset you are selling: {{to_ticker(asset)}}</p>
+          <p>Amount of {{to_ticker(asset)}} you want to sell:</p>
           <p><input style="width:300px" type="number" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell">
           </p>
           <p>Asset you are buying:</p>
-            <select v-model="order.buyAssetId" class="mt-3">
-              <option selected disabled>Select asset to buy</option>
+          <p>
+            <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
               <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
             </select>
+          </p>
+
           <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"></p>
 
           <p>

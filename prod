@@ -17,12 +17,12 @@ npm run build
 
 db=mysql:root:123123
 #db=postgres:postgres:123123
-maxport=8015
+maxport=8008
 
 #--node-args="--prof"
 
 node fs --genesis=test --db=$db
-pm2 start fs.js --no-autorestart  --name fs -- -p443 --silent --wallet-dist --db=$db
+pm2 start fs.js --no-autorestart --name fs -- -p443 --silent --wallet-dist --db=$db
 
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i

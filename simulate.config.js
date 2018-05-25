@@ -4,7 +4,7 @@ let db = 'mysql:root:123123'
 //let db = 'postgres:postgres:123123'
 
 let walletPort = '26678'
-let monkey = '8015'
+let monkey = '8012'
 
 let nodeFlags = ' '
 if (process.version.split('.')[0] === 'v10') {

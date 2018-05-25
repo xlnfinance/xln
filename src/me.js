@@ -334,8 +334,6 @@ class Me {
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
     me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
 
-    me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
-
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
 
@@ -356,12 +354,13 @@ class Me {
       me.intervals.push(
         setInterval(require('./offchain/rebalance'), K.blocktime * 5000)
       )
+      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
 
       // hubs have force react regularly
       me.intervals.push(
         setInterval(() => {
           react({})
-        }, 10000)
+        }, 15000)
       )
     }
 
@@ -519,7 +518,7 @@ Payments: ${await Payment.count()}\n
 
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(500 + Math.random() * 1000))
+      }, Math.round(500 + Math.random() * 3000))
     } else if (counter < 20) {
       setTimeout(() => {
         me.payRando(counter + 1)

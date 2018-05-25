@@ -363,12 +363,12 @@ derive = async (username, pw) => {
 
 sync = () => {
   if (K.prev_hash) {
-    if (K.ts < ts() - K.blocktime) {
-      me.send(
-        Members[Math.floor(Math.random() * Members.length)],
-        'sync',
-        r([fromHex(K.prev_hash)])
-      )
+    // if we're member then sync from anyone except us
+    var set = me.my_member ? Members.filter((m) => m != me.my_member) : Members
+    var chosen = set[Math.floor(Math.random() * set.length)]
+
+    if (K.ts < ts() - K.blocktime || me.my_member) {
+      me.send(chosen, 'sync', r([fromHex(K.prev_hash)]))
     } else {
       l('No need to sync, K.ts is recent')
     }
