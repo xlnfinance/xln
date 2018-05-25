@@ -4,6 +4,7 @@ let db = 'mysql:root:123123'
 //let db = 'postgres:postgres:123123'
 
 let walletPort = '26678'
+let monkey = '8015'
 
 let nodeFlags = ' '
 if (process.version.split('.')[0] === 'v10') {
@@ -32,7 +33,7 @@ module.exports = {
       args: [
         '-p8433',
         '--wallet-url=http://localhost:' + walletPort,
-        '--monkey=8008',
+        '--monkey=' + monkey,
         '--db=' + db,
         //'--silent',
         //'--CHEAT=dontprecommit',
@@ -53,7 +54,7 @@ module.exports = {
           '--wallet-url=http://localhost:' + walletPort,
           '--datadir=data' + id,
           '--db=' + db,
-          id < 8004 ? null : '--monkey=8008',
+          '--monkey=' + monkey,
           id < 8004 ? null : '--silent',
 
           '--color' // `--color` for chalk

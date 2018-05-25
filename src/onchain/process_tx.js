@@ -99,7 +99,7 @@ module.exports = async (tx, meta) => {
         var amount = readInt(input[0])
 
         var partner = await User.idOrKey(input[1])
-        if (!partner) {
+        if (!partner || !partner.id) {
           l('Cant withdraw from nonexistent partner')
           continue
         }
@@ -195,7 +195,7 @@ module.exports = async (tx, meta) => {
         var [id, sig, state] = dispute
 
         var partner = await User.idOrKey(id)
-        if (!partner.id) {
+        if (!partner || !partner.id) {
           l('Your partner is not registred')
           await partner.save()
         }
@@ -319,7 +319,7 @@ module.exports = async (tx, meta) => {
       var reimburse_tax = 1 + Math.floor(tax / t[1].length)
 
       for (var output of t[1]) {
-        amount = readInt(output[0])
+        var amount = readInt(output[0])
 
         if (amount > signer.asset(asset)) {
           l(`Trying to deposit ${amount} but has ${signer.asset(asset)}`)
@@ -330,9 +330,12 @@ module.exports = async (tx, meta) => {
         var withPartner =
           output[2].length == 0 ? false : await User.idOrKey(output[2])
 
+        // invoice is an arbitrary tag to identify the payer for merchant
+        var invoice = output[3] && output[3].length != 0 ? output[3] : false
+
         // here we ensure both parties are registred, and take needed fees
 
-        if (!giveTo.id) {
+        if (!giveTo || !giveTo.id) {
           // you must be registered first using asset 1
           if (asset != 1) {
             l('Not 1 asset')
@@ -365,6 +368,8 @@ module.exports = async (tx, meta) => {
         } else {
           if (withPartner) {
             if (!withPartner.id) {
+              // the partner is not registred yet
+
               var fee = K.standalone_balance + K.account_creation_fee
               if (amount < fee) continue
               if (asset != 1) {
@@ -395,7 +400,10 @@ module.exports = async (tx, meta) => {
               */
             }
           } else {
-            if (giveTo.id == signer.id) continue
+            if (giveTo.id == signer.id) {
+              l('Trying to deposit to your onchain balance is pointless')
+              continue
+            }
             giveTo.asset(asset, amount)
             signer.asset(asset, -amount)
             await giveTo.save()
@@ -466,10 +474,10 @@ module.exports = async (tx, meta) => {
         }
 
         // onchain payment for specific invoice (to us or one of our channels)
-        if (me.pubkey.equals(giveTo.pubkey) && output[3].length > 0) {
+        if (me.pubkey.equals(giveTo.pubkey) && invoice) {
           // TODO: hook into SDK
 
-          l('Invoice paid on chain ', output[3])
+          l('Invoice paid on chain ', invoice)
         }
 
         parsed_tx.events.push([
@@ -477,7 +485,7 @@ module.exports = async (tx, meta) => {
           amount,
           giveTo.id,
           withPartner ? withPartner.id : false,
-          output[3].length > 0 ? toHex(output[3]) : false
+          invoice ? toHex(invoice) : false
         ])
 
         meta.outputs_volume += amount
@@ -488,7 +496,11 @@ module.exports = async (tx, meta) => {
 
       let sellerOwns = signer.asset(asset)
 
-      var order = await Order.create({})
+      var order = await Order.create({
+        amount: amount,
+        rate: rate,
+        userId: signer.id
+      })
     } else if (method == 'createAsset') {
     } else if (method == 'createHub') {
     } else if (method == 'propose') {

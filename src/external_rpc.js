@@ -1,19 +1,9 @@
 // External RPC processes requests to our node coming from outside world.
 // Also implements validator and hub functionality
 
-module.exports = async (ws, msg) => {
-  // sanity checks 10mb
-  if (msg.length > 10000000) {
-    l(`too long input ${msg.length}`)
-    return false
-  }
-
-  var inputType = methodMap(msg[0])
-
+var async_fn = async (ws, inputType, args) => {
   // how many blocks to share at once
   var sync_limit = 100
-
-  msg = msg.slice(1)
 
   // ignore some too frequest RPC commands
   /*if (
@@ -25,7 +15,7 @@ module.exports = async (ws, msg) => {
   //l('External RPC: ' + inputType)
 
   if (inputType == 'auth') {
-    var [pubkey, sig, body] = r(msg)
+    var [pubkey, sig, body] = args
 
     if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
       //if (pubkey.equals(me.pubkey)) return false
@@ -61,7 +51,7 @@ module.exports = async (ws, msg) => {
     if (!me.my_member) return false
 
     //if (me.my_member == me.next_member(1)) {
-    r(msg).map((tx) => {
+    args.map((tx) => {
       me.mempool.push(tx)
     })
     //} else {
@@ -70,7 +60,7 @@ module.exports = async (ws, msg) => {
 
     // another member wants a sig
   } else if (inputType == 'propose') {
-    var [pubkey, sig, header, ordered_tx_body] = r(msg)
+    var [pubkey, sig, header, ordered_tx_body] = args
 
     var m = Members.find((f) => f.block_pubkey.equals(pubkey))
 
@@ -118,7 +108,7 @@ module.exports = async (ws, msg) => {
       ordered_tx_body: ordered_tx_body
     }
   } else if (inputType == 'prevote' || inputType == 'precommit') {
-    var [pubkey, sig, body] = r(msg)
+    var [pubkey, sig, body] = args
     var [method, header] = r(body)
 
     var m = Members.find((f) => f.block_pubkey.equals(pubkey))
@@ -155,22 +145,24 @@ module.exports = async (ws, msg) => {
     // testnet stuff
   } else if (inputType == 'testnet') {
     //l('Testnet trigger')
-    if (msg[0] == 1) {
-      await me.payChannel({
-        destination: msg.slice(2),
-        amount: 10000000,
+    var action = readInt(args[0])
+
+    if (action == 1) {
+      var asset = readInt(args[1])
+      var amount = readInt(args[2])
+      me.payChannel({
+        destination: args[3],
+        amount: amount,
         invoice: Buffer.alloc(1),
-        asset: msg[1]
+        asset: asset
       })
     }
 
     // sync requests latest blocks, chain returns chain
   } else if (inputType == 'chain') {
-    await q('onchain', async () => {
-      var chain = r(msg)
-
+    q('onchain', async () => {
       var started = K.total_blocks
-      for (var block of chain) {
+      for (var block of args) {
         if (!await me.processBlock(block[0], block[1], block[2])) {
           l('Bad chain?')
           break
@@ -178,7 +170,7 @@ module.exports = async (ws, msg) => {
       }
 
       // dirty hack to not backup k.json until all blocks are synced
-      if (chain.length == sync_limit) {
+      if (args.length == sync_limit) {
         sync()
       } else {
         fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
@@ -204,7 +196,7 @@ module.exports = async (ws, msg) => {
     var last = await Block.findOne({
       attributes: ['id'],
       where: {
-        prev_hash: msg
+        prev_hash: args[0]
       }
     })
 
@@ -227,7 +219,7 @@ module.exports = async (ws, msg) => {
 
     // Other party defines credit limit to us
   } else if (inputType == 'setLimits') {
-    var [pubkey, sig, body] = r(msg)
+    var [pubkey, sig, body] = args
 
     var limits = r(body)
 
@@ -253,7 +245,7 @@ module.exports = async (ws, msg) => {
     }
 
     // partner asked us for instant (mutual) withdrawal
-    var [pubkey, sig, body] = r(msg)
+    var [pubkey, sig, body] = args
     if (!ec.verify(body, sig, pubkey)) return false
 
     var [amount, asset] = r(body)
@@ -294,7 +286,7 @@ module.exports = async (ws, msg) => {
     // other party gives withdrawal onchain
     //todo: ensure no conflicts happen if two parties withdraw from each other at the same time
   } else if (inputType == 'withdrawFrom') {
-    var [pubkey, sig, body] = r(msg)
+    var [pubkey, sig, body] = args
 
     var [amount, asset] = r(body).map(readInt)
 
@@ -321,7 +313,7 @@ module.exports = async (ws, msg) => {
     if (argv.syncdb) ch.d.save()
   } else if (inputType == 'update') {
     // New payment arrived
-    let [pubkey, sig, body] = r(msg)
+    let [pubkey, sig, body] = args
 
     if (!ec.verify(body, sig, pubkey)) {
       return l('Wrong input')
@@ -380,4 +372,18 @@ module.exports = async (ws, msg) => {
 
     return //
   }
+}
+
+module.exports = (ws, msg) => {
+  msg = bin(msg) // uws gives ArrayBuffer, we create a view
+
+  // sanity checks 10mb
+  if (msg.length > 10000000) {
+    l(`too long input ${msg.length}`)
+    return false
+  }
+
+  var args = r(msg.slice(1))
+
+  async_fn(ws, methodMap(msg[0]), args)
 }

@@ -92,17 +92,17 @@ ascii_state = (state) => {
 
   let locks = (hl) => {
     return hl
-      .map((h) => h[0] + '/' + (h[1] ? toHex(h[1]) : 'N/A') + '/' + h[2])
+      .map((h) => h[0] + '/' + (h[1] ? trim(h[1]) : 'N/A') + '/' + h[2])
       .join(', ')
   }
 
-  return `Hash ${trim(hash)} | ${trim(state[1][0])} | ${trim(state[1][1])} | #${
+  return `Hash ${trim(hash)} | ${trim(state[1][0])}-${trim(state[1][1])} | #${
     state[1][2]
-  } | ${state[1][3]} | ${state[1][4]}
-------
-| ${locks(state[2])} 
-------
-| ${locks(state[3])} 
+  } | ${state[1][3]} | \$${state[1][4]}
+-----
+${locks(state[2])} 
+-----
+${locks(state[3])} 
 `
 }
 
@@ -199,13 +199,9 @@ q.q = {}
 current_db_hash = () => {
   return Buffer.alloc(1)
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
-  .from(
-    child_process
-      .execSync('shasum -a 256 datadir+/onchain/db.sqlite')
-      .toString()
-      .split(' ')[0],
-    'hex'
-  )*/
+  fromHex()
+    child_process.execSync('shasum -a 256 datadir+/onchain/db.sqlite').toString().split(' ')[0]
+   */
 }
 
 localhost = '127.0.0.1'

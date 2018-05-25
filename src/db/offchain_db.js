@@ -162,6 +162,7 @@ Delta = privSequelize.define(
 Payment = privSequelize.define(
   'payment',
   {
+    //todo: move to single field addnew, addsent ...
     type: Sequelize.ENUM('add', 'del', 'addrisk', 'delrisk'),
     status: Sequelize.ENUM('new', 'sent', 'ack', 'processed'),
     is_inward: Sequelize.BOOLEAN,

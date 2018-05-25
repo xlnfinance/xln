@@ -20,6 +20,27 @@ resolveChannel = (insurance, delta, is_left = true) => {
     uninsured: delta > insurance ? delta - insurance : 0
   }
 
+  var total =
+    parts.they_uninsured + parts.uninsured + parts.they_insured + parts.insured
+
+  if (total < 100) total = 100
+
+  var bar = (amount, symbol) => {
+    if (amount == 0) return ''
+    return Array(1 + Math.ceil(amount * 100 / total)).join(symbol)
+  }
+
+  if (delta < 0) {
+    parts.ascii_channel =
+      '|' + bar(parts.they_uninsured, '-') + bar(parts.they_insured, '=')
+  } else if (delta < insurance) {
+    parts.ascii_channel =
+      bar(parts.insured, '=') + '|' + bar(parts.they_insured, '=')
+  } else {
+    parts.ascii_channel =
+      bar(parts.insured, '=') + bar(parts.uninsured, '-') + '|'
+  }
+
   // default view is left. if current user is right, simply reverse
   if (!is_left) {
     ;[
@@ -339,6 +360,10 @@ initDashboard = async (a) => {
     })
   })
 
+  // start syncing as soon as the node is started
+  sync()
+  cache(true)
+
   l(`\n${note('Welcome to FS REPL!')}`)
   repl = require('repl').start(note(''))
   repl.context.me = me
@@ -378,11 +403,17 @@ derive = async (username, pw) => {
 
 sync = () => {
   if (K.prev_hash) {
-    me.send(
-      Members[Math.floor(Math.random() * Members.length)],
-      'sync',
-      Buffer.from(K.prev_hash, 'hex')
-    )
+    if (K.ts < ts() - K.blocktime) {
+      me.send(
+        Members[Math.floor(Math.random() * Members.length)],
+        'sync',
+        r([fromHex(K.prev_hash)])
+      )
+    } else {
+      l('No need to sync, K.ts is recent')
+    }
+  } else {
+    l('No K.prev_hash to sync from')
   }
 }
 

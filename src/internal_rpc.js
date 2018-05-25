@@ -69,6 +69,8 @@ module.exports = async (ws, msg) => {
         var outs = []
         var asset = parseInt(p.asset)
 
+        p.order.amount = parseInt(p.order.amount)
+
         for (o of p.outs) {
           // split by @
           if (o.to.length > 0) {
@@ -147,11 +149,7 @@ module.exports = async (ws, msg) => {
           me.batch.push(['withdrawFrom', asset, ins])
           me.batch.push(['depositTo', asset, outs])
           react({confirm: 'Rebalanced'})
-        } else {
-          react({alert: 'No action specified'})
         }
-
-        p.order.amount = parseInt(p.order.amount)
 
         if (p.order.amount > 0) {
           if (p.order.amount > me.record.asset(asset) + p.request_amount) {
@@ -168,6 +166,10 @@ module.exports = async (ws, msg) => {
               ]
             ])
           }
+        }
+
+        if (me.batch.length == 0) {
+          react({alert: 'Nothing to send onchain'})
         }
 
         return false
@@ -208,7 +210,7 @@ module.exports = async (ws, msg) => {
         } else if (p.action == 6) {
           me.CHEAT_dontwithdraw = 1
         } else {
-          me.getCoins(p.asset)
+          me.getCoins(p.asset, parseInt(p.faucet_amount))
           /*
           me.send(
             Members.find((m) => m.id == p.partner),

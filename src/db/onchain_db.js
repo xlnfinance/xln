@@ -102,12 +102,22 @@ Order = sequelize.define('order', {
 // Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
 // Primarily used in atomic swaps and mediated transfers. Based on Sprites concept
 // They are are stored for a few days and unlock a specific action
-Hashlock = sequelize.define('hashlock', {
-  alg: Sequelize.INTEGER, // sha256, sha3?
-  hash: Sequelize.TEXT,
-  revealed_at: Sequelize.INTEGER,
-  delete_at: Sequelize.INTEGER
-})
+Hashlock = sequelize.define(
+  'hashlock',
+  {
+    alg: Sequelize.INTEGER, // sha256, sha3?
+    hash: Sequelize.BLOB,
+    revealed_at: Sequelize.INTEGER,
+    delete_at: Sequelize.INTEGER
+  },
+  {
+    indexes: [
+      {
+        fields: [{attribute: 'hash', length: 32}]
+      }
+    ]
+  }
+)
 
 // Assets represent all numerical balances: currencies, tokens, shares, stocks.
 // Anyone can create and issue their own asset (like ERC20, but not programmable)
@@ -136,7 +146,7 @@ Proposal.belongsTo(User)
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
 // >>> Model methods
-
+// some buffers are full pubkeys, some can be short id to save bytes
 User.idOrKey = async function(id) {
   if (id.length == 32) {
     return (await User.findOrBuild({

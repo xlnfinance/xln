@@ -83,7 +83,10 @@ react = async (result = {}, force = true) => {
   }
   me.last_react = new Date()
 
-  await me.syncdb()
+  if (!me.my_hub) {
+    await me.syncdb()
+  }
+
   if (me.headless()) return
 
   //await cache()
@@ -100,11 +103,11 @@ react = async (result = {}, force = true) => {
 
       if (
         cached_result.history[0] &&
-        cached_result.history[0].delta != they_uninsured
+        cached_result.history[0].they_uninsured != they_uninsured
       ) {
         cached_result.history.unshift({
           date: new Date(),
-          delta: they_uninsured
+          they_uninsured: they_uninsured
         })
       }
       */

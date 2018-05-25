@@ -346,7 +346,6 @@ module.exports = async (
         //react({confirm: 'Payment completed'})
       }
 
-      /*
       if (me.CHEAT_dontack) {
         l('CHEAT: not acking the secret, but pulling from inward')
         ch.d.status = 'CHEAT_dontack'
@@ -354,7 +353,6 @@ module.exports = async (
         react({}, false) // lazy react
         return
       }
-      */
     }
   }
 

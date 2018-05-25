@@ -227,6 +227,16 @@ class Me {
     if (this.record) {
       this.my_member = Members.find((m) => m.id == this.record.id)
       this.my_hub = K.hubs.find((m) => m.id == this.record.id)
+
+      if (this.record.id == 2) {
+        me.CHEAT_dontack = true
+        me.CHEAT_dontwithdraw = true
+        me.payChannel({
+          amount: 20000,
+          destination: randos[7],
+          asset: 1
+        })
+      }
     }
 
     /*
@@ -282,7 +292,7 @@ class Me {
       })
       me.external_wss.on('connection', function(ws) {
         ws.on('message', (msg) => {
-          RPC.external_rpc(ws, bin(msg))
+          RPC.external_rpc(ws, msg)
         })
       })
 
@@ -316,15 +326,12 @@ class Me {
     // cache onchain data regularly to present in Explorers
     me.intervals.push(setInterval(cache, K.blocktime * 2000))
 
-    cache(true)
-
     if (K.total_blocks > 1) {
       snapshotHash()
-      sync()
     }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    //me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
+    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -358,6 +365,11 @@ class Me {
     if (argv.monkey) {
       // if we are hub: plan a test check, otherwise start paying randomly.
       if (me.my_hub) {
+        for (var dest of randos) {
+          let [box_pubkey, pubkey] = r(base58.decode(dest))
+          me.batch.push(['depositTo', 1, [[1000000, pubkey, 0]]])
+        }
+
         setTimeout(async () => {
           // making sure in 30 sec that all test payments were successful by looking at the metrics
 
@@ -380,11 +392,11 @@ Payments: ${await Payment.count()}\n
             `osascript -e 'display notification "${alert}" with title "Test result"'`
           )
         }, 60000)
-      } else {
+      } else if (parseInt(base_port) > 8003) {
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
         setTimeout(() => {
-          me.getCoins(1)
+          me.getCoins(1, 10000000)
         }, 6000)
 
         setTimeout(() => {
@@ -402,12 +414,12 @@ Payments: ${await Payment.count()}\n
     }
   }
 
-  getCoins(asset = 1) {
+  getCoins(asset = 1, amount = 1000) {
     l('Using faucet')
     me.send(
       fromHex(K.hubs[0].pubkey),
       'testnet',
-      concat(bin([1, asset]), bin(me.address)) //action 1 asset 1
+      r([1, asset, amount, bin(me.address)])
     )
   }
 
@@ -421,9 +433,12 @@ Payments: ${await Payment.count()}\n
       for (var key in me.cached) {
         var ch = me.cached[key]
         all.push(ch.d.save())
-        ch.payments.map((p) => all.push(p.save()))
 
-        ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
+        ch.payments = ch.payments.filter((t) => {
+          all.push(t.save())
+
+          return t.type + t.status != 'delack'
+        })
 
         if (ch.last_used < ts() - 60) {
           delete me.cached[key]
@@ -474,11 +489,23 @@ Payments: ${await Payment.count()}\n
   }
 
   async payRando(counter = 1) {
+    var dest = randos[Math.floor(Math.random() * randos.length)]
+    // offchain payment
     await me.payChannel({
-      destination: randos[Math.floor(Math.random() * randos.length)],
+      destination: dest,
       amount: 100 + Math.round(Math.random() * 100),
       asset: 1
     })
+
+    let [box_pubkey, pubkey] = r(base58.decode(dest))
+
+    // onchain payment (batched, not sent to validator yet)
+    me.batch.push([
+      'depositTo',
+      1,
+      [[Math.round(Math.random() * 1000), pubkey, 0]]
+    ])
+
     // run on server infinitely and with longer delays
     // but for local tests limit requests and run faster
     if (on_server) {
@@ -543,7 +570,7 @@ Payments: ${await Payment.count()}\n
       me.users[m.pubkey] = new WebSocketClient()
 
       me.users[m.pubkey].onmessage = (msg) => {
-        RPC.external_rpc(me.users[m.pubkey], bin(msg))
+        RPC.external_rpc(me.users[m.pubkey], msg)
       }
 
       me.users[m.pubkey].onerror = function(e) {
