@@ -87,6 +87,7 @@ class Me {
 
   // adds tx to batch, signs and broadcasts
   async broadcast() {
+    // we select our record again to get our current nonce
     me.record = await me.byKey()
     if (!me.record) {
       //l("You can't broadcast if you are not registred")
@@ -103,7 +104,7 @@ class Me {
 
     var per_asset = {}
     // rare requests that we don't see need to merge & optimize
-    let not_mergeable = ['propose', 'vote', 'sellFor', 'cancelOrder']
+    let not_mergeable = ['propose', 'vote', 'createOrder', 'cancelOrder']
     // put into one of first arrays or add to the end
     me.batch.map((kv) => {
       //if (!kv) return
@@ -228,7 +229,7 @@ class Me {
       this.my_member = Members.find((m) => m.id == this.record.id)
       this.my_hub = K.hubs.find((m) => m.id == this.record.id)
 
-      if (this.record.id == 2) {
+      if (argv.monkey && this.record.id == 2) {
         me.CHEAT_dontack = true
         me.CHEAT_dontwithdraw = true
         me.payChannel({
@@ -332,6 +333,8 @@ class Me {
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
     me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
+
+    me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -440,7 +443,7 @@ Payments: ${await Payment.count()}\n
           return t.type + t.status != 'delack'
         })
 
-        if (ch.last_used < ts() - 60) {
+        if (ch.last_used < ts() - K.cache_timeout) {
           delete me.cached[key]
           l('Evict from memory idle channel: ' + key)
         }
@@ -516,7 +519,7 @@ Payments: ${await Payment.count()}\n
 
       setTimeout(() => {
         me.payRando(counter + 1)
-      }, Math.round(1000 + Math.random() * 2000))
+      }, Math.round(500 + Math.random() * 1000))
     } else if (counter < 20) {
       setTimeout(() => {
         me.payRando(counter + 1)
@@ -545,7 +548,7 @@ Payments: ${await Payment.count()}\n
 
     // regular pubkey
     if (m instanceof Buffer) {
-      if (method == 'update') l(`Sending to ${trim(m)} `, toHex(sha3(tx)))
+      //if (method == 'update') l(`Sending to ${trim(m)} `, toHex(sha3(tx)))
 
       if (me.users[m]) {
         me.users[m].send(msg)

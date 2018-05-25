@@ -51,7 +51,7 @@ module.exports = async (ws, msg) => {
 
       case 'dispute':
         var ch = await me.getChannel(
-          Members.find((m) => m.id == p.partner).pubkey,
+          K.hubs.find((m) => m.id == p.partner).pubkey,
           p.asset
         )
         await ch.d.startDispute(p.profitable)
@@ -117,7 +117,7 @@ module.exports = async (ws, msg) => {
         }
 
         if (p.request_amount > 0) {
-          var partner = Members.find((m) => m.id == p.partner)
+          var partner = K.hubs.find((m) => m.id == p.partner)
           var ch = await me.getChannel(partner.pubkey, asset)
           if (p.request_amount > ch.insured) {
             react({alert: 'More than you can withdraw from insured'})
@@ -148,7 +148,6 @@ module.exports = async (ws, msg) => {
         } else if (outs.length > 0) {
           me.batch.push(['withdrawFrom', asset, ins])
           me.batch.push(['depositTo', asset, outs])
-          react({confirm: 'Rebalanced'})
         }
 
         if (p.order.amount > 0) {
@@ -157,11 +156,11 @@ module.exports = async (ws, msg) => {
             react({alert: 'Not enough funds to trade this amount'})
           } else {
             me.batch.push([
-              'sellFor',
+              'createOrder',
               [
                 asset,
                 p.order.amount,
-                parseInt(p.order.asset_to_buy),
+                parseInt(p.order.buyAssetId),
                 parseInt(p.order.rate)
               ]
             ])
@@ -170,6 +169,8 @@ module.exports = async (ws, msg) => {
 
         if (me.batch.length == 0) {
           react({alert: 'Nothing to send onchain'})
+        } else {
+          react({confirm: 'Wait for tx to be added to blockchain'})
         }
 
         return false
@@ -230,7 +231,7 @@ module.exports = async (ws, msg) => {
         break
 
       case 'setLimits':
-        var m = Members.find((m) => m.id == p.partner)
+        var m = K.hubs.find((m) => m.id == p.partner)
 
         var ch = await me.getChannel(m.pubkey, p.asset)
 

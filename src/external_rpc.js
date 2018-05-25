@@ -177,6 +177,7 @@ var async_fn = async (ws, inputType, args) => {
         if (K.total_blocks - started > 0) {
           // something new happened - cache
           cache()
+          react({}, false)
 
           // Ensure our last broadcasted batch was added
           if (PK.pending_batch) {
@@ -255,12 +256,12 @@ var async_fn = async (ws, inputType, args) => {
     var ch = await me.getChannel(pubkey, asset)
 
     if (ch.d.they_input_amount > 0) {
-      l('Peer already has withdrawal from us')
+      l('Partner already has withdrawal from us')
       return false
     }
 
     if (amount == 0 || amount > ch.they_insured) {
-      l(`Peer asks for ${amount} but owns ${ch.they_insured}`)
+      l(`Partner asks for ${amount} but owns ${ch.they_insured}`)
       return false
     }
 

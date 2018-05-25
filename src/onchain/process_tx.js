@@ -490,17 +490,21 @@ module.exports = async (tx, meta) => {
 
         meta.outputs_volume += amount
       }
-    } else if (method == 'sellFor') {
+    } else if (method == 'createOrder') {
       // onchain exchange to sell an asset for another one.
-      var [sellAsset, amount, buyAsset, rate] = t[1].map(readInt)
+      var [assetId, amount, buyAssetId, rate] = t[1].map(readInt)
 
       let sellerOwns = signer.asset(asset)
 
       var order = await Order.create({
         amount: amount,
         rate: rate,
-        userId: signer.id
+        userId: signer.id,
+        assetId: assetId,
+        buyAssetId: buyAssetId
       })
+
+      await order.match()
     } else if (method == 'createAsset') {
     } else if (method == 'createHub') {
     } else if (method == 'propose') {

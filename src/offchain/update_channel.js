@@ -43,6 +43,7 @@ module.exports = async (
         //ch.payments.splice(ind, 1)
       }
     })
+    ch.d.ack_requested_at = null
 
     //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
@@ -62,8 +63,8 @@ module.exports = async (
       )
     }
 
-    ch.d.ack_requested_at = null
-    //loff('Update all sent transitions as ack')
+    if (trace)
+      l('Received ack on current state, all sent transitions are now ack')
   } else {
     if (ch.d.status == 'merge') {
       // we are in merge and yet we just received ackSig that doesnt ack latest state
@@ -91,7 +92,7 @@ module.exports = async (
     */
 
     if (ch.d.signed_state && ch.d.saveState(oldState, ackSig)) {
-      //loff(`Start merge ${trim(pubkey)}`)
+      if (trace) l(`Start merge with ${trim(pubkey)}`)
 
       ch.rollback = [
         ch.d.nonce - oldState[1][2], // nonce diff
@@ -218,6 +219,9 @@ module.exports = async (
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
 
+          if (trace)
+            l(`Received and unlocked a payment, changing addack->delnew`)
+
           // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our del on time and the hashlock expires making us lose the money.
           // SECURITY: if after timeout the del is not ack, go to blockchain ASAP to reveal the preimage!
         }
@@ -247,6 +251,9 @@ module.exports = async (
             inward_pubkey: bin(pubkey)
           })
           dest_ch.payments.push(outward_hl)
+
+          if (trace)
+            l(`Mediating ${outward_amount} payment to ${trim(destination)}`)
 
           if (argv.syncdb) all.push(outward_hl.save())
 
@@ -305,7 +312,6 @@ module.exports = async (
       if (argv.syncdb) all.push(outward_hl.save())
 
       if (outward_hl.inward_pubkey) {
-        //loff(`Found inward ${trim(inward.deltum.partnerId)}`)
         var inward = await me.getChannel(outward_hl.inward_pubkey, ch.d.asset)
 
         if (inward.d.status == 'disputed' && valid) {
@@ -332,6 +338,7 @@ module.exports = async (
               inward.rollback,
               ascii_state(inward.state)
             )
+            continue
             //fatal('Not found pull hl')
           }
 
@@ -340,6 +347,12 @@ module.exports = async (
           pull_hl.status = 'new'
           if (argv.syncdb) all.push(pull_hl.save())
 
+          if (trace)
+            l(
+              `Received a secret from ${trim(
+                pubkey
+              )}, acking and pulling inward payment`
+            )
           uniqAdd(outward_hl.inward_pubkey)
         }
       } else {
@@ -373,7 +386,7 @@ module.exports = async (
     // leaving rollback mode: our sents will auto appear in state
     ch.rollback = [0, 0]
 
-    //l('After rollback ', ascii_state(refresh(ch)))
+    if (trace) l(`After merge our state is \n${ascii_state(refresh(ch))}`)
 
     ch.d.status = 'merge'
   } else {

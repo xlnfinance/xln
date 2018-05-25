@@ -100,9 +100,9 @@ ascii_state = (state) => {
     state[1][2]
   } | ${state[1][3]} | \$${state[1][4]}
 -----
-${locks(state[2])} 
++${locks(state[2])} 
 -----
-${locks(state[3])} 
+-${locks(state[3])} 
 `
 }
 
@@ -321,8 +321,11 @@ methodMap = (i) => {
     'disputeWith', // defines signed state (balance proof). Used only as last resort!
     'withdrawFrom', // mutual *instant* withdrawal proof. Used during normal cooperation.
     'depositTo', // send money to some channel or user
-    'sellFor',
+
+    // onchain exchange
+    'createOrder',
     'cancelOrder',
+
     'createAsset',
     'createHub',
 
@@ -346,7 +349,7 @@ methodMap = (i) => {
     'failNoCapacity',
 
     // offchain inputs
-    'auth', // any kind of offchain auth signatures between peers
+    'auth', // any kind of offchain auth signatures between partners
     'tx', // propose array of tx to add to block
     'sync', // i want to sync since this prev_hash
     'chain', // return X blocks since given prev_hash

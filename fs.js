@@ -66,46 +66,19 @@ refresh = function(ch) {
 
   let hashlock_hold = [0, 0]
 
-  /*
-  ch.payments = ch.payments.filter(
-    (t) => !(t.status == 'ack' && t.type == 'settle')
-  )*/
-  let filtered_settled = []
-
-  var startedl = ch.payments.length
-
   for (let i = 0; i < ch.payments.length; i++) {
     let t = ch.payments[i]
 
     var typestatus = t.type + t.status
 
-    var mask = ['addack', 'delnew'].concat(
-      ch.rollback[0] > 0 ? 'delsent' : 'addsent'
-    )
-
-    if (mask.includes(typestatus)) {
-      ch[t.is_inward ? 'inwards' : 'outwards'].push(t)
-      hashlock_hold[t.is_inward ? 0 : 1] += t.amount
-
-      //l('In state ', t.id)
-    }
-
-    if (typestatus == 'delack') {
-      //delete(ch.payments[i])
-      filtered_settled.push(t)
-      //l('Delete ', i)
-    }
-
-    /*
-
     if (
-      ['addack', 'delnew', 'delsent'].includes(
+      ['addack', 'delnew', ch.rollback[0] > 0 ? 'delsent' : 'addsent'].includes(
         typestatus
       )
     ) {
-      ch[t.is_inward ? 'old_inwards' : 'old_outwards'].push(t)
+      ch[t.is_inward ? 'inwards' : 'outwards'].push(t)
+      hashlock_hold[t.is_inward ? 0 : 1] += t.amount
     }
-    */
   }
 
   if (ch.ins) {
@@ -163,26 +136,13 @@ refresh = function(ch) {
     }
   }
 
-  //ch.payments = filtered_settled
-  if (ch.payments.length != startedl) {
-    l(startedl, ch.payments.length, filtered_settled.length)
-  }
-
-  //l('checkup \n', ch.ascii_states)
-
   return ch.state
 }
-
-/*
-
-remove = (locks, hash) => {
-  let index = locks.findIndex((hl) => hl.hash.equals(hash))
-  return index == -1 ? false : locks.splice(index, 1)[0]
-}*/
 
 on_server = fs.existsSync(
   '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
 )
+
 initDashboard = async (a) => {
   // auto reloader for debugging
   /*
@@ -423,6 +383,7 @@ argv = require('minimist')(process.argv.slice(2), {
 
 datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8000
+trace = !!argv.trace
 
 process.title = 'Failsafe ' + base_port
 

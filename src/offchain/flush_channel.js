@@ -17,7 +17,7 @@ Always flush opportunistically, unless you are acking your direct partner who se
 
 module.exports = async (pubkey, asset, opportunistic) => {
   return q([pubkey, asset], async () => {
-    //loff(`--- Flush ${trim(pubkey)} ${opportunistic}`)
+    if (trace) l(`--- Started Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
     ch.last_used = ts()
@@ -26,7 +26,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     let all = []
 
     if (ch.d.status == 'sent') {
-      //loff(`=== End flush ${trim(pubkey)} CANT`)
+      if (trace) l(`=== End flush ${trim(pubkey)}, in sent`)
 
       if (ch.d.ack_requested_at < new Date() - 4000) {
         //me.send(ch.d.partnerId, 'update', ch.d.pending)
@@ -156,16 +156,24 @@ module.exports = async (pubkey, asset, opportunistic) => {
           args,
           ec(r(refresh(ch)), me.id.secretKey)
         ])
+
+        if (trace)
+          l(
+            `Adding a new ${t.type}, resulting state: \n${ascii_state(
+              ch.state
+            )}`
+          )
       }
 
       if (opportunistic && transitions.length == 0) {
-        //loff(`=== End flush ${trim(pubkey)}: Nothing to flush`)
+        if (trace) l(`=== End flush ${trim(pubkey)}: Nothing to flush`)
         return
       }
     } else if (ch.d.status == 'merge') {
-      //loff('In merge, no tr')
       // important trick: only merge flush once to avoid bombing with equal acks
       if (opportunistic) return
+
+      if (trace) l('In merge, no transactions can be added')
     }
 
     // transitions: method, args, sig, new state
@@ -182,7 +190,12 @@ module.exports = async (pubkey, asset, opportunistic) => {
       ch.d.ack_requested_at = new Date()
       //ch.d.pending = envelope
       ch.d.status = 'sent'
-      //loff(`=== flush ${transitions.length} (${envelope.length}) ${trim(pubkey)}`)
+      if (trace)
+        l(
+          `=== flushing ${transitions.length} (${envelope.length}b) to ${trim(
+            pubkey
+          )}`
+        )
     }
 
     if (argv.syncdb) {

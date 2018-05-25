@@ -137,9 +137,9 @@ User.hasMany(Debt)
 User.hasMany(Order)
 Order.belongsTo(User)
 
-Asset.hasMany(Order, {as: 'sellOrders'})
-Asset.hasMany(Order, {as: 'buyOrders'})
-Order.belongsTo(Asset, {as: 'sellAsset'})
+Asset.hasMany(Order)
+Asset.hasMany(Order, {as: 'buyAsset', foreign_key: 'buyAsset'})
+Order.belongsTo(Asset)
 Order.belongsTo(Asset, {as: 'buyAsset'})
 
 Proposal.belongsTo(User)

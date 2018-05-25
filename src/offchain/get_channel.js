@@ -7,6 +7,8 @@ module.exports = async (pubkey, asset, delta = false) => {
   return await q(['get', pubkey, asset], async () => {
     let ch
 
+    if (typeof pubkey == 'string') pubkey = fromHex(pubkey)
+
     var key = stringify([pubkey, asset])
     if (me.cached[key]) {
       ch = me.cached[key]

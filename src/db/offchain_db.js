@@ -219,6 +219,9 @@ Delta.prototype.saveState = function(state, ackSig) {
   if (ec.verify(canonical, ackSig, this.partnerId)) {
     //this.nonce = state[1][2]
     //this.offdelta = state[1][3]
+    if (trace)
+      l(`Successfully verified sig against state\n${ascii_state(state)}`)
+
     this.sig = ackSig
     this.signed_state = canonical
     return true
