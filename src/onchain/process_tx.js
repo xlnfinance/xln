@@ -18,6 +18,10 @@ module.exports = async (tx, meta) => {
   nonce = readInt(nonce)
   var asset = 1 // default asset id, can be changed many times with setAsset directive
 
+  var is_me = (p) => {
+    return me.pubkey && me.pubkey.equals(p)
+  }
+
   if (methodMap(readInt(methodId)) != 'batch') {
     return {error: 'Only batched tx are supported'}
   }
@@ -55,7 +59,7 @@ module.exports = async (tx, meta) => {
     }
   }
 
-  if (me.pubkey.equals(signer.pubkey)) {
+  if (is_me(signer.pubkey)) {
     if (PK.pending_batch == toHex(tx)) {
       //l('Added to chain')
       react({confirm: 'Your onchain transaction has been added!'}, false)
@@ -295,7 +299,7 @@ module.exports = async (tx, meta) => {
 
           await ins.save()
 
-          if (me.pubkey.equals(partner.pubkey)) {
+          if (is_me(partner.pubkey)) {
             l('Channel with us is disputed')
             // now our job is to ensure our inward hashlocks are unlocked and that we get most profitable outcome
             var ch = await me.getChannel(signer.pubkey, asset)
@@ -385,7 +389,7 @@ module.exports = async (tx, meta) => {
 
               /*
 
-              if (me.pubkey.equals(withPartner.pubkey)) {
+              if (is_me(withPartner.pubkey)) {
                 await me.addHistory(
                   giveTo.pubkey,
                   -K.account_creation_fee,
@@ -443,26 +447,19 @@ module.exports = async (tx, meta) => {
 
           await ins.save()
 
-          if (me.pubkey) {
-            if (
-              withPartner.pubkey.equals(me.pubkey) ||
-              giveTo.pubkey.equals(me.pubkey)
-            ) {
-              // hot reload
-              // todo ensure it's in memory yet
-              var ch = await me.getChannel(
-                withPartner.pubkey.equals(me.pubkey)
-                  ? giveTo.pubkey
-                  : withPartner.pubkey,
-                asset
-              )
-              ch.ins = ins
-            }
+          if (is_me(withPartner.pubkey) || is_me(giveTo.pubkey)) {
+            // hot reload
+            // todo ensure it's in memory yet
+            var ch = await me.getChannel(
+              is_me(withPartner.pubkey) ? giveTo.pubkey : withPartner.pubkey,
+              asset
+            )
+            ch.ins = ins
           }
 
           // rebalance by hub for our account = reimburse hub fees
           /*
-          if (my_hub && me.pubkey.equals(withPartner.pubkey)) {
+          if (my_hub && is_me(withPartner.pubkey)) {
             await me.addHistory(
               giveTo.pubkey,
               -reimburse_tax,
@@ -474,7 +471,7 @@ module.exports = async (tx, meta) => {
         }
 
         // onchain payment for specific invoice (to us or one of our channels)
-        if (me.pubkey.equals(giveTo.pubkey) && invoice) {
+        if (is_me(giveTo.pubkey) && invoice) {
           // TODO: hook into SDK
 
           l('Invoice paid on chain ', invoice)

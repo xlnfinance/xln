@@ -195,6 +195,19 @@ export default {
       })
       // }
     },
+    estimate: (f) => {
+      if (f) {
+        app.order.rate = (app.asset > app.order.buyAssetId
+          ? app.order.buyAmount / app.order.amount
+          : app.order.amount / app.order.buyAmount
+        ).toFixed(6)
+      } else {
+        app.order.buyAmount = (app.asset > app.order.buyAssetId
+          ? app.order.amount * app.order.rate
+          : app.order.amount / app.order.rate
+        ).toFixed(6)
+      }
+    },
     derive: (f) => {
       var data = {
         username: inputUsername.value,
@@ -215,28 +228,21 @@ export default {
 
       return asset ? asset.ticker : 'N/A'
     },
-    getAsset: (asset) => {
-      if (asset == 1) {
-        return app.commy(app.record.balance)
-      } else {
-        // todo make ".00" optional for assets
-        if (app.record.balances) {
-          var bal = JSON.parse(app.record.balances)[asset]
-          return app.commy(bal ? bal : 0)
-        } else {
-          return app.commy(0)
-        }
-      }
-    },
 
-    getBalance: (user, assetId) => {
+    getAsset: (asset, user) => {
+      if (!user) user = app.record
       if (!user) return 0
 
-      if (assetId == 1) return user.balance
-
-      var bals = JSON.parse(user.balances)
-
-      return bals[assetId] ? bals[assetId] : 0
+      if (asset == 1) {
+        return user.balance
+      } else {
+        if (user.balances) {
+          var bal = JSON.parse(user.balances)[asset]
+          return bal ? bal : 0
+        } else {
+          return 0
+        }
+      }
     },
 
     parse_balances: (balances) => {
@@ -699,7 +705,7 @@ export default {
             <p v-if="ch.d.status == 'disputed'">
               Please wait for dispute resolution. <span v-if="ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span>
             </p>
-            <p v-else-if="record && record.balance >= K.standalone_balance">
+            <p v-else-if="getAsset(1) >= K.standalone_balance">
               <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
             </p>
             <p v-else>To start onchain dispute you must be registred onchain and have on your onchain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your onchain balance.</p>
@@ -741,10 +747,10 @@ export default {
         <p>The offchain exchange is completely instant, scalable and has tiny fees, but on another hand sometimes increases your uninsured balance. Still, it's a lot more secure than centralized exchanges but with same speed and cost. Will be available later this year.</p>
 
 
-        <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getBalance(record, asset))}}):</p>
-        <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" id="orderform">
+        <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
         </p>
-        <p>Asset you are buying (you have {{commy(getBalance(record, order.buyAssetId))}}):</p>
+        <p>Asset you are buying (you have {{commy(getAsset(order.buyAssetId))}}):</p>
         <p>
           <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
             <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
@@ -752,7 +758,10 @@ export default {
         </p>
 
         <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
-        <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"></p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"  @input="estimate(false)"></p>
+
+        <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)"></p>
 
         <p>
           <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>

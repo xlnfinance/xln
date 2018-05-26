@@ -318,7 +318,7 @@ module.exports = async (
           loff(
             'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
           )
-          me.batch.push('revealSecrets', [outcome])
+          me.batch.push(['revealSecrets', [outcome]])
         } else {
           /*
           // how much fee we just made by mediating the transfer?
