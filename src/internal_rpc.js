@@ -150,6 +150,27 @@ module.exports = async (ws, msg) => {
           me.batch.push(['depositTo', asset, outs])
         }
 
+        if (me.batch.length == 0) {
+          react({alert: 'Nothing to send onchain'})
+        } else {
+          react({confirm: 'Wait for tx to be added to blockchain'})
+        }
+
+        return false
+
+        break
+
+      case 'createAsset':
+        me.batch.push(['createAsset', [p.ticker, parseInt(p.amount)]])
+        react({confirm: 'Added to batch'})
+
+        break
+      case 'createHub':
+        react({confirm: 'Added to batch'})
+        break
+
+      case 'createOrder':
+        var asset = parseInt(p.asset)
         if (p.order.amount > 0) {
           if (p.order.amount > me.record.asset(asset) + p.request_amount) {
             // more than you can theoretically have even after withdrawal
@@ -158,22 +179,20 @@ module.exports = async (ws, msg) => {
             me.batch.push([
               'createOrder',
               [
-                parseInt(parseFloat(asset) * 100),
-                p.order.amount,
+                asset,
+                parseInt(parseFloat(p.order.amount) * 100),
                 parseInt(p.order.buyAssetId),
                 parseInt(parseFloat(p.order.rate) * 1000000)
               ]
             ])
           }
         }
+        react({confirm: 'Added to batch'})
 
-        if (me.batch.length == 0) {
-          react({alert: 'Nothing to send onchain'})
-        } else {
-          react({confirm: 'Wait for tx to be added to blockchain'})
-        }
-
-        return false
+        break
+      case 'cancelOrder':
+        me.batch.push(['cancelOrder', [p.id]])
+        react({confirm: 'Added to batch'})
 
         break
       case 'getinfo':

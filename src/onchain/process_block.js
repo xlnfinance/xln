@@ -71,17 +71,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   // >>> Given block is considered valid and final after this point <<<
 
-  // In case we are member && locked on this prev_hash, unlock to ensure liveness
-  // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
-  if (me.proposed_block.locked) {
-    var locked_prev_hash = r(me.proposed_block.header)[2]
-
-    if (prev_hash == toHex(locked_prev_hash)) {
-      //l('Just unlocked from previous proposed block')
-      me.proposed_block = {}
-    }
-  }
-
   let ordered_tx = r(ordered_tx_body)
 
   // Processing transactions one by one
@@ -238,6 +227,17 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           ? JSON.stringify(meta)
           : null
     })
+  }
+
+  // In case we are member && locked on this prev_hash, unlock to ensure liveness
+  // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
+  if (me.proposed_block.locked) {
+    var locked_prev_hash = r(me.proposed_block.header)[2]
+
+    if (prev_hash == toHex(locked_prev_hash)) {
+      //l('Just unlocked from previous proposed block')
+      me.proposed_block = {}
+    }
   }
 
   if (me.request_reload) {

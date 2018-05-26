@@ -34,10 +34,15 @@ export default {
       asset: 1,
       partner: 1,
       assets: [],
+      orders: [],
       channels: [],
       faucet_amount: '',
 
-      new_asset: {ticker: 'XYZ'},
+      new_asset: {
+        ticker: 'XYZ',
+        amount: 100000000,
+        desc: 'An asset represents X and backed by Y, can be used for Z.'
+      },
       new_hub: {},
 
       pubkey: false,
@@ -186,8 +191,7 @@ export default {
         partner: app.ch.partner,
         request_amount: app.uncommy(app.request_amount),
         outs: app.outs,
-        asset: app.asset,
-        order: app.order
+        asset: app.asset
       })
       // }
     },
@@ -201,13 +205,13 @@ export default {
       return false
     },
 
-    to_pair: (assetId, buyAssetId) => {
-      return assetId > buyAssetId
-        ? app.to_ticker(assetId) + '/' + app.to_ticker(buyAssetId)
-        : app.to_ticker(buyAssetId) + '/' + app.to_ticker(assetId)
+    buyAmount: (d) => {
+      return (
+        (d.assetId > d.buyAssetId ? d.amount * d.rate : d.amount / d.rate) / 100
+      )
     },
     to_ticker: (assetId) => {
-      let asset = app.assets.find((a) => a.id == assetId)
+      let asset = app.assets ? app.assets.find((a) => a.id == assetId) : null
 
       return asset ? asset.ticker : 'N/A'
     },
@@ -224,6 +228,17 @@ export default {
         }
       }
     },
+
+    getBalance: (user, assetId) => {
+      if (!user) return 0
+
+      if (assetId == 1) return user.balance
+
+      var bals = JSON.parse(user.balances)
+
+      return bals[assetId] ? bals[assetId] : 0
+    },
+
     parse_balances: (balances) => {
       if (balances) {
         return Object.entries(JSON.parse(balances))
@@ -423,7 +438,7 @@ export default {
             </ul>
           </li>
         </ul>
-        <small v-if="pending_batch">Pending onchain batch</small> &nbsp;
+        <span class="badge badge-danger" v-if="pending_batch">Pending tx</span> &nbsp;
         <span @click="call('sync')" v-bind:class='["badge", K.ts > ts() - K.safe_sync_delay ? "badge-light" : "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
@@ -434,7 +449,7 @@ export default {
           <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
           </button>
           &nbsp;
-          <span @click="dev_mode=!dev_mode" v-html="icon(pubkey,32)"></span>
+          <span @click="dev_mode=!dev_mode" v-bind:title="record && record.id" v-html="icon(pubkey,32)"></span>
         </div>
       </div>
     </nav>
@@ -514,9 +529,6 @@ export default {
       </div>
       <div v-else-if="tab=='wallet'">
         <template v-if="pubkey">
-          <h2 class="alert alert-danger" v-if="pending_batch">Please wait until your onchain transaction is added to the blockchain.</h2>
-
-
           <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
           <div v-if="record">
@@ -675,22 +687,6 @@ export default {
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">Add Deposit</button>
           </p>
 
-          <h3>Trustless Exchange</h3>
-
-
-          <p>Amount of {{to_ticker(asset)}} you want to sell:</p>
-          <p><input style="width:300px" type="number" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell">
-          </p>
-          <p>Asset you are buying:</p>
-          <p>
-            <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
-              <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
-            </select>
-          </p>
-
-          <p>Rate {{to_pair(asset, order.buyAssetId)}}:</p>
-          <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"></p>
-
           <p>
             <button type="button" class="btn btn-warning" @click="onchain()">Execute Onchain</button>
           </p>
@@ -745,6 +741,24 @@ export default {
         <p>The offchain exchange is completely instant, scalable and has tiny fees, but on another hand sometimes increases your uninsured balance. Still, it's a lot more secure than centralized exchanges but with same speed and cost. Will be available later this year.</p>
 
 
+        <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getBalance(record, asset))}}):</p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" id="orderform">
+        </p>
+        <p>Asset you are buying (you have {{commy(getBalance(record, order.buyAssetId))}}):</p>
+        <p>
+          <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
+            <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
+          </select>
+        </p>
+
+        <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"></p>
+
+        <p>
+          <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
+        </p>
+
+
         <table v-if="orders.length>0" class="table">
           <thead class="thead-dark">
             <tr>
@@ -754,6 +768,7 @@ export default {
               <th scope="col">Buy Asset</th>
               <th scope="col">Amount</th>
               <th scope="col">Rate</th>
+              <th scope="col">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -765,6 +780,8 @@ export default {
                 <td>{{to_ticker(b.buyAssetId)}}</td>
                 <td>{{commy(b.amount)}}</td>
                 <td>{{b.rate}}</td>
+                <td v-if="record && record.id == b.userId"><button  @click="call('cancelOrder', {id: b.id})" class="btn btn-success">Cancel</button></td>
+                <td v-else><button class="btn btn-success"  @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; ">Fulfil</td>
               </tr>
             </template>
           </tbody>
@@ -873,6 +890,9 @@ export default {
                     <span v-else-if="d[0]=='depositTo'" class="badge badge-success" >{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': d[2])+'@'+d[3]) : d[2]}}{{d[4] ? ' for '+d[4] : ''}}</span>
 
                     <span v-else-if="d[0]=='createOrder'" class="badge badge-dark">Created order {{commy(d[2])}} {{to_ticker(d[1])}} for {{to_ticker(d[3])}}</span>
+
+                    <span v-else-if="d[0]=='cancelOrder'" class="badge badge-dark">Cancelled order {{d[1]}}</span>
+                    <span v-else-if="d[0]=='createAsset'" class="badge badge-dark">Created {{commy(d[2])}} of asset {{d[1]}}</span>
 
                   </template>
                 </td>
@@ -1003,8 +1023,17 @@ export default {
         <template v-if="record">
 
           <div class="form-group">
-            <label for="comment">Ticker:</label>
-            <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input>
+            <p><label for="comment">Ticker:</label>
+            <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input></p>
+            
+            <p><label for="comment">Amount:</label>
+            <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input></p>
+
+            <p><label for="comment">Description:</label>
+            <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input></p>
+
+            <p><button class="btn btn-success" @click="call('createAsset', new_asset)">Create Asset</button></p>
+            
           </div>
           
         </template>

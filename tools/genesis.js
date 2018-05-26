@@ -79,7 +79,7 @@ module.exports = async () => {
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)
     max_hashlocks: 5000, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
-    dispute_if_no_ack: 60000 // ms, how long we wait for ack before going to blockchain
+    dispute_if_no_ack: 40000 // ms, how long we wait for ack before going to blockchain
   }
 
   // Defines global Byzantine tolerance parameter

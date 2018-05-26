@@ -103,8 +103,7 @@ class Me {
     var merged = [[methodMap('revealSecrets'), []]]
 
     var per_asset = {}
-    // rare requests that we don't see need to merge & optimize
-    let not_mergeable = ['propose', 'vote', 'createOrder', 'cancelOrder']
+    let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
     // put into one of first arrays or add to the end
     me.batch.map((kv) => {
       //if (!kv) return
@@ -112,20 +111,17 @@ class Me {
       if (kv[0] == 'revealSecrets') {
         // revealed secrets are not per-assets
         merged[0][1] = merged[0][1].concat(kv[1])
-      } else if (not_mergeable.indexOf(kv[0]) != -1) {
-        // these methods are not batchable and must go separately
-        merged.push([methodMap(kv[0]), kv[1]])
-      } else {
+      } else if (mergeable.includes(kv[0])) {
         // asset specific actions
 
         if (!per_asset[kv[1]]) {
           per_asset[kv[1]] = [[], [], []]
         }
-        let ind = ['disputeWith', 'withdrawFrom', 'depositTo'].indexOf(kv[0])
-        if (ind == -1) {
-          fatal('Unknown method')
-        }
+        let ind = mergeable.indexOf(kv[0])
         per_asset[kv[1]][ind] = per_asset[kv[1]][ind].concat(kv[2])
+      } else {
+        // these methods are not batchable and must go separately
+        merged.push([methodMap(kv[0]), kv[1]])
       }
     })
     me.batch = []
@@ -230,6 +226,7 @@ class Me {
       this.my_hub = K.hubs.find((m) => m.id == this.record.id)
 
       if (argv.monkey && this.record.id == 2) {
+        // trigger the dispute from hub
         me.CHEAT_dontack = true
         me.CHEAT_dontwithdraw = true
         me.payChannel({
@@ -237,6 +234,9 @@ class Me {
           destination: randos[0],
           asset: 1
         })
+
+        // create an asset
+        me.batch.push(['createAsset', ['TEST', 13371337]])
       }
     }
 
@@ -332,7 +332,7 @@ class Me {
     }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
+    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -367,10 +367,14 @@ class Me {
     if (argv.monkey) {
       // if we are hub: plan a test check, otherwise start paying randomly.
       if (me.my_hub) {
+        // adding onchain balances to randos
         for (var dest of randos) {
           let [box_pubkey, pubkey] = r(base58.decode(dest))
           me.batch.push(['depositTo', 1, [[1000000, pubkey, 0]]])
         }
+
+        // creating an initial bond sell for FRD
+        me.batch.push(['createOrder', [2, 10000000, 1, 0.001 * 1000000]])
 
         setTimeout(async () => {
           // making sure in 30 sec that all test payments were successful by looking at the metrics

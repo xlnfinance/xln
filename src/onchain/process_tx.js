@@ -490,19 +490,48 @@ module.exports = async (tx, meta) => {
 
         meta.outputs_volume += amount
       }
+    } else if (method == 'createAsset') {
+      var [ticker, amount] = t[1]
+      amount = readInt(amount)
+      ticker = ticker.toString().replace(/[^a-zA-Z0-9]/g, '') // from buffer to unicode, sanitize
+
+      var exists = await Asset.findOne({where: {ticker: ticker}})
+      if (exists) {
+        if (exists.issuerId == signer.id) {
+          //minting new tokens to issuer's onchain balance
+          exists.total_supply += amount
+          signer.asset(exists.id, amount)
+
+          parsed_tx.events.push(method, [ticker, amount])
+        } else {
+          l('Invalid issuer tries to mint')
+        }
+      } else {
+        var new_asset = await Asset.create({
+          issuerId: signer.id,
+          ticker: ticker,
+          total_supply: amount
+        })
+
+        signer.asset(new_asset.id, amount)
+        parsed_tx.events.push(method, [ticker, amount])
+      }
+    } else if (method == 'createHub') {
     } else if (method == 'createOrder') {
       // onchain exchange to sell an asset for another one.
       var [assetId, amount, buyAssetId, rate] = t[1].map(readInt)
       rate = rate / 1000000
 
-      let sellerOwns = signer.asset(asset)
+      var direct_order = assetId > buyAssetId
+
+      let sellerOwns = signer.asset(assetId)
 
       if (sellerOwns < amount) {
         l('Trying to sell more then signer has')
         continue
       }
 
-      signer.asset(asset, -amount)
+      signer.asset(assetId, -amount)
 
       var order = Order.build({
         amount: amount,
@@ -512,7 +541,6 @@ module.exports = async (tx, meta) => {
         buyAssetId: buyAssetId
       })
 
-      l(order)
       // now let's try orders with same rate or better
 
       var orders = await Order.findAll({
@@ -520,19 +548,26 @@ module.exports = async (tx, meta) => {
           assetId: buyAssetId,
           buyAssetId: assetId,
           rate: {
-            [Op.lte]: rate
+            [direct_order ? Op.gte : Op.lte]: rate
           }
         },
         limit: 200,
-        order: [['rate', 'asc']]
+        order: [['rate', direct_order ? 'desc' : 'asc']]
       })
 
       for (var their of orders) {
-        var they_buy = their.amount * their.rate
-        var we_buy = order.amount * their.rate
+        if (direct_order) {
+          var they_buy = their.amount / their.rate
+          var we_buy = order.amount * their.rate
+        } else {
+          var they_buy = their.amount * their.rate
+          var we_buy = order.amount / their.rate
+        }
+
+        l('Suitable order', we_buy, they_buy, their)
 
         var seller = await User.findById(their.userId)
-        if (order.amount > they_buy) {
+        if (we_buy > their.amount) {
           // close their order. give seller what they wanted
           seller.asset(their.buyAssetId, they_buy)
           signer.asset(order.buyAssetId, their.amount)
@@ -551,25 +586,32 @@ module.exports = async (tx, meta) => {
         if (their.amount == 0) {
           // did our order fullfil them entirely?
           await their.destroy()
+        } else {
+          await their.save()
         }
+        await seller.save()
       }
 
       if (order.amount > 0) {
         // is new order still not fullfilled? keep in orderbook
         await order.save()
+      } else {
+        // doesn't even exist yet
       }
 
-      parsed_tx.events.push([method, assetId, amount, buyAssetId])
+      l(order)
+
+      parsed_tx.events.push([method, assetId, amount, buyAssetId, rate])
     } else if (method == 'cancelOrder') {
-      var order = signer.getOrders({where: {id: readInt[1][0]}})
+      var id = readInt(t[1][0])
+      var order = await Order.findOne({where: {id: id, userId: signer.id}})
       if (!order) {
         l('No such order for signer')
         continue
       }
+      // credit the order amount back to the creator
       signer.asset(order.assetId, order.amount)
       await order.destroy()
-    } else if (method == 'createAsset') {
-    } else if (method == 'createHub') {
     } else if (method == 'propose') {
       // temporary protection
       //if (signer.id != 1)
