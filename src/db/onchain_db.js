@@ -96,7 +96,7 @@ Debt = sequelize.define('debt', {
 
 Order = sequelize.define('order', {
   amount: Sequelize.INTEGER,
-  rate: Sequelize.INTEGER
+  rate: Sequelize.FLOAT
 })
 
 // Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
@@ -292,7 +292,7 @@ Insurance.prototype.resolve = async function() {
   await right.save()
 
   this.insurance = 0
-  this.ondelta = 0
+  this.ondelta = -this.dispute_offdelta
 
   this.dispute_delayed = null
   this.dispute_hashlocks = null
@@ -326,4 +326,10 @@ Insurance.prototype.resolve = async function() {
   return resolved
 }
 
-Order.prototype.match = async function() {}
+Order.prototype.buyAmount = async function() {
+  if (this.assetId > this.buyAssetId) {
+    return this.amount * this.rate
+  } else {
+    return this.amount / this.rate
+  }
+}

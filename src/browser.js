@@ -35,6 +35,9 @@ cache = async (force = false) => {
           cached_result.assets = await Asset.findAll()
         },
         async () => {
+          cached_result.orders = await Order.findAll()
+        },
+        async () => {
           cached_result.blocks = (await Block.findAll({
             limit: 100,
             order: [['id', 'desc']],

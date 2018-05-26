@@ -158,10 +158,10 @@ module.exports = async (ws, msg) => {
             me.batch.push([
               'createOrder',
               [
-                asset,
+                parseInt(parseFloat(asset) * 100),
                 p.order.amount,
                 parseInt(p.order.buyAssetId),
-                parseInt(p.order.rate)
+                parseInt(parseFloat(p.order.rate) * 1000000)
               ]
             ])
           }

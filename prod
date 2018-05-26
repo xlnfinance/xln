@@ -22,13 +22,13 @@ maxport=8008
 #--node-args="--prof"
 
 node fs --genesis=test --db=$db
-pm2 start fs.js --no-autorestart --name fs -- -p443 --silent --wallet-dist --db=$db
+pm2 start fs.js --no-autorestart --name fs -- -p443 --silent --wallet-dist --db=$db --monkey=$maxport
 
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i
   cmd="pm2 start fs.js --no-autorestart --name fs$i -- -p$i --username=$i --pw=password --silent --datadir=data$i --wallet-dist --db=$db"
   if (( i < 8004 )); then
-    ${cmd}
+    ${cmd} --monkey=$maxport
   else
     ${cmd} --monkey=$maxport
   fi

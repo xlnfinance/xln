@@ -181,6 +181,7 @@ export default {
       )
 
       //if(confirm("Total outputs:$"+app.commy(total)+". Do you want to broadcast your transaction?")){
+
       app.call('rebalance', {
         partner: app.ch.partner,
         request_amount: app.uncommy(app.request_amount),
@@ -200,6 +201,11 @@ export default {
       return false
     },
 
+    to_pair: (assetId, buyAssetId) => {
+      return assetId > buyAssetId
+        ? app.to_ticker(assetId) + '/' + app.to_ticker(buyAssetId)
+        : app.to_ticker(buyAssetId) + '/' + app.to_ticker(assetId)
+    },
     to_ticker: (assetId) => {
       let asset = app.assets.find((a) => a.id == assetId)
 
@@ -282,9 +288,9 @@ export default {
       return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     },
     uncommy: (str) => {
-      if (str.indexOf('.') == -1) str += '.00'
+      //if (str.indexOf('.') == -1) str += '.00'
 
-      return parseInt(str.replace(/[^0-9]/g, ''))
+      return Math.round(parseFloat(str) * 100) //parseInt(str.replace(/[^0-9]/g, ''))
     },
 
     timeAgo: (time) => {
@@ -420,7 +426,7 @@ export default {
         <small v-if="pending_batch">Pending onchain batch</small> &nbsp;
         <span @click="call('sync')" v-bind:class='["badge", K.ts > ts() - K.safe_sync_delay ? "badge-light" : "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
         <div v-if="pubkey">
-          <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6">
+          <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
             <option disabled>Select current asset</option>
             <option v-for="(a,index) in assets" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
           </select></span>
@@ -646,12 +652,17 @@ export default {
           <h1>Onchain Operations</h1>
           <p>Onchain {{to_ticker(asset)}} balance: {{getAsset(asset)}}</p>
           
-          <template v-if="ch && ch.insured>0">
+          <template>
             <h3>Withdraw from hub</h3>
-            <small>Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance to your onchain balance.</small>
-            <p>
-              <input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to withdraw">
-            </p>
+            <template v-if="ch && ch.insured>0">
+              
+              <small>Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance
+              .</small>
+              <p>
+                <input style="width:300px" type="text" class="form-control small-input" v-model="request_amount" placeholder="Amount to withdraw">
+              </p>
+            </template>
+            <p v-else>You do not have <b>insured</b> balances to withdraw from.</p>
           </template>
 
           <h3>Deposits to other users or channels</h3>
@@ -677,6 +688,7 @@ export default {
             </select>
           </p>
 
+          <p>Rate {{to_pair(asset, order.buyAssetId)}}:</p>
           <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"></p>
 
           <p>
@@ -731,10 +743,33 @@ export default {
         <p>Fairlayer comes pre-equipped with two kinds of trustless exchanges built into the protocol: onchain and offchain exchanges.</p>
         <p>Onchain one is completely zero-trust and is great for large atomic swaps between two assets, but always incurs an expensive onchain fee because blocks can only fit a few transactions. This exchange is available today. </p>
         <p>The offchain exchange is completely instant, scalable and has tiny fees, but on another hand sometimes increases your uninsured balance. Still, it's a lot more secure than centralized exchanges but with same speed and cost. Will be available later this year.</p>
-        Asset you want to sell. Asset you want to buy.
 
 
-        You want to sell {{to_ticker(asset)}}
+        <table v-if="orders.length>0" class="table">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Seller ID</th>
+              <th scope="col">Sell Asset </th>
+              <th scope="col">Buy Asset</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="b in orders">
+              <tr>
+                <td>{{b.id}}</td>
+                <td>{{b.userId}}</td>
+                <td>{{to_ticker(b.assetId)}}</td>
+                <td>{{to_ticker(b.buyAssetId)}}</td>
+                <td>{{commy(b.amount)}}</td>
+                <td>{{b.rate}}</td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
@@ -836,6 +871,9 @@ export default {
                     <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{d[2]}}</span>
 
                     <span v-else-if="d[0]=='depositTo'" class="badge badge-success" >{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': d[2])+'@'+d[3]) : d[2]}}{{d[4] ? ' for '+d[4] : ''}}</span>
+
+                    <span v-else-if="d[0]=='createOrder'" class="badge badge-dark">Created order {{commy(d[2])}} {{to_ticker(d[1])}} for {{to_ticker(d[3])}}</span>
+
                   </template>
                 </td>
               </tr>

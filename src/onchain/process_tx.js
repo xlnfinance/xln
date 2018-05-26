@@ -493,10 +493,18 @@ module.exports = async (tx, meta) => {
     } else if (method == 'createOrder') {
       // onchain exchange to sell an asset for another one.
       var [assetId, amount, buyAssetId, rate] = t[1].map(readInt)
+      rate = rate / 1000000
 
       let sellerOwns = signer.asset(asset)
 
-      var order = await Order.create({
+      if (sellerOwns < amount) {
+        l('Trying to sell more then signer has')
+        continue
+      }
+
+      signer.asset(asset, -amount)
+
+      var order = Order.build({
         amount: amount,
         rate: rate,
         userId: signer.id,
@@ -504,7 +512,62 @@ module.exports = async (tx, meta) => {
         buyAssetId: buyAssetId
       })
 
-      await order.match()
+      l(order)
+      // now let's try orders with same rate or better
+
+      var orders = await Order.findAll({
+        where: {
+          assetId: buyAssetId,
+          buyAssetId: assetId,
+          rate: {
+            [Op.lte]: rate
+          }
+        },
+        limit: 200,
+        order: [['rate', 'asc']]
+      })
+
+      for (var their of orders) {
+        var they_buy = their.amount * their.rate
+        var we_buy = order.amount * their.rate
+
+        var seller = await User.findById(their.userId)
+        if (order.amount > they_buy) {
+          // close their order. give seller what they wanted
+          seller.asset(their.buyAssetId, they_buy)
+          signer.asset(order.buyAssetId, their.amount)
+
+          their.amount = 0
+          order.amount -= they_buy
+        } else {
+          // close our order
+          seller.asset(their.buyAssetId, order.amount)
+          signer.asset(order.buyAssetId, we_buy)
+
+          their.amount -= we_buy
+          order.amount = 0
+        }
+
+        if (their.amount == 0) {
+          // did our order fullfil them entirely?
+          await their.destroy()
+        }
+      }
+
+      if (order.amount > 0) {
+        // is new order still not fullfilled? keep in orderbook
+        await order.save()
+      }
+
+      parsed_tx.events.push([method, assetId, amount, buyAssetId])
+    } else if (method == 'cancelOrder') {
+      var order = signer.getOrders({where: {id: readInt[1][0]}})
+      if (!order) {
+        l('No such order for signer')
+        continue
+      }
+      signer.asset(order.assetId, order.amount)
+      await order.destroy()
     } else if (method == 'createAsset') {
     } else if (method == 'createHub') {
     } else if (method == 'propose') {

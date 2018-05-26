@@ -234,7 +234,7 @@ class Me {
         me.CHEAT_dontwithdraw = true
         me.payChannel({
           amount: 20000,
-          destination: randos[7],
+          destination: randos[0],
           asset: 1
         })
       }
@@ -464,7 +464,7 @@ Payments: ${await Payment.count()}\n
   async channels() {
     let channels = []
 
-    let assets = await Asset.findAll()
+    let assets = cached_result.assets //await Asset.findAll()
     // all assets with all hubs
 
     if (me.my_hub) {

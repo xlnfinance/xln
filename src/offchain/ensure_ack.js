@@ -45,5 +45,6 @@ module.exports = async () => {
     me.batch.push(['revealSecrets', to_reveal])
     me.batch.push(['disputeWith', ch.d.asset, [await ch.d.getDispute()]])
     ch.d.status = 'disputed'
+    ch.d.ack_requested_at = null
   }
 }
