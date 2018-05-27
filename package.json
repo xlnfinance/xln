@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "prettier": "prettier --write src/**/*.js wallet/js/**/*.vue",
-    "build": "parcel build wallet",
+    "build": "parcel build wallet/index.html",
     "test": "jasmine"
   },
   "dependencies": {
