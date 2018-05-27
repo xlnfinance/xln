@@ -194,14 +194,16 @@ module.exports = async () => {
 
   await Asset.create({
     ticker: 'FRD',
-    desc: 'Dollar',
+    name: 'Dollar',
+    desc: 'Fair Dollar',
     issuerId: 1,
     total_supply: 1000
   })
 
   await Asset.create({
     ticker: 'FRB',
-    desc: 'Bond',
+    name: 'Bond',
+    desc: 'Fair Bond',
     issuerId: 1,
     total_supply: 100000000
   })

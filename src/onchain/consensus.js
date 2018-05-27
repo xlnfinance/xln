@@ -49,9 +49,6 @@ module.exports = async () => {
   if (me.status == 'await' && phase == 'propose') {
     me.status = phase
 
-    // just in case we gone out of sync
-    sync()
-
     //l('Next round', me.next_member().id, me.next_member(true).id)
 
     if (me.my_member == me.next_member()) {
@@ -184,7 +181,10 @@ module.exports = async () => {
     if (shares < K.majority) {
       if (!me.proposed_block.locked) me.proposed_block = {}
 
-      //l(`Failed to commit, only ${shares} precommits / ${K.majority}`)
+      l(
+        `Failed to commit, only ${shares} precommits / ${K.majority}. Lets sync`
+      )
+      sync()
     } else if (me.proposed_block.header) {
       // adding to our external queue to avoid race conditions
       // we don't call processBlock directly to avoid races

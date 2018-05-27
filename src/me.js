@@ -228,20 +228,6 @@ class Me {
     if (this.record) {
       this.my_member = Members.find((m) => m.id == this.record.id)
       this.my_hub = K.hubs.find((m) => m.id == this.record.id)
-
-      if (argv.monkey && this.record.id == 2) {
-        // trigger the dispute from hub
-        me.CHEAT_dontack = true
-        me.CHEAT_dontwithdraw = true
-        me.payChannel({
-          amount: 20000,
-          destination: randos[0],
-          asset: 1
-        })
-
-        // create an asset
-        me.batch.push(['createAsset', ['TEST', 13371337]])
-      }
     }
 
     /*
@@ -369,6 +355,36 @@ class Me {
     }
 
     if (argv.monkey) {
+      // user specific e2e tests
+      if (this.record) {
+        if (this.record.id == 2) {
+          // trigger the dispute from hub
+          me.CHEAT_dontack = true
+          me.CHEAT_dontwithdraw = true
+          me.payChannel({
+            amount: 20000,
+            destination: randos[0],
+            asset: 1
+          })
+
+          // create an asset
+          me.batch.push([
+            'createAsset',
+            ['TEST2', 13371337, 'test coin', 'no goal']
+          ])
+        }
+
+        if (this.record.id == 3) {
+          me.batch.push([
+            'createAsset',
+            ['TEST3', 10000000, 'test coin by 3', 'no goal']
+          ])
+
+          // buying bunch of FRB for $4
+          me.batch.push(['createOrder', [1, 400, 2, 0.001 * 1000000]])
+        }
+      }
+
       // if we are hub: plan a test check, otherwise start paying randomly.
       if (me.my_hub) {
         // adding onchain balances to randos
@@ -394,6 +410,8 @@ Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n
 Blocks: ${await Block.count()}\n
 Deltas: ${await Delta.count()}\n
 Payments: ${await Payment.count()}\n
+Orders: ${await Order.count()}\n
+Assets: ${await Asset.count()}\n
           `
 
           l(alert)
@@ -544,6 +562,10 @@ Payments: ${await Payment.count()}\n
         m.max = m.last_avg
       }
       m.avgs.push(m.last_avg)
+
+      // free up memory
+      if (m.avgs.length > 600) m.avgs.shift()
+
       m.current = 0 // zero the counter for next period
     }
   }

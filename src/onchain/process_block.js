@@ -13,7 +13,15 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   let [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(header)
 
   timestamp = readInt(timestamp)
+  built_by = readInt(built_by)
   prev_hash = toHex(prev_hash)
+
+  var proposer = await User.findById(built_by)
+
+  if (!proposer) {
+    l(`This user doesnt exist ${built_by}`)
+    return false
+  }
 
   if (K.prev_hash != prev_hash) {
     l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
@@ -49,7 +57,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     outputs_volume: 0,
     parsed_tx: [],
     cron: [],
-    missed_validators: []
+    missed_validators: [],
+    proposer: proposer
   }
 
   let shares = 0
@@ -74,7 +83,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   let ordered_tx = r(ordered_tx_body)
 
   // Processing transactions one by one
-  // Long term TODO: parallel execution with pessimistic locks
+  // Long term TODO: parallel execution with q() critical sections
   for (let i = 0; i < ordered_tx.length; i++) {
     let result = await me.processTx(ordered_tx[i], meta)
     if (!result.success) l(result)
@@ -87,9 +96,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   if (K.total_blocks % 100 == 0 || ordered_tx.length > 0)
     l(
-      `${base_port}: Processed block ${K.total_blocks} by ${readInt(
-        built_by
-      )}. Signed shares: ${shares}, tx: ${ordered_tx.length}`
+      `${base_port}: Processed block ${
+        K.total_blocks
+      } by ${built_by}. Signed shares: ${shares}, tx: ${ordered_tx.length}`
     )
 
   // todo: define what is considered a "usable" block
@@ -147,52 +156,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     await job.destroy()
   }
 
-  // only members do snapshots, as they require extra computations
-  if (me.my_member && K.bytes_since_last_snapshot == 0) {
-    // it's important to flush current K to disk before snapshot
-    fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
-
-    var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
-
-    require('tar').c(
-      {
-        gzip: true,
-        sync: false,
-        portable: true,
-        noMtime: true,
-        file: datadir + '/offchain/' + filename,
-        filter: (path, stat) => {
-          // must be deterministic
-          stat.mtime = null
-          stat.atime = null
-          stat.ctime = null
-          stat.birthtime = null
-
-          // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
-          // No dotfiles
-          if (
-            path.includes('/.') ||
-            path.match(
-              /^\.\/(isolate|data[0-9]+|data\/offchain|\.DS_Store|node_modules|wallet\/node_modules|dist|tools)/
-            )
-          ) {
-            return false
-          } else {
-            return true
-          }
-        }
-      },
-      ['.'],
-      (_) => {
-        if (old_height > 1) {
-          // genesis state is stored for analytics and member bootstraping
-          fs.unlink(datadir + '/offchain/Failsafe-' + old_height + '.tar.gz')
-          l('Removed old snapshot and created ' + filename)
-        }
-        snapshotHash()
-      }
-    )
-  }
+  // saving current proposer and their fees earned
+  await meta.proposer.save()
 
   // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
   all.push(
@@ -238,6 +203,53 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       //l('Just unlocked from previous proposed block')
       me.proposed_block = {}
     }
+  }
+
+  // only members do snapshots, as they require extra computations
+  if (me.my_member && K.bytes_since_last_snapshot == 0) {
+    // it's important to flush current K to disk before snapshot
+    fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
+
+    var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
+
+    require('tar').c(
+      {
+        gzip: true,
+        sync: false,
+        portable: true,
+        noMtime: true,
+        file: datadir + '/offchain/' + filename,
+        filter: (path, stat) => {
+          // must be deterministic
+          stat.mtime = null
+          stat.atime = null
+          stat.ctime = null
+          stat.birthtime = null
+
+          // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
+          // No dotfiles
+          if (
+            path.includes('/.') ||
+            path.match(
+              /^\.\/(isolate|data[0-9]+|data\/offchain|\.DS_Store|node_modules|wallet\/node_modules|dist|tools)/
+            )
+          ) {
+            return false
+          } else {
+            return true
+          }
+        }
+      },
+      ['.'],
+      (_) => {
+        if (old_height > 1) {
+          // genesis state is stored for analytics and member bootstraping
+          fs.unlink(datadir + '/offchain/Failsafe-' + old_height + '.tar.gz')
+          l('Removed old snapshot and created ' + filename)
+        }
+        snapshotHash()
+      }
+    )
   }
 
   if (me.request_reload) {

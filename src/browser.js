@@ -8,7 +8,7 @@ cache = async (force = false) => {
   if (K) {
     cached_result.my_hub = me.my_hub
 
-    cached_result.my_member = !!me.my_member
+    cached_result.my_member = me.my_member
 
     cached_result.K = K
 
@@ -39,7 +39,7 @@ cache = async (force = false) => {
         },
         async () => {
           cached_result.blocks = (await Block.findAll({
-            limit: 100,
+            limit: 50,
             order: [['id', 'desc']],
             where: me.show_empty_blocks
               ? {}

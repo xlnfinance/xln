@@ -20,9 +20,11 @@ export default {
 
     app.call('load')
 
+    app.go(location.hash.substr(1).split('/')[0])
+
     this.interval = setInterval(function() {
       app.call('load')
-    }, localStorage.auth_code ? 10000 : 30000)
+    }, localStorage.auth_code ? 10000 : 60000)
   },
   destroyed() {
     clearInterval(this.interval)
@@ -39,9 +41,11 @@ export default {
       faucet_amount: '',
 
       new_asset: {
-        ticker: 'XYZ',
-        amount: 100000000,
-        desc: 'An asset represents X and backed by Y, can be used for Z.'
+        name: 'Yen ¥',
+        ticker: 'YEN',
+        amount: 100000000000,
+        desc:
+          'This asset represents Japanese Yen and is backed by the Bank of Japan.'
       },
       new_hub: {},
 
@@ -54,7 +58,7 @@ export default {
 
       record: false,
 
-      tab: location.hash.substr(1).split('/')[0],
+      tab: '',
 
       install_snippet: false,
 
@@ -256,6 +260,10 @@ export default {
     },
 
     go: (path) => {
+      var authed = ['wallet', 'credit', 'onchain', 'testnet']
+
+      if (authed.includes(path) && !localStorage.auth_code) path = ''
+
       if (path == '') {
         history.pushState('/', null, '/')
       } else {
@@ -397,6 +405,11 @@ export default {
 <template>
   
   <div>
+<div style="background-color: yellow; height:40px; border:thin solid #EDDD00">
+  <p style='padding-top:5px;text-align:center'>This testnet is restarted once every few days. Try at your own risk. Mainnet launch: August 24, 2018.</p> 
+</div>
+
+
     <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
       <a class="navbar-brand" href="#">Fairlayer</a>
       <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
@@ -419,10 +432,10 @@ export default {
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
           </li>
-          <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='exchange' }">
+          <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
             <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
           </li>
-          <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
+          <li v-if="auth_code && dev_mode" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
             <a class="nav-link" @click="go('testnet')">Testnet</a>
           </li>
 
@@ -449,7 +462,7 @@ export default {
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
             <option disabled>Select current asset</option>
-            <option v-for="(a,index) in assets" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
+            <option v-for="(a,index) in assets" :value="a.id">{{a.name}} ({{a.ticker}})</option>
           </select></span>
 
           <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
@@ -538,7 +551,7 @@ export default {
           <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
           <div v-if="record">
-            <h2>Balance {{to_ticker(asset)}} onchain: <b>{{getAsset(asset)}}</b></h2>
+            <h2>{{to_ticker(asset)}} Balance onchain: <b>{{commy(getAsset(asset))}}</b></h2>
             <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with any hub. Your onchain ID: <b>{{record.id}}</b></p>
             <hr />
           </div>
@@ -649,7 +662,7 @@ export default {
         </select>
 
         <template v-if="ch">
-          <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>credit limits</b> below. Unlike traditional banks who open credit to you, <b>it's another way around: you give the hub the credit</b>b> that limits your risk (uninsured balances).</p>
+          <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>credit limits</b> below. Unlike traditional banks who open credit to you, <b>it's another way around: you give the hub the credit</b> that limits your risk (uninsured balances).</p>
           <p>
             <label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
@@ -668,7 +681,7 @@ export default {
       <div v-else-if="tab=='onchain'">
         <div v-if="record">
           <h1>Onchain Operations</h1>
-          <p>Onchain {{to_ticker(asset)}} balance: {{getAsset(asset)}}</p>
+          <p>Onchain {{to_ticker(asset)}} balance: {{commy(getAsset(asset))}}</p>
           
           <template>
             <h3>Withdraw from hub</h3>
@@ -742,31 +755,36 @@ export default {
       </div>
       <div v-else-if="tab=='exchange'">
         <h3>Trustless Exchange</h3>
-        <p>Fairlayer comes pre-equipped with trustless onchain exchange built into the protocol. It is best suitable for <b>rare</b> and large atomic swaps between two assets - it always incurs an <b>expensive onchain but is completely zero risk of counterparty compromise.</b></p>
-        <p>If you're looking to trade often and/or smaller amounts, try any traditional cryptocurrency exchange that supports Fair assets now or wait for scalable yet <b>trustless in-protocol offchain exchange</b> with tiny fees that is coming in 2019.</p>
+        <p>Fairlayer comes pre-equipped with trustless onchain exchange built into the protocol. It is best suitable for <b>rare</b> and large atomic swaps between two assets - it always incurs an <b>expensive fees but is free of counterparty risk.</b></p>
+        <p>If you're looking to trade frequently and/or smaller amounts, try any traditional cryptocurrency exchange that supports Fair assets now or wait for <b>scalable payment channel based in-protocol exchange</b> coming in 2019.</p>
         <hr/>
 
-        <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
-        <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
-        </p>
-        <p>Asset you are buying (you have {{commy(getAsset(order.buyAssetId))}}):</p>
-        <p>
-          <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
-            <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.desc}} ({{a.ticker}})</option>
-          </select>
-        </p>
 
-        <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
-        <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"  @input="estimate(false)"></p>
 
-        <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
-        <p><input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)"></p>
+        <form v-if="auth_code && record && getAsset(1) > 200">
+          <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
+          <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
+          </p>
+          <p>Asset you are buying (you have {{commy(getAsset(order.buyAssetId))}}):</p>
+          <p>
+            <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
+              <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.name}} ({{a.ticker}})</option>
+            </select>
+          </p>
 
-        <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
+          <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
+          <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"  @input="estimate(false)"></p>
 
-        <p>
-          <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
-        </p>
+          <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
+          <p><input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)"></p>
+
+          <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
+
+          <p>
+            <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
+          </p>
+        </form>
+        <p>In order to trade you must have a registered account with FRD balance.</p>
 
 
         <table v-if="orders.length>0" class="table">
@@ -791,7 +809,7 @@ export default {
                 <td>{{commy(b.amount)}}</td>
                 <td>{{b.rate.toFixed(6)}}</td>
                 <td v-if="record && record.id == b.userId"><button  @click="call('cancelOrder', {id: b.id})" class="btn btn-success">Cancel</button></td>
-                <td v-else><button class="btn btn-success"  @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; estimate(false)">Fulfil</td>
+                <td v-else><button class="btn btn-success"  @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; estimate(false)">Fulfill</td>
               </tr>
             </template>
           </tbody>
@@ -800,11 +818,15 @@ export default {
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
-        <p>For greatly increased security our install process is a little bit longer than just downloading an executable file. First, you'd need <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
-        <pre><code>{{install_snippet}}</code></pre>
-        <p>Double check it visually with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal.app</p>
+        <p>In order to enjoy the security model and true decentralization of the network you must <b>download and install Fair app</b> on your personal computer, laptop, mobile phone or server and become a fully verifying independent node.</p>
+
+        <p><b>This website is merely an explorer and does not have any "registration". In fact, avoid any "online wallets" and only use this local wallet with no dependance on 3rd parties.</b> Convenience is valuable to us but strong security model is paramount.</p>
+
+        <p>Our decentralized install is slightly longer than just downloading an executable program. First, you need <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
+        <pre style="background-color: #FFFDDE; padding: 20px;"><code>{{install_snippet}}</code></pre>
+        <p>Visually verify it with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal.app</p>
         <ul>
-          <li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
+          <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
         <p>On Windows? <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with
           <kbd>certUtil -hashfile Failsafe-{{K.last_snapshot_height}}.tar.gz SHA256</kbd> then run
@@ -1033,7 +1055,11 @@ export default {
         <template v-if="record">
 
           <div class="form-group">
-            <p><label for="comment">Ticker:</label>
+
+            <p><label for="comment">Name:</label>
+            <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input></p>
+
+            <p><label for="comment">Ticker (must be unique):</label>
             <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input></p>
             
             <p><label for="comment">Amount:</label>
@@ -1054,6 +1080,7 @@ export default {
           <thead class="thead-dark">
             <tr>
               <th scope="col">Ticker</th>
+              <th scope="col">Name</th>
               <th scope="col">Description</th>
               <th scope="col">Total Supply</th>
             </tr>
@@ -1061,6 +1088,7 @@ export default {
           <tbody>
             <tr v-for="u in assets">
               <th>{{u.ticker}}</th>
+              <th>{{u.name}}</th>
               <th>{{u.desc}}</th>
               <th>{{commy(u.total_supply)}}</th>
             </tr>

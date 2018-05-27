@@ -159,7 +159,10 @@ module.exports = async (ws, msg) => {
         break
 
       case 'createAsset':
-        me.batch.push(['createAsset', [p.ticker, parseInt(p.amount)]])
+        me.batch.push([
+          'createAsset',
+          [p.ticker, parseInt(p.amount), p.name, p.desc]
+        ])
         react({confirm: 'Added to batch'})
 
         break

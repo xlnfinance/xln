@@ -65,6 +65,8 @@ module.exports = async (tx, meta) => {
 
   // Tx is valid, can take the fee
   signer.asset(1, -tax)
+  meta.proposer.asset(1, tax)
+
   K.collected_tax += tax
 
   var parsed_tx = {
@@ -93,7 +95,6 @@ module.exports = async (tx, meta) => {
     } else if (method == 'withdrawFrom') {
       // withdraw money from a channel by providing a sig of your partner
       // you can only withdraw from insured balance
-      var my_hub = K.hubs.find((h) => h.id == signer.id)
 
       for (var input of t[1]) {
         var amount = readInt(input[0])
@@ -316,6 +317,7 @@ module.exports = async (tx, meta) => {
       // deposit from our onchain balance to another onchain balance or channel from some side
       await signer.payDebts(asset, parsed_tx)
       // there's a tiny bias here, the hub always gets reimbursed more than tax paid
+      // todo: consider splitting tax based on % in total output volume
       var reimburse_tax = 1 + Math.floor(tax / t[1].length)
 
       for (var output of t[1]) {
@@ -427,15 +429,16 @@ module.exports = async (tx, meta) => {
 
           signer.asset(asset, -amount)
 
-          if (my_hub) {
+          if (K.hubs.find((h) => h.id == signer.id)) {
             // The hub gets reimbursed for rebalancing users.
             // Otherwise it would be harder to collect fee from participants
             // TODO: attack vector, the user may not endorsed this rebalance
 
+            // the diff, if any, that were spent on registration fees
             var diff = readInt(output[0]) - amount
 
-            ins.insurance -= reimburse_tax + diff
-            if (compared == 1) ins.ondelta -= reimburse_tax + diff
+            ins.insurance -= reimburse_tax
+            if (compared == -1) ins.ondelta += diff + reimburse_tax
 
             signer.asset(1, reimburse_tax + diff)
             // todo take from onchain balance instead
@@ -455,7 +458,7 @@ module.exports = async (tx, meta) => {
 
           // rebalance by hub for our account = reimburse hub fees
           /*
-          if (my_hub && me.is_me(withPartner.pubkey)) {
+          if (me.is_me(withPartner.pubkey)) {
             await me.addHistory(
               giveTo.pubkey,
               -reimburse_tax,
@@ -488,6 +491,11 @@ module.exports = async (tx, meta) => {
       amount = readInt(amount)
       ticker = ticker.toString().replace(/[^a-zA-Z0-9]/g, '') // from buffer to unicode, sanitize
 
+      if (ticker.length < 3) {
+        l('Too short ticker')
+        continue
+      }
+
       var exists = await Asset.findOne({where: {ticker: ticker}})
       if (exists) {
         if (exists.issuerId == signer.id) {
@@ -503,7 +511,10 @@ module.exports = async (tx, meta) => {
         var new_asset = await Asset.create({
           issuerId: signer.id,
           ticker: ticker,
-          total_supply: amount
+          total_supply: amount,
+
+          name: t[1][2] ? t[1][2].toString() : '',
+          desc: t[1][3] ? t[1][3].toString() : ''
         })
 
         signer.asset(new_asset.id, amount)
@@ -513,7 +524,8 @@ module.exports = async (tx, meta) => {
     } else if (method == 'createOrder') {
       // onchain exchange to sell an asset for another one.
       var [assetId, amount, buyAssetId, rate] = t[1].map(readInt)
-      rate = rate / 1000000
+      var round = Math.round
+      rate = rate / 1000000 // convert back from integer
 
       var direct_order = assetId > buyAssetId
 
@@ -541,20 +553,21 @@ module.exports = async (tx, meta) => {
           assetId: buyAssetId,
           buyAssetId: assetId,
           rate: {
+            // depending on which side of pair we sell, different order
             [direct_order ? Op.gte : Op.lte]: rate
           }
         },
-        limit: 200,
+        limit: 500,
         order: [['rate', direct_order ? 'desc' : 'asc']]
       })
 
       for (var their of orders) {
         if (direct_order) {
-          var they_buy = their.amount / their.rate
-          var we_buy = order.amount * their.rate
+          var they_buy = round(their.amount / their.rate)
+          var we_buy = round(order.amount * their.rate)
         } else {
-          var they_buy = their.amount * their.rate
-          var we_buy = order.amount / their.rate
+          var they_buy = round(their.amount * their.rate)
+          var we_buy = round(order.amount / their.rate)
         }
 
         //l('Suitable order', we_buy, they_buy, their)
