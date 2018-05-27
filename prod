@@ -1,13 +1,15 @@
 #!/bin/bash
 
+set -o nounset
+set -o errexit
+set -o pipefail
+
 # Rotate logs for clarity
 if [ -f /etc/logrotate.d/pm2-root ]; then
   logrotate -f /etc/logrotate.d/pm2-root
 fi
 
-pm2 delete all
 
-killall Failsafe 2>/dev/null
 
 rm -rf isolate*
 rm -rf data*
@@ -20,6 +22,9 @@ db=mysql:root:123123
 maxport=8008
 
 #--node-args="--prof"
+
+pm2 delete all || true
+killall Failsafe 2>/dev/null || true
 
 node fs --genesis=test --db=$db
 pm2 start fs.js --no-autorestart --name fs -- -p443 --silent --wallet-dist --db=$db --monkey=$maxport

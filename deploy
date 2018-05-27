@@ -1,3 +1,9 @@
+#!/bin/bash
+
+set -o nounset
+set -o errexit
+set -o pipefail
+
 rm -rf data*
 rm -rf isolate*
 
@@ -7,4 +13,3 @@ ssh root@failsafe.network <<'ENDSSH'
 cd ~/fs
 ./prod
 ENDSSH
-
