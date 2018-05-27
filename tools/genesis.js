@@ -38,7 +38,7 @@ module.exports = async () => {
     blocksize: 20000,
     blocktime: 20,
     step_latency: 5, // how long is each consensus step: propose, prevote, precommit, await is the rest
-    gossip_delay: 1000, // anti clock skew, give others time to change state
+    gossip_delay: 1500, // anti clock skew, give others time to change state
 
     // up to X seconds, validators don't propose blocks if empty
     // the problem is all delayed actions also happen much later if no blocks made

@@ -304,9 +304,9 @@ Insurance.prototype.resolve = async function() {
 
   await this.save()
 
-  var withUs = me.pubkey.equals(left.pubkey)
+  var withUs = me.is_me(left.pubkey)
     ? right
-    : me.pubkey.equals(right.pubkey)
+    : me.is_me(right.pubkey)
       ? left
       : false
 

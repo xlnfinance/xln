@@ -69,8 +69,6 @@ module.exports = async (ws, msg) => {
         var outs = []
         var asset = parseInt(p.asset)
 
-        p.order.amount = parseInt(p.order.amount)
-
         for (o of p.outs) {
           // split by @
           if (o.to.length > 0) {
@@ -170,6 +168,8 @@ module.exports = async (ws, msg) => {
         break
 
       case 'createOrder':
+        p.order.amount = parseInt(p.order.amount)
+
         var asset = parseInt(p.asset)
         if (p.order.amount > 0) {
           if (p.order.amount > me.record.asset(asset) + p.request_amount) {

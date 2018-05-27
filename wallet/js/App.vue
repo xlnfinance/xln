@@ -411,16 +411,16 @@ export default {
             <a class="nav-link" @click="go('install')">Install</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
-            <a class="nav-link" @click="go('wallet')">Wallet</a>
+            <a class="nav-link" @click="go('wallet')">💰 Wallet</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='credit' }">
-            <a class="nav-link" @click="go('credit')">Credit Limits</a>
+            <a class="nav-link" @click="go('credit')">💱 Credit Limits</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
-            <a class="nav-link" @click="go('onchain')">Onchain</a>
+            <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='exchange' }">
-            <a class="nav-link" @click="go('exchange')">Exchange</a>
+            <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
             <a class="nav-link" @click="go('testnet')">Testnet</a>
@@ -428,7 +428,7 @@ export default {
 
 
           <li class="nav-item dropdown">
-            <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">Explorers
+            <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">🔍 Explorers
         <span class="caret"></span></a>
             <ul class="dropdown-menu">
               <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">Blockchain</a></li>

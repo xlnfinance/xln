@@ -131,6 +131,8 @@ l = (...args) => {
 loff = (text) => l(`${chalk.green(`       ⠟ ${text}`)}`)
 
 fatal = (reason) => {
+  react({reload: true})
+
   global.repl = null
   l(errmsg(reason))
   process.exit(1)

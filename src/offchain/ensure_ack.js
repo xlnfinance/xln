@@ -40,11 +40,17 @@ module.exports = async () => {
       }
     }
 
-    l(`No ack dispute with ${trim(ch.d.partnerId)} secrets ${to_reveal.length}`)
+    if (to_reveal.length > 0) {
+      l(
+        `No ack dispute with ${trim(ch.d.partnerId)} secrets ${
+          to_reveal.length
+        }`
+      )
 
-    me.batch.push(['revealSecrets', to_reveal])
-    me.batch.push(['disputeWith', ch.d.asset, [await ch.d.getDispute()]])
-    ch.d.status = 'disputed'
-    ch.d.ack_requested_at = null
+      me.batch.push(['revealSecrets', to_reveal])
+      me.batch.push(['disputeWith', ch.d.asset, [await ch.d.getDispute()]])
+      ch.d.status = 'disputed'
+      ch.d.ack_requested_at = null
+    }
   }
 }

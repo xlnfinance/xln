@@ -71,6 +71,10 @@ class Me {
     return !me.browser || me.browser.readyState != 1
   }
 
+  is_me(pubkey) {
+    return me.pubkey && me.pubkey.equals(pubkey)
+  }
+
   async byKey(pk) {
     if (!pk) {
       if (this.id) {

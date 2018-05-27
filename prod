@@ -1,6 +1,4 @@
 #!/bin/bash
-set -o errexit
-
 set -o nounset
 set -o errexit
 set -o pipefail
@@ -9,8 +7,6 @@ set -o pipefail
 if [ -f /etc/logrotate.d/pm2-root ]; then
   logrotate -f /etc/logrotate.d/pm2-root
 fi
-
-
 
 rm -rf isolate*
 rm -rf data*
