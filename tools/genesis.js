@@ -25,7 +25,7 @@ module.exports = async () => {
 
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 50000,
+    snapshot_after_bytes: 1000000,
     proposals_created: 0,
 
     // cents per byte of tx

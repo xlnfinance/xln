@@ -742,10 +742,9 @@ export default {
       </div>
       <div v-else-if="tab=='exchange'">
         <h3>Trustless Exchange</h3>
-        <p>Fairlayer comes pre-equipped with two kinds of trustless exchanges built into the protocol: onchain and offchain exchanges.</p>
-        <p>Onchain one is completely zero-trust and is great for large atomic swaps between two assets, but always incurs an expensive onchain fee because blocks can only fit a few transactions. This exchange is available today. </p>
-        <p>The offchain exchange is completely instant, scalable and has tiny fees, but on another hand sometimes increases your uninsured balance. Still, it's a lot more secure than centralized exchanges but with same speed and cost. Will be available later this year.</p>
-
+        <p>Fairlayer comes pre-equipped with trustless onchain exchange built into the protocol. It is best suitable for <b>rare</b> and large atomic swaps between two assets - it always incurs an <b>expensive onchain but is completely zero risk of counterparty compromise.</b></p>
+        <p>If you're looking to trade often and/or smaller amounts, try any traditional cryptocurrency exchange that supports Fair assets now or wait for scalable yet <b>trustless in-protocol offchain exchange</b> with tiny fees that is coming in 2019.</p>
+        <hr/>
 
         <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
         <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
@@ -763,6 +762,8 @@ export default {
         <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
         <p><input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)"></p>
 
+        <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
+
         <p>
           <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
         </p>
@@ -774,7 +775,7 @@ export default {
               <th scope="col">#</th>
               <th scope="col">Seller ID</th>
               <th scope="col">Sell Asset </th>
-              <th scope="col">Buy Asset</th>
+              <th scope="col">Pair</th>
               <th scope="col">Amount</th>
               <th scope="col">Rate</th>
               <th scope="col">Action</th>
@@ -786,11 +787,11 @@ export default {
                 <td>{{b.id}}</td>
                 <td>{{b.userId}}</td>
                 <td>{{to_ticker(b.assetId)}}</td>
-                <td>{{to_ticker(b.buyAssetId)}}</td>
+                <td>{{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}</td>
                 <td>{{commy(b.amount)}}</td>
-                <td>{{b.rate}}</td>
+                <td>{{b.rate.toFixed(6)}}</td>
                 <td v-if="record && record.id == b.userId"><button  @click="call('cancelOrder', {id: b.id})" class="btn btn-success">Cancel</button></td>
-                <td v-else><button class="btn btn-success"  @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; ">Fulfil</td>
+                <td v-else><button class="btn btn-success"  @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; estimate(false)">Fulfil</td>
               </tr>
             </template>
           </tbody>

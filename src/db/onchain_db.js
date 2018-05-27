@@ -120,11 +120,13 @@ Hashlock = sequelize.define(
 )
 
 // Assets represent all numerical balances: currencies, tokens, shares, stocks.
-// Anyone can create and issue their own asset (like ERC20, but not programmable)
+// Anyone can create and issue their own asset (like ERC20, but less programmable due to lack of VM)
 Asset = sequelize.define('asset', {
   ticker: Sequelize.TEXT,
+  name: Sequelize.TEXT,
   desc: Sequelize.TEXT,
 
+  issuable: Sequelize.BOOLEAN,
   issuerId: Sequelize.INTEGER,
   total_supply: Sequelize.INTEGER
 })
