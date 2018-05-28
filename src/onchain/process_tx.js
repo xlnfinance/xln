@@ -361,7 +361,7 @@ module.exports = async (tx, meta) => {
 
             giveTo.asset(asset, K.standalone_balance)
             amount -= fee
-            signer.asset(asset, -fee)
+            //signer.asset(asset, -fee)
           }
 
           await giveTo.save()
@@ -381,7 +381,7 @@ module.exports = async (tx, meta) => {
 
               withPartner.asset(asset, K.standalone_balance)
               amount -= fee
-              signer.asset(asset, -fee)
+              //signer.asset(asset, -fee)
               await withPartner.save()
               // now it has id
 
@@ -427,6 +427,10 @@ module.exports = async (tx, meta) => {
           ins.insurance += amount
           if (compared == -1) ins.ondelta += amount
 
+          // user is paying themselves for registration
+          var regfees = readInt(output[0]) - amount
+          ins.ondelta -= compared * regfees
+
           signer.asset(asset, -amount)
 
           if (K.hubs.find((h) => h.id == signer.id)) {
@@ -434,13 +438,11 @@ module.exports = async (tx, meta) => {
             // Otherwise it would be harder to collect fee from participants
             // TODO: attack vector, the user may not endorsed this rebalance
 
-            // the diff, if any, that were spent on registration fees
-            var diff = readInt(output[0]) - amount
-
+            // reimbures to hub rebalance fees
             ins.insurance -= reimburse_tax
-            if (compared == -1) ins.ondelta += diff + reimburse_tax
+            ins.ondelta -= compared * reimburse_tax
 
-            signer.asset(1, reimburse_tax + diff)
+            signer.asset(1, reimburse_tax)
             // todo take from onchain balance instead
           }
 
@@ -503,7 +505,7 @@ module.exports = async (tx, meta) => {
           exists.total_supply += amount
           signer.asset(exists.id, amount)
 
-          parsed_tx.events.push(method, [ticker, amount])
+          parsed_tx.events.push([method, [ticker, amount]])
         } else {
           l('Invalid issuer tries to mint')
         }
@@ -518,7 +520,7 @@ module.exports = async (tx, meta) => {
         })
 
         signer.asset(new_asset.id, amount)
-        parsed_tx.events.push(method, [ticker, amount])
+        parsed_tx.events.push([method, [ticker, amount]])
       }
     } else if (method == 'createHub') {
     } else if (method == 'createOrder') {

@@ -22,9 +22,12 @@ export default {
 
     app.go(location.hash.substr(1).split('/')[0])
 
+    /*
+
     this.interval = setInterval(function() {
       app.call('load')
     }, localStorage.auth_code ? 10000 : 60000)
+    */
   },
   destroyed() {
     clearInterval(this.interval)
@@ -405,8 +408,8 @@ export default {
 <template>
   
   <div>
-<div style="background-color: yellow; height:40px; border:thin solid #EDDD00">
-  <p style='padding-top:5px;text-align:center'>This testnet is restarted once every few days. Try at your own risk. Mainnet launch: August 24, 2018.</p> 
+<div style="background-color: #FFFDDE; border:thin solid #EDDD00">
+  <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days. Mainnet launch: August 24, 2018.</p> 
 </div>
 
 
@@ -703,8 +706,9 @@ export default {
             <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Invoice (optional)">
           </p>
           <p>
-            <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">Add Deposit</button>
+            <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">+ Another Deposit</button>
           </p>
+          <hr />
 
           <p>
             <button type="button" class="btn btn-warning" @click="onchain()">Execute Onchain</button>
@@ -784,7 +788,7 @@ export default {
             <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
           </p>
         </form>
-        <p>In order to trade you must have a registered account with FRD balance.</p>
+        <p v-else>In order to trade you must have a registered account with FRD balance.</p>
 
 
         <table v-if="orders.length>0" class="table">
@@ -924,7 +928,10 @@ export default {
                     <span v-else-if="d[0]=='createOrder'" class="badge badge-dark">Created order {{commy(d[2])}} {{to_ticker(d[1])}} for {{to_ticker(d[3])}}</span>
 
                     <span v-else-if="d[0]=='cancelOrder'" class="badge badge-dark">Cancelled order {{d[1]}}</span>
+
                     <span v-else-if="d[0]=='createAsset'" class="badge badge-dark">Created {{commy(d[2])}} of asset {{d[1]}}</span>
+                    
+                    <span v-else-if="d[0]=='createHub'" class="badge badge-dark">Created hub {{d[1]}}</span>
 
                   </template>
                 </td>
