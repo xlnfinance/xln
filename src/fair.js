@@ -212,7 +212,8 @@ initDashboard = async (a) => {
       break
     }
   } else if (argv['wallet-dist']) {
-    bundler = serveStatic('../dist')
+    let path = require('path')
+    bundler = serveStatic(path.resolve(__dirname, '../dist'))
   } else {
     let Parcel = require('parcel-bundler')
     bundler = new Parcel('wallet/index.html', {
