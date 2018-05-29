@@ -197,7 +197,7 @@ module.exports = async () => {
     name: 'Dollar',
     desc: 'Fair Dollar',
     issuerId: 1,
-    total_supply: 1000
+    total_supply: 1000000000
   })
 
   await Asset.create({
@@ -205,7 +205,7 @@ module.exports = async () => {
     name: 'Bond',
     desc: 'Fair Bond',
     issuerId: 1,
-    total_supply: 100000000
+    total_supply: 1000000000
   })
 
   var left =

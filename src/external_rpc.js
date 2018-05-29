@@ -3,7 +3,7 @@
 
 var async_fn = async (ws, inputType, args) => {
   // how many blocks to share at once
-  var sync_limit = 100
+  var sync_limit = 1000
 
   // ignore some too frequest RPC commands
   /*if (
@@ -173,7 +173,7 @@ var async_fn = async (ws, inputType, args) => {
       if (args.length == sync_limit) {
         sync()
       } else {
-        fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
+        fs.writeFile(datadir + '/onchain/k.json', stringify(K), () => {})
         if (K.total_blocks - started > 0) {
           // something new happened - cache
           cache()
@@ -186,9 +186,9 @@ var async_fn = async (ws, inputType, args) => {
             me.send(me.next_member(true), 'tx', r([raw]))
           } else {
             // time to broadcast our next batch then. (Delay to ensure validator processed the block)
-            //setTimeout(() => {
-            me.broadcast()
-            //}, 500)
+            setTimeout(() => {
+              me.broadcast()
+            }, 1000)
           }
         }
       }

@@ -409,7 +409,7 @@ export default {
   
   <div>
 <div style="background-color: #FFFDDE; border:thin solid #EDDD00">
-  <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days. Mainnet launch: August 24, 2018.</p> 
+  <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days. Mainnet: August 24, 2018.</p> 
 </div>
 
 
@@ -430,7 +430,7 @@ export default {
             <a class="nav-link" @click="go('wallet')">💰 Wallet</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='credit' }">
-            <a class="nav-link" @click="go('credit')">💱 Credit Limits</a>
+            <a class="nav-link" @click="go('credit')">💳 Credit Limits</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
@@ -447,16 +447,21 @@ export default {
             <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">🔍 Explorers
         <span class="caret"></span></a>
             <ul class="dropdown-menu">
-              <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">Blockchain</a></li>
-              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">Accounts</a></li>
-              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect channels between different users and hubs">Channels</a></li>
-              <li><a class="nav-link" @click="go('hashlocks')">Hashlocks</a></li>
-              <li><a class="nav-link" @click="go('validators')">Validators</a></li>
-              <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">Network</a></li>
-              <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">Governance</a></li>
-              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">Assets</a></li>
-              <li><a class="nav-link" @click="go('hubs')" title="Hubs that instantly process payments. Run your own!">Hubs</a></li>
-              <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">Metrics</a></li>
+              <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">📖 Blockchain</a></li>
+
+              <li><a class="nav-link" @click="go('validators')">🤵 Validators</a></li>
+
+              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 Assets</a></li>
+              <li><a class="nav-link" @click="go('hubs')" title="Hubs that instantly process payments. Run your own!">⚡️ Hubs</a></li>
+
+
+              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">👨‍💼 Accounts</a></li>
+              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect channels between different users and hubs">💸 Channels</a></li>
+              <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
+              <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">💡 Governance</a></li>
+              <li><a class="nav-link" @click="go('hashlocks')">🔐 Hashlocks</a></li>
+
+              <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">🎛 Node Metrics</a></li>
             </ul>
           </li>
         </ul>
@@ -518,7 +523,7 @@ export default {
         <h1>Network</h1>
 
 
-        <h2>Current network settings</h2>
+        <h2>General settings</h2>
         <p>Blocktime: {{K.blocktime}} seconds</p>
         <p>Blocksize: {{K.blocksize}} bytes</p>
         <p>Account creation fee (pubkey registration): {{commy(K.account_creation_fee)}}</p>
@@ -569,7 +574,7 @@ export default {
 
 
           <template v-for="(ch, index) in channels" v-if="ch.d.asset == asset" >
-            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}} <span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
+            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}<span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
             <small v-if="ch.payable > 0">
               = {{commy(ch.insurance)}} insurance 
               {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
@@ -654,7 +659,7 @@ export default {
           <p>Make sure your password is unique, strong and you won't forget it, otherwise access to your account is lost. If in doubt, write it down or email it to yourself - <b>password recovery is impossible.</b></p>
           <label for="inputPassword" class="sr-only">Password</label>
           <input v-model="pw" type="password" id="inputPassword" class="form-control" placeholder="Password" required>
-          <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Log In</button>
+          <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Generate Wallet</button>
         </form>
       </div>
       <div v-else-if="pubkey && tab=='credit'">
@@ -765,29 +770,27 @@ export default {
 
 
 
-        <form v-if="auth_code && record && getAsset(1) > 200">
-          <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
-          <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
-          </p>
-          <p>Asset you are buying (you have {{commy(getAsset(order.buyAssetId))}}):</p>
-          <p>
-            <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
-              <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.name}} ({{a.ticker}})</option>
-            </select>
-          </p>
+        <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
+        </p>
+        <p>Asset you are buying (you have {{commy(getAsset(order.buyAssetId))}}):</p>
+        <p>
+          <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
+            <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.name}} ({{a.ticker}})</option>
+          </select>
+        </p>
 
-          <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
-          <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"  @input="estimate(false)"></p>
+        <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate"  @input="estimate(false)"></p>
 
-          <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
-          <p><input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)"></p>
+        <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
+        <p><input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)"></p>
 
-          <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
+        <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
 
-          <p>
-            <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
-          </p>
-        </form>
+        <p v-if="auth_code && record && getAsset(1) > 200">
+          <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
+        </p>
         <p v-else>In order to trade you must have a registered account with FRD balance.</p>
 
 
@@ -1059,27 +1062,31 @@ export default {
       <div v-else-if="tab=='assets'">
         <h1>Assets</h1>
         <p>Digital assets is the name for all kinds of currencies, tokens, stock and colored coins you can create on top of the system.</p>
-        <template v-if="record">
 
-          <div class="form-group">
 
-            <p><label for="comment">Name:</label>
-            <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input></p>
+        <div class="form-group">
 
-            <p><label for="comment">Ticker (must be unique):</label>
-            <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input></p>
-            
-            <p><label for="comment">Amount:</label>
-            <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input></p>
+          <p><label for="comment">Name:</label>
+          <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input></p>
 
-            <p><label for="comment">Description:</label>
-            <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input></p>
-
-            <p><button class="btn btn-success" @click="call('createAsset', new_asset)">Create Asset</button></p>
-            
-          </div>
+          <p><label for="comment">Ticker (must be unique):</label>
+          <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input></p>
           
-        </template>
+          <p><label for="comment">Amount:</label>
+          <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Description:</label>
+          <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input></p>
+
+          <p v-if="record"><button class="btn btn-success" @click="call('createAsset', new_asset)">Create Asset</button></p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+
+          <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can rebalance it to a channel with a hub and start sending instantly to other users.</div>
+          
+        </div>
+          
+
+
 
 
 

@@ -504,8 +504,9 @@ module.exports = async (tx, meta) => {
           //minting new tokens to issuer's onchain balance
           exists.total_supply += amount
           signer.asset(exists.id, amount)
+          await exists.save()
 
-          parsed_tx.events.push([method, [ticker, amount]])
+          parsed_tx.events.push([method, ticker, amount])
         } else {
           l('Invalid issuer tries to mint')
         }
@@ -520,7 +521,11 @@ module.exports = async (tx, meta) => {
         })
 
         signer.asset(new_asset.id, amount)
-        parsed_tx.events.push([method, [ticker, amount]])
+        parsed_tx.events.push([
+          method,
+          new_asset.ticker,
+          new_asset.total_supply
+        ])
       }
     } else if (method == 'createHub') {
     } else if (method == 'createOrder') {

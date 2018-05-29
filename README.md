@@ -2,39 +2,32 @@
 
 [![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
 
-# Failsafe
+# Fairlayer
 
-Failsafe is a new **scalable blockchain** that comes with Lightning-inspired offchain layer out-of-box. It fixes the liquidity problem - Failsafe state channels support transfering beyond the capacity (insurance), which induces manageable risk and removes scalability caps.
+Fairlayer is a new **scalable blockchain** that comes with Lightning-inspired offchain layer out-of-box. It fixes the liquidity problem - Fairlayer state channels support transfering beyond the capacity (insurance), which induces manageable risk and removes scalability caps.
 
-Failsafe has no virtual machine for smart contracts, instead uses onchain governance and  amendments to implement new functionality.
+Fairlayer has no virtual machine for smart contracts, instead uses onchain governance and amendments to implement new functionality.
 
-Failsafe has **a native token FSD to pay for transaction fees** and hub fees for transfer mediations, but the goal is to focus on 3rd party issued tokens (just like issuances in Ripple): **to move bank-backed and government-backed fiat currencies to our blockchain** which ensures fairness and security of first layer yet providing all the needed controls and introspection for financial institutions to remain compliant.
+Fairlayer has **a native token FSD to pay for transaction fees** and hub fees for transfer mediations, but the goal is to focus on 3rd party issued tokens (just like issuances in Ripple): **to move bank-backed and government-backed fiat currencies to our blockchain** which ensures fairness and security of first layer yet providing all the needed controls and introspection for financial institutions to remain compliant.
 
-Unlike "fake" bloated blockchains with high tps, in Failsafe the tokens are transfered instantly **offchain through the hubs** and hubs are responsible for rebalancing "insurances" onchain to reduce the collective risk over time. **This allows 1,000,000+ transactions per second with a hub-and-spoke topology of hubs.** It is the same how the Internet topology looks like, and it also has no central point of failure.
+Unlike "fake" bloated blockchains with high tps, in Fairlayer the tokens are transfered instantly **offchain through the hubs** and hubs are responsible for rebalancing "insurances" onchain to reduce the collective risk over time. **This allows unlimited transactions per second with a hub-and-spoke topology of hubs.** Not 100k tps, not 300k, not 1M, it is in fact unlimited.
+
+It is the same how the Internet topology looks like, and it has no central point of failure.
 
 You can think of it as FDIC insurance, but not up to a specific amount of $250k - instead it can be any user-chosen amount, and the rules are seamlessly enforced by the blockchain instead of the government. You can always enforce and take your money from one hub and send to another.
 
 ## Local Simulation
 
-Look into `./simulate` and install ttab for convenient debugging. 
+`./install` then run `./simulate` to bootstrap local dev blockchain with 4 validators on different ports (8443, 8001, 8002, 8003). Look into `tools/genesis.js` for all the configurable network parameters such as blocksize or timeouts. Install ttab for convenient debugging.
 
-Basically it creates new root member and copy-pastes the folder into 8001, 8002 etc, folder name is the port for convenience. See Testnet for different things that can be tested.
+## Wiki
 
-## What is it? Docs?
+See <a href="https://github.com/fairlayer/fair/wiki">Wiki</a>
 
-Work in progress. Full RFC before late April.
+## Tests
 
-See <a href="https://github.com/failsafenetwork/failsafe/wiki">Wiki</a>
+Fairlayer ./simulate is one giant e2e test. Different users at different times turn on different times and verify the result with setTimeout. Some of the things that are tested:
 
-## Codestyle
+1.  onchain consensus
 
-* async/await is the only way to keep your sanity using JS
-
-* return early, don't stack elses on each other http://blog.timoxley.com/post/47041269194/avoid-else-return-early
-
-* deleted code is best code. Keep complexity/LOC as low as possible
-
-
-
-
-
+2)  offchain payments

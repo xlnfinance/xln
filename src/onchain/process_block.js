@@ -102,15 +102,18 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     )
 
   // todo: define what is considered a "usable" block
-  if (ordered_tx_body.length < K.blocksize - 1000) {
+  if (ordered_tx_body.length < K.blocksize - 10000) {
     K.usable_blocks++
+    var is_usable = true
+  } else {
+    var is_usable = false
   }
 
   K.total_tx += ordered_tx.length
   K.total_bytes += ordered_tx_body.length
   K.bytes_since_last_snapshot += ordered_tx_body.length
 
-  // Every x blocks create new installer
+  // When "tail" gets too long, create new snapshot
   if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
     K.bytes_since_last_snapshot = 0
 
@@ -119,54 +122,63 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     K.last_snapshot_height = K.total_blocks
   }
 
-  // Auto resolving disputes that are due
-  all.push(
-    Insurance.findAll({
-      where: {dispute_delayed: K.usable_blocks},
+  // >>> Automatic crontab-like tasks <<<
+  // Note that different tasks have different timeouts
+
+  if (is_usable && K.usable_blocks % 20 == 0) {
+    // Auto resolving disputes that are due
+    all.push(
+      Insurance.findAll({
+        where: {dispute_delayed: {[Op.lte]: K.usable_blocks}},
+        include: {all: true}
+      }).then(async (insurances) => {
+        for (let ins of insurances) {
+          meta.cron.push(['autodispute', ins, await ins.resolve()])
+        }
+      })
+    )
+  }
+
+  if (is_usable && K.usable_blocks % 100 == 0) {
+    // Executing onchaing gov proposals that are due
+    let jobs = await Proposal.findAll({
+      where: {delayed: {[Op.lte]: K.usable_blocks}},
       include: {all: true}
-    }).then(async (insurances) => {
-      for (let ins of insurances) {
-        meta.cron.push(['autodispute', ins, await ins.resolve()])
-      }
     })
-  )
 
-  // Executing onchaing gov proposals that are due
-  let jobs = await Proposal.findAll({
-    where: {delayed: K.usable_blocks},
-    include: {all: true}
-  })
-
-  for (let job of jobs) {
-    var approved = 0
-    for (let v of job.voters) {
-      var voter = K.members.find((m) => m.id == v.id)
-      if (v.vote.approval && voter) {
-        approved += voter.shares
-      } else {
-        // TODO: denied? slash some votes?
+    for (let job of jobs) {
+      var approved = 0
+      for (let v of job.voters) {
+        var voter = K.members.find((m) => m.id == v.id)
+        if (v.vote.approval && voter) {
+          approved += voter.shares
+        } else {
+          // TODO: denied? slash some votes?
+        }
       }
-    }
 
-    if (approved >= K.majority) {
-      await job.execute()
-      meta.cron.push(['executed', job.desc, job.code, job.patch])
-    }
+      if (approved >= K.majority) {
+        await job.execute()
+        meta.cron.push(['executed', job.desc, job.code, job.patch])
+      }
 
-    await job.destroy()
+      await job.destroy()
+    }
+  }
+
+  if (is_usable && K.usable_blocks % 100 == 0) {
+    // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
+    all.push(
+      Hashlock.destroy({
+        where: {
+          delete_at: {[Op.lte]: K.usable_blocks}
+        }
+      })
+    )
   }
 
   // saving current proposer and their fees earned
-  await meta.proposer.save()
-
-  // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
-  all.push(
-    Hashlock.destroy({
-      where: {
-        delete_at: K.usable_blocks
-      }
-    })
-  )
+  all.push(meta.proposer.save())
 
   await Promise.all(all)
 
