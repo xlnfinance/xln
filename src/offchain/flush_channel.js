@@ -152,7 +152,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
         ch.d.nonce++
 
         transitions.push([
-          methodMap(t.type),
+          map(t.type),
           args,
           ec(r(refresh(ch)), me.id.secretKey)
         ])
@@ -178,7 +178,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
     // transitions: method, args, sig, new state
     let envelope = me.envelope(
-      methodMap('update'),
+      map('update'),
       asset,
       ackSig,
       transitions,

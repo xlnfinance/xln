@@ -265,7 +265,7 @@ module.exports = async (ws, msg) => {
           m,
           'setLimits',
           me.envelope(
-            methodMap('setLimits'),
+            map('setLimits'),
             ch.d.asset,
             ch.d.soft_limit,
             ch.d.hard_limit

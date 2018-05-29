@@ -28,7 +28,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return false
   }
 
-  if (readInt(methodId) != methodMap('propose')) {
+  if (readInt(methodId) != map('propose')) {
     return l('Wrong method for block')
   }
 
@@ -62,7 +62,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   let shares = 0
-  let precommit_body = r([methodMap('precommit'), header])
+  let precommit_body = r([map('precommit'), header])
   for (let i = 0; i < Members.length; i++) {
     if (
       precommits[i].length == 64 &&

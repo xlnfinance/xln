@@ -109,7 +109,7 @@ ascii_state = (state) => {
 ascii_tr = (transitions) => {
   try {
     for (var t of transitions) {
-      var m = methodMap(readInt(t[0]))
+      var m = map(readInt(t[0]))
 
       if (m == 'add') {
         var info = `add ${readInt(t[1][0])} ${trim(t[1][1])} ${readInt(
@@ -306,7 +306,7 @@ usage = () => {
 }
 
 // enumerator of all methods and tx types in the system
-methodMap = (i) => {
+map = (i) => {
   let map = [
     'placeholder',
 

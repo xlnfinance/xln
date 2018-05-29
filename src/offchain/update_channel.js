@@ -120,7 +120,7 @@ module.exports = async (
   //ascii_tr(transitions)
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (let t of transitions) {
-    let m = methodMap(readInt(t[0]))
+    let m = map(readInt(t[0]))
 
     if (m == 'add' || m == 'addrisk') {
       let [amount, hash, exp, destination, unlocker] = t[1]

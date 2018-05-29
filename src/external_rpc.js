@@ -17,7 +17,7 @@ var async_fn = async (ws, inputType, args) => {
   if (inputType == 'auth') {
     var [pubkey, sig, body] = args
 
-    if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
+    if (ec.verify(r([map('auth')]), sig, pubkey)) {
       //if (pubkey.equals(me.pubkey)) return false
 
       // wrap in custom WebSocketClient if it is a raw ws object
@@ -126,13 +126,7 @@ var async_fn = async (ws, inputType, args) => {
       return
     }
 
-    if (
-      ec.verify(
-        r([methodMap(inputType), me.proposed_block.header]),
-        sig,
-        pubkey
-      )
-    ) {
+    if (ec.verify(r([map(inputType), me.proposed_block.header]), sig, pubkey)) {
       m[inputType] = sig
       //l(`Received ${inputType} from ${m.id}`)
     } else {
@@ -213,7 +207,7 @@ var async_fn = async (ws, inputType, args) => {
         return [r(b.precommits), b.header, b.ordered_tx_body]
       })
 
-      ws.send(concat(bin(methodMap('chain')), r(chain)))
+      ws.send(concat(bin(map('chain')), r(chain)))
     } else {
       // l("No blocks to sync after " + msg.toString('hex'))
     }
@@ -226,7 +220,7 @@ var async_fn = async (ws, inputType, args) => {
 
     if (
       !ec.verify(body, sig, pubkey) ||
-      readInt(limits[0]) != methodMap('setLimits')
+      readInt(limits[0]) != map('setLimits')
     ) {
       l('Invalid message')
       return false
@@ -266,7 +260,7 @@ var async_fn = async (ws, inputType, args) => {
     }
 
     var withdrawal = r([
-      methodMap('withdrawFrom'),
+      map('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
@@ -294,7 +288,7 @@ var async_fn = async (ws, inputType, args) => {
     var ch = await me.getChannel(pubkey, asset)
 
     var withdrawal = [
-      methodMap('withdrawFrom'),
+      map('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.nonce,
@@ -326,7 +320,7 @@ var async_fn = async (ws, inputType, args) => {
     // then each transitions contains an action and an ackSig after action is committed
     // debugState/signedState are purely for debug phase
     let [method, asset, ackSig, transitions, debugState, signedState] = r(body)
-    if (methodMap(readInt(method)) != 'update') {
+    if (map(readInt(method)) != 'update') {
       loff('Invalid update input')
       return false
     }
@@ -386,5 +380,5 @@ module.exports = (ws, msg) => {
 
   var args = r(msg.slice(1))
 
-  async_fn(ws, methodMap(msg[0]), args)
+  async_fn(ws, map(msg[0]), args)
 }

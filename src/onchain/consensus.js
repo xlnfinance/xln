@@ -86,7 +86,7 @@ module.exports = async () => {
           var ordered_tx_body = r(ordered_tx)
 
           var header = r([
-            methodMap('propose'),
+            map('propose'),
             me.record.id,
             Buffer.from(K.prev_hash, 'hex'),
             ts(),
@@ -124,7 +124,7 @@ module.exports = async () => {
     var prevotable = me.proposed_block ? me.proposed_block.header : 0
 
     setTimeout(() => {
-      me.gossip('prevote', me.block_envelope(methodMap('prevote'), prevotable))
+      me.gossip('prevote', me.block_envelope(map('prevote'), prevotable))
     }, K.gossip_delay)
   } else if (me.status == 'prevote' && phase == 'precommit') {
     me.status = phase
@@ -154,7 +154,7 @@ module.exports = async () => {
       setTimeout(() => {
         me.gossip(
           'precommit',
-          me.block_envelope(methodMap('precommit'), precommitable)
+          me.block_envelope(map('precommit'), precommitable)
         )
       }, K.gossip_delay)
     }
@@ -191,7 +191,7 @@ module.exports = async () => {
       RPC.external_rpc(
         null,
         concat(
-          bin(methodMap('chain')),
+          bin(map('chain')),
           r([
             [
               precommits,
