@@ -1,13 +1,14 @@
 <script>
-import hljs from './hljs'
 import Identicon from 'identicon.js'
 
 import UserIcon from './UserIcon'
+import Highlight from './Highlight'
 import Whitepaper from './Whitepaper'
 
 export default {
   components: {
     UserIcon,
+    Highlight,
     Whitepaper
   },
   mounted() {
@@ -161,7 +162,6 @@ export default {
       }
       pay()
     },
-    hljs: hljs,
 
     ivoted: (voters) => {
       return voters.find((v) => v.id == app.record.id)
@@ -833,7 +833,9 @@ export default {
         <p><b>This website is merely an explorer and does not have any "registration". In fact, avoid any "online wallets" and only use this local wallet with no dependance on 3rd parties.</b> Convenience is valuable to us but strong security model is paramount.</p>
 
         <p>Our decentralized install is slightly longer than just downloading an executable program. First, you need <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
-        <pre style="background-color: #FFFDDE; padding: 20px;"><code>{{install_snippet}}</code></pre>
+        <div style="background-color: #FFFDDE; padding: 20px;">
+          <Highlight :white="true" lang="bash" :code="install_snippet"></Highlight>
+        </div>
         <p>Visually verify it with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal.app</p>
         <ul>
           <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
@@ -865,10 +867,12 @@ export default {
           <h4>#{{p.id}}: {{p.desc}}</h4>
           <small>Proposed by #{{p.user.id}}</small>
           <div v-html="icon(p.user.pubkey, 30)"></div>
-          <pre><code class="javascript hljs" v-html="hljs('javascript',p.code).value"></code></pre>
+          <Highlight lang="javascript" :code="p.code"></Highlight>
           <div v-if="p.patch">
             <hr>
-            <pre style="line-height:15px; font-size:12px;"><code class="diff hljs"  v-html="hljs('diff',p.patch).value"></code></pre>
+            <div style="line-height:15px; font-size:12px;">
+              <Highlight lang="diff" :code="p.patch"></Highlight>
+            </div>
           </div>
           <p v-for="u in p.voters">
             <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
