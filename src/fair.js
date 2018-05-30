@@ -216,7 +216,7 @@ initDashboard = async (a) => {
     bundler = serveStatic(path.resolve(__dirname, '../dist'))
   } else {
     let Parcel = require('parcel-bundler')
-    bundler = new Parcel('wallet/index.html', {
+    bundler = new Parcel('../wallet/index.html', {
       logLevel: 2
       // for more options https://parceljs.org/api.html
     }).middleware()
