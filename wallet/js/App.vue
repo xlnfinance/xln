@@ -1,12 +1,13 @@
-</script>
 <script>
 import hljs from 'highlight.js'
 import Identicon from 'identicon.js'
 
+import UserIcon from './UserIcon'
 import Whitepaper from './Whitepaper'
 
 export default {
   components: {
+    UserIcon,
     Whitepaper
   },
   mounted() {
@@ -95,6 +96,8 @@ export default {
         `K.blocksize += 1000000;`,
         ''
       ],
+
+      proposals: [],
 
       settings: !localStorage.settings,
 
@@ -493,7 +496,7 @@ export default {
       </div>
 
       <div v-if="tab==''">
-        <Whitepaper />
+        <Whitepaper></Whitepaper>
       </div>
       <div v-else-if="tab=='metrics'">
         <h2>Node Metrics</h2>
@@ -868,7 +871,7 @@ export default {
             <pre style="line-height:15px; font-size:12px;"><code class="diff hljs"  v-html="hljs('diff',p.patch).value"></code></pre>
           </div>
           <p v-for="u in p.voters">
-            <div v-html="icon(u.pubkey,30)"></div>
+            <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
             <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by #{{u.id}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
           </p>
           <small>To be executed at {{p.delayed}} usable block</small>
