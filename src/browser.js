@@ -123,7 +123,7 @@ react = async (result = {}, force = true) => {
         limit: 300
       }),
       me.channels(),
-      me.byKey()
+      User.idOrKey(bin(me.id.publicKey))
     ])
 
     /*

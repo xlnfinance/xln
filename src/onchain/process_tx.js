@@ -4,9 +4,10 @@
 module.exports = async (tx, meta) => {
   var [id, sig, body] = r(tx)
 
-  var signer = await User.findById(readInt(id))
+  var signer = await User.idOrKey(readInt(id))
 
-  if (!signer) {
+  if (!signer || !signer.id) {
+    l(id, signer)
     return {error: "This user doesn't exist"}
   }
 
@@ -579,7 +580,7 @@ module.exports = async (tx, meta) => {
 
         //l('Suitable order', we_buy, they_buy, their)
 
-        var seller = await User.findById(their.userId)
+        var seller = await User.idOrKey(their.userId)
         if (we_buy > their.amount) {
           // close their order. give seller what they wanted
           seller.asset(their.buyAssetId, they_buy)

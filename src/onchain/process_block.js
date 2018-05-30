@@ -16,7 +16,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   built_by = readInt(built_by)
   prev_hash = toHex(prev_hash)
 
-  var proposer = await User.findById(built_by)
+  var proposer = await User.idOrKey(built_by)
 
   if (!proposer) {
     l(`This user doesnt exist ${built_by}`)

@@ -78,19 +78,15 @@ module.exports = async (ws, msg) => {
               var userId = Buffer.from(to[0], 'hex')
 
               // maybe this pubkey is already registred?
-              var u = await User.findOne({
-                where: {
-                  pubkey: userId
-                }
-              })
+              var u = await User.idOrKey(userId)
 
-              if (u) {
+              if (u.id) {
                 userId = u.id
               }
             } else {
               var userId = parseInt(to[0])
 
-              var u = await User.findById(userId)
+              var u = await User.idOrKey(userId)
 
               if (!u) {
                 result.alert =

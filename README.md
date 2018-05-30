@@ -30,4 +30,21 @@ Fairlayer ./simulate is one giant e2e test. Different users at different times t
 
 1.  onchain consensus
 
-2)  offchain payments
+1.1 1 validator is byzantine.
+
+2.  offchain payments
+
+Perfect way to run new code against old blockchain:
+
+```
+rm -rf fs
+id=fs
+f=Failsafe-1.tar.gz
+mkdir $id && cd $id && curl https://failsafe.network/$f -o $f
+tar -xzf $f && rm $f
+ln -s ~/work/fs/node_modules
+ln -s ~/work/fs/wallet/node_modules wallet/node_modules
+rm -rf ./src
+ln -s ~/work/fs/src
+node fs -p8001
+```

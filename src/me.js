@@ -75,24 +75,10 @@ class Me {
     return me.pubkey && me.pubkey.equals(pubkey)
   }
 
-  async byKey(pk) {
-    if (!pk) {
-      if (this.id) {
-        pk = this.id.publicKey
-      } else {
-        return false
-      }
-    }
-
-    return await User.findOne({
-      where: {pubkey: bin(pk)}
-    })
-  }
-
   // adds tx to batch, signs and broadcasts
   async broadcast() {
     // we select our record again to get our current nonce
-    me.record = await me.byKey()
+    me.record = await User.idOrKey(bin(me.id.publicKey))
     if (!me.record) {
       //l("You can't broadcast if you are not registred")
       return false
@@ -223,7 +209,7 @@ class Me {
 
   async start() {
     // in json pubkeys are in hex
-    this.record = await this.byKey()
+    this.record = await User.idOrKey(bin(me.id.publicKey))
 
     if (this.record) {
       this.my_member = Members.find((m) => m.id == this.record.id)

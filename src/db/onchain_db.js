@@ -148,15 +148,37 @@ Proposal.belongsTo(User)
 Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
 // >>> Model methods
-// some buffers are full pubkeys, some can be short id to save bytes
+// some buffers are full pubkeys, some can be id (number/buffer) to save bytes
+cached_users = []
 User.idOrKey = async function(id) {
-  if (id.length == 32) {
-    return (await User.findOrBuild({
+  if (typeof id != 'number' && id.length != 32) {
+    id = readInt(id)
+  }
+
+  var u = cached_users.find((u) => {
+    if (typeof id == 'number') {
+      return u.id == id
+    } else {
+      return u.pubkey.equals(id)
+    }
+  })
+
+  //if (u) return u
+
+  if (typeof id == 'number') {
+    u = await User.findById(id)
+  } else {
+    // buffer
+    u = (await User.findOrBuild({
       where: {pubkey: id}
     }))[0]
-  } else {
-    return await User.findById(readInt(id))
   }
+
+  if (u) {
+    cached_users.push(u)
+  }
+
+  return u
 }
 
 User.prototype.asset = function(asset, diff) {
@@ -188,7 +210,7 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
   let debts = await this.getDebts()
 
   for (let d of debts) {
-    var u = await User.findById(d.oweTo)
+    var u = await User.idOrKey(d.oweTo)
 
     if (d.amount_left <= this.asset(asset)) {
       this.asset(asset, -d.amount_left)
@@ -273,8 +295,8 @@ Insurance.prototype.resolve = async function() {
     true
   )
 
-  var left = await User.findById(this.leftId)
-  var right = await User.findById(this.rightId)
+  var left = await User.idOrKey(this.leftId)
+  var right = await User.idOrKey(this.rightId)
 
   // splitting insurance between users
   left.asset(this.asset, resolved.insured)

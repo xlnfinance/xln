@@ -90,10 +90,12 @@ module.exports = async (pubkey, asset, delta = false) => {
       }
     }
 
-    let user = await User.findOne({
+    let user = await User.idOrKey(pubkey)
+    /*({
       attributes: ['id'],
       where: {pubkey: pubkey}
-    })
+    })*/
+
     if (user) {
       ch.partner = user.id
       if (me.record) {
