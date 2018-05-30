@@ -1,7 +1,20 @@
 #!/bin/bash
+
+# set -x
 set -o nounset
 set -o errexit
 set -o pipefail
+
+
+db=--db=mysql:root:123123
+#db=--db=postgres:postgres:123123
+pm2_opts=--no-autorestart
+maxport=8008
+fs_cluster_args="--wallet-dist $db --color --silent --monkey=$maxport"
+
+if [[ `node -v` =~ v10 ]]; then
+  nodeflags=--experimental-repl-await
+fi
 
 # Rotate logs for clarity
 if [ -f /etc/logrotate.d/pm2-root ]; then
@@ -14,25 +27,23 @@ rm -rf data*
 ./install
 npm run build
 
-db=mysql:root:123123
-#db=postgres:postgres:123123
-maxport=8008
 
 #--node-args="--prof"
 
 pm2 delete all || true
 killall Failsafe 2>/dev/null || true
 
-node fs --genesis=test --db=$db
-pm2 start fs.js --no-autorestart --name fs -- -p443 --silent --wallet-dist --db=$db --monkey=$maxport
+node fs.js --genesis=test $db
+fs_node_args=-p443
+pm2 start $pm2_opts --name fs fs.js -- $fs_cluster_args $fs_node_args
 
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i
-  cmd="pm2 start fs.js --no-autorestart --name fs$i -- -p$i --username=$i --pw=password --silent --datadir=data$i --wallet-dist --db=$db"
+  fs_node_args="-p$i --username=$i --pw=password --datadir=data$i"
   if (( i < 8004 )); then
-    ${cmd} --monkey=$maxport
+    pm2 start $pm2_opts --name fs$i fs.js -- $fs_cluster_args $fs_node_args
   else
-    ${cmd} --monkey=$maxport
+    pm2 start $pm2_opts --name fs$i fs.js -- $fs_cluster_args $fs_node_args
   fi
 done
 
