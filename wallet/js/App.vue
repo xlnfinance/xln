@@ -1,5 +1,5 @@
 <script>
-import hljs from 'highlight.js'
+import hljs from './hljs'
 import Identicon from 'identicon.js'
 
 import UserIcon from './UserIcon'
@@ -161,7 +161,7 @@ export default {
       }
       pay()
     },
-    hljs: hljs.highlight,
+    hljs: hljs,
 
     ivoted: (voters) => {
       return voters.find((v) => v.id == app.record.id)
