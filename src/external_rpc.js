@@ -7,9 +7,9 @@ var async_fn = async (ws, inputType, args) => {
 
   // ignore some too frequest RPC commands
   /*if (
-    ['update', 'chain', 'sync', 'propose', 'prevote', 'precommit'].indexOf(
+    ['update', 'chain', 'sync', 'propose', 'prevote', 'precommit'].includes(
       inputType
-    ) == -1
+    )
   )*/
 
   //l('External RPC: ' + inputType)
@@ -182,7 +182,7 @@ var async_fn = async (ws, inputType, args) => {
             // time to broadcast our next batch then. (Delay to ensure validator processed the block)
             setTimeout(() => {
               me.broadcast()
-            }, 1000)
+            }, 2000)
           }
         }
       }

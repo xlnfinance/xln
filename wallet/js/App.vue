@@ -669,7 +669,7 @@ export default {
         <h3>Credit Limits</h3>
         <select v-model="partner" class="custom-select custom-select-lg mb-3">
           <option disabled>Select current hub</option>
-          <option v-for="(a,index) in channels" v-if="a.d.asset == asset" :value="a.partner">{{a.hub.handle}}</option>
+          <option v-for="(a,index) in channels" v-if="a.d.asset == asset" :value="a.partner">@{{a.hub.handle}}</option>
         </select>
 
         <template v-if="ch">

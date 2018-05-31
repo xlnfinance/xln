@@ -35,7 +35,7 @@ module.exports = async () => {
         ) {
           to_reveal.push(inward.secret)
         } else {
-          l('Already unlocked')
+          l('Already unlocked in ', ch.d.dataValues)
         }
       }
     }

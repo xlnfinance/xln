@@ -24,7 +24,11 @@ User = sequelize.define(
   'user',
   {
     username: Sequelize.STRING, // to be used in DNS later, currently barely used
-
+    // saves time to select Debts
+    has_debts: {
+      type: Sequelize.BOOLEAN,
+      defaultValue: false
+    },
     pubkey: Sequelize.CHAR(32).BINARY,
     nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
@@ -120,7 +124,8 @@ Hashlock = sequelize.define(
 )
 
 // Assets represent all numerical balances: currencies, tokens, shares, stocks.
-// Anyone can create and issue their own asset (like ERC20, but less programmable due to lack of VM)
+// Anyone can create a new asset
+
 Asset = sequelize.define('asset', {
   ticker: Sequelize.TEXT,
   name: Sequelize.TEXT,
@@ -163,7 +168,7 @@ User.idOrKey = async function(id) {
     }
   })
 
-  //if (u) return u
+  if (u) return u
 
   if (typeof id == 'number') {
     u = await User.findById(id)
@@ -255,6 +260,47 @@ Proposal.prototype.execute = async function() {
       l(e)
     }
   }
+}
+
+// you cannot really reason about who owns what by looking at onchain db only (w/o offdelta)
+// but the hubs with higher sum(insurance) locked around them are more trustworthy
+// and users probably own most part of insurances around them
+Insurance.sumForUser = async function(id, asset = 1) {
+  var sum = Insurance.sum('insurance', {
+    where: {
+      [Op.or]: [{leftId: id}, {rightId: id}],
+      asset: asset
+    }
+  })
+  return sum > 0 ? sum : 0
+}
+
+// get an insurance between two user objects
+cached_ins = {}
+Insurance.btw = async function(user1, user2, asset = 1) {
+  if (user1.pubkey.length != 32 || user2.pubkey.length != 32) {
+    return false
+  }
+
+  var compared = Buffer.compare(user1.pubkey, user2.pubkey)
+  if (compared == 0) return false
+
+  var wh = {
+    leftId: compared == -1 ? user1.id : user2.id,
+    rightId: compared == -1 ? user2.id : user1.id,
+    asset: asset
+  }
+  var str = stringify([wh.leftId, wh.rightId, wh.asset])
+
+  var ins = cached_ins[str]
+  //if (ins) return ins
+
+  ins = (await Insurance.findOrBuild({
+    where: wh
+  }))[0]
+
+  cached_ins[str] = ins
+  return ins
 }
 
 Insurance.prototype.resolve = async function() {

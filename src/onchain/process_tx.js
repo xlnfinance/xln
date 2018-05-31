@@ -109,15 +109,9 @@ module.exports = async (tx, meta) => {
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
         if (compared == 0) continue
 
-        var ins = await Insurance.findOne({
-          where: {
-            leftId: compared == -1 ? signer.id : partner.id,
-            rightId: compared == -1 ? partner.id : signer.id,
-            asset: asset
-          }
-        })
+        var ins = await Insurance.btw(signer, partner, asset)
 
-        if (!ins || amount > ins.insurance) {
+        if (!ins || !ins.id || amount > ins.insurance) {
           l(`Invalid amount ${ins.insurance} vs ${amount}`)
           continue
         }
@@ -143,13 +137,13 @@ module.exports = async (tx, meta) => {
         ins.insurance -= amount
         // if signer is left and reduces insurance, move ondelta to the left too
         // .====| reduce insurance .==--| reduce ondelta .==|
-        if (compared == -1) ins.ondelta -= amount
+        if (signer.id == ins.leftId) ins.ondelta -= amount
 
         signer.asset(asset, amount)
 
         ins.nonce++
 
-        await ins.save()
+        await saveId(ins)
 
         // was this input related to us?
         if (me.record && [partner.id, signer.id].includes(me.record.id)) {
@@ -199,7 +193,7 @@ module.exports = async (tx, meta) => {
         var partner = await User.idOrKey(id)
         if (!partner || !partner.id) {
           l('Your partner is not registred')
-          await partner.save()
+          await saveId(partner)
         }
 
         var compared = Buffer.compare(signer.pubkey, partner.pubkey)
@@ -208,14 +202,7 @@ module.exports = async (tx, meta) => {
           continue
         }
 
-        var ins = (await Insurance.findOrBuild({
-          where: {
-            leftId: compared == -1 ? signer.id : partner.id,
-            rightId: compared == -1 ? partner.id : signer.id,
-            asset: asset
-          },
-          include: {all: true}
-        }))[0]
+        var ins = await Insurance.btw(signer, partner, asset)
 
         if (sig) {
           if (!ec.verify(state, sig, partner.pubkey)) {
@@ -295,7 +282,7 @@ module.exports = async (tx, meta) => {
             resolveChannel(ins.insurance, ins.ondelta + offdelta)
           ])
 
-          await ins.save()
+          await saveId(ins)
 
           if (me.is_me(partner.pubkey)) {
             l('Channel with us is disputed')
@@ -329,7 +316,7 @@ module.exports = async (tx, meta) => {
           continue
         }
 
-        var giveTo = await User.idOrKey(output[1])
+        var depositTo = await User.idOrKey(output[1])
         var withPartner =
           output[2].length == 0 ? false : await User.idOrKey(output[2])
 
@@ -338,7 +325,7 @@ module.exports = async (tx, meta) => {
 
         // here we ensure both parties are registred, and take needed fees
 
-        if (!giveTo || !giveTo.id) {
+        if (!depositTo || !depositTo.id) {
           // you must be registered first using asset 1
           if (asset != 1) {
             l('Not 1 asset')
@@ -348,7 +335,7 @@ module.exports = async (tx, meta) => {
           if (!withPartner) {
             if (amount < K.account_creation_fee) continue
 
-            giveTo.asset(asset, amount - K.account_creation_fee)
+            depositTo.asset(asset, amount - K.account_creation_fee)
 
             signer.asset(asset, -amount)
           } else {
@@ -360,12 +347,12 @@ module.exports = async (tx, meta) => {
             var fee = K.standalone_balance + K.account_creation_fee
             if (amount < fee) continue
 
-            giveTo.asset(asset, K.standalone_balance)
+            depositTo.asset(asset, K.standalone_balance)
             amount -= fee
             //signer.asset(asset, -fee)
           }
 
-          await giveTo.save()
+          await saveId(depositTo)
 
           K.collected_tax += K.account_creation_fee
         } else {
@@ -383,19 +370,19 @@ module.exports = async (tx, meta) => {
               withPartner.asset(asset, K.standalone_balance)
               amount -= fee
               //signer.asset(asset, -fee)
-              await withPartner.save()
+              await saveId(withPartner)
               // now it has id
 
               /*
 
               if (me.is_me(withPartner.pubkey)) {
                 await me.addHistory(
-                  giveTo.pubkey,
+                  depositTo.pubkey,
                   -K.account_creation_fee,
                   'Account creation fee'
                 )
                 await me.addHistory(
-                  giveTo.pubkey,
+                  depositTo.pubkey,
                   -K.standalone_balance,
                   'Minimum global balance'
                 )
@@ -403,30 +390,24 @@ module.exports = async (tx, meta) => {
               */
             }
           } else {
-            if (giveTo.id == signer.id) {
+            if (depositTo.id == signer.id) {
               l('Trying to deposit to your onchain balance is pointless')
               continue
             }
-            giveTo.asset(asset, amount)
+            depositTo.asset(asset, amount)
             signer.asset(asset, -amount)
-            await giveTo.save()
+            await saveId(depositTo)
           }
         }
 
         if (withPartner && withPartner.id) {
-          var compared = Buffer.compare(giveTo.pubkey, withPartner.pubkey)
+          var compared = Buffer.compare(depositTo.pubkey, withPartner.pubkey)
           if (compared == 0) continue
 
-          var ins = (await Insurance.findOrBuild({
-            where: {
-              leftId: compared == -1 ? giveTo.id : withPartner.id,
-              rightId: compared == -1 ? withPartner.id : giveTo.id,
-              asset: asset
-            }
-          }))[0]
+          var ins = await Insurance.btw(depositTo, withPartner, asset)
 
           ins.insurance += amount
-          if (compared == -1) ins.ondelta += amount
+          if (depositTo.id == ins.leftId) ins.ondelta += amount
 
           // user is paying themselves for registration
           var regfees = readInt(output[0]) - amount
@@ -447,13 +428,15 @@ module.exports = async (tx, meta) => {
             // todo take from onchain balance instead
           }
 
-          await ins.save()
+          await saveId(ins)
 
-          if (me.is_me(withPartner.pubkey) || me.is_me(giveTo.pubkey)) {
+          if (me.is_me(withPartner.pubkey) || me.is_me(depositTo.pubkey)) {
             // hot reload
             // todo ensure it's in memory yet
             var ch = await me.getChannel(
-              me.is_me(withPartner.pubkey) ? giveTo.pubkey : withPartner.pubkey,
+              me.is_me(withPartner.pubkey)
+                ? depositTo.pubkey
+                : withPartner.pubkey,
               asset
             )
             ch.ins = ins
@@ -463,7 +446,7 @@ module.exports = async (tx, meta) => {
           /*
           if (me.is_me(withPartner.pubkey)) {
             await me.addHistory(
-              giveTo.pubkey,
+              depositTo.pubkey,
               -reimburse_tax,
               'Rebalance fee',
               true
@@ -473,7 +456,7 @@ module.exports = async (tx, meta) => {
         }
 
         // onchain payment for specific invoice (to us or one of our channels)
-        if (me.is_me(giveTo.pubkey) && invoice) {
+        if (me.is_me(depositTo.pubkey) && invoice) {
           // TODO: hook into SDK
 
           l('Invoice paid on chain ', invoice)
@@ -482,7 +465,7 @@ module.exports = async (tx, meta) => {
         parsed_tx.events.push([
           method,
           amount,
-          giveTo.id,
+          depositTo.id,
           withPartner ? withPartner.id : false,
           invoice ? toHex(invoice) : false
         ])
@@ -673,7 +656,7 @@ module.exports = async (tx, meta) => {
   }
 
   signer.nonce++
-  await signer.save()
+  await saveId(signer)
 
   meta['parsed_tx'].push(parsed_tx)
 

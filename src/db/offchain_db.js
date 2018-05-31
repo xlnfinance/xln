@@ -213,7 +213,7 @@ Payment.prototype.toLock = function() {
   return [this.amount, this.hash, this.exp]
 }
 
-Delta.prototype.saveState = function(state, ackSig) {
+Delta.prototype.verify = function(state, ackSig) {
   // canonical state representation
   var canonical = r(state)
   if (ec.verify(canonical, ackSig, this.partnerId)) {

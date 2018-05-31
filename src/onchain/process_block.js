@@ -139,7 +139,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     )
   }
 
-  if (is_usable && K.usable_blocks % 100 == 0) {
+  if (is_usable && K.usable_blocks % 200 == 0) {
     // Executing onchaing gov proposals that are due
     let jobs = await Proposal.findAll({
       where: {delayed: {[Op.lte]: K.usable_blocks}},
@@ -166,7 +166,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
   }
 
-  if (is_usable && K.usable_blocks % 100 == 0) {
+  if (is_usable && K.usable_blocks % 200 == 0) {
     // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
     all.push(
       Hashlock.destroy({
@@ -182,10 +182,11 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   await Promise.all(all)
 
-  // save final block in offchain db. Required for members, optional for everyone else (aka "pruning" mode)
+  // save final block in offchain history db
+  // Required for members/hubs, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
   if (me.my_member || !me.prune) {
-    await Block.create({
+    Block.create({
       prev_hash: fromHex(prev_hash),
       hash: sha3(header),
 
@@ -222,7 +223,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     // it's important to flush current K to disk before snapshot
     fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
 
-    var filename = 'Failsafe-' + K.total_blocks + '.tar.gz'
+    var filename = 'Fair-' + K.total_blocks + '.tar.gz'
 
     require('tar').c(
       {
@@ -256,7 +257,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       (_) => {
         if (old_height > 1) {
           // genesis state is stored for analytics and member bootstraping
-          fs.unlink(datadir + '/offchain/Failsafe-' + old_height + '.tar.gz')
+          fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz')
           l('Removed old snapshot and created ' + filename)
         }
         snapshotHash()

@@ -33,7 +33,7 @@ module.exports = async (
   prettyState(debugState)
   prettyState(signedState)
 
-  if (ch.d.saveState(refresh(ch), ackSig)) {
+  if (ch.d.verify(refresh(ch), ackSig)) {
     // our last known state has been ack.
     ch.payments.map((t, ind) => {
       if (t.status == 'sent') t.status = 'ack'
@@ -91,7 +91,7 @@ module.exports = async (
 
     */
 
-    if (ch.d.signed_state && ch.d.saveState(oldState, ackSig)) {
+    if (ch.d.signed_state && ch.d.verify(oldState, ackSig)) {
       if (trace) l(`Start merge with ${trim(pubkey)}`)
 
       ch.rollback = [
@@ -187,7 +187,7 @@ module.exports = async (
 
       // check new state and sig, save
       ch.d.nonce++
-      if (!ch.d.saveState(refresh(ch), t[2])) {
+      if (!ch.d.verify(refresh(ch), t[2])) {
         loff('Error: Invalid state sig add')
         logstates(ch.state, oldState, debugState, signedState)
 
@@ -304,7 +304,7 @@ module.exports = async (
       outward_hl.secret = outcome
 
       ch.d.nonce++
-      if (!ch.d.saveState(refresh(ch), t[2])) {
+      if (!ch.d.verify(refresh(ch), t[2])) {
         fatal('Error: Invalid state sig at ' + m)
         break
       }

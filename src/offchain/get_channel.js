@@ -99,6 +99,8 @@ module.exports = async (pubkey, asset, delta = false) => {
     if (user) {
       ch.partner = user.id
       if (me.record) {
+        ch.ins = await Insurance.btw(me.record, user, asset)
+        /*
         ch.ins = await Insurance.find({
           where: {
             leftId: ch.left ? me.record.id : user.id,
@@ -106,6 +108,7 @@ module.exports = async (pubkey, asset, delta = false) => {
             asset: asset
           }
         })
+        */
 
         /* convenient for tests to forget about insurance
         ch.ins = Insurance.build({

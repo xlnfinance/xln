@@ -78,9 +78,13 @@ class Me {
   // adds tx to batch, signs and broadcasts
   async broadcast() {
     // we select our record again to get our current nonce
+    if (!me.id) {
+      return false
+    }
+
     me.record = await User.idOrKey(bin(me.id.publicKey))
-    if (!me.record) {
-      //l("You can't broadcast if you are not registred")
+    if (!me.record || !me.record.id) {
+      l("You can't broadcast if you are not registred")
       return false
     }
 
@@ -385,27 +389,24 @@ class Me {
         setTimeout(async () => {
           // making sure in 30 sec that all test payments were successful by looking at the metrics
 
-          let monkey5 = await Insurance.findOne({
-            where: {
-              [Op.or]: [{leftId: 5}, {rightId: 5}]
-            }
-          })
+          await me.syncdb()
+
+          let monkey5 = await Insurance.sumForUser(5)
+
           // must be >100 after expected rebalance
           var alert = `${me.metrics.settle.total}/${me.metrics.fail.total}\n
 Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n
 Blocks: ${await Block.count()}\n
-Deltas: ${await Delta.count()}\n
 Payments: ${await Payment.count()}\n
 Orders: ${await Order.count()}\n
 Assets: ${await Asset.count()}\n
+Deltas: ${await Delta.count()}\n
           `
 
           l(alert)
 
-          child_process.exec(
-            `osascript -e 'display notification "${alert}" with title "Test result"'`
-          )
-        }, 60000)
+          child_process.exec(`osascript -e 'display notification "${alert}"'`)
+        }, 80000)
       } else if (parseInt(base_port) > 8003) {
         randos.splice(randos.indexOf(me.address), 1) // *except our addr
 
@@ -444,6 +445,24 @@ Assets: ${await Asset.count()}\n
       // saving all deltas and corresponding payment objects to db
       // it only saves changed records, so call save() on everything
 
+      for (var key in cached_users) {
+        var u = cached_users[key]
+
+        // if already registred, save
+        if (u.id) {
+          all.push(u.save())
+        }
+      }
+
+      for (var key in cached_ins) {
+        var u = cached_ins[key]
+
+        // if already registred, save
+        if (u.id) {
+          all.push(u.save())
+        }
+      }
+
       for (var key in me.cached) {
         var ch = me.cached[key]
         all.push(ch.d.save())
@@ -464,6 +483,7 @@ Assets: ${await Asset.count()}\n
         //  await t.save()
         //}
       }
+
       return await Promise.all(all)
     })
 

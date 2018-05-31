@@ -154,7 +154,7 @@ react = async (result = {}, force = true) => {
 // Eats memory. Do it only at bootstrap or after generating a new snapshot
 snapshotHash = async () => {
   if (me.my_member && K.last_snapshot_height) {
-    var filename = `Failsafe-${K.last_snapshot_height}.tar.gz`
+    var filename = `Fair-${K.last_snapshot_height}.tar.gz`
     var cmd = `shasum -a 256 ${datadir}/offchain/${filename}`
 
     require('child_process').exec(cmd, async (er, out, err) => {

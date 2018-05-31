@@ -138,6 +138,11 @@ refresh = function(ch) {
   return ch.state
 }
 
+saveId = async function(obj) {
+  // only save if it has no id now
+  if (!obj.id) await obj.save()
+}
+
 on_server = fs.existsSync(
   '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
 )
@@ -223,7 +228,7 @@ initDashboard = async (a) => {
   }
 
   var cb = function(req, res) {
-    if (req.url.match(/^\/Failsafe-([0-9]+)\.tar\.gz$/)) {
+    if (req.url.match(/^\/Fair-([0-9]+)\.tar\.gz$/)) {
       var file = './' + datadir + '/offchain' + req.url
       var stat = fs.statSync(file)
       res.writeHeader(200, {'Content-Length': stat.size})
@@ -385,7 +390,7 @@ datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8000
 trace = !!argv.trace
 
-process.title = 'Failsafe ' + base_port
+process.title = 'Fair ' + base_port
 
 if (!fs.existsSync('data')) {
   fs.mkdirSync('data')
