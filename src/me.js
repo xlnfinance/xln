@@ -390,12 +390,14 @@ class Me {
           // making sure in 30 sec that all test payments were successful by looking at the metrics
 
           await me.syncdb()
+          cache()
 
-          let monkey5 = await Insurance.sumForUser(5)
+          let monkey5 = await User.idOrKey(5)
+          let monkey5ins = await Insurance.sumForUser(5)
 
           // must be >100 after expected rebalance
           var alert = `${me.metrics.settle.total}/${me.metrics.fail.total}\n
-Monkey5: ${monkey5 ? monkey5.insurance : 'N/A'}\n
+Monkey5: ${monkey5 ? monkey5.balance : 'N/A'}\n
 Blocks: ${await Block.count()}\n
 Payments: ${await Payment.count()}\n
 Orders: ${await Order.count()}\n

@@ -1,6 +1,6 @@
 /*
 Once in a few blocks hub takes insurance from net-spenders and rebalances towards net-receivers.
-Matching those with who we have promised>they_soft_limit with those where we have insured>$100
+Matching those with who we have they_uninsured>they_soft_limit with those where we have insured>$100
 
 For now pretty simple. In the future can be added:
 * smart learning based on balances over time not on balance at the time of matching

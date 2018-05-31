@@ -25,10 +25,12 @@ User = sequelize.define(
   {
     username: Sequelize.STRING, // to be used in DNS later, currently barely used
     // saves time to select Debts
+
     has_debts: {
       type: Sequelize.BOOLEAN,
       defaultValue: false
     },
+
     pubkey: Sequelize.CHAR(32).BINARY,
     nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
@@ -212,6 +214,8 @@ User.prototype.asset = function(asset, diff) {
 }
 
 User.prototype.payDebts = async function(asset, parsed_tx) {
+  if (!this.has_debts) return false
+
   let debts = await this.getDebts()
 
   for (let d of debts) {
@@ -293,7 +297,7 @@ Insurance.btw = async function(user1, user2, asset = 1) {
   var str = stringify([wh.leftId, wh.rightId, wh.asset])
 
   var ins = cached_ins[str]
-  //if (ins) return ins
+  if (ins) return ins
 
   ins = (await Insurance.findOrBuild({
     where: wh
@@ -349,13 +353,22 @@ Insurance.prototype.resolve = async function() {
   right.asset(this.asset, resolved.they_insured)
 
   // anybody owes to anyone?
-  if (resolved.promised > 0 || resolved.they_promised > 0) {
+  if (resolved.they_uninsured > 0 || resolved.uninsured > 0) {
     var d = await Debt.create({
-      userId: resolved.promised > 0 ? left.id : right.id,
-      oweTo: resolved.promised > 0 ? right.id : left.id,
+      userId: resolved.they_uninsured > 0 ? left.id : right.id,
+      oweTo: resolved.they_uninsured > 0 ? right.id : left.id,
       amount_left:
-        resolved.promised > 0 ? resolved.promised : resolved.they_promised
+        resolved.they_uninsured > 0
+          ? resolved.they_uninsured
+          : resolved.uninsured
     })
+
+    // optimization flag
+    if (resolved.they_uninsured > 0) {
+      left.has_debts = true
+    } else {
+      right.has_debts = true
+    }
   }
 
   await left.save()

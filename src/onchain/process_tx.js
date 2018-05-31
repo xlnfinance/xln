@@ -304,6 +304,7 @@ module.exports = async (tx, meta) => {
     } else if (method == 'depositTo') {
       // deposit from our onchain balance to another onchain balance or channel from some side
       await signer.payDebts(asset, parsed_tx)
+
       // there's a tiny bias here, the hub always gets reimbursed more than tax paid
       // todo: consider splitting tax based on % in total output volume
       var reimburse_tax = 1 + Math.floor(tax / t[1].length)
