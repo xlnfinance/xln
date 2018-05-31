@@ -177,10 +177,11 @@ initDashboard = async (a) => {
     fatal(`Unable to read ${highlight(kFile)}, quitting`)
   }
 
-  var finalhandler = require('finalhandler')
-  var serveStatic = require('serve-static')
+  let finalhandler = require('finalhandler')
+  let serveStatic = require('serve-static')
+  let path = require('path')
 
-  var bundler
+  let bundler
   if (argv['wallet-url']) {
     let walletUrl = argv['wallet-url']
     let http = require('http')
@@ -217,11 +218,10 @@ initDashboard = async (a) => {
       break
     }
   } else if (argv['wallet-dist']) {
-    let path = require('path')
     bundler = serveStatic(path.resolve(__dirname, '../dist'))
   } else {
     let Parcel = require('parcel-bundler')
-    bundler = new Parcel('../wallet/index.html', {
+    bundler = new Parcel(path.resolve(__dirname, '../wallet/index.html'), {
       logLevel: 2
       // for more options https://parceljs.org/api.html
     }).middleware()
