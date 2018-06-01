@@ -303,7 +303,7 @@ class Me {
 
     l('Setting up intervals')
     // request latest blocks from nearest validator
-    me.intervals.push(setInterval(sync, K.blocktime * 1000))
+    me.intervals.push(setInterval(sync, 2000))
     // cache onchain data regularly to present in Explorers
     me.intervals.push(setInterval(cache, K.blocktime * 2000))
 
@@ -486,7 +486,11 @@ Deltas: ${await Delta.count()}\n
         //}
       }
 
-      return await Promise.all(all)
+      await Promise.all(all)
+
+      l("All changes flushed with syncdb")
+
+      return true
     })
 
     //l('All channels has been synced to db')
@@ -534,12 +538,13 @@ Deltas: ${await Delta.count()}\n
     })
 
     let [box_pubkey, pubkey] = r(base58.decode(dest))
+    var reg = await User.idOrKey(pubkey)
 
     // onchain payment (batched, not sent to validator yet)
     me.batch.push([
       'depositTo',
       1,
-      [[Math.round(Math.random() * 1000), pubkey, 0]]
+      [[Math.round(Math.random() * 1000), reg.id ? reg.id : pubkey, 0]]
     ])
 
     // run on server infinitely and with longer delays

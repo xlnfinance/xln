@@ -1053,6 +1053,7 @@ export default {
               <th scope="col">Name</th>
               <th scope="col">Fee</th>
               <th scope="col">Location</th>
+              <th scope="col">Total FRD Insurances</th>
             </tr>
           </thead>
           <tbody>
@@ -1061,6 +1062,7 @@ export default {
               <th>{{u.name}}</th>
               <th>{{u.fee}}</th>
               <th>{{u.location}}</th>
+              <th>{{commy(u.sumForUser)}}</th>
             </tr>
           </tbody>
         </table>

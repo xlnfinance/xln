@@ -2,9 +2,6 @@
 // Also implements validator and hub functionality
 
 var async_fn = async (ws, inputType, args) => {
-  // how many blocks to share at once
-  var sync_limit = 1000
-
   // ignore some too frequest RPC commands
   /*if (
     ['update', 'chain', 'sync', 'propose', 'prevote', 'precommit'].includes(
@@ -164,7 +161,7 @@ var async_fn = async (ws, inputType, args) => {
       }
 
       // dirty hack to not backup k.json until all blocks are synced
-      if (args.length == sync_limit) {
+      if (args.length == K.sync_limit) {
         sync()
       } else {
         fs.writeFile(datadir + '/onchain/k.json', stringify(K), () => {})
@@ -188,6 +185,12 @@ var async_fn = async (ws, inputType, args) => {
       }
     })
   } else if (inputType == 'sync') {
+    if (K.prev_hash == toHex(args[0])) {
+      // sender is on last block
+      return false
+    }
+
+
     var last = await Block.findOne({
       attributes: ['id'],
       where: {
@@ -202,7 +205,7 @@ var async_fn = async (ws, inputType, args) => {
           id: {[Op.gte]: last.id}
         },
         order: [['id', 'ASC']],
-        limit: sync_limit
+        limit: K.sync_limit
       })).map((b) => {
         return [r(b.precommits), b.header, b.ordered_tx_body]
       })
@@ -373,7 +376,7 @@ module.exports = (ws, msg) => {
   msg = bin(msg) // uws gives ArrayBuffer, we create a view
 
   // sanity checks 10mb
-  if (msg.length > 10000000) {
+  if (msg.length > 50000000) {
     l(`too long input ${msg.length}`)
     return false
   }

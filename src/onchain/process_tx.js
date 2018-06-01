@@ -318,6 +318,8 @@ module.exports = async (tx, meta) => {
         }
 
         var depositTo = await User.idOrKey(output[1])
+        if (!depositTo) continue
+
         var withPartner =
           output[2].length == 0 ? false : await User.idOrKey(output[2])
 

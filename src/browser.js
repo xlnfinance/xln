@@ -29,6 +29,11 @@ cache = async (force = false) => {
           cached_result.insurances = await Insurance.findAll()
         },
         async () => {
+          for (var hub of cached_result.K.hubs) {
+            hub.sumForUser = await Insurance.sumForUser(hub.id)
+          }
+        },
+        async () => {
           cached_result.hashlocks = await Hashlock.findAll()
         },
         async () => {

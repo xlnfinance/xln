@@ -35,7 +35,7 @@ module.exports = async () => {
     account_creation_fee: 100,
     standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
 
-    blocksize: 20000,
+    blocksize: 100000,
     blocktime: 20,
     step_latency: 5, // how long is each consensus step: propose, prevote, precommit, await is the rest
     gossip_delay: 1500, // anti clock skew, give others time to change state
@@ -67,6 +67,8 @@ module.exports = async () => {
 
     cache_timeout: 120, // keep channel in memory since last use
     safe_sync_delay: 60, // after what time prohibit using wallet if unsynced
+    sync_limit: 100,   // how many blocks to share at once
+
 
     // global wide fee sanity limits
     min_fee: 1,

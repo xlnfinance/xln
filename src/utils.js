@@ -203,6 +203,8 @@ current_db_hash = () => {
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
   fromHex()
     child_process.execSync('shasum -a 256 datadir+/onchain/db.sqlite').toString().split(' ')[0]
+
+    shasum -a 256 data/onchain/*
    */
 }
 

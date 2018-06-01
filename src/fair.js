@@ -372,7 +372,9 @@ sync = () => {
     var set = me.my_member ? Members.filter((m) => m != me.my_member) : Members
     var chosen = set[Math.floor(Math.random() * set.length)]
 
-    if (K.ts < ts() - K.blocktime || me.my_member) {
+    //|| me.my_member
+
+    if (K.ts < ts() - K.blocktime/2 || me.my_member) {
       me.send(chosen, 'sync', r([fromHex(K.prev_hash)]))
     } else {
       l('No need to sync, K.ts is recent')

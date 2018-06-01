@@ -270,7 +270,7 @@ Proposal.prototype.execute = async function() {
 // but the hubs with higher sum(insurance) locked around them are more trustworthy
 // and users probably own most part of insurances around them
 Insurance.sumForUser = async function(id, asset = 1) {
-  var sum = Insurance.sum('insurance', {
+  var sum = await Insurance.sum('insurance', {
     where: {
       [Op.or]: [{leftId: id}, {rightId: id}],
       asset: asset

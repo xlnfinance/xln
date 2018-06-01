@@ -222,6 +222,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
     // it's important to flush current K to disk before snapshot
     fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
+    await me.syncdb()
 
     var filename = 'Fair-' + K.total_blocks + '.tar.gz'
 
