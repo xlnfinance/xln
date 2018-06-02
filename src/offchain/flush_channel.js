@@ -89,7 +89,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
           if (
             t.lazy_until &&
             t.lazy_until > new Date() &&
-            ch.payable - ch.insurance < t.amount
+            ch.payable - ch.ins.insurance < t.amount
           ) {
             l('Still lazy, wait')
             continue

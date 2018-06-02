@@ -183,18 +183,20 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   await Promise.all(all)
 
   // looking for non-determinism
+  /*
   if (K.total_blocks % 50 == 0) {
     await me.syncdb()
 
     var out = child_process.execSync(`shasum -a 256 ${datadir}/onchain/db*`).toString().split(/[ \n]/)
-    K.current_db_hash = out[0]
+    //K.current_db_hash = out[0]
   }
+  */
 
   // save final block in offchain history db
   // Required for members/hubs, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
   if (me.my_member || !me.prune) {
-    Block.create({
+    await Block.create({
       prev_hash: fromHex(prev_hash),
       hash: sha3(header),
 
@@ -229,10 +231,17 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // only members do snapshots, as they require extra computations
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
     // it's important to flush current K to disk before snapshot
+
     await me.syncdb()
+    //await promise_writeFile(datadir + '/onchain/k.json', stringify(K))
+
+    if (me.my_member.id != 1) {
+      // in dev mode only to prevent race for /data
+      await sleep(3000)
+    }
+
 
     var filename = 'Fair-' + K.total_blocks + '.tar.gz'
-
     require('tar').c(
       {
         gzip: true,
@@ -271,6 +280,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
         snapshotHash()
       }
     )
+
   }
 
   if (me.request_reload) {

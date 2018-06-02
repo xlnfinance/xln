@@ -80,15 +80,9 @@ refresh = function(ch) {
     }
   }
 
-  if (ch.ins) {
-    ch.insurance = ch.ins.insurance
-    ch.ondelta = ch.ins.ondelta
-    ch.nonce = ch.ins.nonce
-  }
-
   Object.assign(
     ch,
-    resolveChannel(ch.insurance, ch.ondelta + ch.d.offdelta, ch.left)
+    resolveChannel(ch.ins.insurance, ch.ins.ondelta + ch.d.offdelta, ch.left)
   )
 
   // Canonical state
@@ -160,9 +154,10 @@ initDashboard = async (a) => {
     //if (err.name == 'SequelizeTimeoutError') return
     //flush changes to db
     await me.syncdb()
-
-    fatal(`Fatal rejection, quitting`)
+    l('Bye')
+    //fatal(`Fatal rejection, quitting`)
   }
+
   process.on('unhandledRejection', ooops)
   process.on('uncaughtException', ooops)
   process.on('exit', ooops)

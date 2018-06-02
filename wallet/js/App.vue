@@ -123,9 +123,9 @@ export default {
   },
   watch: {
     record(val) {
-      let title = 'Failsafe'
+      let title = 'Fair'
       if (val && val.username) {
-        title = `Failsafe: ${val.username}`
+        title = `Fair: ${val.username}`
       }
       document.title = title
     }
@@ -537,7 +537,7 @@ export default {
         <h2>Governance stats</h2>
         <p>Proposals created: {{K.proposals_created}}</p>
         <h2>Hard Fork</h2>
-        <p><b>Hard fork is like a revolution</b>: sacred and extremely important for long term fairness, even when there is built-in governance protocol. Luckily, everyone is a full node in Failsafe, so you can unilaterally change consensus with a click of a button. If validators vote for things you don't agree with, find like minded people and decide on a new validator set out-of-band. Then paste the code that changes validators below:</p>
+        <p><b>Hard fork is like a revolution</b>: sacred and extremely important for long term fairness, even when there is built-in governance protocol. Luckily, everyone is a full node in Fair, so you can unilaterally change consensus with a click of a button. If validators vote for things you don't agree with, find like minded people and decide on a new validator set out-of-band. Then paste the code that changes validators below:</p>
         <div class="form-group">
           <label for="comment">Code to execute:</label>
           <textarea class="form-control" v-model="hardfork" rows="4" id="comment"></textarea>
@@ -568,7 +568,7 @@ export default {
           <template v-for="(ch, index) in channels" v-if="ch.d.asset == asset" >
             <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}<span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
             <small v-if="ch.payable > 0">
-              = {{commy(ch.insurance)}} insurance 
+              = {{commy(ch.ins.insurance)}} insurance 
               {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
               {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} <span class="badge badge-dark" v-if="ch.uninsured > ch.d.soft_limit">over soft limit, expect rebalance</span><span class="badge badge-dark" v-if="ch.they_insured >= K.risk">stay online to cooperate</span>
@@ -829,10 +829,10 @@ export default {
         <ul>
           <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
-        <p>On Windows? <a v-bind:href="'/Failsafe-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with
-          <kbd>certUtil -hashfile Failsafe-{{K.last_snapshot_height}}.tar.gz SHA256</kbd> then run
+        <p>On Windows? <a v-bind:href="'/Fair-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with
+          <kbd>certUtil -hashfile Fair-{{K.last_snapshot_height}}.tar.gz SHA256</kbd> then run
           <kbd>./install && node fs -p8001</kbd> (8001 is default port). You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
-        <p>Looking for genesis state for research or analytics? <a v-bind:href="'/Failsafe-1.tar.gz'">Get Failsafe-1.tar.gz here</a></p>
+        <p>Looking for genesis state for research or analytics? <a v-bind:href="'/Fair-1.tar.gz'">Get Fair-1.tar.gz here</a></p>
       </div>
       <div v-else-if="tab=='gov'">
         <h3>Governance</h3>

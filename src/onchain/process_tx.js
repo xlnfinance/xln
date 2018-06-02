@@ -52,7 +52,7 @@ module.exports = async (tx, meta) => {
     }
   } else {
     if (signer.nonce != nonce) {
-      return {error: `Invalid nonce dry_run ${signer.nonce} vs ${nonce}`}
+      return {error: `Invalid nonce ${signer.nonce} vs ${nonce}`}
     }
   }
 

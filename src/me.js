@@ -329,11 +329,14 @@ class Me {
     )
     */
 
+    if (me.my_hub || me.my_member) {
+      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
+    }
+
     if (me.my_hub) {
       me.intervals.push(
         setInterval(require('./offchain/rebalance'), K.blocktime * 5000)
       )
-      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
 
       // hubs have force react regularly
       me.intervals.push(
@@ -440,10 +443,11 @@ Deltas: ${await Delta.count()}\n
   }
 
   async syncdb() {
-    await q('syncdb', async () => {
+    return await q('syncdb', async () => {
       var all = []
-
-      all.push(promise_writeFile(datadir + '/onchain/k.json', stringify(K)))
+      l("Init syncdb")
+      
+      all.push(promise_writeFile('./' + datadir + '/onchain/k.json', stringify(K)))
 
       // saving all deltas and corresponding payment objects to db
       // it only saves changed records, so call save() on everything
@@ -487,16 +491,13 @@ Deltas: ${await Delta.count()}\n
         //}
       }
 
+      l("Awaiting syncdb all")
       await Promise.all(all)
-
-      l("All changes flushed with syncdb")
-
+      l('Awaited')
+      
       return true
     })
 
-    //l('All channels has been synced to db')
-
-    return true
   }
 
   // takes channels with supported hubs (verified and custom ones)

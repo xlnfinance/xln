@@ -265,7 +265,7 @@ var async_fn = async (ws, inputType, args) => {
       map('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
-      ch.nonce,
+      ch.ins.nonce,
       amount,
       ch.d.asset
     ])
@@ -293,7 +293,7 @@ var async_fn = async (ws, inputType, args) => {
       map('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
-      ch.nonce,
+      ch.ins.nonce,
       amount,
       ch.d.asset
     ]

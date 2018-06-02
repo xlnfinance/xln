@@ -138,7 +138,10 @@ fatal = (reason) => {
 
   global.repl = null
   l(errmsg(reason))
-  process.exit(1)
+  
+  sleep(1000).then(()=>{
+    process.exit(1)
+  })
 }
 
 gracefulExit = (comment) => {

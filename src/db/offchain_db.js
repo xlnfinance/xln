@@ -100,8 +100,7 @@ Delta = privSequelize.define(
     pending: Sequelize.BLOB,
 
     // TODO: clone from Insurance table to Delta to avoid double querying both dbs
-    insurance: Sequelize.INTEGER,
-    ondelta: Sequelize.INTEGER,
+    disbalance: Sequelize.INTEGER,
 
     offdelta: Sequelize.INTEGER,
     asset: {

@@ -38,10 +38,6 @@ module.exports = async (pubkey, asset, delta = false) => {
     }
 
     ch = {
-      // default insurance
-      insurance: 0,
-      ondelta: 0,
-      nonce: 0,
       left: compared == -1,
 
       rollback: [0, 0], // used in merge situations
@@ -95,6 +91,13 @@ module.exports = async (pubkey, asset, delta = false) => {
       attributes: ['id'],
       where: {pubkey: pubkey}
     })*/
+    
+    // default ins
+    ch.ins = Insurance.build({
+      insurance: 0,
+      ondelta: 0,
+      nonce: 0
+    })
 
     if (user) {
       ch.partner = user.id
