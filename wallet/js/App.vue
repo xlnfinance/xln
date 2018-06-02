@@ -466,9 +466,9 @@ export default {
           <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
           </button>
           &nbsp;
-          <div @click="dev_mode=!dev_mode" :title="record && record.id">
+          <span @click="dev_mode=!dev_mode" :title="record && record.id">
             <UserIcon :hash="pubkey" :size="32"></UserIcon>
-          </div>
+          </span>
         </div>
       </div>
     </nav>
