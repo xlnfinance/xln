@@ -2,7 +2,7 @@
 
 // Called once in a while to cache current state of everything and flush it to browser
 // TODO: better way to keep app reactive?
-cache = async (force = false) => {
+update_cache = async (force = false) => {
   if (!me.my_member && me.headless() && !force) return
 
   if (K) {
@@ -11,8 +11,6 @@ cache = async (force = false) => {
     cached_result.my_member = me.my_member
 
     cached_result.K = K
-
-    cached_result.current_db_hash = current_db_hash().toString('hex')
 
     await Promise.all(
       [
@@ -92,12 +90,12 @@ react = async (result = {}, force = true) => {
   me.last_react = new Date()
 
   if (!me.my_hub) {
-    await me.syncdb()
+    //await me.syncdb()
   }
 
   if (me.headless()) return
 
-  //await cache()
+  //await update_cache()
 
   if (me.id) {
     if (me.my_hub) {

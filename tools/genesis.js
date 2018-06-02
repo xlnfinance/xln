@@ -23,6 +23,8 @@ module.exports = async () => {
 
     voting_period: 10,
 
+    current_db_hash: '',
+
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
     snapshot_after_bytes: 1000000,
@@ -67,7 +69,7 @@ module.exports = async () => {
 
     cache_timeout: 120, // keep channel in memory since last use
     safe_sync_delay: 60, // after what time prohibit using wallet if unsynced
-    sync_limit: 100,   // how many blocks to share at once
+    sync_limit: 500,   // how many blocks to share at once
 
 
     // global wide fee sanity limits
@@ -243,9 +245,9 @@ module.exports = async () => {
 */
 
   var json = stringify(K)
-  fs.writeFileSync(datadir + '/onchain/k.json', json)
+  await promise_writeFile('./'+datadir + '/onchain/k.json', json)
 
-  fs.writeFileSync(
+  await promise_writeFile(
     datadir + '/offchain/pk.json',
     JSON.stringify({
       username: 'root',
@@ -255,5 +257,8 @@ module.exports = async () => {
     })
   )
 
-  gracefulExit('Genesis done, quitting')
+  l('Genesis done ('+datadir+'), quitting')
+
+  // not graceful to not trigger hooks
+  process.exit(0)
 }

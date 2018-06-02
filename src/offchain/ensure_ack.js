@@ -3,8 +3,8 @@ module.exports = async () => {
   //l('Checking who has not ack')
   if (PK.pending_batch) return l('Pending batch')
 
-  for (var key in me.cached) {
-    var ch = me.cached[key]
+  for (var key in cache.ch) {
+    var ch = cache.ch[key]
 
     if (
       // already disputed

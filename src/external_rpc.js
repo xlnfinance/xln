@@ -164,10 +164,9 @@ var async_fn = async (ws, inputType, args) => {
       if (args.length == K.sync_limit) {
         sync()
       } else {
-        fs.writeFile(datadir + '/onchain/k.json', stringify(K), () => {})
         if (K.total_blocks - started > 0) {
           // something new happened - cache
-          cache()
+          update_cache()
           react({}, false)
 
           // Ensure our last broadcasted batch was added

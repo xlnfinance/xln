@@ -147,7 +147,26 @@ on_server = fs.existsSync(
   '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
 )
 
+cache = {
+  ins: {},
+  users: {},
+  ch: {}
+}
+
 initDashboard = async (a) => {
+
+  let ooops = async (err) => {
+    l('oops', err)
+    //if (err.name == 'SequelizeTimeoutError') return
+    //flush changes to db
+    await me.syncdb()
+
+    fatal(`Fatal rejection, quitting`)
+  }
+  process.on('unhandledRejection', ooops)
+  process.on('uncaughtException', ooops)
+  process.on('exit', ooops)
+
   // auto reloader for debugging
   /*
   l(note(`Touch ${highlight('../restart')} to restart`))
@@ -327,7 +346,7 @@ initDashboard = async (a) => {
 
   // start syncing as soon as the node is started
   sync()
-  cache(true)
+  update_cache(true)
 
   l(`\n${note('Welcome to Fair REPL!')}`)
   repl = require('repl').start(note(''))
@@ -410,9 +429,7 @@ require('./db/offchain_db')
 ;(async () => {
   await privSequelize.sync({force: use_force})
 
-  if (argv.console) {
-    initDashboard()
-  } else if (argv.genesis) {
+  if (argv.genesis) {
     require('../tools/genesis')()
   } else if (argv.cluster) {
     var cluster = require('cluster')
@@ -455,16 +472,3 @@ openBrowser = () => {
   l(note(`Open ${link(url)} in your browser`))
   opn(url)
 }
-
-let ooops = async (err) => {
-  //if (err.name == 'SequelizeTimeoutError') return
-  //flush changes to db
-  await me.syncdb()
-
-  l(err)
-  fatal(`Fatal rejection, quitting`)
-}
-
-process.on('unhandledRejection', ooops)
-process.on('uncaughtException', ooops)
-process.on('exit', ooops)

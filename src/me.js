@@ -10,7 +10,6 @@ class Me {
     this.status = 'await'
 
     this.users = {}
-    this.cached = {}
 
     this.hubs = {}
 
@@ -63,7 +62,7 @@ class Me {
 
     PK.username = username
     PK.seed = seed.toString('hex')
-    fs.writeFileSync(datadir + '/offchain/pk.json', JSON.stringify(PK))
+    await promise_writeFile(datadir + '/offchain/pk.json', JSON.stringify(PK))
   }
 
   // returns true if no active browser ws now
@@ -305,7 +304,7 @@ class Me {
     // request latest blocks from nearest validator
     me.intervals.push(setInterval(sync, 2000))
     // cache onchain data regularly to present in Explorers
-    me.intervals.push(setInterval(cache, K.blocktime * 2000))
+    me.intervals.push(setInterval(update_cache, K.blocktime * 2000))
 
     if (K.total_blocks > 1) {
       snapshotHash()
@@ -390,14 +389,14 @@ class Me {
           // making sure in 30 sec that all test payments were successful by looking at the metrics
 
           await me.syncdb()
-          cache()
+          update_cache()
 
           let monkey5 = await User.idOrKey(5)
           let monkey5ins = await Insurance.sumForUser(5)
 
           // must be >100 after expected rebalance
           var alert = `${me.metrics.settle.total}/${me.metrics.fail.total}\n
-Monkey5: ${monkey5 ? monkey5.balance : 'N/A'}\n
+Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
 Blocks: ${await Block.count()}\n
 Payments: ${await Payment.count()}\n
 Orders: ${await Order.count()}\n
@@ -444,11 +443,13 @@ Deltas: ${await Delta.count()}\n
     await q('syncdb', async () => {
       var all = []
 
+      all.push(promise_writeFile(datadir + '/onchain/k.json', stringify(K)))
+
       // saving all deltas and corresponding payment objects to db
       // it only saves changed records, so call save() on everything
 
-      for (var key in cached_users) {
-        var u = cached_users[key]
+      for (var key in cache.users) {
+        var u = cache.users[key]
 
         // if already registred, save
         if (u.id) {
@@ -456,8 +457,8 @@ Deltas: ${await Delta.count()}\n
         }
       }
 
-      for (var key in cached_ins) {
-        var u = cached_ins[key]
+      for (var key in cache.ins) {
+        var u = cache.ins[key]
 
         // if already registred, save
         if (u.id) {
@@ -465,8 +466,8 @@ Deltas: ${await Delta.count()}\n
         }
       }
 
-      for (var key in me.cached) {
-        var ch = me.cached[key]
+      for (var key in cache.ch) {
+        var ch = cache.ch[key]
         all.push(ch.d.save())
 
         ch.payments = ch.payments.filter((t) => {
@@ -476,7 +477,7 @@ Deltas: ${await Delta.count()}\n
         })
 
         if (ch.last_used < ts() - K.cache_timeout) {
-          delete me.cached[key]
+          delete cache.ch[key]
           l('Evict from memory idle channel: ' + key)
         }
 

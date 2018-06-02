@@ -156,19 +156,24 @@ Proposal.belongsToMany(User, {through: Vote, as: 'voters'})
 
 // >>> Model methods
 // some buffers are full pubkeys, some can be id (number/buffer) to save bytes
-cached_users = []
 User.idOrKey = async function(id) {
   if (typeof id != 'number' && id.length != 32) {
     id = readInt(id)
   }
 
-  var u = cached_users.find((u) => {
-    if (typeof id == 'number') {
-      return u.id == id
-    } else {
-      return u.pubkey.equals(id)
+  var u = false
+
+  // if integer, iterate over obj, if pubkey return by key
+  if (typeof id == 'number') {
+    for (var key in cache.users) {
+      if (cache.users[key].id == id) {
+        u = cache.users[key]
+        break
+      }
     }
-  })
+  } else{
+    u = cache.users[id]
+  }
 
   if (u) return u
 
@@ -182,7 +187,7 @@ User.idOrKey = async function(id) {
   }
 
   if (u) {
-    cached_users.push(u)
+    cache.users[u.pubkey] = u
   }
 
   return u
@@ -280,7 +285,6 @@ Insurance.sumForUser = async function(id, asset = 1) {
 }
 
 // get an insurance between two user objects
-cached_ins = {}
 Insurance.btw = async function(user1, user2, asset = 1) {
   if (user1.pubkey.length != 32 || user2.pubkey.length != 32) {
     return false
@@ -296,14 +300,14 @@ Insurance.btw = async function(user1, user2, asset = 1) {
   }
   var str = stringify([wh.leftId, wh.rightId, wh.asset])
 
-  var ins = cached_ins[str]
+  var ins = cache.ins[str]
   if (ins) return ins
 
   ins = (await Insurance.findOrBuild({
     where: wh
   }))[0]
 
-  cached_ins[str] = ins
+  cache.ins[str] = ins
   return ins
 }
 

@@ -10,8 +10,8 @@ module.exports = async (pubkey, asset, delta = false) => {
     if (typeof pubkey == 'string') pubkey = fromHex(pubkey)
 
     var key = stringify([pubkey, asset])
-    if (me.cached[key]) {
-      ch = me.cached[key]
+    if (cache.ch[key]) {
+      ch = cache.ch[key]
       //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
       refresh(ch)
@@ -134,7 +134,7 @@ module.exports = async (pubkey, asset, delta = false) => {
 
     refresh(ch)
 
-    me.cached[key] = ch
+    cache.ch[key] = ch
     //l('Saved in cache ', key)
     return ch
   })

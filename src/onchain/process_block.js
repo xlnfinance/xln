@@ -182,6 +182,14 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   await Promise.all(all)
 
+  // looking for non-determinism
+  if (K.total_blocks % 50 == 0) {
+    await me.syncdb()
+
+    var out = child_process.execSync(`shasum -a 256 ${datadir}/onchain/db*`).toString().split(/[ \n]/)
+    K.current_db_hash = out[0]
+  }
+
   // save final block in offchain history db
   // Required for members/hubs, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
@@ -221,7 +229,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // only members do snapshots, as they require extra computations
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
     // it's important to flush current K to disk before snapshot
-    fs.writeFileSync(datadir + '/onchain/k.json', stringify(K))
     await me.syncdb()
 
     var filename = 'Fair-' + K.total_blocks + '.tar.gz'

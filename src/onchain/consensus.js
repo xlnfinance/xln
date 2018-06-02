@@ -54,6 +54,10 @@ module.exports = async () => {
     if (me.my_member == me.next_member()) {
       //l(`it's our turn to propose, gossip new block`)
 
+      if (K.ts < ts() - K.blocktime) {
+        l("Danger: No previous block exists")
+      }
+
       if (me.proposed_block.locked) {
         l(`We precommited to previous block, keep proposing it`)
         var {header, ordered_tx_body} = me.proposed_block
@@ -61,13 +65,14 @@ module.exports = async () => {
         // otherwise build new block from your mempool
         var ordered_tx = []
         var total_size = 0
+        var meta = {dry_run: true}
         for (var candidate of me.mempool) {
-          if (total_size + candidate.length > K.blocksize) {
+          if (total_size + candidate.length >= K.blocksize) {
             l(`The block is out of space, stop adding tx`)
             break
           }
 
-          var result = await me.processTx(candidate, {dry_run: true})
+          var result = await me.processTx(candidate, meta)
           if (result.success) {
             ordered_tx.push(candidate)
             total_size += candidate.length

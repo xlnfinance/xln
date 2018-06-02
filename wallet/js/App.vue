@@ -528,7 +528,7 @@ export default {
         <p>Last snapshot at block # : {{K.last_snapshot_height}}</p>
         <h2>Network stats</h2>
         <p>Total blocks: {{K.total_blocks}}</p>
-        <p>Current onchain db.sqlite hash: {{current_db_hash}}</p>
+        <p>Current onchain db.sqlite hash: {{K.current_db_hash}}</p>
         <p>Usable blocks: {{K.total_blocks}}</p>
         <p>Last block received {{timeAgo(K.ts)}}</p>
         <p>Network created {{timeAgo(K.created_at)}}</p>
@@ -551,8 +551,8 @@ export default {
           <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
           <div v-if="record">
-            <h2>{{to_ticker(asset)}} Balance onchain: <b>{{commy(getAsset(asset))}}</b></h2>
-            <p>The most secure kind of balance, but expensive to use because requires global broadcast. This balance is not stored with any hub. Your onchain ID: <b>{{record.id}}</b></p>
+            <h4>{{to_ticker(asset)}} Balance onchain: <b>{{commy(getAsset(asset))}}</b></h4>
+            <p>Onchain balance is like a savings account and provides highest security but is the most expensive and slow to use. Store assets you don't plan to use often. Your onchain ID: <b>{{record.id}}</b></p>
             <hr />
           </div>
 
@@ -571,7 +571,7 @@ export default {
               = {{commy(ch.insurance)}} insurance 
               {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
               {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
-              {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} <span class="badge badge-dark" v-if="ch.uninsured >= ch.d.soft_limit">over soft limit, expect rebalance</span>
+              {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} <span class="badge badge-dark" v-if="ch.uninsured > ch.d.soft_limit">over soft limit, expect rebalance</span><span class="badge badge-dark" v-if="ch.they_insured >= K.risk">stay online to cooperate</span>
             </small>
             <p>
               <div v-if="ch.bar > 0">

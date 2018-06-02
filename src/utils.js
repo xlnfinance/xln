@@ -33,6 +33,9 @@ ec.verify = nacl.sign.detached.verify
 ec = (a, b) => concat(Buffer.alloc(32), sha3(a))
 ec.verify = (a, b, c) => ec(a).equals(b)
 
+// promisify writeFile
+promise_writeFile = require('util').promisify(fs.writeFile)
+
 // encoders
 BN = require('bn.js')
 stringify = require('../lib/stringify')
@@ -201,10 +204,9 @@ q.q = {}
 current_db_hash = () => {
   return Buffer.alloc(1)
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
-  fromHex()
-    child_process.execSync('shasum -a 256 datadir+/onchain/db.sqlite').toString().split(' ')[0]
-
-    shasum -a 256 data/onchain/*
+    
+    var out = child_process.execSync(`shasum -a 256 ${datadir}/onchain/db*`).toString().split(/[ \n]/)
+    return fromHex(out)
    */
 }
 
