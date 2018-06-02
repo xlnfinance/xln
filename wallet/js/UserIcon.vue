@@ -7,7 +7,7 @@
 </template>
 
 <script>
-import Identicon from 'identicon.js'
+let Identicon = require('identicon.js')
 
 export default {
   props: ['hash', 'size'],

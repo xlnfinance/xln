@@ -1,5 +1,4 @@
 <script>
-import Identicon from 'identicon.js'
 
 import UserIcon from './UserIcon'
 import Highlight from './Highlight'
@@ -142,18 +141,6 @@ export default {
     }
   },
   methods: {
-    icon: (h, s) => {
-      return (
-        '<img width=' +
-        s +
-        ' height=' +
-        s +
-        ' src="data:image/png;base64,' +
-        new Identicon(h.toString(), s).toString() +
-        '">'
-      )
-    },
-
     stream: () => {
       var n = 0
       var pay = () => {
@@ -479,7 +466,9 @@ export default {
           <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
           </button>
           &nbsp;
-          <span @click="dev_mode=!dev_mode" v-bind:title="record && record.id" v-html="icon(pubkey,32)"></span>
+          <div @click="dev_mode=!dev_mode" :title="record && record.id">
+            <UserIcon :hash="pubkey" :size="32"></UserIcon>
+          </div>
         </div>
       </div>
     </nav>
@@ -866,7 +855,7 @@ export default {
         <div v-for="p in proposals">
           <h4>#{{p.id}}: {{p.desc}}</h4>
           <small>Proposed by #{{p.user.id}}</small>
-          <div v-html="icon(p.user.pubkey, 30)"></div>
+          <UserIcon :hash="p.user.pubkey" :size="30"></UserIcon>
           <Highlight lang="javascript" :code="p.code"></Highlight>
           <div v-if="p.patch">
             <hr>
@@ -982,7 +971,9 @@ export default {
           </thead>
           <tbody>
             <tr v-for="u in users">
-              <th v-html="icon(u.pubkey,30)"></th>
+              <th>
+                <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
+              </th>
               <th scope="row">{{u.id}}</th>
               <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
 
