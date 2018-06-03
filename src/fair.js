@@ -1,6 +1,11 @@
 require('./utils')
 require('./browser')
 
+var SegfaultHandler = require('segfault-handler');
+SegfaultHandler.registerHandler("crash.log"); 
+
+
+
 // This is the most important function in the whole project. Make sure you understand it!
 // Defines how payment channels work, based on "insurance" and delta=("ondelta"+"offdelta")
 // There are 3 major scenarios of delta position
@@ -147,20 +152,26 @@ cache = {
   ch: {}
 }
 
+exitsync = false
+
 initDashboard = async (a) => {
 
   let ooops = async (err) => {
     l('oops', err)
-    //if (err.name == 'SequelizeTimeoutError') return
+    if (exitsync) return false
+    exitsync = true
+
+    if (err.name == 'SequelizeTimeoutError') return
     //flush changes to db
-    await me.syncdb()
-    l('Bye')
+    //await me.syncdb()
+    fatal('Bye')
     //fatal(`Fatal rejection, quitting`)
   }
-
+  
   process.on('unhandledRejection', ooops)
   process.on('uncaughtException', ooops)
   process.on('exit', ooops)
+  
 
   // auto reloader for debugging
   /*

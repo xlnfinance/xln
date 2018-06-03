@@ -10,8 +10,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   var all = []
 
-  let [methodId, built_by, prev_hash, timestamp, tx_root, db_hash] = r(header)
+  let [methodId, built_by, total_blocks, prev_hash, timestamp, tx_root, db_hash] = r(header)
 
+  total_blocks = readInt(total_blocks)
   timestamp = readInt(timestamp)
   built_by = readInt(built_by)
   prev_hash = toHex(prev_hash)
@@ -24,7 +25,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   if (K.prev_hash != prev_hash) {
-    l(`Must be based on ${K.prev_hash} but is using ${prev_hash}`)
+    l(`Must be based on ${K.prev_hash} ${K.total_blocks} but is using ${prev_hash} ${total_blocks}`)
     return false
   }
 

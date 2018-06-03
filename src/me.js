@@ -83,7 +83,7 @@ class Me {
 
     me.record = await User.idOrKey(bin(me.id.publicKey))
     if (!me.record || !me.record.id) {
-      l("You can't broadcast if you are not registred")
+      //l("You can't broadcast if you are not registred")
       return false
     }
 

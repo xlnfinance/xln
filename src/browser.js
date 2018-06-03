@@ -53,6 +53,7 @@ update_cache = async (force = false) => {
             var [
               methodId,
               built_by,
+              total_blocks,
               prev_hash,
               timestamp,
               tx_root,

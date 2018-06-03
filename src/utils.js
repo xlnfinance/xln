@@ -139,8 +139,16 @@ fatal = (reason) => {
   global.repl = null
   l(errmsg(reason))
   
-  sleep(1000).then(()=>{
-    process.exit(1)
+  me.syncdb().then(async ()=>{
+    me.intervals.map(clearInterval)
+
+    await sequelize.close()
+    await privSequelize.close()
+    l('sleep')
+    await sleep(200)
+    
+    process.exit()
+
   })
 }
 

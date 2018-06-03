@@ -114,7 +114,7 @@ window.renderRisk = (hist) => {
 window.render = (r) => {
   if (r.alert) notyf.alert(r.alert)
   if (r.confirm) notyf.confirm(r.confirm)
-  if (r.reload) window.reload()
+  if (r.reload) location.reload()
 
   if (r.already_opened && false) {
     document.body.innerHTML =

@@ -93,6 +93,7 @@ module.exports = async () => {
           var header = r([
             map('propose'),
             me.record.id,
+            K.total_blocks,
             Buffer.from(K.prev_hash, 'hex'),
             ts(),
             sha3(ordered_tx_body),
