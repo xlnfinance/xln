@@ -9,6 +9,10 @@ module.exports = async (opts) => {
     //l('paying ', opts.destination.length, toHex(opts.destination))
 
     // todo not generate secret and exp here and do it during 'add'ing
+    if (!opts.destination) {
+      l('No destination ', opts)
+      return false
+    }
 
     let [box_pubkey, pubkey] = r(base58.decode(opts.destination.toString()))
     let amount = parseInt(opts.amount)

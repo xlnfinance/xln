@@ -1,5 +1,4 @@
 <script>
-
 import UserIcon from './UserIcon'
 import Highlight from './Highlight'
 import Whitepaper from './Whitepaper'
@@ -21,14 +20,13 @@ export default {
 
     app.call('load')
 
-    app.go(location.hash.substr(1).split('/')[0])
+    app.go(location.hash.substr(1).split(/\/|\?/)[0])
 
-    /*
-
-    this.interval = setInterval(function() {
-      app.call('load')
-    }, localStorage.auth_code ? 10000 : 60000)
-    */
+    if (localStorage.auth_code) {
+      this.interval = setInterval(function() {
+        app.call('load')
+      }, 20000)
+    }
   },
   destroyed() {
     clearInterval(this.interval)
@@ -186,7 +184,8 @@ export default {
 
       app.call('rebalance', {
         partner: app.ch.partner,
-        request_amount: app.uncommy(app.request_amount),
+        request_amount:
+          app.ch.insured > 0 ? app.uncommy(app.request_amount) : '0',
         outs: app.outs,
         asset: app.asset
       })
@@ -390,7 +389,7 @@ export default {
         s = '🔒'
       }
       // new and sent are considered "pending" statuses
-      return s + (t.status == 'ack' ? '' : '🕟')
+      return s + (['ack', 'processed'].includes(t.status) ? '' : '🕟')
     }
   }
 }
@@ -446,7 +445,7 @@ export default {
 
 
               <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">👨‍💼 Accounts</a></li>
-              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect channels between different users and hubs">💸 Channels</a></li>
+              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and hubs">💸 Insurances</a></li>
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
               <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">💡 Governance</a></li>
               <li><a class="nav-link" @click="go('hashlocks')">🔐 Hashlocks</a></li>
@@ -986,8 +985,8 @@ export default {
         </table>
       </div>
       <div v-else-if="tab=='channel_explorer'">
-        <h1>Channel Explorer</h1>
-        <p>Payment channels represent collateral between two parties: normally at least one of them is a hub. If the user has 100 units in insurance with @hub, it means the user is guaranteed to get up to 100 units back even if the hub is completely compromised. Pubkeys of both accounts are sorted numerically, lower one is called "left" another one is "right".</p>
+        <h1>Insurance Explorer</h1>
+        <p>Insurances represent collateral between two parties.</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
@@ -1065,7 +1064,6 @@ export default {
 
 
         <div class="form-group">
-
           <p><label for="comment">Name:</label>
           <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input></p>
 
@@ -1082,7 +1080,6 @@ export default {
           <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
 
           <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can rebalance it to a channel with a hub and start sending instantly to other users.</div>
-          
         </div>
           
 

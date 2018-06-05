@@ -7,7 +7,8 @@ l = console.log
 crypto = require('crypto')
 rand = () => crypto.randomBytes(32).toString('hex')
 
-Cookies = require('cookies')
+rr = false
+
 fs = require('fs')
 users = {}
 
@@ -34,15 +35,21 @@ if (fs.existsSync(FS_PATH + '/pk.json')) {
 
 var processInvoices = async () => {
   r = await FS('invoices')
-  for (var i of r.data.acked) {
-    let uid = Buffer.from(i.invoice, 'hex').toString()
-    l(uid)
-    if (users.hasOwnProperty(uid)) {
-      users[uid] += i.amount
+  if (r.data.acked) {
+    for (var i of r.data.acked) {
+      l(i)
+      let uid = Buffer.from(i.invoice, 'hex').toString()
+      if (users.hasOwnProperty(uid)) {
+        users[uid] += i.amount
+      }
     }
   }
 
   setTimeout(processInvoices, 1000)
+}
+
+post = async (url, params) => {
+  return new Promise((resolve) => {})
 }
 
 FS = (method, params = {}) => {
@@ -54,7 +61,10 @@ FS = (method, params = {}) => {
 }
 setTimeout(async () => {
   r = await FS('getinfo')
-  address = r.data.address
+  if (!r.data.address) {
+    throw 'No address'
+  }
+  var address = r.data.address
   l('Our address: ' + address)
   processInvoices()
 }, 1000)
@@ -78,16 +88,21 @@ commy = (b, dot = true) => {
 
 require('http')
   .createServer(async (req, res) => {
-    cookies = new Cookies(req, res)
+    var id = false
+
+    if (req.headers.cookie) {
+      var id = req.headers.cookie.split('id=')[1]
+      l('Loaded id ' + id)
+    }
 
     res.status = 200
-
-    var id = cookies.get('id')
 
     if (req.url == '/') {
       if (!id) {
         id = rand()
-        cookies.set('id', id)
+        l('Set cookie')
+        res.setHeader('Set-Cookie', 'id=' + id)
+        repl.context.res = res
       }
       if (!users[id]) users[id] = 0 // Math.round(Math.random() * 1000000)
 
@@ -224,3 +239,5 @@ window.onload = function(){
     }
   })
   .listen(3010)
+
+repl = require('repl').start()

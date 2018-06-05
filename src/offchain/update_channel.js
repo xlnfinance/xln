@@ -100,12 +100,6 @@ module.exports = async (
       ]
       ch.d.nonce = oldState[1][2]
       ch.d.offdelta = oldState[1][3]
-
-      /*
-      // rolling back to last signed hashlocks
-      ch.inwards = ch.old_inwards
-      ch.outwards = ch.old_outwards
-      */
     } else {
       logstates(ch.state, oldState, debugState, signedState)
 
@@ -146,12 +140,10 @@ module.exports = async (
       let reveal_until = K.usable_blocks + K.hashlock_exp
       // safe ranges when we can accept hashlock exp
 
-      /*
-      if (exp < reveal_until - 2 || exp > reveal_until + 5) {
+      if (exp < reveal_until - 5 || exp > reveal_until + 5) {
         new_type = m == 'add' ? 'del' : 'delrisk'
         loff('Error: exp is out of supported range')
       }
-      */
 
       // don't save in db just yet
       let inward_hl = Payment.build({
@@ -169,21 +161,18 @@ module.exports = async (
 
         deltumId: ch.d.id
       })
-      ch.payments.push(inward_hl)
 
       //l(ascii_state(refresh(ch)))
       //l('Hash got ' + toHex(inward_hl.hash))
 
-      /*
+      ch.payments.push(inward_hl)
 
       if (m == 'add') {
         // push a hashlock in-state
-        ch.inwards.push(hl)
       } else {
         // off-state
         ch.d.offdelta += ch.left ? amount : -amount
       }
-      */
 
       // check new state and sig, save
       ch.d.nonce++
@@ -244,7 +233,7 @@ module.exports = async (
 
             amount: outward_amount,
             hash: bin(hash),
-            exp: exp, // the outgoing exp is a little bit longer
+            exp: exp,
 
             unlocker: unlocker,
             destination: destination,

@@ -1,10 +1,8 @@
 require('./utils')
 require('./browser')
 
-var SegfaultHandler = require('segfault-handler');
-SegfaultHandler.registerHandler("crash.log"); 
-
-
+var SegfaultHandler = require('segfault-handler')
+SegfaultHandler.registerHandler('crash.log')
 
 // This is the most important function in the whole project. Make sure you understand it!
 // Defines how payment channels work, based on "insurance" and delta=("ondelta"+"offdelta")
@@ -155,7 +153,6 @@ cache = {
 exitsync = false
 
 initDashboard = async (a) => {
-
   let ooops = async (err) => {
     l('oops', err)
     if (exitsync) return false
@@ -167,11 +164,13 @@ initDashboard = async (a) => {
     fatal('Bye')
     //fatal(`Fatal rejection, quitting`)
   }
-  
+
   process.on('unhandledRejection', ooops)
   process.on('uncaughtException', ooops)
   process.on('exit', ooops)
-  
+  process.on('beforeExit', () => {
+    l('before exit')
+  })
 
   // auto reloader for debugging
   /*
@@ -399,7 +398,7 @@ sync = () => {
 
     //|| me.my_member
 
-    if (K.ts < ts() - K.blocktime/2 || me.my_member) {
+    if (K.ts < ts() - K.blocktime / 2 || me.my_member) {
       me.send(chosen, 'sync', r([fromHex(K.prev_hash)]))
     } else {
       l('No need to sync, K.ts is recent')

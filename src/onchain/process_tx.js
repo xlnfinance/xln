@@ -313,7 +313,11 @@ module.exports = async (tx, meta) => {
         var amount = readInt(output[0])
 
         if (amount > signer.asset(asset)) {
-          l(`Trying to deposit ${amount} but has ${signer.asset(asset)}`)
+          l(
+            `${signer.id} Trying to deposit ${amount} but has ${signer.asset(
+              asset
+            )}`
+          )
           continue
         }
 

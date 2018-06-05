@@ -10,7 +10,15 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   var all = []
 
-  let [methodId, built_by, total_blocks, prev_hash, timestamp, tx_root, db_hash] = r(header)
+  let [
+    methodId,
+    built_by,
+    total_blocks,
+    prev_hash,
+    timestamp,
+    tx_root,
+    db_hash
+  ] = r(header)
 
   total_blocks = readInt(total_blocks)
   timestamp = readInt(timestamp)
@@ -25,7 +33,11 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   if (K.prev_hash != prev_hash) {
-    l(`Must be based on ${K.prev_hash} ${K.total_blocks} but is using ${prev_hash} ${total_blocks}`)
+    l(
+      `Must be based on ${K.prev_hash} ${
+        K.total_blocks
+      } but is using ${prev_hash} ${total_blocks}`
+    )
     return false
   }
 
@@ -221,10 +233,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // In case we are member && locked on this prev_hash, unlock to ensure liveness
   // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
   if (me.proposed_block.locked) {
-    var locked_prev_hash = r(me.proposed_block.header)[2]
+    var locked_prev_hash = r(me.proposed_block.header)[3]
 
     if (prev_hash == toHex(locked_prev_hash)) {
-      //l('Just unlocked from previous proposed block')
+      l('Just unlocked from previous proposed block')
       me.proposed_block = {}
     }
   }
@@ -240,7 +252,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       // in dev mode only to prevent race for /data
       await sleep(3000)
     }
-
 
     var filename = 'Fair-' + K.total_blocks + '.tar.gz'
     require('tar').c(
@@ -281,7 +292,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
         snapshotHash()
       }
     )
-
   }
 
   if (me.request_reload) {

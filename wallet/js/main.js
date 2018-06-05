@@ -116,9 +116,9 @@ window.render = (r) => {
   if (r.confirm) notyf.confirm(r.confirm)
   if (r.reload) location.reload()
 
-  if (r.already_opened && false) {
+  if (r.already_opened) {
     document.body.innerHTML =
-      '<b>The wallet is already opened in another tab. Only one instance of wallet is allowed.</b>'
+      '<b>The wallet was opened in another tab. Reload to continue in this tab.</b>'
     return false
   }
 

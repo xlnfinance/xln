@@ -160,13 +160,12 @@ var async_fn = async (ws, inputType, args) => {
         }
       }
 
-      // dirty hack to not backup k.json until all blocks are synced
-      if (args.length >= K.sync_limit) {
-        l("So many blocks. Syncing one more time")
-        sync()
-      } else {
-        if (K.total_blocks - started > 0) {
-          // something new happened - cache
+      if (K.total_blocks - started > 0) {
+        // dirty hack to not backup k.json until all blocks are synced
+        if (args.length >= K.sync_limit) {
+          l('So many blocks. Syncing one more time')
+          sync()
+        } else {
           update_cache()
           react({}, false)
 
@@ -189,7 +188,6 @@ var async_fn = async (ws, inputType, args) => {
       // sender is on last block
       return false
     }
-
 
     var last = await Block.findOne({
       attributes: ['id'],

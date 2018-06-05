@@ -362,14 +362,14 @@ class Me {
           // create an asset
           me.batch.push([
             'createAsset',
-            ['TEST2', 13371337, 'test coin', 'no goal']
+            ['TEST2', 13371337, 'Test coin', 'No goal']
           ])
         }
 
         if (this.record.id == 3) {
           me.batch.push([
             'createAsset',
-            ['TEST3', 10000000, 'test coin by 3', 'no goal']
+            ['TEST3', 10000000, 'Test coin by 3', 'No goal']
           ])
 
           // buying bunch of FRB for $4
@@ -445,9 +445,18 @@ Deltas: ${await Delta.count()}\n
   async syncdb() {
     return await q('syncdb', async () => {
       var all = []
-      l("Init syncdb")
-      
-      all.push(promise_writeFile('./' + datadir + '/onchain/k.json', stringify(K)))
+      l('Init syncdb')
+
+      fs.writeFileSync(
+        './' + datadir + '/onchain/k.json',
+        stringify(K),
+        function(err) {
+          if (err) return console.log(err)
+          console.log('Wrote Hello World in file helloworld.txt, just check it')
+        }
+      )
+
+      l('Saving k.json ' + K.total_blocks)
 
       // saving all deltas and corresponding payment objects to db
       // it only saves changed records, so call save() on everything
@@ -491,13 +500,12 @@ Deltas: ${await Delta.count()}\n
         //}
       }
 
-      l("Awaiting syncdb all")
+      l('Awaiting syncdb all')
       await Promise.all(all)
       l('Awaited')
-      
+
       return true
     })
-
   }
 
   // takes channels with supported hubs (verified and custom ones)

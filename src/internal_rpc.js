@@ -11,16 +11,16 @@ module.exports = async (ws, msg) => {
   // temporary: no auth code in dev mode for non roots
   if (json.auth_code == PK.auth_code) {
     if (ws.send && json.is_wallet && me.browser != ws) {
+      // new window replaces old one
       if (me.browser && me.browser.readyState == 1) {
-        ws.send(
+        me.browser.send(
           JSON.stringify({
             result: {already_opened: true}
           })
         )
-      } else {
-        // used to react(). only one instance is allowed
-        me.browser = ws
       }
+
+      me.browser = ws
     }
 
     let p = json.params
@@ -142,12 +142,12 @@ module.exports = async (ws, msg) => {
         } else if (outs.length > 0) {
           me.batch.push(['withdrawFrom', asset, ins])
           me.batch.push(['depositTo', asset, outs])
-        }
 
-        if (me.batch.length == 0) {
-          react({alert: 'Nothing to send onchain'})
-        } else {
-          react({confirm: 'Wait for tx to be added to blockchain'})
+          if (me.batch.length == 0) {
+            react({alert: 'Nothing to send onchain'})
+          } else {
+            react({confirm: 'Wait for tx to be added to blockchain'})
+          }
         }
 
         return false
@@ -199,6 +199,8 @@ module.exports = async (ws, msg) => {
 
         break
       case 'invoices':
+        await me.syncdb()
+
         result.ack = await Payment.findAll({
           where: {
             type: 'del',

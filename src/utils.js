@@ -25,13 +25,14 @@ nacl = require('../lib/nacl')
 
 encrypt_box = nacl.box
 open_box = nacl.box.open
-/*
+
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = nacl.sign.detached.verify
-*/
 
+/*
 ec = (a, b) => concat(Buffer.alloc(32), sha3(a))
 ec.verify = (a, b, c) => ec(a).equals(b)
+*/
 
 // promisify writeFile
 promise_writeFile = require('util').promisify(fs.writeFile)
@@ -134,22 +135,21 @@ l = (...args) => {
 loff = (text) => l(`${chalk.green(`       ⠟ ${text}`)}`)
 
 fatal = (reason) => {
-  react({reload: true})
-
   global.repl = null
   l(errmsg(reason))
-  
-  me.syncdb().then(async ()=>{
+
+  if (me) {
+    react({reload: true}) //reloads UI window
     me.intervals.map(clearInterval)
 
-    await sequelize.close()
-    await privSequelize.close()
-    l('sleep')
-    await sleep(200)
-    
-    process.exit()
+    me.syncdb().then(async () => {
+      await sequelize.close()
+      await privSequelize.close()
+      await sleep(500)
 
-  })
+      process.exit()
+    })
+  }
 }
 
 gracefulExit = (comment) => {

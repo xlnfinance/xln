@@ -96,6 +96,7 @@ Vote = sequelize.define('vote', {
 })
 
 Debt = sequelize.define('debt', {
+  asset: Sequelize.INTEGER,
   amount_left: Sequelize.INTEGER,
   oweTo: Sequelize.INTEGER
 })
@@ -171,7 +172,7 @@ User.idOrKey = async function(id) {
         break
       }
     }
-  } else{
+  } else {
     u = cache.users[id]
   }
 
@@ -221,7 +222,9 @@ User.prototype.asset = function(asset, diff) {
 User.prototype.payDebts = async function(asset, parsed_tx) {
   if (!this.has_debts) return false
 
-  let debts = await this.getDebts()
+  let debts = await this.getDebts({where: {asset: asset}})
+
+  this.has_debts = false
 
   for (let d of debts) {
     var u = await User.idOrKey(d.oweTo)
@@ -232,8 +235,8 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
 
       parsed_tx.events.push(['enforceDebt', d.amount_left, u.id])
 
-      await u.save()
-      await d.destroy()
+      //await u.save()
+      await d.destroy() // the debt was paid in full
     } else {
       let full = this.asset(asset)
       d.amount_left -= full
@@ -242,8 +245,12 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
 
       parsed_tx.events.push(['enforceDebt', full, u.id])
 
-      await u.save()
+      //await u.save()
       await d.save()
+
+      // not paid out in full
+      this.has_debts = true
+
       break
     }
   }
@@ -359,6 +366,7 @@ Insurance.prototype.resolve = async function() {
   // anybody owes to anyone?
   if (resolved.they_uninsured > 0 || resolved.uninsured > 0) {
     var d = await Debt.create({
+      asset: this.asset,
       userId: resolved.they_uninsured > 0 ? left.id : right.id,
       oweTo: resolved.they_uninsured > 0 ? right.id : left.id,
       amount_left:
