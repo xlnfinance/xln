@@ -1,6 +1,8 @@
 // Verify and apply transactions to current state.
 // Since we aim to be a settlement layer executed on *all* machines, transactions are sent in big signed batches to optimize load - only 1 batch per user per block is allowed
 
+// Blockchain consists of blocks, blocks consist of batches sent by users, batches consist of transactions
+
 module.exports = async (tx, meta) => {
   var [id, sig, body] = r(tx)
 

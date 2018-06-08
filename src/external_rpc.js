@@ -208,7 +208,7 @@ var async_fn = async (ws, inputType, args) => {
         return [r(b.precommits), b.header, b.ordered_tx_body]
       })
 
-      ws.send(concat(bin(map('chain')), r(chain)))
+      ws.send(concat(bin(map('chain')), r(chain)), l)
     } else {
       // l("No blocks to sync after " + msg.toString('hex'))
     }

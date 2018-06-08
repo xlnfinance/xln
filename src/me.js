@@ -385,7 +385,7 @@ class Me {
           me.batch.push(['depositTo', 1, [[1000000, pubkey, 0]]])
         }
 
-        // creating an initial bond sell for FRD
+        // creating an initial FRB sell for FRD
         me.batch.push(['createOrder', [2, 10000000, 1, 0.001 * 1000000]])
 
         setTimeout(async () => {
@@ -603,7 +603,7 @@ Deltas: ${await Delta.count()}\n
       //if (method == 'update') l(`Sending to ${trim(m)} `, toHex(sha3(tx)))
 
       if (me.users[m]) {
-        me.users[m].send(msg)
+        me.users[m].send(msg, l)
         return true
       } else {
         var member = Members.find((f) => f.pubkey.equals(m))
@@ -620,7 +620,7 @@ Deltas: ${await Delta.count()}\n
     //l(`Invoking ${method} in member ${m.id}`)
 
     if (me.users[m.pubkey]) {
-      return me.users[m.pubkey].send(msg)
+      return me.users[m.pubkey].send(msg, l)
     } else {
       me.users[m.pubkey] = new WebSocketClient()
 
@@ -634,11 +634,12 @@ Deltas: ${await Delta.count()}\n
       me.users[m.pubkey].onopen = function(e) {
         if (me.id) {
           me.users[m.pubkey].send(
-            concat(bin(map('auth')), me.envelope(map('auth')))
+            concat(bin(map('auth')), me.envelope(map('auth'))),
+            l
           )
         }
 
-        me.users[m.pubkey].send(msg)
+        me.users[m.pubkey].send(msg, l)
       }
 
       me.users[m.pubkey].open(m.location)
@@ -650,7 +651,7 @@ Deltas: ${await Delta.count()}\n
 
 Me.prototype.consensus = require('./onchain/consensus')
 Me.prototype.processBlock = require('./onchain/process_block')
-Me.prototype.processTx = require('./onchain/process_tx')
+Me.prototype.processBatch = require('./onchain/process_batch')
 
 Me.prototype.payChannel = require('./offchain/pay_channel')
 Me.prototype.flushChannel = require('./offchain/flush_channel')

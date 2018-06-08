@@ -72,7 +72,7 @@ module.exports = async () => {
             break
           }
 
-          var result = await me.processTx(candidate, meta)
+          var result = await me.processBatch(candidate, meta)
           if (result.success) {
             ordered_tx.push(candidate)
             total_size += candidate.length

@@ -32,6 +32,7 @@ resolveChannel = (insurance, delta, is_left = true) => {
     return Array(1 + Math.ceil(amount * 100 / total)).join(symbol)
   }
 
+  // visual representations of state in ascii and text
   if (delta < 0) {
     parts.ascii_channel =
       '|' + bar(parts.they_uninsured, '-') + bar(parts.they_insured, '=')
@@ -413,7 +414,7 @@ argv = require('minimist')(process.argv.slice(2), {
 })
 
 datadir = argv.datadir ? argv.datadir : 'data'
-base_port = argv.p ? parseInt(argv.p) : 8000
+base_port = argv.p ? parseInt(argv.p) : 8001
 trace = !!argv.trace
 
 process.title = 'Fair ' + base_port

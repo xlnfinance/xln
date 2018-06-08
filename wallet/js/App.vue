@@ -27,6 +27,8 @@ export default {
         app.call('load')
       }, 20000)
     }
+
+    setInterval(()=>app.$forceUpdate(), 1000)
   },
   destroyed() {
     clearInterval(this.interval)
@@ -272,24 +274,17 @@ export default {
     },
 
     dispute_outcome: (ins, parts) => {
-      var o = []
-      if (parts.insured > 0)
-        o.push(`${ins.leftId} gets ${app.commy(parts.insured)}`)
-      if (parts.they_insured > 0)
-        o.push(`${ins.rightId} gets ${app.commy(parts.they_insured)}`)
+      var o = "" 
+      let c = app.commy
 
-      if (parts.they_uninsured > 0)
-        o.push(
-          `${ins.leftId} owes ${app.commy(parts.they_uninsured)} to ${
-            ins.rightId
-          }`
-        )
-      if (parts.uninsured > 0)
-        o.push(
-          `${ins.rightId} owes ${app.commy(parts.uninsured)} to ${ins.leftId}`
-        )
-
-      return o.join(', ')
+      if (parts.uninsured > 0) {
+        o += `${c(parts.insured)} + ${c(parts.uninsured)} | 0`
+      } else if (parts.they_uninsured > 0) {
+        o += `0 | ${c(parts.they_insured)} + ${c(parts.they_uninsured)}`
+      } else {
+        o += `${c(parts.insured)} | ${c(parts.they_insured)}`
+      }
+      return `(${ins.leftId}) ${o} (${ins.rightId})`
     },
 
     commy: (b, dot = true) => {
@@ -412,22 +407,22 @@ export default {
           <li class="nav-item" v-bind:class="{ active: tab=='' }">
             <a class="nav-link" @click="go('')">Home</a>
           </li>
-          <li v-if="my_member" class="nav-item" v-bind:class="{ active: tab=='install' }">
-            <a class="nav-link" @click="go('install')">Install</a>
+          <li v-if="my_member"  class="nav-item" v-bind:class="{ active: tab=='install' }">
+            <a class="nav-link" @click="go('install')">⬇ Install</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
             <a class="nav-link" @click="go('wallet')">💰 Wallet</a>
           </li>
-          <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='credit' }">
+          <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='credit' }">
             <a class="nav-link" @click="go('credit')">💳 Credit Limits</a>
           </li>
-          <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
+          <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
           </li>
           <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
             <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
           </li>
-          <li v-if="auth_code && dev_mode" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
+          <li v-if="pubkey && dev_mode" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
             <a class="nav-link" @click="go('testnet')">Testnet</a>
           </li>
 
@@ -469,6 +464,7 @@ export default {
             <UserIcon :hash="pubkey" :size="32"></UserIcon>
           </span>
         </div>
+        
       </div>
     </nav>
     <div class="container">
@@ -779,7 +775,7 @@ export default {
 
         <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
 
-        <p v-if="auth_code && record && getAsset(1) > 200">
+        <p v-if="pubkey && record && getAsset(1) > 200">
           <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
         </p>
         <p v-else>In order to trade you must have a registered account with FRD balance.</p>
@@ -909,7 +905,7 @@ export default {
                   <template v-for="d in batch.events">
                     &nbsp;
 
-                    <span v-if="d[0]=='disputeWith'" class="badge badge-primary">{{d[2] == 'started' ? "started a dispute with "+d[1] : "won a dispute with "+d[1] }}: {{dispute_outcome(d[3], d[4])}}
+                    <span v-if="d[0]=='disputeWith'" class="badge badge-primary">{{d[2] == 'started' ? "Started dispute " : "Won dispute "}} {{dispute_outcome(d[3], d[4])}}
                     </span>
 
 
@@ -937,7 +933,7 @@ export default {
               <tr v-if="b.meta">
                 <td v-if="b.meta.cron.length + b.meta.missed_validators.length > 0"  colspan="7">
                   <template v-if="b.meta.cron.length > 0" v-for="m in b.meta.cron">
-                    <span v-if="m[0] == 'autodispute'" class="badge badge-primary">Dispute auto-resolved: {{dispute_outcome(m[1], m[2])}}</span>
+                    <span v-if="m[0] == 'autodispute'" class="badge badge-primary">Dispute resolved {{dispute_outcome(m[1], m[2])}}</span>
                     <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
                     <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span> &nbsp;
                   </template>

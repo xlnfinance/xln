@@ -47,5 +47,8 @@ for i in $(seq 8001 $maxport); do
   fi
 done
 
+sleep 2
+pm2 start tools/demo.js
+
 #node --prof fs.js -p443 --silent --wallet-dist --db=$db
 

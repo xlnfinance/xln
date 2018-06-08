@@ -49,6 +49,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return l('New block from the past')
   }
 
+  if (timestamp > ts() + 86400) {
+    return l('Block from far future?')
+  }
+
   if (!sha3(ordered_tx_body).equals(tx_root)) {
     return l('Invalid tx_root')
   }
@@ -58,7 +62,13 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   if (precommits.length == 0) {
-    // this is just dry run
+    // this is just dry run during consensus
+    var clock_skew = ts() - timestamp
+    if (clock_skew > 60 || clock_skew < -60) {
+      l('Timestamp skew is outside range')
+      return
+    }
+
     return true
   } else if (precommits.length != Members.length) {
     return l('Not valid number of precommits')
@@ -95,14 +105,16 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   let ordered_tx = r(ordered_tx_body)
 
+
+  K.ts = timestamp
+
   // Processing transactions one by one
   // Long term TODO: parallel execution with q() critical sections
   for (let i = 0; i < ordered_tx.length; i++) {
-    let result = await me.processTx(ordered_tx[i], meta)
+    let result = await me.processBatch(ordered_tx[i], meta)
     if (!result.success) l(result)
   }
 
-  K.ts = timestamp
   K.prev_hash = toHex(sha3(header))
 
   K.total_blocks++
@@ -243,14 +255,14 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   // only members do snapshots, as they require extra computations
   if (me.my_member && K.bytes_since_last_snapshot == 0) {
-    // it's important to flush current K to disk before snapshot
-
-    await me.syncdb()
     //await promise_writeFile(datadir + '/onchain/k.json', stringify(K))
 
     if (me.my_member.id != 1) {
       // in dev mode only to prevent race for /data
-      await sleep(3000)
+      await sleep(6000)
+    } else {
+      // it's important to flush current K to disk before snapshot
+      await me.syncdb()
     }
 
     var filename = 'Fair-' + K.total_blocks + '.tar.gz'

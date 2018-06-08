@@ -15,13 +15,14 @@ users = {}
 nacl = require('../lib/nacl')
 
 // define merchant node path
-FS_PATH = fs.existsSync('/root/fs/data8002/offchain/pk.json')
-  ? '/root/fs/data8002/offchain'
-  : '/Users/homakov/work/fs/data8002/offchain'
 
-FS_RPC = 'http://127.0.0.1:8002/rpc'
-
-l(FS_PATH)
+if (fs.existsSync('/root/fs/data8002/offchain/pk.json')) {
+  FS_PATH = '/root/fs/data8002/offchain'
+  FS_RPC = 'https://failsafe.network:8002/rpc'
+} else {
+  FS_PATH = '/Users/homakov/work/fs/data8002/offchain'
+  FS_RPC = 'http://127.0.0.1:8002/rpc'
+}
 
 // pointing browser SDK to user node
 LOCAL_FS_RPC = 'http://127.0.0.1:8001'
@@ -35,8 +36,8 @@ if (fs.existsSync(FS_PATH + '/pk.json')) {
 
 var processInvoices = async () => {
   r = await FS('invoices')
-  if (r.data.acked) {
-    for (var i of r.data.acked) {
+  if (r.data.ack) {
+    for (var i of r.data.ack) {
       l(i)
       let uid = Buffer.from(i.invoice, 'hex').toString()
       if (users.hasOwnProperty(uid)) {
@@ -59,12 +60,16 @@ FS = (method, params = {}) => {
     params: params
   })
 }
+
+address = ''
+
 setTimeout(async () => {
   r = await FS('getinfo')
   if (!r.data.address) {
     throw 'No address'
   }
-  var address = r.data.address
+
+  address = r.data.address
   l('Our address: ' + address)
   processInvoices()
 }, 1000)
@@ -112,8 +117,8 @@ require('http')
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <link rel="stylesheet" href="/bootstrap.min.css">
+    <script src="/axios.js"></script>
   </head>
 
   <body>
@@ -212,7 +217,8 @@ window.onload = function(){
           }
           res.end(JSON.stringify({status: 'paid'}))
         } else if (p.destination) {
-          var amount = parseInt(p.out_amount)
+          var amount = Math.round(parseFloat(p.out_amount) * 100)
+
           if (users[id] < amount) {
             l('Not enough balance')
             return false
@@ -231,11 +237,7 @@ window.onload = function(){
         }
       })
     } else {
-      require('serve-static')('../wallet')(
-        req,
-        res,
-        require('finalhandler')(req, res)
-      )
+      require('serve-static')('.')(req, res, require('finalhandler')(req, res))
     }
   })
   .listen(3010)

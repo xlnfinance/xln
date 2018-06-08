@@ -143,8 +143,8 @@ fatal = (reason) => {
     me.intervals.map(clearInterval)
 
     me.syncdb().then(async () => {
-      await sequelize.close()
-      await privSequelize.close()
+      //await sequelize.close()
+      //await privSequelize.close()
       await sleep(500)
 
       process.exit()

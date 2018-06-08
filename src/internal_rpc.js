@@ -331,10 +331,14 @@ module.exports = async (ws, msg) => {
     }
   } else {
     // the request is not authorized with auth_code - just send public explorer data
-    ws.send(
-      JSON.stringify({
-        result: cached_result
-      })
-    )
+    if (ws.end) {
+      ws.end(JSON.stringify(result))
+    } else {
+      ws.send(
+        JSON.stringify({
+          result: cached_result
+        })
+      )
+    }
   }
 }
