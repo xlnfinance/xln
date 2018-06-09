@@ -98,6 +98,7 @@ export default {
       ],
 
       proposals: [],
+      set_name: '',
 
       settings: !localStorage.settings,
 
@@ -231,8 +232,8 @@ export default {
       if (!user) user = app.record
       if (!user) return 0
 
-      if (asset == 1) {
-        return user.balance
+      if (user['balance'+asset]) {
+        return user['balance'+asset]
       } else {
         if (user.balances) {
           var bal = JSON.parse(user.balances)[asset]
@@ -273,18 +274,20 @@ export default {
       return ''
     },
 
-    dispute_outcome: (ins, parts) => {
-      var o = "" 
+    dispute_outcome: (prefix, ins, parts) => {
       let c = app.commy
+      let o = ''
+
+      var sep = ' | '
 
       if (parts.uninsured > 0) {
-        o += `${c(parts.insured)} + ${c(parts.uninsured)} | 0`
+        o += `${c(parts.insured)} + ${c(parts.uninsured)}${sep}`
       } else if (parts.they_uninsured > 0) {
-        o += `0 | ${c(parts.they_insured)} + ${c(parts.they_uninsured)}`
+        o += `${sep}${c(parts.they_insured)} + ${c(parts.they_uninsured)}`
       } else {
-        o += `${c(parts.insured)} | ${c(parts.they_insured)}`
+        o += `${parts.insured > 0 ? c(parts.insured) : ''}${sep}${parts.they_insured > 0 ? c(parts.they_insured) : ''}`
       }
-      return `(${ins.leftId}) ${o} (${ins.rightId})`
+      return `${prefix} (${ins.leftId}) ${o} (${ins.rightId})`
     },
 
     commy: (b, dot = true) => {
@@ -707,6 +710,12 @@ export default {
           </p>
 
 
+         <input style="width:300px" type="number" class="form-control small-input" v-model="set_name" placeholder="Choose Fair Name">
+
+          <p>
+            <button type="button" class="btn btn-warning" @click="call('setName', {set_name})">Claim Name</button>
+          </p>
+
           <template v-if="ch">
             <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.uninsured)}} (<b>uninsured</b> balance) if the hub is completely compromised.
             </p>
@@ -719,6 +728,8 @@ export default {
             </p>
             <p v-else>To start onchain dispute you must be registred onchain and have on your onchain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your onchain balance.</p>
           </template>
+
+
         </div>
         <div v-else>
           <h3>Registration</h3>
@@ -905,7 +916,7 @@ export default {
                   <template v-for="d in batch.events">
                     &nbsp;
 
-                    <span v-if="d[0]=='disputeWith'" class="badge badge-primary">{{d[2] == 'started' ? "Started dispute " : "Won dispute "}} {{dispute_outcome(d[3], d[4])}}
+                    <span v-if="d[0]=='disputeWith'" class="badge badge-primary" v-html="dispute_outcome(d[2], d[3], d[4])">
                     </span>
 
 
@@ -933,7 +944,7 @@ export default {
               <tr v-if="b.meta">
                 <td v-if="b.meta.cron.length + b.meta.missed_validators.length > 0"  colspan="7">
                   <template v-if="b.meta.cron.length > 0" v-for="m in b.meta.cron">
-                    <span v-if="m[0] == 'autodispute'" class="badge badge-primary">Dispute resolved {{dispute_outcome(m[1], m[2])}}</span>
+                    <span v-if="m[0] == 'autodispute'" class="badge badge-primary" v-html="dispute_outcome('resolved', m[1], m[2])"></span>
                     <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
                     <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span> &nbsp;
                   </template>
@@ -957,9 +968,10 @@ export default {
             <tr>
               <th scope="col">Icon</th>
               <th scope="col">ID</th>
+              <th scope="col">Name</th>
               <th scope="col">Pubkey</th>
-              <th scope="col">Onchain FRD</th>
-              <th scope="col">Onchain Assets</th>
+              <th scope="col">FRD/FRB</th>
+              <th scope="col">Other Assets</th>
               <th scope="col">Nonce</th>
               <th scope="col">Debts</th>
             </tr>
@@ -970,9 +982,10 @@ export default {
                 <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
               </th>
               <th scope="row">{{u.id}}</th>
+              <td>{{u.username}}</td>
               <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
 
-              <td>{{commy(u.balance)}}</td>
+              <td>{{commy(u.balance1)}} / {{commy(u.balance2)}}</td>
               <td>{{parse_balances(u.balances)}}</td>
               <td>{{u.nonce}}</td>
               <td>{{u.debts.length}}</td>

@@ -1,4 +1,4 @@
-// Receives an ack and set of transitions to execute on top of it by the partner
+// Receives an ack and set of transitions to execute on top of it
 module.exports = async (
   pubkey,
   asset,
@@ -37,15 +37,8 @@ module.exports = async (
     // our last known state has been ack.
     ch.payments.map((t, ind) => {
       if (t.status == 'sent') t.status = 'ack'
-
-      if (t.type + t.status == 'delack') {
-        //l('Delete lock ' + ind)
-        //ch.payments.splice(ind, 1)
-      }
     })
     ch.d.ack_requested_at = null
-
-    //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
 
     if (argv.syncdb) {
       all.push(
@@ -79,7 +72,6 @@ module.exports = async (
     }
 
     /*
-
     We received an acksig that doesnt match our current state. Apparently the partner sent
     transitions at the same time we did. 
 
@@ -104,14 +96,12 @@ module.exports = async (
       logstates(ch.state, oldState, debugState, signedState)
 
       fatal('Deadlock?!')
-      //gracefulExit('Deadlock?!')
       //await me.flushChannel(ch)
 
       return
     }
   }
 
-  //ascii_tr(transitions)
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (let t of transitions) {
     let m = map(readInt(t[0]))
@@ -140,7 +130,7 @@ module.exports = async (
       let reveal_until = K.usable_blocks + K.hashlock_exp
       // safe ranges when we can accept hashlock exp
 
-      if (exp < reveal_until - 5 || exp > reveal_until + 5) {
+      if (exp < reveal_until - 2 || exp > reveal_until + 2) {
         new_type = m == 'add' ? 'del' : 'delrisk'
         loff('Error: exp is out of supported range')
       }
@@ -161,9 +151,6 @@ module.exports = async (
 
         deltumId: ch.d.id
       })
-
-      //l(ascii_state(refresh(ch)))
-      //l('Hash got ' + toHex(inward_hl.hash))
 
       ch.payments.push(inward_hl)
 
@@ -212,7 +199,7 @@ module.exports = async (
             l(`Received and unlocked a payment, changing addack->delnew`)
 
           // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our del on time and the hashlock expires making us lose the money.
-          // SECURITY: if after timeout the del is not ack, go to blockchain ASAP to reveal the preimage!
+          // SECURITY: if after timeout the del is not ack, go to blockchain ASAP to reveal the preimage. See ensure_ack
         }
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
@@ -309,18 +296,12 @@ module.exports = async (
           )
           me.batch.push(['revealSecrets', [outcome]])
         } else {
-          /*
-          // how much fee we just made by mediating the transfer?
-          me.metrics.fees.current += inward.amount - hl.amount
-          // add to total volume
-          me.metrics.volume.current += inward.amount
-          // add to settled payments*/
-
+          // pulling the money after receiving secrets, down the chain of channels
           var pull_hl = inward.inwards.find((hl) => hl.hash.equals(hash))
 
           if (!pull_hl) {
             l(
-              `Not found pull`,
+              `error: Not found pull`,
               trim(pubkey),
               toHex(hash),
               valid,
@@ -343,6 +324,12 @@ module.exports = async (
               )}, acking and pulling inward payment`
             )
           uniqAdd(outward_hl.inward_pubkey)
+
+          // how much fee we just made by mediating the transfer?
+          me.metrics.fees.current += pull_hl.amount - outward_hl.amount
+          // add to total volume
+          me.metrics.volume.current += pull_hl.amount
+
         }
       } else {
         //react({confirm: 'Payment completed'})
@@ -360,19 +347,9 @@ module.exports = async (
 
   // since we applied partner's diffs, all we need is to add the diff of our own transitions
   if (ch.rollback[0] > 0) {
-    /*
-    for (var t of ch.sent) {
-      if (t.type == 'add') {
-        ch.outwards.push(t)
-      } else {
-        ch.inwards = ch.inwards.filter((c) => c != t)
-      }
-    }*/
-
+    // merging and leaving rollback mode
     ch.d.nonce += ch.rollback[0]
     ch.d.offdelta += ch.rollback[1]
-
-    // leaving rollback mode: our sents will auto appear in state
     ch.rollback = [0, 0]
 
     if (trace) l(`After merge our state is \n${ascii_state(refresh(ch))}`)
@@ -384,7 +361,6 @@ module.exports = async (
   }
 
   // CHEAT_: storing most profitable outcome for us
-  /*
   if (!ch.d.CHEAT_profitable_state) {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
@@ -395,7 +371,7 @@ module.exports = async (
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
-  */
+  
 
   if (argv.syncdb) {
     all.push(ch.d.save())
@@ -404,6 +380,5 @@ module.exports = async (
 
   return flushable
 
-  // If no transitions received, do opportunistic flush (maybe while we were "sent" transitions were added)
-  // Otherwise give forced ack to the partner
+  // If no transitions received, do opportunistic flush, otherwise give forced ack
 }

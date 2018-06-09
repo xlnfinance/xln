@@ -5,12 +5,13 @@ var SegfaultHandler = require('segfault-handler')
 SegfaultHandler.registerHandler('crash.log')
 
 // This is the most important function in the whole project. Make sure you understand it!
-// Defines how payment channels work, based on "insurance" and delta=("ondelta"+"offdelta")
+// Defines how payment channels work, based on "insurance" and delta=(ondelta+offdelta)
 // There are 3 major scenarios of delta position
 // . is 0 point, | is delta, = is insured, - is uninsured
 // 4,6  .====--| (left user owns entire insurance, has 2 uninsured)
 // 4,2  .==|==   (left and right both have 2 insured)
 // 4,-2 |--.==== (right owns entire insurance, 2 in uninsured balance)
+// https://codepen.io/anon/pen/wjLGgR visual demo
 resolveChannel = (insurance, delta, is_left = true) => {
   var parts = {
     // left user promises only with negative delta, scenario 3

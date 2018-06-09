@@ -81,19 +81,16 @@ var async_fn = async (ws, inputType, args) => {
 
     if (me.proposed_block.locked) {
       return l(
-        'We are still locked on previous block:',
-        me.proposed_block.header,
-        header
+        `Still locked: ${toHex(me.proposed_block.header)} ${toHex(header)}`
       )
     }
 
     // no precommits means dry run
     if (!await me.processBlock([], header, ordered_tx_body)) {
-      l('Bad block proposed ' + toHex(header))
+      l(`Bad block proposed ${toHex(header)}`)
       return false
     }
 
-    //l('Got block ', toHex(header))
 
     // consensus operations are in-memory for now
     //l("Saving proposed block")
@@ -128,9 +125,9 @@ var async_fn = async (ws, inputType, args) => {
       //l(`Received ${inputType} from ${m.id}`)
     } else {
       l(
-        `This ${inputType} by ${m.id} doesn't work for our block ${toHex(
-          me.proposed_block.header
-        )}`
+        `This ${inputType} by ${m.id} doesn't work for our block ${
+          toHex(me.proposed_block.header)
+        }`
       )
     }
     // testnet stuff

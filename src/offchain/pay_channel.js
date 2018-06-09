@@ -10,7 +10,7 @@ module.exports = async (opts) => {
 
     // todo not generate secret and exp here and do it during 'add'ing
     if (!opts.destination) {
-      l('No destination ', opts)
+      l('Error: No destination ', opts)
       return false
     }
 

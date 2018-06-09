@@ -12,10 +12,7 @@ module.exports = async (pubkey, asset, delta = false) => {
     var key = stringify([pubkey, asset])
     if (cache.ch[key]) {
       ch = cache.ch[key]
-      //ch.payments = ch.payments.filter((t) => t.type + t.status != 'delack')
-
       refresh(ch)
-
       return ch
     }
 
@@ -31,10 +28,10 @@ module.exports = async (pubkey, asset, delta = false) => {
       l('Channel to self?')
       return false
     }
+    
     if (!(asset > 0)) {
       l('Invalid asset id', asset)
       asset = 1
-      //return false
     }
 
     ch = {
@@ -57,7 +54,6 @@ module.exports = async (pubkey, asset, delta = false) => {
     if (delta) {
       ch.d = delta
     } else {
-      // ch stands for Channel, d for Delta record, yes
       let created = await Delta.findOrCreate({
         where: {
           myId: me.pubkey,
@@ -87,10 +83,6 @@ module.exports = async (pubkey, asset, delta = false) => {
     }
 
     let user = await User.idOrKey(pubkey)
-    /*({
-      attributes: ['id'],
-      where: {pubkey: pubkey}
-    })*/
     
     // default ins
     ch.ins = Insurance.build({
@@ -99,29 +91,10 @@ module.exports = async (pubkey, asset, delta = false) => {
       nonce: 0
     })
 
-    if (user) {
+    if (user && user.id) {
       ch.partner = user.id
       if (me.record) {
         ch.ins = await Insurance.btw(me.record, user, asset)
-        /*
-        ch.ins = await Insurance.find({
-          where: {
-            leftId: ch.left ? me.record.id : user.id,
-            rightId: ch.left ? user.id : me.record.id,
-            asset: asset
-          }
-        })
-        */
-
-        /* convenient for tests to forget about insurance
-        ch.ins = Insurance.build({
-          leftId: ch.left ? me.record.id : ch.partner,
-          rightId: ch.left ? ch.partner : me.record.id,
-          asset: asset,
-          insurance: 100000000000,
-          ondelta: 50000000000
-        })
-        */
       }
     }
 

@@ -158,7 +158,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
         include: {all: true}
       }).then(async (insurances) => {
         for (let ins of insurances) {
-          meta.cron.push(['autodispute', ins, await ins.resolve()])
+          meta.cron.push(['resolved', ins, await ins.resolve()])
         }
       })
     )
@@ -189,6 +189,16 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
       await job.destroy()
     }
+  }
+
+
+  if (K.bet_maturity && K.ts > K.bet_maturity) {
+    l("🎉 Maturity day! Copy all FRB balances to FRD")
+    // is balance2 nulled after?
+
+    await User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
+
+    K.bet_maturity = false
   }
 
   if (is_usable && K.usable_blocks % 200 == 0) {

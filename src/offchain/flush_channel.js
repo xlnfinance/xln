@@ -17,7 +17,7 @@ Always flush opportunistically, unless you are acking your direct partner who se
 
 module.exports = async (pubkey, asset, opportunistic) => {
   return q([pubkey, asset], async () => {
-    if (trace) l(`--- Started Flush ${trim(pubkey)} ${opportunistic}`)
+    if (trace) l(`Started Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
     ch.last_used = ts()
@@ -26,7 +26,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     let all = []
 
     if (ch.d.status == 'sent') {
-      if (trace) l(`=== End flush ${trim(pubkey)}, in sent`)
+      if (trace) l(`End flush ${trim(pubkey)}, in sent`)
 
       if (ch.d.ack_requested_at < new Date() - 4000) {
         //me.send(ch.d.partnerId, 'update', ch.d.pending)
@@ -58,34 +58,25 @@ module.exports = async (pubkey, asset, opportunistic) => {
         if (t.status != 'new') continue
 
         if (t.type == 'del') {
-          /*
+          
           if (me.CHEAT_dontreveal) {
             loff('CHEAT: not revealing our secret to inward')
             continue
-          }*/
-
-          // the beginning is same for both transitions
-          /*
-          let hl = remove(ch.inwards, t.hash)
-
-          if (!hl) {
-            loff('error No such hashlock')
-            continue
           }
-          */
 
           if (t.secret && t.secret.length == K.secret_len) {
             ch.d.offdelta += ch.left ? t.amount : -t.amount
           }
           var args = [t.hash, t.secret]
-          /*
+          
         } else if (t.type == 'delrisk') {
-          if (t.secret) {
+          // works like refund
+          if (!t.secret) {
             ch.d.offdelta += ch.left ? -t.amount : t.amount
           }
-          args = [t.hash, t.secret]*/
+
+          var args = [t.hash, t.secret]
         } else if (t.type == 'add' || t.type == 'addrisk') {
-          /*
           if (
             t.lazy_until &&
             t.lazy_until > new Date() &&
@@ -93,7 +84,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
           ) {
             l('Still lazy, wait')
             continue
-          }*/
+          }
 
           if (
             t.amount < K.min_amount ||
@@ -131,16 +122,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
             loff('error Cannot set so many hashlocks now, try later')
             //continue
           }
-          /*
-          if (t.type == 'add') {
-            // add hashlock to canonical state
-            ch.outwards.push(t)
-          } else {
-            // store hashlock off-state as "verbal agreement"
-            ch.d.offdelta += ch.left ? -t.amount : t.amount
-          }*/
-
-          //l('Hash sent ' + toHex(t.hash))
 
           args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
         }
@@ -166,7 +147,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
       }
 
       if (opportunistic && transitions.length == 0) {
-        if (trace) l(`=== End flush ${trim(pubkey)}: Nothing to flush`)
+        if (trace) l(`End flush ${trim(pubkey)}: Nothing to flush`)
         return
       }
     } else if (ch.d.status == 'merge') {
@@ -192,7 +173,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
       ch.d.status = 'sent'
       if (trace)
         l(
-          `=== flushing ${transitions.length} (${envelope.length}b) to ${trim(
+          `Flushing ${transitions.length} (${envelope.length}b) to ${trim(
             pubkey
           )}`
         )

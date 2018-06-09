@@ -205,8 +205,6 @@ Payment = privSequelize.define(
 
 Delta.hasMany(Payment)
 Payment.belongsTo(Delta)
-//Delta.hasMany(Payment, {foreignKey: 'delta_id', sourceKey: 'id'})
-//Payment.belongsTo(Delta, {foreignKey: 'delta_id', targetKey: 'id'})
 
 Payment.prototype.toLock = function() {
   return [this.amount, this.hash, this.exp]
@@ -216,8 +214,6 @@ Delta.prototype.verify = function(state, ackSig) {
   // canonical state representation
   var canonical = r(state)
   if (ec.verify(canonical, ackSig, this.partnerId)) {
-    //this.nonce = state[1][2]
-    //this.offdelta = state[1][3]
     if (trace)
       l(`Successfully verified sig against state\n${ascii_state(state)}`)
 

@@ -23,9 +23,10 @@ l('Reading db ', base_db.storage)
 User = sequelize.define(
   'user',
   {
-    username: Sequelize.STRING, // to be used in DNS later, currently barely used
-    // saves time to select Debts
+    // Fair Names /^(\w){1,15}$/)
+    username: Sequelize.STRING,
 
+    // saves time to select Debts
     has_debts: {
       type: Sequelize.BOOLEAN,
       defaultValue: false
@@ -34,9 +35,10 @@ User = sequelize.define(
     pubkey: Sequelize.CHAR(32).BINARY,
     nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
-    // onchain FRD balance
-    balance: {type: Sequelize.BIGINT, defaultValue: 0},
-    // all other assets
+    // FRD and FRB have dedicated db field
+    balance1: {type: Sequelize.BIGINT, defaultValue: 0},
+    balance2: {type: Sequelize.BIGINT, defaultValue: 0},
+    // all other assets, serialized
     balances: {type: Sequelize.TEXT}
   },
   {
@@ -134,6 +136,8 @@ Asset = sequelize.define('asset', {
   name: Sequelize.TEXT,
   desc: Sequelize.TEXT,
 
+  division: Sequelize.INTEGER, // division point for min unit, 0 for yen 2 for dollar
+
   issuable: Sequelize.BOOLEAN,
   issuerId: Sequelize.INTEGER,
   total_supply: Sequelize.INTEGER
@@ -195,12 +199,12 @@ User.idOrKey = async function(id) {
 }
 
 User.prototype.asset = function(asset, diff) {
-  if (asset == 1) {
+  if (this['balance'+asset]) {
     // the default FRD is just a column
     if (diff) {
-      return (this.balance += diff)
+      return (this['balance'+asset] += diff)
     } else {
-      return this.balance
+      return this['balance'+asset]
     }
   } else {
     // read and write on the fly

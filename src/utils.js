@@ -160,12 +160,16 @@ gracefulExit = (comment) => {
 
 child_process = require('child_process')
 
-// Amazing lib to forget about binary encoding: https://github.com/ethereum/wiki/wiki/RLP
+// error-ignoring wrapper around https://github.com/ethereum/wiki/wiki/RLP
 r = function(a) {
   if (a instanceof Buffer) {
+    try {
     return rlp.decode(a)
+    }catch(e){ return []; }
   } else {
+    try{
     return rlp.encode(a)
+    }catch(e){return new Buffer([]) }
   }
 }
 

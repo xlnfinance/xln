@@ -56,7 +56,11 @@ module.exports = async () => {
 
     // latest block done at
     ts: 0,
-    bond_maturity: ts() + 300, // when all bonds turn into dollars
+
+    
+    //Time.at(1913370000) => 2030-08-19 20:40:00 +0900
+    
+    bet_maturity: ts() + 100, // when all FRB turn into FRD
     created_at: ts(),
 
     // sanity limits for offchain payments
@@ -106,16 +110,11 @@ module.exports = async () => {
       pubkey: me.pubkey,
       username: username,
       nonce: 0,
-      balance: 10000000000,
-      balances: `{"2": 10000000000}`
+      balance1: 10000000000,
+      balance2: 10000000000,
+      balances: `{"3": 10000000000}`
     })
-    /*
 
-    Balance.create({
-      balance: 500000000,
-      assetId: 1,
-      userId: user.id
-    })*/
 
     l(`${username} : ${pw} at ${loc}`)
 
@@ -206,8 +205,8 @@ module.exports = async () => {
 
   await Asset.create({
     ticker: 'FRB',
-    name: 'Bond',
-    desc: 'Fair Bond',
+    name: 'Bet',
+    desc: 'Fair Bet',
     issuerId: 1,
     total_supply: 1000000000
   })
