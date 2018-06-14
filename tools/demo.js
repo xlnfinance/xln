@@ -34,19 +34,24 @@ if (fs.existsSync(FS_PATH + '/pk.json')) {
   throw 'No auth'
 }
 
-var processInvoices = async () => {
-  r = await FS('invoices')
-  if (r.data.ack) {
-    for (var i of r.data.ack) {
-      l(i)
-      let uid = Buffer.from(i.invoice, 'hex').toString()
-      if (users.hasOwnProperty(uid)) {
-        users[uid] += i.amount
-      }
+var processUpdates = async () => {
+  r = await FS('receivedAndFailed')
+
+  if (!r.data.receivedAndFailed) return l("no data found")
+    
+  for (var obj of r.data.receivedAndFailed) {
+    if (obj.is_inward) {
+      l("New deposit to "+id)
+    } else {
+      l("Failed to withdraw for "+id)
+    }
+    let uid = Buffer.from(i.invoice, 'hex').toString()
+    if (users.hasOwnProperty(uid)) {
+      users[uid] += i.amount
     }
   }
 
-  setTimeout(processInvoices, 1000)
+  setTimeout(processUpdates, 1000)
 }
 
 post = async (url, params) => {
@@ -71,7 +76,7 @@ setTimeout(async () => {
 
   address = r.data.address
   l('Our address: ' + address)
-  processInvoices()
+  processUpdates()
 }, 1000)
 
 commy = (b, dot = true) => {
@@ -207,7 +212,7 @@ window.onload = function(){
 
         l('init ', p)
 
-        if (p.deposit_invoice) {
+        /*if (p.deposit_invoice) {
           r = await FS('invoice', {invoice: p.deposit_invoice})
 
           if (r.data.status == 'paid' && r.data.extra == id) {
@@ -216,7 +221,8 @@ window.onload = function(){
             console.log('Not paid')
           }
           res.end(JSON.stringify({status: 'paid'}))
-        } else if (p.destination) {
+        } else */
+        if (p.destination) {
           var amount = Math.round(parseFloat(p.out_amount) * 100)
 
           if (users[id] < amount) {
@@ -228,7 +234,7 @@ window.onload = function(){
             outward: {
               destination: p.destination,
               amount: amount,
-              invoice: 'from demo',
+              invoice: id,
               asset: 1
             }
           })

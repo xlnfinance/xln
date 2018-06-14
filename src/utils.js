@@ -6,6 +6,7 @@ fs = require('fs')
 http = require('http')
 os = require('os')
 ws = require('ws')
+querystring = require('querystring')
 opn = require('../lib/opn')
 
 var chalk = require('chalk') // pretty logs?

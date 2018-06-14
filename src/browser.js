@@ -180,9 +180,8 @@ mkdir $id && cd $id && curl ${our_location}$f -o $f
 if [[ -x /usr/bin/sha256sum ]] && sha256sum $f || shasum -a 256 $f | grep \\
   ${out_hash}; then
   tar -xzf $f && rm $f && ./install
-  node fs -p8001
-fi
-`
+  node fs
+fi`
     })
   }
 }
@@ -190,6 +189,5 @@ fi
 // TODO: Move from memory to persistent DB
 cached_result = {
   history: [],
-  my_log: '',
-  settle_tps: 0
+  my_log: ''
 }

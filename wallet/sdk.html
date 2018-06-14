@@ -1,4 +1,4 @@
-Failsafe SDK proxy<script>
+Fairlayer SDK proxy<script>
 var ws = new WebSocket((location.protocol == 'http:' ? 'ws://' : 'wss://')+location.host)
 ws.onmessage = function(m){
   var e = JSON.parse(m.data)
@@ -14,7 +14,7 @@ window.addEventListener('message',function(e){
   if (e.origin != location.origin) {
     
     if (e.data.method == 'send'){
-      var msg = "Do you want to pay with Failsafe?\n\nRecipient: "+e.origin+"\n\nPay total: $"+(json.amount/100)+""
+      var msg = "Do you want to pay with Fairlayer?\n\nRecipient: "+e.origin+"\n\nPay total: $"+(json.amount/100)+""
 
       var confirm_start = new Date
       if(!confirm(msg)) return false
@@ -28,7 +28,7 @@ window.addEventListener('message',function(e){
         return false
       }
     } else if (e.data.method == 'login') {
-      if(!confirm("Login with Failsafe in "+e.origin+"?")) return false
+      if(!confirm("Login with Fairlayer in "+e.origin+"?")) return false
 
     } else {
       console.log("Only send and login are exposed to websites")

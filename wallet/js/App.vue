@@ -660,7 +660,7 @@ export default {
         </select>
 
         <template v-if="ch">
-          <p>You can pay through the hub if you deposit insurance to this channel, but <b>in order to receive</b> from the hub you must define <b>credit limits</b> below. Unlike traditional banks who open credit to you, <b>it's another way around: you give the hub the credit</b> that limits your risk (uninsured balances).</p>
+          <p>In order to receive assets you must define <b>credit limits to a hub</b> below. This limits your risk (uninsured balances).</p>
           <p>
             <label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
@@ -719,21 +719,21 @@ export default {
           <template v-if="ch">
             <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get {{commy(ch.insured)}} (<b>insured</b> part of your balance), but you may lose up to {{commy(ch.uninsured)}} (<b>uninsured</b> balance) if the hub is completely compromised.
             </p>
-            <p>After a timeout money will arrive to your onchain balance, then you will be able to move it to another hub.</p>
+            <p>After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.</p>
             <p v-if="ch.d.status == 'disputed'">
               Please wait for dispute resolution. <span v-if="ch.ins.dispute_delayed > 0">Will be resolved at block {{ch.ins.dispute_delayed}}</span>
             </p>
             <p v-else-if="getAsset(1) >= K.standalone_balance">
               <button class="btn btn-danger" @click="call('dispute', {partner: ch.partner})" href="#">Start Dispute</button>
             </p>
-            <p v-else>To start onchain dispute you must be registred onchain and have on your onchain balance at least {{commy(K.standalone_balance)}} to cover transaction fees. Please ask another hub or user to register you and/or deposit money to your onchain balance.</p>
+            <p v-else>To start onchain dispute you must be registred onchain and have on your onchain balance at least {{commy(K.standalone_balance)}} FRD to cover transaction fees. Please ask another hub or user to register you and/or deposit FRD to your onchain balance.</p>
           </template>
 
 
         </div>
         <div v-else>
           <h3>Registration</h3>
-          <p>You are not currently registered on the blockchain. Onchain registration is not required but it allows you to insure your balances, start disputes with hubs and do rebalances yourself. Your account will be registered automatically once you have more money in uninsured balances. </p>
+          <p>You are not currently registered on the blockchain. Onchain registration is not required but it allows you to insure your balances, start disputes with hubs and do rebalances yourself. Your account will be registered automatically once you have more assets in uninsured balances. </p>
           <p>Otherwise you can ask someone to rebalance onchain at least $10 to your temporary ID:
             <br>
             <b>{{pubkey}}</b></p>
@@ -745,7 +745,7 @@ export default {
         <p>Case 1. Just arrived? You can go to an exchange or any other service to purchase our digital assets. For now just click on faucet. After reaching {{commy(K.risk)}} in uninsured balance, the hub must rebalance/insure you onchain - <b>wait for it</b>. That will automatically register your account onchain. <b>Keep an eye on Blockchain Explorer - every node will see this rebalance transaction</b></p>
         <p>Case 2. Now let's practice p2p payments: use the install snippet again but replace id=fs to id=fs2 and 8001 port to 8002 (to run a parallel user on the same machine). Under the new user, create an invoice for 123 and pay it with our user. Instantly you will see this user has 123 under "spent" and a new user under "uninsured". After some time the hub will ask your node to withdraw from your channel in order to insure the second user, because 123 is beyond risk limit. If you'd pay $5, there would be no rebalance.</p>
         <p>Case 3. You both were using @eu hub, now let's practice 2 hops payment: <b>you->eu->jp->new user</b>. Select jp hub by another user, create an invoice and pay it with our user again. You will pay fees to both hubs (roughly 0.1+0.1%).</p>
-        <p>Case 4. Request withdraw by this user on Onchain rebalance page. Withdraw is taking money "the nice way" from your hub and you could move them to another hub or to make a direct payment to someone else's channel onchain.</p>
+        <p>Case 4. Request withdraw by this user on Onchain rebalance page. Withdraw is taking assets "the nice way" from your hub and you could move them to another hub or to make a direct payment to someone else's channel onchain.</p>
         <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start onchain dispute under Onchain disputes tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
         <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state - biggest balance you ever owned. When hub notices that, they will post latest state before delay period. Keep an eye on Blockchain Explorer page to see that.</p>
         <button class="btn btn-success mb-3" @click="call('dispute', {partner: ch.partner, profitable: true})" href="#">Cheat in Dispute</button>
@@ -823,21 +823,17 @@ export default {
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
-        <p>In order to enjoy the security model and true decentralization of the network you must <b>download and install Fair app</b> on your personal computer, laptop, mobile phone or server and become a fully verifying independent node.</p>
-
-        <p><b>This website is merely an explorer and does not have any "registration". In fact, avoid any "online wallets" and only use this local wallet with no dependance on 3rd parties.</b> Convenience is valuable to us but strong security model is paramount.</p>
-
-        <p>Our decentralized install is slightly longer than just downloading an executable program. First, you need <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
+        <p>Our unique decentralized install procedure is slightly longer than just downloading an executable file. First, make sure you have <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
         <div style="background-color: #FFFDDE; padding: 20px;">
           <Highlight :white="true" lang="bash" :code="install_snippet"></Highlight>
         </div>
-        <p>Visually verify it with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal.app</p>
+        <p>Visually verify it with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal application.</p>
         <ul>
           <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
         <p>On Windows? <a v-bind:href="'/Fair-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with
           <kbd>certUtil -hashfile Fair-{{K.last_snapshot_height}}.tar.gz SHA256</kbd> then run
-          <kbd>./install && node fs -p8001</kbd> (8001 is default port). You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
+          <kbd>./install && node fs</kbd>. You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
         <p>Looking for genesis state for research or analytics? <a v-bind:href="'/Fair-1.tar.gz'">Get Fair-1.tar.gz here</a></p>
       </div>
       <div v-else-if="tab=='gov'">
@@ -1044,7 +1040,7 @@ export default {
 
       <div v-else-if="tab=='hubs'">
         <h1>Hubs</h1>
-        <p>Any user can have a payment channel with any other user. However for effective routing some users get thoroughly verified and offered inside the wallet to have channel with. Similarly to banks, using same hub with recipients is cheaper then sending money cross-hub. Hubs have no priveleges over regular users and follow exact same rules and cannot steal your money like a bank. If your hub is compromised the uninsured balances may be lost, but insured are protected.</p>
+        <p>Any user can have a payment channel with any other user. However for effective routing some users get thoroughly verified and offered inside the wallet to have channel with. Similarly to banks, using same hub with recipients is cheaper then sending assets cross-hub. Hubs have no priveleges over regular users and follow exact same rules and cannot steal your assets like a bank. If your hub is compromised the uninsured balances may be lost, but insured are protected.</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
@@ -1069,7 +1065,7 @@ export default {
 
       <div v-else-if="tab=='assets'">
         <h1>Assets</h1>
-        <p>Digital assets is the name for all kinds of currencies, tokens, stock and colored coins you can create on top of the system.</p>
+        <p>Fair assets is the name for all kinds of fiat/crypto-currencies, tokens and stock you can create on top of the system.</p>
 
 
         <div class="form-group">
@@ -1081,6 +1077,9 @@ export default {
           
           <p><label for="comment">Amount:</label>
           <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Division point (e.g. 0 for yen, 2 for dollar):</label>
+          <input class="form-control" v-model="new_asset.division" rows="2" id="comment"></input></p>
 
           <p><label for="comment">Description:</label>
           <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input></p>

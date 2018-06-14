@@ -275,9 +275,11 @@ initDashboard = async (a) => {
       req.on('data', function(data) {
         queryData += data
       })
-
+  
       req.on('end', function() {
-        RPC.internal_rpc(res, queryData)
+        //GET + JSON in body on top
+        var json = Object.assign(querystring.parse(req.query), parse(queryData))
+        RPC.internal_rpc(res, json)
       })
     } else if (req.url == '/sdk.html') {
       serveStatic('../wallet')(req, res, finalhandler(req, res))
@@ -347,7 +349,7 @@ initDashboard = async (a) => {
   })
   internal_wss.on('connection', function(ws) {
     ws.on('message', (msg) => {
-      RPC.internal_rpc(ws, msg)
+      RPC.internal_rpc(ws, parse(bin(msg).toString()))
     })
   })
 

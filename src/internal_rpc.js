@@ -1,9 +1,7 @@
 // Internal RPC serves requests made by the user's browser or by the merchant server app
 
-module.exports = async (ws, msg) => {
+module.exports = async (ws, json) => {
   var result = {}
-
-  var json = parse(bin(msg).toString())
 
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
@@ -198,14 +196,17 @@ module.exports = async (ws, msg) => {
         result.address = me.address
 
         break
-      case 'invoices':
+
+      case 'receivedAndFailed':
         await me.syncdb()
 
-        result.ack = await Payment.findAll({
+        // what we successfully received and must deposit in our app +
+        // what node failed to send so we must deposit it back to user's balance
+        result.receivedAndFailed = await Payment.findAll({
           where: {
             type: 'del',
             status: 'ack',
-            is_inward: true
+            [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
           }
         })
 
@@ -217,7 +218,7 @@ module.exports = async (ws, msg) => {
             where: {
               type: 'del',
               status: 'ack',
-              is_inward: true
+              [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
             }
           }
         )
