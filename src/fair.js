@@ -4,6 +4,9 @@ require('./browser')
 var SegfaultHandler = require('segfault-handler')
 SegfaultHandler.registerHandler('crash.log')
 
+var Raven = require('raven');
+Raven.config('https://299a833b1763402f9216d8e7baeb6379@sentry.io/1226040').install();
+
 // This is the most important function in the whole project. Make sure you understand it!
 // Defines how payment channels work, based on "insurance" and delta=(ondelta+offdelta)
 // There are 3 major scenarios of delta position

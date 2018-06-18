@@ -455,9 +455,7 @@ Deltas: ${await Delta.count()}\n
           console.log('Wrote Hello World in file helloworld.txt, just check it')
         }
       )
-
-      l('Saving k.json ' + K.total_blocks)
-
+      
       // saving all deltas and corresponding payment objects to db
       // it only saves changed records, so call save() on everything
 
@@ -493,16 +491,10 @@ Deltas: ${await Delta.count()}\n
           delete cache.ch[key]
           l('Evict from memory idle channel: ' + key)
         }
-
-        //await ch.d.save()
-        //for (var t of ch.payments) {
-        //  await t.save()
-        //}
       }
 
-      l('Awaiting syncdb all')
       await Promise.all(all)
-      l('Awaited')
+      l('syncdb done')
 
       return true
     })

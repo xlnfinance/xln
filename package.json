@@ -21,6 +21,7 @@
     "pg": "7.4.3",
     "pm2": "2.10.4",
     "prettier": "1.12.1",
+    "raven": "2.6.2",
     "rlp": "2.0.0",
     "segfault-handler": "1.0.1",
     "sequelize": "4.37.7",

@@ -39,7 +39,7 @@ Perfect way to run new code against old blockchain:
 ```
 rm -rf fs
 id=fs
-f=Failsafe-1.tar.gz
+f=Fair-1.tar.gz
 mkdir $id && cd $id && curl https://failsafe.network/$f -o $f
 tar -xzf $f && rm $f
 ln -s ~/work/fs/node_modules
