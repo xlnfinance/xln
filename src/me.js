@@ -1,4 +1,4 @@
-WebSocketClient = require('../lib/ws')
+WebSocketClient = require('./ws')
 stringify = require('../lib/stringify')
 
 class Me {
@@ -349,7 +349,7 @@ class Me {
     if (argv.monkey) {
       // user specific e2e tests
       if (this.record) {
-        if (this.record.id == 2) {
+        if (this.record.id == 4) {
           // trigger the dispute from hub
           me.CHEAT_dontack = true
           me.CHEAT_dontwithdraw = true
@@ -445,14 +445,12 @@ Deltas: ${await Delta.count()}\n
   async syncdb() {
     return await q('syncdb', async () => {
       var all = []
-      l('Init syncdb')
 
       fs.writeFileSync(
         './' + datadir + '/onchain/k.json',
         stringify(K),
         function(err) {
           if (err) return console.log(err)
-          console.log('Wrote Hello World in file helloworld.txt, just check it')
         }
       )
       
@@ -595,7 +593,7 @@ Deltas: ${await Delta.count()}\n
       //if (method == 'update') l(`Sending to ${trim(m)} `, toHex(sha3(tx)))
 
       if (me.users[m]) {
-        me.users[m].send(msg, l)
+        me.users[m].send(msg, wscb)
         return true
       } else {
         var member = Members.find((f) => f.pubkey.equals(m))
@@ -612,7 +610,7 @@ Deltas: ${await Delta.count()}\n
     //l(`Invoking ${method} in member ${m.id}`)
 
     if (me.users[m.pubkey]) {
-      return me.users[m.pubkey].send(msg, l)
+      return me.users[m.pubkey].send(msg, wscb)
     } else {
       me.users[m.pubkey] = new WebSocketClient()
 
@@ -631,7 +629,7 @@ Deltas: ${await Delta.count()}\n
           )
         }
 
-        me.users[m.pubkey].send(msg, l)
+        me.users[m.pubkey].send(msg, wscb)
       }
 
       me.users[m.pubkey].open(m.location)

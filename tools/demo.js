@@ -27,27 +27,22 @@ if (fs.existsSync('/root/fs/data8002/offchain/pk.json')) {
 // pointing browser SDK to user node
 LOCAL_FS_RPC = 'http://127.0.0.1:8001'
 
-if (fs.existsSync(FS_PATH + '/pk.json')) {
-  auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/pk.json')).auth_code
-  l('Auth code to our node: ' + auth_code)
-} else {
-  throw 'No auth'
-}
-
 var processUpdates = async () => {
   r = await FS('receivedAndFailed')
 
   if (!r.data.receivedAndFailed) return l("no data found")
     
   for (var obj of r.data.receivedAndFailed) {
-    if (obj.is_inward) {
-      l("New deposit to "+id)
-    } else {
-      l("Failed to withdraw for "+id)
-    }
-    let uid = Buffer.from(i.invoice, 'hex').toString()
+    let uid = Buffer.from(obj.invoice, 'hex').toString()
+
+    // checking if uid is valid
     if (users.hasOwnProperty(uid)) {
-      users[uid] += i.amount
+      if (obj.is_inward) {
+        l("New deposit to "+uid)
+      } else {
+        l("Refund because failed to withdraw for "+uid)
+      }
+      users[uid] += obj.amount
     }
   }
 
@@ -66,18 +61,6 @@ FS = (method, params = {}) => {
   })
 }
 
-address = ''
-
-setTimeout(async () => {
-  r = await FS('getinfo')
-  if (!r.data.address) {
-    throw 'No address'
-  }
-
-  address = r.data.address
-  l('Our address: ' + address)
-  processUpdates()
-}, 1000)
 
 commy = (b, dot = true) => {
   let prefix = b < 0 ? '-' : ''
@@ -96,53 +79,53 @@ commy = (b, dot = true) => {
   return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-require('http')
-  .createServer(async (req, res) => {
-    var id = false
 
-    if (req.headers.cookie) {
-      var id = req.headers.cookie.split('id=')[1]
-      l('Loaded id ' + id)
+httpcb = async (req, res) => {
+  var id = false
+
+  if (req.headers.cookie) {
+    var id = req.headers.cookie.split('id=')[1]
+    l('Loaded id ' + id)
+  }
+
+  res.status = 200
+
+  if (req.url == '/') {
+    if (!id) {
+      id = rand()
+      l('Set cookie')
+      res.setHeader('Set-Cookie', 'id=' + id)
+      repl.context.res = res
     }
+    if (!users[id]) users[id] = 0 // Math.round(Math.random() * 1000000)
 
-    res.status = 200
-
-    if (req.url == '/') {
-      if (!id) {
-        id = rand()
-        l('Set cookie')
-        res.setHeader('Set-Cookie', 'id=' + id)
-        repl.context.res = res
-      }
-      if (!users[id]) users[id] = 0 // Math.round(Math.random() * 1000000)
-
-      res.end(`
+    res.end(`
 
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <link rel="stylesheet" href="/bootstrap.min.css">
-    <script src="/axios.js"></script>
-  </head>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="/bootstrap.min.css">
+  <script src="/axios.js"></script>
+</head>
 
-  <body>
-    <main role="main" class="container" id="main">
-      <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
+<body>
+  <main role="main" class="container" id="main">
+    <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
 
-      <p>Your account in our bank: ${id}</p>
-      <p>Available Balance: <b>\$${commy(users[id])}</b></p>
-     
-      <h3>Deposit</h3>
-      <a href="#" id="deposit">${address}</a>
+    <p>Your account in our bank: ${id}</p>
+    <p>Available Balance: <b>\$${commy(users[id])}</b></p>
+   
+    <h3>Deposit</h3>
+    <a href="#" id="deposit">${address}</a>
 
-      <h3>Withdraw</h3>
-      <p><input type="text" id="destination" placeholder="Destination"></p>
-      <p><input type="text" id="out_amount" placeholder="Amount"></p>
-      <p><button class="btn btn-success" id="withdraw">Withdraw</button></p>
-     
+    <h3>Withdraw</h3>
+    <p><input type="text" id="destination" placeholder="Destination"></p>
+    <p><input type="text" id="out_amount" placeholder="Amount"></p>
+    <p><button class="btn btn-success" id="withdraw">Withdraw</button></p>
+   
 
-   </main>
+ </main>
 
 
 <script>
@@ -152,7 +135,7 @@ id = '${id}'
 fs_origin = '${LOCAL_FS_RPC}'
 
 var fallback = setTimeout(()=>{
-  //main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
+//main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
 }, 3000)
 
 
@@ -162,90 +145,120 @@ var fallback = setTimeout(()=>{
 
 window.onload = function(){
 
-  withdraw.onclick = function(){
-    axios.post('/init', {
-      destination: destination.value,
-      out_amount: out_amount.value
-    }).then((r2)=>{
-      if (r2.data.status == 'paid') {
+withdraw.onclick = function(){
+  axios.post('/init', {
+    destination: destination.value,
+    out_amount: out_amount.value
+  }).then((r2)=>{
+    if (r2.data.status == 'paid') {
+      setTimeout(()=>{
         location.reload()
-      } else {
-        alert(r2.data.error)
-      }
-    })
-  }
+      }, 1000)
+      
+    } else {
+      alert(r2.data.error)
+    }
+  })
+}
 
-  deposit.onclick = function(){
-    var invoice = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(32)), function(byte) {
-      return ('0' + (byte & 0xFF).toString(16)).slice(-2);
-    }).join('')
-
-    fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
-
-    window.addEventListener('message', function(e){
-      if(e.origin == fs_origin){
-        l(e.data)
-        fs_w.close()
-
-        location.reload()
-      }
-    })
-
-  
-  }
+//  var invoice = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(32)), function(byte) {
+    return ('0' + (byte & 0xFF).toString(16)).slice(-2);
+// }).join('')
 
 
-  
+deposit.onclick = function(){
+  fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
+
+  window.addEventListener('message', function(e){
+    if(e.origin != fs_origin) return
+
+    l(e)
+    fs_w.close()
+
+    location.reload()
+  })
+
+
+}
+
+
+
 }
 </script>
 </body></html>
 
-      `)
-    } else if (req.url == '/init') {
-      var queryData = ''
-      req.on('data', function(data) {
-        queryData += data
-      })
+    `)
+  } else if (req.url == '/init') {
+    var queryData = ''
+    req.on('data', function(data) {
+      queryData += data
+    })
 
-      req.on('end', async function() {
-        var p = JSON.parse(queryData)
+    req.on('end', async function() {
+      var p = JSON.parse(queryData)
 
-        l('init ', p)
+      l('init ', p)
 
-        /*if (p.deposit_invoice) {
-          r = await FS('invoice', {invoice: p.deposit_invoice})
+      if (p.destination) {
+        var amount = Math.round(parseFloat(p.out_amount) * 100)
 
-          if (r.data.status == 'paid' && r.data.extra == id) {
-            users[id] += r.data.amount
-          } else {
-            console.log('Not paid')
-          }
-          res.end(JSON.stringify({status: 'paid'}))
-        } else */
-        if (p.destination) {
-          var amount = Math.round(parseFloat(p.out_amount) * 100)
-
-          if (users[id] < amount) {
-            l('Not enough balance')
-            return false
-          }
-          users[id] -= amount
-          r = await FS('send', {
-            outward: {
-              destination: p.destination,
-              amount: amount,
-              invoice: id,
-              asset: 1
-            }
-          })
-          l(r.data)
-          res.end(JSON.stringify({status: 'paid'}))
+        if (users[id] < amount) {
+          l('Not enough balance')
+          return false
         }
-      })
-    } else {
-      require('serve-static')('.')(req, res, require('finalhandler')(req, res))
-    }
-  })
-  .listen(3010)
+        users[id] -= amount
+        r = await FS('send', {
+          outward: {
+            destination: p.destination,
+            amount: amount,
+            invoice: id,
+            asset: 1
+          }
+        })
+        l(r.data)
+        res.end(JSON.stringify({status: 'paid'}))
+      }
+    })
+  } else {
+    require('serve-static')(require('path').resolve(__dirname, '.'))(req, res, require('finalhandler')(req, res))
+  }
+}
+
+
+
+
+
+address = '';
+
+setTimeout(async () => {
+
+  if (fs.existsSync(FS_PATH + '/pk.json')) {
+    auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/pk.json')).auth_code
+    l('Auth code to our node: ' + auth_code)
+  } else {
+    throw 'No auth'
+  }
+
+  r = await FS('getinfo')
+  if (!r.data.address) {
+    throw 'No address'
+  }
+
+
+
+  require('http')
+    .createServer(httpcb)
+    .listen(3010)
+
+  address = r.data.address
+  l('Our address: ' + address)
+  processUpdates()
+
+
+  try{
+    require('../lib/opn')('http://127.0.0.1:3010')
+  } catch(e){} 
+}, 5000)
+
 
 repl = require('repl').start()

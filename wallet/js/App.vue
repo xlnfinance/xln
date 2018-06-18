@@ -564,7 +564,7 @@ export default {
 
 
           <template v-for="(ch, index) in channels" v-if="ch.d.asset == asset" >
-            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}<span v-if="dev_mode">{{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
+            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}<span v-if="dev_mode"> {{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
             <small v-if="ch.payable > 0">
               = {{commy(ch.ins.insurance)}} insurance 
               {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
@@ -631,7 +631,7 @@ export default {
                 <tr v-bind:key="h.id" v-for="h in payments.slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                  <td>Hash {{trim(h.hash)}} Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
+                  <td>Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
                   <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
                 </tr>
               </tbody>
@@ -823,14 +823,14 @@ export default {
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
-        <p>Our unique decentralized install procedure is slightly longer than just downloading an executable file. First, make sure you have <a href="https://nodejs.org/en/download/">Node.js installed</a> (9.6.0+). For macOS/Linux: copy-paste this self-contained snippet to your text editor:</p>
-        <div style="background-color: #FFFDDE; padding: 20px;">
-          <Highlight :white="true" lang="bash" :code="install_snippet"></Highlight>
-        </div>
-        <p>Visually verify it with other validators (whichever looks trustworthy to you) listed below to ensure our server isn't compromised. If there's exact match paste the snippet into your Terminal application.</p>
+        <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app:</p>
+        <div style="background-color: #FFFDDE; padding: 20px;"><Highlight :white="true" lang="bash" :code="install_snippet"></Highlight></div>
+        <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
+
         <ul>
           <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
+
         <p>On Windows? <a v-bind:href="'/Fair-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with
           <kbd>certUtil -hashfile Fair-{{K.last_snapshot_height}}.tar.gz SHA256</kbd> then run
           <kbd>./install && node fs</kbd>. You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
@@ -940,7 +940,7 @@ export default {
               <tr v-if="b.meta">
                 <td v-if="b.meta.cron.length + b.meta.missed_validators.length > 0"  colspan="7">
                   <template v-if="b.meta.cron.length > 0" v-for="m in b.meta.cron">
-                    <span v-if="m[0] == 'autodispute'" class="badge badge-primary" v-html="dispute_outcome('resolved', m[1], m[2])"></span>
+                    <span v-if="m[0] == 'resolved'" class="badge badge-primary" v-html="dispute_outcome(m[0], m[1], m[2])"></span>
                     <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
                     <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span> &nbsp;
                   </template>

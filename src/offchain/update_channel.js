@@ -4,8 +4,7 @@ module.exports = async (
   asset,
   ackSig,
   transitions,
-  debugState,
-  signedState
+  debug
 ) => {
   let ch = await me.getChannel(pubkey, asset)
   let all = []
@@ -27,11 +26,14 @@ module.exports = async (
     }
   }
 
-  let oldState = r(ch.d.signed_state)
-  prettyState(oldState)
+  let [theirInitialState, theirFinalState, theirSignedState] = debug
 
-  prettyState(debugState)
-  prettyState(signedState)
+  let ourSignedState = r(ch.d.signed_state)
+  prettyState(ourSignedState)
+
+  prettyState(theirInitialState)
+  prettyState(theirFinalState)
+  prettyState(theirSignedState)
 
   if (ch.d.verify(refresh(ch), ackSig)) {
     // our last known state has been ack.
@@ -61,12 +63,12 @@ module.exports = async (
   } else {
     if (ch.d.status == 'merge') {
       // we are in merge and yet we just received ackSig that doesnt ack latest state
-      logstates(ch.state, oldState, debugState, signedState)
+      logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
       fatal('Rollback cant rollback')
       return
     }
     if (transitions.length == 0) {
-      logstates(ch.state, oldState, debugState, signedState)
+      logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
       fatal('Empty invalid ack ' + ch.d.status)
       return
     }
@@ -83,17 +85,17 @@ module.exports = async (
 
     */
 
-    if (ch.d.signed_state && ch.d.verify(oldState, ackSig)) {
+    if (ch.d.signed_state && ch.d.verify(ourSignedState, ackSig)) {
       if (trace) l(`Start merge with ${trim(pubkey)}`)
 
       ch.rollback = [
-        ch.d.nonce - oldState[1][2], // nonce diff
-        ch.d.offdelta - oldState[1][3] // offdelta diff
+        ch.d.nonce - ourSignedState[1][2], // nonce diff
+        ch.d.offdelta - ourSignedState[1][3] // offdelta diff
       ]
-      ch.d.nonce = oldState[1][2]
-      ch.d.offdelta = oldState[1][3]
+      ch.d.nonce = ourSignedState[1][2]
+      ch.d.offdelta = ourSignedState[1][3]
     } else {
-      logstates(ch.state, oldState, debugState, signedState)
+      logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
 
       fatal('Deadlock?!')
       //await me.flushChannel(ch)
@@ -113,17 +115,17 @@ module.exports = async (
       let new_type = m
 
       if (amount < K.min_amount || amount > ch.they_payable) {
-        loff('Error: invalid amount ', amount)
+        loff('error: invalid amount ', amount)
         new_type = m == 'add' ? 'del' : 'delrisk'
       }
 
       if (hash.length != 32) {
-        loff('Error: Hash must be 32 bytes')
+        loff('error: Hash must be 32 bytes')
         break
       }
 
       if (ch.inwards.length >= K.max_hashlocks) {
-        loff('Error: too many hashlocks')
+        loff('error: too many hashlocks')
         break
       }
 
@@ -132,7 +134,7 @@ module.exports = async (
 
       if (exp < reveal_until - 2 || exp > reveal_until + 2) {
         new_type = m == 'add' ? 'del' : 'delrisk'
-        loff('Error: exp is out of supported range')
+        loff('error: exp is out of supported range')
       }
 
       // don't save in db just yet
@@ -164,8 +166,8 @@ module.exports = async (
       // check new state and sig, save
       ch.d.nonce++
       if (!ch.d.verify(refresh(ch), t[2])) {
-        loff('Error: Invalid state sig add')
-        logstates(ch.state, oldState, debugState, signedState)
+        loff('error: Invalid state sig add')
+        logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
 
         break
       }
@@ -182,7 +184,7 @@ module.exports = async (
         )
 
         if (unlocked == null) {
-          loff('Error: Bad unlocker')
+          loff('error: Bad unlocker')
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
         } else {
@@ -244,7 +246,7 @@ module.exports = async (
         inward_hl.type = m == 'add' ? 'del' : 'delrisk'
         inward_hl.status = 'new'
 
-        loff('Error: arent receiver and arent a hub O_O')
+        loff('error: arent receiver and arent a hub O_O')
       }
 
       if (argv.syncdb) all.push(inward_hl.save())
@@ -281,7 +283,7 @@ module.exports = async (
 
       ch.d.nonce++
       if (!ch.d.verify(refresh(ch), t[2])) {
-        fatal('Error: Invalid state sig at ' + m)
+        fatal('error: Invalid state sig at ' + m)
         break
       }
 
@@ -343,6 +345,14 @@ module.exports = async (
         return
       }
     }
+  }
+
+  let ours = ascii_state(ch.state)
+  let theirs = ascii_state(theirFinalState)
+
+  if (ours != theirs) {
+    l(ours, theirs)
+    fatal("Unexpected final states after transitions ", transitions)
   }
 
   // since we applied partner's diffs, all we need is to add the diff of our own transitions

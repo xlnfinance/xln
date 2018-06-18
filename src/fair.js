@@ -423,6 +423,8 @@ datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8001
 trace = !!argv.trace
 
+argv.syncdb = argv.syncdb != 'off'
+
 process.title = 'Fair ' + base_port
 
 if (!fs.existsSync('data')) {

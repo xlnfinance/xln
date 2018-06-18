@@ -57,7 +57,7 @@ WebSocketClient.prototype.send = function(data) {
     try {
       //var port = this.url.split(':')[2]
       //l('I SEND ' + data.length + ' TO ' + port)
-      this.instance.send(data, l)
+      this.instance.send(data, wscb)
       return true
     } catch (e) {
       l('Failed to send ws:', e)

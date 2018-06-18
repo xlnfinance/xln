@@ -1,0 +1,133 @@
+Insurance <span id=insurance_text></span> (stored onchain, how much collateral is locked up between two users)<input type="range" min="0" max="100" value="0" class="slider" id=insurance><br>
+Ondelta <span id=ondelta_text></span> (stored onchain, updated only during onchain tx by L, apply same changes you do to insurance: += for deposit, -= for withdrawal) <input type="range" min="-50" max="50" value="0" class="slider" id=ondelta> <br>
+Offdelta <span id=offdelta_text></span> (stored offchain, updated during offchain payments)<input type="range" min="-50" max="50" value="0" class="slider" id=offdelta><br>
+<pre id=result></pre> 
+<div id=outcome></div>
+
+
+<style>
+.slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 15px;
+    border-radius: 5px;   
+    background: #d3d3d3;
+    outline: none;
+    opacity: 0.7;
+    -webkit-transition: .2s;
+    transition: opacity .2s;
+}
+
+.slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 25px;
+    height: 25px;
+    border-radius: 50%; 
+    background: #4CAF50;
+    cursor: pointer;
+}
+
+.slider::-moz-range-thumb {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%;
+    background: #4CAF50;
+    cursor: pointer;
+}
+
+span{
+  color: red;font-weight: bold; 
+}
+</style>
+<script>
+resolveChannel = (insurance, delta, is_left = true) => {
+  var parts = {
+    // left user promises only with negative delta, scenario 3
+    they_uninsured: delta < 0 ? -delta : 0,
+    insured: delta > insurance ? insurance : delta > 0 ? delta : 0,
+    they_insured:
+      delta > insurance ? 0 : delta > 0 ? insurance - delta : insurance,
+    // right user promises when delta > insurance, scenario 1
+    uninsured: delta > insurance ? delta - insurance : 0
+  }
+
+  var total =
+    parts.they_uninsured + parts.uninsured + parts.they_insured + parts.insured
+
+  if (total < 300) total = 100
+
+  var bar = (amount, symbol) => {
+    if (amount == 0) return ''
+    return Array(1 + Math.ceil(amount * 100 / total)).join(symbol)
+  }
+  
+  var o='';
+  var c = (a)=>{return a}
+
+      if (parts.uninsured > 0) {
+        o += `${c(parts.insured)} + ${c(parts.uninsured)} | 0`
+      } else if (parts.they_uninsured > 0) {
+        o += `0 | ${c(parts.they_insured)} + ${c(parts.they_uninsured)}`
+      } else {
+        o += `${c(parts.insured)} | ${c(parts.they_insured)}`
+      }
+  
+  parts.o = `Left ${o} Right`
+  
+  
+  if (delta < 0) {
+    parts.outcome = `R has \$${parts.they_insured} insured and  \$${parts.they_uninsured} uninsured`
+    parts.ascii_channel =
+      '|' + bar(parts.they_uninsured, '-') + bar(parts.they_insured, '=')
+  } else if (delta < insurance) {
+    parts.outcome = `L has \$${parts.insured} insured, R has \$${parts.they_insured} insured`
+    parts.ascii_channel =
+      bar(parts.insured, '=') + '|' + bar(parts.they_insured, '=')
+  } else {
+    parts.outcome = `L has \$${parts.insured} insured and \$${parts.uninsured} uninsured`
+    parts.ascii_channel =
+      bar(parts.insured, '=') + bar(parts.uninsured, '-') + '|'
+  }
+
+  // default view is left. if current user is right, simply reverse
+  if (!is_left) {
+    ;[
+      parts.they_uninsured,
+      parts.insured,
+      parts.they_insured,
+      parts.uninsured
+    ] = [
+      parts.uninsured,
+      parts.they_insured,
+      parts.insured,
+      parts.they_uninsured
+    ]
+  }
+
+  return parts
+}
+
+l= console.log
+
+  
+function update(){
+  ['insurance', 'ondelta','offdelta'].map(tag=>{
+    window[tag+'_text'].innerHTML = window[tag].value
+  })
+  
+  var resolved = resolveChannel(parseInt(insurance.value), parseInt(ondelta.value) + parseInt(offdelta.value))
+  
+  
+  result.innerHTML = resolved.o + "<br>"+  resolved.ascii_channel
+  outcome.innerHTML = resolved.outcome
+}
+
+update() 
+
+insurance.oninput = ondelta.oninput = offdelta.oninput = update
+
+
+</script>
+
+

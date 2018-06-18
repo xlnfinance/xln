@@ -29,6 +29,18 @@ if (hashargs.auth_code) {
   history.replaceState(null, null, '/#wallet')
 }
 
+String.prototype.hexEncode = function(){
+    var hex, i;
+
+    var result = "";
+    for (i=0; i<this.length; i++) {
+        hex = this.charCodeAt(i).toString(16);
+        result += ("0"+hex).slice(-2);
+    }
+
+    return result
+}
+
 window.renderRisk = (hist) => {
   var precision = 100 // devide time by
 
@@ -117,20 +129,26 @@ window.render = (r) => {
   if (r.reload) location.reload()
 
   if (r.already_opened) {
+    clearInterval(window.app.interval)
+
     document.body.innerHTML =
       '<b>The wallet was opened in another tab. Reload to continue in this tab.</b>'
     return false
   }
 
-  // verify if opener-initiated last hashargs payment succeded
+  // verify if opener-initiated last hashargs payment succeded (we know secret for this invoice)
   if (
     opener &&
-    r.payments &&
-    r.payments[0] &&
-    r.payments[0].status == 'acked' &&
-    r.payments[0].type == 'settle'
+    app.payments &&
+    //app.payments[0].id != r.payments[0].id &&
+    //r.payments[0].secret
+
+    r.payments[0].invoice == hashargs.invoice.hexEncode() &&
+    Date.parse(r.payments[0].createdAt)/1000 > app.ts()-10 &&
+    r.payments[0].secret
   ) {
-    opener.postMessage({status: 'paid'}, '*')
+    opener.postMessage({status: 'paid'}, '*');
+    //window.close()
   }
 
   Object.assign(window.app, r)

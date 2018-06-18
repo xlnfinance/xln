@@ -9,7 +9,7 @@ var async_fn = async (ws, inputType, args) => {
     )
   )*/
 
-  //l('External RPC: ' + inputType)
+  l('External RPC: ' + inputType)
 
   if (inputType == 'auth') {
     var [pubkey, sig, body] = args
@@ -150,6 +150,7 @@ var async_fn = async (ws, inputType, args) => {
   } else if (inputType == 'chain') {
     q('onchain', async () => {
       var started = K.total_blocks
+      l(`Sync since ${started} ${args.length}`)
       for (var block of args) {
         if (!await me.processBlock(block[0], block[1], block[2])) {
           l('Bad chain?')
@@ -205,7 +206,7 @@ var async_fn = async (ws, inputType, args) => {
         return [r(b.precommits), b.header, b.ordered_tx_body]
       })
 
-      ws.send(concat(bin(map('chain')), r(chain)), l)
+      ws.send(concat(bin(map('chain')), r(chain)), wscb)
     } else {
       // l("No blocks to sync after " + msg.toString('hex'))
     }
@@ -316,8 +317,7 @@ var async_fn = async (ws, inputType, args) => {
 
     // ackSig defines the sig of last known state between two parties.
     // then each transitions contains an action and an ackSig after action is committed
-    // debugState/signedState are purely for debug phase
-    let [method, asset, ackSig, transitions, debugState, signedState] = r(body)
+    let [method, asset, ackSig, transitions, debug] = r(body)
     if (map(readInt(method)) != 'update') {
       loff('Invalid update input')
       return false
@@ -332,8 +332,7 @@ var async_fn = async (ws, inputType, args) => {
         asset,
         ackSig,
         transitions,
-        debugState,
-        signedState
+        debug
       )
     })
 

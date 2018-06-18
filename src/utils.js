@@ -132,6 +132,10 @@ l = (...args) => {
   console.log(...args)
 }
 
+wscb = (...args) => {
+  //console.log("Received from websocket ", args)
+}
+
 // offchain logs
 loff = (text) => l(`${chalk.green(`       ⠟ ${text}`)}`)
 

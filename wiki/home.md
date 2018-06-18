@@ -1,12 +1,20 @@
-# Abstract
+# Extended Lightning Network and Fairlayer 
 
-In this document we're going to propose two things: a non-opinionated Layer2 scalability technique for blockchain (**Fairlayer, the scaling concept** also known as **Extended Lightning Network**) and opinionated double-layered blockchain written in Javascript, which includes this concept out-of-box (**Fairlayer, the Mainnet**). 
+## Abstract
 
-The main novel idea in this paper is the scaling concept, so that's what we're going to start with in the first part. In the second part we figure out the weak spots in existing PoW and PoS consensus engines, blockchain governance, methods of software distribution, batching and even key management UI trying to find the most balanced approach to general public. 
+In this document we're going to propose a concept and its implementation: a non-opinionated Layer2 scalability technique for blockchains **Extended Lightning Network (XLN)** and opinionated two-layered payment network **Fairlayer**, which is the first blockchain to implement XLN out-of-box.
 
-To make soundness of the idea more obvious we structure the explanation in 5 incremental steps, where each starts with the problem and ends with the solution, leaving the better system than it was before. The word "blockchain" won't even be used until step 4.
+The novelty of XLN idea is extending the original Lightning Network with credit lines on both sides of a payment channel to solve (or at least significantly alleviate) the capacity problem of LN (the requirement for locking up funds). With credit lines the capacity problem of payment channels is shifted from onchain defined to trust/risk-defined. We believe a payment with higher risk involved is better than no payment at all, which is a common problem with original Lightning.
 
-# 
+Fairlayer, on another hand, is a quite opinionated XLN implementation that aims to fix other issues with blockchains other than just scalability. Some parts of Fairlayer such as Proof-of-Authority can come off as controversary, but bear in mind XLN (the generic scaling concept) can be immitated on top of Bitcoin and most of other blockchains albeit in a much more limited fashion than Fairlayer does it.
+
+Our paramount priority is security and censorship resistance even from validator majority, which is why we require absolutely all nodes including consumer devices to be a fully-verifying nodes, Spv. Thankfully, our full node is designed to routinely run on everything from cheap smartphones to cloud servers and the first "Fair" layer is cheap to keep up with.
+
+
+
+
+
+
 
 ## 1. Digital signatures and balance proofs
 

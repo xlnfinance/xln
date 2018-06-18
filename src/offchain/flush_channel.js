@@ -43,7 +43,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     }
 
     let ackSig = ec(r(refresh(ch)), me.id.secretKey)
-    let debugState = r(r(ch.state))
+    let initialState = r(r(ch.state))
 
     // array of actions to apply to canonical state
     var transitions = []
@@ -157,14 +157,20 @@ module.exports = async (pubkey, asset, opportunistic) => {
       if (trace) l('In merge, no transactions can be added')
     }
 
+    //only for debug, can be heavy
+    var debug = [
+      initialState, // state we started with
+      ch.state,     // state we finished at
+      r(ch.d.signed_state), // signed state we have
+   ]
+
     // transitions: method, args, sig, new state
     let envelope = me.envelope(
       map('update'),
       asset,
       ackSig,
       transitions,
-      debugState, // state we started with
-      r(ch.d.signed_state) // signed state we started with
+      debug
     )
 
     if (transitions.length > 0) {

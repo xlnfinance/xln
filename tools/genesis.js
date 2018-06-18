@@ -133,6 +133,34 @@ module.exports = async () => {
 
       shares: 0
     })
+
+    if (user.id != 1) {
+      var left =
+        Buffer.compare(
+          user.pubkey,
+          fromHex(K.members[0].pubkey)
+        ) == -1
+
+      // preload channel FRD and FRB
+      await Insurance.create({
+        leftId: left ? user.id : 1,
+        rightId: left ? 1 : user.id,
+        insurance: 1000000,
+        ondelta: left ? 1000000 : 0,
+        nonce: 0,
+        asset: 1
+      })
+
+      await Insurance.create({
+        leftId: left ? user.id : 1,
+        rightId: left ? 1 : user.id,
+        insurance: 2000000,
+        ondelta: left ? 2000000 : 0,
+        nonce: 0,
+        asset: 2
+      })
+    }
+
     return seed
   }
 
@@ -209,31 +237,6 @@ module.exports = async () => {
     desc: 'Fair Bet',
     issuerId: 1,
     total_supply: 1000000000
-  })
-
-  var left =
-    Buffer.compare(
-      fromHex(K.members[1].pubkey),
-      fromHex(K.members[0].pubkey)
-    ) == -1
-
-  // preload 2@3 channel FRD and FRB
-  await Insurance.create({
-    leftId: left ? 2 : 1,
-    rightId: left ? 1 : 2,
-    insurance: 1000000,
-    ondelta: left ? 1000000 : 0,
-    nonce: 0,
-    asset: 1
-  })
-
-  await Insurance.create({
-    leftId: left ? 2 : 1,
-    rightId: left ? 1 : 2,
-    insurance: 2000000,
-    ondelta: left ? 2000000 : 0,
-    nonce: 0,
-    asset: 2
   })
 
   /*
