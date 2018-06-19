@@ -145,10 +145,6 @@ saveId = async function(obj) {
   if (!obj.id) await obj.save()
 }
 
-on_server = fs.existsSync(
-  '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
-)
-
 cache = {
   ins: {},
   users: {},
@@ -292,28 +288,8 @@ initDashboard = async (a) => {
   }
 
   // this serves dashboard HTML page
-  if (on_server) {
-    cert = {
-      cert: fs.readFileSync(
-        '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
-      ),
-      key: fs.readFileSync('/etc/letsencrypt/live/failsafe.network/privkey.pem')
-    }
-    var server = require('https').createServer(cert, cb)
-
-    // redirecting from http://
-    if (base_port == 443) {
-      require('http')
-        .createServer(function(req, res) {
-          res.writeHead(301, {Location: 'https://' + req.headers['host']})
-          res.end()
-        })
-        .listen(80)
-    }
-  } else {
-    cert = false
-    var server = require('http').createServer(cb)
-  }
+  cert = false
+  var server = require('http').createServer(cb)
 
   me = new Me()
 
@@ -344,7 +320,7 @@ initDashboard = async (a) => {
   })
 
   // opn doesn't work in SSH console
-  if (base_port != 443 && !argv.silent) openBrowser()
+  if (!argv.silent) openBrowser()
   internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
   internal_wss.on('error', function(err) {
@@ -422,6 +398,7 @@ argv = require('minimist')(process.argv.slice(2), {
 datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8001
 trace = !!argv.trace
+on_server = !!argv['prod-server']
 
 argv.syncdb = argv.syncdb != 'off'
 
