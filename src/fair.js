@@ -4,8 +4,24 @@ require('./browser')
 var SegfaultHandler = require('segfault-handler')
 SegfaultHandler.registerHandler('crash.log')
 
-var Raven = require('raven');
-Raven.config('https://299a833b1763402f9216d8e7baeb6379@sentry.io/1226040').install();
+argv = require('minimist')(process.argv.slice(2), {
+  string: ['username', 'pw']
+})
+
+on_server = !!argv['prod-server']
+datadir = argv.datadir ? argv.datadir : 'data'
+base_port = argv.p ? parseInt(argv.p) : 8001
+trace = !!argv.trace
+argv.syncdb = argv.syncdb != 'off'
+
+process.title = 'Fair ' + base_port
+
+if (on_server) {
+  let Raven = require('raven')
+  Raven.config(
+    'https://299a833b1763402f9216d8e7baeb6379@sentry.io/1226040'
+  ).install()
+}
 
 // This is the most important function in the whole project. Make sure you understand it!
 // Defines how payment channels work, based on "insurance" and delta=(ondelta+offdelta)
@@ -390,19 +406,6 @@ sync = () => {
     l('No K.prev_hash to sync from')
   }
 }
-
-argv = require('minimist')(process.argv.slice(2), {
-  string: ['username', 'pw']
-})
-
-datadir = argv.datadir ? argv.datadir : 'data'
-base_port = argv.p ? parseInt(argv.p) : 8001
-trace = !!argv.trace
-on_server = !!argv['prod-server']
-
-argv.syncdb = argv.syncdb != 'off'
-
-process.title = 'Fair ' + base_port
 
 if (!fs.existsSync('data')) {
   fs.mkdirSync('data')
