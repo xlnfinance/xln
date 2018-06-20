@@ -164,19 +164,17 @@ module.exports = async () => {
     return seed
   }
 
-  var local = !fs.existsSync(
-    '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
-  )
+  let local = !argv['prod-server']
 
-  var base_rpc = local ? 'ws://' + localhost : 'wss://failsafe.network'
-  var base_web = local ? 'http://' + localhost : 'https://failsafe.network'
+  var base_rpc = local ? 'ws://' + localhost : 'wss://fairlayer.com'
+  var base_web = local ? 'http://' + localhost : 'https://fairlayer.com'
 
   l(note('New members:'))
   var seed = await createMember(
     'root',
     toHex(crypto.randomBytes(16)),
     `${base_rpc}:8100`,
-    local ? 'http://' + localhost + ':8433' : 'https://failsafe.network'
+    local ? 'http://' + localhost + ':8433' : 'https://fairlayer.com'
   )
 
   for (var i = 8001; i < 8004; i++) {
