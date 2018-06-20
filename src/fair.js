@@ -1,12 +1,27 @@
 require('./utils')
 require('./browser')
 
-domain_name = 'fairlayer.com'
 var SegfaultHandler = require('segfault-handler')
 SegfaultHandler.registerHandler('crash.log')
 
-var Raven = require('raven');
-Raven.config('https://299a833b1763402f9216d8e7baeb6379@sentry.io/1226040').install();
+argv = require('minimist')(process.argv.slice(2), {
+  string: ['username', 'pw']
+})
+
+on_server = !!argv['prod-server']
+datadir = argv.datadir ? argv.datadir : 'data'
+base_port = argv.p ? parseInt(argv.p) : 8001
+trace = !!argv.trace
+argv.syncdb = argv.syncdb != 'off'
+
+process.title = 'Fair ' + base_port
+
+if (on_server) {
+  let Raven = require('raven')
+  Raven.config(
+    'https://299a833b1763402f9216d8e7baeb6379@sentry.io/1226040'
+  ).install()
+}
 
 // This is the most important function in the whole project. Make sure you understand it!
 // Defines how payment channels work, based on "insurance" and delta=(ondelta+offdelta)
@@ -146,9 +161,6 @@ saveId = async function(obj) {
   if (!obj.id) await obj.save()
 }
 
-on_server = fs.existsSync(
-  `/etc/letsencrypt/live/${domain_name}/fullchain.pem`
-)
 
 cache = {
   ins: {},
@@ -293,28 +305,9 @@ initDashboard = async (a) => {
   }
 
   // this serves dashboard HTML page
-  if (on_server) {
-    cert = {
-      cert: fs.readFileSync(
-        `/etc/letsencrypt/live/${domain_name}/fullchain.pem`
-      ),
-      key: fs.readFileSync(`/etc/letsencrypt/live/${domain_name}/privkey.pem`)
-    }
-    var server = require('https').createServer(cert, cb)
 
-    // redirecting from http://
-    if (base_port == 443) {
-      require('http')
-        .createServer(function(req, res) {
-          res.writeHead(301, {Location: 'https://' + req.headers['host']})
-          res.end()
-        })
-        .listen(80)
-    }
-  } else {
-    cert = false
-    var server = require('http').createServer(cb)
-  }
+  cert = false
+  var server = require('http').createServer(cb)
 
   me = new Me()
 
@@ -345,7 +338,7 @@ initDashboard = async (a) => {
   })
 
   // opn doesn't work in SSH console
-  if (base_port != 443 && !argv.silent) openBrowser()
+  if (!argv.silent) openBrowser()
   internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
   internal_wss.on('error', function(err) {
@@ -415,18 +408,6 @@ sync = () => {
     l('No K.prev_hash to sync from')
   }
 }
-
-argv = require('minimist')(process.argv.slice(2), {
-  string: ['username', 'pw']
-})
-
-datadir = argv.datadir ? argv.datadir : 'data'
-base_port = argv.p ? parseInt(argv.p) : 8001
-trace = !!argv.trace
-
-argv.syncdb = argv.syncdb != 'off'
-
-process.title = 'Fair ' + base_port
 
 if (!fs.existsSync('data')) {
   fs.mkdirSync('data')

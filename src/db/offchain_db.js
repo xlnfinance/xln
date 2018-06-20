@@ -1,6 +1,7 @@
 // Offchain database - local and private stuff
 if (argv.db) {
   let db_info = argv.db.split(':')
+  let db_pool = argv['db-pool'] || 1
   var base_db = {
     dialect: db_info[0],
     host: '127.0.0.1',
@@ -18,7 +19,7 @@ if (argv.db) {
       max: 10
     },
     pool: {
-      max: base_port == 443 ? 50 : 1,
+      max: db_pool,
       min: 0,
       acquire: 20000,
       idle: 20000,
