@@ -9,7 +9,7 @@ var async_fn = async (ws, inputType, args) => {
     )
   )*/
 
-  l('External RPC: ' + inputType)
+  //l('External RPC: ' + inputType)
 
   if (inputType == 'auth') {
     var [pubkey, sig, body] = args

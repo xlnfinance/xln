@@ -191,11 +191,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
   }
 
+    // is balance2 nulled after?
 
   if (K.bet_maturity && K.ts > K.bet_maturity) {
     l("🎉 Maturity day! Copy all FRB balances to FRD")
-    // is balance2 nulled after?
-
     await User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
 
     K.bet_maturity = false

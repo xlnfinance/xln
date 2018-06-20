@@ -139,14 +139,15 @@ window.render = (r) => {
   // verify if opener-initiated last hashargs payment succeded (we know secret for this invoice)
   if (
     opener &&
-    app.payments &&
+    r.payments &&
+    r.payments[0] &&
     //app.payments[0].id != r.payments[0].id &&
     //r.payments[0].secret
-
-    r.payments[0].invoice == hashargs.invoice.hexEncode() &&
+    //r.payments[0].invoice == hashargs.invoice.hexEncode() &&
     Date.parse(r.payments[0].createdAt)/1000 > app.ts()-10 &&
     r.payments[0].secret
   ) {
+    l("Pinging parent")
     opener.postMessage({status: 'paid'}, '*');
     //window.close()
   }

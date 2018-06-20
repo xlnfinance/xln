@@ -283,7 +283,7 @@ module.exports = async (ws, json) => {
           try {
             // exclude all non-JS files for now
             p[2] = child_process.execSync(
-              'diff  -Naur --exclude=*{.cache,data,dist,Failsafe.app,node_modules,private,spec,.git}  ../8001 . '
+              'diff  -Naur --exclude=*{.cache,data,dist,node_modules,private,spec,.git}  ../8001 . '
             )
           } catch (err) {
             p[2] = err.stdout

@@ -1,6 +1,7 @@
 require('./utils')
 require('./browser')
 
+domain_name = 'fairlayer.com'
 var SegfaultHandler = require('segfault-handler')
 SegfaultHandler.registerHandler('crash.log')
 
@@ -71,7 +72,7 @@ refresh = function(ch) {
   ch.inwards = []
   ch.outwards = []
 
-  let hashlock_hold = [0, 0]
+  ch.hashlock_hold = [0, 0]
 
   for (let i = 0; i < ch.payments.length; i++) {
     let t = ch.payments[i]
@@ -84,7 +85,7 @@ refresh = function(ch) {
       )
     ) {
       ch[t.is_inward ? 'inwards' : 'outwards'].push(t)
-      hashlock_hold[t.is_inward ? 0 : 1] += t.amount
+      ch.hashlock_hold[t.is_inward ? 0 : 1] += t.amount
     }
   }
 
@@ -114,7 +115,7 @@ refresh = function(ch) {
     ch.d.they_hard_limit -
     ch.they_uninsured -
     ch.d.input_amount -
-    hashlock_hold[1]
+    ch.hashlock_hold[1]
 
   ch.they_payable =
     ch.they_insured +
@@ -122,7 +123,7 @@ refresh = function(ch) {
     ch.d.hard_limit -
     ch.uninsured -
     ch.d.they_input_amount -
-    hashlock_hold[0]
+    ch.hashlock_hold[0]
 
   // All stuff we show in the progress bar in the wallet
   ch.bar = ch.they_uninsured + ch.insured + ch.they_insured + ch.uninsured
@@ -146,7 +147,7 @@ saveId = async function(obj) {
 }
 
 on_server = fs.existsSync(
-  '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
+  `/etc/letsencrypt/live/${domain_name}/fullchain.pem`
 )
 
 cache = {
@@ -295,9 +296,9 @@ initDashboard = async (a) => {
   if (on_server) {
     cert = {
       cert: fs.readFileSync(
-        '/etc/letsencrypt/live/failsafe.network/fullchain.pem'
+        `/etc/letsencrypt/live/${domain_name}/fullchain.pem`
       ),
-      key: fs.readFileSync('/etc/letsencrypt/live/failsafe.network/privkey.pem')
+      key: fs.readFileSync(`/etc/letsencrypt/live/${domain_name}/privkey.pem`)
     }
     var server = require('https').createServer(cert, cb)
 

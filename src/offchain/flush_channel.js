@@ -104,14 +104,14 @@ module.exports = async (pubkey, asset, opportunistic) => {
             t.type = 'del'
             t.status = 'ack'
 
-            if (argv.syncdb) all.push(t.save())
+            //if (argv.syncdb) all.push(t.save())
 
             if (t.inward_pubkey) {
               var inward = await me.getChannel(t.inward_pubkey, ch.d.asset)
               var pull_hl = inward.inwards.find((hl) => hl.hash.equals(t.hash))
               pull_hl.type = 'del'
               pull_hl.status = 'new'
-              if (argv.syncdb) all.push(pull_hl.save())
+              //if (argv.syncdb) all.push(pull_hl.save())
 
               flushable.push(inward.d.partnerId)
             }
@@ -127,7 +127,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
         }
 
         t.status = 'sent'
-        if (argv.syncdb) all.push(t.save())
+        //if (argv.syncdb) all.push(t.save())
 
         // increment nonce after each transition
         ch.d.nonce++
@@ -186,8 +186,8 @@ module.exports = async (pubkey, asset, opportunistic) => {
     }
 
     if (argv.syncdb) {
-      all.push(ch.d.save())
-      await Promise.all(all)
+      //all.push(ch.d.save())
+      await me.syncdb() //Promise.all(all)
     }
 
     me.send(ch.d.partnerId, 'update', envelope)

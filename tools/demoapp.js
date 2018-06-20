@@ -151,9 +151,7 @@ withdraw.onclick = function(){
     out_amount: out_amount.value
   }).then((r2)=>{
     if (r2.data.status == 'paid') {
-      setTimeout(()=>{
-        location.reload()
-      }, 1000)
+      location.reload()
       
     } else {
       alert(r2.data.error)
@@ -161,9 +159,11 @@ withdraw.onclick = function(){
   })
 }
 
-//  var invoice = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(32)), function(byte) {
+/*
+  var invoice = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(32)), function(byte) {
     return ('0' + (byte & 0xFF).toString(16)).slice(-2);
-// }).join('')
+ }).join('')
+ */
 
 
 deposit.onclick = function(){
@@ -172,10 +172,10 @@ deposit.onclick = function(){
   window.addEventListener('message', function(e){
     if(e.origin != fs_origin) return
 
-    l(e)
     fs_w.close()
-
-    location.reload()
+    setTimeout(()=>{
+      location.reload()
+    }, 1000)
   })
 
 
@@ -230,18 +230,20 @@ deposit.onclick = function(){
 
 address = '';
 
-setTimeout(async () => {
+init = async () => {
 
   if (fs.existsSync(FS_PATH + '/pk.json')) {
     auth_code = JSON.parse(fs.readFileSync(FS_PATH + '/pk.json')).auth_code
     l('Auth code to our node: ' + auth_code)
   } else {
-    throw 'No auth'
+    l("No auth")
+    return setTimeout(init, 1000)
   }
 
   r = await FS('getinfo')
   if (!r.data.address) {
-    throw 'No address'
+    l('No address')
+    return setTimeout(init, 1000)
   }
 
 
@@ -258,7 +260,8 @@ setTimeout(async () => {
   try{
     require('../lib/opn')('http://127.0.0.1:3010')
   } catch(e){} 
-}, 5000)
+}
 
+init()
 
 repl = require('repl').start()

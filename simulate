@@ -40,6 +40,7 @@ if node fs.js --genesis=test $db | grep "Genesis done"; then
 
   fs_node_args="-p8433 --syncdb=off"
   pm2 start $pm2_opts --name fs fs.js -- $fs_cluster_args $fs_node_args
+  pm2 start $pm2_opts --name demoapp tools/demoapp.js
 
   for i in $(seq 8001 $maxport); do
     fs_node_args="-p$i --username=$i --pw=password --datadir=data$i"
@@ -50,7 +51,6 @@ if node fs.js --genesis=test $db | grep "Genesis done"; then
     fi
   done
 
-  node tools/demo.js
 
   pm2 attach $(node -p "`pm2 id fs`[0]")  
 fi

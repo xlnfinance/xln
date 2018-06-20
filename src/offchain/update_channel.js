@@ -42,6 +42,7 @@ module.exports = async (
     })
     ch.d.ack_requested_at = null
 
+    /*
     if (argv.syncdb) {
       all.push(
         Payment.update(
@@ -57,6 +58,7 @@ module.exports = async (
         )
       )
     }
+    */
 
     if (trace)
       l('Received ack on current state, all sent transitions are now ack')
@@ -233,7 +235,7 @@ module.exports = async (
           if (trace)
             l(`Mediating ${outward_amount} payment to ${trim(destination)}`)
 
-          if (argv.syncdb) all.push(outward_hl.save())
+          //if (argv.syncdb) all.push(outward_hl.save())
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
@@ -249,7 +251,7 @@ module.exports = async (
         loff('error: arent receiver and arent a hub O_O')
       }
 
-      if (argv.syncdb) all.push(inward_hl.save())
+      //if (argv.syncdb) all.push(inward_hl.save())
     } else if (m == 'del' || m == 'delrisk') {
       var [hash, outcome] = t[1]
 
@@ -287,7 +289,7 @@ module.exports = async (
         break
       }
 
-      if (argv.syncdb) all.push(outward_hl.save())
+      //if (argv.syncdb) all.push(outward_hl.save())
 
       if (outward_hl.inward_pubkey) {
         var inward = await me.getChannel(outward_hl.inward_pubkey, ch.d.asset)
@@ -317,7 +319,7 @@ module.exports = async (
           pull_hl.secret = outcome
           pull_hl.type = 'del'
           pull_hl.status = 'new'
-          if (argv.syncdb) all.push(pull_hl.save())
+          //if (argv.syncdb) all.push(pull_hl.save())
 
           if (trace)
             l(
@@ -384,8 +386,9 @@ module.exports = async (
   
 
   if (argv.syncdb) {
-    all.push(ch.d.save())
-    await Promise.all(all)
+    //all.push(ch.d.save())
+
+    await me.syncdb() //Promise.all(all)
   }
 
   return flushable
