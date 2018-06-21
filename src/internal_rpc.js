@@ -210,18 +210,22 @@ module.exports = async (ws, json) => {
           }
         })
 
-        await Payment.update(
-          {
-            status: 'processed'
-          },
-          {
-            where: {
-              type: 'del',
-              status: 'ack',
-              [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
+        // only set as processed if there's anything
+        if (result.receivedAndFailed.length > 0) {  
+          await Payment.update(
+            {
+              status: 'processed'
+            },
+            {
+              where: {
+                type: 'del',
+                status: 'ack',
+                [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
+              }
             }
-          }
-        )
+          )
+        }
+
 
         break
       case 'testnet':

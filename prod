@@ -31,7 +31,7 @@ npm run build
 #--node-args="--prof"
 
 pm2 delete all || true
-killall Failsafe 2>/dev/null || true
+killall Fairlayer 2>/dev/null || true
 
 node fs.js --genesis=test $db
 fs_node_args="-p8000 --db-pool=50"

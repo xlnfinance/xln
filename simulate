@@ -15,15 +15,17 @@ if [[ `node -v` =~ v10 ]]; then
   nodeflags=--experimental-repl-await
 fi
 
-
-rm -rf data*
-rm -rf isolate*
-
-killall Failsafe 2>/dev/null || true
-
 function pm2() {
   node_modules/.bin/pm2 "$@"
 }
+
+pm2 flush
+pm2 delete all || true
+killall Fairlayer 2>/dev/null || true
+
+
+rm -rf data*
+rm -rf isolate*
 
 if node fs.js --genesis=test $db | grep "Genesis done"; then
   echo "Generating with maxport $maxport"
@@ -33,8 +35,6 @@ if node fs.js --genesis=test $db | grep "Genesis done"; then
   done
 
 
-  pm2 flush
-  pm2 delete all || true
 
   pm2 start $pm2_opts --name wallet yarn -- parcel serve wallet -p $wallet_port
 

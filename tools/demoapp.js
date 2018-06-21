@@ -18,7 +18,7 @@ nacl = require('../lib/nacl')
 
 if (fs.existsSync('/root/fs/data8002/offchain/pk.json')) {
   FS_PATH = '/root/fs/data8002/offchain'
-  FS_RPC = 'https://failsafe.network:8002/rpc'
+  FS_RPC = 'https://fairlayer.com:8002/rpc'
 } else {
   FS_PATH = '/Users/homakov/work/fs/data8002/offchain'
   FS_RPC = 'http://127.0.0.1:8002/rpc'
@@ -135,7 +135,7 @@ id = '${id}'
 fs_origin = '${LOCAL_FS_RPC}'
 
 var fallback = setTimeout(()=>{
-//main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://failsafe.network/#install'>Please install Failsafe first</a>"
+//main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://fairlayer.com/#install'>Please install Fairlayer first</a>"
 }, 3000)
 
 

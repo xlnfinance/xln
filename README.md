@@ -40,7 +40,7 @@ Perfect way to run new code against old blockchain:
 rm -rf fs
 id=fs
 f=Fair-1.tar.gz
-mkdir $id && cd $id && curl https://failsafe.network/$f -o $f
+mkdir $id && cd $id && curl https://fairlayer.com/$f -o $f
 tar -xzf $f && rm $f
 ln -s ~/work/fs/node_modules
 ln -s ~/work/fs/wallet/node_modules wallet/node_modules

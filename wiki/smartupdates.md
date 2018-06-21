@@ -22,7 +22,7 @@ On top of that the EVM itself is very hard to use, all high level languages are 
 
 Not long after that, people came to realization that maybe what we need is not a "Turing complete" VM that will never be updated and set in stone, **but a clear process to update the underlying platform, the blockchain itself** aka onchain governance.
 
-This was proposed by Tezos, Dfinity and many others to come. Failsafe also uses amendments.
+This was proposed by Tezos, Dfinity and many others to come. Fairlayer also uses amendments.
 
 Any user can propose a change in platform formatted as: description in text, code to execute (can be like `User.find(3).destroy()`) and GNU diff patch that's merged into everyones code.
 

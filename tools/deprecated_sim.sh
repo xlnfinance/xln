@@ -1,7 +1,7 @@
 #!/bin/bash
 
 forever stopall
-killall Failsafe 2>/dev/null
+killall Fairlayer 2>/dev/null
 
 rm -rf data*
 

@@ -7,9 +7,9 @@ set -o pipefail
 rm -rf data*
 rm -rf isolate*
 
-rsync . root@failsafe.network:~/fs -rv  --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'
+rsync . root@fairlayer.com:~/fs -rv  --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'
 
-ssh root@failsafe.network <<'ENDSSH'
+ssh root@fairlayer.com <<'ENDSSH'
 cd ~/fs
 ./prod
 ENDSSH

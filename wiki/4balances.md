@@ -1,4 +1,4 @@
-# 4 Types Of Balances in Failsafe
+# 4 Types Of Balances in Fairlayer
 
 ## On-Chain Balance
 
