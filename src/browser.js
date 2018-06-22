@@ -171,7 +171,7 @@ snapshotHash = async () => {
 
       var our_location =
         me.my_member.location.indexOf(localhost) != -1
-          ? `http://${localhost}:8000/`
+          ? `http://${localhost}:8001/`
           : `https://fairlayer.com/`
 
       cached_result.install_snippet = `id=fs

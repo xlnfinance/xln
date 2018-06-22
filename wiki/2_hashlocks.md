@@ -1,4 +1,4 @@
-# Mediation
+# Hashlocks
 
 The main benefit of offchain scaling is ability to instantly send money at almost no cost between 2 parties. But, since there are more users in the world, it leads to banks, hubs and centralized exchanges servers.
 

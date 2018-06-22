@@ -1,4 +1,4 @@
-# Building Consensus
+# Consensus: PoA + Tendermint
 
 Our consensus was inspired by <a href="https://tendermint.com/">Tendermint-based</a>. In this chapter our job is to explain exactly where each constant or ratio comes from, not just throw facts/specification at you. We will try to **follow the logic from simple implementation to three phase commit** so you will see potential threats in a story-telling fashion and how they are solved here.
 

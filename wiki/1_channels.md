@@ -1,3 +1,5 @@
+# Payment channels
+
 Payment channels is the cheapest & lowest-latency (1 HTTP request) known way to make a payment without touching the blockchain but still having the security of it. In this chapter we will explain our payment channels protocol, and how it was carefully optimized step-by-step for atomic hashlocks, multiple assets and batched rebalances.
 
 Participants commit a specific state between them to a blockchain to start a channel, then do different actions offchain sending specific proofs directly to each other. If any party cheats or becomes unresponsive, the other party can submit latest state to blockchain and gets a fair result (agreed amount of money)
@@ -151,7 +153,7 @@ me.envelope(
 
 ## Visual Playground
 
-https://codepen.io/anon/pen/wjLGgR
+See `/wallet/demodelta.html` to see ondelta/offdelta movements in action.
 
 
 

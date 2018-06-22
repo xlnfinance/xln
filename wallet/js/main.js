@@ -136,20 +136,22 @@ window.render = (r) => {
     return false
   }
 
-  // verify if opener-initiated last hashargs payment succeded (we know secret for this invoice)
-  if (
-    opener &&
-    r.payments &&
+  /* &&
     r.payments[0] &&
     //app.payments[0].id != r.payments[0].id &&
     //r.payments[0].secret
     //r.payments[0].invoice == hashargs.invoice.hexEncode() &&
     Date.parse(r.payments[0].createdAt)/1000 > app.ts()-1 &&
-    r.payments[0].secret
+    r.payments[0].secret*/
+
+  // verify if opener-initiated last hashargs payment succeded (we know secret for this invoice)
+
+  if (
+    opener &&
+    r.payment_complete 
   ) {
     l("Pinging parent")
     opener.postMessage({status: 'paid'}, '*');
-    //window.close()
   }
 
   Object.assign(window.app, r)

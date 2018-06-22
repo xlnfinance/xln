@@ -291,6 +291,7 @@ module.exports = async (
 
       //if (argv.syncdb) all.push(outward_hl.save())
 
+      // if there's an inward channel for this, we are hub
       if (outward_hl.inward_pubkey) {
         var inward = await me.getChannel(outward_hl.inward_pubkey, ch.d.asset)
 
@@ -336,7 +337,8 @@ module.exports = async (
 
         }
       } else {
-        //react({confirm: 'Payment completed'})
+        // otherwise, we are user who made payment on its own
+        react({payment_complete: true, confirm: 'Payment completed'}, false)
       }
 
       if (me.CHEAT_dontack) {

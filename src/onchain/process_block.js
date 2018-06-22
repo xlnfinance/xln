@@ -291,6 +291,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
           // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
           // No dotfiles
+
           if (
             path.includes('/.') ||
             path.match(

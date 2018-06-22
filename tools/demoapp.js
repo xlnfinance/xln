@@ -18,7 +18,7 @@ nacl = require('../lib/nacl')
 
 if (fs.existsSync('/root/fs/data8002/offchain/pk.json')) {
   FS_PATH = '/root/fs/data8002/offchain'
-  FS_RPC = 'https://fairlayer.com:8002/rpc'
+  FS_RPC = 'http://127.0.0.1:8002/rpc'
 } else {
   FS_PATH = '/Users/homakov/work/fs/data8002/offchain'
   FS_RPC = 'http://127.0.0.1:8002/rpc'

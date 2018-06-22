@@ -33,7 +33,7 @@ npm run build
 pm2 delete all || true
 killall Fairlayer 2>/dev/null || true
 
-node fs.js --genesis=test $db
+node fs.js --genesis=test $db --prod-server
 fs_node_args="-p8000 --db-pool=50"
 pm2 start $pm2_opts --name fs fs.js -- $fs_cluster_args $fs_node_args
 

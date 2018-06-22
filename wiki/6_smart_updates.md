@@ -1,4 +1,8 @@
-# "Smart" "contract"
+# Smart updates
+
+Fairlayer has no smart contracts, instead it has smart updates (also known as onchain governance). In this document we will show why onchain governance is inevitable anyway, and how it solves new functionality problem.
+
+Let's figure out what are smart contracts and what problem they solve.
 
 > A smart contract is a computer protocol intended to digitally facilitate, verify, or enforce the negotiation or performance of a contract. Smart contracts allow the performance of credible transactions without third parties. These transactions are trackable and irreversible.[1] Smart contracts were first proposed by Nick Szabo in 1994.[2]
 
