@@ -1,6 +1,12 @@
 # 4 Types Of Balances in Fairlayer
 
-## On-Chain Balance
+The main theme of Fairlayer is not to force you onto some specific type of balance, but provide a convenient wallet to hop between each type. Onchain balance is great for millions of dollars, terrible for coffee payments. Trusted balance is terrible for millions of dollars, great for paying in subway. 
+
+Insured and uninsured are perfectly positioned in between, both being more secure than trusted and more convenient than onchain.
+
+Let's try to formalize these 4 types of balances we're talking about.
+
+## Onchain Balance
 
 **Security: Highest Possible**
 

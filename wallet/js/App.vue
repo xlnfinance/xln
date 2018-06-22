@@ -569,7 +569,7 @@ export default {
               = {{commy(ch.ins.insurance)}} insurance 
               {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
               {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
-              {{ch.hashlock_hold[1] > 0 ? "- "+commy(ch.hashlock_hold[1])+" hold" : ''}}
+              {{ch.hashlock_hold[1] > 0 ? "- "+commy(ch.hashlock_hold[1])+" hashlocks" : ''}}
               
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} <span class="badge badge-dark" v-if="ch.uninsured > ch.d.soft_limit">over soft limit, expect rebalance</span><span class="badge badge-dark" v-if="ch.they_insured >= K.risk">stay online to cooperate</span>
             </small>

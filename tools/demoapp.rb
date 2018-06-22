@@ -1,3 +1,5 @@
+# fair SDK demo for ruby + sinatra
+
 require 'sinatra'
 
 

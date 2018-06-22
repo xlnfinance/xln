@@ -1,3 +1,5 @@
+// this file is only used during genesis to set initial K params and create first validators
+
 module.exports = async () => {
   l('Start genesis')
 

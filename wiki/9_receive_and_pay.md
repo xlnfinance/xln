@@ -111,7 +111,7 @@ After a request is finished all payments in it are marked as `processed` so they
 
 Say, you are an exchange and your user wants to withdraw some asset to their Fair wallet.
 
-First, you need to check if they have enough money, then reduce their balance by the amount they want to withdraw. 
+First, you need to check if they have enough money, then reduce their balance by the amount they want to withdraw. Make sure you pessimistically locked user account before withdrawal [to avoid race conditions.](https://sakurity.com/blog/2015/05/21/starbucks.html)
 
 Then make a request to your local Fair daemon with **following parameters carefully escaped and sanitized**:
 
@@ -122,11 +122,10 @@ Then make a request to your local Fair daemon with **following parameters carefu
 
 
 ```
-FairRPC('method=send&outward[destination]=DEST&outward[asset]=1&outward[amount]=200&outward[invoice]=INVOICE', (r)=>{
+FairRPC('method=send&outward[destination]=ADDRESS&outward[asset]=1&outward[amount]=200&outward[invoice]=INVOICE', (r)=>{
   // sent
 })
 ```
-
 
 
 If the outward payment fails (rare, but possible), you will receive it as a failed outward via a pulling request above, then you can credit funds back.

@@ -10,27 +10,33 @@ Fairlayer, on another hand, is a quite opinionated XLN implementation that aims 
 
 Our paramount priority is security and censorship resistance even from validator majority, which is why we require absolutely all nodes including consumer devices to be a fully-verifying nodes, Spv. Thankfully, our full node is designed to routinely run on everything from cheap smartphones to cloud servers and the first "Fair" layer is cheap to keep up with.
 
-**This is the reference client** so there is no extensive specification. If you want to learn how something works just look into the code.
+**This is the reference client** and no formal specification is planned. If you want to learn how something works just look into the code.
 
-[1. Channels](/1_channels.md)
+Fairlayer is developed entirely as an end-to-end solution having a full-node, layer2 protocol and user wallet all under one roof working seamlessly. Isomorphic codebase covers different use cases: a wallet, an explorer, a hub and a validator node etc. 
 
-[2. Hashlocks](/2_hashlocks.md)
+There are no smart contracts and no VM to develop upon, but feel free to submit a **smart update** and see if onchain governance approves it.
 
-[3. Rebalance](/3_rebalance.md)
+Interested? Ready? This wiki intends to be single source of documentation, better read it in this order:
 
-[4. Four balances](/4_four_balances.md)
+[1. Channels](/wiki/1_channels.md)
 
-[5. Consensus](/5_consensus.md)
+[2. Hashlocks](/wiki/2_hashlocks.md)
 
-[6. Smart updates](/6_smart_updates.md)
+[3. Rebalance](/wiki/3_rebalance.md)
 
-[7. Other differences](/7_other_differences.md)
+[4. Four balances: onchain, insured, uninsured, trusted](/wiki/4_four_balances.md)
 
-[8. Roadmap](/8_roadmap.md)
+[5. Consensus: Tendermint + PoA](/wiki/5_consensus.md)
 
-[9. Receive and Pay API](/9_receive_and_pay.md)
+[6. Smart contracts? Smart updates!](/wiki/6_smart_updates.md)
 
-[10. Development](/10_genesis.md)
+[7. What makes Fairlayer different](/wiki/7_other_differences.md)
+
+[8. Roadmap](/wiki/8_roadmap.md)
+
+[9. Receive and Pay API](/wiki/9_receive_and_pay.md)
+
+[10. Development](/wiki/10_genesis.md)
 
 
 
