@@ -114,6 +114,8 @@ module.exports = async (ws, json) => {
           if (p.request_amount > ch.insured) {
             react({alert: 'More than you can withdraw from insured'})
             break
+          } else {
+            react({confirm: "Requested withdrawals..."})
           }
           me.send(
             partner,

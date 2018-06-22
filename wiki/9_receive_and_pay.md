@@ -18,20 +18,20 @@ Put this helper in util libs:
 
 ```
 FairRPC = (params, cb) => {
-	http.get('http://127.0.0.1:8002/rpc?auth_code=AUTH_CODE&'+params, (res) => {
-	  let rawData = '';
-	  res.on('data', (chunk) => { rawData += chunk; });
-	  res.on('end', () => {
-	    try {
-	      const parsedData = JSON.parse(rawData);
-	      cb(parsedData);
-	    } catch (e) {
-	      console.error(e.message);
-	    }
-	  });
-	}).on('error', (e) => {
-	  console.error(`Got error: ${e.message}`);
-	});
+  http.get('http://127.0.0.1:8002/rpc?auth_code=AUTH_CODE&'+params, (res) => {
+    let rawData = '';
+    res.on('data', (chunk) => { rawData += chunk; });
+    res.on('end', () => {
+      try {
+        const parsedData = JSON.parse(rawData);
+        cb(parsedData);
+      } catch (e) {
+        console.error(e.message);
+      }
+    });
+  }).on('error', (e) => {
+    console.error(`Got error: ${e.message}`);
+  });
 }
 ```
 
@@ -42,7 +42,7 @@ For someone to pay they need destination address, an amount and optional invoice
 You can read your own address at bootstrap or have it hardcoded 
 
 ```
-FairRPC('getinfo', (r)=>{
+FairRPC('method=getinfo', (r)=>{
   console.log('My address', r.address)
 })
 ```
@@ -59,7 +59,7 @@ window.addEventListener('message', function(e){
 
   fs_w.close()
   setTimeout(()=>{
-  	// give the backend time to process this deposit
+    // give the backend time to process this deposit
     location.reload()
   }, 1000)
 })
@@ -76,10 +76,10 @@ The app that integrates Fair should set up a periodic pulling request to the dae
 FairRPC('method=receivedAndFailed', (r)=>{
   if (!r.receivedAndFailed) return
   for (obj of r.receivedAndFailed) {
-  	if (obj.asset != 1) {
-		// always whitelist assets you're planning to support
-		return 
-  	}
+    if (obj.asset != 1) {
+    // always whitelist assets you're planning to support
+    return 
+    }
 
     let uid = Buffer.from(obj.invoice, 'hex').toString()
 
@@ -99,7 +99,7 @@ FairRPC('method=receivedAndFailed', (r)=>{
 
 This returns unprocessed received payments from outside and transfers that the node failed to sent (due to capacity issues or the receiver being offline for example) which the app should credit back to users balance.
 
-All payments have an invoice field that somehow refers to the user this object belongs. It can be a primary key ID in the database, email, or somehow obfuscated user id, or purchase id if you don't have registration. 
+All payments have an invoice field that somehow refers to the user this object belongs. It can be a primary key ID in the database, email, or somehow obfuscated user id, or purchase id if you don't have registration. [Similar to Destination Tag in Ripple](https://forum.ripple.com/viewtopic.php?f=5&t=7496)
 
 Previously in Bitcoin and other blockchains you would have to generate a new address for every payment, this is no longer the case. Now all payments go to the same address carrying a special tag "invoice" that helps the receiver recognize what is this payment for. This technique is applied both in offchain and onchain payments (onchain invoice is never stored in blockchain state afterwards). 
 
@@ -130,6 +130,7 @@ FairRPC('method=send&outward[destination]=ADDRESS&outward[asset]=1&outward[amoun
 
 If the outward payment fails (rare, but possible), you will receive it as a failed outward via a pulling request above, then you can credit funds back.
 
+# [Go to Table of Contents](/wiki/0_home.md)
 
 
 

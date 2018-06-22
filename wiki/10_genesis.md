@@ -6,7 +6,11 @@ You can increase blocktime or change gas cost along with other network settings.
 
 ## Local Simulation
 
-`./install` then run `./simulate` to bootstrap local dev blockchain with 4 validators on different ports (8443, 8001, 8002, 8003) each having one Fair share.
+`./install` then run `./simulate` to bootstrap local dev blockchain with 4 validators on different ports (8443, 8001, 8002, 8003) each having one Fair share. Other nodes 8004-8008 are regular user wallets. Demoapp is NodeJS demo exchange with deposit/withdraw functions. 
+
+![/wiki/pm2result.png](PM2)
+
+To optimize the development `wallet` serves html for all other nodes and everyone runs the same code from src, only datadirs are different (each node executes blocks).
 
 8443 is also a hub @main. At bootstrap there are various end-2-end tests performed on a live network, which is a great way to see if all components fit together. Different users at different times turn on different times and verify the result with setTimeout.
 

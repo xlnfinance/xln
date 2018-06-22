@@ -66,7 +66,7 @@ module.exports = async () => {
     created_at: ts(),
 
     // sanity limits for offchain payments
-    min_amount: 100,
+    min_amount: 10,
     max_amount: 300000000,
 
     members: [],

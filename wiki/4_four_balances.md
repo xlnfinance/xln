@@ -84,4 +84,5 @@ This way even if the capacity is limited at $1000 you can route $10,000 by sendi
 
 **Offchain hashlocked streamed** - same as above but all chunks are hashlocked. Any number of payments can be routed this way as long as there's enough capacity.
 
+# [Go to Table of Contents](/wiki/0_home.md)
 

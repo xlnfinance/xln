@@ -152,6 +152,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   if (is_usable && K.usable_blocks % 20 == 0) {
     // Auto resolving disputes that are due
+    await me.syncdb()
+
     all.push(
       Insurance.findAll({
         where: {dispute_delayed: {[Op.lte]: K.usable_blocks}},
@@ -191,15 +193,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
   }
 
-    // is balance2 nulled after?
-
-  if (K.bet_maturity && K.ts > K.bet_maturity) {
-    l("🎉 Maturity day! Copy all FRB balances to FRD")
-    await User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
-
-    K.bet_maturity = false
-  }
-
   if (is_usable && K.usable_blocks % 200 == 0) {
     // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
     all.push(
@@ -210,6 +203,20 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       })
     )
   }
+
+
+  if (K.bet_maturity && K.ts > K.bet_maturity) {
+    l("🎉 Maturity day! Copy all FRB balances to FRD")
+    await me.syncdb()
+
+    // first assignment must happen before zeroing
+    await sequelize.query("UPDATE users SET balance1 = balance1 + balance2, balance2 = 0")
+    //await sequelize.query("UPDATE users SET ")
+    //User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
+
+    K.bet_maturity = false
+  }
+
 
   // saving current proposer and their fees earned
   all.push(meta.proposer.save())

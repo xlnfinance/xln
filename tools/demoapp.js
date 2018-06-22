@@ -2,7 +2,7 @@
 axios = require('axios')
 l = console.log
 crypto = require('crypto')
-rand = () => crypto.randomBytes(32).toString('hex')
+rand = () => crypto.randomBytes(12).toString('hex')
 
 rr = false
 
@@ -108,20 +108,18 @@ httpcb = async (req, res) => {
 
 <body>
   <main role="main" class="container" id="main">
-    <h1 class="mt-5">Bank / Exchange Integration Demo</h1>
+    <h1 class="mt-5">Integration Demo (JS)</h1>
+    <p>Your account in our service: ${id}</p>
+    <p>Available FRD Balance: <b>\$${commy(users[id])}</b></p>
 
-    <p>Your account in our bank: ${id}</p>
-    <p>Available Balance: <b>\$${commy(users[id])}</b></p>
-   
-    <h3>Deposit</h3>
-    <a href="#" id="deposit">${address}</a>
+    <h3>Deposit FRD</h3>
+    <p>Deposit Address: <a href="#" id="deposit">${address}#${id}</a></p>
 
-    <h3>Withdraw</h3>
-    <p><input type="text" id="destination" placeholder="Destination"></p>
+    <h3>Withdraw FRD</h3>
+    <p><input type="text" id="destination" placeholder="Address"></p>
     <p><input type="text" id="out_amount" placeholder="Amount"></p>
     <p><button class="btn btn-success" id="withdraw">Withdraw</button></p>
    
-
  </main>
 
 

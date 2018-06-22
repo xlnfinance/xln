@@ -4,7 +4,6 @@ module.exports = async (opts) => {
     let secret = crypto.randomBytes(32)
     let hash = sha3(secret)
 
-    let invoice = opts.invoice ? bin(opts.invoice) : crypto.randomBytes(32)
 
     //l('paying ', opts.destination.length, toHex(opts.destination))
 
@@ -13,9 +12,17 @@ module.exports = async (opts) => {
       l('Error: No destination ', opts)
       return false
     }
+    opts.destination = opts.destination.toString()
 
-    let [box_pubkey, pubkey] = r(base58.decode(opts.destination.toString()))
+    if (opts.destination.includes('#')) {
+      // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
+      [opts.destination, opts.invoice] = opts.destination.split('#')
+    }
+
+    let [box_pubkey, pubkey] = r(base58.decode(opts.destination))
     let amount = parseInt(opts.amount)
+
+    let invoice = opts.invoice ? bin(opts.invoice) : crypto.randomBytes(32)
 
     // if we are hub making a payment, don't add the fees on top
     if (me.my_hub) {

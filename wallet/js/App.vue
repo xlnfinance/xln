@@ -571,7 +571,10 @@ export default {
               {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
               {{ch.hashlock_hold[1] > 0 ? "- "+commy(ch.hashlock_hold[1])+" hashlocks" : ''}}
               
-              {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} <span class="badge badge-dark" v-if="ch.uninsured > ch.d.soft_limit">over soft limit, expect rebalance</span><span class="badge badge-dark" v-if="ch.they_insured >= K.risk">stay online to cooperate</span>
+              {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
+              <span class="badge badge-dark" v-if="!my_hub && ch.d.hard_limit == ch.d.soft_limit && ch.uninsured > 0" @click="">click to request insurance</span>
+              <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured > ch.d.soft_limit">over soft limit, expect rebalance</span>
+              <span title="When you spend large part of your insurance, the hub may request a withdrawal from you so they could deposit this insurance to someone else. It's recommended to come online more frequently, otherwise hub may start a dispute with you." class="badge badge-dark" v-if="!my_hub && ch.they_insured >= K.risk">stay online to cooperate</span>
             </small>
             <p>
               <div v-if="ch.bar > 0">
@@ -671,9 +674,12 @@ export default {
             <label>Hard limit (currently {{commy(ch.d.hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]">
           </p>
+          <p>If you want to request insurance manually, set soft limit equal to hard limit. Then you can click "request insurance" in your wallet but beware of expensive onchain fees.</p>
+          
           <p>
             <button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Uninsured Limits</button>
           </p>
+
           <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
           <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
         </template>

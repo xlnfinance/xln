@@ -75,4 +75,5 @@ This simple approach guarantees there won't be forks if 2/3+ are honest. But...
 It is not so easy. Imagine, the malicious validator received the signatures and went offline forever. The whole network is now in a dead lock, because they never received the valid block back but locked in on this height so cannot continue building a new one.
 
 
+# [Go to Table of Contents](/wiki/0_home.md)
 
