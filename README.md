@@ -8,9 +8,9 @@ Fairlayer is a new **scalable blockchain** that comes with Lightning-inspired of
 
 Fairlayer has no virtual machine for smart contracts, instead uses onchain governance and amendments to implement new functionality.
 
-Fairlayer has **a native token FSD to pay for transaction fees** and hub fees for transfer mediations, but the goal is to focus on 3rd party issued tokens (just like issuances in Ripple): **to move bank-backed and government-backed fiat currencies to our blockchain** which ensures fairness and security of first layer yet providing all the needed controls and introspection for financial institutions to remain compliant.
+Fairlayer has **a native token FRD to pay for transaction fees** and hub fees for transfer mediations, but the goal is to focus on 3rd party issued tokens (just like issuances in Ripple): **to move bank-backed and government-backed fiat currencies to our blockchain** which ensures fairness and security of first layer yet providing all the needed controls and introspection for financial institutions to remain compliant.
 
-Unlike "fake" bloated blockchains with high tps, in Fairlayer the tokens are transfered instantly **offchain through the hubs** and hubs are responsible for rebalancing "insurances" onchain to reduce the collective risk over time. **This allows unlimited transactions per second with a hub-and-spoke topology of hubs.** Not 100k tps, not 300k, not 1M, it is in fact unlimited.
+Unlike "fake" bloated blockchains with high tps, in Fairlayer the tokens are transfered instantly offchain through the hubs and hubs are responsible for rebalancing "insurances" onchain to reduce the collective risk over time. This allows unlimited transactions per second with a hub-and-spoke topology of hubs. Not 100k tps, not 300k, not 1M, it is in fact unlimited.
 
 It is the same how the Internet topology looks like, and it has no central point of failure.
 

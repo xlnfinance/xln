@@ -28,3 +28,33 @@ rm -rf ./src
 ln -s ~/work/fs/src
 node fs -p8001
 ```
+
+
+## Reading the codebase
+
+Fairlayer has small codebase by design, about 5000 LOC. Less code, less bugs and technical debt. 
+
+`/bin` - binary tools 
+
+`/dist` - compiled wallet frontend
+
+`/lib` - vendored 3rd party libraries
+
+`/src` - core code and daemon functionality
+
+`/tools` - random files to help the development or to showcase some concept
+
+`/wallet` - Vue-based frontend for the daemon
+
+`/wiki` - this Wiki, feel free to edit
+
+Start with `/src/fair.js`.
+
+
+
+
+
+
+
+
+

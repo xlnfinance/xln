@@ -144,45 +144,32 @@ var fallback = setTimeout(()=>{
 
 
 window.onload = function(){
+  withdraw.onclick = function(){
+    axios.post('/init', {
+      destination: destination.value,
+      out_amount: out_amount.value
+    }).then((r2)=>{
+      if (r2.data.status == 'paid') {
+        location.reload()
+        
+      } else {
+        alert(r2.data.error)
+      }
+    })
+  }
 
-withdraw.onclick = function(){
-  axios.post('/init', {
-    destination: destination.value,
-    out_amount: out_amount.value
-  }).then((r2)=>{
-    if (r2.data.status == 'paid') {
-      location.reload()
-      
-    } else {
-      alert(r2.data.error)
-    }
-  })
-}
+  deposit.onclick = function(){
+    fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
 
-/*
-  var invoice = Array.prototype.map.call(crypto.getRandomValues(new Uint8Array(32)), function(byte) {
-    return ('0' + (byte & 0xFF).toString(16)).slice(-2);
- }).join('')
- */
+    window.addEventListener('message', function(e){
+      if(e.origin != fs_origin) return
 
-
-deposit.onclick = function(){
-  fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
-
-  window.addEventListener('message', function(e){
-    if(e.origin != fs_origin) return
-
-    fs_w.close()
-    setTimeout(()=>{
-      location.reload()
-    }, 1000)
-  })
-
-
-}
-
-
-
+      fs_w.close()
+      setTimeout(()=>{
+        location.reload()
+      }, 1000)
+    })
+  }
 }
 </script>
 </body></html>

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Before deploy kill all local simulation
+pm2 delete all
+
 set -o nounset
 set -o errexit
 set -o pipefail

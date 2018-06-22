@@ -1,6 +1,6 @@
 # Receive and Send API of Fairlayer
 
-Fairlayer was engineered to be easy to integrate. It's just one pulling HTTP request to get newly received unprocessed payments and one request to send one. 
+Fairlayer was engineered to be ridiculously easy to integrate. It's just one repeating pulling HTTP request to get newly received unprocessed payments and one request to make a payment. 
 
 It seamlessly implements both onchain (direct rebalance of insurance from you@hub to receiver@hub channel) and offchain (through payment channels not touching onchain layer) transfers, depending on the amount and how busy the network is. 
 
@@ -37,14 +37,62 @@ FairRPC = (params, cb) => {
 
 ## Receive
 
-The app that integrates Fair should set up a periodic pulling request e.g. every 1 second:
+For someone to pay they need destination address, an amount and optional invoice parameter.
+
+You can read your own address at bootstrap or have it hardcoded 
+
+```
+FairRPC('getinfo', (r)=>{
+  console.log('My address', r.address)
+})
+```
+
+Once you have an address, you can make a button "Pay with Fair" or simply show the address having onclick action. This action should open user's local Fair wallet with all the values prefilled:
+
+```
+var fs_origin = 'http://127.0.0.1:8001'
+deposit.onclick = function(){
+fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
+
+window.addEventListener('message', function(e){
+  if(e.origin != fs_origin) return
+
+  fs_w.close()
+  setTimeout(()=>{
+  	// give the backend time to process this deposit
+    location.reload()
+  }, 1000)
+})
+}
+```
+
+Once the user reviews payment details, enters the amount if needed and clicks Pay, Fairlayer does the rest. Under the hood user's wallet encrypts a specific hash for the public key stored in your address, passes it to the hub, the hub finds websocket towards your daemon, passes the payment with same condition but smaller amount (minus hub's fees), your daemon decrypts the originally encrypted hashlock, returns the secret to the hub (at this point you are guaranteed to get the money, as you have the dispute proof with hashlock that you can unlock in it), the hub returns the secret to the user and now the payment is finished. 
+
+The user's wallet makes a postMessage event to the opener to notify your app's about successful payment.
+
+The app that integrates Fair should set up a periodic pulling request to the daemon e.g. every 1 second:
 
 ```
 FairRPC('method=receivedAndFailed', (r)=>{
   if (!r.receivedAndFailed) return
   for (obj of r.receivedAndFailed) {
-    // is it received inward or failed outward?
+  	if (obj.asset != 1) {
+		// always whitelist assets you're planning to support
+		return 
+  	}
 
+    let uid = Buffer.from(obj.invoice, 'hex').toString()
+
+    // checking if uid is valid
+    if (users.hasOwnProperty(uid)) {
+      if (obj.is_inward) {
+        l("Received deposit "+uid)
+      } else {
+        l("Refund failed send "+uid)
+      }
+      // credit obj.amount of obj.asset to user=uid
+      users[uid] += obj.amount
+    }
   }
 })
 ```
@@ -65,15 +113,17 @@ Say, you are an exchange and your user wants to withdraw some asset to their Fai
 
 First, you need to check if they have enough money, then reduce their balance by the amount they want to withdraw. 
 
-Then make a request to your local Fair daemon with **following parameters carefully escaped and sanitized**
+Then make a request to your local Fair daemon with **following parameters carefully escaped and sanitized**:
+
+* `outward[destination]` - the address where user wants to send assets
+* `outward[amount]` - the amount of assets to send (fees are passed on the user)
+* `outward[asset]` - id of asset to operate in. 1 for FRD, 2 for FRB and so on.
+* `outward[invoice]` - set the same invoice you would use to receive assets from this user, so if the payment fails it will be credited back according to this invoice
+
 
 ```
 FairRPC('method=send&outward[destination]=DEST&outward[asset]=1&outward[amount]=200&outward[invoice]=INVOICE', (r)=>{
-  if (!r.receivedAndFailed) return
-  for (obj of r.receivedAndFailed) {
-    // is it received or failed?
-
-  }
+  // sent
 })
 ```
 

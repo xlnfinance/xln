@@ -10,122 +10,27 @@ Fairlayer, on another hand, is a quite opinionated XLN implementation that aims 
 
 Our paramount priority is security and censorship resistance even from validator majority, which is why we require absolutely all nodes including consumer devices to be a fully-verifying nodes, Spv. Thankfully, our full node is designed to routinely run on everything from cheap smartphones to cloud servers and the first "Fair" layer is cheap to keep up with.
 
+**This is the reference client** so there is no extensive specification. If you want to learn how something works just look into the code.
 
+[1. Channels](/1_channels.md)
 
+[2. Hashlocks](/2_hashlocks.md)
 
+[3. Rebalance](/3_rebalance.md)
 
+[4. Four balances](/4_four_balances.md)
 
+[5. Consensus](/5_consensus.md)
 
-## 1. Digital signatures and balance proofs
+[6. Smart updates](/6_smart_updates.md)
 
+[7. Other differences](/7_other_differences.md)
 
+[8. Roadmap](/8_roadmap.md)
 
-. The core security principle is **everyone runs a full node** on their devices, with **cheap consumer-grade laptop with world average connection** (8MBit) being primary target
+[9. Receive and Pay API](/9_receive_and_pay.md)
 
+[10. Development](/10_genesis.md)
 
-
-
-## 1. Understanding the Trust Problem
-
-Central authorities are bad.
-
-## 2. Building Basic Distributed Ledger 
-
-Tendermint PoS.
-
-## 3. Going Off-chain with Simple Payment Channel
-
-
-
-## 4. Network of Payment Channels
-
-## 5. Hashlocks
-
-## 6. Fixing Liquidity with Credit Lines
-
-## 7. Mutual Withdrawal and Optimized Rebalances 
-
-7. Reducing Risks Techniques
-
-
-
-
-
-
-## 1. Sending to standalone account
-
-Let's start from basic usage. This is on chain database stored on every node:
-
-| Account | On-Chain Balance |
-| --- | ---|
-| Alice | 10 |
-| Bob   | 0 |
-
-In order to transfer 5 to Bob Alice must create a `rebalance` transaction. Rebalance is used in a batch fashion, it has 3 arguments: disputes, inputs, outputs.
-
-We're going to omit first two and focus on outputs. Output is an array with format of `[amount, giveTo, withPartner, invoice]`.
-
-In order to send to standalone balance Alice signs an on chain transaction:
-
-`[id, sig, methodId, nonce, args]`
-
-`id` refers to primary key in accounts database. It takes less space (2-4 bytes) than providing entire 32 bytes pubkey/address.
-
-`sig` is the `ed25517` signature of everything that comes next, the payload.
-
-`methodId` - each onchain tx must have a method that says how the message is interpreted. There's only a handful of them now, so it's normally 1 byte. 
-
-`nonce` - each valid tx increases nonce by one to prevent replay attacks.
-
-`args` - here is the array of `[disputes,inputs,outputs]` which in our case would be `[[],[],[5,BobId,0,0]]`.
-
-As you can see the giveTo is equal Bob's id but withPartner is empty. That's because we haven't touched the payment channels yet.
-
-So the blockchain finds `u=User.findById(BobID)`, increases `u.balance += amount` and deducts from the `signer.balance -= amount`.
-
-Fairly simple. That's how all blockchains function right now: a user broadcasts public transaction, everyone takes it from user's balance and deposits to target, on every single ledger.
-
-That leads to a lot of unnecessary overhead. So in this system we are going to avoid transfers to standalone balances most of the time, because they are too inefficient but provide highest security.
-
-## 2. Sending to a channel
-
-Technically channels are many-to-many relationships between two arbitrary users in the database. However, most of the time one of those users would be a hub. 
-
-So let's say Alice wants to transfer money off-chain through a Hub. She would have to use an output with `[10, AliceId, HubId, 0]` - this means deposit to Alice's part of a channel with Hub. We're going to refer to channels as alice@hub. It's also possible to deposit to hub@alice - that's how hubs rebalance their users. First part denotes user you want to deposit insurance to and second is their partner.
-
-| Left | Right | Insurance | Ondelta
-| --- | ---|---|---|
-| Alice | Hub |10 |10|
-
-As you can see there is Left and Right users. Left user is the one with lower numerically (Buffer.compare) pubkey.
-
-`Insurance` is like a balance between two users that they can move between each other off-chain.
-
-Finally, another new field is `ondelta`. 
-
-
-
-
-3. Uninsured balance 
-
-```
-Alice -> Hub -> Bob
-============|  H ===|  $
-=========|===  H |===  
-=========|===  H ===|===  $
-======|======  H |======  
-======|======  H ===|======  $
-===|=========  H |=========  
-===|=========  H ===|=========  $
-|============  H |============  
-
-
-============|  H |  
-=========|===  H |---  
-======|======  H |------  
-===|=========  H |---------  
-===|           H |=========  $
-|===           H |=========---  
-```
 
 
