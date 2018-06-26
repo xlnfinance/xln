@@ -42,24 +42,6 @@ module.exports = async (
     })
     ch.d.ack_requested_at = null
 
-    /*
-    if (argv.syncdb) {
-      all.push(
-        Payment.update(
-          {
-            status: 'ack'
-          },
-          {
-            where: {
-              status: 'sent',
-              deltumId: ch.d.id
-            }
-          }
-        )
-      )
-    }
-    */
-
     if (trace)
       l('Received ack on current state, all sent transitions are now ack')
   } else {
@@ -153,6 +135,8 @@ module.exports = async (
         unlocker: unlocker,
         destination: destination,
 
+        asset: asset,
+
         deltumId: ch.d.id
       })
 
@@ -225,6 +209,8 @@ module.exports = async (
             amount: outward_amount,
             hash: bin(hash),
             exp: exp,
+
+            asset: asset,
 
             unlocker: unlocker,
             destination: destination,

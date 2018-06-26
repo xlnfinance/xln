@@ -2,11 +2,11 @@
 
 module.exports = async (ws, json) => {
   var result = {}
+  l("authed ", json)
+
 
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
-
-  // temporary: no auth code in dev mode for non roots
   if (json.auth_code == PK.auth_code) {
     if (ws.send && json.is_wallet && me.browser != ws) {
       // new window replaces old one
@@ -131,7 +131,7 @@ module.exports = async (ws, json) => {
 
               me.batch.push(['withdrawFrom', asset, ins])
               me.batch.push(['depositTo', asset, outs])
-              react({confirm: 'Onchain rebalance tx sent'})
+              react({confirm: 'Onchain rebalance tx added to queue'})
             } else {
               react({
                 alert:
@@ -199,88 +199,6 @@ module.exports = async (ws, json) => {
 
         break
 
-      case 'receivedAndFailed':
-        await me.syncdb()
-
-        // what we successfully received and must deposit in our app +
-        // what node failed to send so we must deposit it back to user's balance
-        result.receivedAndFailed = await Payment.findAll({
-          where: {
-            type: 'del',
-            status: 'ack',
-            [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
-          }
-        })
-
-        // only set as processed if there's anything
-        if (result.receivedAndFailed.length > 0) {  
-          await Payment.update(
-            {
-              status: 'processed'
-            },
-            {
-              where: {
-                type: 'del',
-                status: 'ack',
-                [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
-              }
-            }
-          )
-        }
-
-
-        break
-      case 'testnet':
-        if (p.action == 4) {
-          me.CHEAT_dontack = 1
-        } else if (p.action == 5) {
-          me.CHEAT_dontreveal = 1
-        } else if (p.action == 6) {
-          me.CHEAT_dontwithdraw = 1
-        } else {
-          me.getCoins(p.asset, parseInt(p.faucet_amount))
-          /*
-          me.send(
-            Members.find((m) => m.id == p.partner),
-            'testnet',
-            concat(bin([p.action, p.asset]), bin(me.address))
-          )*/
-        }
-
-        result.confirm = 'Testnet action triggered'
-
-        break
-
-      case 'hardfork':
-        //security: ensure it's not RCE and put extra safeguards
-        //eval(p.hardfork)
-        result.confirm = 'Executed'
-        break
-
-      case 'setLimits':
-        var m = K.hubs.find((m) => m.id == p.partner)
-
-        var ch = await me.getChannel(m.pubkey, p.asset)
-
-        ch.d.soft_limit = parseInt(p.limits[0]) * 100
-        ch.d.hard_limit = parseInt(p.limits[1]) * 100
-        await ch.d.save()
-
-        me.send(
-          m,
-          'setLimits',
-          me.envelope(
-            map('setLimits'),
-            ch.d.asset,
-            ch.d.soft_limit,
-            ch.d.hard_limit
-          )
-        )
-
-        result.confirm = 'The hub has been notified about new credit limits'
-
-        break
-
       case 'propose':
         if (p[0].length <= 1) throw 'Rationale is required'
 
@@ -323,6 +241,92 @@ module.exports = async (ws, json) => {
         )
         return false
         break
+
+
+      // commonly called by merchant app on the same server
+      case 'receivedAndFailed':
+        await me.syncdb()
+
+        // what we successfully received and must deposit in our app +
+        // what node failed to send so we must deposit it back to user's balance
+        result.receivedAndFailed = await Payment.findAll({
+          where: {
+            type: 'del',
+            status: 'ack',
+            processed: false,
+            [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
+          }
+        })
+
+        // mark as processed
+        if (result.receivedAndFailed.length > 0) {  
+          await Payment.update(
+            {
+              processed: true
+            },
+            {
+              where: {
+                type: 'del',
+                status: 'ack',
+                [Op.or]: [{is_inward: true}, {is_inward: false, secret: null}]
+              }
+            }
+          )
+        }
+
+
+        break
+      case 'testnet':
+        if (p.action == 4) {
+          me.CHEAT_dontack = 1
+        } else if (p.action == 5) {
+          me.CHEAT_dontreveal = 1
+        } else if (p.action == 6) {
+          me.CHEAT_dontwithdraw = 1
+        } else {
+          me.getCoins(p.asset, parseInt(p.faucet_amount))
+          /*
+          me.send(
+            Members.find((m) => m.id == p.partner),
+            'testnet',
+            concat(bin([p.action, p.asset]), bin(me.address))
+          )*/
+        }
+
+        result.confirm = 'Testnet action triggered'
+
+        break
+
+      case 'hardfork':
+        //security: ensure it's not RCE and put extra safeguards
+        //eval(p.hardfork)
+        result.confirm = 'Executed'
+        break
+
+      // sets credit limits to a hub
+      case 'setLimits':
+        var m = K.hubs.find((m) => m.id == p.partner)
+
+        var ch = await me.getChannel(m.pubkey, p.asset)
+
+        ch.d.soft_limit = parseInt(p.limits[0]) * 100
+        ch.d.hard_limit = parseInt(p.limits[1]) * 100
+        await ch.d.save()
+
+        me.send(
+          m,
+          'setLimits',
+          me.envelope(
+            map('setLimits'),
+            ch.d.asset,
+            ch.d.soft_limit,
+            ch.d.hard_limit
+          )
+        )
+
+        result.confirm = 'Credit limits updated'
+        break
+
     }
 
     // http or websocket?

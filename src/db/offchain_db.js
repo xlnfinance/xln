@@ -137,7 +137,7 @@ Delta = privSequelize.define(
 
     // 4th type of balance, equivalent traditional balance in a bank. For pocket change.
     // Exists for convenience like pulling payments when the user is offline.
-    custodian_balance: {
+    trusted_frd: {
       type: Sequelize.INTEGER,
       defaultValue: 0
     }
@@ -164,8 +164,13 @@ Payment = privSequelize.define(
   {
     //todo: move to single field addnew, addsent ...
     type: Sequelize.ENUM('add', 'del', 'addrisk', 'delrisk'),
-    status: Sequelize.ENUM('new', 'sent', 'ack', 'processed'),
+    status: Sequelize.ENUM('new', 'sent', 'ack'),
     is_inward: Sequelize.BOOLEAN,
+
+    processed: {
+      type: Sequelize.BOOLEAN,
+      defaultValue: false
+    }, // did merchant app process this deposit already
 
     // streaming payments
     lazy_until: Sequelize.DATE,

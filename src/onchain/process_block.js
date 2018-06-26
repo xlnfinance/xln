@@ -297,7 +297,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           stat.birthtime = null
 
           // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
-          // No dotfiles
+          // No dotfiles. TODO whitelist
 
           if (
             path.includes('/.') ||

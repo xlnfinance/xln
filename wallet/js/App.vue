@@ -3,6 +3,14 @@ import UserIcon from './UserIcon'
 import Highlight from './Highlight'
 import Whitepaper from './Whitepaper'
 
+/* TODO: fair names
+
+         <input style="width:300px" type="number" class="form-control small-input" v-model="set_name" placeholder="Choose Fair Name">
+          <p>
+            <button type="button" class="btn btn-warning" @click="call('setName', {set_name})">Claim Name</button>
+          </p>
+*/
+
 export default {
   components: {
     UserIcon,
@@ -132,6 +140,9 @@ export default {
     }
   },
   computed: {
+    assetPayments: () => {
+      return app.payments.filter(p=>p.asset == app.asset)
+    },
     ch: () => {
       // find current channel for selected asset and hub
       return app.channels
@@ -188,7 +199,7 @@ export default {
       app.call('rebalance', {
         partner: app.ch.partner,
         request_amount:
-          app.ch.insured > 0 ? app.uncommy(app.request_amount) : '0',
+          app.ch.insured > 0 ? app.uncommy(app.request_amount) : 0,
         outs: app.outs,
         asset: app.asset
       })
@@ -548,11 +559,7 @@ export default {
         <template v-if="pubkey">
           <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
-          <div v-if="record">
-            <h4>{{to_ticker(asset)}} Balance onchain: <b>{{commy(getAsset(asset))}}</b></h4>
-            <p>Onchain balance is like a savings account and provides highest security but is the most expensive and slow to use. Store assets you don't plan to use often. Your onchain ID: <b>{{record.id}}</b></p>
-            <hr />
-          </div>
+
 
 
           <div class="input-group mb-3" style="width:400px" >
@@ -620,7 +627,7 @@ export default {
             </p>
 
           </div>
-          <table v-if="payments.length > 0" class="table">
+          <table v-if="assetPayments.length > 0" class="table">
             <thead>
               <tr>
                 <th width="150px">Status</th>
@@ -633,7 +640,7 @@ export default {
               <!--transition-group name="list" tag="tbody"></transition-group>-->
               <tbody>
 
-                <tr v-bind:key="h.id" v-for="h in payments.slice(0, history_limit)">
+                <tr v-bind:key="h.id" v-for="h in assetPayments.slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
                   <td>Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
@@ -641,7 +648,7 @@ export default {
                 </tr>
               </tbody>
 
-              <tr v-if="payments.length > history_limit">
+              <tr v-if="assetPayments.length > history_limit">
                 <td colspan="7" align="center"><a @click="history_limit += 20">Show More</a></td>
               </tr>
 
@@ -687,6 +694,7 @@ export default {
       <div v-else-if="tab=='onchain'">
         <div v-if="record">
           <h1>Onchain Operations</h1>
+          <p>Onchain ID: {{record.id}}</p>
           <p>Onchain {{to_ticker(asset)}} balance: {{commy(getAsset(asset))}}</p>
           
           <template>
@@ -702,11 +710,11 @@ export default {
             <p v-else>You do not have <b>insured</b> balances to withdraw from.</p>
           </template>
 
-          <h3>Deposits to other users or channels</h3>
+          <h3>Deposits to channels or users</h3>
           <p v-for="out in outs">
             <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit">
             <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
-            <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Invoice (optional)">
+            <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Invoice (optional)">
           </p>
           <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">+ Another Deposit</button>
@@ -715,13 +723,6 @@ export default {
 
           <p>
             <button type="button" class="btn btn-warning" @click="onchain()">Execute Onchain</button>
-          </p>
-
-
-         <input style="width:300px" type="number" class="form-control small-input" v-model="set_name" placeholder="Choose Fair Name">
-
-          <p>
-            <button type="button" class="btn btn-warning" @click="call('setName', {set_name})">Claim Name</button>
           </p>
 
           <template v-if="ch">
@@ -961,7 +962,7 @@ export default {
           </tbody>
         </table>
         <div v-else>
-        <p><b>You're not a validator, so your node is not required to store blocks - they are pruned immediately after execution. If you want to see historical blockchain events visit Explorer on any validator website.</b></p>
+        <p><b>No blocks stored on this node.</b></p>
         </div>
       </div>
       <div v-else-if="tab=='account_explorer'">

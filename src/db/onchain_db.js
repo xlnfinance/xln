@@ -228,8 +228,6 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
 
   let debts = await this.getDebts({where: {asset: asset}})
 
-  this.has_debts = false
-
   for (let d of debts) {
     var u = await User.idOrKey(d.oweTo)
 
@@ -252,11 +250,13 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
       //await u.save()
       await d.save()
 
-      // not paid out in full
-      this.has_debts = true
-
       break
     }
+  }
+
+  // no debts left (including other assets)?
+  if (await this.countDebts() == 0) {
+    this.has_debts = false
   }
 }
 

@@ -98,7 +98,8 @@ module.exports = async (a) => {
   }
 
   var cb = function(req, res) {
-    if (req.url.match(/^\/Fair-([0-9]+)\.tar\.gz$/)) {
+    var path = req.url.split('?')[0]
+    if (path.match(/^\/Fair-([0-9]+)\.tar\.gz$/)) {
       var file = './' + datadir + '/offchain' + req.url
       var stat = fs.statSync(file)
       res.writeHeader(200, {'Content-Length': stat.size})
@@ -114,7 +115,7 @@ module.exports = async (a) => {
       res.on('drain', function() {
         fReadStream.resume()
       })
-    } else if (req.url == '/rpc') {
+    } else if (path=='/rpc') {
       var queryData = ''
       req.on('data', function(data) {
         queryData += data
@@ -122,10 +123,11 @@ module.exports = async (a) => {
   
       req.on('end', function() {
         //GET + JSON in body on top
+        l(req.query, querystring.parse(req.query))
         var json = Object.assign(querystring.parse(req.query), parse(queryData))
         RPC.internal_rpc(res, json)
       })
-    } else if (req.url == '/sdk.html') {
+    } else if (path == '/sdk.html') {
       serveStatic('../wallet')(req, res, finalhandler(req, res))
     } else {
       bundler(req, res, finalhandler(req, res))

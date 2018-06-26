@@ -2,23 +2,19 @@
 axios = require('axios')
 l = console.log
 crypto = require('crypto')
-rand = () => crypto.randomBytes(12).toString('hex')
-
-rr = false
+rand = () => crypto.randomBytes(6).toString('hex')
 
 fs = require('fs')
 users = {}
 
-nacl = require('../lib/nacl')
 
 // define merchant node path
 
+FS_RPC = 'http://127.0.0.1:8002/rpc'
 if (fs.existsSync('/root/fs/data8002/offchain/pk.json')) {
   FS_PATH = '/root/fs/data8002/offchain'
-  FS_RPC = 'http://127.0.0.1:8002/rpc'
 } else {
   FS_PATH = '/Users/homakov/work/fs/data8002/offchain'
-  FS_RPC = 'http://127.0.0.1:8002/rpc'
 }
 
 // pointing browser SDK to user node
@@ -27,7 +23,7 @@ LOCAL_FS_RPC = 'http://127.0.0.1:8001'
 var processUpdates = async () => {
   r = await FS('receivedAndFailed')
 
-  if (!r.data.receivedAndFailed) return l("no data found")
+  if (!r.data.receivedAndFailed) return l("No receivedAndFailed")
     
   for (var obj of r.data.receivedAndFailed) {
     let uid = Buffer.from(obj.invoice, 'hex').toString()
@@ -97,79 +93,38 @@ httpcb = async (req, res) => {
     if (!users[id]) users[id] = 0 // Math.round(Math.random() * 1000000)
 
     res.end(`
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" href="/bootstrap.min.css">
   <script src="/axios.js"></script>
+  <script src="/demoapp_common.js"></script>
+  <title>Fairlayer Integration Demo</title>
+
+  <script>
+  fs_origin = '${LOCAL_FS_RPC}'
+  address = '${address}'
+  id = '${id}'
+  </script>
 </head>
 
 <body>
   <main role="main" class="container" id="main">
-    <h1 class="mt-5">Integration Demo (JS)</h1>
-    <p>Your account in our service: ${id}</p>
+    <h1 class="mt-5">Fairlayer Integration Demo (JS)</h1>
+    <p>Your account in our service: <span id="yourid"></span></p>
     <p>Available FRD Balance: <b>\$${commy(users[id])}</b></p>
 
     <h3>Deposit FRD</h3>
-    <p>Deposit Address: <a href="#" id="deposit">${address}#${id}</a></p>
+    <p>Deposit Address: <a href="#" id="deposit"></a></p>
 
     <h3>Withdraw FRD</h3>
     <p><input type="text" id="destination" placeholder="Address"></p>
     <p><input type="text" id="out_amount" placeholder="Amount"></p>
     <p><button class="btn btn-success" id="withdraw">Withdraw</button></p>
-   
+    <a href="https://fairlayer.com/#install">Install Fairlayer</a>
  </main>
-
-
-<script>
-l=console.log
-id = '${id}'
-
-fs_origin = '${LOCAL_FS_RPC}'
-
-var fallback = setTimeout(()=>{
-//main.innerHTML="Couldn't connect to local node at ${LOCAL_FS_RPC}. <a href='https://fairlayer.com/#install'>Please install Fairlayer first</a>"
-}, 3000)
-
-
-</script>
-<script>
-
-
-window.onload = function(){
-  withdraw.onclick = function(){
-    axios.post('/init', {
-      destination: destination.value,
-      out_amount: out_amount.value
-    }).then((r2)=>{
-      if (r2.data.status == 'paid') {
-        location.reload()
-        
-      } else {
-        alert(r2.data.error)
-      }
-    })
-  }
-
-  deposit.onclick = function(){
-    fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
-
-    window.addEventListener('message', function(e){
-      if(e.origin != fs_origin) return
-
-      fs_w.close()
-      setTimeout(()=>{
-        location.reload()
-      }, 1000)
-    })
-  }
-}
-</script>
-</body></html>
-
-    `)
+</body></html>`)
   } else if (req.url == '/init') {
     var queryData = ''
     req.on('data', function(data) {
@@ -178,8 +133,6 @@ window.onload = function(){
 
     req.on('end', async function() {
       var p = JSON.parse(queryData)
-
-      l('init ', p)
 
       if (p.destination) {
         var amount = Math.round(parseFloat(p.out_amount) * 100)
@@ -208,10 +161,6 @@ window.onload = function(){
 
 
 
-
-
-address = '';
-
 init = async () => {
 
   if (fs.existsSync(FS_PATH + '/pk.json')) {
@@ -228,16 +177,14 @@ init = async () => {
     return setTimeout(init, 1000)
   }
 
+  address = r.data.address
+  l('Our address: ' + address)
+  processUpdates()
 
 
   require('http')
     .createServer(httpcb)
     .listen(3010)
-
-  address = r.data.address
-  l('Our address: ' + address)
-  processUpdates()
-
 
   try{
     require('../lib/opn')('http://127.0.0.1:3010')
