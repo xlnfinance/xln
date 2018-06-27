@@ -41,7 +41,7 @@ That's why one way or another Fairlayer is guaranteed to scale to all world tran
 
 ## Is it a new cryptocurrency?
 
-Not really. It's a decentralized platform on top of which you can create your own [crypto]currencies or other tokens (we call them digital assets). **All Fair assets can be deposited into hubs and sent instantly through the network of payment channels**. There are two native assets created at the genesis and managed by the foundation: [FRD (dollar) and FRB (bet).](https://medium.com/fairlayer/invest-in-fairlayer-pre-ico-95f53bb0351d). FRD is also required to pay for onchain tx fees.
+Not really. It's a decentralized platform on top of which you can create your own [crypto]currencies or other tokens (we call them digital assets). **All Fair assets can be deposited into hubs and sent instantly through the network of payment channels**. There are two native assets created at the genesis and managed by the foundation: [FRD (dollar) and FRB (bet)](https://medium.com/fairlayer/invest-in-fairlayer-pre-ico-95f53bb0351d). FRD is also required to pay for onchain tx fees.
 
 ## So you promise to redeem FRD for 1 USD?
 
@@ -63,7 +63,7 @@ The success of FRB is based on the success of Fairlayer adoption, that's why it'
 
 A virtual machine for smart contracts was proposed to solve one simple issue: lack of governance process to upgrade the underlying blockchain. We believe smart contracts such as EVM are too complicated to write secure and sophisticated code, produce too much overhead and limitations (gas limits), have steep learning curve and too little use cases.
 
-More than that, as history shows, onchain governance and software upgrades are inevitable. Traditional software upgrades are centralized (Github releases published by a single person, for example) are prone to compromise.
+More than that, as history shows, onchain governance and software upgrades are inevitable. Traditional software upgrades are centralized (Github releases published by a single person, for example) and prone to compromise.
 
 **That's why in Fairlayer any functionality upgrade is implemented through "smart updates" aka onchain governance** - a set of description, code and patch which validators can vote for.
 
@@ -73,7 +73,7 @@ All upgrades, even as simple as changing the color of a button, are delivered th
 
 ## Where is the catch? There must be a trade-off!
 
-![/wiki/risktriangle.png](/wiki/risktriangle.png)
+![/wiki/risktriangle.jpg](/wiki/risktriangle.jpg)
 
 Like mentioned early, Fairlayer introduces a concept of **uninsured balances** which has similarities with fractional reserve. 
 
