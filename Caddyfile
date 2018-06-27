@@ -1,0 +1,49 @@
+fairlayer.com { 
+  proxy / localhost:8200 { 
+    websocket 
+  } 
+}
+fairlayer.com:8001 { 
+  proxy / localhost:8201 { 
+    websocket 
+  } 
+}
+fairlayer.com:8002 { 
+  proxy / localhost:8202 { 
+    websocket 
+  } 
+}
+fairlayer.com:8003 { 
+  proxy / localhost:8203 { 
+    websocket 
+  }
+}
+
+
+fairlayer.com:8100 { 
+  proxy / localhost:8300 { 
+    websocket 
+  }
+}
+
+fairlayer.com:8101 { 
+  proxy / localhost:8301 { 
+    websocket 
+  } 
+}
+fairlayer.com:8102 { 
+  proxy / localhost:8302 { 
+    websocket 
+  } 
+}
+fairlayer.com:8103 { 
+  proxy / localhost:8303 { 
+    websocket 
+  } 
+}
+
+
+
+failsafe.network {
+  redir https://fairlayer.com{uri}
+}

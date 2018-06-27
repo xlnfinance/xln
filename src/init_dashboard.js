@@ -98,6 +98,9 @@ module.exports = async (a) => {
   }
 
   var cb = function(req, res) {
+    // Clickjacking protection
+    res.setHeader("X-Frame-Options", "DENY")
+
     var [path, query] = req.url.split('?')
     if (path.match(/^\/Fair-([0-9]+)\.tar\.gz$/)) {
       var file = './' + datadir + '/offchain' + req.url
@@ -137,7 +140,6 @@ module.exports = async (a) => {
 
   // this serves dashboard HTML page
 
-  cert = false
   var server = require('http').createServer(cb)
 
   me = new Me()
@@ -162,7 +164,7 @@ module.exports = async (a) => {
     await me.start()
   }
 
-  server.listen(base_port).once('error', function(err) {
+  server.listen(on_server ? base_port+200 : base_port).once('error', function(err) {
     if (err.code === 'EADDRINUSE') {
       fatal(`Port ${highlight(base_port)} is currently in use, quitting`)
     }

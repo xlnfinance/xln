@@ -957,7 +957,9 @@ export default {
               <tr v-if="b.meta">
                 <td v-if="b.meta.cron.length + b.meta.missed_validators.length > 0"  colspan="7">
                   <template v-if="b.meta.cron.length > 0" v-for="m in b.meta.cron">
-                    <span v-if="m[0] == 'resolved'" class="badge badge-primary" v-html="dispute_outcome(m[0], m[1], m[2])"></span>
+                    <span v-if="m[0] == 'maturity'" class="badge badge-primary">🎉 Maturity day! All FRB balances are copied to FRD balances.</span>
+
+                    <span v-else-if="m[0] == 'resolved'" class="badge badge-primary" v-html="dispute_outcome(m[0], m[1], m[2])"></span>
                     <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
                     <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span> &nbsp;
                   </template>

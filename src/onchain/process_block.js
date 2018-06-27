@@ -207,6 +207,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   if (K.bet_maturity && K.ts > K.bet_maturity) {
     l("🎉 Maturity day! Copy all FRB balances to FRD")
+    meta.cron.push(['maturity'])
+    
     await me.syncdb()
 
     // first assignment must happen before zeroing

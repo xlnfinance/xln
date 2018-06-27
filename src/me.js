@@ -247,11 +247,10 @@ class Me {
     if (me.my_member) {
       // there's 2nd dedicated websocket server for member/hub commands
       var cb = () => {}
-      me.member_server = cert
-        ? require('https').createServer(cert, cb)
-        : require('http').createServer(cb)
+      me.member_server = require('http').createServer(cb)
+
       var member_port = parseInt(me.my_member.location.split(':')[2])
-      me.member_server.listen(member_port)
+      me.member_server.listen(on_server ? member_port + 200 : member_port)
 
       l(`Bootstrapping local server at: ${me.my_member.location}`)
 
