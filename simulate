@@ -49,8 +49,7 @@ if node fs.js --genesis=test $db | grep "Genesis done"; then
     fi
   done
 
-  pm2 start $pm2_opts --name demoapp tools/demoapp.js
-
+  
   pm2 attach $(node -p "`pm2 id fs`[0]")  
 fi
 

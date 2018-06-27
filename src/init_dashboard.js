@@ -185,6 +185,10 @@ module.exports = async (a) => {
   sync()
   update_cache(true)
 
+  if (argv.rpc) {
+    RPC.internal_rpc('admin', argv)
+  }
+
   l(`\n${note('Welcome to Fair REPL!')}`)
   repl = require('repl').start(note(''))
   repl.context.me = me

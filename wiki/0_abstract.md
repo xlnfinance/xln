@@ -8,13 +8,11 @@ The novelty of XLN idea is extending the original Lightning Network with credit 
 
 Fairlayer, on another hand, is a quite opinionated XLN implementation that aims to fix other issues with blockchains other than just scalability. Some parts of Fairlayer such as Proof-of-Authority can come off as controversary, but bear in mind XLN (the generic scaling concept) can be immitated on top of Bitcoin and most of other blockchains albeit in a much more limited fashion than Fairlayer does it.
 
-Our paramount priority is security and censorship resistance even from validator majority, which is why we require absolutely all nodes including consumer devices to be a fully-verifying nodes, Spv. Thankfully, our full node is designed to routinely run on everything from cheap smartphones to cloud servers and the first "Fair" layer is cheap to keep up with.
+Our paramount priority is security and censorship resistance even from validator majority, which is why we require absolutely all nodes including consumer devices to be fully-verifying nodes. Thankfully, our full node is designed to routinely run on everything from cheap smartphones to cloud servers and the first "Fair" layer is cheap to keep up with.
 
 **This is the reference client** and no formal specification is planned. If you want to learn how something works just look into the code.
 
-Fairlayer is developed entirely as an end-to-end solution having a full-node, layer2 protocol and user wallet all under one roof working seamlessly. Isomorphic codebase covers different use cases: a wallet, an explorer, a hub and a validator node etc. 
-
-There are no smart contracts and no VM to develop upon, but feel free to submit a **smart update** and see if onchain governance approves it.
+Fairlayer is developed entirely as an end-to-end solution having a full-node, layer2 protocol and default wallet all under one roof working seamlessly. Isomorphic codebase covers different use cases: a wallet, an explorer, a hub and a validator node. 
 
 
 # FAQ

@@ -6,6 +6,8 @@ For now pretty simple. In the future can be added:
 * smart learning based on balances over time not on balance at the time of matching
 * use as little inputs/outputs to transfer as much as possible volume
 
+todo: ensure we have enoguh assets for depositTo
+add conversion rates for other assets K.risk
 */
 
 module.exports = async function() {

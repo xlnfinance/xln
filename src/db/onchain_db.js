@@ -387,8 +387,10 @@ Insurance.prototype.resolve = async function() {
     }
   }
 
+  /*
   await left.save()
   await right.save()
+  */
 
   this.insurance = 0
   this.ondelta = -this.dispute_offdelta
@@ -399,7 +401,7 @@ Insurance.prototype.resolve = async function() {
   //this.dispute_nonce = null
   this.dispute_offdelta = null
 
-  await this.save()
+  //await this.save()
 
   var withUs = me.is_me(left.pubkey)
     ? right
@@ -419,7 +421,7 @@ Insurance.prototype.resolve = async function() {
 
     ch.d.status = 'master'
     ch.d.ack_requested_at = null
-    await ch.d.save()
+    //await ch.d.save()
   }
 
   return resolved

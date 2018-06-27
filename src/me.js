@@ -48,8 +48,8 @@ class Me {
     this.username = username
 
     this.seed = seed
-    this.id = nacl.sign.keyPair.fromSeed(this.seed)
-    this.pubkey = bin(this.id.publicKey)
+    this.id = nacl.sign.keyPair.fromSeed(me.seed)
+    this.pubkey = bin(me.id.publicKey)
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(sha3('block' + this.seed))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
@@ -198,30 +198,30 @@ class Me {
   // signs data and adds our pubkey
   envelope() {
     var msg = r(Object.values(arguments))
-    return r([bin(this.id.publicKey), ec(msg, this.id.secretKey), msg])
+    return r([bin(me.id.publicKey), ec(msg, me.id.secretKey), msg])
   }
 
   block_envelope() {
     var msg = r(Object.values(arguments))
     return r([
-      bin(this.block_keypair.publicKey),
-      ec(msg, this.block_keypair.secretKey),
+      bin(me.block_keypair.publicKey),
+      ec(msg, me.block_keypair.secretKey),
       msg
     ])
   }
 
   async start() {
     // in json pubkeys are in hex
-    this.record = await User.idOrKey(bin(me.id.publicKey))
+    me.record = await User.idOrKey(bin(me.id.publicKey))
 
-    if (this.record) {
-      this.my_member = Members.find((m) => m.id == this.record.id)
-      this.my_hub = K.hubs.find((m) => m.id == this.record.id)
+    if (me.record) {
+      me.my_member = Members.find((m) => m.id == me.record.id)
+      me.my_hub = K.hubs.find((m) => m.id == me.record.id)
     }
 
     /*
 
-    this.intervals.push(
+    me.intervals.push(
       setInterval(async () => {
         var flushable = await Delta.findAll({
           where: {
@@ -250,10 +250,10 @@ class Me {
       me.member_server = cert
         ? require('https').createServer(cert, cb)
         : require('http').createServer(cb)
-      var member_port = parseInt(this.my_member.location.split(':')[2])
+      var member_port = parseInt(me.my_member.location.split(':')[2])
       me.member_server.listen(member_port)
 
-      l(`Bootstrapping local server at: ${this.my_member.location}`)
+      l(`Bootstrapping local server at: ${me.my_member.location}`)
 
       // lowtps/hightps
       //(base_port == 8433 ? require('uws') : ws)
@@ -277,9 +277,9 @@ class Me {
       })
 
       for (var m of Members) {
-        if (this.my_member != m) {
+        if (me.my_member != m) {
           // we need to have connections ready to all members
-          this.send(m, 'auth', me.envelope(map('auth')))
+          me.send(m, 'auth', me.envelope(map('auth')))
         }
       }
 
@@ -289,8 +289,8 @@ class Me {
     } else {
       // keep connection to all hubs
       Members.map((m) => {
-        if (this.my_member != m) {
-          this.send(m, 'auth', this.envelope(map('auth')))
+        if (me.my_member != m) {
+          me.send(m, 'auth', me.envelope(map('auth')))
         }
       })
     }
@@ -348,8 +348,8 @@ class Me {
 
     if (argv.monkey) {
       // user specific e2e tests
-      if (this.record) {
-        if (this.record.id == 4) {
+      if (me.record) {
+        if (me.record.id == 4) {
           // trigger the dispute from hub
           me.CHEAT_dontack = true
           me.CHEAT_dontwithdraw = true
@@ -366,7 +366,7 @@ class Me {
           ])
         }
 
-        if (this.record.id == 3) {
+        if (me.record.id == 3) {
           me.batch.push([
             'createAsset',
             ['TEST3', 10000000, 'Test coin by 3', 'No goal']

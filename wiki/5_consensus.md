@@ -18,29 +18,7 @@ However, at some point in the future, we might release experimental "classic" ve
 
 Given, we are granting 100 stake-tokens to ourselves (master of ceremony) and distribute them to 99 other entities after verifying their social accounts (the more famous the better, less chance of Sybil).
 
-Each block must be signed by `2/3+` of total stake, can tolerate up to `1/3-` and may be compromised if 1/3+ is compromised and only 2/3- honest left. 
-
-
-```
-for(var i=1;i<300;i++){ 
-  var honest = i%3==0?i*2/3+1:Math.ceil(i*2/3)
-  console.log(`${i} validators require honest ${honest} and can tolerate up to ${i-honest} Byzantine. Must compromise ${i-honest+1}`) 
-} 
-```
-
-Demo output:
-
-```
-95 validators require honest 64 and can tolerate up to 31 Byzantine. Must compromise 32
-96 validators require honest 65 and can tolerate up to 31 Byzantine. Must compromise 32
-97 validators require honest 65 and can tolerate up to 32 Byzantine. Must compromise 33
-98 validators require honest 66 and can tolerate up to 32 Byzantine. Must compromise 33
-99 validators require honest 67 and can tolerate up to 32 Byzantine. Must compromise 33
-100 validators require honest 67 and can tolerate up to 33 Byzantine. Must compromise 34
-101 validators require honest 68 and can tolerate up to 33 Byzantine. Must compromise 34
-```
-
-You can run this js to see what amount of validators require honest/malicious nodes to properly function. Where this `2/3` is coming from? Simple visual demo:
+Each block must be signed by `2/3+` of total stake, can tolerate up to `1/3-` and may be compromised if 1/3+ is compromised and only 2/3- honest left. Where this `2/3` is coming from? Simple visual demo:
 
 Say there are 4 validators (we always assume each has 1 stake only). How much should we require to have a valid block?
 
@@ -48,7 +26,7 @@ Say there are 4 validators (we always assume each has 1 stake only). How much sh
 
 If we require all 4, a single failing node going offline would stop the consensus. If we require 2, a single Byzantine node can rely on some network partition and double-sign (create a fork) with 1 on the left and 2 on the right. Which means we must require at least 3 honest nodes to tolerate one malicious one. 4 validators is absolute minimum that makes sense in Byzantine environment, anything less doesn't allow any malicious nodes.
 
-So on one hand we must not require too much to ensure liveness of the protocol. If we require 95%, 5% going offline would stop everything. On another hand if we require 51%, by compromising just 2% we can get a fork by sending two separate groups (49% and 49% respectively) two different blocks. That would require some network partition and state actor power, but that's doable.
+So on one hand we must not require too much to ensure liveness of the protocol. If we require 95%, 5% going offline would stop everything. On another hand if we require 51%, by compromising just 2% we can get a fork by sending two separate groups (49% and 49% respectively) two different blocks. That would require some network partition, but that's doable.
 
 This is why we are choosing the middle requirement at 1/3- (the minus means less than) that ensures if 1/3- goes offline or tries to sign dubiously, the fork can't happen as long as the rest of the nodes 2/3+ are honest. 1/3+ however can achieve that. The -/+ at the end denotes rounding logic that can be seen from JS snippet above.
 

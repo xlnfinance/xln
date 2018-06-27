@@ -12,6 +12,8 @@ Rebalance is initiated by the end users who explicitly (with press of a button R
 
 It's up to a hub to decide from which channel it wants to withdraw. The simplest way is to sort by amounts hub owns and select the biggest ones above K.risk. E.g. the hub owns $800 with Alice, $800 with Bob and $56 with Carol, $2 with Ingrid.
 
+![/wiki/spenderstoreceivers.png](/wiki/spenderstoreceivers.png)
+
 In this scenario the hub makes only two requests to Alice and Bob to request a mutual withdrawal proof "the nice way". The amounts with Carol and Ingrid are too small so the hub doesn't touch them.
 
 If Alice or Bob are unresponsive or gone offline, the hub can start a dispute onchain to claim those $800+$800. However it's in everyone's interest to avoid disputes as they are delayed, expensive and the channel stops working. So Alice and Bob return the signatures with withdrawal nonce increased.

@@ -139,9 +139,6 @@ export default {
     }
   },
   computed: {
-    assetPayments: () => {
-      return app.payments.filter(p=>p.asset == app.asset)
-    },
     ch: () => {
       // find current channel for selected asset and hub
       return app.channels
@@ -163,6 +160,10 @@ export default {
 
     ivoted: (voters) => {
       return voters.find((v) => v.id == app.record.id)
+    },
+    
+    assetPayments: (asset) => {
+      return app.payments.filter(p=>p.asset == asset)
     },
 
     toHexString: (byteArray) => {
@@ -471,7 +472,7 @@ export default {
           </li>
 
           <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
-            <a class="nav-link" href="">📒 Documentation</a>
+            <a class="nav-link" href="https://github.com/fairlayer/fair/blob/master/wiki/start.md">📒 Documentation</a>
           </li>
 
 
@@ -592,7 +593,7 @@ export default {
               {{ch.hashlock_hold[1] > 0 ? "- "+commy(ch.hashlock_hold[1])+" hashlocks" : ''}}
               
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
-              <span class="badge badge-dark" v-if="!my_hub && ch.d.hard_limit == ch.d.soft_limit && ch.uninsured > 0" @click="">click to request insurance</span>
+              <span class="badge badge-dark" v-if="!my_hub && ch.d.hard_limit == ch.d.soft_limit && ch.hard_limit > 0 && ch.uninsured > 0" @click="">click to request insurance</span>
               <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured > ch.d.soft_limit">over soft limit, expect rebalance</span>
               <span title="When you spend large part of your insurance, the hub may request a withdrawal from you so they could deposit this insurance to someone else. It's recommended to come online more frequently, otherwise hub may start a dispute with you." class="badge badge-dark" v-if="!my_hub && ch.they_insured >= K.risk">stay online to cooperate</span>
             </small>
@@ -640,7 +641,7 @@ export default {
             </p>
 
           </div>
-          <table v-if="assetPayments.length > 0" class="table">
+          <table v-if="assetPayments(asset).length > 0" class="table">
             <thead>
               <tr>
                 <th width="150px">Status</th>
@@ -653,7 +654,7 @@ export default {
               <!--transition-group name="list" tag="tbody"></transition-group>-->
               <tbody>
 
-                <tr v-bind:key="h.id" v-for="h in assetPayments.slice(0, history_limit)">
+                <tr v-bind:key="h.id" v-for="h in assetPayments(asset).slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
                   <td>Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
@@ -661,7 +662,7 @@ export default {
                 </tr>
               </tbody>
 
-              <tr v-if="assetPayments.length > history_limit">
+              <tr v-if="assetPayments(asset).length > history_limit">
                 <td colspan="7" align="center"><a @click="history_limit += 20">Show More</a></td>
               </tr>
 
@@ -763,11 +764,7 @@ export default {
       </div>
       <div v-else-if="tab=='testnet'">
         <h3>Testnet Actions</h3>
-        <p>On this page we will guide you through basic functionality and user stories, telling what happens under the hood.</p>
-        <p>Case 1. Just arrived? You can go to an exchange or any other service to purchase our digital assets. For now just click on faucet. After reaching {{commy(K.risk)}} in uninsured balance, the hub must rebalance/insure you onchain - <b>wait for it</b>. That will automatically register your account onchain. <b>Keep an eye on Blockchain Explorer - every node will see this rebalance transaction</b></p>
-        <p>Case 2. Now let's practice p2p payments: use the install snippet again but replace id=fs to id=fs2 and 8001 port to 8002 (to run a parallel user on the same machine). Under the new user, create an invoice for 123 and pay it with our user. Instantly you will see this user has 123 under "spent" and a new user under "uninsured". After some time the hub will ask your node to withdraw from your channel in order to insure the second user, because 123 is beyond risk limit. If you'd pay $5, there would be no rebalance.</p>
-        <p>Case 3. You both were using @eu hub, now let's practice 2 hops payment: <b>you->eu->jp->new user</b>. Select jp hub by another user, create an invoice and pay it with our user again. You will pay fees to both hubs (roughly 0.1+0.1%).</p>
-        <p>Case 4. Request withdraw by this user on Onchain rebalance page. Withdraw is taking assets "the nice way" from your hub and you could move them to another hub or to make a direct payment to someone else's channel onchain.</p>
+
         <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start onchain dispute under Onchain disputes tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
         <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state - biggest balance you ever owned. When hub notices that, they will post latest state before delay period. Keep an eye on Blockchain Explorer page to see that.</p>
         <button class="btn btn-success mb-3" @click="call('dispute', {partner: ch.partner, profitable: true})" href="#">Cheat in Dispute</button>
@@ -914,7 +911,6 @@ export default {
               <th scope="col">Relayed By</th>
 
               <th scope="col">Total Tx</th>
-              <th scope="col">Inputs / Outputs Volume</th>
             </tr>
           </thead>
           <tbody>
@@ -926,7 +922,6 @@ export default {
                 <td>{{b.built_by}} ({{timeAgo(b.timestamp)}})</td>
 
                 <td>{{b.total_tx}}</td>
-                <td v-if="b.meta">{{commy(b.meta.inputs_volume)}} / {{commy(b.meta.outputs_volume)}}</td>
               </tr>
               <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
                 <td colspan="7">

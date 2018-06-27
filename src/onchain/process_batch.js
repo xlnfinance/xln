@@ -160,7 +160,7 @@ module.exports = async (tx, meta) => {
 
           ch.ins = ins
 
-          if (argv.syncdb) ch.d.save()
+          //if (argv.syncdb) ch.d.save()
         }
       }
     } else if (method == 'revealSecrets') {
@@ -291,7 +291,7 @@ module.exports = async (tx, meta) => {
             // now our job is to ensure our inward hashlocks are unlocked and that we get most profitable outcome
             var ch = await me.getChannel(signer.pubkey, asset)
             ch.d.status = 'disputed'
-            await ch.d.save()
+            //await ch.d.save()
             var our_nonce = ch.d.signed_state
               ? readInt(r(ch.d.signed_state)[1][2])
               : 0
@@ -595,7 +595,7 @@ module.exports = async (tx, meta) => {
         } else {
           await their.save()
         }
-        await seller.save()
+        //await seller.save()
       }
 
       if (order.amount > 0) {

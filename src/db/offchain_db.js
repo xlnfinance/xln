@@ -184,7 +184,7 @@ Payment = privSequelize.define(
     // asset type
     asset: {
       type: Sequelize.INTEGER,
-      defaultValue: 1
+      defaultValue: 0
     },
     // secret that unlocks hash
     secret: Sequelize.BLOB,

@@ -5,7 +5,7 @@ module.exports = async (ws, json) => {
 
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
-  if (json.auth_code == PK.auth_code) {
+  if (json.auth_code == PK.auth_code || ws == 'admin') {
     if (ws.send && json.is_wallet && me.browser != ws) {
       // new window replaces old one
       if (me.browser && me.browser.readyState == 1) {
@@ -330,6 +330,9 @@ module.exports = async (ws, json) => {
     // http or websocket?
     if (ws.end) {
       ws.end(JSON.stringify(result))
+    } else if (ws =='admin'){
+      return result
+
     } else {
       /*ws.send(
         JSON.stringify({
