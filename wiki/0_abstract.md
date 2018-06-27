@@ -33,25 +33,31 @@ No, it really is nearly infinite and can replace all world value transfers: cred
 
 All hubs are uncoupled from each other and only share same settlement layer. Capacity of settlement layer does not dictate the capacity of offchain layer, it only impacts the average Total Risk in the system (sum of all uninsured balances).
 
-Thousand hubs with 1k tps = 1M tps. Million hubs with 10k tps each = 10 billion tps. Hence, "infinite" scalability.
+Thousand hubs with 1k tps = 1M tps, 1 million hubs with 10k tps each = 10 billion tps, and so on. You can always simply optimize the hub software/hardware or just add more granular hubs for a specific geographic area, e.g. hub for USA, hub for New York, or hub covering Brooklyn. Hence, "infinite" linear scalability.
 
-**Fairlayer can even technically survive with 1 onchain transaction per minute**, but the Total Risk will be super high.
+**Fairlayer can technically survive with 1 onchain transaction per minute**, but the Total Risk will be very high.
+
+That's why one way or another Fairlayer is guaranteed to scale to all world transfer giving more security than traditional banking, and our job is simply to reduce the Total Risk with different techniques.
 
 ## Is it a new cryptocurrency?
 
-Not actually. It's a platform on top of which you can create a new [crypto]currencies or other tokens (we call them digital assets). **All Fair assets can be deposited into hubs and sent instantly through the network of payment channels**. There are two native assets created at the genesis: [FRD (dollar) and FRB (bet).](https://medium.com/fairlayer/invest-in-fairlayer-pre-ico-95f53bb0351d)
+Not really. It's a decentralized platform on top of which you can create your own [crypto]currencies or other tokens (we call them digital assets). **All Fair assets can be deposited into hubs and sent instantly through the network of payment channels**. There are two native assets created at the genesis and managed by the foundation: [FRD (dollar) and FRB (bet).](https://medium.com/fairlayer/invest-in-fairlayer-pre-ico-95f53bb0351d). FRD is also required to pay for onchain tx fees.
 
 ## So you promise to redeem FRD for 1 USD?
 
-No, we don't believe in promises. We believe in math and code. **Whenever in doubt - read the code** and make up your own mind. FRD is a fiat currency and can be "printed" as much as needed. FRB is capped at 100B and is converted 1-for-1 to FRD in 2030. We do not any promises about price movements or gains you can make.
+No, we don't believe in promises. We believe in math and code. **Whenever in doubt - read the code** and make up your own mind. FRD is a fiat currency and can be "minted" as much as needed. FRB is capped at 100B and is converted 1-for-1 to FRD in 2030. We do not make any promises about price or gains you can make.
 
-## But you do expect FRD to be stable and equal 1 USD?
+## But you do expect FRD to be stable?
 
-Correct. [There were multiple ideas how to create a stable coin.](https://hackernoon.com/stablecoins-designing-a-price-stable-cryptocurrency-6bf24e2689e5). We utilize a hybrid of Tether and Basis approach: the assets are both collateralized accross a wide range of exchanges and bank accounts AND seignorage (FRB) sold to support the peg if there's a compromise in one or many accounts that hold the collateral. It is impossible to avoid a compromise as currently USD can only exist on top of centralized ledgers and custodian banks, and there's simply nothing we can do to protect the funds other than making our best effort.
+Correct. [There were multiple ideas how to create a stable coin.](https://hackernoon.com/stablecoins-designing-a-price-stable-cryptocurrency-6bf24e2689e5). We utilize a hybrid of Tether and Basis approach: the assets are both collateralized accross a wide range of exchanges and bank accounts AND seignorage (FRB) sold to support the peg if there's a compromise in some accounts that hold the collateral. 
+
+It is impossible to avoid compromises as currently USD can only exist on top of centralized ledgers and custodian banks, and there's simply nothing we can do to protect the funds other than making our best effort. Whenever a large chunk of collateral is lost we will be selling FRB funds to cover the losses.
 
 ## What is the price expectation for FRB?
 
-Since at some point in the future FRB is expected to turn into FRD, its price is expected to start around 0.001 and go up to 0.999999 nearing the maturity date in 2030 (**Unix timestamp 1913370000**). It might hit 0.5 in 2020, or in 2028, or never. The success of FRB is based on the success of Fairlayer adoption, that's why it's called a "bet". FRB, just like any asset, can be moved instantly via payment channels and sold any time before 2030 to another entity. By the date of maturity all assets must be withdrawn from payment channels to onchain balances.
+Since at some point in the future FRB is expected to turn into FRD, its price is expected to start around 0.001 and go up to 0.999999 nearing the maturity date in 2030 (**Unix timestamp 1913370000**). It might hit 0.5 in 2020, or in 2029, or never. 
+
+The success of FRB is based on the success of Fairlayer adoption, that's why it's called a "bet". FRB, just like any asset, can be moved instantly via payment channels and sold any time before 2030 to another entity. By the date of maturity all assets must be withdrawn from payment channels to onchain balances.
 
 ## Are there smart contracts?
 
@@ -67,7 +73,7 @@ All upgrades, even as simple as changing the color of a button, are delivered th
 
 ## Where is the catch? There must be a trade-off!
 
-![/wiki/risktriangle.png](PM2)
+![/wiki/risktriangle.png](/wiki/risktriangle.png)
 
 Like mentioned early, Fairlayer introduces a concept of **uninsured balances** which has similarities with fractional reserve. 
 
@@ -87,11 +93,11 @@ Yes, we will never compromise on this property. All laptops and mobile phones mu
 
 There are two types of exchanges. Onchain exchange is perfect for large atomic swaps between Fair assets (see Exchange tab) and is already working. Offchain exchange (through payment channels) is more complicated and will be implemented later. It will have same scalability as centralized exchanges but without the counterparty risk. 
 
-## Can I accept/send Fair assets with my website?
+## Can I accept/send Fair assets on my website?
 
-Yes, and it's very easy. You just need to run a local Fair node (takes less than 1 minute to bootstrap a full node) and 10-30 lines of code. [See the chapter on Receive/Pay API.](/wiki/9_receive_and_pay.md)
+Yes, and it's very easy. You just need to run a local Fair node (takes less than 1 minute to bootstrap a full node) and 10-30 lines of code. [See the chapter on Receive/Pay integration API.](/wiki/9_receive_and_pay.md)
 
 
-
+**Feel free to create an issue if you have another question**
 
 # [Home](/wiki/start.md)

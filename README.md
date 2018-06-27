@@ -14,4 +14,4 @@ Unlike "fake" bloated blockchains with high tps, in Fairlayer the tokens are tra
 
 It is the same how the Internet topology looks like, and it has no central point of failure.
 
-### [For documentation go to our in-repo Wiki](/wiki/0_home.md)
+### [For documentation go to our in-repo Wiki](/wiki/start.md)
