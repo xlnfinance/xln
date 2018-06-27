@@ -20,4 +20,4 @@ All pubkeys are registered in internal onchain relational DB (currently SQLite) 
 
 
 
-# [Go to Table of Contents](/wiki/0_home.md)
+# [Home](/wiki/start.md)

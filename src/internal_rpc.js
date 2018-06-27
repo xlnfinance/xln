@@ -2,8 +2,6 @@
 
 module.exports = async (ws, json) => {
   var result = {}
-  l("authed ", json)
-
 
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
@@ -59,7 +57,7 @@ module.exports = async (ws, json) => {
 
       case 'send':
         // TODO: support batch sends
-        await me.payChannel(p.outward)
+        await me.payChannel(p)
         break
 
       case 'rebalance':
@@ -140,7 +138,7 @@ module.exports = async (ws, json) => {
             }
           }, 3000)
         } else if (outs.length > 0) {
-          me.batch.push(['withdrawFrom', asset, ins])
+          // no withdrawals
           me.batch.push(['depositTo', asset, outs])
 
           if (me.batch.length == 0) {

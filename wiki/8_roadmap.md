@@ -7,4 +7,4 @@ Once in X blocks all validators must create a meta signature for last X blocks w
 Similar approach but deliver a diff of states (so no need to perform all tx in the past). Allows majority of validators to cheat and deliver wrong diff.
 
 
-# [Go to Table of Contents](/wiki/0_home.md)
+# [Home](/wiki/start.md)

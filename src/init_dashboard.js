@@ -98,7 +98,7 @@ module.exports = async (a) => {
   }
 
   var cb = function(req, res) {
-    var path = req.url.split('?')[0]
+    var [path, query] = req.url.split('?')
     if (path.match(/^\/Fair-([0-9]+)\.tar\.gz$/)) {
       var file = './' + datadir + '/offchain' + req.url
       var stat = fs.statSync(file)
@@ -122,9 +122,10 @@ module.exports = async (a) => {
       })
   
       req.on('end', function() {
-        //GET + JSON in body on top
-        l(req.query, querystring.parse(req.query))
-        var json = Object.assign(querystring.parse(req.query), parse(queryData))
+        // HTTP /rpc endpoint supports passing request in GET too
+        var json = Object.assign(querystring.parse(query), parse(queryData))
+
+        if (!json.params) json.params = {}
         RPC.internal_rpc(res, json)
       })
     } else if (path == '/sdk.html') {

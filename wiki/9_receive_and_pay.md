@@ -4,7 +4,11 @@ Fairlayer was engineered to be ridiculously easy to integrate. It's just one rep
 
 It seamlessly implements both onchain (direct rebalance of insurance from you@hub to receiver@hub channel) and offchain (through payment channels not touching onchain layer) transfers, depending on the amount and how busy the network is. 
 
-We believe long term only offchain payments will be used, even for large payments, for in the beginning while the onchain space is cheap we also offer direct rebalance.
+We believe long term only offchain payments will be used, even for large payments, but in the beginning while the onchain space is cheap we also offer direct rebalance.
+
+## Integration Demos
+
+[Check out this repository with different demos.](https://github.com/fairlayer/demos). No packaged SDK is offered because it would increase your attack surface and the API is very simple.
 
 ## Authentication
 
@@ -14,7 +18,7 @@ For simplicity we will use GET and pass params as a GET query, but you can also 
 
 You can modify the port Fair daemon occupies on your server. Pass `-pXXXX` to the daemon to use another port. We are using 8002 below by default. For higher security, make sure the daemon is not exposed to external world (even though all the actions are authorized with security code).
 
-Put this helper in util libs:
+Put something like this helper in util libs:
 
 ```
 FairRPC = (params, cb) => {
@@ -115,14 +119,14 @@ First, you need to check if they have enough money, then reduce their balance by
 
 Then make a request to your local Fair daemon with **following parameters carefully escaped and sanitized**:
 
-* `outward[destination]` - the address where user wants to send assets
-* `outward[amount]` - the amount of assets to send (fees are passed on the user)
-* `outward[asset]` - id of asset to operate in. 1 for FRD, 2 for FRB and so on.
-* `outward[invoice]` - set the same invoice you would use to receive assets from this user, so if the payment fails it will be credited back according to this invoice
+* `params[destination]` - the address where user wants to send assets
+* `params[amount]` - the amount of assets to send (fees are passed on the user)
+* `params[asset]` - id of asset to operate in. 1 for FRD, 2 for FRB and so on.
+* `params[invoice]` - set the same invoice you would use to receive assets from this user, so if the payment fails it will be credited back according to this invoice
 
 
 ```
-FairRPC('method=send&outward[destination]=ADDRESS&outward[asset]=1&outward[amount]=200&outward[invoice]=INVOICE', (r)=>{
+FairRPC('method=send&params[destination]=ADDRESS&params[asset]=1&params[amount]=200&params[invoice]=INVOICE', (r)=>{
   // sent
 })
 ```
@@ -130,7 +134,7 @@ FairRPC('method=send&outward[destination]=ADDRESS&outward[asset]=1&outward[amoun
 
 If the outward payment fails (rare, but possible), you will receive it as a failed outward via a pulling request above, then you can credit funds back.
 
-# [Go to Table of Contents](/wiki/0_home.md)
+# [Home](/wiki/start.md)
 
 
 

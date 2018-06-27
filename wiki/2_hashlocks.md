@@ -21,7 +21,7 @@ Two arrays of hashlocks are added right into dispute proof, i.e. they are direct
 
 
 
-# [Go to Table of Contents](/wiki/0_home.md)
+# [Home](/wiki/start.md)
 
 
 

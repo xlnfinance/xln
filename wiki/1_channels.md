@@ -156,6 +156,6 @@ me.envelope(
 See `/wallet/demodelta.html` to see ondelta/offdelta movements in action.
 
 
-# [Go to Table of Contents](/wiki/0_home.md)
+# [Home](/wiki/start.md)
 
 

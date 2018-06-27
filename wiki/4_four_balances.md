@@ -6,6 +6,19 @@ Insured and uninsured are perfectly positioned in between, both being more secur
 
 Let's try to formalize these 4 types of balances we're talking about.
 
+
+| Properties | Onchain | Insured | Uninsured | Trusted
+|----------|----------|----------|----------|----------|
+| **Security** | Highest | Very High | Medium | Lowest
+| **Convenience** | Lowest | Medium | Very High | Highest
+| **Invented** | Bitcoin (2009) | Lightning (2015) | Fairlayer (2017) | Used for centuries
+| Can be sent instantly (through a hub) | No | Yes | Yes | Yes
+| You have a digital proof of ownership | Yes (N/A) | Yes | Yes | No
+| You can be selectively censored by a hub | N/A | No | No | Yes
+| Validator Majority can attack you | No | Yes | Yes | Yes (N/A)
+| You are guaranteed to redeem it | Yes | Yes | No (insolvency/compromise) | No
+| Can be received/spent offline | N/A | No | No | Yes
+
 ## Onchain Balance
 
 **Security: Highest Possible**
@@ -84,5 +97,4 @@ This way even if the capacity is limited at $1000 you can route $10,000 by sendi
 
 **Offchain hashlocked streamed** - same as above but all chunks are hashlocked. Any number of payments can be routed this way as long as there's enough capacity.
 
-# [Go to Table of Contents](/wiki/0_home.md)
-
+# [Home](/wiki/start.md)

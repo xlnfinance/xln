@@ -110,11 +110,10 @@ export default {
 
       settings: !localStorage.settings,
 
-      outward: {
-        destination: hashargs['address'],
-        amount: hashargs['amount'],
-        invoice: hashargs['invoice']
-      },
+      outward_destination: hashargs['address'],
+      outward_amount: hashargs['amount'],
+      outward_invoice: hashargs['invoice'],
+      
       addrisk: false,
       lazy: false,
 
@@ -195,14 +194,19 @@ export default {
       )
 
       //if(confirm("Total outputs:$"+app.commy(total)+". Do you want to broadcast your transaction?")){
-
-      app.call('rebalance', {
-        partner: app.ch.partner,
-        request_amount:
-          app.ch.insured > 0 ? app.uncommy(app.request_amount) : 0,
+      var obj = {
         outs: app.outs,
         asset: app.asset
-      })
+      }
+      // any withdrawal?
+      if (app.ch && app.ch.insured > 0) {
+        obj.partner = app.ch.partner
+        obj.request_amount = app.uncommy(app.request_amount)
+      }
+
+
+
+      app.call('rebalance', obj)
       // }
     },
     estimate: (f) => {
@@ -436,6 +440,9 @@ export default {
           <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
             <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
           </li>
+
+          
+
           <li v-if="pubkey && dev_mode" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
             <a class="nav-link" @click="go('testnet')">Testnet</a>
           </li>
@@ -462,6 +469,12 @@ export default {
               <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">🎛 Node Metrics</a></li>
             </ul>
           </li>
+
+          <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
+            <a class="nav-link" href="">📒 Documentation</a>
+          </li>
+
+
         </ul>
         <span class="badge badge-danger" v-if="pending_batch">Pending tx</span> &nbsp;
         <span @click="call('sync')" v-bind:class='["badge", K.ts > ts() - K.safe_sync_delay ? "badge-light" : "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
@@ -609,21 +622,21 @@ export default {
           <div class="col-sm-6">
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward.destination" placeholder="Address" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_destination" placeholder="Address" aria-describedby="basic-addon2">
               </div>
             </p>
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward.amount" placeholder="Amount" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_amount" placeholder="Amount" aria-describedby="basic-addon2">
               </div>
             </p>
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward.invoice" placeholder="Private Message (optional)" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_invoice" placeholder="Private Message (optional)" aria-describedby="basic-addon2">
               </div>
             </p>
             <p>
-              <button type="button" class="btn btn-success" @click="call('send', {outward: {destination: outward.destination, asset: asset, amount: uncommy(outward.amount), invoice: outward.invoice, addrisk: addrisk, lazy: lazy}})">Pay Now → </button>
+              <button type="button" class="btn btn-success" @click="call('send', {destination: outward_destination, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy})">Pay Now → </button>
             </p>
 
           </div>

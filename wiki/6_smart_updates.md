@@ -72,5 +72,4 @@ Amendments are great for short-term (<10 years) and smart contracts can flourish
 
 Smart contracts are good for showcasing and as a playground for things like Cryptokitties, but for production usage people would eventually take a successful smart contract use case and implement it natively into an amendment.
 
-
-# [Go to Table of Contents](/wiki/0_home.md)
+# [Home](/wiki/start.md)

@@ -59,6 +59,7 @@ Start with `/src/fair.js`.
 
 
 
+# [Home](/wiki/start.md)
 
 
 
