@@ -113,6 +113,9 @@ export default {
       outward_destination: hashargs['address'],
       outward_amount: hashargs['amount'],
       outward_invoice: hashargs['invoice'],
+      // all, amount, none
+      outward_editable: hashargs['editable'] ? hashargs['editable'] : 'all',
+
       
       addrisk: false,
       lazy: false,
@@ -472,7 +475,7 @@ export default {
           </li>
 
           <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
-            <a class="nav-link" href="https://github.com/fairlayer/fair/blob/master/wiki/start.md">📒 Documentation</a>
+            <a class="nav-link" href="https://github.com/fairlayer/fair/blob/master/wiki/start.md">📒 Docs</a>
           </li>
 
 
@@ -623,17 +626,17 @@ export default {
           <div class="col-sm-6">
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_destination" placeholder="Address" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_destination" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2">
               </div>
             </p>
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_amount" placeholder="Amount" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_amount" :disabled="outward_editable=='none'" placeholder="Amount" aria-describedby="basic-addon2">
               </div>
             </p>
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_invoice" placeholder="Private Message (optional)" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_invoice" :disabled="['none','amount'].includes(outward_editable)" placeholder="Private Message (optional)" aria-describedby="basic-addon2">
               </div>
             </p>
             <p>
@@ -651,16 +654,17 @@ export default {
               </tr>
             </thead>
 
-              <!--transition-group name="list" tag="tbody"></transition-group>-->
-              <tbody>
+              <transition-group name="list" tag="tbody">
+
 
                 <tr v-bind:key="h.id" v-for="h in assetPayments(asset).slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                  <td>Invoice {{trim(h.invoice)}} Dest {{h.destination ? trim(h.destination) : ''}}</td>
+                  <td>{{h.destination ? trim(h.destination) : ''}} {{h.invoice}} </td>
                   <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
                 </tr>
-              </tbody>
+
+              </transition-group>
 
               <tr v-if="assetPayments(asset).length > history_limit">
                 <td colspan="7" align="center"><a @click="history_limit += 20">Show More</a></td>

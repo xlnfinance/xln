@@ -134,6 +134,10 @@ FairRPC('method=send&params[destination]=ADDRESS&params[asset]=1&params[amount]=
 
 If the outward payment fails (rare, but possible), you will receive it as a failed outward via a pulling request above, then you can credit funds back.
 
+## Other endpoints
+
+You can call other RPC endpoints, see internal_rpc.js for full reference.
+
 # [Home](/wiki/start.md)
 
 

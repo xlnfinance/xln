@@ -150,7 +150,7 @@ var async_fn = async (ws, inputType, args) => {
   } else if (inputType == 'chain') {
     q('onchain', async () => {
       var started = K.total_blocks
-      l(`Sync since ${started} ${args.length}`)
+      //l(`Sync since ${started} ${args.length}`)
       for (var block of args) {
         if (!await me.processBlock(block[0], block[1], block[2])) {
           l('Bad chain?')

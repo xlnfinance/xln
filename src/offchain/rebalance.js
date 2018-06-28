@@ -1,8 +1,10 @@
 /*
-Once in a few blocks hub takes insurance from net-spenders and rebalances towards net-receivers.
-Matching those with who we have they_uninsured>they_soft_limit with those where we have insured>$100
+Once in a few blocks
+1. hub finds who needs to insured uninsured balances
+2. requests withdrawals from net-spenders up to that amount
+3. sends a batch onchain
 
-For now pretty simple. In the future can be added:
+In the future can be added:
 * smart learning based on balances over time not on balance at the time of matching
 * use as little inputs/outputs to transfer as much as possible volume
 

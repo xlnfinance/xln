@@ -244,37 +244,14 @@ class Me {
     )
     */
 
+    // both members and hubs must run external_wss
     if (me.my_member) {
-      // there's 2nd dedicated websocket server for member/hub commands
-      var cb = () => {}
-      me.member_server = require('http').createServer(cb)
+      me.startExternalRPC(me.my_member.location)
+    } else if (me.my_hub) {
+      me.startExternalRPC(me.my_hub.location)
+    }
 
-      var member_port = parseInt(me.my_member.location.split(':')[2])
-      me.member_server.listen(on_server ? member_port + 200 : member_port)
-
-      l(`Bootstrapping local server at: ${me.my_member.location}`)
-
-      // lowtps/hightps
-      //(base_port == 8433 ? require('uws') : ws)
-
-      me.external_wss = new (base_port == 8433 ? require('uws') : ws).Server({
-        //noServer: true,
-        //port: member_port,
-        clientTracking: false,
-        perMessageDeflate: false,
-        server: me.member_server,
-        maxPayload: 64 * 1024 * 1024
-      })
-
-      me.external_wss.on('error', function(err) {
-        fatal(err)
-      })
-      me.external_wss.on('connection', function(ws) {
-        ws.on('message', (msg) => {
-          RPC.external_rpc(ws, msg)
-        })
-      })
-
+    if (me.my_member) {
       for (var m of Members) {
         if (me.my_member != m) {
           // we need to have connections ready to all members
@@ -307,6 +284,9 @@ class Me {
 
     if (K.total_blocks > 1) {
       snapshotHash()
+    } else {
+      // initial run? go monkey e2e test
+      require('./monkey')
     }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
@@ -337,7 +317,7 @@ class Me {
         setInterval(require('./offchain/rebalance'), K.blocktime * 5000)
       )
 
-      // hubs have force react regularly
+      // hubs have to force react regularly
       me.intervals.push(
         setInterval(() => {
           react({})
@@ -345,91 +325,36 @@ class Me {
       )
     }
 
-    if (argv.monkey) {
-      // user specific e2e tests
-      if (me.record) {
-        if (me.record.id == 4) {
-          // trigger the dispute from hub
-          me.CHEAT_dontack = true
-          me.CHEAT_dontwithdraw = true
-          me.payChannel({
-            amount: 20000,
-            destination: randos[0],
-            asset: 1
-          })
+  }
 
-          // create an asset
-          me.batch.push([
-            'createAsset',
-            ['TEST2', 13371337, 'Test coin', 'No goal']
-          ])
-        }
+  async startExternalRPC(advertized_url) {
+    // there's 2nd dedicated websocket server for member/hub commands
+    var cb = () => {}
+    me.external_wss_server = require('http').createServer(cb)
 
-        if (me.record.id == 3) {
-          me.batch.push([
-            'createAsset',
-            ['TEST3', 10000000, 'Test coin by 3', 'No goal']
-          ])
+    var port = parseInt(advertized_url.split(':')[2])
+    me.external_wss_server.listen(on_server ? port + 200 : port)
 
-          // buying bunch of FRB for $4
-          me.batch.push(['createOrder', [1, 400, 2, 0.001 * 1000000]])
-        }
-      }
+    l(`Bootstrapping external_wss at: ${advertized_url}`)
 
-      // if we are hub: plan a test check, otherwise start paying randomly.
-      if (me.my_hub) {
-        // adding onchain balances to randos
-        for (var dest of randos) {
-          let [box_pubkey, pubkey] = r(base58.decode(dest))
-          me.batch.push(['depositTo', 1, [[1000000, pubkey, 0]]])
-        }
+    // lowtps/hightps
+    me.external_wss = new (base_port == 8433 ? require('uws') : ws).Server({
+      //noServer: true,
+      //port: port,
+      clientTracking: false,
+      perMessageDeflate: false,
+      server: me.external_wss_server,
+      maxPayload: 64 * 1024 * 1024
+    })
 
-        // creating an initial FRB sell for FRD
-        me.batch.push(['createOrder', [2, 10000000, 1, 0.001 * 1000000]])
-
-        setTimeout(async () => {
-          // making sure in 30 sec that all test payments were successful by looking at the metrics
-
-          await me.syncdb()
-          update_cache()
-
-          let monkey5 = await User.idOrKey(5)
-          let monkey5ins = await Insurance.sumForUser(5)
-
-          // must be >100 after expected rebalance
-          var alert = `${me.metrics.settle.total}/${me.metrics.fail.total}\n
-Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
-Blocks: ${await Block.count()}\n
-Payments: ${await Payment.count()}\n
-Orders: ${await Order.count()}\n
-Assets: ${await Asset.count()}\n
-Deltas: ${await Delta.count()}\n
-          `
-
-          l(alert)
-
-          child_process.exec(`osascript -e 'display notification "${alert}"'`)
-        }, 80000)
-      } else if (parseInt(base_port) > 8003) {
-        randos.splice(randos.indexOf(me.address), 1) // *except our addr
-
-        setTimeout(() => {
-          me.getCoins(1, 10000000)
-        }, 6000)
-
-        setTimeout(() => {
-          me.payRando()
-
-          // intended to fail
-          me.payChannel({
-            destination:
-              'ZUp5PARsn4X2xs8fEjYSRtWSTQqgkMnVax7CaLsBmp9kR36Jqon7NbqCakQ5jQ9w1t5gtGo3zfhTtQ2123123123DJJjZ',
-            amount: 100,
-            asset: 1
-          })
-        }, 17000)
-      }
-    }
+    me.external_wss.on('error', function(err) {
+      fatal(err)
+    })
+    me.external_wss.on('connection', function(ws) {
+      ws.on('message', (msg) => {
+        RPC.external_rpc(ws, msg)
+      })
+    })
   }
 
   getCoins(asset = 1, amount = 1000) {

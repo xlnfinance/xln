@@ -130,6 +130,13 @@ react = async (result = {}, force = true) => {
       User.idOrKey(bin(me.id.publicKey))
     ])
 
+    result.payments.map(p=>{
+      // prefix for invoice types: 1 is user set 2 is random
+      if (p.invoice) {
+        p.invoice = p.invoice.slice(1).toString(p.invoice[0] == 1 ? 'utf8' : 'hex')
+      }
+    })
+
     /*
     var offered_partners = (await me.channels())
       .sort((a, b) => b.they_payable - a.they_payable)

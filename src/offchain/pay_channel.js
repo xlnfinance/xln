@@ -22,7 +22,8 @@ module.exports = async (opts) => {
     let [box_pubkey, pubkey] = r(base58.decode(opts.destination))
     let amount = parseInt(opts.amount)
 
-    let invoice = opts.invoice ? bin(opts.invoice) : crypto.randomBytes(32)
+    // use user supplied private message, otherwise generate random tag
+    let invoice = opts.invoice ? concat(Buffer.from([1]), bin(opts.invoice)) : concat(Buffer.from([2]), crypto.randomBytes(16))
 
     // if we are hub making a payment, don't add the fees on top
     if (me.my_hub) {

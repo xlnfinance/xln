@@ -23,6 +23,7 @@ module.exports = async (ws, json) => {
 
     switch (json.method) {
       case 'load':
+        // endpoint to get node state, plus login
         if (p.username) {
           var seed = await derive(p.username, p.pw)
           await me.init(p.username, seed)
@@ -35,8 +36,8 @@ module.exports = async (ws, json) => {
       case 'logout':
         me.intervals.map(clearInterval)
 
-        if (me.member_server) {
-          me.member_server.close()
+        if (me.external_wss_server) {
+          me.external_wss_server.close()
           me.external_wss.clients.forEach((c) => c.close())
           // Object.keys(me.users).forEach( c=>me.users[c].end() )
         }
@@ -192,8 +193,11 @@ module.exports = async (ws, json) => {
         react({confirm: 'Added to batch'})
 
         break
+
+        // returns generic info about current account and the network
       case 'getinfo':
         result.address = me.address
+        result.assets = cached_result.assets //await Asset.findAll()
 
         break
 
