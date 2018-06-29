@@ -119,10 +119,14 @@ First, you need to check if they have enough money, then reduce their balance by
 
 Then make a request to your local Fair daemon with **following parameters carefully escaped and sanitized**:
 
+**required**
 * `params[destination]` - the address where user wants to send assets
-* `params[amount]` - the amount of assets to send (fees are passed on the user)
 * `params[asset]` - id of asset to operate in. 1 for FRD, 2 for FRB and so on.
-* `params[invoice]` - set the same invoice you would use to receive assets from this user, so if the payment fails it will be credited back according to this invoice
+
+**optional**
+* `params[amount]` - the amount of assets to send (fees are passed on the user). Can be editable.
+* `params[invoice]` - set the same invoice you would use to receive assets from this user, so if the payment fails it will be credited back according to this invoice.
+* `params[editable]` - don't want the user to mess around with parameters? Set to 'none' to disable all fields or to 'amount' if you want to keep amount editable.
 
 
 ```
@@ -132,7 +136,11 @@ FairRPC('method=send&params[destination]=ADDRESS&params[asset]=1&params[amount]=
 ```
 
 
-If the outward payment fails (rare, but possible), you will receive it as a failed outward via a pulling request above, then you can credit funds back.
+If the outward payment fails (rare, but possible), you will receive it as a failed outward via a pulling receivedAndFailed request, then you can credit funds back.
+
+## Fair Login
+
+You can use built-in authenticator.
 
 ## Other endpoints
 

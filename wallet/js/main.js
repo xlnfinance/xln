@@ -136,13 +136,6 @@ window.render = (r) => {
     return false
   }
 
-  /* &&
-    r.payments[0] &&
-    //app.payments[0].id != r.payments[0].id &&
-    //r.payments[0].secret
-    //r.payments[0].invoice == hashargs.invoice.hexEncode() &&
-    Date.parse(r.payments[0].createdAt)/1000 > app.ts()-1 &&
-    r.payments[0].secret*/
 
   // verify if opener-initiated last hashargs payment succeded (we know secret for this invoice)
 

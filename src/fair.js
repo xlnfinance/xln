@@ -13,6 +13,7 @@ datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8001
 trace = !!argv.trace
 argv.syncdb = argv.syncdb != 'off'
+node_started_at = ts()
 
 process.title = 'Fair ' + base_port
 

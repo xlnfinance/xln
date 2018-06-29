@@ -45,7 +45,7 @@ export default {
     return {
       auth_code: localStorage.auth_code,
 
-      asset: 1,
+      asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
       partner: 1,
       assets: [],
       orders: [],
@@ -113,7 +113,7 @@ export default {
       outward_destination: hashargs['address'],
       outward_amount: hashargs['amount'],
       outward_invoice: hashargs['invoice'],
-      // all, amount, none
+      // which fields can be changed? all, amount, none
       outward_editable: hashargs['editable'] ? hashargs['editable'] : 'all',
 
       
@@ -163,6 +163,20 @@ export default {
 
     ivoted: (voters) => {
       return voters.find((v) => v.id == app.record.id)
+    },
+
+    skipDate: (h, index) => {
+      // if previous timestamp has same date, don't show it
+      var str = new Date(h.createdAt).toLocaleString()
+      if (index == 0) app.skip_prev_date = false
+
+      if (app.skip_prev_date && str.startsWith(app.skip_prev_date)) {
+        app.skip_prev_date = str.split(', ')[0]
+        return str.split(', ')[1]
+      } else {
+        app.skip_prev_date = str.split(', ')[0]
+        return str.split(', ')[1] + ', <b>'+str.split(', ')[0]+'</b>'
+      }
     },
     
     assetPayments: (asset) => {
@@ -647,21 +661,21 @@ export default {
           <table v-if="assetPayments(asset).length > 0" class="table">
             <thead>
               <tr>
-                <th width="150px">Status</th>
-                <th>Amount</th>
-                <th>Details</th>
-                <th>Date</th>
+                <th width="5%">Status</th>
+                <th width="10%">Amount</th>
+                <th width="65%">Details</th>
+                <th width="20%">Date</th>
               </tr>
             </thead>
 
               <transition-group name="list" tag="tbody">
 
 
-                <tr v-bind:key="h.id" v-for="h in assetPayments(asset).slice(0, history_limit)">
+                <tr v-bind:key="h.id" v-for="(h, index) in assetPayments(asset).slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
                   <td>{{h.destination ? trim(h.destination) : ''}} {{h.invoice}} </td>
-                  <td>{{ new Date(h.createdAt).toLocaleString() }}</td>
+                  <td v-html="skipDate(h, index)"></td>
                 </tr>
 
               </transition-group>
@@ -732,7 +746,7 @@ export default {
           <p v-for="out in outs">
             <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit">
             <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
-            <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Invoice (optional)">
+            <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Message (optional)">
           </p>
           <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">+ Another Deposit</button>

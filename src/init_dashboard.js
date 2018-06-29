@@ -1,3 +1,5 @@
+// serves default wallet and internal rpc on the same port
+
 module.exports = async (a) => {
   let ooops = async (err) => {
     l('oops', err)
@@ -118,6 +120,10 @@ module.exports = async (a) => {
       res.on('drain', function() {
         fReadStream.resume()
       })
+    } else if (path=='/health') {
+      res.end(JSON.stringify({
+        uptime: ts() - node_started_at
+      }))
     } else if (path=='/rpc') {
       var queryData = ''
       req.on('data', function(data) {
@@ -166,6 +172,7 @@ module.exports = async (a) => {
 
   server.listen(on_server ? base_port+200 : base_port).once('error', function(err) {
     if (err.code === 'EADDRINUSE') {
+      openBrowser()
       fatal(`Port ${highlight(base_port)} is currently in use, quitting`)
     }
   })

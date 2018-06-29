@@ -37,7 +37,17 @@ After this transaction insurances with Alice and Bob are reduced by 800 and incr
 
 Also note, before executing depositTos, the blockchain ensures hub has no Debts on it, and pays them first if any. 
 
-In a long term it's possible to employ much more sophisticated algorithms for net-spenders to take insurance from and net-receivers to deposit insurance to. For instance it could be not an immediate channel state but an average state over last 10 days or some kind of machine learning to predict where uninsured balance will go up in the nearest future the most. 
+## Smarter rebalance
+
+Initially rebalance heuristics will be very simple. Over time we will employ much more sophisticated algorithms for matching net-spenders (to take insurance from) and net-receivers (to deposit insurance to). 
+
+* For instance we could be checking not the immediate channel state but an average state over last 10 days and use machine learning to predict where uninsured balance will go up.
+
+* Have online-presence patterns to get withdrawal proofs from net-spenders earlier than actual rebalance happens
+
+* Optimize for lowest tax paid yet highest volume rebalanced
+
+* 
 
 Those tricks would allow the hub to be more effective, present lower TR for its user base and therefore be more profitable.
 

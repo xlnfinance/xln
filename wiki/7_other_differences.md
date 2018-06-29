@@ -19,5 +19,15 @@ All pubkeys are registered in internal onchain relational DB (currently SQLite) 
 ## [5. Optimized for fast sync on a consumer device.](https://medium.com/@homakov/weekly-sync-friction-the-most-important-blockchain-security-metric-1042c0c172b7)
 
 
+## 6. No invalid blocks/tx
+
+The content of a block that has 2/3+ precommits is never verified. Each validator may put into a block whatever they want, even megabytes of nullbytes, only limited by blocksize. In order to maximize profits, they must verify the transactions are valid. If other validators see some validator puts a lot of invalid tx into their blocks, they may vote to remove malicious validator.
+
+
+## 7. 1 user 1 address
+
+It used to be a common practice to bloat the blockchain with unnecessary throw-away addresses generated per-user. As a result there is a lot of dust for no useful reason. This practice neither gives you strong privacy (the link between UTXOs is apparent once you spend them in batch), nor convenient to deal with as a merchant, and is a nightmare for backup (until mnemonic seeds were proposed).
+
+In Fairlayer we believe onchain space is precious (once again: all nodes are full nodes), and recommend to have just one account onchain per identity, and every payment must include an invoice tag that refers to the motivation of this payment (user id or order id). This invoice is private when sent offchain, and public when rebalanced onchain. 
 
 # [Home](/wiki/start.md)

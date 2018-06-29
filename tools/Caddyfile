@@ -1,3 +1,9 @@
+demo.fairlayer.com { 
+  proxy / localhost:3010 { 
+    websocket 
+  } 
+}
+
 fairlayer.com { 
   proxy / localhost:8200 { 
     websocket 

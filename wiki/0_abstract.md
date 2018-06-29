@@ -43,7 +43,7 @@ Not really. It's a decentralized platform on top of which you can create your ow
 
 ## So you promise to redeem FRD for 1 USD?
 
-No, we don't believe in promises. We believe in math and code. **Whenever in doubt - read the code** and make up your own mind. FRD is a fiat currency and can be "minted" as much as needed. FRB is capped at 100B and is converted 1-for-1 to FRD in 2030. We do not make any promises about price or gains you can make.
+No, we don't believe in promises. We believe in math and code. **Whenever in doubt - read the code** and make up your own mind. FRD is a new fiat currency and can be "minted" as much as needed, think Australian dollar or Japanese yen. FRB is capped at 100B and is converted 1-for-1 to FRD in 2030. We do not make any promises about price or gains you can make.
 
 ## But you do expect FRD to be stable?
 

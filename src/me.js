@@ -370,14 +370,16 @@ class Me {
     return await q('syncdb', async () => {
       var all = []
 
-      fs.writeFileSync(
-        './' + datadir + '/onchain/k.json',
-        stringify(K),
-        function(err) {
-          if (err) return console.log(err)
-        }
-      )
-      
+      if (K) {
+        fs.writeFileSync(
+          './' + datadir + '/onchain/k.json',
+          stringify(K),
+          function(err) {
+            if (err) return console.log(err)
+          }
+        )
+      }
+
       // saving all deltas and corresponding payment objects to db
       // it only saves changed records, so call save() on everything
 
