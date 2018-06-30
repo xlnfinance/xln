@@ -47,6 +47,13 @@ for i in $(seq 8001 $maxport); do
   fi
 done
 
-#cp ./Caddyfile ~/Caddyfile && caddy -service restart
+
+rm ~/Caddyfile
+cp ./tools/Caddyfile ~/Caddyfile
+caddy -service restart
+
+# init demoapp at :3010
+cd ~/demos
+pm2 start app.js
 #node --prof fs.js -p443 --silent --wallet-dist --db=$db
 

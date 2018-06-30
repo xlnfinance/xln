@@ -280,5 +280,5 @@ if (argv.monkey) {
 openBrowser = () => {
   var url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
   l(note(`Open ${link(url)} in your browser`))
-  opn(url)
+  try{ opn(url) } catch(e){}
 }

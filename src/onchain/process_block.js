@@ -304,7 +304,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           if (
             path.includes('/.') ||
             path.match(
-              /^\.\/(isolate|data[0-9]+|data\/offchain|\.DS_Store|node_modules|wallet\/node_modules|dist|tools)/
+              /^\.\/(isolate|data[0-9]+|data\/offchain|\.DS_Store|node_modules|wiki|wallet\/node_modules|dist|tools)/
             )
           ) {
             return false

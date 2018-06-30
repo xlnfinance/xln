@@ -19,6 +19,8 @@ module.exports = async (ws, json) => {
       me.browser = ws
     }
 
+    result.authorized = true
+
     let p = json.params
 
     switch (json.method) {
@@ -329,14 +331,15 @@ module.exports = async (ws, json) => {
         result.confirm = 'Credit limits updated'
         break
 
+        default: 
+        result.alert = "No method provided"
     }
 
     // http or websocket?
     if (ws.end) {
       ws.end(JSON.stringify(result))
-    } else if (ws =='admin'){
+    } else if (ws == 'admin'){
       return result
-
     } else {
       /*ws.send(
         JSON.stringify({
@@ -346,6 +349,8 @@ module.exports = async (ws, json) => {
       react(result)
     }
   } else {
+    result.authorized = false
+
     // the request is not authorized with auth_code - just send public explorer data
     if (ws.end) {
       ws.end(JSON.stringify(result))

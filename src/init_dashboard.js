@@ -125,6 +125,8 @@ module.exports = async (a) => {
         uptime: ts() - node_started_at
       }))
     } else if (path=='/rpc') {
+      res.setHeader("Content-Type", "application/json")
+
       var queryData = ''
       req.on('data', function(data) {
         queryData += data
