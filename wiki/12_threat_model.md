@@ -22,7 +22,7 @@ By using PoA to mitigate Sybil attacks (1 node 1 vote) and raising the number of
 
 3. Evil onchain governance
 
-Onchain governance allows to introduce new features quickly, painlessly and simultaneously. However, the main disadvatedge of onchain governance is that some changes can be malicious for the benefit of validator(s). For instance, majority of validators may decide to print them more assets or to ban good users they don't like. 
+Onchain governance allows to introduce new features quickly, painlessly and simultaneously. However, the main disadvantage of onchain governance is that some changes can be malicious for the benefit of validator(s). For instance, majority of validators may decide to print them more assets or to ban good users they don't like. 
 
 We propose 3 ways to resolve this problem:
 
