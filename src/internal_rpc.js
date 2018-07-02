@@ -59,7 +59,6 @@ module.exports = async (ws, json) => {
         break
 
       case 'send':
-        // TODO: support batch sends
         await me.payChannel(p)
         break
 
@@ -310,6 +309,8 @@ module.exports = async (ws, json) => {
       // sets credit limits to a hub
       case 'setLimits':
         var m = K.hubs.find((m) => m.id == p.partner)
+
+        if (!m) return
 
         var ch = await me.getChannel(m.pubkey, p.asset)
 

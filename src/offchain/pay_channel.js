@@ -8,18 +8,18 @@ module.exports = async (opts) => {
     //l('paying ', opts.destination.length, toHex(opts.destination))
 
     // todo not generate secret and exp here and do it during 'add'ing
-    if (!opts.destination) {
-      l('Error: No destination ', opts)
+    if (!opts.address) {
+      l('Error: No address ', opts)
       return false
     }
-    opts.destination = opts.destination.toString()
+    opts.address = opts.address.toString()
 
-    if (opts.destination.includes('#')) {
+    if (opts.address.includes('#')) {
       // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
-      [opts.destination, opts.invoice] = opts.destination.split('#')
+      [opts.address, opts.invoice] = opts.address.split('#')
     }
 
-    let [box_pubkey, pubkey] = r(base58.decode(opts.destination))
+    let [box_pubkey, pubkey] = r(base58.decode(opts.address))
     let amount = parseInt(opts.amount)
 
     // use user supplied private message, otherwise generate random tag
@@ -37,8 +37,10 @@ module.exports = async (opts) => {
     let ch = await me.getChannel(via, opts.asset)
 
     let unlocker_nonce = crypto.randomBytes(24)
+
+    // we are sender and passing to receiver the amount, preimage, invoice and our own address
     let unlocker_box = encrypt_box(
-      r([amount, secret, invoice]),
+      r([amount, secret, invoice, bin(me.address)]),
       unlocker_nonce,
       box_pubkey,
       me.box.secretKey

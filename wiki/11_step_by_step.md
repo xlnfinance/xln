@@ -5,7 +5,7 @@ Two layered blockchains are much harder to understand and reason about, so let's
 ## Genesis
 
 Fair uses identity-based consensus which is a subset of Proof-of-Stake.
- There is an array K.members (K is the main configuration object) which contains details about current validators and `shares` field that says what voting power.
+ There is an array K.members (K is the main configuration object) which contains details about current validators and `shares` field that says what voting power they currently have (the goal is to have 1 identity 1 share).
 
 ![/wiki/step1.png](/wiki/step1.png)
 
@@ -77,7 +77,7 @@ Things are getting complicated, right? Let's start with most basic direct offcha
 
 The fact that you own signed offdelta (dispute proof) with highest nonce gives you strong confidence that you own the money as you can start a dispute and take them back to your onchain balance.
 
-To see full payment channel protocol look under `offchain/*` files, but in a nutshell user 2 now creates a Payment object that has amount=$10, destination=1 and is ready to execute.
+To see full payment channel protocol look under `offchain/*` files, but in a nutshell user 2 now creates a Payment object in **their offchain database (private)** that has amount=$10, destination=1 and is ready to execute.
 
 The code triggers `flushChannel(user 1)` that finds all pending payments. It creates a transitions object that contains all actions we are doing to our state.
 

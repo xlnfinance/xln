@@ -69,32 +69,30 @@ Our hubs **may** support trusted balance at some point just to be compatible wit
 
 By a money transfer we mean any method to increase total asset value of the receiver by reducing our own asset value. In total there are 4 scenarios of onchain payments and 4 offchain, **each best suitable for different size of payments**
 
-## Onchain transfers
+## Direct rebalance
 
 A user that owns anything onchain can always choose to perform a direct settlement broadcasting a public transaction. **This helps to avoid using a hub, has highest security and no capacity limits.** However, induces higher fee.
 
-In fact there are 4 combinations of such settlement. Standalone outputs have null in place of hubId. 
+In fact there are 4 combinations of such settlement. Onchain outputs have null in place of hubId. Also known as splicing in LN.
 
-**Standalone => Standalone** - traditional way to transfer money in all other blockchains. This way you transfer from onchain balance directly to someone's onchain balance. But since onchain balances are harder to spend, it's usually recommended to transfer to a channel.
+**Onchain => Onchain** - traditional way to transfer money in all other blockchains. This way you transfer from onchain balance directly to someone's onchain balance. But since onchain balances are harder to spend, it's usually recommended to transfer to a channel.
 
-**Standalone => Channel** - transfering straight into a channel of user@hub (depositing from user's side of the channel). This way the user doesn't have to manually load up their channel again and the funds are ready to use (be sent offchain).
+**Onchain => Insured** 
 
-**Channel => Standalone** - withdraw from my channel with hub and send to someone's standalone. Rare usage expected, likely with someone who just prefers standalone balance.
+**Insured => Onchain**
 
-**Channel => Channel**  - **most preferred way to use onchain settlements** is to withdraw money from your channel and deposit to recepient's channel right away, in a single optimized transaction.
+**Insured => Insured**  - **most preferred way to use onchain settlements** is to withdraw money from your channel and deposit to recepient's insured balance.
 
 ## Offchain transfers
 
-Offchain sends may be unconditional (without hashlock, cheaper to service) or with hashlocks. They also can be one-off or streamed (sent in smaller chunks, like subscription. Each second, daily, weekly etc.)
+Offchain sends may be unconditional ("addrisk" without hashlock, cheaper to service) or with hashlocks. They also can be one-off or streamed (sent in smaller chunks, like subscription. Each second, daily, weekly etc.)
 
-**Offchain unlocked** - most basic type of send. Has no hashlocks - change of delta is unconditional so the hub may simply steal the funds. Perfect for micropayments below $100
+**Offchain hashlock** 
 
-**Offchain hashlocked** - adds a hashlock object to signed dispute, this way there's zero counterparty risk but it also induces higher size of dispute and costs to service the lock. Thus is only used for payments $100-10k
+**Offchain hashlock streamed** 
 
-**Offchain unlocked streamed** - sending unlocked payments for one invoice in streaming fashion. Streaming is a great way to send large payments even **if there's no capacity by instantly redistributing the funds you receive like salary (cash inflows) to your vendors like rent (cash outflows)**
+**Offchain risk**
 
-This way even if the capacity is limited at $1000 you can route $10,000 by sending 10 payments every second and the user fulfils their lazy payments and reroutes your $1000 forward to their own recipients. Requires the recipient to have a lot of lazy (pending) payments. 
-
-**Offchain hashlocked streamed** - same as above but all chunks are hashlocked. Any number of payments can be routed this way as long as there's enough capacity.
+**Offchain risk streamed** 
 
 # [Home](/wiki/start.md)

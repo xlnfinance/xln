@@ -139,7 +139,7 @@ var async_fn = async (ws, inputType, args) => {
       var asset = readInt(args[1])
       var amount = readInt(args[2])
       me.payChannel({
-        destination: args[3],
+        address: args[3],
         amount: amount,
         invoice: Buffer.alloc(1),
         asset: asset

@@ -5,7 +5,7 @@ import Whitepaper from './Whitepaper'
 
 /* TODO: fair names
 
-         <input style="width:300px" type="number" class="form-control small-input" v-model="set_name" placeholder="Choose Fair Name">
+         <input style="width:300px" type="text" class="form-control small-input" v-model="set_name" placeholder="Choose Fair Name">
           <p>
             <button type="button" class="btn btn-warning" @click="call('setName', {set_name})">Claim Name</button>
           </p>
@@ -110,7 +110,7 @@ export default {
 
       settings: !localStorage.settings,
 
-      outward_destination: hashargs['address'],
+      outward_address: hashargs['address'],
       outward_amount: hashargs['amount'],
       outward_invoice: hashargs['invoice'],
       // which fields can be changed? all, amount, none
@@ -488,8 +488,12 @@ export default {
             </ul>
           </li>
 
-          <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
+          <li class="nav-item">
             <a class="nav-link" href="https://github.com/fairlayer/fair/blob/master/wiki/start.md">📒 Docs</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="https://demo.fairlayer.com">🏄‍♂️ User Experience Demo</a>
           </li>
 
 
@@ -575,9 +579,9 @@ export default {
         <p>Transactions: {{K.total_tx}}</p>
         <p>Total bytes: {{K.total_bytes}}</p>
         <h2>Governance stats</h2>
-        <p>Proposals created: {{K.proposals_created}}</p>
+        <p>Smart updates created: {{K.proposals_created}}</p>
         <h2>Hard Fork</h2>
-        <p><b>Hard fork is like a revolution</b>: sacred and extremely important for long term fairness, even when there is built-in governance protocol. Luckily, everyone is a full node in Fair, so you can unilaterally change consensus with a click of a button. If validators vote for things you don't agree with, find like minded people and decide on a new validator set out-of-band. Then paste the code that changes validators below:</p>
+        <p>If validators vote for things you don't agree with, find like minded people and decide on a new validator set out-of-band. Then paste the code that changes validators below:</p>
         <div class="form-group">
           <label for="comment">Code to execute:</label>
           <textarea class="form-control" v-model="hardfork" rows="4" id="comment"></textarea>
@@ -640,7 +644,7 @@ export default {
           <div class="col-sm-6">
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_destination" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_address" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2">
               </div>
             </p>
             <p>
@@ -654,7 +658,7 @@ export default {
               </div>
             </p>
             <p>
-              <button type="button" class="btn btn-success" @click="call('send', {destination: outward_destination, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy})">Pay Now → </button>
+              <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy})">Pay Now → </button>
             </p>
 
           </div>
@@ -674,7 +678,7 @@ export default {
                 <tr v-bind:key="h.id" v-for="(h, index) in assetPayments(asset).slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                  <td>{{h.destination ? trim(h.destination) : ''}} {{h.invoice}} </td>
+                  <td>{{h.destination ? "To "+trim(h.destination)+": " : 'From N/A: '}}{{h.invoice}}</td>
                   <td v-html="skipDate(h, index)"></td>
                 </tr>
 
@@ -690,9 +694,11 @@ export default {
           <label for="inputUsername" class="sr-only">Username</label>
           <input v-model="username" type="text" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
           <br>
-          <p>Make sure your password is unique, strong and you won't forget it, otherwise access to your account is lost. If in doubt, write it down or email it to yourself - <b>password recovery is impossible.</b></p>
           <label for="inputPassword" class="sr-only">Password</label>
           <input v-model="pw" type="password" id="inputPassword" class="form-control" placeholder="Password" required>
+
+          <p>Make sure you don't forget your password - <b>password recovery is not possible.</b> If in doubt, write it down or email it to yourself.</p>
+          
           <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Generate Wallet</button>
         </form>
       </div>
@@ -743,11 +749,12 @@ export default {
           </template>
 
           <h3>Deposits to channels or users</h3>
-          <p v-for="out in outs">
-            <input style="width:300px" type="number" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit">
-            <input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub">
-            <input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Message (optional)">
-          </p>
+          <div v-for="out in outs">
+            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub"></p>
+            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit"></p>
+            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Message (optional)"></p>
+            <hr />
+          </div>
           <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">+ Another Deposit</button>
           </p>
@@ -798,12 +805,9 @@ export default {
         <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 6 })">CHEAT dontwithdraw</button>
       </div>
       <div v-else-if="tab=='exchange'">
-        <h3>Trustless Exchange</h3>
-        <p>Fairlayer comes pre-equipped with trustless onchain exchange built into the protocol. It is best suitable for <b>rare</b> and large atomic swaps between two assets - it always incurs an <b>expensive fees but is free of counterparty risk.</b></p>
-        <p>If you're looking to trade frequently and/or smaller amounts, try any traditional cryptocurrency exchange that supports Fair assets now or wait for <b>scalable payment channel based in-protocol exchange</b> coming in 2019.</p>
+        <h3>Trustless Onchain Exchange</h3>
+        <p>Onchain exchange is best suitable for large atomic swaps between two assets - it always incurs an expensive fees but is free of any counterparty risk. If you're looking to trade frequently or small amounts, try any exchange that supports Fair assets.</p>
         <hr/>
-
-
 
         <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
         <p><input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
@@ -847,7 +851,7 @@ export default {
                 <td>{{b.id}}</td>
                 <td>{{b.userId}}</td>
                 <td>{{to_ticker(b.assetId)}}</td>
-                <td>{{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}</td>
+                <td>{{[b.assetId, b.buyAssetId].sort().reverse().map(to_ticker).join('/')}}</td>
                 <td>{{commy(b.amount)}}</td>
                 <td>{{b.rate.toFixed(6)}}</td>
                 <td v-if="record && record.id == b.userId"><button  @click="call('cancelOrder', {id: b.id})" class="btn btn-success">Cancel</button></td>
@@ -861,20 +865,17 @@ export default {
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS/Linux/Windows</h3>
         <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app:</p>
-        <div style="background-color: #FFFDDE; padding: 20px;"><Highlight :white="true" lang="bash" :code="install_snippet"></Highlight></div>
+        <div style="background-color: #FFFDDE; padding-left: 10px;"><Highlight :white="true" lang="bash" :code="install_snippet"></Highlight></div>
         <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
 
         <ul>
           <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
 
-        <p>On Windows? <a v-bind:href="'/Fair-'+K.last_snapshot_height+'.tar.gz'">Download snapshot directly</a>, verify the hash with
-          <kbd>certUtil -hashfile Fair-{{K.last_snapshot_height}}.tar.gz SHA256</kbd> then run
-          <kbd>./install && node fs</kbd>. You might need WinRAR/7-Zip to unpack tar.gz archive.</p>
-        <p>Looking for genesis state for research or analytics? <a v-bind:href="'/Fair-1.tar.gz'">Get Fair-1.tar.gz here</a></p>
+
       </div>
       <div v-else-if="tab=='gov'">
-        <h3>Governance</h3>
+        <h3>Smart Updates</h3>
         <div class="form-group">
           <label for="comment">Description:</label>
           <textarea class="form-control" v-model="proposal[0]" rows="2" id="comment"></textarea>
@@ -884,7 +885,7 @@ export default {
           <textarea class="form-control" v-model="proposal[1]" rows="2" id="comment"></textarea>
         </div>
         <div class="form-group">
-          <input class="form-check-input" type="checkbox" v-model="proposal[2]"> Add patch fs vs 8001
+          <input class="form-check-input" type="checkbox" v-model="proposal[2]"> Add patch
           
         </div>
         <p v-if="my_member">

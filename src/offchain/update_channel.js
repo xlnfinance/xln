@@ -174,10 +174,13 @@ module.exports = async (
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
         } else {
-          let [box_amount, box_secret, box_invoice] = r(bin(unlocked))
+          // the sender encrypted for us: how much they sent, the preimage for hashlock
+          // an invoice (reason for this payment), and optional refund address 
+          let [box_amount, box_secret, box_invoice, box_refund_address] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
           inward_hl.invoice = box_invoice
+          inward_hl.refund_address = box_refund_address.toString()
 
           inward_hl.secret = box_secret
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'

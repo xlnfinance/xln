@@ -16,7 +16,7 @@ class Me {
     this.queue = []
     this.batch = []
 
-    // generic metric boilerplate: contains array of averages per minute over time
+    // generic metric boilerplate: contains array of averages over time
     let getMetric = () => {
       return {
         max: 0,
@@ -310,6 +310,8 @@ class Me {
 
     if (me.my_hub || me.my_member) {
       me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
+    } else {
+      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))      
     }
 
     if (me.my_hub) {
@@ -372,7 +374,7 @@ class Me {
 
       if (K) {
         fs.writeFileSync(
-          './' + datadir + '/onchain/k.json',
+          require('path').resolve(__dirname, '../' + datadir + '/onchain/k.json'),
           stringify(K),
           function(err) {
             if (err) return console.log(err)
@@ -455,15 +457,15 @@ class Me {
   }
 
   async payRando(counter = 1) {
-    var dest = randos[Math.floor(Math.random() * randos.length)]
+    var address = randos[Math.floor(Math.random() * randos.length)]
     // offchain payment
     await me.payChannel({
-      destination: dest,
+      address: address,
       amount: 100 + Math.round(Math.random() * 100),
       asset: 1
     })
 
-    let [box_pubkey, pubkey] = r(base58.decode(dest))
+    let [box_pubkey, pubkey] = r(base58.decode(address))
     var reg = await User.idOrKey(pubkey)
 
     // onchain payment (batched, not sent to validator yet)

@@ -8,7 +8,7 @@ We believe long term only offchain payments will be used, even for large payment
 
 ## Integration Demos
 
-[Check out this repository with different demos.](https://github.com/fairlayer/demos). No packaged SDK is offered because it would increase your attack surface and the API is very simple.
+[Check out this repository with different demos.](https://github.com/fairlayer/demos) No packaged SDK is offered because it would increase your attack surface and the API is very simple.
 
 ## Authentication
 
@@ -56,7 +56,7 @@ Once you have an address, you can make a button "Pay with Fair" or simply show t
 ```
 var fs_origin = 'http://127.0.0.1:8001'
 deposit.onclick = function(){
-fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10")
+fs_w = window.open(fs_origin+'#wallet?invoice='+id+"&address=${address}&amount=10&asset=1")
 
 window.addEventListener('message', function(e){
   if(e.origin != fs_origin) return
@@ -69,6 +69,11 @@ window.addEventListener('message', function(e){
 })
 }
 ```
+**Required params**: address, amount, invoice, asset
+
+**These params can be passed in #hash**
+* `editable` - don't want the user to mess around with parameters? Set to 'none' to disable all fields or to 'amount' if you want to keep amount editable.
+* `origin` - set to `location.origin` if you want to use Fair Login. The login token will be returned via postMessage.
 
 Once the user reviews payment details, enters the amount if needed and clicks Pay, Fairlayer does the rest. Under the hood user's wallet encrypts a specific hash for the public key stored in your address, passes it to the hub, the hub finds websocket towards your daemon, passes the payment with same condition but smaller amount (minus hub's fees), your daemon decrypts the originally encrypted hashlock, returns the secret to the hub (at this point you are guaranteed to get the money, as you have the dispute proof with hashlock that you can unlock in it), the hub returns the secret to the user and now the payment is finished. 
 
@@ -119,28 +124,19 @@ First, you need to check if they have enough money, then reduce their balance by
 
 Then make a request to your local Fair daemon with **following parameters carefully escaped and sanitized**:
 
-**required**
-* `params[destination]` - the address where user wants to send assets
-* `params[asset]` - id of asset to operate in. 1 for FRD, 2 for FRB and so on.
-
-**optional**
+* `params[address]` - the address where user wants to send assets
 * `params[amount]` - the amount of assets to send (fees are passed on the user). Can be editable.
 * `params[invoice]` - set the same invoice you would use to receive assets from this user, so if the payment fails it will be credited back according to this invoice.
-* `params[editable]` - don't want the user to mess around with parameters? Set to 'none' to disable all fields or to 'amount' if you want to keep amount editable.
-
+* `params[asset]` - id of asset to operate in. 1 for FRD, 2 for FRB and so on.
 
 ```
-FairRPC('method=send&params[destination]=ADDRESS&params[asset]=1&params[amount]=200&params[invoice]=INVOICE', (r)=>{
+FairRPC('method=send&params[address]=ADDRESS&params[asset]=1&params[amount]=200&params[invoice]=INVOICE', (r)=>{
   // sent
 })
 ```
 
 
 If the outward payment fails (rare, but possible), you will receive it as a failed outward via a pulling receivedAndFailed request, then you can credit funds back.
-
-## Fair Login
-
-You can use built-in authenticator.
 
 ## Other endpoints
 

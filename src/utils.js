@@ -209,9 +209,9 @@ q = async function(key, job) {
           //clearTimeout(deadlock)
           //l('Section took: ' + (performance.now() - started))
         } catch (e) {
-          l(e)
+          l("Error in q", e)
           setTimeout(() => {
-            fatal('Error in q')
+            fatal(e)
           }, 100)
         }
       }

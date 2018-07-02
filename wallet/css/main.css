@@ -8,6 +8,12 @@
   left: 10px;
 }
 
+@media (min-width: 979px) {
+  ul.nav li.dropdown:hover > ul.dropdown-menu {
+    display: block;
+  }
+}
+
 .list-item {
   display: inline-block;
   margin-right: 10px;

@@ -26,7 +26,7 @@ This wiki intends to be single source of documentation, better read it in this o
 
 [11. Step by step](/wiki/11_step_by_step.md)
 
-[10. Threat Model](/wiki/12_threat_model.md)
+[12. Threat Model](/wiki/12_threat_model.md)
 
 
 

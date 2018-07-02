@@ -238,7 +238,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // save final block in offchain history db
   // Required for members/hubs, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
-  if (me.my_member || !me.prune) {
+  if (me.my_member || PK.explorer) {
     await Block.create({
       prev_hash: fromHex(prev_hash),
       hash: sha3(header),

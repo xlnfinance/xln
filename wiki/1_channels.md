@@ -53,56 +53,61 @@ Alright, now the ondelta is 6, insurance is 6 and offdelta is still 0.
 
 ## resolveChannel
 
-It's about time to introduce the "cornerstone" function of Fairlayer (the very first function you will find reading the codebase):
+This function is used to define what parts of balance are insured/uninsured for you and counterparty.
 
 ```
-// This is the most important function in the whole project. Make sure you understand it!
-// Defines how payment channels work, based on "insurance" and delta=("ondelta"+"offdelta")
-// There are 3 major scenarios of delta position
-// . is 0 point, | is delta, = is insurance, - is promised
-// 4,6  .====--| (left user owns entire insurance, has 2 uninsured)
-// 4,2  .==|==   (left and right both have 2 insured)
-// 4,-2 |--.==== (right owns entire insurance, 2 in uninsured balance)
 resolveChannel = (insurance, delta, is_left = true) => {
   var parts = {
     // left user promises only with negative delta, scenario 3
-    promised: delta < 0 ? -delta : 0,
+    they_uninsured: delta < 0 ? -delta : 0,
     insured: delta > insurance ? insurance : delta > 0 ? delta : 0,
     they_insured:
       delta > insurance ? 0 : delta > 0 ? insurance - delta : insurance,
-    // right user promises when delta goes beyond insurance, scenario 1
-    they_promised: delta > insurance ? delta - insurance : 0
+    // right user promises when delta > insurance, scenario 1
+    uninsured: delta > insurance ? delta - insurance : 0
+  }
+
+  var total =
+    parts.they_uninsured + parts.uninsured + parts.they_insured + parts.insured
+
+  if (total < 100) total = 100
+
+  var bar = (amount, symbol) => {
+    if (amount == 0) return ''
+    return Array(1 + Math.ceil(amount * 100 / total)).join(symbol)
+  }
+
+  // visual representations of state in ascii and text
+  if (delta < 0) {
+    parts.ascii_channel =
+      '|' + bar(parts.they_uninsured, '-') + bar(parts.they_insured, '=')
+  } else if (delta < insurance) {
+    parts.ascii_channel =
+      bar(parts.insured, '=') + '|' + bar(parts.they_insured, '=')
+  } else {
+    parts.ascii_channel =
+      bar(parts.insured, '=') + bar(parts.uninsured, '-') + '|'
   }
 
   // default view is left. if current user is right, simply reverse
   if (!is_left) {
     ;[
-      parts.promised,
+      parts.they_uninsured,
       parts.insured,
       parts.they_insured,
-      parts.they_promised
-    ] = [parts.they_promised, parts.they_insured, parts.insured, parts.promised]
+      parts.uninsured
+    ] = [
+      parts.uninsured,
+      parts.they_insured,
+      parts.insured,
+      parts.they_uninsured
+    ]
   }
 
   return parts
 }
 ```
 
-Try playing around with parameters: understanding of inputs and outputs of this method is paramount to understanding Fairlayer. Let's consider our case
-
-```
- resolveChannel(6, 6, true)
-{ promised: 0, insured: 6, they_insured: 0, they_promised: 0 }
-```
-
-This is how user 5 sees the channel with 7 right now. We own 6 in insurance, they own nothing.
-
-```
-> resolveChannel(6, 6, false)
-{ promised: 0, insured: 0, they_insured: 6, they_promised: 0 }
-```
-
-And vice-versa, 7 after processing onchain tx, sees that 5 owns 6 in `they_insured`. Please note, we always add `they_` prefix to various values of the counterparty in the channel. 
 
 ## Canonical state (dispute proof)
 
@@ -111,7 +116,7 @@ In order to make our first payment, we must figure out the common canonical repr
 ```
 
   var state = [
-    methodMap('disputeWith'),
+    map('disputeWith'),
     [
       left ? this.myId : this.partnerId,
       left ? this.partnerId : this.myId,
@@ -127,7 +132,7 @@ In order to make our first payment, we must figure out the common canonical repr
 
 For encoding of any binary arrays in Fairlayer we use Recursive Length Prefix library. After rlp.encode(state) we sign it and share the sig with the partner.
 
-The first element of the state is `methodMap('disputeWith')`. We always use `methodMap` utility to hop back and forth between a string and it's compact int index to save bytes. The second element consists of metadata: left user pubkey, right user pubkey, nonce (the higher is move valid one), offdelta and asset id.
+The first element of the state is `map('disputeWith')`. We always use `map` utility to hop back and forth between a string and it's compact int index to save bytes. The second element consists of metadata: left user pubkey, right user pubkey, nonce (the higher is move valid one), offdelta and asset id.
 
 The other two elements are hashlocks which we will get back to later.
 
@@ -142,7 +147,7 @@ Internally all payments are expressed in flush_channel and update_channel files.
 
 ```
 me.envelope(
-      methodMap('update'), // denotes that it is an update message
+      map('update'), // denotes that it is an update message
       asset, // asset id we are operating with
       ackSig,  // a signature of the state that we start from (acks previous transitions if any)
       transitions, // 0 or more transitions: [transition type, transition args, state sig after applying]

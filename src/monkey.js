@@ -9,7 +9,7 @@ if (argv.monkey) {
       me.CHEAT_dontwithdraw = true
       me.payChannel({
         amount: 20000,
-        destination: randos[0],
+        address: randos[0],
         asset: 1
       })
 
@@ -21,9 +21,10 @@ if (argv.monkey) {
     }
 
     if (me.record.id == 3) {
+      var xss = '\'"><img src=x onerror=alert(0)>'
       me.batch.push([
         'createAsset',
-        ['TEST3', 10000000, 'Test coin by 3', 'No goal']
+        ['XSS', 10000000, xss, xss]
       ])
 
       // buying bunch of FRB for $4
@@ -77,7 +78,7 @@ Deltas: ${await Delta.count()}\n
 
       // intended to fail
       me.payChannel({
-        destination:
+        address:
           'ZUp5PARsn4X2xs8fEjYSRtWSTQqgkMnVax7CaLsBmp9kR36Jqon7NbqCakQ5jQ9w1t5gtGo3zfhTtQ2123123123DJJjZ',
         amount: 100,
         asset: 1

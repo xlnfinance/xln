@@ -87,7 +87,7 @@ module.exports = async () => {
     dispute_delay: 8, // in how many blocks disputes are considered final
     hashlock_exp: 4, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)
-    max_hashlocks: 5000, // we don't want overweight huge dispute strings
+    max_hashlocks: 50, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
     dispute_if_no_ack: 40000 // ms, how long we wait for ack before going to blockchain
   }
@@ -225,16 +225,16 @@ module.exports = async () => {
 
   await Asset.create({
     ticker: 'FRD',
-    name: 'Dollar',
-    desc: 'Fair Dollar',
+    name: 'Fair Dollar',
+    desc: 'Fair Dollar is a fiat currency issued by Fair Foundation. It is collateralized and easy to sell for traditional fiat currencies at stable exchange rate.',
     issuerId: 1,
     total_supply: 1000000000
   })
 
   await Asset.create({
     ticker: 'FRB',
-    name: 'Bet',
-    desc: 'Fair Bet',
+    name: 'Fair Bet',
+    desc: 'Fair Bet supply is capped at 100B FRB. FRB will be automatically converted into FRD 1-for-1 on 2030-08-19.',
     issuerId: 1,
     total_supply: 1000000000
   })
@@ -244,7 +244,7 @@ module.exports = async () => {
     handle: 'us',
     name: '@us (America-based)'
   }
-*/
+  */
 
   var json = stringify(K)
   await promise_writeFile('./'+datadir + '/onchain/k.json', json)

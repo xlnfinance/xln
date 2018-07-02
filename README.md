@@ -4,16 +4,12 @@
 
 # Intro
 
-Fairlayer is a new scalable blockchain platform that implements next-gen Lightning [XLN](https://medium.com/fairlayer/xln-extended-lightning-network-80fa7acf80f3) layer2 out-of-box. XLN fixes the liquidity problem - Fairlayer state channels support transfering beyond the capacity/insurance according to credit lines that nodes can set to each other, which induces manageable risk and makes offchain payments more routable.
+Fairlayer is a billion+ transaction per second payment network secured with blockchain. It implements the idea of Extended Lightning Network [XLN](https://medium.com/fairlayer/xln-extended-lightning-network-80fa7acf80f3).
 
-Fairlayer has no virtual machine for smart contracts, instead uses onchain governance and amendments to implement new functionality.
+Each user of the network runs a full node that processes few publicly broadcasted onchain transactions (insurance rebalances, disputes etc). All the payments happen instantly peer-to-peer offchain and can be enforced in onchain "court" when needed.
 
-There are two native tokens FRD and FRB, plus everyone can create their own asset on top of the platform.
+Imagine that your bank always gives you a signed proof that you own $X and you are always guaranteed to go to public independent blockchain court to enforce them to return you $X back which you later could deposit to another bank.
 
-Unlike "fake" bloated blockchains with high tps, in Fairlayer the tokens are transfered instantly offchain through the hubs and hubs are responsible for rebalancing "insurances" onchain to reduce the collective risk over time. This allows unlimited transactions per second with a hub-and-spoke topology of hubs. Not 100k tps, not 300k, not 1M, it is in fact unlimited.
+[For documentation go to wiki](/wiki/start.md)
 
-It is the same how the Internet topology looks like, and it has no central point of failure.
-
-### [For documentation go to our in-repo Wiki](/wiki/start.md)
-
-**Node.js programmers needed full-time: send resume to info@sakurity.com**
+#**Node.js programmers needed full-time: send resume to info@sakurity.com**

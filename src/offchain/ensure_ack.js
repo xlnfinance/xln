@@ -1,4 +1,6 @@
-// This method ensures all settled hashlocks were ack on time. If we don't get ack on time, the hashlock may expire and we lose the money, that's why we must go to blockchain asap to reveal the secret to hashlock
+// This method ensures all settled hashlocks were ack on time. If we don't get ack on time, 
+// the hashlock may expire and we lose the money, 
+// that's why we must go to blockchain asap to reveal the secret to hashlock
 module.exports = async () => {
   //l('Checking who has not ack')
   if (PK.pending_batch) return l('Pending batch')

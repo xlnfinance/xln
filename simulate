@@ -5,15 +5,12 @@ set -o nounset
 set -o errexit
 set -o pipefail
 
-db= #--db=mysql:root:123123
+db=
+#--db=mysql:root:123123
 pm2_opts=--no-autorestart
 wallet_port=26678
 maxport=8008
 fs_cluster_args="--wallet-url=http://localhost:$wallet_port $db --color --monkey=$maxport"
-
-if [[ `node -v` =~ v10 ]]; then
-  nodeflags=--experimental-repl-await
-fi
 
 function pm2() {
   node_modules/.bin/pm2 "$@"
@@ -23,7 +20,6 @@ function pm2() {
 pm2 flush
 pm2 delete all || true
 killall node 2>/dev/null || true
-
 
 rm -rf data*
 rm -rf isolate*
@@ -49,7 +45,6 @@ if node fs.js --genesis=test $db | grep "Genesis done"; then
     fi
   done
 
-  
   pm2 attach $(node -p "`pm2 id fs`[0]")  
 fi
 

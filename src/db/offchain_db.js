@@ -197,6 +197,13 @@ Payment = privSequelize.define(
     // user-specified or randomly generated private message
     invoice: Sequelize.BLOB,
 
+    // stored on our node only. can help to identify the reason for payment
+    // eg when a withdrawal has failed we credit funds back
+    personal_tag: Sequelize.BLOB,
+
+    // sender may decide to provide refund address inside the private message
+    refund_address: Sequelize.BLOB,
+
     // who caused us to make this payment (if we're hub)?
     inward_pubkey: Sequelize.BLOB
   },
