@@ -41,7 +41,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     return false
   }
 
-  if (readInt(methodId) != map('propose')) {
+  if (readInt(methodId) != methodMap('propose')) {
     return l('Wrong method for block')
   }
 
@@ -85,7 +85,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   let shares = 0
-  let precommit_body = r([map('precommit'), header])
+  let precommit_body = r([methodMap('precommit'), header])
   for (let i = 0; i < Members.length; i++) {
     if (
       precommits[i].length == 64 &&
@@ -208,7 +208,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   if (K.bet_maturity && K.ts > K.bet_maturity) {
     l("🎉 Maturity day! Copy all FRB balances to FRD")
     meta.cron.push(['maturity'])
-    
+
     await me.syncdb()
 
     // first assignment must happen before zeroing

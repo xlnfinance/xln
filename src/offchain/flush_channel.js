@@ -58,7 +58,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
         if (t.status != 'new') continue
 
         if (t.type == 'del') {
-          
           if (me.CHEAT_dontreveal) {
             loff('CHEAT: not revealing our secret to inward')
             continue
@@ -68,7 +67,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
             ch.d.offdelta += ch.left ? t.amount : -t.amount
           }
           var args = [t.hash, t.secret]
-          
         } else if (t.type == 'delrisk') {
           // works like refund
           if (!t.secret) {
@@ -133,7 +131,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
         ch.d.nonce++
 
         transitions.push([
-          map(t.type),
+          methodMap(t.type),
           args,
           ec(r(refresh(ch)), me.id.secretKey)
         ])
@@ -166,7 +164,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
     // transitions: method, args, sig, new state
     let envelope = me.envelope(
-      map('update'),
+      methodMap('update'),
       asset,
       ackSig,
       transitions,

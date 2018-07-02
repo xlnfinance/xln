@@ -88,7 +88,7 @@ parseAddress = (addr) => {
   return {
     box_pubkey: parts[0],
     pubkey: parts[1]
-  }     
+  }
 }
 
 trim = (ad) => toHex(ad).substr(0, 4)
@@ -113,16 +113,16 @@ ascii_state = (state) => {
     state[1][2]
   } | ${state[1][3]} | \$${state[1][4]}
 -----
-+${locks(state[2])} 
++${locks(state[2])}
 -----
--${locks(state[3])} 
+-${locks(state[3])}
 `
 }
 
 ascii_tr = (transitions) => {
   try {
     for (var t of transitions) {
-      var m = map(readInt(t[0]))
+      var m = methodMap(readInt(t[0]))
 
       if (m == 'add') {
         var info = `add ${readInt(t[1][0])} ${trim(t[1][1])} ${readInt(
@@ -232,7 +232,7 @@ q.q = {}
 current_db_hash = () => {
   return Buffer.alloc(1)
   /* TODO: fix. may cause race condition and lock db for reading breaking other operations
-    
+
     var out = child_process.execSync(`shasum -a 256 ${datadir}/onchain/db*`).toString().split(/[ \n]/)
     return fromHex(out)
    */
@@ -338,8 +338,8 @@ usage = () => {
 }
 
 // enumerator of all methods and tx types in the system
-map = (i) => {
-  let map = [
+methodMap = (i) => {
+  let methodMap = [
     'placeholder',
 
     // consensus
@@ -394,9 +394,9 @@ map = (i) => {
 
   if (typeof i === 'string') {
     i = i.trim()
-    if (map.indexOf(i) == -1) throw `No such method: "${i}"`
-    return map.indexOf(i)
+    if (methodMap.indexOf(i) == -1) throw `No such method: "${i}"`
+    return methodMap.indexOf(i)
   } else {
-    return map[i]
+    return methodMap[i]
   }
 }

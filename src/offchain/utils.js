@@ -85,7 +85,7 @@ refresh = function(ch) {
 
   // Canonical state
   ch.state = [
-    map('disputeWith'),
+    methodMap('disputeWith'),
     [
       ch.left ? ch.d.myId : ch.d.partnerId,
       ch.left ? ch.d.partnerId : ch.d.myId,
