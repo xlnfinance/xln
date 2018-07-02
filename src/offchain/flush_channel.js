@@ -90,7 +90,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
             t.amount < K.min_amount ||
             t.amount > K.max_amount ||
             t.amount > ch.payable ||
-            t.destination.equals(me.pubkey) ||
+            t.destination_address == me.address ||
             ch.outwards.length >= K.max_hashlocks
           ) {
             loff(
@@ -123,7 +123,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
             //continue
           }
 
-          args = [t.amount, t.hash, t.exp, t.destination, t.unlocker]
+          args = [t.amount, t.hash, t.exp, bin(t.destination_address), t.unlocker]
         }
 
         t.status = 'sent'

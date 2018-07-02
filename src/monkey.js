@@ -64,7 +64,7 @@ Deltas: ${await Delta.count()}\n
 
       l(alert)
 
-      child_process.exec(`osascript -e 'display notification "${alert}"'`)
+      //child_process.exec(`osascript -e 'display notification "${alert}"'`)
     }, 80000)
   } else if (parseInt(base_port) > 8003) {
     randos.splice(randos.indexOf(me.address), 1) // *except our addr

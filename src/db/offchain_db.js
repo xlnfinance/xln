@@ -189,8 +189,6 @@ Payment = privSequelize.define(
     // secret that unlocks hash
     secret: Sequelize.BLOB,
 
-    // who is recipient
-    destination: Sequelize.BLOB,
     // string to be decrypted by outward
     unlocker: Sequelize.BLOB,
 
@@ -201,8 +199,11 @@ Payment = privSequelize.define(
     // eg when a withdrawal has failed we credit funds back
     personal_tag: Sequelize.BLOB,
 
+    // who is recipient
+    destination_address: Sequelize.TEXT,
+
     // sender may decide to provide refund address inside the private message
-    refund_address: Sequelize.BLOB,
+    refund_address: Sequelize.TEXT,
 
     // who caused us to make this payment (if we're hub)?
     inward_pubkey: Sequelize.BLOB

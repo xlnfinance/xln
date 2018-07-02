@@ -83,6 +83,14 @@ prettyState = (state) => {
   })
 }
 
+parseAddress = (addr) => {
+  var parts = r(base58.decode(addr))
+  return {
+    box_pubkey: parts[0],
+    pubkey: parts[1]
+  }     
+}
+
 trim = (ad) => toHex(ad).substr(0, 4)
 
 logstates = (a, b, c, d) => {

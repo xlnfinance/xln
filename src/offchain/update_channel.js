@@ -93,7 +93,10 @@ module.exports = async (
     let m = map(readInt(t[0]))
 
     if (m == 'add' || m == 'addrisk') {
-      let [amount, hash, exp, destination, unlocker] = t[1]
+      let [amount, hash, exp, destination_address, unlocker] = t[1]
+
+      destination_address = destination_address.toString()
+
       ;[exp, amount] = [exp, amount].map(readInt)
 
       let new_type = m
@@ -133,7 +136,7 @@ module.exports = async (
         exp: exp,
 
         unlocker: unlocker,
-        destination: destination,
+        destination_address: destination_address.toString(),
 
         asset: asset,
 
@@ -160,7 +163,7 @@ module.exports = async (
 
       if (new_type != m) {
         // go to next transition - we failed this hashlock already
-      } else if (destination.equals(me.pubkey)) {
+      } else if (destination_address == me.address) {
         unlocker = r(unlocker)
         let unlocked = open_box(
           unlocker[0],
@@ -197,12 +200,13 @@ module.exports = async (
       } else if (me.my_hub) {
         //loff(`Forward ${amount} to ${trim(destination)}`)
         let outward_amount = afterFees(amount, me.my_hub.fee)
+        var dest_pubkey = parseAddress(destination_address).pubkey
 
-        let dest_ch = await me.getChannel(destination, asset)
+        let dest_ch = await me.getChannel(dest_pubkey, asset)
 
         // is online? Is payable?
 
-        if (me.users[destination] && dest_ch.payable >= outward_amount) {
+        if (me.users[dest_pubkey] && dest_ch.payable >= outward_amount) {
           var outward_hl = Payment.build({
             deltumId: dest_ch.d.id,
             type: m,
@@ -216,13 +220,13 @@ module.exports = async (
             asset: asset,
 
             unlocker: unlocker,
-            destination: destination,
+            destination_address: destination_address,
             inward_pubkey: bin(pubkey)
           })
           dest_ch.payments.push(outward_hl)
 
           if (trace)
-            l(`Mediating ${outward_amount} payment to ${trim(destination)}`)
+            l(`Mediating ${outward_amount} payment to ${trim(destination_address)}`)
 
           //if (argv.syncdb) all.push(outward_hl.save())
 

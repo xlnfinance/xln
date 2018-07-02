@@ -69,7 +69,7 @@ module.exports = async (opts) => {
         exp: K.usable_blocks + K.hashlock_exp,
 
         unlocker: unlocker,
-        destination: pubkey,
+        destination_address: opts.address,
         invoice: invoice
       })
 

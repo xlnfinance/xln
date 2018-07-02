@@ -1,7 +1,7 @@
 <script>
 import UserIcon from './UserIcon'
 import Highlight from './Highlight'
-import Whitepaper from './Whitepaper'
+import Home from './Home'
 
 /* TODO: fair names
 
@@ -15,7 +15,7 @@ export default {
   components: {
     UserIcon,
     Highlight,
-    Whitepaper
+    Home
   },
   mounted() {
     window.app = this
@@ -529,7 +529,7 @@ export default {
       </div>
 
       <div v-if="tab==''">
-        <Whitepaper></Whitepaper>
+        <Home></Home>
       </div>
       <div v-else-if="tab=='metrics'">
         <h2>Node Metrics</h2>
@@ -678,7 +678,7 @@ export default {
                 <tr v-bind:key="h.id" v-for="(h, index) in assetPayments(asset).slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                  <td>{{h.destination ? "To "+trim(h.destination)+": " : 'From N/A: '}}{{h.invoice}}</td>
+                  <td @click="outward_address=h.is_inward ? h.refund_address : h.destination_address; outward_amount=commy(h.amount); outward_invoice = h.invoice"><u class="dotted">{{h.is_inward ? "From "+trim(h.refund_address): "To "+trim(h.destination_address)}}</u>: {{h.invoice}}</td>
                   <td v-html="skipDate(h, index)"></td>
                 </tr>
 
