@@ -1,4 +1,5 @@
 // serves default wallet and internal rpc on the same port
+const derive = require('./derive')
 
 module.exports = async (a) => {
   let ooops = async (err) => {
@@ -19,20 +20,6 @@ module.exports = async (a) => {
   process.on('beforeExit', () => {
     l('before exit')
   })
-
-  // auto reloader for debugging
-  /*
-  l(note(`Touch ${highlight('../restart')} to restart`))
-  setInterval(() => {
-    fs.stat('../restart', (e, f) => {
-      if (!f) return
-      var restartedAt = restartedAt ? restartedAt : f.atimeMs
-
-      if (f && f.atimeMs != restartedAt) {
-        gracefulExit('restarting')
-      }
-    })
-  }, 1000)*/
 
   var kFile = './' + datadir + '/onchain/k.json'
   if (fs.existsSync(kFile)) {

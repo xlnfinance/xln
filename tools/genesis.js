@@ -1,4 +1,5 @@
 // this file is only used during genesis to set initial K params and create first validators
+const derive = require('../src/derive')
 
 module.exports = async () => {
   l('Start genesis')
@@ -87,7 +88,7 @@ module.exports = async () => {
     dispute_delay: 8, // in how many blocks disputes are considered final
     hashlock_exp: 4, // how many blocks a user needs to be a able to reveal
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)
-    max_hashlocks: 50, // we don't want overweight huge dispute strings
+    max_hashlocks: 20, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
     dispute_if_no_ack: 40000 // ms, how long we wait for ack before going to blockchain
   }
@@ -205,7 +206,7 @@ module.exports = async () => {
     location: K.members[0].location,
     pubkey: K.members[0].pubkey,
 
-    fee: 0.008,
+    fee: 0.001,
 
     handle: 'main',
     name: '@main (Main)'

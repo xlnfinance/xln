@@ -137,13 +137,6 @@ react = async (result = {}, force = true) => {
       }
     })
 
-    /*
-    var offered_partners = (await me.channels())
-      .sort((a, b) => b.they_payable - a.they_payable)
-      .filter((a) => a.they_payable >= amount)
-      .map((a) => a.partner)
-      .join('_')
-      */
     result.address = me.address
     result.pubkey = toHex(me.pubkey)
     result.pending_batch = PK.pending_batch
@@ -181,13 +174,13 @@ snapshotHash = async () => {
           ? `http://${localhost}:8001/`
           : `https://fairlayer.com/`
 
-      cached_result.install_snippet = `id=fs
+      cached_result.install_snippet = `id=fair
 f=${filename}
 mkdir $id && cd $id && curl ${our_location}$f -o $f
 if [[ -x /usr/bin/sha256sum ]] && sha256sum $f || shasum -a 256 $f | grep \\
   ${out_hash}; then
   tar -xzf $f && rm $f && ./install
-  node fs
+  node fair
 fi`
     })
   }

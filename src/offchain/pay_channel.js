@@ -12,22 +12,22 @@ module.exports = async (opts) => {
       l('Error: No address ', opts)
       return false
     }
-    opts.address = opts.address.toString()
 
-    if (opts.address.includes('#')) {
-      // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
-      [opts.address, opts.invoice] = opts.address.split('#')
+    var addr = parseAddress(opts.address)
+
+    // invoice inside the address takes priority
+    if (addr.invoice) {
+      opts.invoice = addr.invoice
     }
-
-    let [box_pubkey, pubkey] = r(base58.decode(opts.address))
-    let amount = parseInt(opts.amount)
 
     // use user supplied private message, otherwise generate random tag
     let invoice = opts.invoice ? concat(Buffer.from([1]), bin(opts.invoice)) : concat(Buffer.from([2]), crypto.randomBytes(16))
 
+    let amount = parseInt(opts.amount)
+
     // if we are hub making a payment, don't add the fees on top
     if (me.my_hub) {
-      var via = pubkey
+      var via = addr.pubkey
       var sent_amount = amount
     } else {
       var via = fromHex(K.hubs[0].pubkey)
@@ -42,7 +42,7 @@ module.exports = async (opts) => {
     let unlocker_box = encrypt_box(
       r([amount, secret, invoice, bin(me.address)]),
       unlocker_nonce,
-      box_pubkey,
+      addr.box_pubkey,
       me.box.secretKey
     )
 

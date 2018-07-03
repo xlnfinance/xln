@@ -84,12 +84,22 @@ prettyState = (state) => {
 }
 
 parseAddress = (addr) => {
+  addr = addr.toString()
+  if (addr.includes('#')) {
+    // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
+    var [addr, invoice] = addr.split('#')
+  }
+
   var parts = r(base58.decode(addr))
+
   return {
     box_pubkey: parts[0],
-    pubkey: parts[1]
-  }     
+    pubkey: parts[1],
+    hubs: parts[2] ? parts[2].map(readInt) : [1],
+    invoice: invoice
+  }
 }
+
 
 trim = (ad) => toHex(ad).substr(0, 4)
 

@@ -48,15 +48,29 @@ class Me {
     this.username = username
 
     this.seed = seed
-    this.id = nacl.sign.keyPair.fromSeed(me.seed)
-    this.pubkey = bin(me.id.publicKey)
+    this.id = nacl.sign.keyPair.fromSeed(this.seed)
+    this.pubkey = bin(this.id.publicKey)
 
     this.block_keypair = nacl.sign.keyPair.fromSeed(sha3('block' + this.seed))
     this.block_pubkey = bin(this.block_keypair.publicKey).toString('hex')
 
     this.box = nacl.box.keyPair.fromSecretKey(this.seed)
 
-    this.address = base58.encode(r([bin(me.box.publicKey), me.pubkey]))
+    /*
+    var offered_partners = (await me.channels())
+      .sort((a, b) => b.they_payable - a.they_payable)
+      .filter((a) => a.they_payable >= amount)
+      .map((a) => a.partner)
+      .join('_')
+      */
+
+    let encodable = [
+      bin(this.box.publicKey), 
+      this.pubkey,
+      [1] // preferred hubs
+    ]
+
+    this.address = base58.encode(r(encodable))
 
     this.last_react = new Date()
 
@@ -456,8 +470,8 @@ class Me {
     return channels
   }
 
-  async payRando(counter = 1) {
-    var address = randos[Math.floor(Math.random() * randos.length)]
+  async payMonkey(counter = 1) {
+    var address = monkeys[Math.floor(Math.random() * monkeys.length)]
     // offchain payment
     await me.payChannel({
       address: address,
@@ -484,11 +498,11 @@ class Me {
       //if (counter % 300 == 10) me.getCoins()
 
       setTimeout(() => {
-        me.payRando(counter + 1)
+        me.payMonkey(counter + 1)
       }, Math.round(500 + Math.random() * 3000))
     } else if (counter < 20) {
       setTimeout(() => {
-        me.payRando(counter + 1)
+        me.payMonkey(counter + 1)
       }, Math.round(200))
     }
   }

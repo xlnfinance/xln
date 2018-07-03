@@ -37,37 +37,6 @@ exitsync = false
 
 initDashboard = require('./init_dashboard')
 
-derive = async (username, pw) => {
-  return new Promise((resolve, reject) => {
-    require('../lib/scrypt')(
-      pw,
-      username,
-      {
-        N: Math.pow(2, 12),
-        r: 8,
-        p: 1,
-        dkLen: 32,
-        encoding: 'binary'
-      },
-      (r) => {
-        r = bin(r)
-        resolve(r)
-      }
-    )
-
-    /* Native scrypt. TESTNET: we use pure JS scrypt
-    var seed = await scrypt.hash(pw, {
-      N: Math.pow(2, 16),
-      interruptStep: 1000,
-      p: 2,
-      r: 8,
-      dkLen: 32,
-      encoding: 'binary'
-    }, 32, username)
-
-    return seed; */
-  })
-}
 
 sync = () => {
   if (K.prev_hash) {
@@ -119,26 +88,32 @@ require('./db/offchain_db')
     if (cluster.isWorker) {
       initDashboard()
     }
+
+  } else if (argv.generate_monkeys) {
+    let derive = require('./derive')
+    var me = new Me()
+
+    var addr = []
+    for (let i = 8001; i < 8200; i++){
+      let username = i.toString()
+      let seed = await derive(username, 'password')
+      await me.init(username, seed)
+      addr.push(me.address)
+    }
+    // save new-line separated monkey addresses
+    await promise_writeFile('./tools/monkeys.txt', addr.join("\n"))
   } else {
     initDashboard()
   }
 })()
-/* Get randos:
-var addr = []
-for (let i = 8001; i < 8200; i++){
-  let username = i.toString()
-  let seed = await derive(username, 'password')
-  await me.init(username, seed)
-  addr.push(me.address)
-}
-*/
+
 if (argv.monkey) {
-  randos = fs
-    .readFileSync('./tools/randos.txt')
+  monkeys = fs
+    .readFileSync('./tools/monkeys.txt')
     .toString()
     .split('\n')
     .slice(3, parseInt(argv.monkey) - 8000)
-  l('Loaded randos: ' + randos.length)
+  l('Loaded monkeys: ' + monkeys.length)
 }
 
 openBrowser = () => {

@@ -3,14 +3,6 @@ import UserIcon from './UserIcon'
 import Highlight from './Highlight'
 import Home from './Home'
 
-/* TODO: fair names
-
-         <input style="width:300px" type="text" class="form-control small-input" v-model="set_name" placeholder="Choose Fair Name">
-          <p>
-            <button type="button" class="btn btn-warning" @click="call('setName', {set_name})">Claim Name</button>
-          </p>
-*/
-
 export default {
   components: {
     UserIcon,
@@ -156,7 +148,7 @@ export default {
       var n = 0
       var pay = () => {
         document.querySelector('.btn-success').click()
-        if (n++ < 100) setTimeout(pay, 1000)
+        if (n++ < 100) setTimeout(pay, 100)
       }
       pay()
     },
@@ -659,6 +651,10 @@ export default {
             </p>
             <p>
               <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy})">Pay Now → </button>
+
+              <button type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
+
+
             </p>
 
           </div>

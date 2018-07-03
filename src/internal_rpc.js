@@ -1,4 +1,5 @@
 // Internal RPC serves requests made by the user's browser or by the merchant server app
+const derive = require('./derive')
 
 module.exports = async (ws, json) => {
   var result = {}

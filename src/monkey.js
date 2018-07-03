@@ -9,7 +9,7 @@ if (argv.monkey) {
       me.CHEAT_dontwithdraw = true
       me.payChannel({
         amount: 20000,
-        address: randos[0],
+        address: monkeys[0],
         asset: 1
       })
 
@@ -34,8 +34,8 @@ if (argv.monkey) {
 
   // if we are hub: plan a test check, otherwise start paying randomly.
   if (me.my_hub) {
-    // adding onchain balances to randos
-    for (var dest of randos) {
+    // adding onchain balances to monkeys
+    for (var dest of monkeys) {
       let [box_pubkey, pubkey] = r(base58.decode(dest))
       me.batch.push(['depositTo', 1, [[1000000, pubkey, 0]]])
     }
@@ -67,14 +67,14 @@ Deltas: ${await Delta.count()}\n
       //child_process.exec(`osascript -e 'display notification "${alert}"'`)
     }, 80000)
   } else if (parseInt(base_port) > 8003) {
-    randos.splice(randos.indexOf(me.address), 1) // *except our addr
+    monkeys.splice(monkeys.indexOf(me.address), 1) // *except our addr
 
     setTimeout(() => {
       me.getCoins(1, 10000000)
     }, 6000)
 
     setTimeout(() => {
-      me.payRando()
+      me.payMonkey()
 
       // intended to fail
       me.payChannel({

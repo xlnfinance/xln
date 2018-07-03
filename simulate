@@ -10,7 +10,7 @@ db=
 pm2_opts=--no-autorestart
 wallet_port=26678
 maxport=8008
-fs_cluster_args="--wallet-url=http://localhost:$wallet_port $db --color --monkey=$maxport"
+fair_cluster_args="--wallet-url=http://localhost:$wallet_port $db --color --monkey=$maxport"
 
 function pm2() {
   node_modules/.bin/pm2 "$@"
@@ -24,7 +24,7 @@ killall node 2>/dev/null || true
 rm -rf data*
 rm -rf isolate*
 
-if node fs.js --genesis=test $db | grep "Genesis done"; then
+if node fair.js --genesis=test $db | grep "Genesis done"; then
   echo "Generating with maxport $maxport"
 
   for i in $(seq 8001 $maxport); do
@@ -33,18 +33,18 @@ if node fs.js --genesis=test $db | grep "Genesis done"; then
 
   pm2 start $pm2_opts --name wallet yarn -- parcel serve wallet -p $wallet_port
 
-  fs_node_args="-p8433 --syncdb=off"
-  pm2 start $pm2_opts --name fs fs.js -- $fs_cluster_args $fs_node_args
+  fair_node_args="-p8433 --syncdb=off"
+  pm2 start $pm2_opts --name fair fair.js -- $fair_cluster_args $fair_node_args
 
   for i in $(seq 8001 $maxport); do
-    fs_node_args="-p$i --username=$i --pw=password --datadir=data$i"
+    fair_node_args="-p$i --username=$i --pw=password --datadir=data$i"
     if (( i < 8004 )); then
-      pm2 start $pm2_opts --name fs$i fs.js -- $fs_cluster_args $fs_node_args
+      pm2 start $pm2_opts --name fair$i fair.js -- $fair_cluster_args $fair_node_args
     else
-      pm2 start $pm2_opts --name fs$i fs.js -- $fs_cluster_args $fs_node_args --silent
+      pm2 start $pm2_opts --name fair$i fair.js -- $fair_cluster_args $fair_node_args --silent
     fi
   done
 
-  pm2 attach $(node -p "`pm2 id fs`[0]")  
+  pm2 attach $(node -p "`pm2 id fair`[0]")  
 fi
 
