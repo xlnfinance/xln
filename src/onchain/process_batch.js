@@ -21,7 +21,7 @@ module.exports = async (tx, meta) => {
   nonce = readInt(nonce)
   var asset = 1 // default asset id, can be changed many times with setAsset directive
 
-  if (map(readInt(methodId)) != 'batch') {
+  if (methodMap(readInt(methodId)) != 'batch') {
     return {error: 'Only batched tx are supported'}
   }
 
@@ -85,7 +85,7 @@ module.exports = async (tx, meta) => {
   // at some point, we should apply strategy pattern here.
   // For now it is easier to refer local vars with if/else if cascade.
   for (var t of transactions) {
-    var method = map(readInt(t[0]))
+    var method = methodMap(readInt(t[0]))
 
     if (method == 'setAsset') {
       // all subsequent transactions are now implied to use this asset
@@ -119,7 +119,7 @@ module.exports = async (tx, meta) => {
         }
 
         var body = r([
-          map('withdrawFrom'),
+          methodMap('withdrawFrom'),
           ins.leftId,
           ins.rightId,
           ins.nonce,
@@ -221,7 +221,7 @@ module.exports = async (tx, meta) => {
           ] = r(state)
 
           if (
-            map(readInt(methodId)) != 'disputeWith' ||
+            methodMap(readInt(methodId)) != 'disputeWith' ||
             !leftId.equals(compared == -1 ? signer.pubkey : partner.pubkey) ||
             !rightId.equals(compared == -1 ? partner.pubkey : signer.pubkey) ||
             readInt(dispute_asset) != asset

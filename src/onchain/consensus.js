@@ -13,7 +13,7 @@ propose > prevote on proposal or nil > precommit if 2/3+ prevotes or nil > commi
 
 Long term TODO: redundancy reduced gossip. For now with validators <= 100, everyone sends to everyone.
 
-Byzantine (CHEAT_) scenarios for validator to attack network. 
+Byzantine (CHEAT_) scenarios for validator to attack network.
 
 Expected security properties:
 1/3- cannot make forks or deadlock consensus
@@ -26,7 +26,7 @@ for all scenarios we use 4 nodes: A B C D each with 25% stake. We must tolerate 
 1. A gives all three different blocks.
 = no block gains 2/3+ prevotes, next node is honest.
 
-2. A proposes block1 to B C and block2 to D.  
+2. A proposes block1 to B C and block2 to D.
 = block1 gains 3 prevotes, B and C precommit to block 1. A cheats on them and never gossips its own precommit. This round is failed. Next round B is still locked on block1 and proposes block1 again. B C and D all prevote and precommit on it = block1 is committed.
 
 */
@@ -91,7 +91,7 @@ module.exports = async () => {
           var ordered_tx_body = r(ordered_tx)
 
           var header = r([
-            map('propose'),
+            methodMap('propose'),
             me.record.id,
             K.total_blocks,
             Buffer.from(K.prev_hash, 'hex'),
@@ -130,7 +130,7 @@ module.exports = async () => {
     var prevotable = me.proposed_block ? me.proposed_block.header : 0
 
     setTimeout(() => {
-      me.gossip('prevote', me.block_envelope(map('prevote'), prevotable))
+      me.gossip('prevote', me.block_envelope(methodMap('prevote'), prevotable))
     }, K.gossip_delay)
   } else if (me.status == 'prevote' && phase == 'precommit') {
     me.status = phase
@@ -160,7 +160,7 @@ module.exports = async () => {
       setTimeout(() => {
         me.gossip(
           'precommit',
-          me.block_envelope(map('precommit'), precommitable)
+          me.block_envelope(methodMap('precommit'), precommitable)
         )
       }, K.gossip_delay)
     }
@@ -197,7 +197,7 @@ module.exports = async () => {
       RPC.external_rpc(
         null,
         concat(
-          bin(map('chain')),
+          bin(methodMap('chain')),
           r([
             [
               precommits,
@@ -214,6 +214,6 @@ module.exports = async () => {
   setTimeout(()=>{
     q('onchain', me.consensus)
   }, 500) // watch for new events
-  
+
   return true
 }

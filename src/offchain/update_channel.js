@@ -59,12 +59,12 @@ module.exports = async (
 
     /*
     We received an acksig that doesnt match our current state. Apparently the partner sent
-    transitions at the same time we did. 
+    transitions at the same time we did.
 
     Our job is to rollback to last known signed state, check ackSig against it, if true - apply
     partner's transitions, and then reapply the difference we made with OUR transitions
-    namely - nonce and offdelta diffs because hashlocks are already processed. 
-    
+    namely - nonce and offdelta diffs because hashlocks are already processed.
+
     We hope the partner does the same with our transitions so we both end up on equal states.
 
     */
@@ -90,7 +90,7 @@ module.exports = async (
 
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (let t of transitions) {
-    let m = map(readInt(t[0]))
+    let m = methodMap(readInt(t[0]))
 
     if (m == 'add' || m == 'addrisk') {
       let [amount, hash, exp, destination_address, unlocker] = t[1]
@@ -178,7 +178,7 @@ module.exports = async (
           inward_hl.status = 'new'
         } else {
           // the sender encrypted for us: how much they sent, the preimage for hashlock
-          // an invoice (reason for this payment), and optional refund address 
+          // an invoice (reason for this payment), and optional refund address
           let [box_amount, box_secret, box_invoice, box_refund_address] = r(bin(unlocked))
           box_amount = readInt(box_amount)
 
@@ -378,7 +378,6 @@ module.exports = async (
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
-  
 
   if (argv.syncdb) {
     //all.push(ch.d.save())

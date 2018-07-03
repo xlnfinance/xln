@@ -263,7 +263,7 @@ module.exports = async (ws, json) => {
         })
 
         // mark as processed
-        if (result.receivedAndFailed.length > 0) {  
+        if (result.receivedAndFailed.length > 0) {
           await Payment.update(
             {
               processed: true
@@ -323,7 +323,7 @@ module.exports = async (ws, json) => {
           m,
           'setLimits',
           me.envelope(
-            map('setLimits'),
+            methodMap('setLimits'),
             ch.d.asset,
             ch.d.soft_limit,
             ch.d.hard_limit
@@ -333,7 +333,7 @@ module.exports = async (ws, json) => {
         result.confirm = 'Credit limits updated'
         break
 
-        default: 
+        default:
         result.alert = "No method provided"
     }
 

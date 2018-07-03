@@ -107,7 +107,7 @@ class Me {
     // TODO: make batch persistent on disk
 
     // recommended canonical batch structure: 4 money-related arrays before everything else
-    var merged = [[map('revealSecrets'), []]]
+    var merged = [[methodMap('revealSecrets'), []]]
 
     var per_asset = {}
     let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
@@ -128,7 +128,7 @@ class Me {
         per_asset[kv[1]][ind] = per_asset[kv[1]][ind].concat(kv[2])
       } else {
         // these methods are not batchable and must go separately
-        merged.push([map(kv[0]), kv[1]])
+        merged.push([methodMap(kv[0]), kv[1]])
       }
     })
     me.batch = []
@@ -143,11 +143,11 @@ class Me {
 
         if (i != '1' || multiasset) {
           // 1 is default anyway
-          merged.push([map('setAsset'), [parseInt(i)]])
+          merged.push([methodMap('setAsset'), [parseInt(i)]])
         }
-        merged.push([map('disputeWith'), per_asset[i][0]])
-        merged.push([map('withdrawFrom'), per_asset[i][1]])
-        merged.push([map('depositTo'), per_asset[i][2]])
+        merged.push([methodMap('disputeWith'), per_asset[i][0]])
+        merged.push([methodMap('withdrawFrom'), per_asset[i][1]])
+        merged.push([methodMap('depositTo'), per_asset[i][2]])
         multiasset = true
       }
     }
@@ -160,7 +160,7 @@ class Me {
 
     var nonce = me.record.nonce
 
-    var to_sign = r([map('batch'), nonce, merged])
+    var to_sign = r([methodMap('batch'), nonce, merged])
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
@@ -269,7 +269,7 @@ class Me {
       for (var m of Members) {
         if (me.my_member != m) {
           // we need to have connections ready to all members
-          me.send(m, 'auth', me.envelope(map('auth')))
+          me.send(m, 'auth', me.envelope(methodMap('auth')))
         }
       }
 
@@ -280,7 +280,7 @@ class Me {
       // keep connection to all hubs
       Members.map((m) => {
         if (me.my_member != m) {
-          me.send(m, 'auth', me.envelope(map('auth')))
+          me.send(m, 'auth', me.envelope(methodMap('auth')))
         }
       })
     }
@@ -325,7 +325,7 @@ class Me {
     if (me.my_hub || me.my_member) {
       me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
     } else {
-      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))      
+      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
     }
 
     if (me.my_hub) {
@@ -528,7 +528,7 @@ class Me {
   // a generic interface to send a websocket message to some user or member
 
   send(m, method, tx) {
-    var msg = concat(bin([map(method)]), tx)
+    var msg = concat(bin([methodMap(method)]), tx)
 
     // regular pubkey
     if (m instanceof Buffer) {
@@ -566,7 +566,7 @@ class Me {
       me.users[m.pubkey].onopen = function(e) {
         if (me.id) {
           me.users[m.pubkey].send(
-            concat(bin(map('auth')), me.envelope(map('auth'))),
+            concat(bin(methodMap('auth')), me.envelope(methodMap('auth'))),
             l
           )
         }
