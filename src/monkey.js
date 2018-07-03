@@ -1,5 +1,9 @@
-// Fairlayer runs e2e tests on itself, 
+// Fairlayer runs e2e tests on itself,
 // different nodes acting like "monkeys" and doing different overlapping scenarios
+
+let assertion = (msg, got, expected) => {
+  l(msg + ': ' + (expected.includes(got) ? 'OK' : '>>FAIL<< ' + got))
+}
 
 if (argv.monkey) {
   if (me.record) {
@@ -7,11 +11,14 @@ if (argv.monkey) {
       // trigger the dispute from hub
       me.CHEAT_dontack = true
       me.CHEAT_dontwithdraw = true
-      me.payChannel({
-        amount: 20000,
-        address: monkeys[0],
-        asset: 1
-      })
+
+      setTimeout(() => {
+        me.payChannel({
+          amount: 20000,
+          address: monkeys[0],
+          asset: 1
+        })
+      }, 8000)
 
       // create an asset
       me.batch.push([
@@ -21,11 +28,9 @@ if (argv.monkey) {
     }
 
     if (me.record.id == 3) {
+      // just to make sure there's no leaky unescaped injection
       var xss = '\'"><img src=x onerror=alert(0)>'
-      me.batch.push([
-        'createAsset',
-        ['XSS', 10000000, xss, xss]
-      ])
+      me.batch.push(['createAsset', ['XSS', 10000000, xss, xss]])
 
       // buying bunch of FRB for $4
       me.batch.push(['createOrder', [1, 400, 2, 0.001 * 1000000]])
@@ -61,6 +66,9 @@ Orders: ${await Order.count()}\n
 Assets: ${await Asset.count()}\n
 Deltas: ${await Delta.count()}\n
       `
+
+      assertion('orders', await Order.count(), [1])
+      assertion('payments', await Payment.count(), [214])
 
       l(alert)
 

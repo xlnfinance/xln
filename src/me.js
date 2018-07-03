@@ -65,7 +65,7 @@ class Me {
       */
 
     let encodable = [
-      bin(this.box.publicKey), 
+      bin(this.box.publicKey),
       this.pubkey,
       [1] // preferred hubs
     ]
@@ -340,7 +340,6 @@ class Me {
         }, 15000)
       )
     }
-
   }
 
   async startExternalRPC(advertized_url) {
@@ -388,7 +387,10 @@ class Me {
 
       if (K) {
         fs.writeFileSync(
-          require('path').resolve(__dirname, '../' + datadir + '/onchain/k.json'),
+          require('path').resolve(
+            __dirname,
+            '../' + datadir + '/onchain/k.json'
+          ),
           stringify(K),
           function(err) {
             if (err) return console.log(err)

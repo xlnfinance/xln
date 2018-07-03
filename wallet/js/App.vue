@@ -28,7 +28,7 @@ export default {
       }, 20000)
     }
 
-    setInterval(()=>app.$forceUpdate(), 1000)
+    setInterval(() => app.$forceUpdate(), 1000)
   },
   destroyed() {
     clearInterval(this.interval)
@@ -108,7 +108,6 @@ export default {
       // which fields can be changed? all, amount, none
       outward_editable: hashargs['editable'] ? hashargs['editable'] : 'all',
 
-      
       addrisk: false,
       lazy: false,
 
@@ -167,12 +166,12 @@ export default {
         return str.split(', ')[1]
       } else {
         app.skip_prev_date = str.split(', ')[0]
-        return str.split(', ')[1] + ', <b>'+str.split(', ')[0]+'</b>'
+        return str.split(', ')[1] + ', <b>' + str.split(', ')[0] + '</b>'
       }
     },
-    
+
     assetPayments: (asset) => {
-      return app.payments.filter(p=>p.asset == asset)
+      return app.payments.filter((p) => p.asset == asset)
     },
 
     toHexString: (byteArray) => {
@@ -213,8 +212,6 @@ export default {
         obj.partner = app.ch.partner
         obj.request_amount = app.uncommy(app.request_amount)
       }
-
-
 
       app.call('rebalance', obj)
       // }
@@ -257,8 +254,8 @@ export default {
       if (!user) user = app.record
       if (!user) return 0
 
-      if (user['balance'+asset]) {
-        return user['balance'+asset]
+      if (user['balance' + asset]) {
+        return user['balance' + asset]
       } else {
         if (user.balances) {
           var bal = JSON.parse(user.balances)[asset]
@@ -310,7 +307,9 @@ export default {
       } else if (parts.they_uninsured > 0) {
         o += `${sep}${c(parts.they_insured)} + ${c(parts.they_uninsured)}`
       } else {
-        o += `${parts.insured > 0 ? c(parts.insured) : ''}${sep}${parts.they_insured > 0 ? c(parts.they_insured) : ''}`
+        o += `${parts.insured > 0 ? c(parts.insured) : ''}${sep}${
+          parts.they_insured > 0 ? c(parts.they_insured) : ''
+        }`
       }
       return `${prefix} (${ins.leftId}) ${o} (${ins.rightId})`
     },
@@ -426,7 +425,7 @@ export default {
 
 
     <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
-      <a class="navbar-brand" href="#">Fairlayer</a>
+      <a class="navbar-brand" href="#" style="padding: 10px"><img width="30px" src="../img/fl.png"> Fairlayer</a>
       <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
@@ -481,7 +480,7 @@ export default {
           </li>
 
           <li class="nav-item">
-            <a class="nav-link" href="https://github.com/fairlayer/fair/blob/master/wiki/start.md">📒 Docs</a>
+            <a class="nav-link" href="https://github.com/fairlayer/wiki">📒 Docs</a>
           </li>
 
           <li class="nav-item">

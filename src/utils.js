@@ -100,7 +100,6 @@ parseAddress = (addr) => {
   }
 }
 
-
 trim = (ad) => toHex(ad).substr(0, 4)
 
 logstates = (a, b, c, d) => {
@@ -187,12 +186,16 @@ child_process = require('child_process')
 r = function(a) {
   if (a instanceof Buffer) {
     try {
-    return rlp.decode(a)
-    }catch(e){ return []; }
+      return rlp.decode(a)
+    } catch (e) {
+      return []
+    }
   } else {
-    try{
-    return rlp.encode(a)
-    }catch(e){return new Buffer([]) }
+    try {
+      return rlp.encode(a)
+    } catch (e) {
+      return new Buffer([])
+    }
   }
 }
 
@@ -227,7 +230,7 @@ q = async function(key, job) {
           //clearTimeout(deadlock)
           //l('Section took: ' + (performance.now() - started))
         } catch (e) {
-          l("Error in q", e)
+          l('Error in q', e)
           setTimeout(() => {
             fatal(e)
           }, 100)
@@ -301,7 +304,7 @@ beforeFees = (amount, fees) => {
 afterFees = (amount, fees) => {
   if (!(fees instanceof Array)) fees = [fees]
   for (var fee of fees) {
-    var fee = Math.round(amount / (1 + fee) * fee)
+    var fee = Math.round((amount / (1 + fee)) * fee)
     if (fee == 0) fee = K.min_fee
     if (fee > K.max_fee) fee = K.max_fee
     amount = amount - fee

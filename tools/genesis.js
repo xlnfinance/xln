@@ -14,7 +14,7 @@ module.exports = async () => {
   // K is a handy config JSON
   K = {
     // global network pepper to protect derivation from rainbow tables
-    network_name: 'main',
+    network_name: 'main' ,
 
     usable_blocks: 0, // blocks that have some extra space (to ensure disputes add on-time)
     total_blocks: 0, // total number of blocks full or not

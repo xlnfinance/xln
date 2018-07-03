@@ -1,4 +1,5 @@
 // derives private key from username and password using memory hard alg
+// Why brainwallets are great: https://medium.com/fairlayer/why-brainwallet-are-great-for-cryptocurrency-ff73dd65ecd9
 
 module.exports = async (username, pw) => {
   return new Promise((resolve, reject) => {
