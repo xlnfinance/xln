@@ -14,7 +14,7 @@ var async_fn = async (ws, inputType, args) => {
   if (inputType == 'auth') {
     var [pubkey, sig, body] = args
 
-    if (ec.verify(r([map('auth')]), sig, pubkey)) {
+    if (ec.verify(r([methodMap('auth')]), sig, pubkey)) {
       //if (pubkey.equals(me.pubkey)) return false
 
       // wrap in custom WebSocketClient if it is a raw ws object
@@ -120,7 +120,7 @@ var async_fn = async (ws, inputType, args) => {
       return
     }
 
-    if (ec.verify(r([map(inputType), me.proposed_block.header]), sig, pubkey)) {
+    if (ec.verify(r([methodMap(inputType), me.proposed_block.header]), sig, pubkey)) {
       m[inputType] = sig
       //l(`Received ${inputType} from ${m.id}`)
     } else {
@@ -206,7 +206,7 @@ var async_fn = async (ws, inputType, args) => {
         return [r(b.precommits), b.header, b.ordered_tx_body]
       })
 
-      ws.send(concat(bin(map('chain')), r(chain)), wscb)
+      ws.send(concat(bin(methodMap('chain')), r(chain)), wscb)
     } else {
       // l("No blocks to sync after " + msg.toString('hex'))
     }
@@ -219,7 +219,7 @@ var async_fn = async (ws, inputType, args) => {
 
     if (
       !ec.verify(body, sig, pubkey) ||
-      readInt(limits[0]) != map('setLimits')
+      readInt(limits[0]) != methodMap('setLimits')
     ) {
       l('Invalid message')
       return false
@@ -259,7 +259,7 @@ var async_fn = async (ws, inputType, args) => {
     }
 
     var withdrawal = r([
-      map('withdrawFrom'),
+      methodMap('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.ins.nonce,
@@ -287,7 +287,7 @@ var async_fn = async (ws, inputType, args) => {
     var ch = await me.getChannel(pubkey, asset)
 
     var withdrawal = [
-      map('withdrawFrom'),
+      methodMap('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
       ch.ins.nonce,
@@ -318,7 +318,7 @@ var async_fn = async (ws, inputType, args) => {
     // ackSig defines the sig of last known state between two parties.
     // then each transitions contains an action and an ackSig after action is committed
     let [method, asset, ackSig, transitions, debug] = r(body)
-    if (map(readInt(method)) != 'update') {
+    if (methodMap(readInt(method)) != 'update') {
       loff('Invalid update input')
       return false
     }
@@ -337,7 +337,7 @@ var async_fn = async (ws, inputType, args) => {
     })
 
     /*
-    We MUST ack if there were any transitions, otherwise if it was ack w/o transitions 
+    We MUST ack if there were any transitions, otherwise if it was ack w/o transitions
     to ourselves then do an opportunistic flush (flush if any). Forced ack here would lead to recursive ack pingpong!
     Flushable are other channels that were impacted by this update
     Sometimes sender is already included in flushable, so don't flush twice
@@ -377,5 +377,5 @@ module.exports = (ws, msg) => {
 
   var args = r(msg.slice(1))
 
-  async_fn(ws, map(msg[0]), args)
+  async_fn(ws, methodMap(msg[0]), args)
 }
