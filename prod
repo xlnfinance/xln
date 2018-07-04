@@ -35,7 +35,7 @@ killall Fairlayer 2>/dev/null || true
 
 node fair.js --genesis=test $db --prod-server
 fair_node_args="-p8000 --db-pool=50"
-pm2 start $pm2_opts --name fair fair.js -- $fair_cluster_args $fair_node_args
+pm2 start $pm2_opts --name fair8000 fair.js -- $fair_cluster_args $fair_node_args
 
 for i in $(seq 8001 $maxport); do
   rsync -q -rva --exclude=offchain data/* data$i

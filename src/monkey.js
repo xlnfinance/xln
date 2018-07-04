@@ -18,12 +18,12 @@ if (argv.monkey) {
           address: monkeys[0],
           asset: 1
         })
-      }, 8000)
+      }, 12000)
 
       // create an asset
       me.batch.push([
         'createAsset',
-        ['TEST2', 13371337, 'Test coin', 'No goal']
+        ['TESTCOIN', 13371337, 'Test coin', 'No goal']
       ])
     }
 
@@ -73,7 +73,7 @@ Deltas: ${await Delta.count()}\n
       l(alert)
 
       //child_process.exec(`osascript -e 'display notification "${alert}"'`)
-    }, 80000)
+    }, 30000)
   } else if (parseInt(base_port) > 8003) {
     monkeys.splice(monkeys.indexOf(me.address), 1) // *except our addr
 

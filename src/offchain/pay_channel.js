@@ -4,7 +4,6 @@ module.exports = async (opts) => {
     let secret = crypto.randomBytes(32)
     let hash = sha3(secret)
 
-
     //l('paying ', opts.destination.length, toHex(opts.destination))
 
     // todo not generate secret and exp here and do it during 'add'ing
@@ -15,13 +14,17 @@ module.exports = async (opts) => {
 
     var addr = parseAddress(opts.address)
 
-    // invoice inside the address takes priority
-    if (addr.invoice) {
-      opts.invoice = addr.invoice
-    }
-
     // use user supplied private message, otherwise generate random tag
-    let invoice = opts.invoice ? concat(Buffer.from([1]), bin(opts.invoice)) : concat(Buffer.from([2]), crypto.randomBytes(16))
+    // invoice inside the address takes priority
+    if (addr.invoice || opts.invoice) {
+      l('Rewritten invoice with ', addr)
+      opts.invoice = concat(
+        Buffer.from([1]),
+        bin(addr.invoice ? addr.invoice : opts.invoice)
+      )
+    } else {
+      opts.invoice = concat(Buffer.from([2]), crypto.randomBytes(16))
+    }
 
     let amount = parseInt(opts.amount)
 
@@ -40,7 +43,7 @@ module.exports = async (opts) => {
 
     // we are sender and passing to receiver the amount, preimage, invoice and our own address
     let unlocker_box = encrypt_box(
-      r([amount, secret, invoice, bin(me.address)]),
+      r([amount, secret, opts.invoice, bin(me.address)]),
       unlocker_nonce,
       addr.box_pubkey,
       me.box.secretKey
@@ -70,7 +73,7 @@ module.exports = async (opts) => {
 
         unlocker: unlocker,
         destination_address: opts.address,
-        invoice: invoice
+        invoice: opts.invoice
       })
 
       if (argv.syncdb) {

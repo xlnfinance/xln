@@ -203,7 +203,7 @@ Payment = privSequelize.define(
     destination_address: Sequelize.TEXT,
 
     // sender may decide to provide refund address inside the private message
-    refund_address: Sequelize.TEXT,
+    source_address: Sequelize.TEXT,
 
     // who caused us to make this payment (if we're hub)?
     inward_pubkey: Sequelize.BLOB

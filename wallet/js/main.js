@@ -29,16 +29,21 @@ if (hashargs.auth_code) {
   history.replaceState(null, null, '/#wallet')
 }
 
-String.prototype.hexEncode = function(){
-    var hex, i;
+if (opener) {
+  // let the opener know this machine has fair installed
+  opener.postMessage({status: 'loaded'}, '*')
+}
 
-    var result = "";
-    for (i=0; i<this.length; i++) {
-        hex = this.charCodeAt(i).toString(16);
-        result += ("0"+hex).slice(-2);
-    }
+String.prototype.hexEncode = function() {
+  var hex, i
 
-    return result
+  var result = ''
+  for (i = 0; i < this.length; i++) {
+    hex = this.charCodeAt(i).toString(16)
+    result += ('0' + hex).slice(-2)
+  }
+
+  return result
 }
 
 window.renderRisk = (hist) => {
@@ -136,15 +141,11 @@ window.render = (r) => {
     return false
   }
 
-
   // verify if opener-initiated last hashargs payment succeded (we know secret for this invoice)
 
-  if (
-    opener &&
-    r.payment_complete 
-  ) {
-    l("Pinging parent")
-    opener.postMessage({status: 'paid'}, '*');
+  if (opener && r.payment_complete) {
+    l('Pinging parent')
+    opener.postMessage({status: 'paid'}, '*')
   }
 
   Object.assign(window.app, r)

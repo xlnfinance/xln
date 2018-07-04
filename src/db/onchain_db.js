@@ -199,12 +199,12 @@ User.idOrKey = async function(id) {
 }
 
 User.prototype.asset = function(asset, diff) {
-  if (this['balance'+asset]) {
+  if (this['balance' + asset]) {
     // the default FRD is just a column
     if (diff) {
-      return (this['balance'+asset] += diff)
+      return (this['balance' + asset] += diff)
     } else {
-      return this['balance'+asset]
+      return this['balance' + asset]
     }
   } else {
     // read and write on the fly
@@ -255,7 +255,7 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
   }
 
   // no debts left (including other assets)?
-  if (await this.countDebts() == 0) {
+  if ((await this.countDebts()) == 0) {
     this.has_debts = false
   }
 }
@@ -401,7 +401,7 @@ Insurance.prototype.resolve = async function() {
   //this.dispute_nonce = null
   this.dispute_offdelta = null
 
-  //await this.save()
+  await this.save()
 
   var withUs = me.is_me(left.pubkey)
     ? right

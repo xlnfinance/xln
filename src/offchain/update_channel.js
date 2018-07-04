@@ -1,11 +1,5 @@
 // Receives an ack and set of transitions to execute on top of it
-module.exports = async (
-  pubkey,
-  asset,
-  ackSig,
-  transitions,
-  debug
-) => {
+module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
   let ch = await me.getChannel(pubkey, asset)
   let all = []
 
@@ -96,7 +90,6 @@ module.exports = async (
       let [amount, hash, exp, destination_address, unlocker] = t[1]
 
       destination_address = destination_address.toString()
-
       ;[exp, amount] = [exp, amount].map(readInt)
 
       let new_type = m
@@ -179,11 +172,13 @@ module.exports = async (
         } else {
           // the sender encrypted for us: how much they sent, the preimage for hashlock
           // an invoice (reason for this payment), and optional refund address
-          let [box_amount, box_secret, box_invoice, box_refund_address] = r(bin(unlocked))
+          let [box_amount, box_secret, box_invoice, box_source_address] = r(
+            bin(unlocked)
+          )
           box_amount = readInt(box_amount)
 
           inward_hl.invoice = box_invoice
-          inward_hl.refund_address = box_refund_address.toString()
+          inward_hl.source_address = box_source_address.toString()
 
           inward_hl.secret = box_secret
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
@@ -226,7 +221,11 @@ module.exports = async (
           dest_ch.payments.push(outward_hl)
 
           if (trace)
-            l(`Mediating ${outward_amount} payment to ${trim(destination_address)}`)
+            l(
+              `Mediating ${outward_amount} payment to ${trim(
+                destination_address
+              )}`
+            )
 
           //if (argv.syncdb) all.push(outward_hl.save())
 
@@ -327,7 +326,6 @@ module.exports = async (
           me.metrics.fees.current += pull_hl.amount - outward_hl.amount
           // add to total volume
           me.metrics.volume.current += pull_hl.amount
-
         }
       } else {
         // otherwise, we are user who made payment on its own
@@ -349,7 +347,7 @@ module.exports = async (
 
   if (ours != theirs) {
     l(ours, theirs)
-    fatal("Unexpected final states after transitions ", transitions)
+    fatal('Unexpected final states after transitions ', transitions)
   }
 
   // since we applied partner's diffs, all we need is to add the diff of our own transitions

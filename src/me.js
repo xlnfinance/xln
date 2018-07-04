@@ -473,7 +473,7 @@ class Me {
   }
 
   async payMonkey(counter = 1) {
-    var address = monkeys[Math.floor(Math.random() * monkeys.length)]
+    var address = monkeys.randomElement()
     // offchain payment
     await me.payChannel({
       address: address,

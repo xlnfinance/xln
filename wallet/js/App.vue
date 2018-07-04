@@ -673,7 +673,7 @@ export default {
                 <tr v-bind:key="h.id" v-for="(h, index) in assetPayments(asset).slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                  <td @click="outward_address=h.is_inward ? h.refund_address : h.destination_address; outward_amount=commy(h.amount); outward_invoice = h.invoice"><u class="dotted">{{h.is_inward ? "From "+trim(h.refund_address): "To "+trim(h.destination_address)}}</u>: {{h.invoice}}</td>
+                  <td @click="outward_address=h.is_inward ? h.source_address : h.destination_address; outward_amount=commy(h.amount); outward_invoice = h.invoice"><u class="dotted">{{h.is_inward ? "From "+trim(h.source_address): "To "+trim(h.destination_address)}}</u>: {{h.invoice}}</td>
                   <td v-html="skipDate(h, index)"></td>
                 </tr>
 

@@ -65,6 +65,10 @@ Buffer.prototype.toJSON = function() {
   return this.toString('hex')
 }
 
+Array.prototype.randomElement = function() {
+  return this[Math.floor(Math.random() * this.length)]
+}
+
 prettyState = (state) => {
   if (!state[1]) return false
   state[1][2] = readInt(state[1][2])
@@ -85,9 +89,11 @@ prettyState = (state) => {
 
 parseAddress = (addr) => {
   addr = addr.toString()
+  var invoice = false
+
   if (addr.includes('#')) {
     // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
-    var [addr, invoice] = addr.split('#')
+    ;[addr, invoice] = addr.split('#')
   }
 
   var parts = r(base58.decode(addr))

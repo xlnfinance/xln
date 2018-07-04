@@ -1,5 +1,5 @@
 module.exports = async () => {
-  await me.syn
+  await me.syncdb()
 
   let result = {}
 

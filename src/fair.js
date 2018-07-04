@@ -25,8 +25,6 @@ if (on_server) {
   ).install()
 }
 
-
-
 cache = {
   ins: {},
   users: {},
@@ -37,13 +35,11 @@ exitsync = false
 
 initDashboard = require('./init_dashboard')
 
-
 sync = () => {
   if (K.prev_hash) {
     // if we're member then sync from anyone except us
     var set = me.my_member ? Members.filter((m) => m != me.my_member) : Members
-    var chosen = set[Math.floor(Math.random() * set.length)]
-
+    var chosen = set.randomElement()
     //|| me.my_member
 
     if (K.ts < ts() - K.blocktime / 2 || me.my_member) {
@@ -88,20 +84,19 @@ require('./db/offchain_db')
     if (cluster.isWorker) {
       initDashboard()
     }
-
   } else if (argv.generate_monkeys) {
     let derive = require('./derive')
     var me = new Me()
 
     var addr = []
-    for (let i = 8001; i < 8200; i++){
+    for (let i = 8001; i < 8200; i++) {
       let username = i.toString()
       let seed = await derive(username, 'password')
       await me.init(username, seed)
       addr.push(me.address)
     }
     // save new-line separated monkey addresses
-    await promise_writeFile('./tools/monkeys.txt', addr.join("\n"))
+    await promise_writeFile('./tools/monkeys.txt', addr.join('\n'))
   } else {
     initDashboard()
   }
@@ -119,5 +114,7 @@ if (argv.monkey) {
 openBrowser = () => {
   var url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
   l(note(`Open ${link(url)} in your browser`))
-  try{ opn(url) } catch(e){}
+  try {
+    opn(url)
+  } catch (e) {}
 }

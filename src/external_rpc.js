@@ -86,11 +86,10 @@ var async_fn = async (ws, inputType, args) => {
     }
 
     // no precommits means dry run
-    if (!await me.processBlock([], header, ordered_tx_body)) {
+    if (!(await me.processBlock([], header, ordered_tx_body))) {
       l(`Bad block proposed ${toHex(header)}`)
       return false
     }
-
 
     // consensus operations are in-memory for now
     //l("Saving proposed block")
@@ -120,14 +119,20 @@ var async_fn = async (ws, inputType, args) => {
       return
     }
 
-    if (ec.verify(r([methodMap(inputType), me.proposed_block.header]), sig, pubkey)) {
+    if (
+      ec.verify(
+        r([methodMap(inputType), me.proposed_block.header]),
+        sig,
+        pubkey
+      )
+    ) {
       m[inputType] = sig
       //l(`Received ${inputType} from ${m.id}`)
     } else {
       l(
-        `This ${inputType} by ${m.id} doesn't work for our block ${
-          toHex(me.proposed_block.header)
-        }`
+        `This ${inputType} by ${m.id} doesn't work for our block ${toHex(
+          me.proposed_block.header
+        )}`
       )
     }
     // testnet stuff
@@ -138,10 +143,20 @@ var async_fn = async (ws, inputType, args) => {
     if (action == 1) {
       var asset = readInt(args[1])
       var amount = readInt(args[2])
+
+      var friendly_invoice = [
+        'You are welcome!',
+        'With great power comes great responsibility',
+        "It's free money!",
+        'Call me maybe?',
+        "'\"><img src=x onerror=alert('pwned')>",
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+      ].randomElement()
+
       me.payChannel({
         address: args[3],
         amount: amount,
-        invoice: Buffer.alloc(1),
+        invoice: friendly_invoice,
         asset: asset
       })
     }
@@ -152,7 +167,7 @@ var async_fn = async (ws, inputType, args) => {
       var started = K.total_blocks
       //l(`Sync since ${started} ${args.length}`)
       for (var block of args) {
-        if (!await me.processBlock(block[0], block[1], block[2])) {
+        if (!(await me.processBlock(block[0], block[1], block[2]))) {
           l('Bad chain?')
           break
         }
@@ -327,13 +342,7 @@ var async_fn = async (ws, inputType, args) => {
 
     let flushable = await q([pubkey, asset], async () => {
       //loff(`--- Start update ${trim(pubkey)} - ${transitions.length}`)
-      return me.updateChannel(
-        pubkey,
-        asset,
-        ackSig,
-        transitions,
-        debug
-      )
+      return me.updateChannel(pubkey, asset, ackSig, transitions, debug)
     })
 
     /*

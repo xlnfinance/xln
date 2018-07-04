@@ -88,37 +88,44 @@ module.exports = async (a) => {
 
   var cb = function(req, res) {
     // Clickjacking protection
-    res.setHeader("X-Frame-Options", "DENY")
+    res.setHeader('X-Frame-Options', 'DENY')
 
     var [path, query] = req.url.split('?')
     if (path.match(/^\/Fair-([0-9]+)\.tar\.gz$/)) {
-      var file = './' + datadir + '/offchain' + req.url
-      var stat = fs.statSync(file)
-      res.writeHeader(200, {'Content-Length': stat.size})
-      var fReadStream = fs.createReadStream(file)
-      fReadStream.on('data', function(chunk) {
-        if (!res.write(chunk)) {
-          fReadStream.pause()
-        }
-      })
-      fReadStream.on('end', function() {
-        res.end()
-      })
-      res.on('drain', function() {
-        fReadStream.resume()
-      })
-    } else if (path=='/health') {
-      res.end(JSON.stringify({
-        uptime: ts() - node_started_at
-      }))
-    } else if (path=='/rpc') {
-      res.setHeader("Content-Type", "application/json")
+      // the snapshot may have been deleted meanwhile
+      try {
+        var file = './' + datadir + '/offchain' + req.url
+        var stat = fs.statSync(file)
+        res.writeHeader(200, {'Content-Length': stat.size})
+        var fReadStream = fs.createReadStream(file)
+        fReadStream.on('data', function(chunk) {
+          if (!res.write(chunk)) {
+            fReadStream.pause()
+          }
+        })
+        fReadStream.on('end', function() {
+          res.end()
+        })
+        res.on('drain', function() {
+          fReadStream.resume()
+        })
+      } catch (e) {
+        l(e)
+      }
+    } else if (path == '/health') {
+      res.end(
+        JSON.stringify({
+          uptime: ts() - node_started_at
+        })
+      )
+    } else if (path == '/rpc') {
+      res.setHeader('Content-Type', 'application/json')
 
       var queryData = ''
       req.on('data', function(data) {
         queryData += data
       })
-  
+
       req.on('end', function() {
         // HTTP /rpc endpoint supports passing request in GET too
         var json = Object.assign(querystring.parse(query), parse(queryData))
@@ -159,12 +166,14 @@ module.exports = async (a) => {
     await me.start()
   }
 
-  server.listen(on_server ? base_port+200 : base_port).once('error', function(err) {
-    if (err.code === 'EADDRINUSE') {
-      openBrowser()
-      fatal(`Port ${highlight(base_port)} is currently in use, quitting`)
-    }
-  })
+  server
+    .listen(on_server ? base_port + 200 : base_port)
+    .once('error', function(err) {
+      if (err.code === 'EADDRINUSE') {
+        openBrowser()
+        fatal(`Port ${highlight(base_port)} is currently in use, quitting`)
+      }
+    })
 
   // opn doesn't work in SSH console
   if (!argv.silent) openBrowser()
