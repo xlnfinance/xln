@@ -1,5 +1,5 @@
 // serves default wallet and internal rpc on the same port
-const derive = require('./derive')
+const derive = require('./utils/derive')
 
 module.exports = async (a) => {
   let ooops = async (err) => {

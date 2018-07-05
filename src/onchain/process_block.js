@@ -105,7 +105,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   let ordered_tx = r(ordered_tx_body)
 
-
   K.ts = timestamp
 
   // Processing transactions one by one
@@ -141,6 +140,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // When "tail" gets too long, create new snapshot
   if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
     K.bytes_since_last_snapshot = 0
+    K.snapshots_taken++
 
     meta.cron.push(['snapshot', K.total_blocks])
     var old_height = K.last_snapshot_height
@@ -167,7 +167,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   if (is_usable && K.usable_blocks % 200 == 0) {
-    // Executing onchaing gov proposals that are due
+    // Executing smart updates that are due
     let jobs = await Proposal.findAll({
       where: {delayed: {[Op.lte]: K.usable_blocks}},
       include: {all: true}
@@ -204,21 +204,21 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     )
   }
 
-
   if (K.bet_maturity && K.ts > K.bet_maturity) {
-    l("🎉 Maturity day! Copy all FRB balances to FRD")
+    l('🎉 Maturity day! Copy all FRB balances to FRD')
     meta.cron.push(['maturity'])
 
     await me.syncdb()
 
     // first assignment must happen before zeroing
-    await sequelize.query("UPDATE users SET balance1 = balance1 + balance2, balance2 = 0")
+    await sequelize.query(
+      'UPDATE users SET balance1 = balance1 + balance2, balance2 = 0'
+    )
     //await sequelize.query("UPDATE users SET ")
     //User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
 
     K.bet_maturity = false
   }
-
 
   // saving current proposer and their fees earned
   all.push(meta.proposer.save())

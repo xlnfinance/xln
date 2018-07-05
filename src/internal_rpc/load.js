@@ -1,4 +1,4 @@
-const derive = require('./../derive')
+const derive = require('../utils/derive')
 
 module.exports = async (p) => {
   let result = {}

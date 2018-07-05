@@ -22,9 +22,9 @@
             &nbsp;<a href="https://www.reddit.com/r/fairlayer/"><img style="width:32px" src="../img/reddit.svg"></a> 
             </p>
 
-            <p>Fairlayer is a decentralized payment network that takes asset stability and instant transfers of traditional finance and adds security of the blockchain.</p>
+            <p>Fairlayer is a decentralized payment network that combines instant transfers and stability of traditional finance with security of a blockchain.</p>
 
-            <p>It is composed of two loosely coupled layers: globally shared "onchain" state and node-to-node "offchain" protocol. It repurposes the blockchain's slow replicated state to work as insurance layer and crypto court for disputes, moving all payments to be processed instantly and cheaply through non-custodial hubs.</p>
+            <p>It is composed of two loosely coupled layers: globally shared compact "onchain" state and node-to-node "offchain" protocol. It repurposes the blockchain's from daily payments to work as insurance and settlement layer and crypto court for disputes, moving all payments to be processed instantly and cheaply through non-custodial hubs. The platform supports any type of a fungible numerical asset: from stable fiat currencies to security tokens and stock.</p>
 
             <p><b>Balance of scalability and decentralization.</b> Fairlayer can support billion+ transactions per second and scale to all world value transfers, while having all laptops and mobile phones as full nodes.</p>
 

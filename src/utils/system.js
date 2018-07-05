@@ -7,7 +7,7 @@ http = require('http')
 os = require('os')
 ws = require('ws')
 querystring = require('querystring')
-opn = require('../lib/opn')
+opn = require('../../lib/opn')
 
 var chalk = require('chalk') // pretty logs?
 highlight = (text) => `"${chalk.bold(text)}"`
@@ -22,7 +22,7 @@ base58 = require('base-x')(
   '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 )
 
-nacl = require('../lib/nacl')
+nacl = require('../../lib/nacl')
 
 encrypt_box = nacl.box
 open_box = nacl.box.open
@@ -40,13 +40,13 @@ promise_writeFile = require('util').promisify(fs.writeFile)
 
 // encoders
 BN = require('bn.js')
-stringify = require('../lib/stringify')
-rlp = require('../lib/rlp') // patched rlp for signed-integer
+stringify = require('../../lib/stringify')
+rlp = require('../../lib/rlp') // patched rlp for signed-integer
 
 Sequelize = require('sequelize')
 Op = Sequelize.Op
 
-Me = require('./me').Me
+Me = require('../me').Me
 
 // globals
 K = false
@@ -56,8 +56,8 @@ Members = false
 PK = {}
 
 RPC = {
-  internal_rpc: require('./internal_rpc'),
-  external_rpc: require('./external_rpc')
+  internal_rpc: require('../internal_rpc'),
+  external_rpc: require('../external_rpc')
 }
 
 // it's just handier when Buffer is stringified into hex vs Type: Buffer..
@@ -67,24 +67,6 @@ Buffer.prototype.toJSON = function() {
 
 Array.prototype.randomElement = function() {
   return this[Math.floor(Math.random() * this.length)]
-}
-
-prettyState = (state) => {
-  if (!state[1]) return false
-  state[1][2] = readInt(state[1][2])
-  state[1][3] = readInt(state[1][3])
-  state[1][4] = readInt(state[1][4])
-
-  // amount and exp, except the hash
-  state[2].map((h) => {
-    h[0] = readInt(h[0])
-    h[2] = readInt(h[2])
-  })
-
-  state[3].map((h) => {
-    h[0] = readInt(h[0])
-    h[2] = readInt(h[2])
-  })
 }
 
 parseAddress = (addr) => {
@@ -107,49 +89,6 @@ parseAddress = (addr) => {
 }
 
 trim = (ad) => toHex(ad).substr(0, 4)
-
-logstates = (a, b, c, d) => {
-  l('Our state\n', ascii_state(a))
-  l('Our signed state\n', ascii_state(b))
-  l('Their state\n', ascii_state(c))
-  l('Their signed state\n', ascii_state(d))
-}
-ascii_state = (state) => {
-  if (!state[1]) return false
-  let hash = toHex(sha3(r(state)))
-
-  let locks = (hl) => {
-    return hl
-      .map((h) => h[0] + '/' + (h[1] ? trim(h[1]) : 'N/A') + '/' + h[2])
-      .join(', ')
-  }
-
-  return `Hash ${trim(hash)} | ${trim(state[1][0])}-${trim(state[1][1])} | #${
-    state[1][2]
-  } | ${state[1][3]} | \$${state[1][4]}
------
-+${locks(state[2])}
------
--${locks(state[3])}
-`
-}
-
-ascii_tr = (transitions) => {
-  try {
-    for (var t of transitions) {
-      var m = methodMap(readInt(t[0]))
-
-      if (m == 'add') {
-        var info = `add ${readInt(t[1][0])} ${trim(t[1][1])} ${readInt(
-          t[1][2]
-        )} ${trim(t[1][3])}`
-      } else {
-        var info = `${m} ${trim(t[1][1])}`
-      }
-      l(`${info}`)
-    }
-  } catch (e) {}
-}
 
 l = (...args) => {
   console.log(...args)
@@ -356,66 +295,3 @@ usage = () => {
   })
 }
 
-// enumerator of all methods and tx types in the system
-methodMap = (i) => {
-  let methodMap = [
-    'placeholder',
-
-    // consensus
-    'propose', // same word used to propose amendments
-    'prevote',
-    'precommit',
-
-    // onchain transactions
-    'batch', // all transactions are batched one by one
-
-    // methods below are per-assets (ie should have setAsset directive beforehand)
-    'setAsset',
-    'disputeWith', // defines signed state (balance proof). Used only as last resort!
-    'withdrawFrom', // mutual *instant* withdrawal proof. Used during normal cooperation.
-    'depositTo', // send money to some channel or user
-
-    // onchain exchange
-    'createOrder',
-    'cancelOrder',
-
-    'createAsset',
-    'createHub',
-
-    'revealSecrets', // reveal secrets if partner has not acked our del settle
-    'vote',
-
-    // offchain
-    'update', // gives ack and 0 or more transitions on top
-
-    'setLimits', // define credit limits to partner
-
-    'add', // we add hashlock transfer to state.
-    'del', // we've got the secret or couldn't get secret for <reason>
-
-    // same, but off-canonical-state and risky (receiver is not required to return secret to claim money)
-    'addrisk',
-    'delrisk',
-
-    // fail reasons
-    'failOffline',
-    'failNoCapacity',
-
-    // offchain inputs
-    'auth', // any kind of offchain auth signatures between partners
-    'tx', // propose array of tx to add to block
-    'sync', // i want to sync since this prev_hash
-    'chain', // return X blocks since given prev_hash
-    'requestWithdrawFrom',
-    'ack',
-    'testnet'
-  ]
-
-  if (typeof i === 'string') {
-    i = i.trim()
-    if (methodMap.indexOf(i) == -1) throw `No such method: "${i}"`
-    return methodMap.indexOf(i)
-  } else {
-    return methodMap[i]
-  }
-}

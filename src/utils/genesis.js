@@ -1,5 +1,5 @@
 // this file is only used during genesis to set initial K params and create first validators
-const derive = require('../src/derive')
+const derive = require('./derive')
 
 module.exports = async () => {
   l('Start genesis')
@@ -14,7 +14,7 @@ module.exports = async () => {
   // K is a handy config JSON
   K = {
     // global network pepper to protect derivation from rainbow tables
-    network_name: 'main' ,
+    network_name: 'main',
 
     usable_blocks: 0, // blocks that have some extra space (to ensure disputes add on-time)
     total_blocks: 0, // total number of blocks full or not
@@ -31,6 +31,7 @@ module.exports = async () => {
     bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
     snapshot_after_bytes: 1000000,
+    snapshots_taken: 0,
     proposals_created: 0,
 
     // cents per byte of tx
@@ -60,9 +61,8 @@ module.exports = async () => {
     // latest block done at
     ts: 0,
 
-    
     //Time.at(1913370000) => 2030-08-19 20:40:00 +0900
-    
+
     bet_maturity: ts() + 100, // when all FRB turn into FRD
     created_at: ts(),
 
@@ -76,8 +76,7 @@ module.exports = async () => {
 
     cache_timeout: 120, // keep channel in memory since last use
     safe_sync_delay: 60, // after what time prohibit using wallet if unsynced
-    sync_limit: 500,   // how many blocks to share at once
-
+    sync_limit: 500, // how many blocks to share at once
 
     // global wide fee sanity limits
     min_fee: 1,
@@ -118,7 +117,6 @@ module.exports = async () => {
       balances: `{"3": 10000000000}`
     })
 
-
     l(`${username} : ${pw} at ${loc}`)
 
     K.members.push({
@@ -138,11 +136,7 @@ module.exports = async () => {
     })
 
     if (user.id != 1) {
-      var left =
-        Buffer.compare(
-          user.pubkey,
-          fromHex(K.members[0].pubkey)
-        ) == -1
+      var left = Buffer.compare(user.pubkey, fromHex(K.members[0].pubkey)) == -1
 
       // preload channel FRD and FRB
       await Insurance.create({
@@ -227,7 +221,8 @@ module.exports = async () => {
   await Asset.create({
     ticker: 'FRD',
     name: 'Fair Dollar',
-    desc: 'Fair Dollar is a fiat currency issued by Fair Foundation. It is collateralized and easy to sell for traditional fiat currencies at stable exchange rate.',
+    desc:
+      'Fair Dollar is a fiat currency issued by Fair Foundation. It is collateralized and easy to sell for traditional fiat currencies at stable exchange rate.',
     issuerId: 1,
     total_supply: 1000000000
   })
@@ -235,7 +230,8 @@ module.exports = async () => {
   await Asset.create({
     ticker: 'FRB',
     name: 'Fair Bet',
-    desc: 'Fair Bet supply is capped at 100B FRB. FRB will be automatically converted into FRD 1-for-1 on 2030-08-19.',
+    desc:
+      'Fair Bet supply is capped at 100B FRB. FRB will be automatically converted into FRD 1-for-1 on 2030-08-19.',
     issuerId: 1,
     total_supply: 1000000000
   })
@@ -248,7 +244,7 @@ module.exports = async () => {
   */
 
   var json = stringify(K)
-  await promise_writeFile('./'+datadir + '/onchain/k.json', json)
+  await promise_writeFile('./' + datadir + '/onchain/k.json', json)
 
   await promise_writeFile(
     datadir + '/offchain/pk.json',
@@ -260,7 +256,7 @@ module.exports = async () => {
     })
   )
 
-  l('Genesis done ('+datadir+'), quitting')
+  l('Genesis done (' + datadir + '), quitting')
 
   // not graceful to not trigger hooks
   process.exit(0)

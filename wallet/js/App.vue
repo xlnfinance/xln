@@ -472,7 +472,7 @@ export default {
               <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">👨‍💼 Accounts</a></li>
               <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and hubs">💸 Insurances</a></li>
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
-              <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">💡 Governance</a></li>
+              <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
               <li><a class="nav-link" @click="go('hashlocks')">🔐 Hashlocks</a></li>
 
               <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">🎛 Node Metrics</a></li>
@@ -561,6 +561,7 @@ export default {
         <h2>Snapshots</h2>
         <p>Bytes until next snapshot: {{K.snapshot_after_bytes-K.bytes_since_last_snapshot}}</p>
         <p>Last snapshot at block # : {{K.last_snapshot_height}}</p>
+        <p>Snapshots taken: {{K.snapshots_taken}}</p>
         <h2>Network stats</h2>
         <p>Total blocks: {{K.total_blocks}}</p>
         <p>Current onchain db.sqlite hash: {{K.current_db_hash}}</p>
@@ -569,7 +570,6 @@ export default {
         <p>Network created {{timeAgo(K.created_at)}}</p>
         <p>Transactions: {{K.total_tx}}</p>
         <p>Total bytes: {{K.total_bytes}}</p>
-        <h2>Governance stats</h2>
         <p>Smart updates created: {{K.proposals_created}}</p>
         <h2>Hard Fork</h2>
         <p>If validators vote for things you don't agree with, find like minded people and decide on a new validator set out-of-band. Then paste the code that changes validators below:</p>
@@ -801,7 +801,7 @@ export default {
       </div>
       <div v-else-if="tab=='exchange'">
         <h3>Trustless Onchain Exchange</h3>
-        <p>Onchain exchange is best suitable for large atomic swaps between two assets - it always incurs an expensive fees but is free of any counterparty risk. If you're looking to trade frequently or small amounts, try any exchange that supports Fair assets.</p>
+        <p>Onchain exchange is best suitable for large atomic swaps between two assets - it always incurs an expensive fees but is free of any counterparty risk. If you're looking to trade frequently or small amounts, try any traditional exchange that supports Fair assets.</p>
         <hr/>
 
         <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
@@ -858,7 +858,7 @@ export default {
 
       </div>
       <div v-else-if="tab=='install'">
-        <h3>Decentralized Install for macOS/Linux/Windows</h3>
+        <h3>Decentralized Install for macOS and Linux</h3>
         <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app:</p>
         <div style="background-color: #FFFDDE; padding-left: 10px;"><Highlight :white="true" lang="bash" :code="install_snippet"></Highlight></div>
         <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
@@ -867,10 +867,13 @@ export default {
           <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
 
+        <p>Windows, Android and iOS support is coming soon.</p>
+
 
       </div>
       <div v-else-if="tab=='gov'">
         <h3>Smart Updates</h3>
+        <p>Smart updates are small patches to the system that can be offered by anyone and they solve the same problem smart contracts do but in much more powerful and secure fashion. An update can introduce new functionality, execute any code and modify any file. There is a voting period when validators can vote for proposed updates. If an update gains approval of the majority, the update will be automatically applied syncroniously accross all nodes in the network.</p>
         <div class="form-group">
           <label for="comment">Description:</label>
           <textarea class="form-control" v-model="proposal[0]" rows="2" id="comment"></textarea>
@@ -886,7 +889,7 @@ export default {
         <p v-if="my_member">
           <button @click="call('propose', proposal)" class="btn btn-warning">Propose</button>
         </p>
-        <p v-else>Currently only stakeholders can submit a new amendment.</p>
+        <p v-else>Currently only stakeholders can submit a smart update.</p>
         <div v-for="p in proposals">
           <h4>#{{p.id}}: {{p.desc}}</h4>
           <small>Proposed by #{{p.user.id}}</small>

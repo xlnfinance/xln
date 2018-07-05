@@ -1,4 +1,4 @@
-WebSocketClient = require('./ws')
+WebSocketClient = require('./utils/ws')
 stringify = require('../lib/stringify')
 
 class Me {

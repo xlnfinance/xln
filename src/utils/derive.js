@@ -3,7 +3,7 @@
 
 module.exports = async (username, pw) => {
   return new Promise((resolve, reject) => {
-    require('../lib/scrypt')(
+    require('../../lib/scrypt')(
       pw,
       username,
       {

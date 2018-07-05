@@ -1,5 +1,10 @@
-require('./utils')
-require('./offchain/utils')
+require('./utils/system')
+require('./utils/channel')
+require('./utils/debug')
+
+// enumerator of all methods and tx types in the system
+methodMap = require('./utils/method_map')
+
 require('./browser')
 
 var SegfaultHandler = require('segfault-handler')
@@ -69,7 +74,7 @@ require('./db/offchain_db')
   await privSequelize.sync({force: use_force})
 
   if (argv.genesis) {
-    require('../tools/genesis')()
+    require('./utils/genesis')()
   } else if (argv.cluster) {
     var cluster = require('cluster')
     if (cluster.isMaster) {
@@ -85,7 +90,7 @@ require('./db/offchain_db')
       initDashboard()
     }
   } else if (argv.generate_monkeys) {
-    let derive = require('./derive')
+    let derive = require('./utils/derive')
     var me = new Me()
 
     var addr = []
