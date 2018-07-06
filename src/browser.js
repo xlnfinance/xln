@@ -130,10 +130,14 @@ react = async (result = {}, force = true) => {
       User.idOrKey(bin(me.id.publicKey))
     ])
 
-    result.payments.map(p=>{
+    if (!result.record.id) result.record = null
+
+    result.payments.map((p) => {
       // prefix for invoice types: 1 is user set 2 is random
       if (p.invoice) {
-        p.invoice = p.invoice.slice(1).toString(p.invoice[0] == 1 ? 'utf8' : 'hex')
+        p.invoice = p.invoice
+          .slice(1)
+          .toString(p.invoice[0] == 1 ? 'utf8' : 'hex')
       }
     })
 

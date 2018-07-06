@@ -120,9 +120,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   if (K.total_blocks % 100 == 0 || ordered_tx.length > 0)
     l(
-      `${base_port}: Processed block ${
+      `${base_port}: Block ${
         K.total_blocks
-      } by ${built_by}. Signed shares: ${shares}, tx: ${ordered_tx.length}`
+      } by ${built_by}. Shares: ${shares}, tx: ${ordered_tx.length}`
     )
 
   // todo: define what is considered a "usable" block

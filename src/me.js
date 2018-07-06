@@ -71,6 +71,7 @@ class Me {
     ]
 
     this.address = base58.encode(r(encodable))
+    l('Logged in with address: ' + this.address)
 
     this.last_react = new Date()
 

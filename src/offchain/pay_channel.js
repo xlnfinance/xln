@@ -17,11 +17,11 @@ module.exports = async (opts) => {
     // use user supplied private message, otherwise generate random tag
     // invoice inside the address takes priority
     if (addr.invoice || opts.invoice) {
-      l('Rewritten invoice with ', addr)
       opts.invoice = concat(
         Buffer.from([1]),
         bin(addr.invoice ? addr.invoice : opts.invoice)
       )
+      l('Rewritten invoice with ', opts.invoice)
     } else {
       opts.invoice = concat(Buffer.from([2]), crypto.randomBytes(16))
     }
