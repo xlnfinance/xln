@@ -1,6 +1,6 @@
 [![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
 
-<img src='/wallet/img/shot.jpg' />
+<img src='/wallet/img/shot.png' />
 
 # Intro
 
@@ -10,4 +10,4 @@ Each user of the network runs a full node that processes few publicly broadcaste
 
 [For documentation go to wiki](https://github.com/fairlayer/wiki)
 
-#**Node.js programmers needed full-time: send resume to info@sakurity.com**
+# Hiring Node.js programmers to join full-time: contact info@sakurity.com

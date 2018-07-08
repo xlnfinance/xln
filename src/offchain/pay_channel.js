@@ -12,7 +12,7 @@ module.exports = async (opts) => {
       return false
     }
 
-    var addr = parseAddress(opts.address)
+    let addr = parseAddress(opts.address)
 
     // use user supplied private message, otherwise generate random tag
     // invoice inside the address takes priority
@@ -31,19 +31,32 @@ module.exports = async (opts) => {
     // if we are hub making a payment, don't add the fees on top
     if (me.my_hub) {
       var via = addr.pubkey
-      var sent_amount = amount
+      var amountWithFees = amount
     } else {
       var via = fromHex(K.hubs[0].pubkey)
-      var sent_amount = beforeFees(amount, [K.hubs[0].fee])
+      var amountWithFees = beforeFees(amount, [K.hubs[0].fee])
     }
 
     let ch = await me.getChannel(via, opts.asset)
 
     let unlocker_nonce = crypto.randomBytes(24)
 
-    // we are sender and passing to receiver the amount, preimage, invoice and our own address
+    // sender encrypts various JSON-encoded data for the receiver
+    // this is offchain transfer so we don't care about compact data format
+    let box_data = {
+      amount: amount,
+      asset: opts.asset,
+
+      // buffers are in hex for JSON
+      secret: toHex(secret),
+      invoice: toHex(opts.invoice),
+
+      ts: ts(),
+      source_address: me.address
+    }
+
     let unlocker_box = encrypt_box(
-      r([amount, secret, opts.invoice, bin(me.address)]),
+      bin(JSON.stringify(box_data)),
       unlocker_nonce,
       addr.box_pubkey,
       me.box.secretKey
@@ -58,7 +71,7 @@ module.exports = async (opts) => {
     } else if (amount < K.min_amount) {
       react({alert: `Minimum payment is $${commy(K.min_amount)}`}, false)
     } else {
-      var outward = Payment.build({
+      let outward = Payment.build({
         deltumId: ch.d.id,
         type: opts.addrisk ? 'addrisk' : 'add',
         lazy_until: opts.lazy ? +new Date() + 30000 : null,
@@ -67,7 +80,7 @@ module.exports = async (opts) => {
         is_inward: false,
         asset: opts.asset,
 
-        amount: sent_amount,
+        amount: amountWithFees,
         hash: bin(hash),
         exp: K.usable_blocks + K.hashlock_exp,
 

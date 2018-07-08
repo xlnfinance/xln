@@ -158,29 +158,48 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         // go to next transition - we failed this hashlock already
       } else if (destination_address == me.address) {
         unlocker = r(unlocker)
-        let unlocked = open_box(
+        let raw_box = open_box(
           unlocker[0],
           unlocker[1],
           unlocker[2],
           me.box.secretKey
         )
 
-        if (unlocked == null) {
+        if (raw_box == null) {
           loff('error: Bad unlocker')
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
         } else {
-          // the sender encrypted for us: how much they sent, the preimage for hashlock
-          // an invoice (reason for this payment), and optional refund address
-          let [box_amount, box_secret, box_invoice, box_source_address] = r(
-            bin(unlocked)
-          )
-          box_amount = readInt(box_amount)
+          // the sender encrypted for us JSON with payment params
 
-          inward_hl.invoice = box_invoice
-          inward_hl.source_address = box_source_address.toString()
+          let box_data = JSON.parse(bin(raw_box).toString())
+          l('Box received: ', box_data)
 
-          inward_hl.secret = box_secret
+          // decode buffers from json
+          box_data.secret = fromHex(box_data.secret)
+          box_data.invoice = fromHex(box_data.invoice)
+
+          // ensure the amount & asset are as expected
+          // if any hashlock bug - del it
+          if (box_data.amount != amount) {
+            l('box mismatch: amount')
+            return
+          }
+          if (box_data.asset != asset) {
+            l('box mismatch: asset')
+            return
+          }
+
+          if (!sha3(box_data.secret).equals(hash)) {
+            l('box mismatch: secret')
+            return
+          }
+
+          inward_hl.source_address = box_data.source_address
+
+          inward_hl.invoice = box_data.invoice
+          inward_hl.secret = box_data.secret
+
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
 

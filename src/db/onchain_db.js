@@ -199,8 +199,8 @@ User.idOrKey = async function(id) {
 }
 
 User.prototype.asset = function(asset, diff) {
-  if (this['balance' + asset]) {
-    // the default FRD is just a column
+  // native assets have dedicated column
+  if (this.hasOwnProperty('balance' + asset)) {
     if (diff) {
       return (this['balance' + asset] += diff)
     } else {
