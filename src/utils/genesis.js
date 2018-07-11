@@ -1,9 +1,48 @@
 // this file is only used during genesis to set initial K params and create first validators
 const derive = require('./derive')
 
+const createMember = async (username, pw, loc, website) => {
+  l(`${username} : ${pw} at ${loc}`)
+
+  const seed = await derive(username, pw)
+  const me = new Me()
+  await me.init(username, seed)
+
+  const user = await User.create({
+    pubkey: me.pubkey,
+    username: username,
+    nonce: 0,
+    balance1: 10000000000,
+    balance2: 10000000000,
+    balances: `{"3": 10000000000}`
+  })
+
+  const member = {
+    id: user.id,
+    username: username,
+    location: loc,
+    website: website,
+    pubkey: toHex(me.pubkey),
+    block_pubkey: me.block_pubkey,
+    missed_blocks: [],
+    shares: 0
+  }
+
+  return [member, seed]
+}
+
+const writeGenesisOnchainConfig = async (k, datadir) => {
+  await promise_writeFile('./' + datadir + '/onchain/k.json', stringify(k))
+}
+
+const writeGenesisOffchainConfig = async (pk, datadir) => {
+  await promise_writeFile('./' + datadir + '/offchain/pk.json', stringify(pk))
+}
+
 module.exports = async () => {
   l('Start genesis')
 
+  // recreate the onchain database
   try {
     await sequelize.sync({force: true})
   } catch (err) {
@@ -12,7 +51,7 @@ module.exports = async () => {
   }
 
   // K is a handy config JSON
-  K = {
+  const K = {
     // global network pepper to protect derivation from rainbow tables
     network_name: 'main',
 
@@ -101,88 +140,57 @@ module.exports = async () => {
 
   K.majority = K.total_shares - K.tolerance
 
+  const local = !argv['prod-server']
+
+  const base_rpc = local ? 'ws://' + localhost : 'wss://fairlayer.com'
+  const base_web = local ? 'http://' + localhost : 'https://fairlayer.com'
+
   // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
-
-  createMember = async (username, pw, loc, website) => {
-    var seed = await derive(username, pw)
-    me = new Me()
-    await me.init(username, seed)
-
-    var user = await User.create({
-      pubkey: me.pubkey,
-      username: username,
-      nonce: 0,
-      balance1: 10000000000,
-      balance2: 10000000000,
-      balances: `{"3": 10000000000}`
-    })
-
-    l(`${username} : ${pw} at ${loc}`)
-
-    K.members.push({
-      id: user.id,
-
-      username: username,
-
-      location: loc,
-      website: website,
-
-      pubkey: toHex(me.pubkey),
-      block_pubkey: me.block_pubkey,
-
-      missed_blocks: [],
-
-      shares: 0
-    })
-
-    if (user.id != 1) {
-      var left = Buffer.compare(user.pubkey, fromHex(K.members[0].pubkey)) == -1
-
-      // preload channel FRD and FRB
-      await Insurance.create({
-        leftId: left ? user.id : 1,
-        rightId: left ? 1 : user.id,
-        insurance: 1000000,
-        ondelta: left ? 1000000 : 0,
-        nonce: 0,
-        asset: 1
-      })
-
-      await Insurance.create({
-        leftId: left ? user.id : 1,
-        rightId: left ? 1 : user.id,
-        insurance: 2000000,
-        ondelta: left ? 2000000 : 0,
-        nonce: 0,
-        asset: 2
-      })
-    }
-
-    return seed
-  }
-
-  let local = !argv['prod-server']
-
-  var base_rpc = local ? 'ws://' + localhost : 'wss://fairlayer.com'
-  var base_web = local ? 'http://' + localhost : 'https://fairlayer.com'
-
   l(note('New members:'))
-  var seed = await createMember(
+
+  // create hub
+  const [hubMember, hubSeed] = await createMember(
     'root',
     toHex(crypto.randomBytes(16)),
     `${base_rpc}:8100`,
     local ? 'http://' + localhost + ':8433' : 'https://fairlayer.com'
   )
+  K.members.push(hubMember)
 
-  for (var i = 8001; i < 8004; i++) {
-    await createMember(
+  // create other members
+  for (const i of [8001, 8002, 8003]) {
+    const [member, _] = await createMember(
       i.toString(),
       'password',
       `${base_rpc}:${i + 100}`,
       `${base_web}:${i}`
     )
+
+    const left = Buffer.compare(fromHex(member.pubkey), fromHex(hubMember.pubkey)) == -1
+
+    K.members.push(member)
+
+    // preload channel FRD and FRB
+    await Insurance.create({
+      leftId: left ? member.id : 1,
+      rightId: left ? 1 : member.id,
+      insurance: 1000000,
+      ondelta: left ? 1000000 : 0,
+      nonce: 0,
+      asset: 1
+    })
+
+    await Insurance.create({
+      leftId: left ? member.id : 1,
+      rightId: left ? 1 : member.id,
+      insurance: 2000000,
+      ondelta: left ? 2000000 : 0,
+      nonce: 0,
+      asset: 2
+    })
   }
 
+  // distribute shares
   K.members[0].shares = 1
   K.members[0].platform = 'Digital Ocean SGP1'
 
@@ -195,6 +203,7 @@ module.exports = async () => {
   K.members[3].shares = 1
   K.members[3].platform = 'Google Cloud'
 
+  // set hub
   K.hubs.push({
     id: K.members[0].id,
     location: K.members[0].location,
@@ -243,18 +252,15 @@ module.exports = async () => {
   }
   */
 
-  var json = stringify(K)
-  await promise_writeFile('./' + datadir + '/onchain/k.json', json)
+  const PK = {
+    username: 'root',
+    seed: hubSeed.toString('hex'),
+    auth_code: toHex(crypto.randomBytes(32)),
+    pending_batch: null
+  }
 
-  await promise_writeFile(
-    datadir + '/offchain/pk.json',
-    JSON.stringify({
-      username: 'root',
-      seed: seed.toString('hex'),
-      auth_code: toHex(crypto.randomBytes(32)),
-      pending_batch: null
-    })
-  )
+  await writeGenesisOnchainConfig(K, datadir)
+  await writeGenesisOffchainConfig(PK, datadir)
 
   l('Genesis done (' + datadir + '), quitting')
 
