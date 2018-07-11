@@ -211,9 +211,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     await me.syncdb()
 
     // first assignment must happen before zeroing
-    await sequelize.query(
-      'UPDATE users SET balance1 = balance1 + balance2, balance2 = 0'
-    )
+    await sequelize.query('UPDATE users SET balance1 = balance1 + balance2')
+    await sequelize.query('UPDATE users SET balance2 = 0')
     //await sequelize.query("UPDATE users SET ")
     //User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
 

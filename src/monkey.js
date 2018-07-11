@@ -67,13 +67,14 @@ Assets: ${await Asset.count()}\n
 Deltas: ${await Delta.count()}\n
       `
 
-      assertion('orders', await Order.count(), [1])
-      assertion('payments', await Payment.count(), [214])
+      if ((await Order.count()) != 1) l('orders FAIL')
+      if ((await Payment.count()) != 106) l('payments FAIL')
+      if ((await Delta.count()) != 7) l('delta FAIL')
 
       l(alert)
 
       //child_process.exec(`osascript -e 'display notification "${alert}"'`)
-    }, 30000)
+    }, 50000)
   } else if (parseInt(base_port) > 8003) {
     monkeys.splice(monkeys.indexOf(me.address), 1) // *except our addr
 

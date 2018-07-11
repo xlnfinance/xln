@@ -686,13 +686,15 @@ export default {
           </table>
         </template>
         <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
+          <h2 class="danger danger-primary">To start using Fairlayer you must create your own digital identity. Make sure you don't forget your password - <b>password recovery is not possible.</b> If in doubt, write it down or email it to yourself.</h2>
+
+
           <label for="inputUsername" class="sr-only">Username</label>
           <input v-model="username" type="text" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
           <br>
           <label for="inputPassword" class="sr-only">Password</label>
           <input v-model="pw" type="password" id="inputPassword" class="form-control" placeholder="Password" required>
 
-          <p>Make sure you don't forget your password - <b>password recovery is not possible.</b> If in doubt, write it down or email it to yourself.</p>
           
           <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Generate Wallet</button>
         </form>

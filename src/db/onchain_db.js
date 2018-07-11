@@ -200,7 +200,7 @@ User.idOrKey = async function(id) {
 
 User.prototype.asset = function(asset, diff) {
   // native assets have dedicated column
-  if (this.hasOwnProperty('balance' + asset)) {
+  if (this.attributes.includes('balance' + asset)) {
     if (diff) {
       return (this['balance' + asset] += diff)
     } else {
