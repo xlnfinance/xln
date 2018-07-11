@@ -47,9 +47,8 @@ const await_propose = async () => {
   let ordered_tx_body
 
   if (me.proposed_block.locked) {
-    l(`We precommited to previous block, keep proposing it`)(
-      ({header, ordered_tx_body} = me.proposed_block)
-    )
+    l(`We precommited to previous block, keep proposing it`)
+    ;({header, ordered_tx_body} = me.proposed_block)
   } else {
     // otherwise build new block from your mempool
     let total_size = 0
