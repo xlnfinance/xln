@@ -135,11 +135,11 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   K.total_tx += ordered_tx.length
   K.total_bytes += ordered_tx_body.length
-  K.bytes_since_last_snapshot += ordered_tx_body.length
+  K.blocks_since_last_snapshot += 1
 
   // When "tail" gets too long, create new snapshot
-  if (K.bytes_since_last_snapshot > K.snapshot_after_bytes) {
-    K.bytes_since_last_snapshot = 0
+  if (K.blocks_since_last_snapshot > K.snapshot_after_blocks) {
+    K.blocks_since_last_snapshot = 0
     K.snapshots_taken++
 
     meta.cron.push(['snapshot', K.total_blocks])
@@ -271,7 +271,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   // only members do snapshots, as they require extra computations
-  if (me.my_member && K.bytes_since_last_snapshot == 0) {
+  if (me.my_member && K.blocks_since_last_snapshot == 0) {
     //await promise_writeFile(datadir + '/onchain/k.json', stringify(K))
 
     if (me.my_member.id != 1) {

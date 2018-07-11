@@ -446,11 +446,6 @@ export default {
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
           </li>
-          <li class="nav-item" v-bind:class="{ active: tab=='exchange' }">
-            <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
-          </li>
-
-          
 
           <li v-if="pubkey && dev_mode" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
             <a class="nav-link" @click="go('testnet')">Testnet</a>
@@ -461,6 +456,8 @@ export default {
             <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">🔍 Explorers
         <span class="caret"></span></a>
             <ul class="dropdown-menu">
+
+          
               <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">📖 Blockchain</a></li>
 
               <li><a class="nav-link" @click="go('validators')">🤵 Validators</a></li>
@@ -473,19 +470,26 @@ export default {
               <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and hubs">💸 Insurances</a></li>
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
               <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
+
+              <li v-bind:class="{ active: tab=='exchange' }">
+                <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
+              </li>
+                            
               <li><a class="nav-link" @click="go('hashlocks')">🔐 Hashlocks</a></li>
 
               <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">🎛 Node Metrics</a></li>
+
+              <li>
+                <a class="nav-link" href="https://github.com/fairlayer/wiki">📒 Docs</a>
+              </li>
+
+              <li>
+                <a class="nav-link" href="https://demo.fairlayer.com">UX Demo</a>
+              </li>
             </ul>
+
           </li>
 
-          <li class="nav-item">
-            <a class="nav-link" href="https://github.com/fairlayer/wiki">📒 Docs</a>
-          </li>
-
-          <li class="nav-item">
-            <a class="nav-link" href="https://demo.fairlayer.com">🏄‍♂️ User Experience Demo</a>
-          </li>
 
 
         </ul>
@@ -686,7 +690,9 @@ export default {
           </table>
         </template>
         <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
-          <h2 class="danger danger-primary">To start using Fairlayer you must create your own digital identity. Make sure you don't forget your password - <b>password recovery is not possible.</b> If in doubt, write it down or email it to yourself.</h2>
+
+          <p><h4 class="danger danger-primary">To start using Fairlayer you must create your own digital identity. Make sure you don't forget your password - <b>password recovery is not possible.</b> If in doubt, write it down or email it to yourself.</h4></p>
+
 
 
           <label for="inputUsername" class="sr-only">Username</label>
@@ -861,17 +867,14 @@ export default {
       </div>
       <div v-else-if="tab=='install'">
         <h3>Decentralized Install for macOS and Linux</h3>
-        <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app:</p>
+        <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app and press Enter:</p>
         <div style="background-color: #FFFDDE; padding-left: 10px;"><Highlight :white="true" lang="bash" :code="install_snippet"></Highlight></div>
         <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
 
         <ul>
           <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
-
-        <p>Windows, Android and iOS support is coming soon.</p>
-
-
+        <small>Windows, Android and iOS support is coming soon.</small>
       </div>
       <div v-else-if="tab=='gov'">
         <h3>Smart Updates</h3>

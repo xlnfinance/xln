@@ -67,9 +67,9 @@ module.exports = async () => {
 
     current_db_hash: '',
 
-    bytes_since_last_snapshot: 999999999, // force to do a snapshot on first block
+    blocks_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_bytes: 1000000,
+    snapshot_after_blocks: 600,
     snapshots_taken: 0,
     proposals_created: 0,
 
@@ -166,7 +166,8 @@ module.exports = async () => {
       `${base_web}:${i}`
     )
 
-    const left = Buffer.compare(fromHex(member.pubkey), fromHex(hubMember.pubkey)) == -1
+    const left =
+      Buffer.compare(fromHex(member.pubkey), fromHex(hubMember.pubkey)) == -1
 
     K.members.push(member)
 
