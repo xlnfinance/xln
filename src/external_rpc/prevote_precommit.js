@@ -1,7 +1,7 @@
 module.exports = async (inputType, args) => {
   let [pubkey, sig, body] = args
   let [method, header] = r(body)
-  let m = Members.find((f) => f.block_pubkey.equals(pubkey))
+  let m = Validators.find((f) => f.block_pubkey.equals(pubkey))
 
   if (me.status != inputType || !m) {
     return //l(`${me.status} not ${inputType}`)

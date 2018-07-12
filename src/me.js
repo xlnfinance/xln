@@ -165,10 +165,10 @@ class Me {
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
-    if (me.my_member && me.my_member == me.next_member(true)) {
+    if (me.my_validator && me.my_validator == me.next_validator(true)) {
       me.mempool.push(signed_batch)
     } else {
-      me.send(me.next_member(true), 'tx', r([signed_batch]))
+      me.send(me.next_validator(true), 'tx', r([signed_batch]))
     }
 
     // saving locally to ensure it is added, and rebroadcast if needed
@@ -177,32 +177,32 @@ class Me {
 
   // tell all validators the same thing
   gossip(method, data) {
-    Members.map((c) => {
+    Validators.map((c) => {
       me.send(c, method, data)
     })
   }
 
   // returns validator making block right now, use skip=true to get validator for next slot
-  next_member(skip = false) {
+  next_validator(skip = false) {
     var now = ts()
     var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
     var searchIndex = 0
 
-    for (var i = 0; i < Members.length; i++) {
-      searchIndex += Members[i].shares
+    for (var i = 0; i < Validators.length; i++) {
+      searchIndex += Validators[i].shares
 
       if (searchIndex > currentIndex) {
-        var current = Members[i]
+        var current = Validators[i]
 
         if (currentIndex + 1 == K.total_shares) {
           // go back to 0
-          var next = Members[0]
+          var next = Validators[0]
         } else if (currentIndex + 1 < searchIndex) {
-          // same member
+          // same validator
           var next = current
         } else {
-          // next member
-          var next = Members[i + 1]
+          // next validator
+          var next = Validators[i + 1]
         }
         break
       }
@@ -230,7 +230,7 @@ class Me {
     me.record = await User.idOrKey(bin(me.id.publicKey))
 
     if (me.record) {
-      me.my_member = Members.find((m) => m.id == me.record.id)
+      me.my_validator = Validators.find((m) => m.id == me.record.id)
       me.my_hub = K.hubs.find((m) => m.id == me.record.id)
     }
 
@@ -259,28 +259,28 @@ class Me {
     )
     */
 
-    // both members and hubs must run external_wss
-    if (me.my_member) {
-      me.startExternalRPC(me.my_member.location)
+    // both validators and hubs must run external_wss
+    if (me.my_validator) {
+      me.startExternalRPC(me.my_validator.location)
     } else if (me.my_hub) {
       me.startExternalRPC(me.my_hub.location)
     }
 
-    if (me.my_member) {
-      for (var m of Members) {
-        if (me.my_member != m) {
-          // we need to have connections ready to all members
+    if (me.my_validator) {
+      for (var m of Validators) {
+        if (me.my_validator != m) {
+          // we need to have connections ready to all validators
           me.send(m, 'auth', me.envelope(methodMap('auth')))
         }
       }
 
-      // only members need to run consensus
+      // only validators need to run consensus
       l('Starting consensus reactor engine')
       me.consensus()
     } else {
       // keep connection to all hubs
-      Members.map((m) => {
-        if (me.my_member != m) {
+      Validators.map((m) => {
+        if (me.my_validator != m) {
           me.send(m, 'auth', me.envelope(methodMap('auth')))
         }
       })
@@ -323,7 +323,7 @@ class Me {
     )
     */
 
-    if (me.my_hub || me.my_member) {
+    if (me.my_hub || me.my_validator) {
       me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
     } else {
       me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
@@ -344,7 +344,7 @@ class Me {
   }
 
   async startExternalRPC(advertized_url) {
-    // there's 2nd dedicated websocket server for member/hub commands
+    // there's 2nd dedicated websocket server for validator/hub commands
     var cb = () => {}
     me.external_wss_server = require('http').createServer(cb)
 
@@ -528,7 +528,7 @@ class Me {
     }
   }
 
-  // a generic interface to send a websocket message to some user or member
+  // a generic interface to send a websocket message to some user or validator
 
   send(m, method, tx) {
     var msg = concat(bin([methodMap(method)]), tx)
@@ -541,9 +541,9 @@ class Me {
         me.users[m].send(msg, wscb)
         return true
       } else {
-        var member = Members.find((f) => f.pubkey.equals(m))
-        if (member) {
-          m = member
+        var validator = Validators.find((f) => f.pubkey.equals(m))
+        if (validator) {
+          m = validator
         } else {
           l(m, 'not online')
           return false
@@ -551,8 +551,8 @@ class Me {
       }
     }
 
-    // member object
-    //l(`Invoking ${method} in member ${m.id}`)
+    // validator object
+    //l(`Invoking ${method} in validator ${m.id}`)
 
     if (me.users[m.pubkey]) {
       return me.users[m.pubkey].send(msg, wscb)

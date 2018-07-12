@@ -42,12 +42,14 @@ initDashboard = require('./init_dashboard')
 
 sync = () => {
   if (K.prev_hash) {
-    // if we're member then sync from anyone except us
-    var set = me.my_member ? Members.filter((m) => m != me.my_member) : Members
+    // if we're validator then sync from anyone except us
+    var set = me.my_validator
+      ? Validators.filter((m) => m != me.my_validator)
+      : Validators
     var chosen = set.randomElement()
-    //|| me.my_member
+    //|| me.my_validator
 
-    if (K.ts < ts() - K.blocktime / 2 || me.my_member) {
+    if (K.ts < ts() - K.blocktime / 2 || me.my_validator) {
       me.send(chosen, 'sync', r([fromHex(K.prev_hash)]))
     } else {
       l('No need to sync, K.ts is recent')

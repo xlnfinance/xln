@@ -33,8 +33,8 @@ for all scenarios we use 4 nodes: A B C D each with 25% stake. We must tolerate 
 const await_propose = async () => {
   me.status = 'propose'
 
-  //l('Next round', me.next_member().id)
-  if (me.my_member != me.next_member()) {
+  //l('Next round', me.next_validator().id)
+  if (me.my_validator != me.next_validator()) {
     return
   }
 
@@ -129,7 +129,7 @@ const prevote_precommit = () => {
 
   // do we have enough prevotes?
   let shares = 0
-  Members.map((c, index) => {
+  Validators.map((c, index) => {
     if (c.prevote) {
       shares += c.shares
     }
@@ -162,7 +162,7 @@ const precommit_await = () => {
   // if have 2/3+ precommits, commit the block and share
   let shares = 0
   const precommits = []
-  Members.map((c, index) => {
+  Validators.map((c, index) => {
     if (c.precommit) {
       shares += c.shares
       precommits[index] = c.precommit

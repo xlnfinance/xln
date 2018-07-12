@@ -22,7 +22,7 @@ module.exports = async (args) => {
         if (PK.pending_batch) {
           let raw = fromHex(PK.pending_batch)
           l('Rebroadcasting pending tx ', raw.length)
-          me.send(me.next_member(true), 'tx', r([raw]))
+          me.send(me.next_validator(true), 'tx', r([raw]))
         } else {
           // time to broadcast our next batch then. (Delay to ensure validator processed the block)
           setTimeout(() => {

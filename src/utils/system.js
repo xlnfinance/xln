@@ -51,7 +51,7 @@ Me = require('../me').Me
 // globals
 K = false
 me = false
-Members = false
+Validators = false
 // Private Key value
 PK = {}
 

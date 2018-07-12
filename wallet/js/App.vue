@@ -55,7 +55,7 @@ export default {
 
       pubkey: false,
       K: false,
-      my_member: false,
+      my_validator: false,
 
       pw: '',
       username: '',
@@ -425,7 +425,7 @@ export default {
 
 
     <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
-      <a class="navbar-brand" href="#" style="padding: 10px"><img width="30px" src="../img/fl.png"> Fairlayer</a>
+      <a class="navbar-brand" href="#" style="padding: 10px">Fairlayer</a>
       <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
@@ -434,7 +434,7 @@ export default {
           <li class="nav-item" v-bind:class="{ active: tab=='' }">
             <a class="nav-link" @click="go('')">Home</a>
           </li>
-          <li v-if="my_member"  class="nav-item" v-bind:class="{ active: tab=='install' }">
+          <li v-if="my_validator"  class="nav-item" v-bind:class="{ active: tab=='install' }">
             <a class="nav-link" @click="go('install')">⬇ Install</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
@@ -494,7 +494,7 @@ export default {
 
         </ul>
         <span class="badge badge-danger" v-if="pending_batch">Pending tx</span> &nbsp;
-        <span @click="call('sync')" v-bind:class='["badge", K.ts > ts() - K.safe_sync_delay ? "badge-light" : "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
+        <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
             <option disabled>Select current asset</option>
@@ -547,7 +547,7 @@ export default {
       <div v-else-if="tab=='validators'">
         <h1>Validators</h1>
         <ul>
-          <li v-if="m.website" v-for="m in K.members"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b></li>
+          <li v-if="m.website" v-for="m in K.validators"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b></li>
         </ul>
       </div>
       <div v-else-if="tab=='help'">
@@ -872,7 +872,7 @@ export default {
         <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
 
         <ul>
-          <li v-for="m in K.members" v-if="m.website && (!my_member || m.id != my_member.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
+          <li v-for="m in K.validators" v-if="m.website && (!my_validator || m.id != my_validator.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
         <small>Windows, Android and iOS support is coming soon.</small>
       </div>
@@ -891,7 +891,7 @@ export default {
           <input class="form-check-input" type="checkbox" v-model="proposal[2]"> Add patch
           
         </div>
-        <p v-if="my_member">
+        <p v-if="my_validator">
           <button @click="call('propose', proposal)" class="btn btn-warning">Propose</button>
         </p>
         <p v-else>Currently only stakeholders can submit a smart update.</p>

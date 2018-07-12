@@ -3,12 +3,12 @@
 // Called once in a while to cache current state of everything and flush it to browser
 // TODO: better way to keep app reactive?
 update_cache = async (force = false) => {
-  if (!me.my_member && me.headless() && !force) return
+  if (!me.my_validator && me.headless() && !force) return
 
   if (K) {
     cached_result.my_hub = me.my_hub
 
-    cached_result.my_member = me.my_member
+    cached_result.my_validator = me.my_validator
 
     cached_result.K = K
 
@@ -161,7 +161,7 @@ react = async (result = {}, force = true) => {
 
 // Eats memory. Do it only at bootstrap or after generating a new snapshot
 snapshotHash = async () => {
-  if (me.my_member && K.last_snapshot_height) {
+  if (me.my_validator && K.last_snapshot_height) {
     var filename = `Fair-${K.last_snapshot_height}.tar.gz`
     var cmd = `shasum -a 256 ${datadir}/offchain/${filename}`
 
@@ -174,7 +174,7 @@ snapshotHash = async () => {
       var out_hash = out.split(' ')[0]
 
       var our_location =
-        me.my_member.location.indexOf(localhost) != -1
+        me.my_validator.location.indexOf(localhost) != -1
           ? `http://${localhost}:8001/`
           : `https://fairlayer.com/`
 

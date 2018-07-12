@@ -27,8 +27,8 @@ module.exports = async (a) => {
     var json = fs.readFileSync(kFile)
     K = JSON.parse(json)
 
-    Members = JSON.parse(json).members // another object ref
-    for (m of Members) {
+    Validators = JSON.parse(json).validators // another object ref
+    for (m of Validators) {
       m.pubkey = Buffer.from(m.pubkey, 'hex')
       m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
     }

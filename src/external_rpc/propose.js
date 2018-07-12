@@ -1,6 +1,6 @@
 module.exports = async (args) => {
   let [pubkey, sig, header, ordered_tx_body] = args
-  let m = Members.find((f) => f.block_pubkey.equals(pubkey))
+  let m = Validators.find((f) => f.block_pubkey.equals(pubkey))
 
   if (me.status != 'propose' || !m) {
     return //l(`${me.status} not propose`)
@@ -11,7 +11,7 @@ module.exports = async (args) => {
   }
 
   // ensure the proposer is the current one
-  let proposer = me.next_member()
+  let proposer = me.next_validator()
   if (m != proposer) {
     return l(`You ${m.id} are not the current proposer ${proposer.id}`)
   }

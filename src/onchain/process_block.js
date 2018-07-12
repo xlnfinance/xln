@@ -70,7 +70,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
 
     return true
-  } else if (precommits.length != Members.length) {
+  } else if (precommits.length != Validators.length) {
     return l('Not valid number of precommits')
   }
 
@@ -86,14 +86,14 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   let shares = 0
   let precommit_body = r([methodMap('precommit'), header])
-  for (let i = 0; i < Members.length; i++) {
+  for (let i = 0; i < Validators.length; i++) {
     if (
       precommits[i].length == 64 &&
-      ec.verify(precommit_body, precommits[i], Members[i].block_pubkey)
+      ec.verify(precommit_body, precommits[i], Validators[i].block_pubkey)
     ) {
-      shares += Members[i].shares
+      shares += Validators[i].shares
     } else {
-      meta.missed_validators.push(Members[i].id)
+      meta.missed_validators.push(Validators[i].id)
     }
   }
 
@@ -176,7 +176,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     for (let job of jobs) {
       var approved = 0
       for (let v of job.voters) {
-        var voter = K.members.find((m) => m.id == v.id)
+        var voter = K.validators.find((m) => m.id == v.id)
         if (v.vote.approval && voter) {
           approved += voter.shares
         } else {
@@ -235,9 +235,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   */
 
   // save final block in offchain history db
-  // Required for members/hubs, optional for everyone else (aka "pruning" mode)
+  // Required for validators/hubs, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
-  if (me.my_member || PK.explorer) {
+  if (me.my_validator || PK.explorer) {
     await Block.create({
       prev_hash: fromHex(prev_hash),
       hash: sha3(header),
@@ -259,7 +259,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     })
   }
 
-  // In case we are member && locked on this prev_hash, unlock to ensure liveness
+  // In case we are validator && locked on this prev_hash, unlock to ensure liveness
   // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
   if (me.proposed_block.locked) {
     var locked_prev_hash = r(me.proposed_block.header)[3]
@@ -270,11 +270,11 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
   }
 
-  // only members do snapshots, as they require extra computations
-  if (me.my_member && K.blocks_since_last_snapshot == 0) {
+  // only validators do snapshots, as they require extra computations
+  if (me.my_validator && K.blocks_since_last_snapshot == 0) {
     //await promise_writeFile(datadir + '/onchain/k.json', stringify(K))
 
-    if (me.my_member.id != 1) {
+    if (me.my_validator.id != 1) {
       // in dev mode only to prevent race for /data
       await sleep(6000)
     } else {
@@ -315,7 +315,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       ['.'],
       (_) => {
         if (old_height > 1) {
-          // genesis state is stored for analytics and member bootstraping
+          // genesis state is stored for analytics and validator bootstraping
           fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz')
           l('Removed old snapshot and created ' + filename)
         }

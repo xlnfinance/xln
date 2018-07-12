@@ -1,7 +1,7 @@
 // this file is only used during genesis to set initial K params and create first validators
 const derive = require('./derive')
 
-const createMember = async (username, pw, loc, website) => {
+const createValidator = async (username, pw, loc, website) => {
   l(`${username} : ${pw} at ${loc}`)
 
   const seed = await derive(username, pw)
@@ -17,7 +17,7 @@ const createMember = async (username, pw, loc, website) => {
     balances: `{"3": 10000000000}`
   })
 
-  const member = {
+  const validator = {
     id: user.id,
     username: username,
     location: loc,
@@ -28,7 +28,7 @@ const createMember = async (username, pw, loc, website) => {
     shares: 0
   }
 
-  return [member, seed]
+  return [validator, seed]
 }
 
 const writeGenesisOnchainConfig = async (k, datadir) => {
@@ -109,7 +109,7 @@ module.exports = async () => {
     min_amount: 10,
     max_amount: 300000000,
 
-    members: [],
+    validators: [],
     hubs: [],
     flush_timeout: 250,
 
@@ -128,7 +128,7 @@ module.exports = async () => {
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)
     max_hashlocks: 20, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
-    dispute_if_no_ack: 40000 // ms, how long we wait for ack before going to blockchain
+    dispute_if_no_ack: 60000 // ms, how long we wait for ack before going to blockchain
   }
 
   // Defines global Byzantine tolerance parameter
@@ -145,21 +145,21 @@ module.exports = async () => {
   const base_rpc = local ? 'ws://' + localhost : 'wss://fairlayer.com'
   const base_web = local ? 'http://' + localhost : 'https://fairlayer.com'
 
-  // members provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
-  l(note('New members:'))
+  // validators provide services: 1) build blocks 2) hubs 3) watchers 4) storage of vaults
+  l(note('New validators:'))
 
   // create hub
-  const [hubMember, hubSeed] = await createMember(
+  const [hubValidator, hubSeed] = await createValidator(
     'root',
     toHex(crypto.randomBytes(16)),
     `${base_rpc}:8100`,
     local ? 'http://' + localhost + ':8433' : 'https://fairlayer.com'
   )
-  K.members.push(hubMember)
+  K.validators.push(hubValidator)
 
-  // create other members
+  // create other validators
   for (const i of [8001, 8002, 8003]) {
-    const [member, _] = await createMember(
+    const [validator, _] = await createValidator(
       i.toString(),
       'password',
       `${base_rpc}:${i + 100}`,
@@ -167,14 +167,15 @@ module.exports = async () => {
     )
 
     const left =
-      Buffer.compare(fromHex(member.pubkey), fromHex(hubMember.pubkey)) == -1
+      Buffer.compare(fromHex(validator.pubkey), fromHex(hubValidator.pubkey)) ==
+      -1
 
-    K.members.push(member)
+    K.validators.push(validator)
 
     // preload channel FRD and FRB
     await Insurance.create({
-      leftId: left ? member.id : 1,
-      rightId: left ? 1 : member.id,
+      leftId: left ? validator.id : 1,
+      rightId: left ? 1 : validator.id,
       insurance: 1000000,
       ondelta: left ? 1000000 : 0,
       nonce: 0,
@@ -182,8 +183,8 @@ module.exports = async () => {
     })
 
     await Insurance.create({
-      leftId: left ? member.id : 1,
-      rightId: left ? 1 : member.id,
+      leftId: left ? validator.id : 1,
+      rightId: left ? 1 : validator.id,
       insurance: 2000000,
       ondelta: left ? 2000000 : 0,
       nonce: 0,
@@ -192,23 +193,23 @@ module.exports = async () => {
   }
 
   // distribute shares
-  K.members[0].shares = 1
-  K.members[0].platform = 'Digital Ocean SGP1'
+  K.validators[0].shares = 1
+  K.validators[0].platform = 'Digital Ocean SGP1'
 
-  K.members[1].shares = 1
-  K.members[1].platform = 'AWS'
+  K.validators[1].shares = 1
+  K.validators[1].platform = 'AWS'
 
-  K.members[2].shares = 1
-  K.members[2].platform = 'Azure'
+  K.validators[2].shares = 1
+  K.validators[2].platform = 'Azure'
 
-  K.members[3].shares = 1
-  K.members[3].platform = 'Google Cloud'
+  K.validators[3].shares = 1
+  K.validators[3].platform = 'Google Cloud'
 
   // set hub
   K.hubs.push({
-    id: K.members[0].id,
-    location: K.members[0].location,
-    pubkey: K.members[0].pubkey,
+    id: K.validators[0].id,
+    location: K.validators[0].location,
+    pubkey: K.validators[0].pubkey,
 
     fee: 0.001,
 
@@ -218,9 +219,9 @@ module.exports = async () => {
 
   /*
   K.hubs.push({
-    id: K.members[3].id,
-    location: K.members[3].location,
-    pubkey: K.members[3].pubkey,
+    id: K.validators[3].id,
+    location: K.validators[3].location,
+    pubkey: K.validators[3].pubkey,
 
     fee: 0.005,
 
@@ -247,7 +248,7 @@ module.exports = async () => {
   })
 
   /*
-  K.members[2].hub = {
+  K.validators[2].hub = {
     handle: 'us',
     name: '@us (America-based)'
   }

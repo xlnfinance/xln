@@ -9,7 +9,7 @@ module.exports = (p) => {
     me.getCoins(p.asset, parseInt(p.faucet_amount))
     /*
     me.send(
-      Members.find((m) => m.id == p.partner),
+      Validators.find((m) => m.id == p.partner),
       'testnet',
       concat(bin([p.action, p.asset]), bin(me.address))
     )*/

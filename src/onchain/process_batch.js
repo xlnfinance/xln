@@ -18,7 +18,7 @@ const withdrawFrom = async (global_state, tr, signer, meta) => {
   // withdraw money from a channel by providing a sig of your partner
   // you can only withdraw from insured balance
   for (const input of tr[1]) {
-    const amount = readInt(input[0])
+    let amount = readInt(input[0])
 
     const partner = await User.idOrKey(input[1])
     if (!partner || !partner.id) {
@@ -242,8 +242,8 @@ const depositTo = async (global_state, tr, signer, meta, tax) => {
   // todo: consider splitting tax based on % in total output volume
   const reimburse_tax = 1 + Math.floor(tax / tr[1].length)
 
-  for (const output of tr[1]) {
-    const amount = readInt(output[0])
+  for (let output of tr[1]) {
+    let amount = readInt(output[0])
 
     if (amount > signer.asset(asset)) {
       l(
@@ -412,7 +412,7 @@ const depositTo = async (global_state, tr, signer, meta, tax) => {
 
 const createAsset = async (global_state, tr, signer) => {
   const [raw_ticker, raw_amount] = tr[1]
-  const amount = readInt(raw_amount)
+  let amount = readInt(raw_amount)
   const ticker = raw_ticker.toString().replace(/[^a-zA-Z0-9]/g, '') // from buffer to unicode, sanitize
 
   if (ticker.length < 3) {
@@ -453,7 +453,7 @@ const createAsset = async (global_state, tr, signer) => {
 
 const createOrder = async (global_state, tr, signer) => {
   // onchain exchange to sell an asset for another one.
-  const [assetId, amount, buyAssetId, raw_rate] = tr[1].map(readInt)
+  let [assetId, amount, buyAssetId, raw_rate] = tr[1].map(readInt)
   const round = Math.round
   const rate = raw_rate / 1000000 // convert back from integer
 
