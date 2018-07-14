@@ -382,8 +382,8 @@ class Me {
     )
   }
 
-  async syncdb() {
-    return await q('syncdb', async () => {
+  async syncdb(opts = {}) {
+    return q('syncdb', async () => {
       var all = []
 
       if (K) {
@@ -411,6 +411,8 @@ class Me {
         }
       }
 
+      if (opts.flush == 'users') cache.users = {}
+
       for (var key in cache.ins) {
         var u = cache.ins[key]
 
@@ -432,14 +434,12 @@ class Me {
 
         if (ch.last_used < ts() - K.cache_timeout) {
           delete cache.ch[key]
-          l('Evict from memory idle channel: ' + key)
+          //l('Evict from memory idle channel: ' + key)
         }
       }
 
-      await Promise.all(all)
       l('syncdb done')
-
-      return true
+      return Promise.all(all)
     })
   }
 

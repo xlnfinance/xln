@@ -144,7 +144,7 @@ const disputeWith = async (global_state, tr, signer) => {
       // see Delta.prototype.getState to see how state it's built
       let [
         methodId,
-        [leftId, rightId, dispute_nonce, offdelta, dispute_asset],
+        [leftId, rightId, new_dispute_nonce, new_offdelta, dispute_asset],
         left_inwards,
         right_inwards
       ] = r(state)
@@ -159,8 +159,9 @@ const disputeWith = async (global_state, tr, signer) => {
         return
       }
 
-      dispute_nonce = readInt(dispute_nonce)
-      offdelta = readInt(offdelta) // SIGNED int
+      // overwrite the above default "let" params
+      dispute_nonce = readInt(new_dispute_nonce)
+      offdelta = readInt(new_offdelta) // SIGNED int
       hashlocks = r([left_inwards, right_inwards])
     } else {
       l('New channel? Split with default values')

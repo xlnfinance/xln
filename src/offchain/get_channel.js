@@ -16,7 +16,7 @@ module.exports = async (pubkey, asset, delta = false) => {
       return ch
     }
 
-    l('Loading channel from db: ', key)
+    //l('Loading channel from db: ', key)
 
     if (!me.pubkey) {
       return false
@@ -28,7 +28,7 @@ module.exports = async (pubkey, asset, delta = false) => {
       l('Channel to self?')
       return false
     }
-    
+
     if (!(asset > 0)) {
       l('Invalid asset id', asset)
       asset = 1
@@ -83,7 +83,7 @@ module.exports = async (pubkey, asset, delta = false) => {
     }
 
     let user = await User.idOrKey(pubkey)
-    
+
     // default ins
     ch.ins = Insurance.build({
       insurance: 0,

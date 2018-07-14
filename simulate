@@ -33,11 +33,11 @@ if node fair.js --genesis=test $db | grep "Genesis done"; then
 
   pm2 start $pm2_opts --name wallet yarn -- parcel serve wallet -p $wallet_port
 
-  fair_node_args="-p8433 --syncdb=off"
+  fair_node_args="-p8433 --syncdb=off $1"
   pm2 start $pm2_opts --name fair8433 fair.js -- $fair_cluster_args $fair_node_args
 
   for i in $(seq 8001 $maxport); do
-    fair_node_args="-p$i --username=$i --pw=password --datadir=data$i"
+    fair_node_args="-p$i --username=$i --pw=password --datadir=data$i $1"
     if (( i < 8004 )); then
       pm2 start $pm2_opts --name fair$i fair.js -- $fair_cluster_args $fair_node_args
     else

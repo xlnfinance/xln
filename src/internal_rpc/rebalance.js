@@ -7,9 +7,11 @@ module.exports = async (p) => {
     // split by @
     if (o.to.length > 0) {
       let to = o.to.split('@')
+      let userId
 
+      // looks like a pubkey
       if (to[0].length == 64) {
-        let userId = Buffer.from(to[0], 'hex')
+        userId = Buffer.from(to[0], 'hex')
 
         // maybe this pubkey is already registred?
         let u = await User.idOrKey(userId)
@@ -18,7 +20,8 @@ module.exports = async (p) => {
           userId = u.id
         }
       } else {
-        let userId = parseInt(to[0])
+        // looks like numerical ID
+        userId = parseInt(to[0])
 
         let u = await User.idOrKey(userId)
 

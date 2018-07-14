@@ -124,7 +124,7 @@ module.exports = async () => {
     // hashlock and dispute-related
     secret_len: 32,
     dispute_delay: 8, // in how many blocks disputes are considered final
-    hashlock_exp: 4, // how many blocks a user needs to be a able to reveal
+    hashlock_exp: 6, // how many blocks (worst case scenario) a user needs to be a able to reveal secret
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)
     max_hashlocks: 20, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it

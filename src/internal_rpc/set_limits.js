@@ -13,7 +13,12 @@ module.exports = async (p) => {
   me.send(
     m,
     'setLimits',
-    me.envelope(map('setLimits'), ch.d.asset, ch.d.soft_limit, ch.d.hard_limit)
+    me.envelope(
+      methodMap('setLimits'),
+      ch.d.asset,
+      ch.d.soft_limit,
+      ch.d.hard_limit
+    )
   )
 
   result.confirm = 'Credit limits updated'

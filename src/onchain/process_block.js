@@ -208,7 +208,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     l('🎉 Maturity day! Copy all FRB balances to FRD')
     meta.cron.push(['maturity'])
 
-    await me.syncdb()
+    // clear up from cache
+    await me.syncdb({flush: 'users'})
 
     // first assignment must happen before zeroing
     await sequelize.query('UPDATE users SET balance1 = balance1 + balance2')
@@ -262,7 +263,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // In case we are validator && locked on this prev_hash, unlock to ensure liveness
   // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
   if (me.proposed_block.locked) {
-    var locked_prev_hash = r(me.proposed_block.header)[3]
+    let locked_prev_hash = r(me.proposed_block.header)[3]
 
     if (prev_hash == toHex(locked_prev_hash)) {
       l('Just unlocked from previous proposed block')

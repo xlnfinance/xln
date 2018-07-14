@@ -14,6 +14,11 @@ module.exports = async (opts) => {
 
     let addr = parseAddress(opts.address)
 
+    if (opts.address == me.address) {
+      react({alert: `Cannot pay to yourself`}, false)
+      return
+    }
+
     // use user supplied private message, otherwise generate random tag
     // invoice inside the address takes priority
     if (addr.invoice || opts.invoice) {
@@ -21,7 +26,6 @@ module.exports = async (opts) => {
         Buffer.from([1]),
         bin(addr.invoice ? addr.invoice : opts.invoice)
       )
-      l('Rewritten invoice with ', opts.invoice)
     } else {
       opts.invoice = concat(Buffer.from([2]), crypto.randomBytes(16))
     }

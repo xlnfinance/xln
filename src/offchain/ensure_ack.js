@@ -1,5 +1,5 @@
-// This method ensures all settled hashlocks were ack on time. If we don't get ack on time, 
-// the hashlock may expire and we lose the money, 
+// This method ensures all settled hashlocks were ack on time. If we don't get ack on time,
+// the hashlock may expire and we lose the money,
 // that's why we must go to blockchain asap to reveal the secret to hashlock
 module.exports = async () => {
   //l('Checking who has not ack')
@@ -8,13 +8,15 @@ module.exports = async () => {
   for (var key in cache.ch) {
     var ch = cache.ch[key]
 
+    let missed_ack = new Date() - ch.d.ack_requested_at
+
     if (
       // already disputed
       ch.d.status == 'disputed' ||
       // not awaiting ack
       !ch.d.ack_requested_at ||
       // they still have some time
-      ch.d.ack_requested_at > new Date() - K.dispute_if_no_ack
+      missed_ack < K.dispute_if_no_ack
     ) {
       continue
     }
@@ -46,7 +48,7 @@ module.exports = async () => {
       l(
         `No ack dispute with ${trim(ch.d.partnerId)} secrets ${
           to_reveal.length
-        }`
+        } missed ${missed_ack}`
       )
 
       me.batch.push(['revealSecrets', to_reveal])
