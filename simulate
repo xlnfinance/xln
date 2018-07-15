@@ -5,6 +5,13 @@ set -o nounset
 set -o errexit
 set -o pipefail
 
+if [ $# -eq 0 ]; then
+  global=
+else
+  global="$1"
+fi
+
+
 db=
 #--db=mysql:root:123123
 pm2_opts=--no-autorestart
@@ -33,11 +40,11 @@ if node fair.js --genesis=test $db | grep "Genesis done"; then
 
   pm2 start $pm2_opts --name wallet yarn -- parcel serve wallet -p $wallet_port
 
-  fair_node_args="-p8433 --syncdb=off $1"
+  fair_node_args="-p8433 --syncdb=off $global"
   pm2 start $pm2_opts --name fair8433 fair.js -- $fair_cluster_args $fair_node_args
 
   for i in $(seq 8001 $maxport); do
-    fair_node_args="-p$i --username=$i --pw=password --datadir=data$i $1"
+    fair_node_args="-p$i --username=$i --pw=password --datadir=data$i $global"
     if (( i < 8004 )); then
       pm2 start $pm2_opts --name fair$i fair.js -- $fair_cluster_args $fair_node_args
     else

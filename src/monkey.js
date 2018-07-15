@@ -26,8 +26,8 @@ Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
       if (!monkey5) failed.push('monkey5')
 
       if ((await Block.count()) < 2) failed.push('blocks')
-      if ((await Order.count()) != 1) failed.push('orders')
-      if ((await Delta.count()) != 7) failed.push('deltas')
+      if ((await Order.count()) < 1) failed.push('orders')
+      if ((await Delta.count()) < 5) failed.push('deltas')
       if ((await Asset.count()) < 4) failed.push('assets')
 
       let e2e =
