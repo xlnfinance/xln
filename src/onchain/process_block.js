@@ -283,46 +283,51 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       await me.syncdb()
     }
 
-    var filename = 'Fair-' + K.total_blocks + '.tar.gz'
-    require('tar').c(
-      {
-        gzip: true,
-        sync: false,
-        portable: true,
-        noMtime: true,
-        file: datadir + '/offchain/' + filename,
-        filter: (path, stat) => {
-          // must be deterministic
-          stat.mtime = null
-          stat.atime = null
-          stat.ctime = null
-          stat.birthtime = null
+    const path_filter = (path, stat) => {
+      // must be deterministic
+      stat.mtime = null
+      stat.atime = null
+      stat.ctime = null
+      stat.birthtime = null
 
-          // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
-          // No dotfiles. TODO whitelist
+      // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
+      // No dotfiles. TODO whitelist
 
-          if (
-            path.includes('/.') ||
-            path.match(
-              /^\.\/(isolate|data[0-9]+|data\/offchain|\.DS_Store|node_modules|wiki|wallet\/node_modules|dist|tools)/
-            )
-          ) {
-            return false
-          } else {
-            return true
-          }
-        }
-      },
-      ['.'],
-      (_) => {
-        if (old_height > 1) {
-          // genesis state is stored for analytics and validator bootstraping
-          fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz')
-          l('Removed old snapshot and created ' + filename)
-        }
-        snapshotHash()
+      if (
+        path.includes('/.') ||
+        path.match(
+          /^\.\/(isolate|data[0-9]+|data\/offchain|\.DS_Store|node_modules|wiki|wallet\/node_modules|dist|tools)/
+        )
+      ) {
+        return false
+      } else {
+        return true
       }
-    )
+    }
+
+    const filename = 'Fair-' + K.total_blocks + '.tar.gz'
+
+    const options = {
+      gzip: true,
+      sync: false,
+      portable: true,
+      noMtime: true,
+      file: datadir + '/offchain/' + filename,
+      filter: path_filter
+    }
+
+    const paths = ['.']
+
+    const callback = (_) => {
+      if (old_height > 1) {
+        // genesis state is stored for analytics and member bootstraping
+        fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz')
+        l('Removed old snapshot and created ' + filename)
+      }
+      snapshotHash()
+    }
+
+    require('tar').c(options, paths, callback)
   }
 
   if (me.request_reload) {
