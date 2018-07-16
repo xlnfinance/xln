@@ -184,30 +184,25 @@ class Me {
 
   // returns validator making block right now, use skip=true to get validator for next slot
   next_validator(skip = false) {
-    var now = ts()
-    var currentIndex = Math.floor(now / K.blocktime) % K.total_shares
-    var searchIndex = 0
+    const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
 
-    for (var i = 0; i < Validators.length; i++) {
-      searchIndex += Validators[i].shares
+    let searchIndex = 0
+    for (let i = 0; i < Validators.length; i++) {
+      const current = Validators[i]
+      searchIndex += current.shares
 
-      if (searchIndex > currentIndex) {
-        var current = Validators[i]
+      if (searchIndex <= currentIndex) continue
+      if (skip == false) return current
 
-        if (currentIndex + 1 == K.total_shares) {
-          // go back to 0
-          var next = Validators[0]
-        } else if (currentIndex + 1 < searchIndex) {
-          // same validator
-          var next = current
-        } else {
-          // next validator
-          var next = Validators[i + 1]
-        }
-        break
-      }
+      // go back to 0
+      if (currentIndex + 1 == K.total_shares) return Validators[0]
+
+      // same member
+      if (currentIndex + 1 < searchIndex) return current
+
+      // next member
+      return Validators[i + 1]
     }
-    return skip ? next : current
   }
 
   // signs data and adds our pubkey
