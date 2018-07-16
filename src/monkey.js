@@ -36,7 +36,7 @@ Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
       l(e2e)
       child_process.exec(`osascript -e 'display notification "${e2e}"'`)
 
-      if (failed.length != 0) {
+      if (failed.length != 0 && !on_server) {
         fatal(0)
       }
 

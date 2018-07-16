@@ -320,7 +320,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
     const callback = (_) => {
       if (old_height > 1) {
-        // genesis state is stored for analytics and member bootstraping
+        // genesis state is stored for analytics and my_validator bootstraping
         fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz')
         l('Removed old snapshot and created ' + filename)
       }

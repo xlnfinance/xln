@@ -10,7 +10,8 @@ set -o pipefail
 rm -rf data*
 rm -rf isolate*
 
-rsync . root@fairlayer.com:~/fair -rv  --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'
+rsync . root@fairlayer.com:~/fair -rv  --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'  
+#--delete
 
 ssh root@fairlayer.com <<'ENDSSH'
 cd ~/fair

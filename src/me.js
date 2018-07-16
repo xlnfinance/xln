@@ -197,10 +197,10 @@ class Me {
       // go back to 0
       if (currentIndex + 1 == K.total_shares) return Validators[0]
 
-      // same member
+      // same validator
       if (currentIndex + 1 < searchIndex) return current
 
-      // next member
+      // next validator
       return Validators[i + 1]
     }
   }

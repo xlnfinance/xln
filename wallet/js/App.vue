@@ -501,8 +501,6 @@ export default {
             <option v-for="(a,index) in assets" :value="a.id">{{a.name}} ({{a.ticker}})</option>
           </select></span>
 
-          <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
-          </button>
           &nbsp;
           <span @click="dev_mode=!dev_mode" :title="record && record.id">
             <UserIcon :hash="pubkey" :size="32"></UserIcon>
@@ -730,6 +728,12 @@ export default {
 
           <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
           <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
+
+
+          <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
+          </button>
+
+                    
         </template>
       </div>
       <div v-else-if="tab=='onchain'">

@@ -51,7 +51,7 @@ sync = () => {
   }
 
   const sendSync = () => {
-    // if we're member then sync from anyone except us
+    // if we're validator then sync from anyone except us
     const validatorSet = me.my_validator
       ? Validators.filter((m) => m != me.my_validator)
       : Validators
@@ -60,7 +60,7 @@ sync = () => {
     me.send(randomChosenValidator, 'sync', prevHash)
   }
 
-  if (me.my_member) {
+  if (me.my_validator) {
     return sendSync()
   }
 
