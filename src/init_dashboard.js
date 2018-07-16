@@ -1,8 +1,6 @@
 // serves default wallet and internal rpc on the same port
-const derive = require('./utils/derive')
-
 module.exports = async (a) => {
-  let ooops = async (err) => {
+  const ooops = async (err) => {
     l('oops', err)
     if (exitsync) return false
     exitsync = true
@@ -21,70 +19,11 @@ module.exports = async (a) => {
     l('before exit')
   })
 
-  var kFile = './' + datadir + '/onchain/k.json'
-  if (fs.existsSync(kFile)) {
-    l('Loading K data')
-    var json = fs.readFileSync(kFile)
-    K = JSON.parse(json)
-
-    Validators = JSON.parse(json).validators // another object ref
-    for (m of Validators) {
-      m.pubkey = Buffer.from(m.pubkey, 'hex')
-      m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
-    }
-  } else {
-    fatal(`Unable to read ${highlight(kFile)}, quitting`)
-  }
-
-  let finalhandler = require('finalhandler')
-  let serveStatic = require('serve-static')
-  let path = require('path')
+  const finalhandler = require('finalhandler')
+  const serveStatic = require('serve-static')
+  const path = require('path')
 
   let bundler
-  if (argv['wallet-url']) {
-    let walletUrl = argv['wallet-url']
-    let http = require('http')
-    let proxy = require('http-proxy').createProxyServer({
-      target: walletUrl
-    })
-    bundler = (req, res) => proxy.web(req, res, {}, finalhandler(req, res))
-    let retries = 0
-
-    while (true) {
-      const statusCode = await new Promise((resolve) => {
-        l('Reaching wallet ', walletUrl)
-        http
-          .get(walletUrl, (res) => {
-            const {statusCode} = res
-            resolve(statusCode)
-          })
-          .on('error', (e) => {
-            resolve(404)
-          })
-      })
-      if (statusCode !== 200) {
-        if (retries > 0) {
-          l(note(`Waiting for Parcel (HTTP ${statusCode})`))
-        }
-        if (retries > 5) {
-          throw new Error('No parcel on ' + walletUrl)
-        }
-        await sleep(1000 * Math.pow(1.5, retries))
-        retries++
-        continue
-      }
-      l(note('Parcel: OK'))
-      break
-    }
-  } else if (argv['wallet-dist']) {
-    bundler = serveStatic(path.resolve(__dirname, '../dist'))
-  } else {
-    let Parcel = require('parcel-bundler')
-    bundler = new Parcel(path.resolve(__dirname, '../wallet/index.html'), {
-      logLevel: 2
-      // for more options https://parceljs.org/api.html
-    }).middleware()
-  }
 
   var cb = function(req, res) {
     // Clickjacking protection
@@ -140,30 +79,60 @@ module.exports = async (a) => {
     }
   }
 
-  // this serves dashboard HTML page
+  if (argv['wallet-url']) {
+    const walletUrl = argv['wallet-url']
+    const http = require('http')
+    const proxy = require('http-proxy').createProxyServer({
+      target: walletUrl
+    })
+    bundler = (req, res) => proxy.web(req, res, {}, finalhandler(req, res))
+    let retries = 0
 
-  var server = require('http').createServer(cb)
-
-  me = new Me()
-
-  if (fs.existsSync('./' + datadir + '/offchain/pk.json')) {
-    PK = JSON.parse(fs.readFileSync('./' + datadir + '/offchain/pk.json'))
-  } else {
-    // used to authenticate browser sessions to this daemon
-    PK = {
-      auth_code: toHex(crypto.randomBytes(32)),
-
-      pending_batch: null
+    while (true) {
+      const statusCode = await new Promise((resolve) => {
+        l('Reaching wallet ', walletUrl)
+        http
+          .get(walletUrl, (res) => {
+            const {statusCode} = res
+            resolve(statusCode)
+          })
+          .on('error', (e) => {
+            resolve(404)
+          })
+      })
+      if (statusCode !== 200) {
+        if (retries > 0) {
+          l(note(`Waiting for Parcel (HTTP ${statusCode})`))
+        }
+        if (retries > 5) {
+          throw new Error('No parcel on ' + walletUrl)
+        }
+        await sleep(1000 * Math.pow(1.5, retries))
+        retries++
+        continue
+      }
+      l(note('Parcel: OK'))
+      break
     }
+  } else if (argv['wallet-dist']) {
+    bundler = serveStatic(path.resolve(__dirname, '../dist'))
+  } else {
+    let Parcel = require('parcel-bundler')
+    bundler = new Parcel(path.resolve(__dirname, '../wallet/index.html'), {
+      logLevel: 2
+      // for more options https://parceljs.org/api.html
+    }).middleware()
   }
 
-  if (argv.username) {
-    var seed = await derive(argv.username, argv.pw)
-    await me.init(argv.username, seed)
-    await me.start()
-  } else if (PK.username) {
-    await me.init(PK.username, Buffer.from(PK.seed, 'hex'))
-    await me.start()
+  // this serves dashboard HTML page
+  var server = require('http').createServer(cb)
+
+  openBrowser = () => {
+    const url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
+    l(note(`Open ${link(url)} in your browser`))
+    try {
+      opn(url)
+    } catch (e) {}
   }
 
   server
@@ -192,15 +161,5 @@ module.exports = async (a) => {
     })
   })
 
-  // start syncing as soon as the node is started
-  sync()
   update_cache(true)
-
-  if (argv.rpc) {
-    RPC.internal_rpc('admin', argv)
-  }
-
-  l(`\n${note('Welcome to Fair REPL!')}`)
-  repl = require('repl').start(note(''))
-  repl.context.me = me
 }

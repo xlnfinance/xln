@@ -1,5 +1,5 @@
 module.exports = (i) => {
-    let methodMap = [
+    const methodMap = [
         'placeholder',
 
         // consensus
