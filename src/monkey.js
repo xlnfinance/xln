@@ -5,6 +5,9 @@ if (argv.monkey) {
   if (me.my_hub) {
     // after a while the hub checks environment, db counts etc and test fails if anything is unexpected
     setTimeout(async () => {
+      // no need to run test on server
+      if (on_server) return
+
       await me.syncdb()
       update_cache()
 
@@ -12,9 +15,6 @@ if (argv.monkey) {
       let monkey5ins = await Insurance.sumForUser(5)
 
       // must be >100 after expected rebalance
-      var alert = `${me.metrics.settle.total}/${me.metrics.fail.total}\n
-Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
-      `
 
       let failed = []
 
@@ -24,6 +24,8 @@ Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
       if ((await Payment.count()) < 100) failed.push('payments')
 
       if (!monkey5) failed.push('monkey5')
+
+      //if (monkey5ins < 100) failed.push('monkey5insurance')
 
       if ((await Block.count()) < 2) failed.push('blocks')
       if ((await Order.count()) < 1) failed.push('orders')
@@ -36,7 +38,7 @@ Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
       l(e2e)
       child_process.exec(`osascript -e 'display notification "${e2e}"'`)
 
-      if (failed.length != 0 && !on_server) {
+      if (failed.length != 0) {
         fatal(0)
       }
 
@@ -99,6 +101,22 @@ Monkey5: ${monkey5 ? monkey5.asset(1) : 'N/A'}/${monkey5ins}\n
 
       // buying bunch of FRB for $4
       me.batch.push(['createOrder', [1, 400, 2, 0.001 * 1000000]])
+    }
+
+    if (me.record.id == 2) {
+      // withdraw 12.34 from hub and deposit 9.12 to 3@1
+      require('./internal_rpc/rebalance')({
+        asset: 1,
+        request_amount: 1234,
+        partner: 1,
+        outs: [
+          {
+            to: '3@1',
+            amount: '9.12',
+            invoice: 'test'
+          }
+        ]
+      })
     }
   }
 }

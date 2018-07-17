@@ -135,11 +135,9 @@ Delta = privSequelize.define(
     CHEAT_profitable_state: Sequelize.BLOB,
     CHEAT_profitable_sig: Sequelize.BLOB,
 
-    // 4th type of balance, equivalent traditional balance in a bank. For pocket change.
-    // Exists for convenience like pulling payments when the user is offline.
-    trusted_frd: {
-      type: Sequelize.INTEGER,
-      defaultValue: 0
+    requested_insurance: {
+      type: Sequelize.BOOLEAN,
+      default: false
     }
   },
   {

@@ -149,7 +149,7 @@ module.exports = async (a) => {
     })
 
   // opn doesn't work in SSH console
-  if (!argv.silent) openBrowser()
+  if (!argv.silent && !argv.s) openBrowser()
   internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
   internal_wss.on('error', function(err) {

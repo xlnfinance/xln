@@ -69,7 +69,8 @@ module.exports = async () => {
 
     blocks_since_last_snapshot: 999999999, // force to do a snapshot on first block
     last_snapshot_height: 0,
-    snapshot_after_blocks: 600,
+
+    snapshot_after_blocks: 100, // something like every hour is good enough
     snapshots_taken: 0,
     proposals_created: 0,
 

@@ -35,11 +35,24 @@ module.exports = async (p) => {
 
       let amount = parseInt(o.amount.replace(/[^0-9]/g, ''))
 
+      let withPartner = 0
+      // @onchain or @0 mean onchain balance
+      if (to[1] && to[1] != 'onchain' && to[1] != '0') {
+        // find a hub by its handle or id
+        let h = K.hubs.find((h) => h.handle == to[1] || h.id == to[1])
+        if (h) {
+          withPartner = h.id
+        } else {
+          react({alert: 'No such hub'})
+          return
+        }
+      }
+
       if (amount > 0) {
         outs.push([
           amount,
           userId,
-          to[1] ? parseInt(to[1]) : 0,
+          withPartner,
           o.invoice ? Buffer.from(o.invoice, 'hex') : 0
         ])
       }

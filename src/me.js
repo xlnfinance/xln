@@ -340,8 +340,21 @@ class Me {
 
   async startExternalRPC(advertized_url) {
     // there's 2nd dedicated websocket server for validator/hub commands
-    var cb = () => {}
-    me.external_wss_server = require('http').createServer(cb)
+
+    me.external_wss_server = require('http').createServer((req, res) => {
+      var [path, query] = req.url.split('?')
+      // call /faucet?address=ME&amount=100&asset=1
+      if (path == '/faucet') {
+        let args = querystring.parse(query)
+
+        await me.payChannel({
+          address: args.address,
+          amount: parseInt(args.amount),
+          asset: parseInt(args.asset)
+        })
+        res.end('sent')
+      }
+    })
 
     var port = parseInt(advertized_url.split(':')[2])
     me.external_wss_server.listen(on_server ? port + 200 : port)

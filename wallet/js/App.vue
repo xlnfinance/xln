@@ -250,6 +250,13 @@ export default {
       return asset ? asset.ticker : 'N/A'
     },
 
+    to_user: (userId) => {
+      // todo: twitter-style tooltips with info on the user
+
+      let h = app.K.hubs.find((h) => h.id == userId)
+      //`<span class="badge badge-success">@${h.handle}</span>`
+      return h ? h.handle : userId
+    },
     getAsset: (asset, user) => {
       if (!user) user = app.record
       if (!user) return 0
@@ -311,7 +318,7 @@ export default {
           parts.they_insured > 0 ? c(parts.they_insured) : ''
         }`
       }
-      return `${prefix} (${ins.leftId}) ${o} (${ins.rightId})`
+      return `${prefix} (${to_user(ins.leftId)}) ${o} (${to_user(ins.rightId)})`
     },
 
     commy: (b, dot = true) => {
@@ -465,10 +472,12 @@ export default {
               <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 Assets</a></li>
               <li><a class="nav-link" @click="go('hubs')" title="Hubs that instantly process payments. Run your own!">⚡️ Hubs</a></li>
 
-
               <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">👨‍💼 Accounts</a></li>
+
               <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and hubs">💸 Insurances</a></li>
+
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
+
               <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
 
               <li v-bind:class="{ active: tab=='exchange' }">
@@ -483,14 +492,14 @@ export default {
                 <a class="nav-link" href="https://github.com/fairlayer/wiki">📒 Docs</a>
               </li>
 
-              <li>
-                <a class="nav-link" href="https://demo.fairlayer.com">UX Demo</a>
-              </li>
             </ul>
+
 
           </li>
 
-
+          <li class="nav-item" >
+            <a class="nav-link" href="https://web.fairlayer.com">Web Wallet</a>
+          </li>
 
         </ul>
         <span class="badge badge-danger" v-if="pending_batch">Pending tx</span> &nbsp;
@@ -587,15 +596,6 @@ export default {
         <template v-if="pubkey">
           <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
-
-
-
-          <div class="input-group mb-3" style="width:400px" >
-            <input v-model="faucet_amount" type="text" class="form-control" placeholder="Amount to get" aria-label="Amount to get" aria-describedby="basic-addon2">
-            <div class="input-group-append">
-              <button class="btn btn-outline-secondary" type="button" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, faucet_amount: uncommy(faucet_amount) })">Testnet Faucet</button>
-            </div>
-          </div>
 
 
           <template v-for="(ch, index) in channels" v-if="ch.d.asset == asset" >
@@ -709,6 +709,16 @@ export default {
           <option disabled>Select current hub</option>
           <option v-for="(a,index) in channels" v-if="a.d.asset == asset" :value="a.partner">@{{a.hub.handle}}</option>
         </select>
+        
+
+
+        <div class="input-group mb-3" style="width:400px" >
+          <input v-model="faucet_amount" type="text" class="form-control" placeholder="Amount to get" aria-label="Amount to get" aria-describedby="basic-addon2">
+          <div class="input-group-append">
+            <button class="btn btn-outline-secondary" type="button" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, faucet_amount: uncommy(faucet_amount) })">Testnet Faucet</button>
+          </div>
+        </div>
+
 
         <template v-if="ch">
           <p>In order to receive assets you must define <b>credit limits to a hub</b> below. This limits your risk (uninsured balances).</p>
@@ -739,9 +749,18 @@ export default {
       <div v-else-if="tab=='onchain'">
         <div v-if="record">
           <h1>Onchain Operations</h1>
-          <p>Onchain ID: {{record.id}}</p>
+          <p>ID: {{record.id}}@onchain</p>
           <p>Onchain {{to_ticker(asset)}} balance: {{commy(getAsset(asset))}}</p>
           
+          <h3>Deposits to channels or users</h3>
+          <div v-for="out in outs">
+            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub"></p>
+            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit"></p>
+            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Message (optional)"></p>
+            <hr />
+          </div>
+
+
           <template>
             <h3>Withdraw from hub</h3>
             <template v-if="ch && ch.insured>0">
@@ -755,13 +774,7 @@ export default {
             <p v-else>You do not have <b>insured</b> balances to withdraw from.</p>
           </template>
 
-          <h3>Deposits to channels or users</h3>
-          <div v-for="out in outs">
-            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub"></p>
-            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit"></p>
-            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Message (optional)"></p>
-            <hr />
-          </div>
+
           <p>
             <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">+ Another Deposit</button>
           </p>
@@ -870,7 +883,10 @@ export default {
 
       </div>
       <div v-else-if="tab=='install'">
-        <h3>Decentralized Install for macOS and Linux</h3>
+        <h4>Web Wallet (optimized for convenience)</h4>
+        <p>If you are on mobile or want to store only small amounts you can use a <a href="https://web.fairlayer.com">custodian web wallet</a></p>
+
+        <h4>Fair Core (optimized for security)</h4>
         <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app and press Enter:</p>
         <div style="background-color: #FFFDDE; padding-left: 10px;"><Highlight :white="true" lang="bash" :code="install_snippet"></Highlight></div>
         <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
@@ -878,7 +894,7 @@ export default {
         <ul>
           <li v-for="m in K.validators" v-if="m.website && (!my_validator || m.id != my_validator.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
         </ul>
-        <small>Windows, Android and iOS support is coming soon.</small>
+
       </div>
       <div v-else-if="tab=='gov'">
         <h3>Smart Updates</h3>
@@ -898,7 +914,7 @@ export default {
         <p v-if="my_validator">
           <button @click="call('propose', proposal)" class="btn btn-warning">Propose</button>
         </p>
-        <p v-else>Currently only stakeholders can submit a smart update.</p>
+        <p v-else>Currently only validators can submit a smart update.</p>
         <div v-for="p in proposals">
           <h4>#{{p.id}}: {{p.desc}}</h4>
           <small>Proposed by #{{p.user.id}}</small>
@@ -925,9 +941,7 @@ export default {
       </div>
       <div v-else-if="tab=='blockchain_explorer'">
         <h1>Blockchain Explorer</h1>
-        <p>Blockchain is a chain of blocks, which contain transactions. These transactions were publicly broadcasted and executed on every full node, including yours. On this page you will see only last few blocks that your node processed, after a while they are deleted from your machine - you aren't required to store them.</p>
-        <p>Empty blocks are omitted. Under each block you will see what happened: transactions submitted by users and some automatic events.</p>
-        <p>If you want to review historical blocks from the beginning go to an explorer of any of the validators listed under Network.</p>
+        <p>These transactions were publicly broadcasted and executed on every full node, including yours.</p>
         <table v-if="blocks.length>0" class="table">
           <thead class="thead-dark">
             <tr>
@@ -1003,7 +1017,7 @@ export default {
       </div>
       <div v-else-if="tab=='account_explorer'">
         <h1>Account Explorer</h1>
-        <p>This is a table of registered users in the network. Onchain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Channel Explorer.</p>
+        <p>This is a table of registered users in the network. Onchain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Insurance explorer.</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
@@ -1042,8 +1056,8 @@ export default {
             <tr>
               <th scope="col">Left ID</th>
               <th scope="col">Right ID</th>
-              <th scope="col">Asset</th>
               <th scope="col">Insurance</th>
+              <th scope="col">Asset</th>
               <th scope="col">Ondelta</th>
               <th scope="col">Withdrawal Nonce</th>
               <th scope="col">Dispute</th>
@@ -1051,10 +1065,10 @@ export default {
           </thead>
           <tbody>
             <tr v-for="u in insurances">
-              <th>{{u.leftId}}</th>
-              <th>{{u.rightId}}</th>
-              <th>{{to_ticker(u.asset)}}</th>
+              <th v-html="to_user(u.leftId)"></th>
+              <th v-html="to_user(u.rightId)"></th>
               <th>{{commy(u.insurance)}}</th>
+              <th>{{to_ticker(u.asset)}}</th>
               <th>{{commy(u.ondelta)}}</th>
               <th>{{u.nonce}}</th>
               <th>{{u.dispute_delayed ? "Until "+u.dispute_delayed+" started by "+(u.dispute_left ? u.leftId : u.rightId) : "N/A" }}</th>
