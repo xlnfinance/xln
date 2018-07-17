@@ -71,20 +71,33 @@ Array.prototype.randomElement = function() {
 
 parseAddress = (addr) => {
   addr = addr.toString()
-  var invoice = false
+  let invoice = false
 
   if (addr.includes('#')) {
     // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
     ;[addr, invoice] = addr.split('#')
   }
 
-  var parts = r(base58.decode(addr))
+  let parts = r(base58.decode(addr))
+  let hubs = parts[2] ? parts[2].map(readInt) : [1]
 
-  return {
-    box_pubkey: parts[0],
-    pubkey: parts[1],
-    hubs: parts[2] ? parts[2].map(readInt) : [1],
-    invoice: invoice
+  // both pubkeys and hub list must be present
+  if (
+    parts[0] &&
+    parts[0].length == 32 &&
+    parts[1] &&
+    parts[1].length == 32 &&
+    hubs.length > 0
+  ) {
+    return {
+      box_pubkey: parts[0],
+      pubkey: parts[1],
+      hubs: hubs,
+      invoice: invoice
+    }
+  } else {
+    l('bad address ', addr)
+    return false
   }
 }
 
@@ -294,4 +307,3 @@ usage = () => {
     uptime: process.uptime()
   })
 }
-

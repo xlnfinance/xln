@@ -17,7 +17,7 @@ General recommendations:
 
 */
 
-module.exports = async function(asset) {
+module.exports = async function(asset = 1) {
   // tries to rebalance this particular asset
 
   if (PK.pending_batch) return l('There are pending tx')

@@ -14,6 +14,11 @@ module.exports = async (opts) => {
 
     let addr = parseAddress(opts.address)
 
+    if (!addr) {
+      l('Invalid address')
+      return
+    }
+
     if (opts.address == me.address) {
       react({alert: `Cannot pay to yourself`}, false)
       return

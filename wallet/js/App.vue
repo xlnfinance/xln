@@ -570,7 +570,7 @@ export default {
         <p>Risk limit: {{commy(K.risk)}}</p>
         <p>Hard risk limit: {{commy(K.hard_limit)}}</p>
         <h2>Snapshots</h2>
-        <p>Bytes until next snapshot: {{K.snapshot_after_bytes-K.bytes_since_last_snapshot}}</p>
+        <p>Make snapshot at blocks: {{K.snapshot_after_blocks}}</p>
         <p>Last snapshot at block # : {{K.last_snapshot_height}}</p>
         <p>Snapshots taken: {{K.snapshots_taken}}</p>
         <h2>Network stats</h2>
