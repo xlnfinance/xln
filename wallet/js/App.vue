@@ -244,6 +244,7 @@ export default {
         (d.assetId > d.buyAssetId ? d.amount * d.rate : d.amount / d.rate) / 100
       )
     },
+
     to_ticker: (assetId) => {
       let asset = app.assets ? app.assets.find((a) => a.id == assetId) : null
 
@@ -257,6 +258,7 @@ export default {
       //`<span class="badge badge-success">@${h.handle}</span>`
       return h ? h.handle : userId
     },
+
     getAsset: (asset, user) => {
       if (!user) user = app.record
       if (!user) return 0
@@ -318,7 +320,9 @@ export default {
           parts.they_insured > 0 ? c(parts.they_insured) : ''
         }`
       }
-      return `${prefix} (${to_user(ins.leftId)}) ${o} (${to_user(ins.rightId)})`
+      return `${prefix} (${app.to_user(ins.leftId)}) ${o} (${app.to_user(
+        ins.rightId
+      )})`
     },
 
     commy: (b, dot = true) => {

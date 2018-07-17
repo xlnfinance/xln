@@ -17,9 +17,7 @@ General recommendations:
 
 */
 
-module.exports = async function(asset = 1) {
-  // tries to rebalance this particular asset
-
+const rebalance = async function(asset = 1) {
   if (PK.pending_batch) return l('There are pending tx')
 
   var deltas = await Delta.findAll({
@@ -32,9 +30,6 @@ module.exports = async function(asset = 1) {
   // we request withdrawals and check in few seconds for them
   let netSpenders = []
   let netReceivers = []
-
-  // how much we own of this asset
-  let solvency = me.record.asset(asset)
 
   for (let d of deltas) {
     let ch = await d.getChannel()
@@ -70,7 +65,6 @@ module.exports = async function(asset = 1) {
       } else if (ch.d.withdrawal_requested_at == null) {
         l('Delayed pull')
         ch.d.withdrawal_requested_at = ts()
-        await ch.d.save()
       } else if (ch.d.withdrawal_requested_at + 600 < ts()) {
         l('User is offline for too long, or tried to cheat')
         me.batch.push(['disputeWith', asset, [await ch.d.getDispute()]])
@@ -80,9 +74,15 @@ module.exports = async function(asset = 1) {
 
   // checking on all inputs we expected to get, then rebalance
   setTimeout(async () => {
-    for (var partnerId of netSpenders) {
+    // how much we own of this asset
+    let solvency = me.record.asset(asset)
+
+    // add all withdrawals we received
+    for (let partnerId of netSpenders) {
       var ch = await me.getChannel(partnerId, asset)
       if (ch.d.input_sig) {
+        solvency += ch.d.input_amount
+
         me.batch.push([
           'withdrawFrom',
           ch.d.asset,
@@ -90,11 +90,37 @@ module.exports = async function(asset = 1) {
         ])
       } else {
         ch.d.withdrawal_requested_at = ts()
-        await ch.d.save()
+      }
+    }
+
+    // sort receivers, larger ones are given priority
+    netReceivers.sort((a, b) => b[0] - a[0])
+
+    // dont let our FRD onchain balance go lower than that
+    let safety = asset == 1 ? 100000 : 0
+
+    // now do our best to cover net receivers
+    for (let [deposit, partnerId] of netReceivers) {
+      solvency -= deposit
+      if (solvency >= safety) {
+        me.batch.push([
+          'depositTo',
+          asset,
+          [[deposit, me.record.id, partnerId, 0]]
+        ])
+      } else {
+        l('run out of funds')
+        break
       }
     }
 
     // broadcast will be automatic
     // await me.broadcast()
   }, 5000)
+}
+
+module.exports = () => {
+  for (let i = 1; i <= K.assets_created; i++) {
+    rebalance(i)
+  }
 }

@@ -443,6 +443,8 @@ const createAsset = async (global_state, tr, signer) => {
       desc: tr[1][3] ? tr[1][3].toString() : ''
     })
 
+    K.assets_created++
+
     signer.asset(new_asset.id, amount)
     global_state.events.push([
       'createAsset',

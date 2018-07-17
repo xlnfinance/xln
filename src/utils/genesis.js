@@ -101,6 +101,8 @@ module.exports = async () => {
     // latest block done at
     ts: 0,
 
+    assets_created: 2,
+
     //Time.at(1913370000) => 2030-08-19 20:40:00 +0900
 
     bet_maturity: ts() + 100, // when all FRB turn into FRD
