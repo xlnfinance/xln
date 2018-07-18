@@ -1,3 +1,5 @@
+// users rarely promise funds to the hub, so there is no periodic rebalance
+// but users can do manual rebalance, e.g. tranfering funds from old to better hub
 module.exports = async (p) => {
   let ins = []
   let outs = []

@@ -4,7 +4,7 @@ web.fairlayer.com {
   } 
 }
 
-web.fairlayer.com { 
+demo.fairlayer.com { 
   proxy / localhost:3010 { 
     websocket 
   } 

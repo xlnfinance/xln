@@ -15,6 +15,9 @@ General recommendations:
 1. assets stuck in a dispute is a waste. It's better to do everything by mutual agreement as much as possible, w/o suffering dispute delays and locked up liquidity
 2. the hub must store as little funds on their @onchain balances as possible. So once hub withdraw from net-spenders they should immediately deposit it to net-receiver.
 
+TODO
+promisify withdrawals, give sane timeout (eg 10 seconds)
+remember of debts during solvency that can appear
 */
 
 const rebalance = async function(asset = 1) {
