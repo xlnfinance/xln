@@ -23,6 +23,7 @@ if (argv.monkey) {
 
       if ((await Payment.count()) < 100) failed.push('payments')
 
+      // was this entirely new user created since genesis?
       if (!monkey5) failed.push('monkey5')
 
       //if (monkey5ins < 100) failed.push('monkey5insurance')

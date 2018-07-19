@@ -195,6 +195,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
             return
           }
 
+          // if any
           inward_hl.source_address = box_data.source_address
 
           inward_hl.invoice = box_data.invoice

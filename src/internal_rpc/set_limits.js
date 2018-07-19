@@ -6,8 +6,13 @@ module.exports = async (p) => {
   if (!m) return result
 
   let ch = await me.getChannel(m.pubkey, p.asset)
-  ch.d.soft_limit = parseInt(p.limits[0]) * 100
-  ch.d.hard_limit = parseInt(p.limits[1]) * 100
+
+  if (p.limits) {
+    ch.d.hard_limit = parseInt(p.limits[0]) * 100
+    ch.d.soft_limit = parseInt(p.limits[1]) * 100
+  }
+
+  ch.d.requested_insurance = p.request_insurance == 1
   await ch.d.save()
 
   me.send(
@@ -17,10 +22,13 @@ module.exports = async (p) => {
       methodMap('setLimits'),
       ch.d.asset,
       ch.d.soft_limit,
-      ch.d.hard_limit
+      ch.d.hard_limit,
+      p.request_insurance // 1 or undefined
     )
   )
 
-  result.confirm = 'Credit limits updated'
+  result.confirm = p.request_insurance
+    ? 'Insurance requested! Please wait'
+    : 'Credit limits updated'
   return result
 }

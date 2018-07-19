@@ -326,7 +326,7 @@ class Me {
 
     if (me.my_hub) {
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 5000)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 500)
       )
 
       // hubs have to force react regularly
@@ -344,16 +344,16 @@ class Me {
     me.external_wss_server = require('http').createServer(async (req, res) => {
       var [path, query] = req.url.split('?')
       // call /faucet?address=ME&amount=100&asset=1
-      if (path == '/faucet') {
+      if (path.startsWith('/faucet')) {
         let args = querystring.parse(query)
+        l('faucet ', args)
 
         let status = await me.payChannel({
           address: args.address,
           amount: parseInt(args.amount ? args.amount : 1000),
           asset: parseInt(args.asset ? args.asset : 1)
         })
-
-        res.end(status)
+        res.end('sent')
       }
     })
 

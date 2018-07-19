@@ -19,10 +19,12 @@ module.exports = async (opts) => {
       return
     }
 
-    if (opts.address == me.address) {
+    if (addr.address == me.address) {
       react({alert: `Cannot pay to yourself`}, false)
       return
     }
+
+    l('Paying to ', addr)
 
     // use user supplied private message, otherwise generate random tag
     // invoice inside the address takes priority
@@ -94,7 +96,7 @@ module.exports = async (opts) => {
         exp: K.usable_blocks + K.hashlock_exp,
 
         unlocker: unlocker,
-        destination_address: opts.address,
+        destination_address: addr.address,
         invoice: opts.invoice
       })
 

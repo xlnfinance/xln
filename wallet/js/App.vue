@@ -42,7 +42,6 @@ export default {
       assets: [],
       orders: [],
       channels: [],
-      faucet_amount: '',
 
       new_asset: {
         name: 'Yen ¥',
@@ -80,7 +79,7 @@ export default {
 
       my_hub: false,
 
-      limits: [100, 1000],
+      limits: ['', ''], //hard, soft
       metrics: {},
 
       history_limit: 10,
@@ -135,11 +134,21 @@ export default {
   computed: {
     ch: () => {
       // find current channel for selected asset and hub
-      return app.channels
+      let chan = app.channels
         ? app.channels.find(
             (c) => c.partner == app.partner && c.d.asset == app.asset
           )
         : false
+
+      // prefil credit limits, but only on first load
+      if (chan && app.limits[0] == '') {
+        app.limits = [
+          app.commy(chan.d.hard_limit),
+          app.commy(chan.d.soft_limit)
+        ]
+      }
+
+      return chan
     }
   },
   methods: {
@@ -410,6 +419,10 @@ export default {
 
     ts: () => Math.round(new Date() / 1000),
 
+    prompt: (a) => {
+      return window.prompt(a)
+    },
+
     trim: (str) => {
       return str ? str.slice(0, 8) + '...' : ''
     },
@@ -458,10 +471,6 @@ export default {
             <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
           </li>
 
-          <li v-if="pubkey && dev_mode" class="nav-item" v-bind:class="{ active: tab=='testnet' }">
-            <a class="nav-link" @click="go('testnet')">Testnet</a>
-          </li>
-
 
           <li class="nav-item dropdown">
             <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">🔍 Explorers
@@ -506,7 +515,7 @@ export default {
           </li>
 
         </ul>
-        <span class="badge badge-danger" v-if="pending_batch">Pending tx</span> &nbsp;
+        <span class="badge badge-danger" v-if="pending_batch">Onchain tx pending</span> &nbsp;
         <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
@@ -604,17 +613,28 @@ export default {
 
           <template v-for="(ch, index) in channels" v-if="ch.d.asset == asset" >
             <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}<span v-if="dev_mode"> {{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
+
+
             <small v-if="ch.payable > 0">
               = {{commy(ch.ins.insurance)}} insurance 
               {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
               {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
               {{ch.hashlock_hold[1] > 0 ? "- "+commy(ch.hashlock_hold[1])+" hashlocks" : ''}}
-              
+
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
-              <span class="badge badge-dark" v-if="!my_hub && ch.d.hard_limit == ch.d.soft_limit && ch.hard_limit > 0 && ch.uninsured > 0" @click="">click to request insurance</span>
-              <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured > ch.d.soft_limit">over soft limit, expect rebalance</span>
+
+              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('setLimits', {partner: ch.partner, request_insurance: 1})">{{ch.d.requested_insurance ? "Insurance Requested" : "Request Insurance"}}</span>
+
+              <!--
+              <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured> ch.d.soft_limit">over soft limit, expect rebalance</span>
               <span title="When you spend large part of your insurance, the hub may request a withdrawal from you so they could deposit this insurance to someone else. It's recommended to come online more frequently, otherwise hub may start a dispute with you." class="badge badge-dark" v-if="!my_hub && ch.they_insured >= K.risk">stay online to cooperate</span>
+              -->
+
             </small>
+
+
+            <span class="badge badge-success" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, faucet_amount: uncommy(prompt('How much?')) })">Faucet</span>
+            
             <p>
               <div v-if="ch.bar > 0">
                 <div class="progress" style="max-width:1400px">
@@ -714,38 +734,28 @@ export default {
           <option v-for="(a,index) in channels" v-if="a.d.asset == asset" :value="a.partner">@{{a.hub.handle}}</option>
         </select>
         
-
-
-        <div class="input-group mb-3" style="width:400px" >
-          <input v-model="faucet_amount" type="text" class="form-control" placeholder="Amount to get" aria-label="Amount to get" aria-describedby="basic-addon2">
-          <div class="input-group-append">
-            <button class="btn btn-outline-secondary" type="button" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, faucet_amount: uncommy(faucet_amount) })">Testnet Faucet</button>
-          </div>
-        </div>
-
-
         <template v-if="ch">
-          <p>In order to receive assets you must define <b>credit limits to a hub</b> below. This limits your risk (uninsured balances).</p>
           <p>
-            <label>Soft limit (currently {{commy(ch.d.soft_limit)}}, recommended {{commy(K.risk)}}) tells the hub after what amount uninsured balances must be insured. Low soft limit makes the hub rebalance more often thus incurs higher rebalance fees.</label>
+            <label>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive funds through the network.</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
           </p>
+
           <p>
-            <label>Hard limit (currently {{commy(ch.d.hard_limit)}}, recommended 1000) defines a maximum uninsured balance you can have at any time. Low hard limit may prevent you from receiving large payments.</label>
+            <label>Set soft limit to request hub automatically rebalance you after this amount. Leave empty to request insurance manually.</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]">
           </p>
-          <p>If you want to request insurance manually, set soft limit equal to hard limit. Then you can click "request insurance" in your wallet but beware of expensive onchain fees.</p>
+
           
           <p>
-            <button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save Uninsured Limits</button>
+            <button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save</button>
           </p>
 
-          <p>Wondering how much risk you are exposed to? This chart shows your uninsured balances over time and can help you to structure (stream) payments to reduce your risk to negligible amount.</p>
+          <p>This chart shows your uninsured balances over time</p>
           <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
 
 
-          <button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
-          </button>
+          <p><button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
+          </button></p>
 
                     
         </template>
@@ -811,23 +821,10 @@ export default {
             <b>{{pubkey}}</b></p>
         </div>
       </div>
-      <div v-else-if="tab=='testnet'">
-        <h3>Testnet Actions</h3>
 
-        <p>Case 5. If the hub tries to censor you and didn't let to withdraw the nice way, you can do the ugly way: start onchain dispute under Onchain disputes tab. (Notice that after a dispute uninsured limits are reset to 0 i.e. you reset your trust to the hub)</p>
-        <p>Case 6. More than that, you can try to cheat on the hub with the button below: it will broadcase the most profitable state - biggest balance you ever owned. When hub notices that, they will post latest state before delay period. Keep an eye on Blockchain Explorer page to see that.</p>
-        <button class="btn btn-success mb-3" @click="call('dispute', {partner: ch.partner, profitable: true})" href="#">Cheat in Dispute</button>
-        <br>
-        <p>Case 7. If you've been offline for too long, and the hub tried to get a withdrawal from you, they would have to dispute the channel with you.</p>
-        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 2 })">Ask Hub to Start Dispute</button>
-        <br>
-        <p>Case 8. Using this button you can ensure you're safe if the hub also tries to cheat on you with most profitable state.</p>
-        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 3 })">Ask Hub to Cheat in Dispute</button>
 
-        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 4 })">CHEAT dontack</button>
-        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 5 })">CHEAT dontreveal</button>
-        <button class="btn btn-success mb-3" @click="call('testnet', { partner: ch.partner, action: 6 })">CHEAT dontwithdraw</button>
-      </div>
+
+
       <div v-else-if="tab=='exchange'">
         <h3>Trustless Onchain Exchange</h3>
         <p>Onchain exchange is best suitable for large atomic swaps between two assets - it always incurs an expensive fees but is free of any counterparty risk. If you're looking to trade frequently or small amounts, try any traditional exchange that supports Fair assets.</p>

@@ -115,6 +115,16 @@ Delta = privSequelize.define(
     they_soft_limit: Sequelize.INTEGER,
     they_hard_limit: Sequelize.INTEGER, // they trust us
 
+    requested_insurance: {
+      type: Sequelize.BOOLEAN,
+      default: false
+    },
+
+    they_requested_insurance: {
+      type: Sequelize.BOOLEAN,
+      default: false
+    },
+
     flush_requested_at: Sequelize.DATE,
     ack_requested_at: Sequelize.DATE,
     last_online: Sequelize.DATE,
@@ -133,12 +143,7 @@ Delta = privSequelize.define(
 
     // All the safety Byzantine checks start with cheat_
     CHEAT_profitable_state: Sequelize.BLOB,
-    CHEAT_profitable_sig: Sequelize.BLOB,
-
-    requested_insurance: {
-      type: Sequelize.BOOLEAN,
-      default: false
-    }
+    CHEAT_profitable_sig: Sequelize.BLOB
   },
   {
     indexes: [

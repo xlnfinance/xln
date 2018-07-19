@@ -14,7 +14,8 @@ module.exports = async (args) => {
 
   ch.d.they_soft_limit = readInt(limits[2])
   ch.d.they_hard_limit = readInt(limits[3])
+  ch.d.they_requested_insurance = readInt(limits[4]) == 1
 
   l('Received updated limits')
-  if (argv.syncdb) ch.d.save()
+  //if (argv.syncdb) ch.d.save()
 }

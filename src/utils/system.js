@@ -77,9 +77,13 @@ parseAddress = (addr) => {
     // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
     ;[addr, invoice] = addr.split('#')
   }
+  let parts = []
+  let hubs = [1]
 
-  let parts = r(base58.decode(addr))
-  let hubs = parts[2] ? parts[2].map(readInt) : [1]
+  try {
+    parts = r(base58.decode(addr))
+    if (parts[2]) hubs = parts[2].map(readInt)
+  } catch (e) {}
 
   // both pubkeys and hub list must be present
   if (
@@ -93,7 +97,8 @@ parseAddress = (addr) => {
       box_pubkey: parts[0],
       pubkey: parts[1],
       hubs: hubs,
-      invoice: invoice
+      invoice: invoice,
+      address: addr
     }
   } else {
     l('bad address ', addr)

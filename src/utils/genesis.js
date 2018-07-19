@@ -79,7 +79,9 @@ module.exports = async () => {
 
     // manually priced actions to prevent spam
     account_creation_fee: 100,
-    standalone_balance: 500, // keep $5 on your own balance for unexpected onchain fees
+
+    standalone_balance: 1000, // keep $10 on your own balance for unexpected onchain fees
+    hub_standalone_balance: 100000, // hub has higher operational costs, so $1k is safer for unexpected onchain fees
 
     blocksize: 100000,
     blocktime: 20,
@@ -109,7 +111,7 @@ module.exports = async () => {
     created_at: ts(),
 
     // sanity limits for offchain payments
-    min_amount: 10,
+    min_amount: 5,
     max_amount: 300000000,
 
     validators: [],

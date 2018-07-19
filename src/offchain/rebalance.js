@@ -17,11 +17,13 @@ General recommendations:
 
 TODO
 promisify withdrawals, give sane timeout (eg 10 seconds)
-remember of debts during solvency that can appear
+
 */
 
+const withdraw = require('./withdraw')
+
 const rebalance = async function(asset = 1) {
-  if (PK.pending_batch) return l('There are pending tx')
+  if (PK.pending_batch || me.batch.length > 0) return l('There are pending tx')
 
   var deltas = await Delta.findAll({
     where: {
@@ -37,14 +39,14 @@ const rebalance = async function(asset = 1) {
   for (let d of deltas) {
     let ch = await d.getChannel()
 
-    // finding who's gone beyond soft limit or manually requested
-    // soft limit can be raised over K.risk to pay less fees
+    // finding who has uninsured balances AND requests insurance or gone beyond soft limit
     if (
-      ch.requested_insurance ||
-      ch.they_uninsured >= Math.max(K.risk, ch.d.they_soft_limit)
+      ch.they_uninsured > 0 &&
+      (ch.d.they_requested_insurance ||
+        (ch.d.they_soft_limit > 0 && ch.they_uninsured >= ch.d.they_soft_limit))
     ) {
       //l('Adding output for our promise ', ch.d.partnerId)
-      netReceivers.push([ch.they_uninsured, ch.d.partnerId])
+      netReceivers.push(ch)
     } else if (ch.insured >= K.risk) {
       if (ch.d.input_sig) {
         //l('We already have input to use')
@@ -58,11 +60,19 @@ const rebalance = async function(asset = 1) {
       } else if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
 
+        withdraw({
+          withPartner: ch.d.partnerId,
+          amount: ch.insured, // everything we got
+          asset: asset
+        })
+
+        /*
         me.send(
           ch.d.partnerId,
           'requestWithdrawFrom',
           me.envelope(ch.insured, asset)
         )
+        */
 
         netSpenders.push(ch.d.partnerId)
       } else if (ch.d.withdrawal_requested_at == null) {
@@ -77,14 +87,14 @@ const rebalance = async function(asset = 1) {
 
   // checking on all inputs we expected to get, then rebalance
   setTimeout(async () => {
-    // how much we own of this asset
-    let solvency = me.record.asset(asset)
+    // 1. how much we own of this asset
+    let weOwn = me.record.asset(asset)
 
-    // add all withdrawals we received
+    // 2. add all withdrawals we received
     for (let partnerId of netSpenders) {
       var ch = await me.getChannel(partnerId, asset)
       if (ch.d.input_sig) {
-        solvency += ch.d.input_amount
+        weOwn += ch.d.input_amount
 
         me.batch.push([
           'withdrawFrom',
@@ -96,23 +106,36 @@ const rebalance = async function(asset = 1) {
       }
     }
 
+    // 3. debts will be enforced on us (if any), so let's deduct them beforehand
+    let debts = await me.record.getDebts({where: {asset: asset}})
+    for (let d of debts) {
+      weOwn -= d.amount_left
+    }
+
     // sort receivers, larger ones are given priority
-    netReceivers.sort((a, b) => b[0] - a[0])
+    netReceivers.sort((a, b) => b.they_uninsured - a.they_uninsured)
 
     // dont let our FRD onchain balance go lower than that
-    let safety = asset == 1 ? 100000 : 0
+    let safety = asset == 1 ? K.hub_standalone_balance : 0
 
-    // now do our best to cover net receivers
-    for (let [deposit, partnerId] of netReceivers) {
-      solvency -= deposit
-      if (solvency >= safety) {
+    // 4. now do our best to cover net receivers
+    for (let ch of netReceivers) {
+      weOwn -= ch.they_uninsured
+      if (weOwn >= safety) {
         me.batch.push([
           'depositTo',
           asset,
-          [[deposit, me.record.id, partnerId, 0]]
+          [[ch.they_uninsured, me.record.id, ch.d.partnerId, 0]]
         ])
+
+        // nullify their insurance request
+        ch.d.they_requested_insurance = false
       } else {
-        l('run out of funds')
+        l(
+          `Run out of funds for asset ${asset}, own ${weOwn} need ${
+            ch.they_uninsured
+          }`
+        )
         break
       }
     }

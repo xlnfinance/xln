@@ -1,5 +1,7 @@
 // users rarely promise funds to the hub, so there is no periodic rebalance
 // but users can do manual rebalance, e.g. tranfering funds from old to better hub
+const withdraw = require('../offchain/withdraw')
+
 module.exports = async (p) => {
   let ins = []
   let outs = []
@@ -70,11 +72,8 @@ module.exports = async (p) => {
     } else {
       react({confirm: 'Requested withdrawals...'})
     }
-    me.send(
-      partner,
-      'requestWithdrawFrom',
-      me.envelope(p.request_amount, asset)
-    )
+
+    withdraw({withPartner: partner, amount: p.request_amount, asset: asset})
 
     // waiting for the response
     setTimeout(async () => {

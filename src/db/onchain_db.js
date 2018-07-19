@@ -231,6 +231,13 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
   for (let d of debts) {
     var u = await User.idOrKey(d.oweTo)
 
+    // FRD cannot be enforced below safety limit,
+    // otherwise the nodes won't be able to send onchain tx
+    let chargable =
+      asset == 1
+        ? this.asset(asset) - K.hub_standalone_balance
+        : this.asset(asset)
+
     if (d.amount_left <= this.asset(asset)) {
       this.asset(asset, -d.amount_left)
       u.asset(asset, d.amount_left)
@@ -240,12 +247,11 @@ User.prototype.payDebts = async function(asset, parsed_tx) {
       //await u.save()
       await d.destroy() // the debt was paid in full
     } else {
-      let full = this.asset(asset)
-      d.amount_left -= full
-      u.asset(asset, full)
-      this.asset(asset, -full) // this user's balance is 0 now!
+      d.amount_left -= chargable
+      u.asset(asset, chargable)
+      this.asset(asset, -chargable) // this user's balance is 0 now!
 
-      parsed_tx.events.push(['enforceDebt', full, u.id])
+      parsed_tx.events.push(['enforceDebt', chargable, u.id])
 
       //await u.save()
       await d.save()
@@ -414,9 +420,9 @@ Insurance.prototype.resolve = async function() {
     var ch = await me.getChannel(withUs.pubkey, this.asset)
 
     // reset all credit limits - the relationship starts "from scratch"
-    ch.d.soft_limit = 0
+    ch.d.soft_limit = null
     ch.d.hard_limit = 0
-    ch.d.they_soft_limit = 0
+    ch.d.they_soft_limit = null
     ch.d.they_hard_limit = 0
 
     ch.d.status = 'master'
