@@ -29,12 +29,13 @@ module.exports = async (args) => {
     if (PK.pending_batch) {
       const raw = fromHex(PK.pending_batch)
       l('Rebroadcasting pending tx ', raw.length)
-      me.send(me.next_validator(true), 'tx', r([raw]))
-    } else {
-      // time to broadcast our next batch then. (Delay to ensure validator processed the block)
-      setTimeout(() => {
-        me.broadcast()
-      }, 2000)
+      me.send(nextValidator(true), 'tx', r([raw]))
+      return
     }
+
+    // time to broadcast our next batch then. (Delay to ensure validator processed the block)
+    setTimeout(() => {
+      me.broadcast()
+    }, 2000)
   })
 }

@@ -11,7 +11,7 @@ module.exports = async (args) => {
   }
 
   // ensure the proposer is the current one
-  let proposer = me.next_validator()
+  let proposer = nextValidator()
   if (m != proposer) {
     return l(`You ${m.id} are not the current proposer ${proposer.id}`)
   }

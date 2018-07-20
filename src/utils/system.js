@@ -69,6 +69,90 @@ Array.prototype.randomElement = function() {
   return this[Math.floor(Math.random() * this.length)]
 }
 
+// returns validator making block right now, use skip=true to get validator for next slot
+nextValidator = (skip = false) => {
+  const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
+
+  let searchIndex = 0
+  for (let i = 0; i < Validators.length; i++) {
+    const current = Validators[i]
+    searchIndex += current.shares
+
+    if (searchIndex <= currentIndex) continue
+    if (skip == false) return current
+
+    // go back to 0
+    if (currentIndex + 1 == K.total_shares) return Validators[0]
+
+    // same validator
+    if (currentIndex + 1 < searchIndex) return current
+
+    // next validator
+    return Validators[i + 1]
+  }
+}
+
+syncdb = async (opts = {}) => {
+  return q('syncdb', async () => {
+    var all = []
+
+    if (K) {
+      fs.writeFileSync(
+        require('path').resolve(
+          __dirname,
+          '../../' + datadir + '/onchain/k.json'
+        ),
+        stringify(K),
+        function(err) {
+          if (err) return console.log(err)
+        }
+      )
+    }
+
+    // saving all deltas and corresponding payment objects to db
+    // it only saves changed records, so call save() on everything
+
+    for (var key in cache.users) {
+      var u = cache.users[key]
+
+      // if already registred, save
+      if (u.id) {
+        all.push(u.save())
+      }
+    }
+
+    if (opts.flush == 'users') cache.users = {}
+
+    for (var key in cache.ins) {
+      var u = cache.ins[key]
+
+      // if already registred, save
+      if (u.id) {
+        all.push(u.save())
+      }
+    }
+
+    for (var key in cache.ch) {
+      var ch = cache.ch[key]
+      all.push(ch.d.save())
+
+      ch.payments = ch.payments.filter((t) => {
+        all.push(t.save())
+
+        return t.type + t.status != 'delack'
+      })
+
+      if (ch.last_used < ts() - K.cache_timeout) {
+        delete cache.ch[key]
+        //l('Evict from memory idle channel: ' + key)
+      }
+    }
+
+    l('syncdb done')
+    return Promise.all(all)
+  })
+}
+
 parseAddress = (addr) => {
   addr = addr.toString()
   let invoice = false
@@ -127,7 +211,7 @@ fatal = (reason) => {
     react({reload: true}) //reloads UI window
     me.intervals.map(clearInterval)
 
-    me.syncdb().then(async () => {
+    syncdb().then(async () => {
       //await sequelize.close()
       //await privSequelize.close()
       await sleep(500)
