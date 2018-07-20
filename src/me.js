@@ -80,11 +80,6 @@ class Me {
     await promise_writeFile(datadir + '/offchain/pk.json', JSON.stringify(PK))
   }
 
-  // returns true if no active browser ws now
-  headless() {
-    return !me.browser || me.browser.readyState != 1
-  }
-
   is_me(pubkey) {
     return me.pubkey && me.pubkey.equals(pubkey)
   }
