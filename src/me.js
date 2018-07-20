@@ -454,43 +454,6 @@ class Me {
     return channels
   }
 
-  async payMonkey(counter = 1) {
-    var address = monkeys.randomElement()
-    // offchain payment
-    await me.payChannel({
-      address: address,
-      amount: 100 + Math.round(Math.random() * 100),
-      asset: 1
-    })
-
-    let [box_pubkey, pubkey] = r(base58.decode(address))
-    var reg = await User.idOrKey(pubkey)
-
-    // onchain payment (batched, not sent to validator yet)
-    me.batch.push([
-      'depositTo',
-      1,
-      [[Math.round(Math.random() * 1000), reg.id ? reg.id : pubkey, 0]]
-    ])
-
-    // run on server infinitely and with longer delays
-    // but for local tests limit requests and run faster
-    if (on_server) {
-      // replenish with testnet faucet once in a while
-
-      //if (ch.payable < 3000 && argv.monkey && !me.my_hub) {
-      //if (counter % 300 == 10) me.getCoins()
-
-      setTimeout(() => {
-        me.payMonkey(counter + 1)
-      }, Math.round(500 + Math.random() * 3000))
-    } else if (counter < 20) {
-      setTimeout(() => {
-        me.payMonkey(counter + 1)
-      }, Math.round(200))
-    }
-  }
-
   updateMetrics() {
     for (let name of Object.keys(me.metrics)) {
       let m = me.metrics[name]
