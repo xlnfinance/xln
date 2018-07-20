@@ -160,10 +160,10 @@ class Me {
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
-    if (me.my_validator && me.my_validator == me.next_validator(true)) {
+    if (me.my_validator && me.my_validator == nextValidator(true)) {
       me.mempool.push(signed_batch)
     } else {
-      me.send(me.next_validator(true), 'tx', r([signed_batch]))
+      me.send(nextValidator(true), 'tx', r([signed_batch]))
     }
 
     // saving locally to ensure it is added, and rebroadcast if needed
@@ -175,29 +175,6 @@ class Me {
     Validators.map((c) => {
       me.send(c, method, data)
     })
-  }
-
-  // returns validator making block right now, use skip=true to get validator for next slot
-  next_validator(skip = false) {
-    const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
-
-    let searchIndex = 0
-    for (let i = 0; i < Validators.length; i++) {
-      const current = Validators[i]
-      searchIndex += current.shares
-
-      if (searchIndex <= currentIndex) continue
-      if (skip == false) return current
-
-      // go back to 0
-      if (currentIndex + 1 == K.total_shares) return Validators[0]
-
-      // same validator
-      if (currentIndex + 1 < searchIndex) return current
-
-      // next validator
-      return Validators[i + 1]
-    }
   }
 
   // signs data and adds our pubkey

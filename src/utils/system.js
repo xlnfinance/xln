@@ -69,6 +69,29 @@ Array.prototype.randomElement = function() {
   return this[Math.floor(Math.random() * this.length)]
 }
 
+// returns validator making block right now, use skip=true to get validator for next slot
+nextValidator = (skip = false) => {
+  const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
+
+  let searchIndex = 0
+  for (let i = 0; i < Validators.length; i++) {
+    const current = Validators[i]
+    searchIndex += current.shares
+
+    if (searchIndex <= currentIndex) continue
+    if (skip == false) return current
+
+    // go back to 0
+    if (currentIndex + 1 == K.total_shares) return Validators[0]
+
+    // same validator
+    if (currentIndex + 1 < searchIndex) return current
+
+    // next validator
+    return Validators[i + 1]
+  }
+}
+
 parseAddress = (addr) => {
   addr = addr.toString()
   let invoice = false
