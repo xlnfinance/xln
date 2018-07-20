@@ -152,7 +152,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   if (is_usable && K.usable_blocks % 20 == 0) {
     // Auto resolving disputes that are due
-    await me.syncdb()
+    await syncdb()
 
     all.push(
       Insurance.findAll({
@@ -209,7 +209,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     meta.cron.push(['maturity'])
 
     // clear up from cache
-    await me.syncdb({flush: 'users'})
+    await syncdb({flush: 'users'})
 
     // first assignment must happen before zeroing
     await sequelize.query('UPDATE users SET balance1 = balance1 + balance2')
@@ -228,7 +228,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // looking for non-determinism
   /*
   if (K.total_blocks % 50 == 0) {
-    await me.syncdb()
+    await syncdb()
 
     var out = child_process.execSync(`shasum -a 256 ${datadir}/onchain/db*`).toString().split(/[ \n]/)
     //K.current_db_hash = out[0]
@@ -280,7 +280,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
       await sleep(6000)
     } else {
       // it's important to flush current K to disk before snapshot
-      await me.syncdb()
+      await syncdb()
     }
 
     const path_filter = (path, stat) => {

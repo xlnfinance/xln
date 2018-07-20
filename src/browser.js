@@ -97,7 +97,7 @@ react = async (result = {}, force = true) => {
   me.last_react = new Date()
 
   if (!me.my_hub) {
-    //await me.syncdb()
+    //await syncdb()
   }
 
   if (isHeadless()) return

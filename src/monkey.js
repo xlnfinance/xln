@@ -46,7 +46,7 @@ if (argv.monkey) {
       // no need to run test on server
       if (on_server) return
 
-      await me.syncdb()
+      await syncdb()
       update_cache()
 
       let monkey5 = await User.idOrKey(5)

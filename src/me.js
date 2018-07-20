@@ -291,9 +291,9 @@ class Me {
     */
 
     if (me.my_hub || me.my_validator) {
-      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
+      me.intervals.push(setInterval(syncdb, K.blocktime * 4000))
     } else {
-      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
+      me.intervals.push(setInterval(syncdb, K.blocktime * 4000))
     }
 
     if (me.my_hub) {
@@ -361,67 +361,6 @@ class Me {
       'testnet',
       r([1, asset, amount, bin(me.address)])
     )
-  }
-
-  async syncdb(opts = {}) {
-    return q('syncdb', async () => {
-      var all = []
-
-      if (K) {
-        fs.writeFileSync(
-          require('path').resolve(
-            __dirname,
-            '../' + datadir + '/onchain/k.json'
-          ),
-          stringify(K),
-          function(err) {
-            if (err) return console.log(err)
-          }
-        )
-      }
-
-      // saving all deltas and corresponding payment objects to db
-      // it only saves changed records, so call save() on everything
-
-      for (var key in cache.users) {
-        var u = cache.users[key]
-
-        // if already registred, save
-        if (u.id) {
-          all.push(u.save())
-        }
-      }
-
-      if (opts.flush == 'users') cache.users = {}
-
-      for (var key in cache.ins) {
-        var u = cache.ins[key]
-
-        // if already registred, save
-        if (u.id) {
-          all.push(u.save())
-        }
-      }
-
-      for (var key in cache.ch) {
-        var ch = cache.ch[key]
-        all.push(ch.d.save())
-
-        ch.payments = ch.payments.filter((t) => {
-          all.push(t.save())
-
-          return t.type + t.status != 'delack'
-        })
-
-        if (ch.last_used < ts() - K.cache_timeout) {
-          delete cache.ch[key]
-          //l('Evict from memory idle channel: ' + key)
-        }
-      }
-
-      l('syncdb done')
-      return Promise.all(all)
-    })
   }
 
   // takes channels with supported hubs (verified and custom ones)
