@@ -400,7 +400,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
   if (argv.syncdb) {
     //all.push(ch.d.save())
 
-    await me.syncdb() //Promise.all(all)
+    await syncdb() //Promise.all(all)
   }
 
   return flushable

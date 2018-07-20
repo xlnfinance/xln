@@ -2,8 +2,14 @@
 
 // Called once in a while to cache current state of everything and flush it to browser
 // TODO: better way to keep app reactive?
+
+  // returns true if no active browser ws now
+const isHeadless = () => {
+  return !me.browser || me.browser.readyState != 1
+}
+
 update_cache = async (force = false) => {
-  if (!me.my_validator && me.headless() && !force) return
+  if (!me.my_validator && isHeadless() && !force) return
 
   if (K) {
     cached_result.my_hub = me.my_hub
@@ -91,10 +97,10 @@ react = async (result = {}, force = true) => {
   me.last_react = new Date()
 
   if (!me.my_hub) {
-    //await me.syncdb()
+    //await syncdb()
   }
 
-  if (me.headless()) return
+  if (isHeadless()) return
 
   //await update_cache()
 
@@ -146,7 +152,7 @@ react = async (result = {}, force = true) => {
     result.pending_batch = PK.pending_batch
   }
 
-  if (me.headless()) return
+  if (isHeadless()) return
 
   try {
     me.browser.send(

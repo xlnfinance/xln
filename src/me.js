@@ -80,11 +80,6 @@ class Me {
     await promise_writeFile(datadir + '/offchain/pk.json', JSON.stringify(PK))
   }
 
-  // returns true if no active browser ws now
-  headless() {
-    return !me.browser || me.browser.readyState != 1
-  }
-
   is_me(pubkey) {
     return me.pubkey && me.pubkey.equals(pubkey)
   }
@@ -165,10 +160,10 @@ class Me {
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
-    if (me.my_validator && me.my_validator == me.next_validator(true)) {
+    if (me.my_validator && me.my_validator == nextValidator(true)) {
       me.mempool.push(signed_batch)
     } else {
-      me.send(me.next_validator(true), 'tx', r([signed_batch]))
+      me.send(nextValidator(true), 'tx', r([signed_batch]))
     }
 
     // saving locally to ensure it is added, and rebroadcast if needed
@@ -180,29 +175,6 @@ class Me {
     Validators.map((c) => {
       me.send(c, method, data)
     })
-  }
-
-  // returns validator making block right now, use skip=true to get validator for next slot
-  next_validator(skip = false) {
-    const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
-
-    let searchIndex = 0
-    for (let i = 0; i < Validators.length; i++) {
-      const current = Validators[i]
-      searchIndex += current.shares
-
-      if (searchIndex <= currentIndex) continue
-      if (skip == false) return current
-
-      // go back to 0
-      if (currentIndex + 1 == K.total_shares) return Validators[0]
-
-      // same validator
-      if (currentIndex + 1 < searchIndex) return current
-
-      // next validator
-      return Validators[i + 1]
-    }
   }
 
   // signs data and adds our pubkey
@@ -319,9 +291,9 @@ class Me {
     */
 
     if (me.my_hub || me.my_validator) {
-      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
+      me.intervals.push(setInterval(syncdb, K.blocktime * 4000))
     } else {
-      me.intervals.push(setInterval(me.syncdb, K.blocktime * 4000))
+      me.intervals.push(setInterval(syncdb, K.blocktime * 4000))
     }
 
     if (me.my_hub) {
@@ -391,67 +363,6 @@ class Me {
     )
   }
 
-  async syncdb(opts = {}) {
-    return q('syncdb', async () => {
-      var all = []
-
-      if (K) {
-        fs.writeFileSync(
-          require('path').resolve(
-            __dirname,
-            '../' + datadir + '/onchain/k.json'
-          ),
-          stringify(K),
-          function(err) {
-            if (err) return console.log(err)
-          }
-        )
-      }
-
-      // saving all deltas and corresponding payment objects to db
-      // it only saves changed records, so call save() on everything
-
-      for (var key in cache.users) {
-        var u = cache.users[key]
-
-        // if already registred, save
-        if (u.id) {
-          all.push(u.save())
-        }
-      }
-
-      if (opts.flush == 'users') cache.users = {}
-
-      for (var key in cache.ins) {
-        var u = cache.ins[key]
-
-        // if already registred, save
-        if (u.id) {
-          all.push(u.save())
-        }
-      }
-
-      for (var key in cache.ch) {
-        var ch = cache.ch[key]
-        all.push(ch.d.save())
-
-        ch.payments = ch.payments.filter((t) => {
-          all.push(t.save())
-
-          return t.type + t.status != 'delack'
-        })
-
-        if (ch.last_used < ts() - K.cache_timeout) {
-          delete cache.ch[key]
-          //l('Evict from memory idle channel: ' + key)
-        }
-      }
-
-      l('syncdb done')
-      return Promise.all(all)
-    })
-  }
-
   // takes channels with supported hubs (verified and custom ones)
   async channels() {
     let channels = []
@@ -480,43 +391,6 @@ class Me {
     }
 
     return channels
-  }
-
-  async payMonkey(counter = 1) {
-    var address = monkeys.randomElement()
-    // offchain payment
-    await me.payChannel({
-      address: address,
-      amount: 100 + Math.round(Math.random() * 100),
-      asset: 1
-    })
-
-    let [box_pubkey, pubkey] = r(base58.decode(address))
-    var reg = await User.idOrKey(pubkey)
-
-    // onchain payment (batched, not sent to validator yet)
-    me.batch.push([
-      'depositTo',
-      1,
-      [[Math.round(Math.random() * 1000), reg.id ? reg.id : pubkey, 0]]
-    ])
-
-    // run on server infinitely and with longer delays
-    // but for local tests limit requests and run faster
-    if (on_server) {
-      // replenish with testnet faucet once in a while
-
-      //if (ch.payable < 3000 && argv.monkey && !me.my_hub) {
-      //if (counter % 300 == 10) me.getCoins()
-
-      setTimeout(() => {
-        me.payMonkey(counter + 1)
-      }, Math.round(500 + Math.random() * 3000))
-    } else if (counter < 20) {
-      setTimeout(() => {
-        me.payMonkey(counter + 1)
-      }, Math.round(200))
-    }
   }
 
   updateMetrics() {

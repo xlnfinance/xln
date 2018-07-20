@@ -185,7 +185,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
     if (argv.syncdb) {
       //all.push(ch.d.save())
-      await me.syncdb() //Promise.all(all)
+      await syncdb() //Promise.all(all)
     }
 
     me.send(ch.d.partnerId, 'update', envelope)

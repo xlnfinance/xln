@@ -33,8 +33,8 @@ for all scenarios we use 4 nodes: A B C D each with 25% stake. We must tolerate 
 const await_propose = async () => {
   me.status = 'propose'
 
-  //l('Next round', me.next_validator().id)
-  if (me.my_validator != me.next_validator()) {
+  //l('Next round', nextValidator().id)
+  if (me.my_validator != nextValidator()) {
     return
   }
 

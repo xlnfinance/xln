@@ -491,7 +491,7 @@ export default {
 
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
 
-              <li><a class="nav-link" @click="go('gov')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
+              <li><a class="nav-link" @click="go('updates')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
 
               <li v-bind:class="{ active: tab=='exchange' }">
                 <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
@@ -897,9 +897,9 @@ export default {
         </ul>
 
       </div>
-      <div v-else-if="tab=='gov'">
+      <div v-else-if="tab=='updates'">
         <h3>Smart Updates</h3>
-        <p>Smart updates are small patches to the system that can be offered by anyone and they solve the same problem smart contracts do but in much more powerful and secure fashion. An update can introduce new functionality, execute any code and modify any file. There is a voting period when validators can vote for proposed updates. If an update gains approval of the majority, the update will be automatically applied syncroniously accross all nodes in the network.</p>
+        <p>Smart updates solve the same problem as smart contracts - they are adding a new functionality into the blockchain. While smart contracts run inside a complicated virtual machine with execution overhead and opcode limitations, smart updates modify the underlying blockchain software and provide a more effective and powerful way to add a new feature or fix a problem. Anyone can propose a smart update, validators vote for it and then it is syncroniously applied across all nodes.</p>
         <div class="form-group">
           <label for="comment">Description:</label>
           <textarea class="form-control" v-model="proposal[0]" rows="2" id="comment"></textarea>
