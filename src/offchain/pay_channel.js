@@ -39,6 +39,9 @@ module.exports = async (opts) => {
 
     let amount = parseInt(opts.amount)
 
+    // NaN
+    if (!Number.isInteger(amount)) return
+
     // if we are hub making a payment, don't add the fees on top
     if (me.my_hub) {
       var via = addr.pubkey

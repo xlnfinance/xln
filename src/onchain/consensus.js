@@ -183,7 +183,7 @@ const precommit_await = () => {
   } else if (me.proposed_block.header) {
     // adding to our external queue to avoid race conditions
     // we don't call processBlock directly to avoid races
-    require('./chain')([
+    require('./process_chain')([
       [precommits, me.proposed_block.header, me.proposed_block.ordered_tx_body]
     ])
     me.proposed_block = {}

@@ -942,7 +942,7 @@ export default {
       </div>
       <div v-else-if="tab=='blockchain_explorer'">
         <h1>Blockchain Explorer</h1>
-        <p>These transactions were publicly broadcasted and executed on every full node, including yours.</p>
+        <p>These transactions were publicly broadcasted and executed on every full node, including yours. Blockchain space is reserved for insurance rebalances, disputes and other high-level settlement actions.</p>
         <table v-if="blocks.length>0" class="table">
           <thead class="thead-dark">
             <tr>
