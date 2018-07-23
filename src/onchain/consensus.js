@@ -219,7 +219,7 @@ module.exports = async () => {
   // watch for new events
   setTimeout(() => {
     q('onchain', me.consensus)
-  }, 500)
+  }, 200)
 
   return true
 }

@@ -298,7 +298,7 @@ class Me {
 
     if (me.my_hub) {
       me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 500)
+        setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
       )
 
       // hubs have to force react regularly

@@ -23,8 +23,6 @@ promisify withdrawals, give sane timeout (eg 10 seconds)
 const withdraw = require('./withdraw')
 
 const rebalance = async function(asset = 1) {
-  if (PK.pending_batch || me.batch.length > 0) return l('There are pending tx')
-
   var deltas = await Delta.findAll({
     where: {
       myId: me.pubkey,
@@ -143,10 +141,12 @@ const rebalance = async function(asset = 1) {
 
     // broadcast will be automatic
     // await me.broadcast()
-  }, 5000)
+  }, 3000)
 }
 
 module.exports = () => {
+  if (PK.pending_batch || me.batch.length > 0) return l('There are pending tx')
+
   for (let i = 1; i <= K.assets_created; i++) {
     rebalance(i)
   }

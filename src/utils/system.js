@@ -92,31 +92,39 @@ nextValidator = (skip = false) => {
   }
 }
 
+// cache layer stores most commonly edited records:
+// channels, payments, users and insurances
+// also K.json is stored
 syncdb = async (opts = {}) => {
   return q('syncdb', async () => {
     var all = []
 
     if (K) {
-      fs.writeFileSync(
-        require('path').resolve(
-          __dirname,
-          '../../' + datadir + '/onchain/k.json'
-        ),
-        stringify(K),
-        function(err) {
-          if (err) return console.log(err)
-        }
-      )
+      let K_dump = stringify(K)
+
+      // rewrite only if changed
+      if (K_dump != cache.last_K_dump) {
+        fs.writeFileSync(
+          require('path').resolve(
+            __dirname,
+            '../../' + datadir + '/onchain/k.json'
+          ),
+          K_dump,
+          function(err) {
+            if (err) return console.log(err)
+          }
+        )
+        cache.last_K_dump = K_dump
+      }
     }
 
     // saving all deltas and corresponding payment objects to db
-    // it only saves changed records, so call save() on everything
+    // it only saves changed() records, so call save() on everything
 
     for (var key in cache.users) {
       var u = cache.users[key]
 
-      // if already registred, save
-      if (u.id) {
+      if (u.id && u.changed()) {
         all.push(u.save())
       }
     }
@@ -126,18 +134,21 @@ syncdb = async (opts = {}) => {
     for (var key in cache.ins) {
       var u = cache.ins[key]
 
-      // if already registred, save
-      if (u.id) {
+      if (u.id && u.changed()) {
         all.push(u.save())
       }
     }
 
     for (var key in cache.ch) {
       var ch = cache.ch[key]
-      all.push(ch.d.save())
+      if (ch.d.changed()) {
+        all.push(ch.d.save())
+      }
 
       ch.payments = ch.payments.filter((t) => {
-        all.push(t.save())
+        if (t.changed()) {
+          all.push(t.save())
+        }
 
         return t.type + t.status != 'delack'
       })
@@ -148,7 +159,7 @@ syncdb = async (opts = {}) => {
       }
     }
 
-    l('syncdb done')
+    l(`syncdb done: ${all.length}`)
     return Promise.all(all)
   })
 }

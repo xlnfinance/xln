@@ -1,0 +1,11 @@
+cd ~
+rm -rf fair
+id=fair
+f=Fair-1.tar.gz
+mkdir $id && cd $id && curl https://fairlayer.com/$f -o $f
+tar -xzf $f && rm $f
+rm -rf ./src
+cp -r ~/work/fair/node_modules node_modules
+cp -r ~/work/fair/wallet/node_modules wallet/node_modules
+cp -r ~/work/fair/src src
+node fair -p8001

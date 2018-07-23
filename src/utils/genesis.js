@@ -52,8 +52,17 @@ module.exports = async () => {
 
   // K is a handy config JSON
   const K = {
-    // global network pepper to protect derivation from rainbow tables
-    network_name: 'main',
+    // Things that are different in testnet vs mainnet
+    network_name: 'testnet',
+    blocksize: 100000,
+    blocktime: 10,
+    step_latency: 2, // how long is each consensus step: propose, prevote, precommit, await is the rest
+    gossip_delay: 500, // anti clock skew, give others time to change state
+
+    //Time.at(1913370000) => 2030-08-19 20:40:00 +0900
+
+    bet_maturity: ts() + 100, // when all FRB turn into FRD
+    created_at: ts(),
 
     usable_blocks: 0, // blocks that have some extra space (to ensure disputes add on-time)
     total_blocks: 0, // total number of blocks full or not
@@ -83,11 +92,6 @@ module.exports = async () => {
     standalone_balance: 1000, // keep $10 on your own balance for unexpected onchain fees
     hub_standalone_balance: 100000, // hub has higher operational costs, so $1k is safer for unexpected onchain fees
 
-    blocksize: 100000,
-    blocktime: 20,
-    step_latency: 5, // how long is each consensus step: propose, prevote, precommit, await is the rest
-    gossip_delay: 1500, // anti clock skew, give others time to change state
-
     // up to X seconds, validators don't propose blocks if empty
     // the problem is all delayed actions also happen much later if no blocks made
     skip_empty_blocks: 0,
@@ -95,7 +99,7 @@ module.exports = async () => {
     // each genesis is randomized
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
 
-    risk: 10000, // recommended rebalance limit
+    risk: 10000, // hubs usually withdraw after this amount
 
     soft_limit: 5000000, // rebalance after
     hard_limit: 50000000, // how much can a user lose if hub is insolvent?
@@ -106,11 +110,6 @@ module.exports = async () => {
     ts: 0,
 
     assets_created: 2,
-
-    //Time.at(1913370000) => 2030-08-19 20:40:00 +0900
-
-    bet_maturity: ts() + 100, // when all FRB turn into FRD
-    created_at: ts(),
 
     // sanity limits for offchain payments
     min_amount: 5,

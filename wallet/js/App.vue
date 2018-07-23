@@ -520,7 +520,7 @@ export default {
 
         </ul>
         <span class="badge badge-danger" v-if="pending_batch">Onchain tx pending</span> &nbsp;
-        <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>Block #{{K.total_blocks}}, {{timeAgo(K.ts)}}</span> &nbsp;
+        <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span><span v-else >Block #{{K.total_blocks}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
             <option disabled>Select current asset</option>
@@ -768,9 +768,12 @@ export default {
         <div v-if="record">
           <h1>Onchain Operations</h1>
           <p>ID: {{record.id}}@onchain</p>
-          <p>Onchain {{to_ticker(asset)}} balance: {{commy(getAsset(asset))}}</p>
+          <p>FRD balance: {{commy(getAsset(1))}}</p>
+
+          <p v-if="asset != 1">Onchain {{to_ticker(asset)}} balance: {{commy(getAsset(asset))}}</p>
+          <p>@onchain is a special "meta" balance that is not stored with a hub and has maximum security guarantees. To send money to it use ID@onchain or just ID. Your onchain FRD balance is used to pay all kinds of fees so keep it preloaded.</p>
           
-          <h3>Deposits to channels or users</h3>
+          <h3>Deposits</h3>
           <div v-for="out in outs">
             <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub"></p>
             <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit"></p>
@@ -780,7 +783,7 @@ export default {
 
 
           <template>
-            <h3>Withdraw from hub</h3>
+            <h3>Withdraw</h3>
             <template v-if="ch && ch.insured>0">
               
               <small>Amount to withdraw (up to <b>{{commy(ch.insured)}}</b>) from <b>insured</b> balance
@@ -1022,7 +1025,7 @@ export default {
       </div>
       <div v-else-if="tab=='account_explorer'">
         <h1>Account Explorer</h1>
-        <p>This is a table of registered users in the network. Onchain balance is normally used to pay transaction fees, and most assets are stored in payment channels under Insurance explorer.</p>
+        <p>This is a table of registered users in the network. Onchain balance is normally used to pay transaction fees, and most assets are stored with hubs under Insurance explorer.</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
@@ -1104,7 +1107,7 @@ export default {
 
       <div v-else-if="tab=='hubs'">
         <h1>Hubs</h1>
-        <p>Any user can have a payment channel with any other user. However for effective routing some users get thoroughly verified and offered inside the wallet to have channel with. Similarly to banks, using same hub with recipients is cheaper then sending assets cross-hub. Hubs have no priveleges over regular users and follow exact same rules and cannot steal your assets like a bank. If your hub is compromised the uninsured balances may be lost, but insured are protected.</p>
+        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks.</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
@@ -1151,7 +1154,7 @@ export default {
           <p v-if="record"><button class="btn btn-success" @click="call('createAsset', new_asset)">Create Asset</button></p>
           <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
 
-          <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can rebalance it to a channel with a hub and start sending instantly to other users.</div>
+          <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can deposit it to a hub and start sending instantly to other users.</div>
         </div>
           
 

@@ -6,6 +6,11 @@
 // 4,-2 |--.==== (right owns entire insurance, 2 in uninsured balance)
 // https://codepen.io/anon/pen/wjLGgR visual demo
 resolveChannel = (insurance, delta, is_left = true) => {
+  if (!Number.isInteger(insurance) || !Number.isInteger(delta)) {
+    l(insurance, delta)
+    throw 'Not integer'
+  }
+
   var parts = {
     // left user promises only with negative delta, scenario 3
     they_uninsured: delta < 0 ? -delta : 0,

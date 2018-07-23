@@ -245,6 +245,7 @@ const depositTo = async (global_state, tr, signer, meta, tax) => {
 
   for (let output of tr[1]) {
     let amount = readInt(output[0])
+    let original_amount = amount
 
     if (amount > signer.asset(asset)) {
       l(
@@ -346,7 +347,7 @@ const depositTo = async (global_state, tr, signer, meta, tax) => {
       if (depositTo.id == ins.leftId) ins.ondelta += amount
 
       // user is paying themselves for registration
-      const regfees = readInt(output[0]) - amount
+      const regfees = original_amount - amount
       ins.ondelta -= compared * regfees
 
       signer.asset(asset, -amount)
@@ -355,12 +356,13 @@ const depositTo = async (global_state, tr, signer, meta, tax) => {
         // The hub gets reimbursed for rebalancing users.
         // Otherwise it would be harder to collect fee from participants
         // TODO: attack vector, the user may not endorsed this rebalance
-
         // reimbures to hub rebalance fees
+        /*
         ins.insurance -= reimburse_tax
         ins.ondelta -= compared * reimburse_tax
 
         signer.asset(1, reimburse_tax)
+        */
         // todo take from onchain balance instead
       }
 
