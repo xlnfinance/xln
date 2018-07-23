@@ -21,8 +21,8 @@ module.exports = async (args) => {
   }
 
   l('Got withdrawal for ' + amount)
-  ch.d.input_amount = amount
-  ch.d.input_sig = sig
+  ch.d.withdrawal_amount = amount
+  ch.d.withdrawal_sig = sig
 
   if (argv.syncdb) ch.d.save()
 }

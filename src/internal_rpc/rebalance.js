@@ -78,8 +78,8 @@ module.exports = async (p) => {
     // waiting for the response
     setTimeout(async () => {
       let ch = await me.getChannel(partner.pubkey, asset)
-      if (ch.d.input_sig) {
-        ins.push([ch.d.input_amount, ch.d.partnerId, ch.d.input_sig])
+      if (ch.d.withdrawal_sig) {
+        ins.push([ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig])
 
         me.batch.push(['withdrawFrom', asset, ins])
         me.batch.push(['depositTo', asset, outs])

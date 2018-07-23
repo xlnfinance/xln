@@ -420,9 +420,9 @@ Insurance.prototype.resolve = async function() {
     var ch = await me.getChannel(withUs.pubkey, this.asset)
 
     // reset all credit limits - the relationship starts "from scratch"
-    ch.d.soft_limit = null
+    ch.d.soft_limit = 0
     ch.d.hard_limit = 0
-    ch.d.they_soft_limit = null
+    ch.d.they_soft_limit = 0
     ch.d.they_hard_limit = 0
 
     ch.d.status = 'master'

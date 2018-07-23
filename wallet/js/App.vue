@@ -480,24 +480,28 @@ export default {
           
               <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">📖 Blockchain</a></li>
 
-              <li><a class="nav-link" @click="go('validators')">🤵 Validators</a></li>
-
-              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 Assets</a></li>
-              <li><a class="nav-link" @click="go('hubs')" title="Hubs that instantly process payments. Run your own!">⚡️ Hubs</a></li>
-
-              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">👨‍💼 Accounts</a></li>
-
               <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and hubs">💸 Insurances</a></li>
 
-              <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
-
-              <li><a class="nav-link" @click="go('updates')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
+              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 Assets</a></li>
 
               <li v-bind:class="{ active: tab=='exchange' }">
                 <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
               </li>
+
+
+              <li><a class="nav-link" @click="go('hubs')" title="Hubs that instantly process payments. Run your own!">⚡️ Hubs</a></li>
+
+              <li><a class="nav-link" @click="go('validators')">🤵 Validators</a></li>
+
+              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">👨‍💼 Accounts</a></li>
+
+
+              <li><a class="nav-link" @click="go('updates')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
+
                             
               <li><a class="nav-link" @click="go('hashlocks')">🔐 Hashlocks</a></li>
+
+              <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
 
               <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">🎛 Node Metrics</a></li>
 
@@ -623,7 +627,7 @@ export default {
 
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
 
-              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('setLimits', {partner: ch.partner, request_insurance: 1})">{{ch.d.requested_insurance ? "Insurance Requested" : "Request Insurance"}}</span>
+              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('setLimits', {partner: ch.partner, request_insurance: 1})">Request Insurance</span>
 
               <!--
               <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured> ch.d.soft_limit">over soft limit, expect rebalance</span>

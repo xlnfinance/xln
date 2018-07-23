@@ -72,9 +72,9 @@ const withdrawFrom = async (global_state, tr, signer, meta) => {
         global_state.asset
       )
       // they planned to withdraw and they did. Nullify hold amount
-      ch.d.they_input_amount = 0
-      ch.d.input_amount = 0
-      ch.d.input_sig = null
+      ch.d.they_withdrawal_amount = 0
+      ch.d.withdrawal_amount = 0
+      ch.d.withdrawal_sig = null
 
       ch.ins = ins
 

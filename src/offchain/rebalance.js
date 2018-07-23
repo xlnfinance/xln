@@ -8,7 +8,7 @@ The most important job of the hub is to rebalance assets once in a while.
 
 Current implementation is super simple and straightforward. There's huge room for improvement:
 * smart learning based on balances over time not on balance at the time of matching
-* use as little inputs/outputs to transfer as much as possible volume
+* use as little withdrawals/deposits to transfer as much as possible volume
 * have different schedule for different assets, e.g. rebalance FRD every 1 block but rare assets every 1k blocks
 
 General recommendations:
@@ -39,7 +39,8 @@ const rebalance = async function(asset = 1) {
   for (let d of deltas) {
     let ch = await d.getChannel()
 
-    // finding who has uninsured balances AND requests insurance or gone beyond soft limit
+    // finding who has uninsured balances AND
+    // requests insurance OR gone beyond soft limit
     if (
       ch.they_uninsured > 0 &&
       (ch.d.they_requested_insurance ||
@@ -48,14 +49,14 @@ const rebalance = async function(asset = 1) {
       //l('Adding output for our promise ', ch.d.partnerId)
       netReceivers.push(ch)
     } else if (ch.insured >= K.risk) {
-      if (ch.d.input_sig) {
-        //l('We already have input to use')
+      if (ch.d.withdrawal_sig) {
+        //l('We already have withdrawal to use')
         // method, user, hub, nonce, amount
 
         me.batch.push([
           'withdrawFrom',
           asset,
-          [[ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]]
+          [[ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig]]
         ])
       } else if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
@@ -85,7 +86,7 @@ const rebalance = async function(asset = 1) {
     }
   }
 
-  // checking on all inputs we expected to get, then rebalance
+  // checking on all withdrawals we expected to get, then rebalance
   setTimeout(async () => {
     // 1. how much we own of this asset
     let weOwn = me.record.asset(asset)
@@ -93,13 +94,13 @@ const rebalance = async function(asset = 1) {
     // 2. add all withdrawals we received
     for (let partnerId of netSpenders) {
       var ch = await me.getChannel(partnerId, asset)
-      if (ch.d.input_sig) {
-        weOwn += ch.d.input_amount
+      if (ch.d.withdrawal_sig) {
+        weOwn += ch.d.withdrawal_amount
 
         me.batch.push([
           'withdrawFrom',
           ch.d.asset,
-          [[ch.d.input_amount, ch.d.partnerId, ch.d.input_sig]]
+          [[ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig]]
         ])
       } else {
         ch.d.withdrawal_requested_at = ts()

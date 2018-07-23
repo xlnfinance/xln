@@ -78,10 +78,17 @@ refresh = function(ch) {
     }
   }
 
-  Object.assign(
-    ch,
-    resolveChannel(ch.ins.insurance, ch.ins.ondelta + ch.d.offdelta, ch.left)
-  )
+  let insurance = ch.ins.insurance
+  let delta = ch.ins.ondelta + ch.d.offdelta
+
+  // we must apply withdrawal proofs on state even before they hit blockchain
+  // what we are about to withdraw and they are about to withdraw
+  insurance -= ch.d.withdrawal_amount + ch.d.they_withdrawal_amount
+
+  // delta minus what Left one is about to withdraw
+  delta -= ch.left ? ch.d.withdrawal_amount : ch.d.they_withdrawal_amount
+
+  Object.assign(ch, resolveChannel(insurance, delta, ch.left))
 
   // Canonical state
   ch.state = [
@@ -103,7 +110,6 @@ refresh = function(ch) {
     ch.uninsured +
     ch.d.they_hard_limit -
     ch.they_uninsured -
-    ch.d.input_amount -
     ch.hashlock_hold[1]
 
   ch.they_payable =
@@ -111,7 +117,6 @@ refresh = function(ch) {
     ch.they_uninsured +
     ch.d.hard_limit -
     ch.uninsured -
-    ch.d.they_input_amount -
     ch.hashlock_hold[0]
 
   // All stuff we show in the progress bar in the wallet

@@ -117,12 +117,12 @@ Delta = privSequelize.define(
 
     requested_insurance: {
       type: Sequelize.BOOLEAN,
-      default: false
+      defaultValue: false
     },
 
     they_requested_insurance: {
       type: Sequelize.BOOLEAN,
-      default: false
+      defaultValue: false
     },
 
     flush_requested_at: Sequelize.DATE,
@@ -130,10 +130,15 @@ Delta = privSequelize.define(
     last_online: Sequelize.DATE,
     withdrawal_requested_at: Sequelize.DATE,
 
-    they_input_amount: Sequelize.INTEGER,
-
-    input_amount: Sequelize.INTEGER,
-    input_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
+    withdrawal_amount: {
+      type: Sequelize.INTEGER,
+      defaultValue: 0
+    },
+    withdrawal_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
+    they_withdrawal_amount: {
+      type: Sequelize.INTEGER,
+      defaultValue: 0
+    },
 
     sig: Sequelize.BLOB,
     signed_state: Sequelize.BLOB,

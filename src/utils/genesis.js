@@ -96,7 +96,9 @@ module.exports = async () => {
     prev_hash: toHex(crypto.randomBytes(32)), // toHex(Buffer.alloc(32)),
 
     risk: 10000, // recommended rebalance limit
-    hard_limit: 100000000, // how much can a user lose if hub is insolvent?
+
+    soft_limit: 5000000, // rebalance after
+    hard_limit: 50000000, // how much can a user lose if hub is insolvent?
 
     collected_tax: 0,
 

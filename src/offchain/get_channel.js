@@ -65,13 +65,10 @@ module.exports = async (pubkey, asset, delta = false) => {
           status: 'master',
           offdelta: 0,
 
-          input_amount: 0,
-          they_input_amount: 0,
-
-          soft_limit: my_hub(pubkey) ? null : 0,
+          soft_limit: my_hub(pubkey) ? K.soft_limit : 0,
           hard_limit: my_hub(pubkey) ? K.hard_limit : 0,
 
-          they_soft_limit: my_hub(me.pubkey) ? null : 0,
+          they_soft_limit: my_hub(me.pubkey) ? K.soft_limit : 0,
           they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0
         }
       })

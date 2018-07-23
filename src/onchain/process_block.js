@@ -138,7 +138,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   K.blocks_since_last_snapshot += 1
 
   // When "tail" gets too long, create new snapshot
-  if (K.blocks_since_last_snapshot > K.snapshot_after_blocks) {
+  if (K.blocks_since_last_snapshot >= K.snapshot_after_blocks) {
     K.blocks_since_last_snapshot = 0
     K.snapshots_taken++
 
@@ -160,6 +160,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
         include: {all: true}
       }).then(async (insurances) => {
         for (let ins of insurances) {
+          // take from cache instead
+          let str = stringify([ins.leftId, ins.rightId, ins.asset])
+          if (cache.ins[str]) ins = cache.ins[str]
+
           meta.cron.push(['resolved', ins, await ins.resolve()])
         }
       })

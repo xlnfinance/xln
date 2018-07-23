@@ -14,7 +14,7 @@ module.exports = async (args) => {
 
   let ch = await me.getChannel(pubkey, asset)
 
-  if (ch.d.they_input_amount > 0) {
+  if (ch.d.they_withdrawal_amount > 0) {
     l('Partner already has withdrawal from us')
     return false
   }
@@ -33,7 +33,7 @@ module.exports = async (args) => {
     ch.d.asset
   ])
 
-  ch.d.they_input_amount = amount
+  ch.d.they_withdrawal_amount = amount
   if (argv.syncdb) ch.d.save()
   l('Gave withdrawal for ' + amount)
 
