@@ -55,8 +55,8 @@ module.exports = async () => {
     // Things that are different in testnet vs mainnet
     network_name: 'testnet',
     blocksize: 100000,
-    blocktime: 10,
-    step_latency: 2, // how long is each consensus step: propose, prevote, precommit, await is the rest
+    blocktime: 6,
+    step_latency: 1, // how long is each consensus step: propose, prevote, precommit, await is the rest
     gossip_delay: 500, // anti clock skew, give others time to change state
 
     //Time.at(1913370000) => 2030-08-19 20:40:00 +0900
