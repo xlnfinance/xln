@@ -140,11 +140,12 @@ module.exports = async (a) => {
     .once('error', function(err) {
       if (err.code === 'EADDRINUSE') {
         openBrowser()
-        fatal(
+        l(
           `Port ${highlight(
             base_port
           )} is currently in use. Pass -p PORT to use another port.`
         )
+        process.exit(0)
       }
     })
 

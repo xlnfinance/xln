@@ -140,14 +140,6 @@ export default {
           )
         : false
 
-      // prefil credit limits, but only on first load
-      if (chan && app.limits[0] == '') {
-        app.limits = [
-          app.commy(chan.d.hard_limit),
-          app.commy(chan.d.soft_limit)
-        ]
-      }
-
       return chan
     }
   },
@@ -247,6 +239,13 @@ export default {
       app.call('load', data)
       return false
     },
+    prefillLimits: () => {
+      let ch = app.channels.find(
+        (c) => c.partner == app.partner && c.d.asset == app.asset
+      )
+      // prefil credit limits, but only on first load
+      app.limits = [app.commy(ch.d.hard_limit), app.commy(ch.d.soft_limit)]
+    },
 
     buyAmount: (d) => {
       return (
@@ -297,7 +296,7 @@ export default {
     go: (path) => {
       var authed = ['wallet', 'credit', 'onchain', 'testnet']
 
-      if (authed.includes(path) && !localStorage.auth_code) path = ''
+      //if (authed.includes(path) && !localStorage.auth_code) path = ''
 
       if (path == '') {
         history.pushState('/', null, '/')
@@ -740,12 +739,12 @@ export default {
         
         <template v-if="ch">
           <p>
-            <label>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive funds through the network.</label>
+            <label>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive funds through the network. Currently: {{commy(ch.d.hard_limit)}}</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
           </p>
 
           <p>
-            <label>Set soft limit to request hub automatically rebalance you after this amount. Leave empty to request insurance manually.</label>
+            <label>Set uninsured limit to request hub automatically rebalance you after this amount. Leave empty to request insurance manually. Currently: {{commy(ch.d.soft_limit)}}</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]">
           </p>
 
