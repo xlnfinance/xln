@@ -1,1 +1,1 @@
-npm i yarn -g && yarn
+vendored_yarn/bin/yarn

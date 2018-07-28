@@ -108,7 +108,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   K.ts = timestamp
 
   // Processing transactions one by one
-  // Long term TODO: parallel execution with q() critical sections
+  // Long term TODO: parallel execution with section() critical sections
   for (let i = 0; i < ordered_tx.length; i++) {
     let result = await me.processBatch(ordered_tx[i], meta)
     if (!result.success) l(result)
@@ -325,8 +325,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     const callback = (_) => {
       if (old_height > 1) {
         // genesis state is stored for analytics and my_validator bootstraping
-        fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz')
-        l('Removed old snapshot and created ' + filename)
+        fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz', () => {
+          l('Removed old snapshot and created ' + filename)
+        })
       }
       snapshotHash()
     }

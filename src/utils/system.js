@@ -96,7 +96,7 @@ nextValidator = (skip = false) => {
 // channels, payments, users and insurances
 // also K.json is stored
 syncdb = async (opts = {}) => {
-  return q('syncdb', async () => {
+  return section('syncdb', async () => {
     var all = []
 
     if (K) {
@@ -139,8 +139,8 @@ syncdb = async (opts = {}) => {
       }
     }
 
-    for (var key in cache.ch) {
-      var ch = cache.ch[key]
+    for (let key in cache.ch) {
+      let ch = cache.ch[key]
       if (ch.d.changed()) {
         all.push(ch.d.save())
       }
@@ -155,11 +155,14 @@ syncdb = async (opts = {}) => {
 
       if (ch.last_used < ts() - K.cache_timeout) {
         delete cache.ch[key]
-        //l('Evict from memory idle channel: ' + key)
+        l(
+          'Evict from memory idle channel: ' + trim(ch.d.partnerId),
+          ch.d.ack_requested_at
+        )
       }
     }
 
-    l(`syncdb done: ${all.length}`)
+    if (all.length > 0) l(`syncdb done: ${all.length}`)
     return Promise.all(all)
   })
 }
@@ -264,19 +267,20 @@ sleep = async function(ms) {
 
 var {performance} = require('perf_hooks')
 
-// critical section for "key"
-q = async function(key, job) {
+// critical section for a specific key
+// https://en.wikipedia.org/wiki/Critical_section
+section = async function(key, job) {
   return new Promise(async (resolve) => {
-    key = 'key_' + JSON.stringify(key)
+    key = JSON.stringify(key)
 
-    if (q.q[key]) {
-      q.q[key].push([job, resolve])
+    if (section.q[key]) {
+      section.q[key].push([job, resolve])
     } else {
-      q.q[key] = [[job, resolve]]
+      section.q[key] = [[job, resolve]]
 
-      while (q.q[key].length > 0) {
+      while (section.q[key].length > 0) {
         try {
-          let [got_job, got_resolve] = q.q[key].shift()
+          let [got_job, got_resolve] = section.q[key].shift()
           let started = performance.now()
 
           //let deadlock = setTimeout(function() {
@@ -294,11 +298,11 @@ q = async function(key, job) {
           }, 100)
         }
       }
-      delete q.q[key]
+      delete section.q[key]
     }
   })
 }
-q.q = {}
+section.q = {}
 
 current_db_hash = () => {
   return Buffer.alloc(1)

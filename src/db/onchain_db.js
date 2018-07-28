@@ -425,6 +425,7 @@ Insurance.prototype.resolve = async function() {
     ch.d.they_soft_limit = 0
     ch.d.they_hard_limit = 0
 
+    // reset disputed status and ack timestamp
     ch.d.status = 'master'
     ch.d.ack_requested_at = null
     //await ch.d.save()

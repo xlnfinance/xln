@@ -4,7 +4,7 @@
 // TODO: periodically clone Insurance to Delta db to only deal with one db having all data
 module.exports = async (pubkey, asset, delta = false) => {
   // this critical section protects from simultaneous getChannel and doublesaved db records
-  return await q(['get', pubkey, asset], async () => {
+  return await section(['get', pubkey, asset], async () => {
     let ch
 
     if (typeof pubkey == 'string') pubkey = fromHex(pubkey)

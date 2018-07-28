@@ -18,7 +18,7 @@ module.exports = async (args) => {
 
   asset = readInt(asset)
 
-  let flushable = await q([pubkey, asset], async () => {
+  let flushable = await section(['use', pubkey, asset], async () => {
     //loff(`--- Start update ${trim(pubkey)} - ${transitions.length}`)
     return me.updateChannel(pubkey, asset, ackSig, transitions, debug)
   })

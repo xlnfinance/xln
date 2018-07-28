@@ -1,6 +1,6 @@
 // short helper to create a Payment on some delta and flush the channel right after it
 module.exports = async (opts) => {
-  q('pay', async () => {
+  section('pay', async () => {
     let secret = crypto.randomBytes(32)
     let hash = sha3(secret)
 

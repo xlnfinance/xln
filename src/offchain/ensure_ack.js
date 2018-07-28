@@ -48,7 +48,7 @@ module.exports = async () => {
       l(
         `No ack dispute with ${trim(ch.d.partnerId)} secrets ${
           to_reveal.length
-        } missed ${missed_ack}`
+        } missed ${missed_ack} with ${ch.d.ack_requested_at}`
       )
 
       me.batch.push(['revealSecrets', to_reveal])

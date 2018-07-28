@@ -728,6 +728,18 @@ export default {
 
           
           <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Generate Wallet</button>
+
+          <p class="alert alert-primary">
+            This testnet is slightly different from mainnet version:
+            <ul>
+              <li>Blocktime is 6s, in production 60s</li>
+              <li>Password derivation is fast, in production takes ~10s</li>
+              <li>You can click on a testnet faucet to get assets for free</li>
+            </ul>
+
+          </p>
+
+
         </form>
       </div>
       <div v-else-if="pubkey && tab=='credit'">
@@ -739,12 +751,12 @@ export default {
         
         <template v-if="ch">
           <p>
-            <label>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive funds through the network. Currently: {{commy(ch.d.hard_limit)}}</label>
+            <label>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Currently: {{commy(ch.d.hard_limit)}}</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
           </p>
 
           <p>
-            <label>Set uninsured limit to request hub automatically rebalance you after this amount. Leave empty to request insurance manually. Currently: {{commy(ch.d.soft_limit)}}</label>
+            <label>Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually. Currently: {{commy(ch.d.soft_limit)}}</label>
             <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]">
           </p>
 
@@ -753,8 +765,8 @@ export default {
             <button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save</button>
           </p>
 
-          <p>This chart shows your uninsured balances over time</p>
-          <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>
+          <!--<p>This chart shows your uninsured balances over time</p>
+          <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>-->
 
 
           <p><button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
@@ -1019,7 +1031,7 @@ export default {
           </tbody>
         </table>
         <div v-else>
-        <p><b>No blocks stored on this node.</b></p>
+        <p><b>This node does not keep blocks. <a href="https://fairlayer.com/#blockchain_explorer">Try public explorer.</a></b></p>
         </div>
       </div>
       <div v-else-if="tab=='account_explorer'">

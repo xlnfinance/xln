@@ -1,7 +1,7 @@
 // chain has blocks, block has batches, batch has transactions
 
 module.exports = async (args) => {
-  return q('onchain', async () => {
+  return section('onchain', async () => {
     const started = K.total_blocks
     //l(`Sync since ${started} ${args.length}`)
 

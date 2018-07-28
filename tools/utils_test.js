@@ -1,5 +1,5 @@
 require('../src/utils')
-
+q = section
 in_section = false
 testq = async () => {
   if (in_section) throw 'Already in critical section'

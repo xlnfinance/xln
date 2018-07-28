@@ -34,7 +34,10 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
     ch.payments.map((t, ind) => {
       if (t.status == 'sent') t.status = 'ack'
     })
+
     ch.d.ack_requested_at = null
+
+    l('Nullify ack for ', ch.d.ack_requested_at, trim(pubkey))
 
     if (trace)
       l('Received ack on current state, all sent transitions are now ack')

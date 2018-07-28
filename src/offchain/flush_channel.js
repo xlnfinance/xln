@@ -16,7 +16,7 @@ Always flush opportunistically, unless you are acking your direct partner who se
 */
 
 module.exports = async (pubkey, asset, opportunistic) => {
-  return q([pubkey, asset], async () => {
+  return section(['use', pubkey, asset], async () => {
     if (trace) l(`Started Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
@@ -121,7 +121,13 @@ module.exports = async (pubkey, asset, opportunistic) => {
             //continue
           }
 
-          args = [t.amount, t.hash, t.exp, bin(t.destination_address), t.unlocker]
+          args = [
+            t.amount,
+            t.hash,
+            t.exp,
+            bin(t.destination_address),
+            t.unlocker
+          ]
         }
 
         t.status = 'sent'
@@ -158,9 +164,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
     //only for debug, can be heavy
     var debug = [
       initialState, // state we started with
-      ch.state,     // state we finished at
-      r(ch.d.signed_state), // signed state we have
-   ]
+      ch.state, // state we finished at
+      r(ch.d.signed_state) // signed state we have
+    ]
 
     // transitions: method, args, sig, new state
     let envelope = me.envelope(
@@ -172,7 +178,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
     )
 
     if (transitions.length > 0) {
+      // if there were any transitions, we need an ack on top
       ch.d.ack_requested_at = new Date()
+      l('Set ack request ', ch.d.ack_requested_at, trim(pubkey))
       //ch.d.pending = envelope
       ch.d.status = 'sent'
       if (trace)
