@@ -12,6 +12,8 @@ require('../assets/dist/js/bootstrap.min.js')
 window.l = console.log
 window.ts = () => Math.round(new Date() / 1000)
 
+document.title = 'Fair ' + location.port
+
 window.hashargs = location.hash.split('?')[1]
 
 hashargs = hashargs
@@ -131,7 +133,18 @@ window.renderRisk = (hist) => {
 window.render = (r) => {
   if (r.alert) notyf.alert(r.alert)
   if (r.confirm) notyf.confirm(r.confirm)
-  if (r.reload) location.reload()
+  if (r.reload) {
+    clearInterval(window.app.interval)
+
+    document.body.innerHTML = 'Reload requested'
+    // only reload when the server is alive again
+    setInterval(() => {
+      fetch('/').then((r) => {
+        location.reload()
+      })
+    }, 1000)
+    return false
+  }
 
   if (r.already_opened) {
     clearInterval(window.app.interval)

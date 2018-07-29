@@ -119,7 +119,7 @@ module.exports = async () => {
     hubs: [],
     flush_timeout: 250,
 
-    cache_timeout: 120, //s, keep channel in memory since last use
+    cache_timeout: 60, //s, keep channel in memory since last use
     safe_sync_delay: 60, //s, after what time prohibit using wallet if unsynced
     sync_limit: 500, // how many blocks to share at once
 
@@ -130,10 +130,12 @@ module.exports = async () => {
     // hashlock and dispute-related
     secret_len: 32,
     dispute_delay: 8, // in how many blocks disputes are considered final
-    hashlock_exp: 10, // how many blocks (worst case scenario) a user needs to be a able to reveal secret
+    hashlock_exp: 16, // how many blocks (worst case scenario) a user needs to be a able to reveal secret
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)
     max_hashlocks: 20, // we don't want overweight huge dispute strings
     hashlock_service_fee: 100, // the one who adds hashlock pays for it
+
+    // ensure it is much shorter than hashlock_exp
     dispute_if_no_ack: 60000 // ms, how long we wait for ack before going to blockchain
   }
 

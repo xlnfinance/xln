@@ -139,31 +139,44 @@ syncdb = async (opts = {}) => {
       }
     }
 
+    var new_ch = {}
+
     for (let key in cache.ch) {
       let ch = cache.ch[key]
-      if (ch.d.changed()) {
-        all.push(ch.d.save())
-      }
 
-      ch.payments = ch.payments.filter((t) => {
-        if (t.changed()) {
-          all.push(t.save())
+      await section(['use', ch.d.partnerId, ch.d.asset], async () => {
+        ch.payments = ch.payments.filter((t) => {
+          if (t.changed()) {
+            all.push(t.save())
+          }
+
+          return t.type + t.status != 'delack'
+        })
+
+        let evict = ch.last_used < ts() - K.cache_timeout
+
+        //if (ch.d.changed()) {
+        let promise = ch.d.save()
+
+        // the channel is only evicted after it is properly saved in db
+        if (evict) {
+          //delete cache.ch[key]
+
+          promise = promise.then(() => {
+            //l('Evict: ' + trim(ch.d.partnerId), ch.d.ack_requested_at)
+          })
+        } else {
+          //new_ch[key] = ch
         }
 
-        return t.type + t.status != 'delack'
+        all.push(promise)
       })
-
-      if (ch.last_used < ts() - K.cache_timeout) {
-        delete cache.ch[key]
-        l(
-          'Evict from memory idle channel: ' + trim(ch.d.partnerId),
-          ch.d.ack_requested_at
-        )
-      }
     }
 
+    //cache.ch = new_ch
+
     if (all.length > 0) l(`syncdb done: ${all.length}`)
-    return Promise.all(all)
+    return await Promise.all(all)
   })
 }
 
@@ -217,7 +230,7 @@ wscb = (...args) => {
 // offchain logs
 loff = (text) => l(`${chalk.green(`       ⠟ ${text}`)}`)
 
-fatal = (reason) => {
+fatal = async (reason) => {
   global.repl = null
   l(errmsg(reason))
 
@@ -225,13 +238,13 @@ fatal = (reason) => {
     react({reload: true}) //reloads UI window
     me.intervals.map(clearInterval)
 
-    syncdb().then(async () => {
-      //await sequelize.close()
-      //await privSequelize.close()
-      await sleep(500)
-
-      process.exit()
-    })
+    await syncdb()
+    //.then(async () => {
+    //await sequelize.close()
+    //await privSequelize.close()
+    await sleep(500)
+    process.exit()
+    //})
   }
 }
 
@@ -292,7 +305,7 @@ section = async function(key, job) {
           //clearTimeout(deadlock)
           //l('Section took: ' + (performance.now() - started))
         } catch (e) {
-          l('Error in q', e)
+          l('Error in critical section: ', e)
           setTimeout(() => {
             fatal(e)
           }, 100)

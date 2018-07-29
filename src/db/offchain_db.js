@@ -126,7 +126,11 @@ Delta = privSequelize.define(
     },
 
     flush_requested_at: Sequelize.DATE,
-    ack_requested_at: Sequelize.DATE,
+    ack_requested_at: {
+      type: Sequelize.DATE,
+      defaultValue: null
+    },
+
     last_online: Sequelize.DATE,
     withdrawal_requested_at: Sequelize.DATE,
 

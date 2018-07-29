@@ -44,11 +44,11 @@ if node fair.js --genesis=test $db | grep "Genesis done"; then
   pm2 start $pm2_opts --name fair8433 fair.js -- $fair_cluster_args $fair_node_args
 
   for i in $(seq 8001 $maxport); do
-    fair_node_args="-p$i --username=$i --pw=password --datadir=data$i $global"
-    if (( i < 8004 )); then
+    fair_node_args="-p$i  --syncdb=off --username=$i --pw=password --datadir=data$i $global"
+    if (( i < 8014 )); then
       pm2 start $pm2_opts --name fair$i fair.js -- $fair_cluster_args $fair_node_args
     else
-      pm2 start $pm2_opts --name fair$i fair.js -- $fair_cluster_args $fair_node_args --silent
+      pm2 start $pm2_opts --name fair$i fair.js -- $fair_cluster_args $fair_node_args -s
     fi
   done
 

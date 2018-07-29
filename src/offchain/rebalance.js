@@ -22,7 +22,7 @@ promisify withdrawals, give sane timeout (eg 10 seconds)
 
 const withdraw = require('./withdraw')
 
-const rebalance = async function(asset = 1) {
+const rebalance = async function(asset) {
   var deltas = await Delta.findAll({
     where: {
       myId: me.pubkey,
@@ -35,7 +35,8 @@ const rebalance = async function(asset = 1) {
   let netReceivers = []
 
   for (let d of deltas) {
-    let ch = await d.getChannel()
+    let ch = await me.getChannel(d.partnerId, d.asset)
+    //d.getChannel()
 
     // finding who has uninsured balances AND
     // requests insurance OR gone beyond soft limit
@@ -147,6 +148,7 @@ const rebalance = async function(asset = 1) {
 module.exports = () => {
   if (PK.pending_batch || me.batch.length > 0) return l('There are pending tx')
 
+  // we iterate over all assets in existance and rebalance each separately
   for (let i = 1; i <= K.assets_created; i++) {
     rebalance(i)
   }

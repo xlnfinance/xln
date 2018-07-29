@@ -5,16 +5,24 @@ module.exports = async () => {
   //l('Checking who has not ack')
   if (PK.pending_batch) return l('Pending batch')
 
-  for (var key in cache.ch) {
-    var ch = cache.ch[key]
+  var deltas = await Delta.findAll({
+    where: {
+      myId: me.pubkey
+    }
+  })
 
-    let missed_ack = new Date() - ch.d.ack_requested_at
+  for (let d of deltas) {
+    let ch = await me.getChannel(d.partnerId, d.asset)
+    //cache.ch[key]
+    if (!ch) continue
+
+    let missed_ack = ch.d.ack_requested_at
+      ? new Date() - ch.d.ack_requested_at
+      : 0
 
     if (
       // already disputed
       ch.d.status == 'disputed' ||
-      // not awaiting ack
-      !ch.d.ack_requested_at ||
       // they still have some time
       missed_ack < K.dispute_if_no_ack
     ) {

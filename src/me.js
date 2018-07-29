@@ -272,7 +272,7 @@ class Me {
     }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 1000))
+    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
 
     // updates tps metrics for nice sparklines graphs
     me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
@@ -290,11 +290,8 @@ class Me {
     )
     */
 
-    if (me.my_hub || me.my_validator) {
-      me.intervals.push(setInterval(syncdb, K.blocktime * 4000))
-    } else {
-      me.intervals.push(setInterval(syncdb, K.blocktime * 4000))
-    }
+    //if (me.my_hub || me.my_validator) {
+    me.intervals.push(setInterval(syncdb, K.blocktime * 2000))
 
     if (me.my_hub) {
       me.intervals.push(

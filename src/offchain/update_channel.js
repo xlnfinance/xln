@@ -1,6 +1,8 @@
 // Receives an ack and set of transitions to execute on top of it
 module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
   let ch = await me.getChannel(pubkey, asset)
+  ch.last_used = ts()
+
   let all = []
 
   if (ch.d.status == 'disputed') {
@@ -114,10 +116,11 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
       let reveal_until = K.usable_blocks + K.hashlock_exp
       // safe ranges when we can accept hashlock exp
-
-      if (exp < reveal_until - 2 || exp > reveal_until + 2) {
+      // not earlier than few blocks in the past, but many in the future is fine
+      // we do not break here (it can happen during normal operation) and simply delack this payment
+      if (exp < reveal_until - 2 || exp > reveal_until + 6) {
         new_type = m == 'add' ? 'del' : 'delrisk'
-        loff('error: exp is out of supported range')
+        loff(`error: exp is out of supported range: ${exp} vs ${reveal_until}`)
       }
 
       // don't save in db just yet

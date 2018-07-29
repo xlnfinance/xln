@@ -31,7 +31,8 @@ module.exports = async (ws, json) => {
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
 
-  if (json.auth_code != PK.auth_code && ws != 'admin' && base_port != 8433) {
+  if (json.auth_code != PK.auth_code && ws != 'admin') {
+    //if (!json.auth_code) {
     return respondNotAuthorized(ws)
   }
 

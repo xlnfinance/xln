@@ -66,6 +66,7 @@ refresh = function(ch) {
   ch.inwards = []
   ch.outwards = []
 
+  // hashlock creates hold-like assets in limbo. For left and right user:
   ch.hashlock_hold = [0, 0]
 
   for (let i = 0; i < ch.payments.length; i++) {

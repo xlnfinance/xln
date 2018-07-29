@@ -25,7 +25,7 @@ export default {
     if (localStorage.auth_code) {
       this.interval = setInterval(function() {
         app.call('load')
-      }, 20000)
+      }, 6000)
     }
 
     setInterval(() => app.$forceUpdate(), 1000)
@@ -120,15 +120,6 @@ export default {
 
       // useful for visual debugging
       dev_mode: false
-    }
-  },
-  watch: {
-    record(val) {
-      let title = 'Fair'
-      if (val && val.username) {
-        title = `Fair: ${val.username}`
-      }
-      document.title = title
     }
   },
   computed: {
@@ -615,7 +606,7 @@ export default {
 
 
           <template v-for="(ch, index) in channels" v-if="ch.d.asset == asset" >
-            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}<span v-if="dev_mode"> {{ch.d.status}}</span>: {{commy(ch.payable)}}</h2>
+            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}: {{commy(ch.payable)}}</h2>
 
 
             <small v-if="ch.payable > 0">
@@ -657,6 +648,10 @@ export default {
               </div>
             </p>
             
+            <div v-if="dev_mode">
+            {{ch.d.status}} / 
+            {{ch.d.ack_requested_at}}
+            </div>
             <pre v-if="dev_mode" v-html="ch.ascii_channel"></pre>
             <pre v-if="dev_mode" v-html="ch.ascii_states"></pre>
           </template>
@@ -729,14 +724,14 @@ export default {
           
           <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Generate Wallet</button>
 
+          <br>
           <p class="alert alert-primary">
             This testnet is slightly different from mainnet version:
             <ul>
               <li>Blocktime is 6s, in production 60s</li>
               <li>Password derivation is fast, in production takes ~10s</li>
-              <li>You can click on a testnet faucet to get assets for free</li>
+              <li>You can click on a testnet faucet to get any asset for free</li>
             </ul>
-
           </p>
 
 
