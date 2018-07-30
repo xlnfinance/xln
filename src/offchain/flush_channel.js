@@ -16,7 +16,7 @@ Always flush opportunistically, unless you are acking your direct partner who se
 */
 
 module.exports = async (pubkey, asset, opportunistic) => {
-  return section(['use', pubkey, asset], async () => {
+  await section(['use', pubkey, asset], async () => {
     if (trace) l(`Started Flush ${trim(pubkey)} ${opportunistic}`)
 
     let ch = await me.getChannel(pubkey, asset)
@@ -189,11 +189,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
             pubkey
           )}`
         )
-    }
-
-    if (argv.syncdb) {
-      //all.push(ch.d.save())
-      await syncdb() //Promise.all(all)
     }
 
     me.send(ch.d.partnerId, 'update', envelope)

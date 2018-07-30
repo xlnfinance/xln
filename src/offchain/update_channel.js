@@ -403,11 +403,11 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
 
-  if (argv.syncdb) {
-    //all.push(ch.d.save())
+  //if (argv.syncdb) {
+  //all.push(ch.d.save())
 
-    await syncdb() //Promise.all(all)
-  }
+  //await syncdb() //Promise.all(all)
+  //}
 
   return flushable
 

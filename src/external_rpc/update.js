@@ -45,6 +45,12 @@ module.exports = async (args) => {
   }
   await Promise.all(flushed)
 
+  if (argv.syncdb) {
+    //all.push(ch.d.save())
+
+    await syncdb() //Promise.all(all)
+  }
+
   // use lazy react for external requests
   react({}, false)
 

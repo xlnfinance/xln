@@ -24,7 +24,7 @@ module.exports = async (opts) => {
       return
     }
 
-    l('Paying to ', addr)
+    //l('Paying to ', addr)
 
     // use user supplied private message, otherwise generate random tag
     // invoice inside the address takes priority
@@ -52,6 +52,8 @@ module.exports = async (opts) => {
     }
 
     let ch = await me.getChannel(via, opts.asset)
+
+    if (!ch) return
 
     let unlocker_nonce = crypto.randomBytes(24)
 
@@ -110,9 +112,12 @@ module.exports = async (opts) => {
       ch.payments.push(outward)
     }
 
-    if (ch) {
-      react({}, false)
-      me.flushChannel(ch.d.partnerId, opts.asset, true)
+    react({}, false)
+    me.flushChannel(ch.d.partnerId, opts.asset, true)
+
+    if (argv.syncdb) {
+      //all.push(ch.d.save())
+      await syncdb() //Promise.all(all)
     }
   })
 }

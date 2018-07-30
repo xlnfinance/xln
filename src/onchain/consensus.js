@@ -204,22 +204,21 @@ const compute_phase = () => {
 }
 
 module.exports = async () => {
-  const phase = compute_phase()
+  await section('onchain', async () => {
+    const phase = compute_phase()
 
-  if (me.status == 'await' && phase == 'propose') {
-    await await_propose()
-  } else if (me.status == 'propose' && phase == 'prevote') {
-    propose_prevote()
-  } else if (me.status == 'prevote' && phase == 'precommit') {
-    prevote_precommit()
-  } else if (me.status == 'precommit' && phase == 'await') {
-    precommit_await()
-  }
+    if (me.status == 'await' && phase == 'propose') {
+      await await_propose()
+    } else if (me.status == 'propose' && phase == 'prevote') {
+      propose_prevote()
+    } else if (me.status == 'prevote' && phase == 'precommit') {
+      prevote_precommit()
+    } else if (me.status == 'precommit' && phase == 'await') {
+      precommit_await()
+    }
 
-  // watch for new events
-  setTimeout(() => {
-    section('onchain', me.consensus)
-  }, 200)
-
+    // watch for new events
+    setTimeout(me.consensus, 100)
+  })
   return true
 }
