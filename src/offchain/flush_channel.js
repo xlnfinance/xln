@@ -180,7 +180,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     if (transitions.length > 0) {
       // if there were any transitions, we need an ack on top
       ch.d.ack_requested_at = new Date()
-      l('Set ack request ', ch.d.ack_requested_at, trim(pubkey))
+      //l('Set ack request ', ch.d.ack_requested_at, trim(pubkey))
       //ch.d.pending = envelope
       ch.d.status = 'sent'
       if (trace)

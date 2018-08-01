@@ -1,5 +1,6 @@
 // users rarely promise funds to the hub, so there is no periodic rebalance
-// but users can do manual rebalance, e.g. tranfering funds from old to better hub
+// 1. users can do manual rebalance, e.g. tranfering funds from old to better hub
+// 2. used for direct settlement and large transfers
 const withdraw = require('../offchain/withdraw')
 
 module.exports = async (p) => {
@@ -73,23 +74,26 @@ module.exports = async (p) => {
       react({confirm: 'Requested withdrawals...'})
     }
 
-    withdraw({withPartner: partner, amount: p.request_amount, asset: asset})
-
     // waiting for the response
-    setTimeout(async () => {
-      let ch = await me.getChannel(partner.pubkey, asset)
-      if (ch.d.withdrawal_sig) {
-        ins.push([ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig])
+    let withdrawn = await withdraw(ch, p.request_amount)
 
-        me.batch.push(['withdrawFrom', asset, ins])
-        me.batch.push(['depositTo', asset, outs])
-        react({confirm: 'Onchain rebalance tx added to queue'})
-      } else {
-        react({
-          alert: 'Failed to obtain withdrawal. Try later or start a dispute.'
-        })
-      }
-    }, 3000)
+    if (withdrawn == 'timeout') {
+      react({alert: 'The hub cannot be reached'})
+      return
+    }
+
+    //let ch = await me.getChannel(partner.pubkey, asset)
+    if (ch.d.withdrawal_sig) {
+      ins.push([ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig])
+
+      me.batch.push(['withdrawFrom', asset, ins])
+      me.batch.push(['depositTo', asset, outs])
+      react({confirm: 'Onchain rebalance tx added to queue'})
+    } else {
+      react({
+        alert: 'Failed to obtain withdrawal. Try later or start a dispute.'
+      })
+    }
   } else if (outs.length > 0) {
     // no withdrawals
     me.batch.push(['depositTo', asset, outs])

@@ -60,21 +60,7 @@ const rebalance = async function(asset) {
       } else if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
 
-        withdraw({
-          withPartner: ch.d.partnerId,
-          amount: ch.insured, // everything we got
-          asset: asset
-        })
-
-        /*
-        me.send(
-          ch.d.partnerId,
-          'requestWithdrawFrom',
-          me.envelope(ch.insured, asset)
-        )
-        */
-
-        netSpenders.push(ch.d.partnerId)
+        netSpenders.push(withdraw(ch, ch.insured))
       } else if (ch.d.withdrawal_requested_at == null) {
         l('Delayed pull')
         ch.d.withdrawal_requested_at = ts()
@@ -86,63 +72,64 @@ const rebalance = async function(asset) {
   }
 
   // checking on all withdrawals we expected to get, then rebalance
-  setTimeout(async () => {
-    // 1. how much we own of this asset
-    let weOwn = me.record.asset(asset)
+  netSpenders = await Promise.all(netSpenders)
 
-    // 2. add all withdrawals we received
-    for (let partnerId of netSpenders) {
-      var ch = await me.getChannel(partnerId, asset)
-      if (ch.d.withdrawal_sig) {
-        weOwn += ch.d.withdrawal_amount
+  // 1. how much we own of this asset
+  let weOwn = me.record.asset(asset)
 
-        me.batch.push([
-          'withdrawFrom',
-          ch.d.asset,
-          [[ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig]]
-        ])
-      } else {
-        ch.d.withdrawal_requested_at = ts()
-      }
+  // 2. add all withdrawals we received
+  for (let ch of netSpenders) {
+    if (ch == 'timeout') {
+      // offline? dispute
+      continue
     }
 
-    // 3. debts will be enforced on us (if any), so let's deduct them beforehand
-    let debts = await me.record.getDebts({where: {asset: asset}})
-    for (let d of debts) {
-      weOwn -= d.amount_left
+    if (ch.d.withdrawal_sig) {
+      weOwn += ch.d.withdrawal_amount
+
+      me.batch.push([
+        'withdrawFrom',
+        ch.d.asset,
+        [[ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig]]
+      ])
+    } else {
+      ch.d.withdrawal_requested_at = ts()
     }
+  }
 
-    // sort receivers, larger ones are given priority
-    netReceivers.sort((a, b) => b.they_uninsured - a.they_uninsured)
+  // 3. debts will be enforced on us (if any), so let's deduct them beforehand
+  let debts = await me.record.getDebts({where: {asset: asset}})
+  for (let d of debts) {
+    weOwn -= d.amount_left
+  }
 
-    // dont let our FRD onchain balance go lower than that
-    let safety = asset == 1 ? K.hub_standalone_balance : 0
+  // sort receivers, larger ones are given priority
+  netReceivers.sort((a, b) => b.they_uninsured - a.they_uninsured)
 
-    // 4. now do our best to cover net receivers
-    for (let ch of netReceivers) {
-      weOwn -= ch.they_uninsured
-      if (weOwn >= safety) {
-        me.batch.push([
-          'depositTo',
-          asset,
-          [[ch.they_uninsured, me.record.id, ch.d.partnerId, 0]]
-        ])
+  // dont let our FRD onchain balance go lower than that
+  let safety = asset == 1 ? K.hub_standalone_balance : 0
 
-        // nullify their insurance request
-        ch.d.they_requested_insurance = false
-      } else {
-        l(
-          `Run out of funds for asset ${asset}, own ${weOwn} need ${
-            ch.they_uninsured
-          }`
-        )
-        break
-      }
+  // 4. now do our best to cover net receivers
+  for (let ch of netReceivers) {
+    weOwn -= ch.they_uninsured
+    if (weOwn >= safety) {
+      me.batch.push([
+        'depositTo',
+        asset,
+        [[ch.they_uninsured, me.record.id, ch.d.partnerId, 0]]
+      ])
+
+      // nullify their insurance request
+      ch.d.they_requested_insurance = false
+    } else {
+      l(
+        `Run out of funds for asset ${asset}, own ${weOwn} need ${
+          ch.they_uninsured
+        }`
+      )
+      break
     }
-
-    // broadcast will be automatic
-    // await me.broadcast()
-  }, 3000)
+  }
 }
 
 module.exports = () => {

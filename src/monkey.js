@@ -104,7 +104,7 @@ if (argv.monkey) {
       // intended to fail
       me.payChannel({
         address:
-          'ZUp5PARsn4X2xs8fEjYSRtWSTQqgkMnVax7CaLsBmp9kR36Jqon7NbqCakQ5jQ9w1t5gtGo3zfhTtQ2123123123DJJjZ',
+          'ZUp5PARsn4X2xs8fEjYSRtWSTQqgkMnVax7CaLsBmp9kR36Jqon7NbqCakQ5jQ9w1t5gtGo3zfhTtQ2123123123DJJjZ#DOOMEDTOFAIL',
         amount: 100,
         asset: 1
       })

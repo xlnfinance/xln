@@ -24,5 +24,9 @@ module.exports = async (args) => {
   ch.d.withdrawal_amount = amount
   ch.d.withdrawal_sig = sig
 
+  if (me.withdrawalRequests[ch]) {
+    me.withdrawalRequests[ch](ch)
+  }
+
   if (argv.syncdb) ch.d.save()
 }

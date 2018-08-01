@@ -784,8 +784,14 @@ export default {
             <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID or ID@hub"></p>
             <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit"></p>
             <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Message (optional)"></p>
+
             <hr />
           </div>
+
+          <p>
+            <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">+ Another Deposit</button>
+          </p>
+
 
 
           <template>
@@ -802,10 +808,6 @@ export default {
           </template>
 
 
-          <p>
-            <button type="button" class="btn btn-success" @click="outs.push({to:'',amount: '', invoice:''})">+ Another Deposit</button>
-          </p>
-          <hr />
 
           <p>
             <button type="button" class="btn btn-warning" @click="onchain()">Execute Onchain</button>

@@ -155,21 +155,19 @@ syncdb = async (opts = {}) => {
 
         let evict = ch.last_used < ts() - K.cache_timeout
 
-        //if (ch.d.changed()) {
-        let promise = ch.d.save()
+        if (ch.d.changed()) {
+          all.push(ch.d.save())
+        }
 
         // the channel is only evicted after it is properly saved in db
-        if (evict) {
+        /*if (evict) {
           //delete cache.ch[key]
-
           promise = promise.then(() => {
             //l('Evict: ' + trim(ch.d.partnerId), ch.d.ack_requested_at)
           })
-        } else {
-          //new_ch[key] = ch
-        }
+        }*/
 
-        all.push(promise)
+        //all.push(promise)
       })
     }
 

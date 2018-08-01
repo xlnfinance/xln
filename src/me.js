@@ -16,6 +16,8 @@ class Me {
     this.queue = []
     this.batch = []
 
+    this.withdrawalRequests = {}
+
     // generic metric boilerplate: contains array of averages over time
     let getMetric = () => {
       return {

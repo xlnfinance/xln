@@ -6,8 +6,14 @@
 
 Fairlayer is a billion+ transaction per second payment network secured with blockchain. It implements the idea of Extended Lightning Network [XLN](https://medium.com/fairlayer/xln-extended-lightning-network-80fa7acf80f3).
 
-Each user of the network runs a full node that processes few publicly broadcasted onchain transactions (insurance rebalances, disputes etc). All the payments happen instantly offchain and can be enforced in onchain "court" when needed.
+It is **very easy to be a full node** because it processes few publicly broadcasted onchain transactions (insurance rebalances, disputes etc). All the payments happen instantly offchain and can be enforced in onchain "court" when needed.
+
+# Installation
+
+This repo contains generic code not attached to any network, by design. Use `./simulate` to start local private network.
+
+For existing public network, go to a validator website and find Install page ([https://fairlayer.com/#install](https://fairlayer.com/#install)). This will use latest state and latest code automatically.
 
 [For documentation go to wiki](https://github.com/fairlayer/wiki)
 
-# Hiring Node.js programmers to join full-time: contact info@sakurity.com
+**Hiring Node.js programmers to join full-time: contact info@sakurity.com**
