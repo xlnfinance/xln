@@ -14,6 +14,8 @@ This repo contains generic code not attached to any network, by design. Use `./s
 
 For existing public network, go to a validator website and find Install page ([https://fairlayer.com/#install](https://fairlayer.com/#install)). This will use latest state and latest code automatically.
 
-[For documentation go to wiki](https://github.com/fairlayer/wiki)
+When you install on a server, pass `-s/--silent` to switch off `opn` that tries to open a browser with the wallet for you. The script will simply output the URL with auth_code you need to visit.
+
+[For full documentation go to wiki](https://github.com/fairlayer/wiki)
 
 **Hiring Node.js programmers to join full-time: contact info@sakurity.com**

@@ -23,6 +23,12 @@ l('Reading db ', base_db.storage)
 User = sequelize.define(
   'user',
   {
+    id: {
+      type: Sequelize.INTEGER,
+      autoIncrement: true,
+      primaryKey: true
+    },
+
     // Fair Names /^(\w){1,15}$/)
     username: Sequelize.STRING,
 

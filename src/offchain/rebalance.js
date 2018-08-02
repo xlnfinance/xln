@@ -55,7 +55,7 @@ const rebalance = async function(asset) {
         me.batch.push([
           'withdrawFrom',
           asset,
-          [[ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig]]
+          [[ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]]
         ])
       } else if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
@@ -79,20 +79,16 @@ const rebalance = async function(asset) {
 
   // 2. add all withdrawals we received
   for (let ch of netSpenders) {
-    if (ch == 'timeout') {
-      // offline? dispute
-      continue
-    }
-
     if (ch.d.withdrawal_sig) {
       weOwn += ch.d.withdrawal_amount
 
       me.batch.push([
         'withdrawFrom',
         ch.d.asset,
-        [[ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig]]
+        [[ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]]
       ])
     } else {
+      // offline? dispute
       ch.d.withdrawal_requested_at = ts()
     }
   }

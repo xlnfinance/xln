@@ -4,17 +4,14 @@ stringify = require('../lib/stringify')
 class Me {
   // boilerplate attributes
   constructor() {
+    this.status = 'await'
+
     this.my_hub = false
 
     this.mempool = []
-    this.status = 'await'
+    this.batch = []
 
     this.users = {}
-
-    this.hubs = {}
-
-    this.queue = []
-    this.batch = []
 
     this.withdrawalRequests = {}
 

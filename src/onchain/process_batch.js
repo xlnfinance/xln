@@ -46,7 +46,7 @@ const withdrawFrom = async (global_state, tr, signer, meta) => {
     ])
 
     if (!ec.verify(body, input[2], partner.pubkey)) {
-      l('Invalid withdrawal sig by partner ', ins.nonce, input)
+      l('Invalid withdrawal sig by partner ', amount, ins)
       return
     }
 
@@ -73,6 +73,8 @@ const withdrawFrom = async (global_state, tr, signer, meta) => {
       )
       // they planned to withdraw and they did. Nullify hold amount
       ch.d.they_withdrawal_amount = 0
+
+      // already used, nullify
       ch.d.withdrawal_amount = 0
       ch.d.withdrawal_sig = null
 

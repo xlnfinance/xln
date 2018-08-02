@@ -39,7 +39,7 @@ const await_propose = async () => {
   }
 
   //l(`it's our turn to propose, gossip new block`)
-  if (K.ts < ts() - K.blocktime) {
+  if (K.ts < ts() - K.blocktime - 5000) {
     l('Danger: No previous block exists')
   }
 

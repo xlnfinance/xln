@@ -174,6 +174,8 @@ export default {
         .join('')
     },
 
+
+
     call: function(method, args = {}) {
       if (method == 'vote') {
         args.rationale = prompt('Why?')
@@ -564,9 +566,10 @@ export default {
           <li v-if="m.website" v-for="m in K.validators"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b></li>
         </ul>
       </div>
+
+
       <div v-else-if="tab=='help'">
         <h1>Network</h1>
-
 
         <h2>General settings</h2>
         <p>Blocktime: {{K.blocktime}} seconds</p>
@@ -958,6 +961,7 @@ export default {
       <div v-else-if="tab=='blockchain_explorer'">
         <h1>Blockchain Explorer</h1>
         <p>These transactions were publicly broadcasted and executed on every full node, including yours. Blockchain space is reserved for insurance rebalances, disputes and other high-level settlement actions.</p>
+        <p>Next validator: {{nextValidator.id}}</p>
         <table v-if="blocks.length>0" class="table">
           <thead class="thead-dark">
             <tr>
@@ -992,6 +996,8 @@ export default {
                     <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">Set asset: {{to_ticker(d[1])}}</span>
 
                     <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{d[2]}}</span>
+
+
 
                     <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Secret revealed: {{trim(d[1])}}</span>
 

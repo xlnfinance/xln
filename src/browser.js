@@ -3,7 +3,7 @@
 // Called once in a while to cache current state of everything and flush it to browser
 // TODO: better way to keep app reactive?
 
-  // returns true if no active browser ws now
+// returns true if no active browser ws now
 const isHeadless = () => {
   return !me.browser || me.browser.readyState != 1
 }
@@ -17,6 +17,8 @@ update_cache = async (force = false) => {
     cached_result.my_validator = me.my_validator
 
     cached_result.K = K
+
+    cached_result.nextValidator = nextValidator()
 
     await Promise.all(
       [
@@ -105,27 +107,6 @@ react = async (result = {}, force = true) => {
   //await update_cache()
 
   if (me.id) {
-    if (me.my_hub) {
-      /*
-      var deltas = await Delta.findAll({where: {myId: me.record.id}})
-      var they_uninsured = 0
-      for (var d of deltas) {
-        var ch = await me.getChannel(d.userId, d.asset)
-        if (ch.they_uninsured > 0) they_uninsured += ch.they_uninsured
-      }
-
-      if (
-        cached_result.history[0] &&
-        cached_result.history[0].they_uninsured != they_uninsured
-      ) {
-        cached_result.history.unshift({
-          date: new Date(),
-          they_uninsured: they_uninsured
-        })
-      }
-      */
-    }
-
     ;[result.payments, result.channels, result.record] = await Promise.all([
       Payment.findAll({
         order: [['id', 'desc']],

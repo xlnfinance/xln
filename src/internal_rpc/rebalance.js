@@ -70,29 +70,21 @@ module.exports = async (p) => {
     if (p.request_amount > ch.insured) {
       react({alert: 'More than you can withdraw from insured'})
       return
-    } else {
-      react({confirm: 'Requested withdrawals...'})
     }
 
     // waiting for the response
-    let withdrawn = await withdraw(ch, p.request_amount)
-
-    if (withdrawn == 'timeout') {
-      react({alert: 'The hub cannot be reached'})
-      return
-    }
+    ch = await withdraw(ch, p.request_amount)
 
     //let ch = await me.getChannel(partner.pubkey, asset)
     if (ch.d.withdrawal_sig) {
-      ins.push([ch.d.withdrawal_amount, ch.d.partnerId, ch.d.withdrawal_sig])
+      // if there is anything to withdraw the user is already registred
+      ins.push([ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig])
 
       me.batch.push(['withdrawFrom', asset, ins])
       me.batch.push(['depositTo', asset, outs])
-      react({confirm: 'Onchain rebalance tx added to queue'})
+      react({confirm: 'Onchain tx added.'})
     } else {
-      react({
-        alert: 'Failed to obtain withdrawal. Try later or start a dispute.'
-      })
+      react({alert: 'The hub cannot be reached. Try later or start a dispute.'})
     }
   } else if (outs.length > 0) {
     // no withdrawals
