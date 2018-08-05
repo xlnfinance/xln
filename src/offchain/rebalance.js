@@ -10,13 +10,11 @@ Current implementation is super simple and straightforward. There's huge room fo
 * smart learning based on balances over time not on balance at the time of matching
 * use as little withdrawals/deposits to transfer as much as possible volume
 * have different schedule for different assets, e.g. rebalance FRD every 1 block but rare assets every 1k blocks
+* often hub needs to request insurance from another hub (cross-hub payments). 
 
 General recommendations:
 1. assets stuck in a dispute is a waste. It's better to do everything by mutual agreement as much as possible, w/o suffering dispute delays and locked up liquidity
 2. the hub must store as little funds on their @onchain balances as possible. So once hub withdraw from net-spenders they should immediately deposit it to net-receiver.
-
-TODO
-promisify withdrawals, give sane timeout (eg 10 seconds)
 
 */
 
@@ -48,16 +46,7 @@ const rebalance = async function(asset) {
       //l('Adding output for our promise ', ch.d.partnerId)
       netReceivers.push(ch)
     } else if (ch.insured >= K.risk) {
-      if (ch.d.withdrawal_sig) {
-        //l('We already have withdrawal to use')
-        // method, user, hub, nonce, amount
-
-        me.batch.push([
-          'withdrawFrom',
-          asset,
-          [[ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]]
-        ])
-      } else if (me.users[ch.d.partnerId]) {
+      if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
 
         netSpenders.push(withdraw(ch, ch.insured))
@@ -81,11 +70,12 @@ const rebalance = async function(asset) {
   for (let ch of netSpenders) {
     if (ch.d.withdrawal_sig) {
       weOwn += ch.d.withdrawal_amount
+      let user = await User.idOrKey(ch.d.partnerId)
 
       me.batch.push([
         'withdrawFrom',
         ch.d.asset,
-        [[ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]]
+        [[ch.d.withdrawal_amount, user.id, ch.d.withdrawal_sig]]
       ])
     } else {
       // offline? dispute

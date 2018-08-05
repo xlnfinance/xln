@@ -1,6 +1,12 @@
 // make a request to ask for (mutual) withdrawal proof from partner
 // the promise returns either a valid proof or error
 module.exports = async function(ch, amount) {
+  // reset values
+  //ch.d.withdraw_sig = null
+  //ch.d.withdraw_amount = 0
+
+  l('Withdrawal request for ' + amount)
+
   me.send(
     ch.d.partnerId,
     'requestWithdrawFrom',

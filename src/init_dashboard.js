@@ -130,9 +130,7 @@ module.exports = async (a) => {
   openBrowser = () => {
     const url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
     l(note(`Open ${link(url)} in your browser`))
-    try {
-      opn(url)
-    } catch (e) {}
+    opn(url)
   }
 
   server
@@ -150,7 +148,11 @@ module.exports = async (a) => {
     })
 
   // opn doesn't work in SSH console
-  if (!argv.silent && !argv.s) openBrowser()
+  if (!argv.silent && !argv.s) {
+    openBrowser()
+  } else {
+    l('In silent mode: open the wallet manually.')
+  }
   internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
   internal_wss.on('error', function(err) {

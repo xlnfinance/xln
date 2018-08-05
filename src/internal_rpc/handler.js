@@ -50,10 +50,6 @@ module.exports = async (ws, json) => {
       result = require('./logout')()
       break
 
-    case 'dispute':
-      result = await require('./dispute')(json.params)
-      break
-
     case 'send':
       await me.payChannel(json.params)
       break

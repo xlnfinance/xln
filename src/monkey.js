@@ -39,7 +39,7 @@ const payMonkey = async (on_server, counter = 1) => {
 }
 
 if (argv.monkey) {
-  if (me.my_hub) {
+  if (me.record.id == 1) {
     // after a while the hub checks environment, db counts etc and test fails if anything is unexpected
     setTimeout(async () => {
       // no need to run test on server

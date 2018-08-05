@@ -4,19 +4,86 @@
 const withdraw = require('../offchain/withdraw')
 
 module.exports = async (p) => {
-  let ins = []
-  let outs = []
   let asset = parseInt(p.asset)
 
-  for (o of p.outs) {
+  let withdrawFrom = []
+  let depositTo = []
+  let disputes = []
+
+  // withdrawing promises
+  let await_all = []
+
+  let balance = me.record.asset(asset)
+
+  // do something with every channel
+  for (let index in p.chActions) {
+    let action = p.chActions[index]
+
+    let ch = await me.getChannel(fromHex(action.partnerId), asset)
+
+    if (action.startDispute) {
+      disputes.push(await ch.d.getDispute())
+    }
+
+    if (action.depositAmount > 0) {
+      if (action.withdrawAmount > 0) {
+        react({
+          alert: "It's pointless to deposit and withdraw at the same time"
+        })
+        return
+      }
+
+      balance -= action.depositAmount
+
+      depositTo.push([action.depositAmount, me.record.id, ch.partner, 0])
+    }
+
+    if (action.withdrawAmount == 0) {
+      continue
+    }
+
+    if (action.withdrawAmount > ch.insured) {
+      react({alert: 'More than you can withdraw from insured'})
+      return
+    }
+
+    // waiting for the response
+    await_all.push(withdraw(ch, action.withdrawAmount))
+  }
+
+  // await withdrawal proofs from all parties, or get timed out
+  await_all = await Promise.all(await_all)
+
+  // did any fail? If so, cancel entire operation
+  let failed_ch = await_all.find((ch) => ch.d.withdrawal_sig == null)
+  if (failed_ch) {
+    react({
+      alert:
+        'Failed to get withdrawal from: ' +
+        failed_ch.hub.handle +
+        '. Try later or start a dispute.'
+    })
+    return
+  }
+
+  // otherwise, proceed and add them
+  for (let ch of await_all) {
+    balance += ch.d.withdrawal_amount
+
+    // if there is anything to withdraw the user is already registred
+    withdrawFrom.push([ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig])
+  }
+
+  // external deposits are everything else other than you@anyhub
+  for (o of p.externalDeposits) {
     // split by @
     if (o.to.length > 0) {
-      let to = o.to.split('@')
+      let to = o.to
       let userId
 
       // looks like a pubkey
-      if (to[0].length == 64) {
-        userId = Buffer.from(to[0], 'hex')
+      if (to.length == 64) {
+        userId = Buffer.from(to, 'hex')
 
         // maybe this pubkey is already registred?
         let u = await User.idOrKey(userId)
@@ -26,7 +93,7 @@ module.exports = async (p) => {
         }
       } else {
         // looks like numerical ID
-        userId = parseInt(to[0])
+        userId = parseInt(to)
 
         let u = await User.idOrKey(userId)
 
@@ -36,15 +103,16 @@ module.exports = async (p) => {
         }
       }
 
-      if (o.amount.indexOf('.') == -1) o.amount += '.00'
+      //if (o.amount.indexOf('.') == -1) o.amount += '.00'
+      //.replace(/[^0-9]/g, '')
 
-      let amount = parseInt(o.amount.replace(/[^0-9]/g, ''))
+      let amount = parseInt(o.depositAmount)
 
       let withPartner = 0
       // @onchain or @0 mean onchain balance
-      if (to[1] && to[1] != 'onchain' && to[1] != '0') {
+      if (o.hub && o.hub != 'onchain' && o.hub != '0') {
         // find a hub by its handle or id
-        let h = K.hubs.find((h) => h.handle == to[1] || h.id == to[1])
+        let h = K.hubs.find((h) => h.handle == o.hub || h.id == o.hub)
         if (h) {
           withPartner = h.id
         } else {
@@ -54,7 +122,9 @@ module.exports = async (p) => {
       }
 
       if (amount > 0) {
-        outs.push([
+        balance -= amount
+
+        depositTo.push([
           amount,
           userId,
           withPartner,
@@ -64,36 +134,20 @@ module.exports = async (p) => {
     }
   }
 
-  if (p.request_amount > 0) {
-    let partner = K.hubs.find((m) => m.id == p.partner)
-    let ch = await me.getChannel(partner.pubkey, asset)
-    if (p.request_amount > ch.insured) {
-      react({alert: 'More than you can withdraw from insured'})
-      return
-    }
+  if (balance < 0) {
+    react({alert: 'Your final balance will become negative: not enough funds.'})
+    return
+  }
 
-    // waiting for the response
-    ch = await withdraw(ch, p.request_amount)
+  if (disputes.length + withdrawFrom.length + depositTo.length == 0) {
+    react({alert: 'Nothing to send onchain'})
+    return
+  } else {
+    // finally flushing all of them to pending batch
+    me.batch.push(['withdrawFrom', asset, withdrawFrom])
+    me.batch.push(['depositTo', asset, depositTo])
+    me.batch.push(['disputeWith', asset, disputes])
 
-    //let ch = await me.getChannel(partner.pubkey, asset)
-    if (ch.d.withdrawal_sig) {
-      // if there is anything to withdraw the user is already registred
-      ins.push([ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig])
-
-      me.batch.push(['withdrawFrom', asset, ins])
-      me.batch.push(['depositTo', asset, outs])
-      react({confirm: 'Onchain tx added.'})
-    } else {
-      react({alert: 'The hub cannot be reached. Try later or start a dispute.'})
-    }
-  } else if (outs.length > 0) {
-    // no withdrawals
-    me.batch.push(['depositTo', asset, outs])
-
-    if (me.batch.length == 0) {
-      react({alert: 'Nothing to send onchain'})
-    } else {
-      react({confirm: 'Wait for tx to be added to blockchain'})
-    }
+    react({confirm: 'Onchain tx added.'})
   }
 }

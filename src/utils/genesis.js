@@ -225,7 +225,6 @@ module.exports = async () => {
     name: '@main (Main)'
   })
 
-  /*
   K.hubs.push({
     id: K.validators[3].id,
     location: K.validators[3].location,
@@ -233,9 +232,9 @@ module.exports = async () => {
 
     fee: 0.005,
 
-    handle: 'jp',
-    name: '@jp (Japan)'
-  })*/
+    handle: 'second',
+    name: '@second (Second)'
+  })
 
   await Asset.create({
     ticker: 'FRD',

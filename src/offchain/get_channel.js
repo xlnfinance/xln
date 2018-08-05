@@ -49,6 +49,7 @@ module.exports = async (pubkey, asset, delta = false) => {
     }
 
     let my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
+    // users aren't hubs but can be represented by trimmed pubkey in UI
     ch.hub = my_hub(pubkey) || {handle: toHex(pubkey).substr(0, 10)}
 
     if (delta) {
