@@ -386,6 +386,7 @@ export default {
       return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     },
     uncommy: (str) => {
+      if (str == '') return 0
       //if (str.indexOf('.') == -1) str += '.00'
 
       return Math.round(parseFloat(str) * 100) //parseInt(str.replace(/[^0-9]/g, ''))
@@ -459,15 +460,21 @@ export default {
     },
 
     totalWithdrawals: ()=>{
-      let total = app.uncommy(app.request_amount)
+      let total = 0
+      app.channelsForAsset().map(ch=>{
+        total += app.uncommy(app.chAction(ch.d.id).withdrawAmount)
+      })
 
       return Number.isInteger(total) ? total : 0
     },
 
     totalDeposits: ()=>{
       let total = 0
-      for (let out of app.externalDeposits) {
-        total += app.uncommy(out.amount)
+      app.channelsForAsset().map(ch=>{
+        total += app.uncommy(app.chAction(ch.d.id).depositAmount)
+      })
+      for (let dep of app.externalDeposits) {
+        total += app.uncommy(dep.depositAmount)
       }
       return total
     },
@@ -838,85 +845,106 @@ export default {
         <div v-if="record">
           <h1>Onchain Operations</h1>
           <p>ID: {{record.id}}@onchain</p>
+          <p>Current FRD balance: {{commy(getAsset(1))}}</p>
 
           <p>@onchain is a special "meta" balance that is not stored with a hub and has maximum security guarantees. To send money to it use ID@onchain or just ID. Your onchain FRD balance is used to pay all kinds of fees so keep it preloaded.</p>
 
           <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the hub is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.
           </p>
 
-          <p>Current FRD balance: {{commy(getAsset(1))}}</p>
-          <p v-if="asset != 1">Onchain {{to_ticker(asset)}} balance: {{commy(getAsset(asset))}}</p>
 
 
-
-
-
-        <table class="table">
-          <thead class="thead-dark">
-            <tr>
-              <th scope="col">Hub</th>
-              <th scope="col">Insured</th>
-              <th scope="col">Uninsured</th>
-              <th scope="col" v-if="my_hub">They Uninsured</th>
-              <th scope="col">Withdraw</th>
-              <th scope="col">Deposit</th>
-              <th scope="col">Dispute</th>
-              <th scope="col">Delete</th>
-            </tr>
-          </thead>
-          <tbody>
-
-            <template v-for="chan in channelsForAsset()">
-            
+          <table class="table">
+            <thead class="thead-dark">
               <tr>
-                <td>{{chan.hub.handle}}</td>
-                <td>{{commy(chan.insured)}}</td>
-                <td>{{commy(chan.uninsured)}}</td>
-                <td v-if="my_hub">{{commy(chan.they_uninsured)}}</td>
+                <th scope="col">Hub</th>
+                <th scope="col">Insured</th>
+                <th scope="col">Uninsured</th>
+                <th scope="col" v-if="my_hub">They_Uninsured</th>
+                <th scope="col">Withdraw</th>
+                <th scope="col">Deposit</th>
+                <th scope="col">Dispute</th>
 
-
-                <td><input style="width:150px" type="text" class="form-control small-input" v-model="chAction(chan.d.id).withdrawAmount" placeholder="Amount to withdraw"></td>
-
-                <td><input style="width:150px" type="text" class="form-control small-input" v-model="chAction(chan.d.id).depositAmount" placeholder="Amount to deposit"></td>
-
-                <td><input class="form-control" type="checkbox" v-model="chAction(chan.d.id).startDispute"> Dispute</td>
-
-                <td>Delete!</td>
               </tr>
-            </template>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+
+              <template v-for="chan in channelsForAsset()">
+              
+                <tr>
+                  <td>{{chan.hub.handle}}</td>
+                  <td>{{commy(chan.insured)}}</td>
+                  <td>{{commy(chan.uninsured)}}</td>
+                  <td v-if="my_hub">{{commy(chan.they_uninsured)}}</td>
 
 
-          <p><button type="button" class="btn btn-success" @click="externalDeposits.push({to:'', hub:'onchain', amount: '', invoice:''})">+ Add External Deposit</button> &nbsp;
+                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(chan.d.id).withdrawAmount" placeholder="To withdraw"></td>
+
+                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(chan.d.id).depositAmount" placeholder="To deposit"></td>
+
+                  <td><input class="form-check-input" type="checkbox" v-model="chAction(chan.d.id).startDispute" :id="chan.d.id">
+                  <label class="form-check-label" :for="chan.d.id">Dispute</label>
+                  </td>
+
+                </tr>
+              </template>
+            </tbody>
+          </table>
+
+
+
+
+          <table class="table" v-if="externalDeposits.length > 0">
+            <thead class="thead-dark">
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Hub</th>
+                <th scope="col">Deposit</th>
+                <th scope="col">Invoice</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr v-for="dep in externalDeposits" style="width:300px">
+                <td><input style="width:300px" type="text" class="form-control small-input" v-model="dep.to" placeholder="ID"></td>
+
+                <td><select type="text" class="form-control" v-model="dep.hub" placeholder="Hub handle">
+                  <option value="onchain">onchain</option>
+                  <option v-for="hub in K.hubs" :value="hub.handle">{{hub.handle}}</option>
+                </select></td>
+
+
+                <td><input style="width:300px" type="text" class="form-control small-input" v-model="dep.depositAmount" placeholder="Amount to deposit"></td>
+
+                <td><input style="width:300px" type="text" class="form-control small-input" v-model="dep.invoice" placeholder="Public Message (optional)"></td>
+
+              </tr>
+            </tbody>
+          </table>
+
+
+
+          <p><button type="button" class="btn btn-success" @click="externalDeposits.push({to:'', hub: 'onchain', depositAmount: '0.00', invoice: ''})">+ Add External Deposit</button> &nbsp;
 
             <button v-if="externalDeposits.length > 0" type="button" class="btn btn-danger" @click="externalDeposits.pop()">- Remove External Deposit</button>
           </p>
-          <div v-for="out in externalDeposits" style="width:300px">
-            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.to" placeholder="ID"></p>
 
-            <p><select type="text" class="form-control" v-model="out.hub" placeholder="Hub handle">
-              <option value="onchain">@onchain</option>
-              <option v-for="hub in K.hubs" :value="hub.handle">@{{hub.handle}}</option>
-            </select></p>
-
-
-            <p><input style="width:300px" type="text" class="form-control small-input" v-model="out.amount" placeholder="Amount to deposit">
-            &nbsp;<input style="width:300px" type="text" class="form-control small-input" v-model="out.invoice" placeholder="Public Message (optional)"></p>
-            <hr />
-          </div>
+          <p>Operating in: {{to_ticker(asset)}}</p>
+          <p>Initial onchain balance: {{commy(getAsset(asset))}}</p>
+          <p>Total to withdraw (added to your onchain balance first): {{commy(totalWithdrawals())}}</p>
+          <p>Total to deposit (substracted from your onchain balance): {{commy(totalDeposits())}}</p>
+          <p>Final onchain balance: {{commy(afterRebalance())}}</p>
 
 
-
-          <p v-if="totalWithdrawals() > 0">Total to withdraw: {{commy(totalWithdrawals())}}</p>
-
-          <p v-if="totalDeposits() > 0">Total to deposit: {{commy(totalDeposits())}}</p>
-
-          <hr>
           <p v-if="afterRebalance() > 0">
             <button type="button" class="btn btn-warning" @click="onchainPrepare()">Prepare Transaction</button>
           </p>
           <p v-else>Not enough funds to perform this transaction. Increase your withdrawals or decrease your deposits.</p>
+
+
+          <div v-if="batch">
+            {{batch}}
+          </div>
 
 
 

@@ -145,12 +145,17 @@ if (argv.monkey) {
       // withdraw 12.34 from hub and deposit 9.12 to 3@1
       require('./internal_rpc/rebalance')({
         asset: 1,
-        request_amount: 1234,
-        partner: 1,
-        outs: [
+        
+        chActions: {"1": {
+          partnerId: K.hubs[0].pubkey
+          withdrawAmount: 1234
+        }},
+
+        externalDeposits: [
           {
-            to: '3@1',
-            amount: '9.12',
+            to: '3',
+            hub: 'main',
+            depositAmount: 912,
             invoice: 'test'
           }
         ]

@@ -131,6 +131,7 @@ react = async (result = {}, force = true) => {
     result.address = me.address
     result.pubkey = toHex(me.pubkey)
     result.pending_batch = PK.pending_batch
+    result.batch = me.batch
   }
 
   if (isHeadless()) return
