@@ -59,6 +59,12 @@ module.exports = async (ws, json) => {
       return false
       break
 
+    case 'broadcast':
+      me.broadcast()
+      react({confirm: 'Now await inclusion in block'})
+      return false
+      break
+
     case 'createAsset':
       require('./create_asset')(json.params)
       react({confirm: 'Added to batch'})

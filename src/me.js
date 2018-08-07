@@ -126,7 +126,6 @@ class Me {
         merged.push([methodMap(kv[0]), kv[1]])
       }
     })
-    me.batch = []
 
     // finally merging per-asset batches
     var multiasset = false
@@ -140,9 +139,15 @@ class Me {
           // 1 is default anyway
           merged.push([methodMap('setAsset'), [parseInt(i)]])
         }
-        merged.push([methodMap('disputeWith'), per_asset[i][0]])
-        merged.push([methodMap('withdrawFrom'), per_asset[i][1]])
-        merged.push([methodMap('depositTo'), per_asset[i][2]])
+
+        if (per_asset[i][0].length > 0)
+          merged.push([methodMap('disputeWith'), per_asset[i][0]])
+
+        if (per_asset[i][1].length > 0)
+          merged.push([methodMap('withdrawFrom'), per_asset[i][1]])
+
+        if (per_asset[i][2].length > 0)
+          merged.push([methodMap('depositTo'), per_asset[i][2]])
         multiasset = true
       }
     }
@@ -158,6 +163,8 @@ class Me {
     var to_sign = r([methodMap('batch'), nonce, merged])
 
     var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
+
+    me.batch = []
 
     if (me.my_validator && me.my_validator == nextValidator(true)) {
       me.mempool.push(signed_batch)
@@ -268,6 +275,9 @@ class Me {
     } else {
       // initial run? go monkey e2e test
       require('./monkey')
+
+      // normally broadcast is manual
+      setInterval(me.broadcast, 10000)
     }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP

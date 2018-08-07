@@ -22,11 +22,10 @@ export default {
 
     app.go(location.hash.substr(1).split(/\/|\?/)[0])
 
-    if (localStorage.auth_code) {
-      this.interval = setInterval(function() {
-        app.call('load')
-      }, 6000)
-    }
+    this.interval = setInterval(function() {
+      app.call('load')
+    }, localStorage.auth_code ? 6000 : 80000)
+  
 
     setInterval(() => app.$forceUpdate(), 1000)
   },
@@ -943,9 +942,10 @@ export default {
 
 
           <div v-if="batch">
-            {{batch}}
-          </div>
+            <b v-for="tx in batch">{{tx[0]}}, </b>
+            <button type="button" class="btn btn-danger" @click="call('broadcast')">Sign and Broadcast</button>
 
+          </div>
 
 
         </div>

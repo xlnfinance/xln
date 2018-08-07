@@ -323,11 +323,17 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     const paths = ['.']
 
     const callback = (_) => {
+      // genesis state is stored for analytics and my_validator bootstraping
       if (old_height > 1) {
-        // genesis state is stored for analytics and my_validator bootstraping
-        fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz', () => {
-          l('Removed old snapshot and created ' + filename)
-        })
+        // delay to let people with slow connection to finish download
+        setTimeout(() => {
+          fs.unlink(
+            datadir + '/offchain/Fair-' + old_height + '.tar.gz',
+            () => {
+              l('Removed old snapshot ' + old_height)
+            }
+          )
+        }, 5 * 60 * 1000)
       }
       snapshotHash()
     }
