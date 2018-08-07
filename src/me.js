@@ -463,7 +463,9 @@ class Me {
   }
 }
 
-Me.prototype.consensus = require('./onchain/consensus')
+Me.prototype.consensus = require('./consensus')
+
+Me.prototype.processChain = require('./onchain/process_chain')
 Me.prototype.processBlock = require('./onchain/process_block')
 Me.prototype.processBatch = require('./onchain/process_batch')
 

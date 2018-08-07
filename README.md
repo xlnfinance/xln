@@ -4,9 +4,9 @@
 
 # Intro
 
-Fairlayer is a billion+ transaction per second payment network secured with blockchain. It implements the idea of Extended Lightning Network [XLN](https://medium.com/fairlayer/xln-extended-lightning-network-80fa7acf80f3).
+Fairlayer is a two-layered blockchain capable of processing billion+ transaction per second. It implements the idea of Extended Lightning Network [XLN](https://medium.com/fairlayer/xln-extended-lightning-network-80fa7acf80f3).
 
-It is **very easy to be a full node** because it processes few publicly broadcasted onchain transactions (insurance rebalances, disputes etc). All the payments happen instantly offchain and can be enforced in onchain "court" when needed.
+Our goal is to keep it easy to be a full node on any laptop, no matter how many payments happen on the second layer. The node processes few publicly broadcasted onchain transactions (insurance rebalances, disputes etc). All the payments happen instantly offchain and can be enforced in onchain "court" when needed.
 
 # Installation
 

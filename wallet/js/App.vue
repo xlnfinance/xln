@@ -206,14 +206,13 @@ export default {
 
     onchainPrepare: () => {
       // only send currently visible actions (some are hidden) and uncommy them
-      let selectedActions = {}
+      let selectedActions = []
       let channels = app.channelsForAsset()
 
       for (let i in channels) {
         let raw = app.chAction(channels[i].d.id)
 
-
-        selectedActions[i] = {
+        let a = {
           withdrawAmount: app.uncommy(raw.withdrawAmount),
           depositAmount: app.uncommy(raw.depositAmount),
           startDispute: raw.startDispute,
@@ -222,32 +221,32 @@ export default {
 
         // some mistake checks
 
-        if (selectedActions[i].withdrawAmount > 0 && selectedActions[i].depositAmount > 0) {
+        if (a.withdrawAmount > 0 && a.depositAmount > 0) {
           alert("There's no need to withdraw and deposit at the same time from one channel")
           return false
         }
 
-        if (raw.startDispute && (selectedActions[i].withdrawAmount + selectedActions[i].depositAmount > 0)) {
+        if (raw.startDispute && (a.withdrawAmount + a.depositAmount > 0)) {
           alert("You cannot withdraw/deposit and start dispute at the same time")
           return false
         }
-
-
+        selectedActions.push(a)
       }
 
       app.call('rebalance', {
         asset: app.asset,
         chActions: selectedActions,
-        externalDeposits: app.externalDeposits.map(o=>{
+        externalDeposits: app.externalDeposits.map(dep=>{
           return {
-            depositAmount: app.uncommy(o.amount),
-            to: o.to,
-            invoice: o.invoice
+            depositAmount: app.uncommy(dep.depositAmount),
+            hub: dep.hub,
+            to: dep.to,
+            invoice: dep.invoice
           }
         }),
       })
       
-      // reset fields
+      // reset all formfields
       app.chActions = {}
       app.externalDeposits = []
 
@@ -882,8 +881,9 @@ export default {
 
                   <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(chan.d.id).depositAmount" placeholder="To deposit"></td>
 
-                  <td><input class="form-check-input" type="checkbox" v-model="chAction(chan.d.id).startDispute" :id="chan.d.id">
+                  <td><div class="form-check"><input class="form-check-input" type="checkbox" v-model="chAction(chan.d.id).startDispute" :id="chan.d.id">
                   <label class="form-check-label" :for="chan.d.id">Dispute</label>
+                  </div>
                   </td>
 
                 </tr>
@@ -906,7 +906,7 @@ export default {
 
             <tbody>
               <tr v-for="dep in externalDeposits" style="width:300px">
-                <td><input style="width:300px" type="text" class="form-control small-input" v-model="dep.to" placeholder="ID"></td>
+                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.to" placeholder="ID"></td>
 
                 <td><select type="text" class="form-control" v-model="dep.hub" placeholder="Hub handle">
                   <option value="onchain">onchain</option>
@@ -914,9 +914,9 @@ export default {
                 </select></td>
 
 
-                <td><input style="width:300px" type="text" class="form-control small-input" v-model="dep.depositAmount" placeholder="Amount to deposit"></td>
+                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.depositAmount" placeholder="Amount to deposit"></td>
 
-                <td><input style="width:300px" type="text" class="form-control small-input" v-model="dep.invoice" placeholder="Public Message (optional)"></td>
+                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.invoice" placeholder="Public Message (optional)"></td>
 
               </tr>
             </tbody>

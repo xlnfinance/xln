@@ -16,9 +16,7 @@ module.exports = async (p) => {
   let balance = me.record.asset(asset)
 
   // do something with every channel
-  for (let index in p.chActions) {
-    let action = p.chActions[index]
-
+  for (let action of p.chActions) {
     let ch = await me.getChannel(fromHex(action.partnerId), asset)
 
     if (action.startDispute) {
@@ -75,10 +73,10 @@ module.exports = async (p) => {
   }
 
   // external deposits are everything else other than you@anyhub
-  for (o of p.externalDeposits) {
+  for (let dep of p.externalDeposits) {
     // split by @
-    if (o.to.length > 0) {
-      let to = o.to
+    if (dep.to.length > 0) {
+      let to = dep.to
       let userId
 
       // looks like a pubkey
@@ -103,16 +101,13 @@ module.exports = async (p) => {
         }
       }
 
-      //if (o.amount.indexOf('.') == -1) o.amount += '.00'
-      //.replace(/[^0-9]/g, '')
-
-      let amount = parseInt(o.depositAmount)
+      let amount = parseInt(dep.depositAmount)
 
       let withPartner = 0
       // @onchain or @0 mean onchain balance
-      if (o.hub && o.hub != 'onchain' && o.hub != '0') {
+      if (dep.hub && dep.hub != 'onchain') {
         // find a hub by its handle or id
-        let h = K.hubs.find((h) => h.handle == o.hub || h.id == o.hub)
+        let h = K.hubs.find((h) => h.handle == dep.hub || h.id == dep.hub)
         if (h) {
           withPartner = h.id
         } else {
@@ -128,7 +123,7 @@ module.exports = async (p) => {
           amount,
           userId,
           withPartner,
-          o.invoice ? Buffer.from(o.invoice, 'hex') : 0
+          dep.invoice ? Buffer.from(dep.invoice, 'hex') : 0
         ])
       }
     }

@@ -23,7 +23,7 @@ module.exports = (ws, msg) => {
     case 'precommit':
       return require('./prevote_precommit')(inputType, args)
     case 'chain':
-      return require('../onchain/process_chain')(args)
+      return me.processChain(args)
     case 'sync':
       return require('./sync')(ws, args)
     case 'setLimits':

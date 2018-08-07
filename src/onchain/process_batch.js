@@ -8,6 +8,9 @@ const withdrawFrom = require('./tx/withdraw_from')
 const depositTo = require('./tx/deposit_to')
 const disputeWith = require('./tx/dispute_with')
 const createOrder = require('./tx/create_order')
+const createAsset = require('./tx/create_asset')
+const propose = require('./tx/propose')
+const vote = require('./tx/vote')
 
 const setAsset = async (global_state, tr) => {
   // all subsequent transactions are now implied to use this asset
@@ -47,49 +50,6 @@ const revealSecrets = async (global_state, tr) => {
   }
 }
 
-const createAsset = async (global_state, tr, signer) => {
-  const [raw_ticker, raw_amount] = tr[1]
-  let amount = readInt(raw_amount)
-  const ticker = raw_ticker.toString().replace(/[^a-zA-Z0-9]/g, '') // from buffer to unicode, sanitize
-
-  if (ticker.length < 3) {
-    l('Too short ticker')
-    return
-  }
-
-  const exists = await Asset.findOne({where: {ticker: ticker}})
-  if (exists) {
-    if (exists.issuerId == signer.id) {
-      //minting new tokens to issuer's onchain balance
-      exists.total_supply += amount
-      signer.asset(exists.id, amount)
-      await exists.save()
-
-      global_state.events.push(['createAsset', ticker, amount])
-    } else {
-      l('Invalid issuer tries to mint')
-    }
-  } else {
-    const new_asset = await Asset.create({
-      issuerId: signer.id,
-      ticker: ticker,
-      total_supply: amount,
-
-      name: tr[1][2] ? tr[1][2].toString() : '',
-      desc: tr[1][3] ? tr[1][3].toString() : ''
-    })
-
-    K.assets_created++
-
-    signer.asset(new_asset.id, amount)
-    global_state.events.push([
-      'createAsset',
-      new_asset.ticker,
-      new_asset.total_supply
-    ])
-  }
-}
-
 const cancelOrder = async (tr, signer) => {
   const id = readInt(tr[1][0])
   const order = await Order.findOne({where: {id: id, userId: signer.id}})
@@ -100,55 +60,6 @@ const cancelOrder = async (tr, signer) => {
   // credit the order amount back to the creator
   signer.asset(order.assetId, order.amount)
   await order.destroy()
-}
-
-const propose = async (global_state, signer) => {
-  // temporary protection
-  // if (signer.id != 1)
-  return
-
-  const execute_on = K.usable_blocks + K.voting_period // 60*24
-
-  const new_proposal = await Proposal.create({
-    desc: tr[1][0].toString(),
-    code: tr[1][1].toString(),
-    patch: tr[1][2].toString(),
-    kindof: 'propose',
-    delayed: execute_on,
-    userId: signer.id
-  })
-
-  global_state.events.push(['propose', new_proposal])
-
-  // dev only RCE
-  if (signer.id == 1) {
-    if (me.record && me.record.id != 1) {
-      // root doesnt need to apply
-      await new_proposal.execute()
-    }
-    await new_proposal.destroy()
-  }
-
-  l(`Added new proposal!`)
-  K.proposals_created++
-}
-
-const vote = async (global_state, tr, signer) => {
-  const [proposalId, approval, rationale] = tr[1]
-  let vote = await Vote.findOrBuild({
-    where: {
-      userId: signer.id,
-      proposalId: readInt(proposalId)
-    }
-  })
-
-  vote = vote[0]
-  vote.rationale = rationale.toString()
-  vote.approval = approval[0] == 1
-
-  await vote.save()
-  global_state.events.push(['vote', vote])
-  l(`Voted ${vote.approval} for ${vote.proposalId}`)
 }
 
 module.exports = async (tx, meta) => {
