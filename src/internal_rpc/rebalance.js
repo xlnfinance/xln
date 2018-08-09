@@ -136,7 +136,7 @@ module.exports = async (p) => {
   }
 
   if (disputes.length + withdrawFrom.length + depositTo.length == 0) {
-    react({alert: 'Nothing to send onchain'})
+    react({alert: 'Nothing to add to batch.'})
     return
   } else {
     // finally flushing all of them to pending batch
@@ -145,6 +145,6 @@ module.exports = async (p) => {
     if (depositTo.length > 0) me.batch.push(['depositTo', asset, depositTo])
     if (disputes.length > 0) me.batch.push(['disputeWith', asset, disputes])
 
-    react({confirm: 'Onchain tx added.'})
+    react({confirm: 'Added to batch. Now you can sign and broadcast.'})
   }
 }

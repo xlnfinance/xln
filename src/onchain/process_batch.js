@@ -76,18 +76,28 @@ module.exports = async (tx, meta) => {
     return {error: `Invalid tx signature.`}
   }
 
-  let [methodId, nonce, transactions] = r(body)
-  nonce = readInt(nonce)
+  let [methodId, nonce, gaslimit, gasprice, transactions] = r(body)
+  ;[methodId, nonce, gaslimit, gasprice] = [
+    methodId,
+    nonce,
+    gaslimit,
+    gasprice
+  ].map(readInt)
 
-  if (methodMap(readInt(methodId)) != 'batch') {
+  if (methodMap(methodId) != 'batch') {
     return {error: 'Only batched tx are supported'}
   }
 
-  // gas/tax estimation is very straighforward for now, later methods' pricing can be fine tuned
-  let tax = Math.round(K.tax * tx.length)
+  if (gasprice < K.min_gasprice) {
+    return {error: 'Gasprice offered is below minimum'}
+  }
 
-  // only asset=1 balance is used for tax
-  if (signer.asset(1) < tax) {
+  // gas/fees estimation is very straighforward for now, later methods' pricing can be fine tuned
+  let gas = tx.length
+  let txfee = Math.round(gasprice * gas)
+
+  // only asset=1 balance is used for fees
+  if (signer.asset(1) < txfee) {
     return {error: 'Not enough FRD balance to cover tx fee'}
   }
 
@@ -108,7 +118,7 @@ module.exports = async (tx, meta) => {
       // Mark this user to deny subsequent tx
       if (!meta[signer.id]) meta[signer.id] = 1
 
-      return {success: true}
+      return {success: true, gas: gas, gasprice: gasprice, txfee: txfee}
     }
   } else {
     if (signer.nonce != nonce) {
@@ -125,15 +135,15 @@ module.exports = async (tx, meta) => {
   }
 
   // Tx is valid, can take the fee
-  signer.asset(1, -tax)
-  meta.proposer.asset(1, tax)
+  signer.asset(1, -txfee)
+  meta.proposer.asset(1, txfee)
 
-  K.collected_tax += tax
+  K.collected_fees += txfee
 
   const parsed_tx = {
     signer: signer,
     nonce: nonce,
-    tax: tax,
+    txfee: txfee,
     length: tx.length,
 
     // valid and executed events
@@ -161,7 +171,7 @@ module.exports = async (tx, meta) => {
         await disputeWith(state, t, signer)
         break
       case 'depositTo':
-        await depositTo(state, t, signer, meta, tax)
+        await depositTo(state, t, signer, meta, txfee)
         break
       case 'createAsset':
         await createAsset(state, t, signer)

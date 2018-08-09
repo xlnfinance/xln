@@ -39,13 +39,35 @@ const payMonkey = async (on_server, counter = 1) => {
 }
 
 if (argv.monkey) {
-  if (!me.record || me.record.id < 8) {
+  if (parseInt(base_port) > 8003) {
+    monkeys.splice(monkeys.indexOf(me.address), 1) // *except our addr
+
+    setTimeout(() => {
+      me.getCoins(1, 10000000)
+    }, 6000)
+
+    setTimeout(() => {
+      payMonkey(on_server)
+
+      // intended to fail
+      me.payChannel({
+        address:
+          'ZUp5PARsn4X2xs8fEjYSRtWSTQqgkMnVax7CaLsBmp9kR36Jqon7NbqCakQ5jQ9w1t5gtGo3zfhTtQ2123123123DJJjZ#DOOMEDTOFAIL',
+        amount: 100,
+        asset: 1
+      })
+    }, 17000)
+  }
+
+  // below go pre-registred users
+  if (!me.record || me.record.id > 10) {
     return
   }
 
-  setInterval(me.broadcast, 10000)
+  setInterval(me.broadcast, 6000)
 
   if (me.record.id == 1) {
+    l('Scheduling e2e checks')
     // after a while the hub checks environment, db counts etc and test fails if anything is unexpected
     setTimeout(async () => {
       // no need to run test on server
@@ -97,24 +119,6 @@ if (argv.monkey) {
 
     // creating an initial FRB sell for FRD
     me.batch.push(['createOrder', [2, 10000000, 1, 0.001 * 1000000]])
-  } else if (parseInt(base_port) > 8003) {
-    monkeys.splice(monkeys.indexOf(me.address), 1) // *except our addr
-
-    setTimeout(() => {
-      me.getCoins(1, 10000000)
-    }, 6000)
-
-    setTimeout(() => {
-      payMonkey(on_server)
-
-      // intended to fail
-      me.payChannel({
-        address:
-          'ZUp5PARsn4X2xs8fEjYSRtWSTQqgkMnVax7CaLsBmp9kR36Jqon7NbqCakQ5jQ9w1t5gtGo3zfhTtQ2123123123DJJjZ#DOOMEDTOFAIL',
-        amount: 100,
-        asset: 1
-      })
-    }, 17000)
   }
 
   if (me.record.id == 4) {

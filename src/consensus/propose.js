@@ -28,6 +28,7 @@ module.exports = async () => {
         break
       }
 
+      // TODO: sort by result.gasprice (optimize for profits)
       const result = await me.processBatch(candidate, meta)
       if (result.success) {
         ordered_tx.push(candidate)
@@ -37,7 +38,6 @@ module.exports = async () => {
         // punish submitter ip
       }
     }
-    // sort by fee (optimize for profits)
 
     // flush it or pass leftovers to next validator
     me.mempool = []

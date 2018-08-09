@@ -1,11 +1,11 @@
-module.exports = async (global_state, tr, signer, meta, tax) => {
+module.exports = async (global_state, tr, signer, meta, txfee) => {
   // deposit from our onchain balance to another onchain balance or channel from some side
   const asset = global_state.asset
   await signer.payDebts(asset, global_state)
 
-  // there's a tiny bias here, the hub always gets reimbursed more than tax paid
-  // todo: consider splitting tax based on % in total output volume
-  const reimburse_tax = 1 + Math.floor(tax / tr[1].length)
+  // there's a tiny bias here, the hub always gets reimbursed more than fee paid
+  // todo: consider splitting txfee based on % in total output volume
+  const reimburse_txfee = 1 + Math.floor(txfee / tr[1].length)
 
   for (let output of tr[1]) {
     let amount = readInt(output[0])
@@ -56,7 +56,7 @@ module.exports = async (global_state, tr, signer, meta, tax) => {
 
       await saveId(depositTo)
 
-      K.collected_tax += K.account_creation_fee
+      K.collected_fees += K.account_creation_fee
     } else {
       if (withPartner) {
         if (!withPartner.id) {
@@ -122,10 +122,10 @@ module.exports = async (global_state, tr, signer, meta, tax) => {
         // TODO: attack vector, the user may not endorsed this rebalance
         // reimbures to hub rebalance fees
         /*
-        ins.insurance -= reimburse_tax
-        ins.ondelta -= compared * reimburse_tax
+        ins.insurance -= reimburse_txfee
+        ins.ondelta -= compared * reimburse_txfee
 
-        signer.asset(1, reimburse_tax)
+        signer.asset(1, reimburse_txfee)
         */
         // todo take from onchain balance instead
       }
@@ -147,7 +147,7 @@ module.exports = async (global_state, tr, signer, meta, tax) => {
       if (me.is_me(withPartner.pubkey)) {
         await me.addHistory(
           depositTo.pubkey,
-          -reimburse_tax,
+          -reimburse_txfee,
           'Rebalance fee',
           true
         )

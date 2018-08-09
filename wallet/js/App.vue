@@ -676,7 +676,7 @@ export default {
         <p>Blocktime: {{K.blocktime}} seconds</p>
         <p>Blocksize: {{K.blocksize}} bytes</p>
         <p>Account creation fee (pubkey registration): {{commy(K.account_creation_fee)}}</p>
-        <p>Average onchain fee: {{commy(K.tax * 83)}} (to short ID) – {{commy(K.tax * 115)}} (to pubkey)</p>
+        <p>Average onchain fee: {{commy(K.min_gasprice * 83)}} (to short ID) – {{commy(K.min_gasprice * 115)}} (to pubkey)</p>
         <h2>Hubs & topology</h2>
         <p>Risk limit: {{commy(K.risk)}}</p>
         <p>Hard risk limit: {{commy(K.hard_limit)}}</p>
@@ -975,15 +975,14 @@ export default {
 
 
           <div v-if="batch.length > 0" class="alert alert-primary">
-            <p>You're about to make a globally broadcasted onchain transaction. You can still add other actions to current batch, after you're done choose the fee and click to broadcast it.</p>
+            <p>Globally broadcasted onchain transactions are expensive, so it's recommended to use them rarely and pack many actions in one batch. After you're done adding actions, choose the fee and click to broadcast it.</p>
             <ul>
-              <li v-for="tx in batch">{{tx[0]}}: {{tx[2].length}}</li>
+              <li v-for="tx in batch">Action {{tx[0]}}: {{tx[2].length}} items</li>
             </ul>
 
-            <p></p>
 
             <div class="slidecontainer">
-              <input type="range" min="1" max="200" class="slider" v-model="gasprice">
+              <input type="range" min="1" max="100" class="slider" v-model="gasprice">
               <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee {{commy(gasprice * batch_estimate.size)}}</p>
             </div>
 
@@ -1144,7 +1143,7 @@ export default {
               </tr>
               <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
                 <td colspan="7">
-                  <span class="badge badge-warning">By {{batch.signer.id}} ({{commy(batch.tax)}} fee, size {{batch.length}}):</span>&nbsp;
+                  <span class="badge badge-warning">By {{batch.signer.id}} ({{commy(batch.txfee)}} fee, size {{batch.length}}):</span>&nbsp;
                   <template v-for="d in batch.events">
                     &nbsp;
 

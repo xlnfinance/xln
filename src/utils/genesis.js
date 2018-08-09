@@ -84,7 +84,7 @@ module.exports = async () => {
     proposals_created: 0,
 
     // cents per byte of tx
-    tax: 1,
+    min_gasprice: 1,
 
     // manually priced actions to prevent spam
     account_creation_fee: 100,
@@ -104,7 +104,7 @@ module.exports = async () => {
     soft_limit: 5000000, // rebalance after
     hard_limit: 50000000, // how much can a user lose if hub is insolvent?
 
-    collected_tax: 0,
+    collected_fees: 0,
 
     // latest block done at
     ts: 0,

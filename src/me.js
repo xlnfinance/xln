@@ -84,7 +84,7 @@ class Me {
   }
 
   // compiles signed tx from current batch, not state changing
-  async batch_estimate(p) {
+  async batch_estimate(opts = {}) {
     // we select our record again to get our current nonce
     if (!me.id || me.batch.length == 0) {
       return false
@@ -154,8 +154,10 @@ class Me {
     }
 
     let nonce = me.record.nonce
+    let gaslimit = 0 //uncapped
+    let gasprice = opts.gasprice ? parseInt(opts.gasprice) : K.min_gasprice
 
-    let to_sign = r([methodMap('batch'), nonce, merged])
+    let to_sign = r([methodMap('batch'), nonce, gaslimit, gasprice, merged])
     let signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
     return {
@@ -165,13 +167,13 @@ class Me {
   }
 
   // signs and broadcasts
-  async broadcast(p) {
+  async broadcast(opts) {
     if (PK.pending_batch) {
       return l('Only 1 tx is supported')
     }
     // TODO: make batch persistent on disk
 
-    let estimated = await me.batch_estimate(p)
+    let estimated = await me.batch_estimate(opts)
 
     if (!estimated) return
 
