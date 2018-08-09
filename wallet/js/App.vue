@@ -74,7 +74,7 @@ export default {
 
       my_hub: false,
 
-      limits: ['', ''], //hard, soft
+
       metrics: {},
 
       history_limit: 10,
@@ -118,8 +118,9 @@ export default {
     }
   },
   computed: {
-    ch: () => {
+    current_ch: () => {
       // find current channel for selected asset and hub
+
       let chan = app.channels
         ? app.channels.find(
             (c) => c.partner == app.partner && c.d.asset == app.asset
@@ -169,16 +170,18 @@ export default {
         .join('')
     },
 
-    chAction: (index)=>{
-      if (!app.chActions[index]) {
-        app.chActions[index] = {
+    chAction: (ch)=>{
+      if (!app.chActions[ch.d.id]) {
+        app.chActions[ch.d.id] = {
           depositAmount: '0',
           withdrawAmount: '0',
-          startDispute: false
+          startDispute: false,
+          hard_limit: app.commy(ch.d.hard_limit), 
+          soft_limit: app.commy(ch.d.soft_limit)
         }
       }
 
-      return app.chActions[index]
+      return app.chActions[ch.d.id]
 
     },
 
@@ -203,19 +206,45 @@ export default {
       return app.channels.filter(c=>c.d.asset == asset)
     },
 
+    setLimits: () => {
+      let selectedActions = []
+      let channels = app.channelsForAsset()
+
+      for (let i in channels) {
+        let raw = app.chAction(channels[i])
+
+        let a = {
+          partnerId: channels[i].d.partnerId,
+          asset: channels[i].d.asset,
+          hard_limit: app.uncommy(raw.hard_limit),
+          soft_limit: app.uncommy(raw.soft_limit),
+        }
+
+        selectedActions.push(a)
+      }
+
+      app.call('setLimits', {
+        asset: app.asset,
+        chActions: selectedActions
+      })
+    
+      // reset all formfields
+      app.chActions = {}    
+    },
     onchainPrepare: () => {
       // only send currently visible actions (some are hidden) and uncommy them
       let selectedActions = []
       let channels = app.channelsForAsset()
 
       for (let i in channels) {
-        let raw = app.chAction(channels[i].d.id)
+        let raw = app.chAction(channels[i])
 
         let a = {
           withdrawAmount: app.uncommy(raw.withdrawAmount),
           depositAmount: app.uncommy(raw.depositAmount),
           startDispute: raw.startDispute,
-          partnerId: channels[i].d.partnerId
+          partnerId: channels[i].d.partnerId,
+          asset: channels[i].d.asset
         }
 
         // some mistake checks
@@ -273,13 +302,7 @@ export default {
       app.call('load', data)
       return false
     },
-    prefillLimits: () => {
-      let ch = app.channels.find(
-        (c) => c.partner == app.partner && c.d.asset == app.asset
-      )
-      // prefil credit limits, but only on first load
-      app.limits = [app.commy(ch.d.hard_limit), app.commy(ch.d.soft_limit)]
-    },
+
 
     buyAmount: (d) => {
       return (
@@ -387,6 +410,9 @@ export default {
       if (str == '') return 0
       //if (str.indexOf('.') == -1) str += '.00'
 
+      // commas are removed as they are just separators 
+      str = str.replace(',','')
+
       return Math.round(parseFloat(str) * 100) //parseInt(str.replace(/[^0-9]/g, ''))
     },
 
@@ -460,7 +486,7 @@ export default {
     totalWithdrawals: ()=>{
       let total = 0
       app.channelsForAsset().map(ch=>{
-        total += app.uncommy(app.chAction(ch.d.id).withdrawAmount)
+        total += app.uncommy(app.chAction(ch).withdrawAmount)
       })
 
       return Number.isInteger(total) ? total : 0
@@ -469,7 +495,7 @@ export default {
     totalDeposits: ()=>{
       let total = 0
       app.channelsForAsset().map(ch=>{
-        total += app.uncommy(app.chAction(ch.d.id).depositAmount)
+        total += app.uncommy(app.chAction(ch).depositAmount)
       })
       for (let dep of app.externalDeposits) {
         total += app.uncommy(dep.depositAmount)
@@ -502,7 +528,7 @@ export default {
   
   <div>
 <div style="background-color: #FFFDDE; border:thin solid #EDDD00">
-  <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days. Mainnet: August 24, 2018.</p> 
+  <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days. Bug bounty: August 24, 2018.</p> 
 </div>
 
 
@@ -582,7 +608,7 @@ export default {
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
             <option disabled>Select current asset</option>
-            <option v-for="(a,index) in assets" :value="a.id">{{a.name}} ({{a.ticker}})</option>
+            <option v-for="a in assets" :value="a.id">{{a.name}} ({{a.ticker}})</option>
           </select></span>
 
           &nbsp;
@@ -626,10 +652,13 @@ export default {
 
 
       </div>
+
+
+
       <div v-else-if="tab=='validators'">
         <h1>Validators</h1>
         <ul>
-          <li v-if="m.website" v-for="m in K.validators"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b></li>
+          <li v-if="m.website" v-for="m in K.validators"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b> </li>
         </ul>
       </div>
 
@@ -808,39 +837,47 @@ export default {
       </div>
       <div v-else-if="pubkey && tab=='credit'">
         <h3>Credit Limits</h3>
-        <select v-model="partner" class="custom-select custom-select-lg mb-3">
-          <option disabled>Select current hub</option>
-          <option v-for="(a,index) in channelsForAsset()" :value="a.partner">@{{a.hub.handle}}</option>
-        </select>
-        
-        <template v-if="ch">
-          <p>
-            <label>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Currently: {{commy(ch.d.hard_limit)}}</label>
-            <input v-once type="text" class="form-control col-lg-4" v-model="limits[0]">
-          </p>
 
-          <p>
-            <label>Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually. Currently: {{commy(ch.d.soft_limit)}}</label>
-            <input v-once type="text" class="form-control col-lg-4" v-model="limits[1]">
-          </p>
-
-          
-          <p>
-            <button type="button" class="btn btn-danger" @click="call('setLimits', {limits: limits, partner: ch.partner})" href="#">Save</button>
-          </p>
-
-          <!--<p>This chart shows your uninsured balances over time</p>
-          <canvas width="100%" style="max-height: 200px" id="riskcanvas"></canvas>-->
+        <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
 
 
-          <p><button type="button" class="btn btn-danger" @click="call('logout')">Sign Out
-          </button></p>
 
-                    
-        </template>
+        <table class="table">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">Hub</th>
+              <th scope="col">Receivable</th>
+              <th scope="col">Hard limit</th>
+              <th scope="col">Soft limit</th>
+              <th scope="col">Request Insurance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="ch in channelsForAsset()">
+              <td>{{ch.hub.handle}}</td>
+              <td>{{commy(ch.they_payable)}}</td>
+              <td><input type="text" class="form-control" v-model="chAction(ch).hard_limit"></td>
+              </td>
+              <td><input type="text" class="form-control" v-model="chAction(ch).soft_limit"></td>
+              <td>Request</td>
+            </tr>
+          </tbody>
+        </table>
+
+
+        <p>
+          <button type="button" class="btn btn-danger" @click="setLimits()" href="#">Save</button>
+        </p>
+
+        <p><button type="button" class="btn btn-danger" @click="call('logout')">Quit Node
+        </button></p>
+
       </div>
       <div v-else-if="tab=='onchain'">
-        <div v-if="record">
+        <div v-if="pending_batch">
+          <p>You just broadcasted a transaction, after it is included in next blocks by validators you will be able to make another one.</p>
+        </div>
+        <div v-else-if="record">
           <h1>Onchain Operations</h1>
           <p>ID: {{record.id}}@onchain</p>
           <p>Current FRD balance: {{commy(getAsset(1))}}</p>
@@ -857,32 +894,32 @@ export default {
               <tr>
                 <th scope="col">Hub</th>
                 <th scope="col">Insured</th>
-                <th scope="col">Uninsured</th>
                 <th scope="col" v-if="my_hub">They_Uninsured</th>
+                <th scope="col">Uninsured</th>
                 <th scope="col">Withdraw</th>
                 <th scope="col">Deposit</th>
-                <th scope="col">Dispute</th>
+                <th scope="col" width="100px">Dispute</th>
 
               </tr>
             </thead>
             <tbody>
 
-              <template v-for="chan in channelsForAsset()">
+              <template v-for="ch in channelsForAsset()">
               
                 <tr>
-                  <td>{{chan.hub.handle}}</td>
-                  <td>{{commy(chan.insured)}}</td>
-                  <td>{{commy(chan.uninsured)}}</td>
-                  <td v-if="my_hub">{{commy(chan.they_uninsured)}}</td>
+                  <td>{{ch.hub.handle}}</td>
+                  <td @click="chAction(ch).withdrawAmount = commy(ch.insured)">{{commy(ch.insured)}}</td>
+
+                  <td v-if="my_hub" v-bind:style="[ch.d.they_requested_insurance ? {'background-color':'red'} : {}]" @click="chAction(ch).depositAmount=commy(ch.they_uninsured)">{{commy(ch.they_uninsured)}}</td>
+
+                  <td>{{commy(ch.uninsured)}}</td>
 
 
-                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(chan.d.id).withdrawAmount" placeholder="To withdraw"></td>
+                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(ch).withdrawAmount" placeholder="To withdraw"></td>
 
-                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(chan.d.id).depositAmount" placeholder="To deposit"></td>
+                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(ch).depositAmount" placeholder="To deposit"></td>
 
-                  <td><div class="form-check"><input class="form-check-input" type="checkbox" v-model="chAction(chan.d.id).startDispute" :id="chan.d.id">
-                  <label class="form-check-label" :for="chan.d.id">Dispute</label>
-                  </div>
+                  <td class="form-check"><input class="form-check-input" type="checkbox" v-model="chAction(ch).startDispute" :id="ch.d.id"><label class="form-check-label" :for="ch.d.id">Dispute</label>
                   </td>
 
                 </tr>
@@ -899,12 +936,13 @@ export default {
                 <th scope="col">ID</th>
                 <th scope="col">Hub</th>
                 <th scope="col">Deposit</th>
-                <th scope="col">Invoice</th>
+                <th scope="col">Tag (optional)</th>
+                <th scope="col">Action</th>
               </tr>
             </thead>
 
             <tbody>
-              <tr v-for="dep in externalDeposits" style="width:300px">
+              <tr v-for="(dep, index) in externalDeposits" style="width:300px">
                 <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.to" placeholder="ID"></td>
 
                 <td><select type="text" class="form-control" v-model="dep.hub" placeholder="Hub handle">
@@ -915,25 +953,16 @@ export default {
 
                 <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.depositAmount" placeholder="Amount to deposit"></td>
 
-                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.invoice" placeholder="Public Message (optional)"></td>
+                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.invoice" placeholder="Tag (optional)"></td>
 
+                <td><button v-if="externalDeposits.length > 0" type="button" class="btn btn-danger" @click="externalDeposits.splice(index, 1)">Remove</button></td>
               </tr>
             </tbody>
           </table>
 
+          <p><button type="button" class="btn btn-success" @click="externalDeposits.push({to:'', hub: 'onchain', depositAmount: '0.00', invoice: ''})">+ Add External Deposit</button></p>
 
-
-          <p><button type="button" class="btn btn-success" @click="externalDeposits.push({to:'', hub: 'onchain', depositAmount: '0.00', invoice: ''})">+ Add External Deposit</button> &nbsp;
-
-            <button v-if="externalDeposits.length > 0" type="button" class="btn btn-danger" @click="externalDeposits.pop()">- Remove External Deposit</button>
-          </p>
-
-          <p>Operating in: {{to_ticker(asset)}}</p>
-          <p>Initial onchain balance: {{commy(getAsset(asset))}}</p>
-          <p>Total to withdraw (added to your onchain balance first): {{commy(totalWithdrawals())}}</p>
-          <p>Total to deposit (substracted from your onchain balance): {{commy(totalDeposits())}}</p>
-          <p>Final onchain balance: {{commy(afterRebalance())}}</p>
-
+          <p>{{commy(getAsset(asset))}} (current balance) + {{commy(totalWithdrawals())}} (withdrawals) - {{commy(totalDeposits())}} (deposits) = {{commy(afterRebalance())}} (final balance)</p>
 
           <p v-if="afterRebalance() > 0">
             <button type="button" class="btn btn-warning" @click="onchainPrepare()">Prepare Transaction</button>
@@ -941,18 +970,19 @@ export default {
           <p v-else>Not enough funds to perform this transaction. Increase your withdrawals or decrease your deposits.</p>
 
 
-          <div v-if="batch">
+          <div v-if="batch.length > 0">
             <b v-for="tx in batch">{{tx[0]}}, </b>
-            <button type="button" class="btn btn-danger" @click="call('broadcast')">Sign and Broadcast</button>
 
+            <br>
+            <button type="button" class="btn btn-danger" @click="call('broadcast')">Sign and Broadcast</button>
           </div>
 
 
         </div>
         <div v-else>
           <h3>Registration</h3>
-          <p>You are not currently registered on the blockchain. Onchain registration is not required but it allows you to insure your balances, start disputes with hubs and do rebalances yourself. Your account will be registered automatically once you have more assets in uninsured balances. </p>
-          <p>Otherwise you can ask someone to rebalance onchain at least $10 to your temporary ID:
+          <p>You are not currently registered on the blockchain. Onchain registration allows to have insured balances, start disputes and have strong ownership of your assets. Your account will be registered automatically once you have over $100 in FRD balance</p>
+          <p>Also you can ask someone to deposit onchain at least $10 to your temporary ID:
             <br>
             <b>{{pubkey}}</b></p>
         </div>

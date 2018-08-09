@@ -1,34 +1,30 @@
 module.exports = async (p) => {
   // sets credit limits to a hub
-  let result = {}
-  let m = K.hubs.find((m) => m.id == p.partner)
+  for (let action of p.chActions) {
+    let ch = await me.getChannel(fromHex(action.partnerId), action.asset)
 
-  if (!m) return result
+    if (!ch) return result
 
-  let ch = await me.getChannel(m.pubkey, p.asset)
+    // if limits are same, skip
+    if (action.limits == [ch.d.hard_limit, ch.d.soft_limit]) {
+      continue
+    }
 
-  if (p.limits) {
-    ch.d.hard_limit = parseInt(p.limits[0]) * 100
-    ch.d.soft_limit = parseInt(p.limits[1]) * 100
+    ch.d.requested_insurance = action.request_insurance == 1
+    await ch.d.save()
+
+    me.send(
+      ch.hub,
+      'setLimits',
+      me.envelope(
+        methodMap('setLimits'),
+        ch.d.asset,
+        ch.d.soft_limit,
+        ch.d.hard_limit,
+        action.request_insurance // 1 or undefined
+      )
+    )
   }
 
-  ch.d.requested_insurance = p.request_insurance == 1
-  await ch.d.save()
-
-  me.send(
-    m,
-    'setLimits',
-    me.envelope(
-      methodMap('setLimits'),
-      ch.d.asset,
-      ch.d.soft_limit,
-      ch.d.hard_limit,
-      p.request_insurance // 1 or undefined
-    )
-  )
-
-  result.confirm = p.request_insurance
-    ? 'Insurance requested! Please wait'
-    : 'Credit limits updated'
-  return result
+  return {confirm: 'Credit limits updated'}
 }

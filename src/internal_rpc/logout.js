@@ -9,6 +9,7 @@ module.exports = () => {
   me = new Me()
 
   let result = {pubkey: null}
+  fatal(1)
 
   return result
 }

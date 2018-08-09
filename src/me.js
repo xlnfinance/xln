@@ -303,9 +303,12 @@ class Me {
     me.intervals.push(setInterval(syncdb, K.blocktime * 2000))
 
     if (me.my_hub) {
-      me.intervals.push(
-        setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
-      )
+      // turn on auto rebalance with --rebalance
+      if (argv.rebalance) {
+        me.intervals.push(
+          setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
+        )
+      }
 
       // hubs have to force react regularly
       me.intervals.push(

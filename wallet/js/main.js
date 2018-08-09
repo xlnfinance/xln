@@ -164,12 +164,6 @@ window.render = (r) => {
   Object.assign(window.app, r)
   window.app.$forceUpdate()
 
-  if (window.app.limits[0] == '') {
-    setTimeout(() => {
-      //app.prefillLimits()
-    }, 300)
-  }
-
   if (r.history && window.riskcanvas) {
     renderRisk(r.history)
   }

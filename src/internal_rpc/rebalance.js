@@ -6,6 +6,7 @@ const withdraw = require('../offchain/withdraw')
 module.exports = async (p) => {
   let asset = parseInt(p.asset)
 
+  // three types of actions
   let withdrawFrom = []
   let depositTo = []
   let disputes = []
@@ -17,7 +18,7 @@ module.exports = async (p) => {
 
   // do something with every channel
   for (let action of p.chActions) {
-    let ch = await me.getChannel(fromHex(action.partnerId), asset)
+    let ch = await me.getChannel(fromHex(action.partnerId), action.asset)
 
     if (action.startDispute) {
       disputes.push(await ch.d.getDispute())
@@ -139,9 +140,10 @@ module.exports = async (p) => {
     return
   } else {
     // finally flushing all of them to pending batch
-    me.batch.push(['withdrawFrom', asset, withdrawFrom])
-    me.batch.push(['depositTo', asset, depositTo])
-    me.batch.push(['disputeWith', asset, disputes])
+    if (withdrawFrom.length > 0)
+      me.batch.push(['withdrawFrom', asset, withdrawFrom])
+    if (depositTo.length > 0) me.batch.push(['depositTo', asset, depositTo])
+    if (disputes.length > 0) me.batch.push(['disputeWith', asset, disputes])
 
     react({confirm: 'Onchain tx added.'})
   }

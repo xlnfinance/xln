@@ -20,7 +20,7 @@ module.exports = () => {
   if (shares < K.majority) {
     if (!me.proposed_block.locked) me.proposed_block = {}
 
-    l(`Failed to commit, only ${shares} precommits / ${K.majority}. Lets sync`)
+    l(`Failed to commit #${K.total_blocks}, ${shares}/${K.majority}`)
     sync()
   } else if (me.proposed_block.header) {
     // adding to our external queue to avoid race conditions
