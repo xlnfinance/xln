@@ -36,7 +36,7 @@ module.exports = async (args) => {
     }
 
     // time to broadcast our next batch then. (Delay to ensure validator processed the block)
-    if (me.my_hub) {
+    if (me.my_hub && argv.rebalance) {
       setTimeout(() => {
         me.broadcast()
       }, 2000)

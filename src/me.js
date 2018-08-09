@@ -83,10 +83,10 @@ class Me {
     return me.pubkey && me.pubkey.equals(pubkey)
   }
 
-  // adds tx to batch, signs and broadcasts
-  async broadcast() {
+  // compiles signed tx from current batch, not state changing
+  async batch_estimate(p) {
     // we select our record again to get our current nonce
-    if (!me.id) {
+    if (!me.id || me.batch.length == 0) {
       return false
     }
 
@@ -96,15 +96,10 @@ class Me {
       return false
     }
 
-    if (PK.pending_batch) {
-      return l('Only 1 tx is supported')
-    }
-    // TODO: make batch persistent on disk
-
     // recommended canonical batch structure: 4 money-related arrays before everything else
-    var merged = [[methodMap('revealSecrets'), []]]
+    let merged = [[methodMap('revealSecrets'), []]]
 
-    var per_asset = {}
+    let per_asset = {}
     let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
     // put into one of first arrays or add to the end
     me.batch.map((kv) => {
@@ -158,22 +153,37 @@ class Me {
       return false
     }
 
-    var nonce = me.record.nonce
+    let nonce = me.record.nonce
 
-    var to_sign = r([methodMap('batch'), nonce, merged])
+    let to_sign = r([methodMap('batch'), nonce, merged])
+    let signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
-    var signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
+    return {
+      signed_batch: signed_batch,
+      size: to_sign.length
+    }
+  }
 
-    me.batch = []
+  // signs and broadcasts
+  async broadcast(p) {
+    if (PK.pending_batch) {
+      return l('Only 1 tx is supported')
+    }
+    // TODO: make batch persistent on disk
+
+    let estimated = await me.batch_estimate(p)
+
+    if (!estimated) return
 
     if (me.my_validator && me.my_validator == nextValidator(true)) {
-      me.mempool.push(signed_batch)
+      me.mempool.push(estimated.signed_batch)
     } else {
-      me.send(nextValidator(true), 'tx', r([signed_batch]))
+      me.send(nextValidator(true), 'tx', r([estimated.signed_batch]))
     }
 
     // saving locally to ensure it is added, and rebroadcast if needed
-    PK.pending_batch = toHex(signed_batch)
+    PK.pending_batch = toHex(estimated.signed_batch)
+    me.batch = []
   }
 
   // tell all validators the same thing
@@ -275,9 +285,6 @@ class Me {
     } else {
       // initial run? go monkey e2e test
       require('./monkey')
-
-      // normally broadcast is manual
-      setInterval(me.broadcast, 10000)
     }
 
     // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP

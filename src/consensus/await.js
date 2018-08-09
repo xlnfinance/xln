@@ -1,6 +1,8 @@
 module.exports = () => {
   me.status = 'await'
 
+  //l('Consensus: ' + me.status + ts())
+
   // if have 2/3+ precommits, commit the block and share
   let shares = 0
   const precommits = []

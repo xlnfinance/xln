@@ -39,6 +39,12 @@ const payMonkey = async (on_server, counter = 1) => {
 }
 
 if (argv.monkey) {
+  if (!me.record || me.record.id < 8) {
+    return
+  }
+
+  setInterval(me.broadcast, 10000)
+
   if (me.record.id == 1) {
     // after a while the hub checks environment, db counts etc and test fails if anything is unexpected
     setTimeout(async () => {
@@ -111,57 +117,55 @@ if (argv.monkey) {
     }, 17000)
   }
 
-  if (me.record) {
-    if (me.record.id == 4) {
-      // trigger the dispute from hub
-      me.CHEAT_dontack = true
-      me.CHEAT_dontwithdraw = true
+  if (me.record.id == 4) {
+    // trigger the dispute from hub
+    me.CHEAT_dontack = true
+    me.CHEAT_dontwithdraw = true
 
-      setTimeout(() => {
-        me.payChannel({
-          amount: 20000,
-          address: monkeys[0],
-          asset: 1
-        })
-      }, 12000)
-
-      // create an asset
-      me.batch.push([
-        'createAsset',
-        ['TESTCOIN', 13371337, 'Test coin', 'No goal']
-      ])
-    }
-
-    if (me.record.id == 3) {
-      // just to make sure there's no leaky unescaped injection
-      var xss = '\'"><img src=x onerror=alert(0)>'
-      me.batch.push(['createAsset', ['XSS', 10000000, xss, xss]])
-
-      // buying bunch of FRB for $4
-      me.batch.push(['createOrder', [1, 400, 2, 0.001 * 1000000]])
-    }
-
-    if (me.record.id == 2) {
-      // withdraw 12.34 from hub and deposit 9.12 to 3@1
-      require('./internal_rpc/rebalance')({
-        asset: 1,
-
-        chActions: [
-          {
-            partnerId: K.hubs[0].pubkey,
-            withdrawAmount: 1234
-          }
-        ],
-
-        externalDeposits: [
-          {
-            to: '3',
-            hub: 'main',
-            depositAmount: 912,
-            invoice: 'test'
-          }
-        ]
+    setTimeout(() => {
+      me.payChannel({
+        amount: 20000,
+        address: monkeys[0],
+        asset: 1
       })
-    }
+    }, 12000)
+
+    // create an asset
+    me.batch.push([
+      'createAsset',
+      ['TESTCOIN', 13371337, 'Test coin', 'No goal']
+    ])
+  }
+
+  if (me.record.id == 3) {
+    // just to make sure there's no leaky unescaped injection
+    var xss = '\'"><img src=x onerror=alert(0)>'
+    me.batch.push(['createAsset', ['XSS', 10000000, xss, xss]])
+
+    // buying bunch of FRB for $4
+    me.batch.push(['createOrder', [1, 400, 2, 0.001 * 1000000]])
+  }
+
+  if (me.record.id == 2) {
+    // withdraw 12.34 from hub and deposit 9.12 to 3@1
+    require('./internal_rpc/rebalance')({
+      asset: 1,
+
+      chActions: [
+        {
+          partnerId: K.hubs[0].pubkey,
+          withdrawAmount: 1234
+        }
+      ],
+
+      externalDeposits: [
+        {
+          to: '3',
+          hub: 'main',
+          depositAmount: 912,
+          invoice: 'test'
+        }
+      ]
+    })
   }
 }

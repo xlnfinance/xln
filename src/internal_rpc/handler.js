@@ -60,7 +60,7 @@ module.exports = async (ws, json) => {
       break
 
     case 'broadcast':
-      me.broadcast()
+      me.broadcast(json.params)
       react({confirm: 'Now await inclusion in block'})
       return false
       break
@@ -117,7 +117,7 @@ module.exports = async (ws, json) => {
 
     case 'hardfork':
       //security: ensure it's not RCE and put extra safeguards
-      //eval(p.hardfork)
+      //eval(json.params.hardfork)
       result.confirm = 'Executed'
       break
 

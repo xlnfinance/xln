@@ -18,6 +18,8 @@ export default {
       }
     }
 
+    app.onServer = location.hostname!='127.0.0.1'
+
     app.call('load')
 
     app.go(location.hash.substr(1).split(/\/|\?/)[0])
@@ -37,7 +39,9 @@ export default {
       auth_code: localStorage.auth_code,
 
       asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
-      partner: 1,
+
+      gasprice: 1, 
+
       assets: [],
       orders: [],
       channels: [],
@@ -350,6 +354,8 @@ export default {
       }
     },
 
+
+
     go: (path) => {
       var authed = ['wallet', 'credit', 'onchain', 'testnet']
 
@@ -598,12 +604,12 @@ export default {
 
           </li>
 
-          <li class="nav-item" >
+          <li class="nav-item" v-if="onServer">
             <a class="nav-link" href="https://web.fairlayer.com">Web Wallet</a>
           </li>
 
         </ul>
-        <span class="badge badge-danger" v-if="pending_batch">Onchain tx pending</span> &nbsp;
+        <span class="badge badge-danger" v-if="pending_batch" @click="go('onchain')">Onchain tx pending</span> &nbsp;
         <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span><span v-else >Block #{{K.total_blocks}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
@@ -875,17 +881,20 @@ export default {
       </div>
       <div v-else-if="tab=='onchain'">
         <div v-if="pending_batch">
-          <p>You just broadcasted a transaction, after it is included in next blocks by validators you will be able to make another one.</p>
+          <h2 class="alert alert-primary">You just broadcasted a transaction, wait until it's included in a block by validators to make another one.</h2>
+
+          <center><div class="loader"></div></center>
         </div>
+
         <div v-else-if="record">
           <h1>Onchain Operations</h1>
           <p>ID: {{record.id}}@onchain</p>
           <p>Current FRD balance: {{commy(getAsset(1))}}</p>
 
-          <p>@onchain is a special "meta" balance that is not stored with a hub and has maximum security guarantees. To send money to it use ID@onchain or just ID. Your onchain FRD balance is used to pay all kinds of fees so keep it preloaded.</p>
+          <!--<p>@onchain is a special "meta" balance that is not stored with a hub and has maximum security guarantees. To send money to it use ID@onchain or just ID. Your onchain FRD balance is used to pay all kinds of fees so keep it preloaded.</p>
 
           <p>If the hub becomes unresponsive, doesn't honor your soft limit and insure your balances, fails to process your payments or anything else: you can always start a dispute onchain. You are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the hub is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.
-          </p>
+          </p>-->
 
 
 
@@ -895,7 +904,6 @@ export default {
                 <th scope="col">Hub</th>
                 <th scope="col">Insured</th>
                 <th scope="col" v-if="my_hub">They_Uninsured</th>
-                <th scope="col">Uninsured</th>
                 <th scope="col">Withdraw</th>
                 <th scope="col">Deposit</th>
                 <th scope="col" width="100px">Dispute</th>
@@ -912,15 +920,11 @@ export default {
 
                   <td v-if="my_hub" v-bind:style="[ch.d.they_requested_insurance ? {'background-color':'red'} : {}]" @click="chAction(ch).depositAmount=commy(ch.they_uninsured)">{{commy(ch.they_uninsured)}}</td>
 
-                  <td>{{commy(ch.uninsured)}}</td>
+                  <td><input style="width:150px" type="text" class="form-control small-input" v-model="chAction(ch).withdrawAmount" placeholder="To withdraw"></td>
 
+                  <td><input style="width:150px" type="text" class="form-control small-input" v-model="chAction(ch).depositAmount" placeholder="To deposit"></td>
 
-                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(ch).withdrawAmount" placeholder="To withdraw"></td>
-
-                  <td><input style="width:120px" type="text" class="form-control small-input" v-model="chAction(ch).depositAmount" placeholder="To deposit"></td>
-
-                  <td class="form-check"><input class="form-check-input" type="checkbox" v-model="chAction(ch).startDispute" :id="ch.d.id"><label class="form-check-label" :for="ch.d.id">Dispute</label>
-                  </td>
+                  <td><input type="checkbox" v-model="chAction(ch).startDispute" :id="ch.d.id"></td>
 
                 </tr>
               </template>
@@ -962,7 +966,7 @@ export default {
 
           <p><button type="button" class="btn btn-success" @click="externalDeposits.push({to:'', hub: 'onchain', depositAmount: '0.00', invoice: ''})">+ Add External Deposit</button></p>
 
-          <p>{{commy(getAsset(asset))}} (current balance) + {{commy(totalWithdrawals())}} (withdrawals) - {{commy(totalDeposits())}} (deposits) = {{commy(afterRebalance())}} (final balance)</p>
+          <p>{{commy(getAsset(asset))}} (current onchain balance) + {{commy(totalWithdrawals())}} (all withdrawals) - {{commy(totalDeposits())}} (all deposits) </p><p>= {{commy(afterRebalance())}} (final balance)</p>
 
           <p v-if="afterRebalance() > 0">
             <button type="button" class="btn btn-warning" @click="onchainPrepare()">Prepare Transaction</button>
@@ -970,11 +974,20 @@ export default {
           <p v-else>Not enough funds to perform this transaction. Increase your withdrawals or decrease your deposits.</p>
 
 
-          <div v-if="batch.length > 0">
-            <b v-for="tx in batch">{{tx[0]}}, </b>
+          <div v-if="batch.length > 0" class="alert alert-primary">
+            <p>You're about to make a globally broadcasted onchain transaction. You can still add other actions to current batch, after you're done choose the fee and click to broadcast it.</p>
+            <ul>
+              <li v-for="tx in batch">{{tx[0]}}: {{tx[2].length}}</li>
+            </ul>
 
-            <br>
-            <button type="button" class="btn btn-danger" @click="call('broadcast')">Sign and Broadcast</button>
+            <p></p>
+
+            <div class="slidecontainer">
+              <input type="range" min="1" max="200" class="slider" v-model="gasprice">
+              <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee {{commy(gasprice * batch_estimate.size)}}</p>
+            </div>
+
+            <p><button type="button" class="btn btn-danger" @click="call('broadcast', {gasprice: gasprice})">Sign and Broadcast</button></p>
           </div>
 
 
@@ -987,8 +1000,6 @@ export default {
             <b>{{pubkey}}</b></p>
         </div>
       </div>
-
-
 
 
       <div v-else-if="tab=='exchange'">
