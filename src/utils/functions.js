@@ -1,5 +1,5 @@
 // returns validator making block right now, use skip=true to get validator for next slot
-nextValidator = (skip = false) => {
+const nextValidator = (skip = false) => {
   const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
 
   let searchIndex = 0
@@ -21,8 +21,8 @@ nextValidator = (skip = false) => {
   }
 }
 
-parseAddress = (addr) => {
-  addr = addr.toString()
+const parseAddress = (address) => {
+  let addr = address.toString()
   let invoice = false
 
   if (addr.includes('#')) {
@@ -58,7 +58,7 @@ parseAddress = (addr) => {
   }
 }
 
-loadKFile = (datadir) => {
+const loadKFile = (datadir) => {
   l('Loading K data')
   const kFile = './' + datadir + '/onchain/k.json'
   if (!fs.existsSync(kFile)) {
@@ -69,7 +69,7 @@ loadKFile = (datadir) => {
   return JSON.parse(json)
 }
 
-loadPKFile = (datadir) => {
+const loadPKFile = (datadir) => {
   l('Loading PK data')
   const pkFile = './' + datadir + '/offchain/pk.json'
   if (!fs.existsSync(pkFile)) {
@@ -84,7 +84,7 @@ loadPKFile = (datadir) => {
   return JSON.parse(json)
 }
 
-loadValidators = (validators) => {
+const loadValidators = (validators) => {
   return validators.map((m) => {
     m.pubkey = Buffer.from(m.pubkey, 'hex')
     m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
@@ -92,7 +92,7 @@ loadValidators = (validators) => {
   })
 }
 
-generateMonkeys = async () => {
+const generateMonkeys = async () => {
   const derive = require('./utils/derive')
   const addr = []
   for (let i = 8001; i < 8200; i++) {
@@ -106,7 +106,7 @@ generateMonkeys = async () => {
   await promise_writeFile('./tools/monkeys.txt', addr.join('\n'))
 }
 
-loadMonkeys = (monkey_port) => {
+const loadMonkeys = (monkey_port) => {
   const monkeys = fs
     .readFileSync('./tools/monkeys.txt')
     .toString()
@@ -118,7 +118,7 @@ loadMonkeys = (monkey_port) => {
   return monkeys
 }
 
-sync = () => {
+const sync = () => {
   if (!K.prev_hash) {
     return l('No K.prev_hash to sync from')
   }
@@ -144,7 +144,7 @@ sync = () => {
   return l('No need to sync, K.ts is recent')
 }
 
-setupDirectories = (datadir) => {
+const setupDirectories = (datadir) => {
   if (!fs.existsSync('./' + datadir)) {
     fs.mkdirSync('./' + datadir)
     fs.mkdirSync('./' + datadir + '/onchain')
@@ -161,22 +161,22 @@ setupDirectories = (datadir) => {
   }
 }
 
-getInsuranceBetween = async function(user1, user2, asset = 1) {
+const getInsuranceBetween = async function(user1, user2, asset = 1) {
   if (user1.pubkey.length != 32 || user2.pubkey.length != 32) {
     return false
   }
 
-  var compared = Buffer.compare(user1.pubkey, user2.pubkey)
+  const compared = Buffer.compare(user1.pubkey, user2.pubkey)
   if (compared == 0) return false
 
-  var wh = {
+  const wh = {
     leftId: compared == -1 ? user1.id : user2.id,
     rightId: compared == -1 ? user2.id : user1.id,
     asset: asset
   }
-  var str = stringify([wh.leftId, wh.rightId, wh.asset])
+  const str = stringify([wh.leftId, wh.rightId, wh.asset])
 
-  var ins = cache.ins[str]
+  let ins = cache.ins[str]
   if (ins) return ins
 
   ins = (await Insurance.findOrBuild({
@@ -190,22 +190,23 @@ getInsuranceBetween = async function(user1, user2, asset = 1) {
 // you cannot really reason about who owns what by looking at onchain db only (w/o offdelta)
 // but the hubs with higher sum(insurance) locked around them are more trustworthy
 // and users probably own most part of insurances around them
-getInsuranceSumForUser = async function(id, asset = 1) {
-  var sum = await Insurance.sum('insurance', {
+const getInsuranceSumForUser = async function(id, asset = 1) {
+  const sum = await Insurance.sum('insurance', {
     where: {
       [Op.or]: [{leftId: id}, {rightId: id}],
       asset: asset
     }
   })
-  return sum > 0 ? sum : 0
+
+  return Math.max(sum, 0)
 }
 
-getUserByidOrKey = async function(id) {
+const getUserByidOrKey = async function(id) {
   if (typeof id != 'number' && id.length != 32) {
     id = readInt(id)
   }
 
-  var u = false
+  let u = false
 
   // if integer, iterate over obj, if pubkey return by key
   if (typeof id == 'number') {
@@ -237,7 +238,7 @@ getUserByidOrKey = async function(id) {
   return u
 }
 
-userAsset = (user, asset, diff) => {
+const userAsset = (user, asset, diff) => {
   // native assets have dedicated column
   if (user.attributes.includes('balance' + asset)) {
     if (diff) {
@@ -262,17 +263,17 @@ userAsset = (user, asset, diff) => {
   }
 }
 
-userPayDebts = async (user, asset, parsed_tx) => {
+const userPayDebts = async (user, asset, parsed_tx) => {
   if (!user.has_debts) return false
 
-  let debts = await user.getDebts({where: {asset: asset}})
+  const debts = await user.getDebts({where: {asset: asset}})
 
-  for (let d of debts) {
+  for (const d of debts) {
     var u = await User.idOrKey(d.oweTo)
 
     // FRD cannot be enforced below safety limit,
     // otherwise the nodes won't be able to send onchain tx
-    let chargable =
+    const chargable =
       asset == 1
         ? userAsset(user, asset) - K.hub_standalone_balance
         : userAsset(user, asset)
@@ -305,7 +306,7 @@ userPayDebts = async (user, asset, parsed_tx) => {
   }
 }
 
-insuranceResolve = async (insurance) => {
+const insuranceResolve = async (insurance) => {
   if (insurance.dispute_hashlocks) {
     // are there any hashlocks attached to this dispute? Check for unlocked ones
     var [left_inwards, right_inwards] = r(insurance.dispute_hashlocks)
@@ -411,7 +412,7 @@ insuranceResolve = async (insurance) => {
   return resolved
 }
 
-proposalExecute = async (proposal) => {
+const proposalExecute = async (proposal) => {
   if (proposal.code) {
     await eval(`(async function() { ${proposal.code} })()`)
   }
@@ -419,7 +420,7 @@ proposalExecute = async (proposal) => {
   if (proposal.patch.length > 0) {
     me.request_reload = true
     try {
-      let pr = require('child_process').exec(
+      const pr = require('child_process').exec(
         'patch -p1',
         (error, stdout, stderr) => {
           console.log(error, stdout, stderr)
@@ -433,7 +434,7 @@ proposalExecute = async (proposal) => {
   }
 }
 
-deltaGetDispute = async (delta) => {
+const deltaGetDispute = async (delta) => {
   // post last sig if any
   const partner = await getUserByidOrKey(delta.partnerId)
 
@@ -442,9 +443,9 @@ deltaGetDispute = async (delta) => {
   return delta.sig ? [id, delta.sig, delta.signed_state] : [id]
 }
 
-deltaVerify = (delta, state, ackSig) => {
+const deltaVerify = (delta, state, ackSig) => {
   // canonical state representation
-  var canonical = r(state)
+  const canonical = r(state)
   if (ec.verify(canonical, ackSig, delta.partnerId)) {
     if (trace)
       l(`Successfully verified sig against state\n${ascii_state(state)}`)
@@ -455,4 +456,26 @@ deltaVerify = (delta, state, ackSig) => {
   } else {
     return false
   }
+}
+
+module.exports = {
+  nextValidator: nextValidator,
+  parseAddress: parseAddress,
+  loadKFile: loadKFile,
+  loadPKFile: loadPKFile,
+  loadValidators: loadValidators,
+  generateMonkeys: generateMonkeys,
+  loadMonkeys: loadMonkeys,
+  deltaVerify: deltaVerify,
+  sync: sync,
+  setupDirectories: setupDirectories,
+  getInsuranceBetween: getInsuranceBetween,
+  getInsuranceSumForUser: getInsuranceSumForUser,
+  getUserByidOrKey: getUserByidOrKey,
+  userAsset: userAsset,
+  userPayDebts: userPayDebts,
+  insuranceResolve: insuranceResolve,
+  proposalExecute: proposalExecute,
+  deltaGetDispute: deltaGetDispute,
+  deltaVerify: deltaVerify
 }

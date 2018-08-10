@@ -1,7 +1,9 @@
 require('./utils/system')
 require('./utils/channel')
 require('./utils/debug')
-require('./utils/functions')
+
+const functions = require('./utils/functions')
+Object.assign(global, functions)
 
 // enumerator of all methods and tx types in the system
 methodMap = require('./utils/method_map')
