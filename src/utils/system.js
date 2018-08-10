@@ -69,29 +69,6 @@ Array.prototype.randomElement = function() {
   return this[Math.floor(Math.random() * this.length)]
 }
 
-// returns validator making block right now, use skip=true to get validator for next slot
-nextValidator = (skip = false) => {
-  const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
-
-  let searchIndex = 0
-  for (let i = 0; i < Validators.length; i++) {
-    const current = Validators[i]
-    searchIndex += current.shares
-
-    if (searchIndex <= currentIndex) continue
-    if (skip == false) return current
-
-    // go back to 0
-    if (currentIndex + 1 == K.total_shares) return Validators[0]
-
-    // same validator
-    if (currentIndex + 1 < searchIndex) return current
-
-    // next validator
-    return Validators[i + 1]
-  }
-}
-
 // cache layer stores most commonly edited records:
 // channels, payments, users and insurances
 // also K.json is stored
@@ -176,43 +153,6 @@ syncdb = async (opts = {}) => {
     if (all.length > 0) l(`syncdb done: ${all.length}`)
     return await Promise.all(all)
   })
-}
-
-parseAddress = (addr) => {
-  addr = addr.toString()
-  let invoice = false
-
-  if (addr.includes('#')) {
-    // the invoice is encoded as #hash in destination and takes precedence over manually sent invoice
-    ;[addr, invoice] = addr.split('#')
-  }
-  let parts = []
-  let hubs = [1]
-
-  try {
-    parts = r(base58.decode(addr))
-    if (parts[2]) hubs = parts[2].map(readInt)
-  } catch (e) {}
-
-  // both pubkeys and hub list must be present
-  if (
-    parts[0] &&
-    parts[0].length == 32 &&
-    parts[1] &&
-    parts[1].length == 32 &&
-    hubs.length > 0
-  ) {
-    return {
-      box_pubkey: parts[0],
-      pubkey: parts[1],
-      hubs: hubs,
-      invoice: invoice,
-      address: addr
-    }
-  } else {
-    l('bad address ', addr)
-    return false
-  }
 }
 
 trim = (ad) => toHex(ad).substr(0, 4)

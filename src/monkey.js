@@ -11,7 +11,7 @@ const payMonkey = async (on_server, counter = 1) => {
   })
 
   const [_, pubkey] = r(base58.decode(address))
-  const reg = await User.idOrKey(pubkey)
+  const reg = await getUserByidOrKey(pubkey)
 
   // onchain payment (batched, not sent to validator yet)
   me.batch.push([
@@ -76,8 +76,8 @@ if (argv.monkey) {
       await syncdb()
       update_cache()
 
-      let monkey5 = await User.idOrKey(5)
-      let monkey5ins = await Insurance.sumForUser(5)
+      let monkey5 = await getUserByidOrKey(5)
+      let monkey5ins = await getInsuranceSumForUser(5)
 
       // must be >100 after expected rebalance
 

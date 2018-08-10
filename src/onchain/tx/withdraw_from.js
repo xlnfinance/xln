@@ -4,7 +4,7 @@ module.exports = async (global_state, tr, signer, meta) => {
   for (const input of tr[1]) {
     let amount = readInt(input[0])
 
-    const partner = await User.idOrKey(input[1])
+    const partner = await getUserByidOrKey(input[1])
     if (!partner || !partner.id) {
       l('Cant withdraw from nonexistent partner')
       return
@@ -13,7 +13,7 @@ module.exports = async (global_state, tr, signer, meta) => {
     const compared = Buffer.compare(signer.pubkey, partner.pubkey)
     if (compared == 0) return
 
-    const ins = await Insurance.btw(signer, partner, global_state.asset)
+    const ins = await getInsuranceBetween(signer, partner, global_state.asset)
 
     if (!ins || !ins.id || amount > ins.insurance) {
       l(`Invalid amount ${ins.insurance} vs ${amount}`)
@@ -43,7 +43,7 @@ module.exports = async (global_state, tr, signer, meta) => {
     // .====| reduce insurance .==--| reduce ondelta .==|
     if (signer.id == ins.leftId) ins.ondelta -= amount
 
-    signer.asset(global_state.asset, amount)
+    userAsset(signer, global_state.asset, amount)
 
     ins.nonce++
 

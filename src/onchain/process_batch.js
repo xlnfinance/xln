@@ -58,14 +58,14 @@ const cancelOrder = async (tr, signer) => {
     return
   }
   // credit the order amount back to the creator
-  signer.asset(order.assetId, order.amount)
+  userAsset(signer, order.assetId, order.amount)
   await order.destroy()
 }
 
 module.exports = async (tx, meta) => {
   let [id, sig, body] = r(tx)
 
-  let signer = await User.idOrKey(readInt(id))
+  let signer = await getUserByidOrKey(readInt(id))
 
   if (!signer || !signer.id) {
     l(id, signer)
@@ -97,7 +97,7 @@ module.exports = async (tx, meta) => {
   let txfee = Math.round(gasprice * gas)
 
   // only asset=1 balance is used for fees
-  if (signer.asset(1) < txfee) {
+  if (userAsset(signer, 1) < txfee) {
     return {error: 'Not enough FRD balance to cover tx fee'}
   }
 
@@ -135,8 +135,8 @@ module.exports = async (tx, meta) => {
   }
 
   // Tx is valid, can take the fee
-  signer.asset(1, -txfee)
-  meta.proposer.asset(1, txfee)
+  userAsset(signer, 1, -txfee)
+  userAsset(meta.proposer, 1, txfee)
 
   K.collected_fees += txfee
 

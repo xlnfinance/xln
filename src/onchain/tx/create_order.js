@@ -6,14 +6,14 @@ module.exports = async (global_state, tr, signer) => {
 
   const direct_order = assetId > buyAssetId
 
-  const sellerOwns = signer.asset(assetId)
+  const sellerOwns = userAsset(signer, assetId)
 
   if (sellerOwns < amount) {
     l('Trying to sell more then signer has')
     return
   }
 
-  signer.asset(assetId, -amount)
+  userAsset(signer, assetId, -amount)
 
   const order = Order.build({
     amount: amount,
@@ -50,18 +50,18 @@ module.exports = async (global_state, tr, signer) => {
 
     //l('Suitable order', we_buy, they_buy, their)
 
-    const seller = await User.idOrKey(their.userId)
+    const seller = await getUserByidOrKey(their.userId)
     if (we_buy > their.amount) {
       // close their order. give seller what they wanted
-      seller.asset(their.buyAssetId, they_buy)
-      signer.asset(order.buyAssetId, their.amount)
+      userAsset(seller, their.buyAssetId, they_buy)
+      userAsset(signer, order.buyAssetId, their.amount)
 
       their.amount = 0
       order.amount -= they_buy
     } else {
       // close our order
-      seller.asset(their.buyAssetId, order.amount)
-      signer.asset(order.buyAssetId, we_buy)
+      userAsset(seller, their.buyAssetId, order.amount)
+      userAsset(signer, order.buyAssetId, we_buy)
 
       their.amount -= we_buy
       order.amount = 0

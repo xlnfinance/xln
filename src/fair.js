@@ -1,6 +1,7 @@
 require('./utils/system')
 require('./utils/channel')
 require('./utils/debug')
+require('./utils/functions')
 
 // enumerator of all methods and tx types in the system
 methodMap = require('./utils/method_map')
@@ -32,9 +33,6 @@ node_started_at = ts()
 
 process.title = 'Fair ' + base_port
 
-require('./db/onchain_db')
-require('./db/offchain_db')
-
 cache = {
   ins: {},
   users: {},
@@ -45,104 +43,34 @@ exitsync = false
 
 monkeys = []
 
-sync = () => {
-  if (!K.prev_hash) {
-    return l('No K.prev_hash to sync from')
-  }
-
-  const sendSync = () => {
-    // if we're validator then sync from anyone except us
-    const validatorSet = me.my_validator
-      ? Validators.filter((m) => m != me.my_validator)
-      : Validators
-    const randomChosenValidator = validatorSet.randomElement()
-    const prevHash = r([fromHex(K.prev_hash)])
-    me.send(randomChosenValidator, 'sync', prevHash)
-  }
-
-  if (me.my_validator) {
-    return sendSync()
-  }
-
-  if (K.ts < ts() - K.blocktime / 2) {
-    return sendSync()
-  }
-
-  return l('No need to sync, K.ts is recent')
-}
-
-loadKFile = (datadir) => {
-  l('Loading K data')
-  const kFile = './' + datadir + '/onchain/k.json'
-  if (!fs.existsSync(kFile)) {
-    fatal(`Unable to read ${highlight(kFile)}, quitting`)
-  }
-
-  const json = fs.readFileSync(kFile)
-  return JSON.parse(json)
-}
-
-loadPKFile = (datadir) => {
-  l('Loading PK data')
-  const pkFile = './' + datadir + '/offchain/pk.json'
-  if (!fs.existsSync(pkFile)) {
-    // used to authenticate browser sessions to this daemon
-    return {
-      auth_code: toHex(crypto.randomBytes(32)),
-      pending_batch: null
-    }
-  }
-
-  const json = fs.readFileSync(pkFile)
-  return JSON.parse(json)
-}
-
-loadValidators = (validators) => {
-  return validators.map((m) => {
-    m.pubkey = Buffer.from(m.pubkey, 'hex')
-    m.block_pubkey = Buffer.from(m.block_pubkey, 'hex')
-    return m
-  })
-}
-
-generateMonkeys = async () => {
-  const derive = require('./utils/derive')
-  const addr = []
-  for (let i = 8001; i < 8200; i++) {
-    const username = i.toString()
-    const seed = await derive(username, 'password')
-    const me = new Me()
-    await me.init(username, seed)
-    addr.push(me.address)
-  }
-  // save new-line separated monkey addresses
-  await promise_writeFile('./tools/monkeys.txt', addr.join('\n'))
-}
-
-loadMonkeys = (monkey_port) => {
-  const monkeys = fs
-    .readFileSync('./tools/monkeys.txt')
-    .toString()
-    .split('\n')
-    .slice(3, parseInt(monkey_port) - 8000)
-
-  l('Loaded monkeys: ' + monkeys.length)
-
-  return monkeys
-}
-
-use_force = false
-if (!fs.existsSync('./' + datadir)) {
-  fs.mkdirSync('./' + datadir)
-  fs.mkdirSync('./' + datadir + '/onchain')
-}
-
-if (!fs.existsSync('./' + datadir + '/offchain')) {
-  fs.mkdirSync('./' + datadir + '/offchain')
-  use_force = true
-}
+const OnchainDB = require('./db/onchain_db')
+const OffchainDB = require('./db/offchain_db')
 
 startFairlayer = async () => {
+  const onchainDB = new OnchainDB(datadir, argv['genesis'])
+  const offchainDB = new OffchainDB(
+    datadir,
+    argv['db'],
+    argv['db-pool'],
+    argv['genesis']
+  )
+
+  setupDirectories(datadir)
+
+  try {
+    await onchainDB.init()
+    await offchainDB.init()
+  } catch(e) {
+    throw e
+  }
+
+
+  // temporary measure
+  global.onchainDB = onchainDB
+  global.offchainDB = offchainDB
+  Object.assign(global, global.onchainDB.models)
+  Object.assign(global, global.offchainDB.models)
+
   if (argv.generate_monkeys) {
     await generateMonkeys()
   }
@@ -151,11 +79,9 @@ startFairlayer = async () => {
     monkeys = loadMonkeys(argv.monkey)
   }
 
-  await privSequelize.sync({force: use_force})
-
   if (argv.genesis) {
     startGenesis = require('./utils/genesis')
-    await startGenesis()
+    await startGenesis(datadir)
     return
   }
 
