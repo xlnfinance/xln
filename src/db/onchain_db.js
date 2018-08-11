@@ -1,8 +1,8 @@
 // Onchain database - every full node has the exact same copy
 const Sequelize = require('sequelize')
 
-const defineUserModel = (sequelize) => {
-  return sequelize.define(
+const defineModels = (sequelize) => {
+  const User = sequelize.define(
     'user',
     {
       id: {
@@ -37,10 +37,8 @@ const defineUserModel = (sequelize) => {
       ]
     }
   )
-}
 
-const defineInsuranceModel = (sequelize) => {
-  return sequelize.define(
+  const Insurance = sequelize.define(
     'insurance',
     {
       leftId: Sequelize.INTEGER,
@@ -75,10 +73,8 @@ const defineInsuranceModel = (sequelize) => {
       ]
     }
   )
-}
 
-const defineProposalModel = (sequelize) => {
-  return sequelize.define('proposal', {
+  const Proposal = sequelize.define('proposal', {
     desc: Sequelize.TEXT,
     code: Sequelize.TEXT,
     patch: Sequelize.TEXT,
@@ -87,35 +83,27 @@ const defineProposalModel = (sequelize) => {
 
     kindof: Sequelize.STRING
   })
-}
 
-const defineVoteModel = (sequelize) => {
-  return sequelize.define('vote', {
+  const Vote = sequelize.define('vote', {
     rationale: Sequelize.TEXT,
     approval: Sequelize.BOOLEAN // approval or denial
   })
-}
 
-const defineDebtModel = (sequelize) => {
-  return sequelize.define('debt', {
+  const Debt = sequelize.define('debt', {
     asset: Sequelize.INTEGER,
     amount_left: Sequelize.INTEGER,
     oweTo: Sequelize.INTEGER
   })
-}
 
-const defineOrderModel = (sequelize) => {
-  return sequelize.define('order', {
+  const Order = sequelize.define('order', {
     amount: Sequelize.INTEGER,
     rate: Sequelize.FLOAT
   })
-}
 
-// Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
-// Primarily used in atomic swaps and mediated transfers. Based on Sprites concept
-// They are are stored for a few days and unlock a specific action
-const defineHashlockModel = (sequelize) => {
-  return sequelize.define(
+  // Hashlocks is like an evidence guarantee: if you have the secret before exp you unlock the action
+  // Primarily used in atomic swaps and mediated transfers. Based on Sprites concept
+  // They are are stored for a few days and unlock a specific action
+  const Hashlock = sequelize.define(
     'hashlock',
     {
       alg: Sequelize.INTEGER, // sha256, sha3?
@@ -131,12 +119,10 @@ const defineHashlockModel = (sequelize) => {
       ]
     }
   )
-}
 
-// Assets represent all numerical balances: currencies, tokens, shares, stocks.
-// Anyone can create a new asset
-const defineAssetModel = (sequelize) => {
-  return sequelize.define('asset', {
+  // Assets represent all numerical balances: currencies, tokens, shares, stocks.
+  // Anyone can create a new asset
+  const Asset = sequelize.define('asset', {
     ticker: Sequelize.TEXT,
     name: Sequelize.TEXT,
     desc: Sequelize.TEXT,
@@ -148,17 +134,6 @@ const defineAssetModel = (sequelize) => {
     issuerId: Sequelize.INTEGER,
     total_supply: Sequelize.INTEGER
   })
-}
-
-const defineModels = (sequelize) => {
-  const User = defineUserModel(sequelize)
-  const Insurance = defineInsuranceModel(sequelize)
-  const Proposal = defineProposalModel(sequelize)
-  const Vote = defineVoteModel(sequelize)
-  const Debt = defineDebtModel(sequelize)
-  const Order = defineOrderModel(sequelize)
-  const Hashlock = defineHashlockModel(sequelize)
-  const Asset = defineAssetModel(sequelize)
 
   Debt.belongsTo(User)
 

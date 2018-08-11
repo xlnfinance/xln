@@ -24,12 +24,12 @@ for(i=8001;i<8200;i++){
 
 const Sequelize = require('sequelize')
 
-// Encapsulates relationship with counterparty: offdelta and last signatures
-// TODO: seamlessly cloud backup it. If signatures are lost, money is lost
+const defineModels = (sequelize) => {
+  // Encapsulates relationship with counterparty: offdelta and last signatures
+  // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
-// we name our things "value", and counterparty's "they_value"
-const makeDeltaModel = (sequelize) => {
-  return sequelize.define(
+  // we name our things "value", and counterparty's "they_value"
+  const Delta = sequelize.define(
     'delta',
     {
       // between who and who
@@ -118,10 +118,8 @@ const makeDeltaModel = (sequelize) => {
       ]
     }
   )
-}
 
-const makePaymentModel = (sequelize) => {
-  return sequelize.define(
+  const Payment = sequelize.define(
     'payment',
     {
       //todo: move to single field addnew, addsent ...
@@ -178,12 +176,10 @@ const makePaymentModel = (sequelize) => {
       ]
     }
   )
-}
 
-// used primarily by validators and explorers to store historical blocks.
-// Regular users don't have to store blocks ("pruning" mode)
-const makeBlockModel = (sequelize) => {
-  return sequelize.define(
+  // used primarily by validators and explorers to store historical blocks.
+  // Regular users don't have to store blocks ("pruning" mode)
+  const Block = sequelize.define(
     'block',
     {
       hash: Sequelize.BLOB,
@@ -210,12 +206,6 @@ const makeBlockModel = (sequelize) => {
       ]
     }
   )
-}
-
-const defineModels = (sequelize) => {
-  const Delta = makeDeltaModel(sequelize)
-  const Payment = makePaymentModel(sequelize)
-  const Block = makeBlockModel(sequelize)
 
   Delta.hasMany(Payment)
   Payment.belongsTo(Delta)
