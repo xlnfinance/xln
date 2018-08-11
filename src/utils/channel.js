@@ -61,6 +61,10 @@ resolveChannel = (insurance, delta, is_left = true) => {
   return parts
 }
 
+const paymentToLock = (payment) => {
+  return [payment.amount, payment.hash, payment.exp]
+}
+
 refresh = function(ch) {
   // filter all payments by some trait
   ch.inwards = []
@@ -106,8 +110,8 @@ refresh = function(ch) {
       ch.d.offdelta,
       ch.d.asset
     ],
-    ch[ch.left ? 'inwards' : 'outwards'].map((t) => t.toLock()),
-    ch[ch.left ? 'outwards' : 'inwards'].map((t) => t.toLock())
+    ch[ch.left ? 'inwards' : 'outwards'].map((t) => paymentToLock(t)),
+    ch[ch.left ? 'outwards' : 'inwards'].map((t) => paymentToLock(t))
   ]
 
   // inputs are like bearer cheques and can be used any minute, so we deduct them

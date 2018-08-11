@@ -36,7 +36,7 @@ update_cache = async (force = false) => {
         },
         async () => {
           for (var hub of cached_result.K.hubs) {
-            hub.sumForUser = await Insurance.sumForUser(hub.id)
+            hub.sumForUser = await getInsuranceSumForUser(hub.id)
           }
         },
         async () => {
@@ -114,7 +114,7 @@ react = async (result = {}, force = true) => {
         limit: 300
       }),
       me.channels(),
-      User.idOrKey(bin(me.id.publicKey))
+      getUserByidOrKey(bin(me.id.publicKey))
     ])
 
     if (!result.record.id) result.record = null

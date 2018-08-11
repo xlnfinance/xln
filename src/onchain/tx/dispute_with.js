@@ -1,3 +1,18 @@
+const deltaStartDispute = async (delta, cheat = false) => {
+  if (cheat && delta.CHEAT_profitable_state) {
+    var d = [
+      delta.partnerId,
+      delta.CHEAT_profitable_sig,
+      delta.CHEAT_profitable_state
+    ]
+  } else {
+    var d = await deltaGetDispute(delta)
+  }
+  delta.status = 'disputed'
+  me.batch.push(['disputeWith', delta.asset, [d]])
+  await delta.save()
+}
+
 module.exports = async (global_state, tr, signer) => {
   // our partner is unresponsive, so we provide dispute proof/state (signed offdelta, nonce, hashlocks etc all in one)
   const asset = global_state.asset
@@ -5,7 +20,7 @@ module.exports = async (global_state, tr, signer) => {
   for (const dispute of tr[1]) {
     const [id, sig, state] = dispute
 
-    const partner = await User.idOrKey(id)
+    const partner = await getUserByidOrKey(id)
     if (!partner || !partner.id) {
       l('Your partner is not registred')
       await saveId(partner)
@@ -17,7 +32,7 @@ module.exports = async (global_state, tr, signer) => {
       return
     }
 
-    const ins = await Insurance.btw(signer, partner, asset)
+    const ins = await getInsuranceBetween(signer, partner, asset)
 
     let dispute_nonce = 0
     let offdelta = 0
@@ -75,7 +90,7 @@ module.exports = async (global_state, tr, signer) => {
           partner.id,
           'disputed',
           ins,
-          await ins.resolve()
+          await insuranceResolve(ins)
         ])
         l('Resolved with fraud proof')
       } else {
@@ -115,7 +130,7 @@ module.exports = async (global_state, tr, signer) => {
         //!me.CHEAT_dontack
         if (our_nonce > ins.dispute_nonce && !me.CHEAT_dontack) {
           l('Our last signed nonce is higher! ' + our_nonce)
-          await ch.d.startDispute()
+          await deltaStartDispute(ch.d)
         }
       }
     }

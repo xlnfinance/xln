@@ -1,5 +1,5 @@
 /*
-The most important job of the hub is to rebalance assets once in a while. 
+The most important job of the hub is to rebalance assets once in a while.
 1. the hub finds who wants to insure their uninsured balances. They can learn automatically (given soft limit) or manually (Request Insurance in the wallet)
 2. now the hub tries to find the total amount of insurance needed from the net-spenders who are currently online
 3. it's up to the alg implementation to start disputes with net-spenders who are offline for too long
@@ -10,7 +10,7 @@ Current implementation is super simple and straightforward. There's huge room fo
 * smart learning based on balances over time not on balance at the time of matching
 * use as little withdrawals/deposits to transfer as much as possible volume
 * have different schedule for different assets, e.g. rebalance FRD every 1 block but rare assets every 1k blocks
-* often hub needs to request insurance from another hub (cross-hub payments). 
+* often hub needs to request insurance from another hub (cross-hub payments).
 
 General recommendations:
 1. assets stuck in a dispute is a waste. It's better to do everything by mutual agreement as much as possible, w/o suffering dispute delays and locked up liquidity
@@ -34,7 +34,6 @@ const rebalance = async function(asset) {
 
   for (let d of deltas) {
     let ch = await me.getChannel(d.partnerId, d.asset)
-    //d.getChannel()
 
     // finding who has uninsured balances AND
     // requests insurance OR gone beyond soft limit
@@ -55,7 +54,7 @@ const rebalance = async function(asset) {
         ch.d.withdrawal_requested_at = ts()
       } else if (ch.d.withdrawal_requested_at + 600 < ts()) {
         l('User is offline for too long, or tried to cheat')
-        me.batch.push(['disputeWith', asset, [await ch.d.getDispute()]])
+        me.batch.push(['disputeWith', asset, [await deltaGetDispute(ch.d)]])
       }
     }
   }
@@ -64,13 +63,13 @@ const rebalance = async function(asset) {
   netSpenders = await Promise.all(netSpenders)
 
   // 1. how much we own of this asset
-  let weOwn = me.record.asset(asset)
+  let weOwn = userAsset(me.record, asset)
 
   // 2. add all withdrawals we received
   for (let ch of netSpenders) {
     if (ch.d.withdrawal_sig) {
       weOwn += ch.d.withdrawal_amount
-      let user = await User.idOrKey(ch.d.partnerId)
+      let user = await getUserByidOrKey(ch.d.partnerId)
 
       me.batch.push([
         'withdrawFrom',

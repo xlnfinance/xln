@@ -1,3 +1,11 @@
+const deltaRequestFlush = async (delta) => {
+  if (!delta.flush_requested_at) {
+    //delta.flush_requested_at = new Date()
+    //await delta.save()
+    await me.flushChannel(delta.partnerId, 1, true)
+  }
+}
+
 module.exports = async (args) => {
   // New payment arrived
   let [pubkey, sig, body] = args
@@ -40,7 +48,7 @@ module.exports = async (args) => {
       } else {
         loff('Tried to flush twice')
       }
-      //await ch.d.requestFlush()
+      //await deltaRequestFlush(ch.d)
     }
   }
   await Promise.all(flushed)

@@ -25,7 +25,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   built_by = readInt(built_by)
   prev_hash = toHex(prev_hash)
 
-  var proposer = await User.idOrKey(built_by)
+  var proposer = await getUserByidOrKey(built_by)
 
   if (!proposer) {
     l(`This user doesnt exist ${built_by}`)
@@ -164,7 +164,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           let str = stringify([ins.leftId, ins.rightId, ins.asset])
           if (cache.ins[str]) ins = cache.ins[str]
 
-          meta.cron.push(['resolved', ins, await ins.resolve()])
+          meta.cron.push(['resolved', ins, await insuranceResolve(ins)])
         }
       })
     )
@@ -216,8 +216,8 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     await syncdb({flush: 'users'})
 
     // first assignment must happen before zeroing
-    await sequelize.query('UPDATE users SET balance1 = balance1 + balance2')
-    await sequelize.query('UPDATE users SET balance2 = 0')
+    await onchainDB.db.query('UPDATE users SET balance1 = balance1 + balance2')
+    await onchainDB.db.query('UPDATE users SET balance2 = 0')
     //await sequelize.query("UPDATE users SET ")
     //User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
 
