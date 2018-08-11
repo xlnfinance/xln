@@ -143,7 +143,10 @@ module.exports = async (tx, meta) => {
   const parsed_tx = {
     signer: signer,
     nonce: nonce,
+    gas: gas,
+    gasprice: gasprice,
     txfee: txfee,
+
     length: tx.length,
 
     // valid and executed events

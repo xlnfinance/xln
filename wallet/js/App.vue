@@ -40,6 +40,8 @@ export default {
 
       asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
 
+      preferHub: 'auto',
+
       gasprice: 1, 
 
       assets: [],
@@ -760,7 +762,7 @@ export default {
             <pre v-if="dev_mode" v-html="ch.ascii_states"></pre>
           </template>
           <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
-          <div class="col-sm-6">
+          <div class="col-sm-6" style="width:400px">
             <p>
               <div class="input-group" style="width:400px">
                 <input type="text" class="form-control small-input" v-model="outward_address" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2">
@@ -777,7 +779,15 @@ export default {
               </div>
             </p>
             <p>
-              <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy})">Pay Now → </button>
+              <div class="input-group" style="width:400px">
+              <select v-model="preferHub" class="custom-select " style="width:400px">
+                <option value="auto">Choose hub automatically</option>
+                <option v-for="a in K.hubs" :value="a.handle">{{a.handle}}</option>
+              </select>
+              </div>
+            </p>
+            <p>
+              <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, preferHub: preferHub})">Pay Now → </button>
 
               <button type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
 
@@ -986,7 +996,7 @@ export default {
               <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee {{commy(gasprice * batch_estimate.size)}}</p>
             </div>
 
-            <p><button type="button" class="btn btn-danger" @click="call('broadcast', {gasprice: gasprice})">Sign and Broadcast</button></p>
+            <p><button type="button" class="btn btn-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button></p>
           </div>
 
 
@@ -1143,13 +1153,12 @@ export default {
               </tr>
               <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
                 <td colspan="7">
-                  <span class="badge badge-warning">By {{batch.signer.id}} ({{commy(batch.txfee)}} fee, size {{batch.length}}):</span>&nbsp;
+                  <span class="badge badge-warning">By {{batch.signer.id}} ({{batch.gas}} * {{batch.gasprice}} = {{commy(batch.txfee)}} ):</span>&nbsp;
                   <template v-for="d in batch.events">
                     &nbsp;
 
                     <span v-if="d[0]=='disputeWith'" class="badge badge-primary" v-html="dispute_outcome(d[2], d[3], d[4])">
                     </span>
-
 
                     <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">Set asset: {{to_ticker(d[1])}}</span>
 
@@ -1157,7 +1166,7 @@ export default {
 
 
 
-                    <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Secret revealed: {{trim(d[1])}}</span>
+                    <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Reveal: {{trim(d[1])}}</span>
 
                     <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{d[2]}}</span>
 
