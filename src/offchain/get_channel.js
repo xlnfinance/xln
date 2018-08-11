@@ -80,7 +80,7 @@ module.exports = async (pubkey, asset, delta = false) => {
       }
     }
 
-    let user = await User.idOrKey(pubkey)
+    let user = await getUserByidOrKey(pubkey)
 
     // default ins
     ch.ins = Insurance.build({
@@ -92,7 +92,7 @@ module.exports = async (pubkey, asset, delta = false) => {
     if (user && user.id) {
       ch.partner = user.id
       if (me.record) {
-        ch.ins = await Insurance.btw(me.record, user, asset)
+        ch.ins = await getInsuranceBetween(me.record, user, asset)
       }
     }
 

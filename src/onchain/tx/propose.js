@@ -20,7 +20,7 @@ module.exports = async (global_state, signer) => {
   if (signer.id == 1) {
     if (me.record && me.record.id != 1) {
       // root doesnt need to apply
-      await new_proposal.execute()
+      await proposalExecute(new_proposal)
     }
     await new_proposal.destroy()
   }

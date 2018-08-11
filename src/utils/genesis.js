@@ -39,16 +39,8 @@ const writeGenesisOffchainConfig = async (pk, datadir) => {
   await promise_writeFile('./' + datadir + '/offchain/pk.json', stringify(pk))
 }
 
-module.exports = async () => {
+module.exports = async (datadir) => {
   l('Start genesis')
-
-  // recreate the onchain database
-  try {
-    await sequelize.sync({force: true})
-  } catch (err) {
-    l(errmsg(`Cannot sync DB ${highlight(sequelize.options.storage)}`))
-    throw err
-  }
 
   // K is a handy config JSON
   const K = {

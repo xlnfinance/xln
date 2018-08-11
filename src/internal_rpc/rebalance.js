@@ -14,14 +14,14 @@ module.exports = async (p) => {
   // withdrawing promises
   let await_all = []
 
-  let balance = me.record.asset(asset)
+  let balance = userAsset(me.record, asset)
 
   // do something with every channel
   for (let action of p.chActions) {
     let ch = await me.getChannel(fromHex(action.partnerId), action.asset)
 
     if (action.startDispute) {
-      disputes.push(await ch.d.getDispute())
+      disputes.push(await deltaGetDispute(ch.d))
     }
 
     if (action.depositAmount > 0) {
@@ -85,7 +85,7 @@ module.exports = async (p) => {
         userId = Buffer.from(to, 'hex')
 
         // maybe this pubkey is already registred?
-        let u = await User.idOrKey(userId)
+        let u = await getUserByidOrKey(userId)
 
         if (u.id) {
           userId = u.id
@@ -94,7 +94,7 @@ module.exports = async (p) => {
         // looks like numerical ID
         userId = parseInt(to)
 
-        let u = await User.idOrKey(userId)
+        let u = await getUserByidOrKey(userId)
 
         if (!u) {
           result.alert = 'User with short ID ' + userId + " doesn't exist."

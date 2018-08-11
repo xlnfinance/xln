@@ -13,7 +13,7 @@ module.exports = async (global_state, tr, signer) => {
     if (exists.issuerId == signer.id) {
       //minting new tokens to issuer's onchain balance
       exists.total_supply += amount
-      signer.asset(exists.id, amount)
+      userAsset(signer, exists.id, amount)
       await exists.save()
 
       global_state.events.push(['createAsset', ticker, amount])
@@ -32,7 +32,7 @@ module.exports = async (global_state, tr, signer) => {
 
     K.assets_created++
 
-    signer.asset(new_asset.id, amount)
+    userAsset(signer, new_asset.id, amount)
     global_state.events.push([
       'createAsset',
       new_asset.ticker,
