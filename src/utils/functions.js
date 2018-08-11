@@ -269,7 +269,7 @@ const userPayDebts = async (user, asset, parsed_tx) => {
   const debts = await user.getDebts({where: {asset: asset}})
 
   for (const d of debts) {
-    var u = await User.idOrKey(d.oweTo)
+    var u = await getUserByidOrKey(d.oweTo)
 
     // FRD cannot be enforced below safety limit,
     // otherwise the nodes won't be able to send onchain tx
@@ -344,8 +344,8 @@ const insuranceResolve = async (insurance) => {
     true
   )
 
-  var left = await User.idOrKey(insurance.leftId)
-  var right = await User.idOrKey(insurance.rightId)
+  var left = await getUserByidOrKey(insurance.leftId)
+  var right = await getUserByidOrKey(insurance.rightId)
 
   // splitting insurance between users
   userAsset(left, insurance.asset, resolved.insured)
