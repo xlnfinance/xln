@@ -9,6 +9,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   var all = []
+  var s = {}
 
   let [
     methodId,
@@ -25,9 +26,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   built_by = readInt(built_by)
   prev_hash = toHex(prev_hash)
 
-  var proposer = await getUserByidOrKey(built_by)
+  s.proposer = await getUserByidOrKey(built_by)
 
-  if (!proposer) {
+  if (!s.proposer) {
     l(`This user doesnt exist ${built_by}`)
     return false
   }
@@ -75,13 +76,13 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   // List of events/metadata about current block, used on Explorer page
-  let meta = {
+  s.meta = {
     inputs_volume: 0,
     outputs_volume: 0,
     parsed_tx: [],
     cron: [],
     missed_validators: [],
-    proposer: proposer
+    proposer: s.proposer
   }
 
   let shares = 0
@@ -93,7 +94,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     ) {
       shares += Validators[i].shares
     } else {
-      meta.missed_validators.push(Validators[i].id)
+      s.meta.missed_validators.push(Validators[i].id)
     }
   }
 
@@ -110,7 +111,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // Processing transactions one by one
   // Long term TODO: parallel execution with section() critical sections
   for (let i = 0; i < ordered_tx.length; i++) {
-    let result = await me.processBatch(ordered_tx[i], meta)
+    let result = await me.processBatch(s, ordered_tx[i])
     if (!result.success) l(result)
   }
 
@@ -142,7 +143,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     K.blocks_since_last_snapshot = 0
     K.snapshots_taken++
 
-    meta.cron.push(['snapshot', K.total_blocks])
+    s.meta.cron.push(['snapshot', K.total_blocks])
     var old_height = K.last_snapshot_height
     K.last_snapshot_height = K.total_blocks
   }
@@ -164,7 +165,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
           let str = stringify([ins.leftId, ins.rightId, ins.asset])
           if (cache.ins[str]) ins = cache.ins[str]
 
-          meta.cron.push(['resolved', ins, await insuranceResolve(ins)])
+          s.meta.cron.push(['resolved', ins, await insuranceResolve(ins)])
         }
       })
     )
@@ -190,7 +191,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
       if (approved >= K.majority) {
         await job.execute()
-        meta.cron.push(['executed', job.desc, job.code, job.patch])
+        s.meta.cron.push(['executed', job.desc, job.code, job.patch])
       }
 
       await job.destroy()
@@ -210,7 +211,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   if (K.bet_maturity && K.ts > K.bet_maturity) {
     l('🎉 Maturity day! Copy all FRB balances to FRD')
-    meta.cron.push(['maturity'])
+    s.meta.cron.push(['maturity'])
 
     // clear up from cache
     await syncdb({flush: 'users'})
@@ -225,7 +226,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   // saving current proposer and their fees earned
-  all.push(meta.proposer.save())
+  all.push(s.meta.proposer.save())
 
   await Promise.all(all)
 
@@ -255,11 +256,11 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
       // did anything happen in this block?
       meta:
-        meta.parsed_tx.length +
-          meta.cron.length +
-          meta.missed_validators.length >
+        s.meta.parsed_tx.length +
+          s.meta.cron.length +
+          s.meta.missed_validators.length >
         0
-          ? JSON.stringify(meta)
+          ? JSON.stringify(s.meta)
           : null
     })
   }

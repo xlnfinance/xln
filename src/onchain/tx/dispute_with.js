@@ -13,9 +13,8 @@ const deltaStartDispute = async (delta, cheat = false) => {
   await delta.save()
 }
 
-module.exports = async (global_state, tr, signer) => {
+module.exports = async (s, tr) => {
   // our partner is unresponsive, so we provide dispute proof/state (signed offdelta, nonce, hashlocks etc all in one)
-  const asset = global_state.asset
 
   for (const dispute of tr[1]) {
     const [id, sig, state] = dispute
@@ -26,13 +25,13 @@ module.exports = async (global_state, tr, signer) => {
       await saveId(partner)
     }
 
-    const compared = Buffer.compare(signer.pubkey, partner.pubkey)
+    const compared = Buffer.compare(s.signer.pubkey, partner.pubkey)
     if (compared == 0) {
       l('Cannot dispute with yourself')
       return
     }
 
-    const ins = await getInsuranceBetween(signer, partner, asset)
+    const ins = await getInsuranceBetween(s.signer, partner, s.asset)
 
     let dispute_nonce = 0
     let offdelta = 0
@@ -54,9 +53,9 @@ module.exports = async (global_state, tr, signer) => {
 
       if (
         methodMap(readInt(methodId)) != 'disputeWith' ||
-        !leftId.equals(compared == -1 ? signer.pubkey : partner.pubkey) ||
-        !rightId.equals(compared == -1 ? partner.pubkey : signer.pubkey) ||
-        readInt(dispute_asset) != asset
+        !leftId.equals(compared == -1 ? s.signer.pubkey : partner.pubkey) ||
+        !rightId.equals(compared == -1 ? partner.pubkey : s.signer.pubkey) ||
+        readInt(dispute_asset) != s.asset
       ) {
         l('Invalid dispute')
         return
@@ -71,7 +70,7 @@ module.exports = async (global_state, tr, signer) => {
     }
 
     if (ins.dispute_nonce && dispute_nonce <= ins.dispute_nonce) {
-      l(`New nonce in dispute must be higher ${asset}`)
+      l(`New nonce in dispute must be higher ${s.asset}`)
       return
     }
 
@@ -85,7 +84,7 @@ module.exports = async (global_state, tr, signer) => {
         ins.dispute_nonce = dispute_nonce
         ins.dispute_offdelta = offdelta
 
-        global_state.events.push([
+        s.parsed_tx.events.push([
           'disputeWith',
           partner.id,
           'disputed',
@@ -107,7 +106,7 @@ module.exports = async (global_state, tr, signer) => {
       ins.dispute_left = compared == -1
       ins.dispute_delayed = K.usable_blocks + K.dispute_delay
 
-      global_state.events.push([
+      s.parsed_tx.events.push([
         'disputeWith',
         partner.id,
         'started',
@@ -121,7 +120,7 @@ module.exports = async (global_state, tr, signer) => {
         l('Channel with us is disputed')
         // now our job is to ensure our inward hashlocks are unlocked
         // and that we get most profitable outcome
-        const ch = await me.getChannel(signer.pubkey, asset)
+        const ch = await me.getChannel(s.signer.pubkey, s.asset)
         ch.d.status = 'disputed'
         //await ch.d.save()
         const our_nonce = ch.d.signed_state

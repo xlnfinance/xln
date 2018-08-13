@@ -21,7 +21,8 @@ module.exports = async () => {
     // otherwise build new block from your mempool
     let total_size = 0
     const ordered_tx = []
-    const meta = {dry_run: true}
+    const s = {dry_run: true, meta: {}}
+
     for (const candidate of me.mempool) {
       if (total_size + candidate.length >= K.blocksize) {
         l(`The block is out of space, stop adding tx`)
@@ -29,7 +30,7 @@ module.exports = async () => {
       }
 
       // TODO: sort by result.gasprice (optimize for profits)
-      const result = await me.processBatch(candidate, meta)
+      const result = await me.processBatch(s, candidate)
       if (result.success) {
         ordered_tx.push(candidate)
         total_size += candidate.length

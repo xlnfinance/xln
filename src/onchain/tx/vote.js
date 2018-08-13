@@ -1,8 +1,8 @@
-module.exports = async (global_state, tr, signer) => {
+module.exports = async (s, tr) => {
   const [proposalId, approval, rationale] = tr[1]
   let vote = await Vote.findOrBuild({
     where: {
-      userId: signer.id,
+      userId: s.signer.id,
       proposalId: readInt(proposalId)
     }
   })
@@ -12,6 +12,6 @@ module.exports = async (global_state, tr, signer) => {
   vote.approval = approval[0] == 1
 
   await vote.save()
-  global_state.events.push(['vote', vote])
+  s.parsed_tx.events.push(['vote', vote])
   l(`Voted ${vote.approval} for ${vote.proposalId}`)
 }

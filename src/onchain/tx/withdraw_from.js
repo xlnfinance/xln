@@ -1,4 +1,4 @@
-module.exports = async (global_state, tr, signer, meta) => {
+module.exports = async (s, tr) => {
   // withdraw money from a channel by providing a sig of your partner
   // you can only withdraw from insured balance
   for (const input of tr[1]) {
@@ -10,10 +10,10 @@ module.exports = async (global_state, tr, signer, meta) => {
       return
     }
 
-    const compared = Buffer.compare(signer.pubkey, partner.pubkey)
+    const compared = Buffer.compare(s.signer.pubkey, partner.pubkey)
     if (compared == 0) return
 
-    const ins = await getInsuranceBetween(signer, partner, global_state.asset)
+    const ins = await getInsuranceBetween(s.signer, partner, s.asset)
 
     if (!ins || !ins.id || amount > ins.insurance) {
       l(`Invalid amount ${ins.insurance} vs ${amount}`)
@@ -35,25 +35,25 @@ module.exports = async (global_state, tr, signer, meta) => {
     }
 
     // for blockchain explorer
-    global_state.events.push(['withdrawFrom', amount, partner.id])
-    meta.inputs_volume += amount // todo: asset-specific
+    s.parsed_tx.events.push(['withdrawFrom', amount, partner.id])
+    s.meta.inputs_volume += amount // todo: asset-specific
 
     ins.insurance -= amount
     // if signer is left and reduces insurance, move ondelta to the left too
     // .====| reduce insurance .==--| reduce ondelta .==|
-    if (signer.id == ins.leftId) ins.ondelta -= amount
+    if (s.signer.id == ins.leftId) ins.ondelta -= amount
 
-    userAsset(signer, global_state.asset, amount)
+    userAsset(s.signer, s.asset, amount)
 
     ins.nonce++
 
     await saveId(ins)
 
     // was this input related to us?
-    if (me.record && [partner.id, signer.id].includes(me.record.id)) {
+    if (me.record && [partner.id, s.signer.id].includes(me.record.id)) {
       const ch = await me.getChannel(
-        me.record.id == partner.id ? signer.pubkey : partner.pubkey,
-        global_state.asset
+        me.record.id == partner.id ? s.signer.pubkey : partner.pubkey,
+        s.asset
       )
       // they planned to withdraw and they did. Nullify hold amount
       ch.d.they_withdrawal_amount = 0

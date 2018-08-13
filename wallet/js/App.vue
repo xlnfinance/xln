@@ -1154,7 +1154,7 @@ export default {
               </tr>
               <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
                 <td colspan="7">
-                  <span class="badge badge-warning">By {{batch.signer.id}} ({{batch.gas}} * {{batch.gasprice}} = {{commy(batch.txfee)}} ):</span>&nbsp;
+                  <span class="badge badge-warning">By {{batch.signer.id}} ({{batch.gas}}*{{commy(batch.gasprice)}}=${{commy(batch.txfee)}} fee):</span>&nbsp;
                   <template v-for="d in batch.events">
                     &nbsp;
 

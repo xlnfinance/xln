@@ -12,18 +12,18 @@ const createAsset = require('./tx/create_asset')
 const propose = require('./tx/propose')
 const vote = require('./tx/vote')
 
-const setAsset = async (global_state, tr) => {
+const setAsset = async (s, tr) => {
   // all subsequent transactions are now implied to use this asset
   // ensure this asset exists
   const assetRecord = await Asset.findById(readInt(tr[1][0]))
   if (assetRecord) {
     const asset = assetRecord.id
-    global_state.asset = asset
-    global_state.events.push(['setAsset', asset])
+    s.asset = asset
+    s.parsed_tx.events.push(['setAsset', asset])
   }
 }
 
-const revealSecrets = async (global_state, tr) => {
+const revealSecrets = async (s, tr) => {
   // someone tries to cheat in an atomic payment? Reveal the secrets onchain and dispute!
   // can be used not just for channels but any atomic actions. Stored according to Sprites approach
   for (const secret of tr[1]) {
@@ -45,34 +45,34 @@ const revealSecrets = async (global_state, tr) => {
         // we don't want the evidence to be stored forever, obviously
         delete_at: K.usable_blocks + K.hashlock_keepalive
       })
-      global_state.events.push(['revealSecrets', hash])
+      s.parsed_tx.events.push(['revealSecrets', hash])
     }
   }
 }
 
-const cancelOrder = async (tr, signer) => {
+const cancelOrder = async (s, tr) => {
   const id = readInt(tr[1][0])
-  const order = await Order.findOne({where: {id: id, userId: signer.id}})
+  const order = await Order.findOne({where: {id: id, userId: s.signer.id}})
   if (!order) {
     l('No such order for signer')
     return
   }
   // credit the order amount back to the creator
-  userAsset(signer, order.assetId, order.amount)
+  userAsset(s.signer, order.assetId, order.amount)
   await order.destroy()
 }
 
-module.exports = async (tx, meta) => {
-  let [id, sig, body] = r(tx)
+module.exports = async (s, batch) => {
+  let [id, sig, body] = r(batch)
 
-  let signer = await getUserByidOrKey(readInt(id))
+  s.signer = await getUserByidOrKey(readInt(id))
 
-  if (!signer || !signer.id) {
-    l(id, signer)
+  if (!s.signer || !s.signer.id) {
+    l(id, s.signer)
     return {error: "This user doesn't exist"}
   }
 
-  if (!ec.verify(body, sig, signer.pubkey)) {
+  if (!ec.verify(body, sig, s.signer.pubkey)) {
     return {error: `Invalid tx signature.`}
   }
 
@@ -93,41 +93,41 @@ module.exports = async (tx, meta) => {
   }
 
   // gas/fees estimation is very straighforward for now, later methods' pricing can be fine tuned
-  let gas = tx.length
+  let gas = batch.length
   let txfee = Math.round(gasprice * gas)
 
   // only asset=1 balance is used for fees
-  if (userAsset(signer, 1) < txfee) {
+  if (userAsset(s.signer, 1) < txfee) {
     return {error: 'Not enough FRD balance to cover tx fee'}
   }
 
   // This is just checking, so no need to apply
-  if (meta.dry_run) {
-    if (meta[signer.id]) {
+  if (s.dry_run) {
+    if (s.meta[s.signer.id]) {
       // Why only 1 tx/block? Two reasons:
       // * it's an extra hassle to ensure the account has money to cover subsequent w/o applying old ones. It would require fast rollbacks / reorganizations
       // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway
       return {error: 'Only 1 tx per block per user allowed'}
     } else {
-      if (signer.nonce != nonce) {
+      if (s.signer.nonce != nonce) {
         return {
-          error: `Invalid nonce dry_run ${signer.nonce} vs ${nonce}`
+          error: `Invalid nonce dry_run ${s.signer.nonce} vs ${nonce}`
         }
       }
 
       // Mark this user to deny subsequent tx
-      if (!meta[signer.id]) meta[signer.id] = 1
+      if (!s.meta[s.signer.id]) s.meta[s.signer.id] = 1
 
       return {success: true, gas: gas, gasprice: gasprice, txfee: txfee}
     }
   } else {
-    if (signer.nonce != nonce) {
-      return {error: `Invalid nonce ${signer.nonce} vs ${nonce}`}
+    if (s.signer.nonce != nonce) {
+      return {error: `Invalid nonce ${s.signer.nonce} vs ${nonce}`}
     }
   }
 
-  if (me.is_me(signer.pubkey)) {
-    if (PK.pending_batch == toHex(tx)) {
+  if (me.is_me(s.signer.pubkey)) {
+    if (PK.pending_batch == toHex(batch)) {
       //l('Added to chain')
       react({confirm: 'Your onchain transaction has been added!'}, false)
       PK.pending_batch = null
@@ -135,26 +135,24 @@ module.exports = async (tx, meta) => {
   }
 
   // Tx is valid, can take the fee
-  userAsset(signer, 1, -txfee)
-  userAsset(meta.proposer, 1, txfee)
+  userAsset(s.signer, 1, -txfee)
+  userAsset(s.meta.proposer, 1, txfee)
 
   K.collected_fees += txfee
 
-  const parsed_tx = {
-    signer: signer,
+  // default asset id, can be changed many times with setAsset directive
+  s.asset = 1
+
+  s.parsed_tx = {
+    signer: s.signer,
     nonce: nonce,
     gas: gas,
     gasprice: gasprice,
     txfee: txfee,
 
-    length: tx.length,
+    length: batch.length,
 
     // valid and executed events
-    events: []
-  }
-
-  const state = {
-    asset: 1, // default asset id, can be changed many times with setAsset directive
     events: []
   }
 
@@ -162,47 +160,45 @@ module.exports = async (tx, meta) => {
     const method = methodMap(readInt(t[0]))
     switch (method) {
       case 'setAsset':
-        await setAsset(state, t)
+        await setAsset(s, t)
         break
       case 'withdrawFrom':
-        await withdrawFrom(state, t, signer, meta)
+        await withdrawFrom(s, t)
         break
       case 'revealSecrets':
-        await revealSecrets(state, t)
+        await revealSecrets(s, t)
         break
       case 'disputeWith':
-        await disputeWith(state, t, signer)
+        await disputeWith(s, t)
         break
       case 'depositTo':
-        await depositTo(state, t, signer, meta, txfee)
+        await depositTo(s, t)
         break
       case 'createAsset':
-        await createAsset(state, t, signer)
+        await createAsset(s, t)
         break
       case 'createHub':
         // not implemented
         break
       case 'createOrder':
-        await createOrder(state, t, signer)
+        await createOrder(s, t)
         break
       case 'cancelOrder':
-        await cancelOrder(t, signer)
+        await cancelOrder(s, t)
         break
       case 'propose':
-        await propose(state, signer)
+        await propose(s, t)
         break
       case 'vote':
-        await vote(state, t, signer)
+        await vote(s, t)
         break
     }
   }
 
-  signer.nonce++
-  await saveId(signer)
+  s.signer.nonce++
+  await saveId(s.signer)
 
-  parsed_tx.events = state.events
-
-  meta['parsed_tx'].push(parsed_tx)
+  s.meta['parsed_tx'].push(s.parsed_tx)
 
   return {success: true}
 }

@@ -1,4 +1,4 @@
-module.exports = async (global_state, tr, signer) => {
+module.exports = async (s, tr) => {
   // onchain exchange to sell an asset for another one.
   let [assetId, amount, buyAssetId, raw_rate] = tr[1].map(readInt)
   const round = Math.round
@@ -6,19 +6,19 @@ module.exports = async (global_state, tr, signer) => {
 
   const direct_order = assetId > buyAssetId
 
-  const sellerOwns = userAsset(signer, assetId)
+  const sellerOwns = userAsset(s.signer, assetId)
 
   if (sellerOwns < amount) {
     l('Trying to sell more then signer has')
     return
   }
 
-  userAsset(signer, assetId, -amount)
+  userAsset(s.signer, assetId, -amount)
 
   const order = Order.build({
     amount: amount,
     rate: rate,
-    userId: signer.id,
+    userId: s.signer.id,
     assetId: assetId,
     buyAssetId: buyAssetId
   })
@@ -54,14 +54,14 @@ module.exports = async (global_state, tr, signer) => {
     if (we_buy > their.amount) {
       // close their order. give seller what they wanted
       userAsset(seller, their.buyAssetId, they_buy)
-      userAsset(signer, order.buyAssetId, their.amount)
+      userAsset(s.signer, order.buyAssetId, their.amount)
 
       their.amount = 0
       order.amount -= they_buy
     } else {
       // close our order
       userAsset(seller, their.buyAssetId, order.amount)
-      userAsset(signer, order.buyAssetId, we_buy)
+      userAsset(s.signer, order.buyAssetId, we_buy)
 
       their.amount -= we_buy
       order.amount = 0
@@ -83,5 +83,5 @@ module.exports = async (global_state, tr, signer) => {
     // doesn't even exist yet
   }
 
-  global_state.events.push(['createOrder', assetId, amount, buyAssetId, rate])
+  s.parsed_tx.events.push(['createOrder', assetId, amount, buyAssetId, rate])
 }

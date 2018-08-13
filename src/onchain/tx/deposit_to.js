@@ -1,20 +1,20 @@
-module.exports = async (global_state, tr, signer, meta, txfee) => {
+module.exports = async (s, tr) => {
   // deposit from our onchain balance to another onchain balance or channel from some side
-  const asset = global_state.asset
-  await userPayDebts(signer, asset, global_state)
+  //await userPayDebts(s.signer, s.asset, s)
 
   // there's a tiny bias here, the hub always gets reimbursed more than fee paid
   // todo: consider splitting txfee based on % in total output volume
-  const reimburse_txfee = 1 + Math.floor(txfee / tr[1].length)
+  const reimburse_txfee = 1 + Math.floor(s.parsed_tx.txfee / tr[1].length)
 
   for (let output of tr[1]) {
     let amount = readInt(output[0])
     let original_amount = amount
 
-    if (amount > userAsset(signer, asset)) {
+    if (amount > userAsset(s.signer, s.asset)) {
       l(
-        `${signer.id} Trying to deposit ${amount} but has ${userAsset(signer,
-          asset
+        `${s.signer.id} Trying to deposit ${amount} but has ${userAsset(
+          s.signer,
+          s.asset
         )}`
       )
       return
@@ -29,7 +29,7 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
     // here we ensure both parties are registred, and take needed fees
     if (!depositTo || !depositTo.id) {
       // you must be registered first using asset 1
-      if (asset != 1) {
+      if (s.asset != 1) {
         l('Not 1 asset')
         return
       }
@@ -37,8 +37,8 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
       if (!withPartner) {
         if (amount < K.account_creation_fee) return
 
-        userAsset(depositTo, asset, amount - K.account_creation_fee)
-        userAsset(signer, asset, -amount)
+        userAsset(depositTo, s.asset, amount - K.account_creation_fee)
+        userAsset(s.signer, s.asset, -amount)
       } else {
         if (!withPartner.id) {
           l("Both partners don't exist")
@@ -48,9 +48,9 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
         const fee = K.standalone_balance + K.account_creation_fee
         if (amount < fee) return
 
-        userAsset(depositTo, asset, K.standalone_balance)
+        userAsset(depositTo, s.asset, K.standalone_balance)
         amount -= fee
-        //userAsset(signer, asset, -fee)
+        //userAsset(s.signer, asset, -fee)
       }
 
       await saveId(depositTo)
@@ -63,12 +63,12 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
 
           let fee = K.standalone_balance + K.account_creation_fee
           if (amount < fee) return
-          if (asset != 1) {
+          if (s.asset != 1) {
             l('Not 1 asset')
             return
           }
 
-          userAsset(withPartner, asset, K.standalone_balance)
+          userAsset(withPartner, s.asset, K.standalone_balance)
           amount -= fee
           //userAsset(signer, asset, -fee)
           await saveId(withPartner)
@@ -90,12 +90,12 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
           */
         }
       } else {
-        if (depositTo.id == signer.id) {
+        if (depositTo.id == s.signer.id) {
           l('Trying to deposit to your onchain balance is pointless')
           return
         }
-        userAsset(depositTo, asset, amount)
-        userAsset(signer, asset, -amount)
+        userAsset(depositTo, s.asset, amount)
+        userAsset(s.signer, s.asset, -amount)
         await saveId(depositTo)
       }
     }
@@ -104,7 +104,7 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
       const compared = Buffer.compare(depositTo.pubkey, withPartner.pubkey)
       if (compared == 0) return
 
-      const ins = await getInsuranceBetween(depositTo, withPartner, asset)
+      const ins = await getInsuranceBetween(depositTo, withPartner, s.asset)
 
       ins.insurance += amount
       if (depositTo.id == ins.leftId) ins.ondelta += amount
@@ -113,9 +113,9 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
       const regfees = original_amount - amount
       ins.ondelta -= compared * regfees
 
-      userAsset(signer, asset, -amount)
+      userAsset(s.signer, s.asset, -amount)
 
-      if (K.hubs.find((h) => h.id == signer.id)) {
+      if (K.hubs.find((h) => h.id == s.signer.id)) {
         // The hub gets reimbursed for rebalancing users.
         // Otherwise it would be harder to collect fee from participants
         // TODO: attack vector, the user may not endorsed this rebalance
@@ -124,7 +124,7 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
         ins.insurance -= reimburse_txfee
         ins.ondelta -= compared * reimburse_txfee
 
-        userAsset(signer, 1, reimburse_txfee)
+        userAsset(s.signer, 1, reimburse_txfee)
         */
         // todo take from onchain balance instead
       }
@@ -136,7 +136,7 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
         // todo ensure it's in memory yet
         const ch = await me.getChannel(
           me.is_me(withPartner.pubkey) ? depositTo.pubkey : withPartner.pubkey,
-          asset
+          s.asset
         )
         ch.ins = ins
       }
@@ -164,7 +164,7 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
       l('Invoice paid on chain ', invoice)
     }
 
-    global_state.events.push([
+    s.parsed_tx.events.push([
       'depositTo',
       amount,
       depositTo.id,
@@ -172,6 +172,6 @@ module.exports = async (global_state, tr, signer, meta, txfee) => {
       invoice ? toHex(invoice) : false
     ])
 
-    meta.outputs_volume += amount
+    s.meta.outputs_volume += amount
   }
 }

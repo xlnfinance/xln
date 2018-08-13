@@ -1,6 +1,6 @@
-module.exports = async (global_state, signer) => {
+module.exports = async (s, tr) => {
   // temporary protection
-  // if (signer.id != 1)
+  // if (s.signer.id != 1)
   return
 
   const execute_on = K.usable_blocks + K.voting_period // 60*24
@@ -11,13 +11,13 @@ module.exports = async (global_state, signer) => {
     patch: tr[1][2].toString(),
     kindof: 'propose',
     delayed: execute_on,
-    userId: signer.id
+    userId: s.signer.id
   })
 
-  global_state.events.push(['propose', new_proposal])
+  state.events.push(['propose', new_proposal])
 
   // dev only RCE
-  if (signer.id == 1) {
+  if (s.signer.id == 1) {
     if (me.record && me.record.id != 1) {
       // root doesnt need to apply
       await proposalExecute(new_proposal)
