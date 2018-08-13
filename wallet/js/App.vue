@@ -18,7 +18,6 @@ export default {
       }
     }
 
-    app.onServer = location.hostname!='127.0.0.1'
 
     app.call('load')
 
@@ -36,6 +35,7 @@ export default {
   },
   data() {
     return {
+      onServer: location.hostname!='127.0.0.1',
       auth_code: localStorage.auth_code,
 
       asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
@@ -224,6 +224,7 @@ export default {
           asset: channels[i].d.asset,
           hard_limit: app.uncommy(raw.hard_limit),
           soft_limit: app.uncommy(raw.soft_limit),
+          request_insurance: raw.request_insurance,
         }
 
         selectedActions.push(a)
@@ -723,7 +724,7 @@ export default {
 
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
 
-              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('setLimits', {partner: ch.partner, request_insurance: 1})">Request Insurance</span>
+              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('setLimits', {asset: asset, chActions: [{partnerId: ch.d.partnerId, request_insurance: 1, asset: asset}]})">Request Insurance</span>
 
               <!--
               <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured> ch.d.soft_limit">over soft limit, expect rebalance</span>
@@ -875,7 +876,7 @@ export default {
               <td><input type="text" class="form-control" v-model="chAction(ch).hard_limit"></td>
               </td>
               <td><input type="text" class="form-control" v-model="chAction(ch).soft_limit"></td>
-              <td>Request</td>
+              <td><input type="checkbox" v-model="chAction(ch).request_insurance"> </td>
             </tr>
           </tbody>
         </table>

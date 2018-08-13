@@ -335,6 +335,8 @@ class Me {
       var [path, query] = req.url.split('?')
       // call /faucet?address=ME&amount=100&asset=1
       if (path.startsWith('/faucet')) {
+        res.setHeader('Access-Control-Allow-Origin', '*')
+
         let args = querystring.parse(query)
         l('faucet ', args)
 
