@@ -13,10 +13,10 @@ const deltaStartDispute = async (delta, cheat = false) => {
   await delta.save()
 }
 
-module.exports = async (s, tr) => {
+module.exports = async (s, args) => {
   // our partner is unresponsive, so we provide dispute proof/state (signed offdelta, nonce, hashlocks etc all in one)
 
-  for (const dispute of tr[1]) {
+  for (const dispute of args) {
     const [id, sig, state] = dispute
 
     const partner = await getUserByidOrKey(id)

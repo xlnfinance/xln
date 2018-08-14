@@ -1,12 +1,12 @@
-module.exports = async (s, tr) => {
+module.exports = async (s, args) => {
   // deposit from our onchain balance to another onchain balance or channel from some side
   //await userPayDebts(s.signer, s.asset, s)
 
   // there's a tiny bias here, the hub always gets reimbursed more than fee paid
   // todo: consider splitting txfee based on % in total output volume
-  const reimburse_txfee = 1 + Math.floor(s.parsed_tx.txfee / tr[1].length)
+  // const reimburse_txfee = 1 + Math.floor(s.parsed_tx.txfee / args.length)
 
-  for (let output of tr[1]) {
+  for (let output of args) {
     let amount = readInt(output[0])
     let original_amount = amount
 

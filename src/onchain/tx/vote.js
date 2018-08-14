@@ -1,5 +1,5 @@
-module.exports = async (s, tr) => {
-  const [proposalId, approval, rationale] = tr[1]
+module.exports = async (s, args) => {
+  const [proposalId, approval, rationale] = args
   let vote = await Vote.findOrBuild({
     where: {
       userId: s.signer.id,

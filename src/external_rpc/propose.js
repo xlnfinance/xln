@@ -27,7 +27,7 @@ module.exports = async (args) => {
   }
 
   // no precommits means dry run
-  if (!(await me.processBlock([], header, ordered_tx_body))) {
+  if (!(await me.processBlock({dry_run: true}, header, ordered_tx_body))) {
     l(`Bad block proposed ${toHex(header)}`)
     return false
   }

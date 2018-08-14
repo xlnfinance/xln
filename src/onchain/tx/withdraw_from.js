@@ -1,7 +1,7 @@
-module.exports = async (s, tr) => {
+module.exports = async (s, args) => {
   // withdraw money from a channel by providing a sig of your partner
   // you can only withdraw from insured balance
-  for (const input of tr[1]) {
+  for (const input of args) {
     let amount = readInt(input[0])
 
     const partner = await getUserByidOrKey(input[1])

@@ -1,5 +1,5 @@
-module.exports = async (s, tr) => {
-  const [raw_ticker, raw_amount] = tr[1]
+module.exports = async (s, args) => {
+  const [raw_ticker, raw_amount, raw_name, raw_desc] = args
   let amount = readInt(raw_amount)
   const ticker = raw_ticker.toString().replace(/[^a-zA-Z0-9]/g, '') // from buffer to unicode, sanitize
 
@@ -26,8 +26,8 @@ module.exports = async (s, tr) => {
       ticker: ticker,
       total_supply: amount,
 
-      name: tr[1][2] ? tr[1][2].toString() : '',
-      desc: tr[1][3] ? tr[1][3].toString() : ''
+      name: raw_name ? raw_name.toString() : '',
+      desc: raw_desc ? raw_desc.toString() : ''
     })
 
     K.assets_created++

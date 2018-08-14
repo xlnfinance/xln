@@ -16,20 +16,20 @@ const Tx = {
   vote: require('./tx/vote')
 }
 
-Tx.setAsset = async (s, tr) => {
+Tx.setAsset = async (s, args) => {
   // all subsequent transactions are now implied to use this asset
   // ensure this asset exists
-  const assetRecord = await Asset.findById(readInt(tr[1][0]))
+  const assetRecord = await Asset.findById(readInt(args[0]))
   if (assetRecord) {
     s.asset = assetRecord.id
     s.parsed_tx.events.push(['setAsset', assetRecord.id])
   }
 }
 
-Tx.revealSecrets = async (s, tr) => {
+Tx.revealSecrets = async (s, args) => {
   // someone tries to cheat in an atomic payment? Reveal the secrets onchain and dispute!
   // can be used not just for channels but any atomic actions. Stored according to Sprites approach
-  for (const secret of tr[1]) {
+  for (const secret of args) {
     const hash = sha3(secret)
     const hl = await Hashlock.findOne({
       where: {
@@ -53,8 +53,8 @@ Tx.revealSecrets = async (s, tr) => {
   }
 }
 
-Tx.cancelOrder = async (s, tr) => {
-  const id = readInt(tr[1][0])
+Tx.cancelOrder = async (s, args) => {
+  const id = readInt(args[0])
   const order = await Order.findOne({where: {id: id, userId: s.signer.id}})
   if (!order) {
     l('No such order for signer')
@@ -159,13 +159,14 @@ module.exports = async (s, batch) => {
     events: []
   }
 
-  for (const t of transactions) {
-    const method = methodMap(readInt(t[0]))
+  // transaction consists of short id and array of args
+  for (const [methodId, args] of transactions) {
+    const methodName = methodMap(readInt(methodId))
 
-    if (Tx[method]) {
-      let end = perf(method)
+    if (Tx[methodName]) {
+      let end = perf(methodName)
       // pass state and tx to apply
-      await Tx[method](s, t)
+      await Tx[methodName](s, args)
       end()
     }
   }

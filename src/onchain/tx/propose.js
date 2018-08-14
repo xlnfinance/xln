@@ -1,4 +1,4 @@
-module.exports = async (s, tr) => {
+module.exports = async (s, args) => {
   // temporary protection
   // if (s.signer.id != 1)
   return
@@ -6,9 +6,9 @@ module.exports = async (s, tr) => {
   const execute_on = K.usable_blocks + K.voting_period // 60*24
 
   const new_proposal = await Proposal.create({
-    desc: tr[1][0].toString(),
-    code: tr[1][1].toString(),
-    patch: tr[1][2].toString(),
+    desc: args[0].toString(),
+    code: args[1].toString(),
+    patch: args[2].toString(),
     kindof: 'propose',
     delayed: execute_on,
     userId: s.signer.id

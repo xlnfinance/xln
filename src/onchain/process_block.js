@@ -1,7 +1,7 @@
 // Block processing code. Verifies precommits sigs then executes tx in it one by one
-module.exports = async (precommits, header, ordered_tx_body) => {
+module.exports = async (s, header, ordered_tx_body) => {
   if (header.length < 64 || header.length > 200) {
-    return l('Invalid header length: ', precommits, header, ordered_tx_body)
+    return l('Invalid header length: ', s.precommits, header, ordered_tx_body)
   }
 
   if (ordered_tx_body.length > K.blocksize) {
@@ -9,7 +9,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   }
 
   var all = []
-  var s = {}
 
   let [
     methodId,
@@ -62,7 +61,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     l('DANGER: state mismatch. Some tx was not deterministic')
   }
 
-  if (precommits.length == 0) {
+  if (s.dry_run) {
     // this is just dry run during consensus
     var clock_skew = ts() - timestamp
     if (clock_skew > 60 || clock_skew < -60) {
@@ -71,8 +70,6 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     }
 
     return true
-  } else if (precommits.length != Validators.length) {
-    return l('Not valid number of precommits')
   }
 
   // List of events/metadata about current block, used on Explorer page
@@ -81,25 +78,7 @@ module.exports = async (precommits, header, ordered_tx_body) => {
     outputs_volume: 0,
     parsed_tx: [],
     cron: [],
-    missed_validators: [],
     proposer: s.proposer
-  }
-
-  let shares = 0
-  let precommit_body = r([methodMap('precommit'), header])
-  for (let i = 0; i < Validators.length; i++) {
-    if (
-      precommits[i].length == 64 &&
-      ec.verify(precommit_body, precommits[i], Validators[i].block_pubkey)
-    ) {
-      shares += Validators[i].shares
-    } else {
-      s.meta.missed_validators.push(Validators[i].id)
-    }
-  }
-
-  if (shares < K.majority) {
-    return l(`Not enough precommits`)
   }
 
   // >>> Given block is considered valid and final after this point <<<
@@ -123,9 +102,9 @@ module.exports = async (precommits, header, ordered_tx_body) => {
 
   if (K.total_blocks % 100 == 0 || ordered_tx.length > 0)
     l(
-      `${base_port}: Block ${
-        K.total_blocks
-      } by ${built_by}. Shares: ${shares}, tx: ${ordered_tx.length}`
+      `${base_port}: Block ${K.total_blocks} by ${built_by}. tx: ${
+        ordered_tx.length
+      }`
     )
 
   // todo: define what is considered a "usable" block
@@ -246,11 +225,12 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // Required for validators/hubs, optional for everyone else (aka "pruning" mode)
   // it is fine to delete a block after grace period ~3 months.
   if (me.my_validator || PK.explorer) {
+    s.meta.missed_validators = s.missed_validators
     await Block.create({
       prev_hash: fromHex(prev_hash),
       hash: sha3(header),
 
-      precommits: r(precommits), // pack them in rlp for storage
+      precommits: r(s.precommits), // pack them in rlp for storage
       header: header,
       ordered_tx_body: ordered_tx_body,
 

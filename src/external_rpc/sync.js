@@ -7,25 +7,30 @@ module.exports = async (ws, args) => {
 
   let limit = readInt(args[3]) //K.sync_limit
 
-  let last = await Block.findOne({
+  let their_block = await Block.findOne({
     attributes: ['id'],
     where: {
       prev_hash: args[1]
     }
   })
 
-  if (last) {
-    let chain = (await Block.findAll({
+  if (their_block) {
+    let block_records = await Block.findAll({
       attributes: ['precommits', 'header', 'ordered_tx_body'],
       where: {
-        id: {[Op.gte]: last.id}
+        id: {[Op.gte]: their_block.id}
       },
       order: [['id', 'ASC']],
       limit: limit
-    })).map((b) => {
-      // only include precommits in the last one
-      return [r(b.precommits), b.header, b.ordered_tx_body]
     })
+
+    let chain = block_records.map((b) => {
+      return [null, b.header, b.ordered_tx_body]
+    })
+
+    // only include precommits in the last one, not in each
+    let last_block = chain.length - 1
+    chain[last_block][0] = r(block_records[last_block].precommits)
 
     ws.send(concat(bin(methodMap('chain')), r(chain)), wscb)
   } else {
