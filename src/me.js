@@ -374,12 +374,18 @@ class Me {
     })
   }
 
-  getCoins(asset = 1, amount = 1000) {
-    l('Using faucet')
+  testnet(p) {
+    l('Using testnet')
+
     me.send(
-      fromHex(K.hubs[0].pubkey),
+      fromHex(K.hubs.find((h) => h.id == p.partner).pubkey),
       'testnet',
-      r([1, asset, amount, bin(me.address)])
+      r([
+        p.action ? p.action : 1,
+        p.asset ? p.asset : 1,
+        p.amount,
+        bin(me.address)
+      ])
     )
   }
 

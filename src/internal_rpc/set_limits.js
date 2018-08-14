@@ -26,5 +26,5 @@ module.exports = async (p) => {
     )
   }
 
-  return {confirm: 'Credit limits updated'}
+  return {confirm: 'Updated limits with hubs'}
 }

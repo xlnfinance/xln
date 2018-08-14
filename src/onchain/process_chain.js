@@ -3,6 +3,7 @@
 module.exports = async (args) => {
   return section('onchain', async () => {
     const started = K.total_blocks
+    let end = perf('processChain')
     //l(`Sync since ${started} ${args.length}`)
 
     for (const block of args) {
@@ -12,6 +13,8 @@ module.exports = async (args) => {
       }
     }
 
+    end()
+
     if (K.total_blocks - started <= 0) {
       return
     }
@@ -19,8 +22,8 @@ module.exports = async (args) => {
     // dirty hack to not backup k.json until all blocks are synced
     if (args.length >= K.sync_limit) {
       l('So many blocks. Syncing one more time')
-      sync()
-      return
+      //sync()
+      //return
     }
 
     //

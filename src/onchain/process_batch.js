@@ -4,26 +4,29 @@
 // Blockchain consists of blocks, blocks consist of batches sent by users, batches consist of transactions
 
 // some big tx handlers are in separate tx/* files
-const withdrawFrom = require('./tx/withdraw_from')
-const depositTo = require('./tx/deposit_to')
-const disputeWith = require('./tx/dispute_with')
-const createOrder = require('./tx/create_order')
-const createAsset = require('./tx/create_asset')
-const propose = require('./tx/propose')
-const vote = require('./tx/vote')
+const Tx = {
+  withdrawFrom: require('./tx/withdraw_from'),
+  depositTo: require('./tx/deposit_to'),
+  disputeWith: require('./tx/dispute_with'),
 
-const setAsset = async (s, tr) => {
+  createOrder: require('./tx/create_order'),
+  createAsset: require('./tx/create_asset'),
+
+  propose: require('./tx/propose'),
+  vote: require('./tx/vote')
+}
+
+Tx.setAsset = async (s, tr) => {
   // all subsequent transactions are now implied to use this asset
   // ensure this asset exists
   const assetRecord = await Asset.findById(readInt(tr[1][0]))
   if (assetRecord) {
-    const asset = assetRecord.id
-    s.asset = asset
-    s.parsed_tx.events.push(['setAsset', asset])
+    s.asset = assetRecord.id
+    s.parsed_tx.events.push(['setAsset', assetRecord.id])
   }
 }
 
-const revealSecrets = async (s, tr) => {
+Tx.revealSecrets = async (s, tr) => {
   // someone tries to cheat in an atomic payment? Reveal the secrets onchain and dispute!
   // can be used not just for channels but any atomic actions. Stored according to Sprites approach
   for (const secret of tr[1]) {
@@ -50,7 +53,7 @@ const revealSecrets = async (s, tr) => {
   }
 }
 
-const cancelOrder = async (s, tr) => {
+Tx.cancelOrder = async (s, tr) => {
   const id = readInt(tr[1][0])
   const order = await Order.findOne({where: {id: id, userId: s.signer.id}})
   if (!order) {
@@ -158,40 +161,12 @@ module.exports = async (s, batch) => {
 
   for (const t of transactions) {
     const method = methodMap(readInt(t[0]))
-    switch (method) {
-      case 'setAsset':
-        await setAsset(s, t)
-        break
-      case 'withdrawFrom':
-        await withdrawFrom(s, t)
-        break
-      case 'revealSecrets':
-        await revealSecrets(s, t)
-        break
-      case 'disputeWith':
-        await disputeWith(s, t)
-        break
-      case 'depositTo':
-        await depositTo(s, t)
-        break
-      case 'createAsset':
-        await createAsset(s, t)
-        break
-      case 'createHub':
-        // not implemented
-        break
-      case 'createOrder':
-        await createOrder(s, t)
-        break
-      case 'cancelOrder':
-        await cancelOrder(s, t)
-        break
-      case 'propose':
-        await propose(s, t)
-        break
-      case 'vote':
-        await vote(s, t)
-        break
+
+    if (Tx[method]) {
+      let end = perf(method)
+      // pass state and tx to apply
+      await Tx[method](s, t)
+      end()
     }
   }
 

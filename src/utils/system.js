@@ -28,7 +28,10 @@ encrypt_box = nacl.box
 open_box = nacl.box.open
 
 ec = (a, b) => bin(nacl.sign.detached(a, b))
-ec.verify = nacl.sign.detached.verify
+ec.verify = (a, b, c) => {
+  // speed of ec.verify is useless in benchmarking as depends purely on 3rd party lib speed
+  return argv.nocrypto ? true : nacl.sign.detached.verify(a, b, c)
+}
 
 /*
 ec = (a, b) => concat(Buffer.alloc(32), sha3(a))
@@ -303,6 +306,42 @@ js_sha3 = require('js-sha3')
 sha3 = (a) => bin(js_sha3.sha3_256.digest(bin(a)))
 
 ts = () => Math.round(new Date() / 1000)
+
+hrtime = () => {
+  let hrTime = process.hrtime()
+  return hrTime[0] * 1000000 + Math.round(hrTime[1] / 1000)
+}
+perf = (label) => {
+  let started_at = hrtime()
+
+  // unlocker you run in the end
+  return () => {
+    if (!perf.entries[label]) perf.entries[label] = []
+
+    perf.entries[label].push(hrtime() - started_at)
+  }
+}
+
+perf.entries = {}
+perf.stats = (label) => {
+  if (label) {
+    var sum,
+      avg = 0
+
+    if (perf.entries[label].length) {
+      sum = perf.entries[label].reduce(function(a, b) {
+        return a + b
+      })
+      avg = sum / perf.entries[label].length
+    }
+    return [parseInt(sum), parseInt(avg)]
+  } else {
+    Object.keys(perf.entries).map((key) => {
+      let nums = perf.stats(key)
+      l(`${key}: sum ${commy(nums[0], false)} avg ${commy(nums[1], false)}`)
+    })
+  }
+}
 
 beforeFees = (amount, fees) => {
   for (var fee of fees) {

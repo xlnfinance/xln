@@ -27,8 +27,11 @@ resolveChannel = (insurance, delta, is_left = true) => {
   if (total < 100) total = 100
 
   var bar = (amount, symbol) => {
-    if (amount == 0) return ''
-    return Array(1 + Math.ceil((amount * 100) / total)).join(symbol)
+    if (amount > 0) {
+      return Array(1 + Math.ceil((amount * 100) / total)).join(symbol)
+    } else {
+      return ''
+    }
   }
 
   // visual representations of state in ascii and text

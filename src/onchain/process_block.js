@@ -111,8 +111,10 @@ module.exports = async (precommits, header, ordered_tx_body) => {
   // Processing transactions one by one
   // Long term TODO: parallel execution with section() critical sections
   for (let i = 0; i < ordered_tx.length; i++) {
+    let end = perf('processBatch')
     let result = await me.processBatch(s, ordered_tx[i])
     if (!result.success) l(result)
+    end()
   }
 
   K.prev_hash = toHex(sha3(header))

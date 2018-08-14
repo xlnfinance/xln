@@ -8,4 +8,4 @@ rm -rf ./src
 cp -r ~/work/fair/node_modules node_modules
 cp -r ~/work/fair/wallet/node_modules wallet/node_modules
 cp -r ~/work/fair/src src
-node fair -p8001
+node fair -p8001 --nocrypto --synclimit=5000

@@ -32,6 +32,8 @@ const rebalance = async function(asset) {
   let netSpenders = []
   let netReceivers = []
 
+  let minRisk = 100 //K.risk
+
   for (let d of deltas) {
     let ch = await me.getChannel(d.partnerId, d.asset)
 
@@ -44,7 +46,7 @@ const rebalance = async function(asset) {
     ) {
       //l('Adding output for our promise ', ch.d.partnerId)
       netReceivers.push(ch)
-    } else if (ch.insured >= K.risk) {
+    } else if (ch.insured >= minRisk) {
       if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
 

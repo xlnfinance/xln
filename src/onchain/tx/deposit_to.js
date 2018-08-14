@@ -50,7 +50,7 @@ module.exports = async (s, tr) => {
 
         userAsset(depositTo, s.asset, K.standalone_balance)
         amount -= fee
-        //userAsset(s.signer, asset, -fee)
+        //userAsset(s.signer, s.asset, -fee)
       }
 
       await saveId(depositTo)
@@ -70,7 +70,7 @@ module.exports = async (s, tr) => {
 
           userAsset(withPartner, s.asset, K.standalone_balance)
           amount -= fee
-          //userAsset(signer, asset, -fee)
+          //userAsset(signer, s.asset, -fee)
           await saveId(withPartner)
           // now it has id
 

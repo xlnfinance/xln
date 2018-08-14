@@ -6,7 +6,7 @@ const payMonkey = async (on_server, counter = 1) => {
   // offchain payment
   await me.payChannel({
     address: address,
-    amount: 100 + Math.round(Math.random() * 100),
+    amount: 100 + Math.round(Math.random() * 20000),
     asset: 1
   })
 
@@ -26,7 +26,7 @@ const payMonkey = async (on_server, counter = 1) => {
     // replenish with testnet faucet once in a while
 
     //if (ch.payable < 3000 && argv.monkey && !me.my_hub) {
-    //if (counter % 300 == 10) me.getCoins()
+    //if (counter % 300 == 10) me.testnet({partner: 1, amount: 10000000})
 
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
@@ -43,7 +43,7 @@ if (argv.monkey) {
     monkeys.splice(monkeys.indexOf(me.address), 1) // *except our addr
 
     setTimeout(() => {
-      me.getCoins(1, 10000000)
+      me.testnet({partner: 1, amount: 10000000})
     }, 6000)
 
     setTimeout(() => {

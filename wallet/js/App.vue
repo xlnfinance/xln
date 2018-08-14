@@ -734,7 +734,7 @@ export default {
             </small>
 
 
-            <span class="badge badge-success" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, faucet_amount: uncommy(prompt('How much?')) })">Faucet</span>
+            <span class="badge badge-success" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, faucet_amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
             
             <p>
               <div v-if="ch.bar > 0">

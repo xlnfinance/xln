@@ -129,8 +129,17 @@ const sync = () => {
       ? Validators.filter((m) => m != me.my_validator)
       : Validators
     const randomChosenValidator = validatorSet.randomElement()
-    const prevHash = r([fromHex(K.prev_hash)])
-    me.send(randomChosenValidator, 'sync', prevHash)
+
+    me.send(
+      randomChosenValidator,
+      'sync',
+      r([
+        K.network_name,
+        fromHex(K.prev_hash),
+        K.total_blocks,
+        parseInt(argv.synclimit ? argv.synclimit : K.sync_limit)
+      ])
+    )
   }
 
   if (me.my_validator) {
