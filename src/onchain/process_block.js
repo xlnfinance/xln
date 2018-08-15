@@ -100,22 +100,24 @@ module.exports = async (s, header, ordered_tx_body) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 100 == 0 || ordered_tx.length > 0)
+  if (K.total_blocks % 200 == 0 && cached_result.sync_started_at) {
     l(
       `${base_port}: Block ${K.total_blocks} by ${built_by}. tx: ${
         ordered_tx.length
       }`
     )
 
-  // update browser UI about sync process
-  cached_result.synced_blocks = K.total_blocks - cached_result.sync_started_at
-  let sync_left = Math.round((ts() - K.ts) / K.blocktime)
-  cached_result.sync_progress = Math.round(
-    (cached_result.synced_blocks / (cached_result.synced_blocks + sync_left)) *
-      100
-  )
+    // update browser UI about sync process
+    cached_result.synced_blocks = K.total_blocks - cached_result.sync_started_at
+    let sync_left = Math.round((ts() - K.ts) / K.blocktime)
+    cached_result.sync_progress = Math.round(
+      (cached_result.synced_blocks /
+        (cached_result.synced_blocks + sync_left)) *
+        100
+    )
 
-  react({skip_private: true}, false)
+    react({skip_private: true}, false)
+  }
 
   // todo: define what is considered a "usable" block
   if (ordered_tx_body.length < K.blocksize - 10000) {

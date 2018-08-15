@@ -1,3 +1,3 @@
-module.exports = (p) => {
-  me.batch.push(['cancelOrder', [p.id]])
+module.exports = (args) => {
+  me.batch.push(['cancelOrder', [args.id]])
 }

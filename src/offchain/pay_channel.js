@@ -49,11 +49,11 @@ module.exports = async (opts) => {
     } else {
       // compare against addr.hubs?
 
-      if (p.preferHub == 'auto') {
+      if (!opts.preferHub || opts.preferHub == 'auto') {
         // find channel where we have enough funds
         var chosenHub = K.hubs[0]
       } else {
-        var chosenHub = K.hubs.find((h) => h.handle == p.preferHub)
+        var chosenHub = K.hubs.find((h) => h.handle == opts.preferHub)
       }
 
       // calculate entire chain of fees

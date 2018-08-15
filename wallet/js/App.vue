@@ -640,13 +640,11 @@ export default {
         </trend>
       </div>
      
-      <div v-if="K.ts < ts() - K.safe_sync_delay">
+      <div v-if="sync_started_at && K.ts < ts() - K.safe_sync_delay">
         <h1>Syncing and validating new blocks</h1>
-        <p>Please wait until for the time you've been offline.</p>
+        <p>Please wait for validation of all blocks that were created while your node was offline. To avoid this in the future enable background sync. Blocks synced so far: {{K.total_blocks - sync_started_at}}</p>
         <div class="progress" style="max-width:1400px">
-          <div class="progress-bar" v-bind:style="{ width: sync_progress+'%', 'background-color':'#5cb85c'}" role="progressbar">
-              synced
-          </div>
+          <div class="progress-bar" v-bind:style="{ width: sync_progress+'%', 'background-color':'#5cb85c'}" role="progressbar"></div>
 
         </div>
 
@@ -658,7 +656,7 @@ export default {
         <h2>Node Metrics</h2>
 
         <p v-for="(obj, index) in metrics">
-          <b v-if="['volume','fees'].indexOf(index) != -1">Average {{index}}/s: {{commy(obj.last_avg)}} (max {{commy(obj.max)}}, total {{commy(obj.total)}}).</b>
+          <b v-if="['volume','fees'].indexOf(index) != -1">Current {{index}}/s: {{commy(obj.last_avg)}} (max {{commy(obj.max)}}, total {{commy(obj.total)}}).</b>
           <b v-else>Current {{index}}/s: {{commy(obj.last_avg,false)}} (max {{commy(obj.max,false)}}, total {{commy(obj.total,false)}}).</b>
 
           <trend

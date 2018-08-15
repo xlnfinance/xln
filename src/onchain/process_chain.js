@@ -82,9 +82,10 @@ module.exports = async (args) => {
     }
 
     if (K.ts + K.blocktime * 2 > ts()) {
+      if (K.total_blocks - cached_result.sync_started_at > 100) {
+        react({confirm: 'New blocks synced and validated!'})
+      }
       cached_result.sync_started_at = false
-
-      react({confirm: 'New blocks synced and validated!'})
     }
 
     //
