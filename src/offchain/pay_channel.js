@@ -47,8 +47,18 @@ module.exports = async (opts) => {
       var via = addr.pubkey
       var amountWithFees = amount
     } else {
-      var via = fromHex(K.hubs[0].pubkey)
-      var amountWithFees = beforeFees(amount, [K.hubs[0].fee])
+      // compare against addr.hubs?
+
+      if (p.preferHub == 'auto') {
+        // find channel where we have enough funds
+        var chosenHub = K.hubs[0]
+      } else {
+        var chosenHub = K.hubs.find((h) => h.handle == p.preferHub)
+      }
+
+      // calculate entire chain of fees
+      var amountWithFees = beforeFees(amount, [chosenHub.fee])
+      var via = fromHex(chosenHub.pubkey)
     }
 
     let ch = await me.getChannel(via, opts.asset)

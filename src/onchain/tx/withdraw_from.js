@@ -1,10 +1,12 @@
 module.exports = async (s, args) => {
   // withdraw money from a channel by providing a sig of your partner
   // you can only withdraw from insured balance
-  for (const input of args) {
-    let amount = readInt(input[0])
+  for (const withdrawal of args) {
+    let [amount, partnerId, withdrawal_sig] = withdrawal
 
-    const partner = await getUserByidOrKey(input[1])
+    amount = readInt(amount)
+
+    const partner = await getUserByidOrKey(partnerId)
     if (!partner || !partner.id) {
       l('Cant withdraw from nonexistent partner')
       return
@@ -29,7 +31,7 @@ module.exports = async (s, args) => {
       ins.asset
     ])
 
-    if (!ec.verify(body, input[2], partner.pubkey)) {
+    if (!ec.verify(body, withdrawal_sig, partner.pubkey)) {
       l('Invalid withdrawal sig by partner ', amount, ins)
       return
     }

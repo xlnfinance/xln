@@ -29,6 +29,8 @@ open_box = nacl.box.open
 
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = (a, b, c) => {
+  me.metrics.ecverify.current++
+
   // speed of ec.verify is useless in benchmarking as depends purely on 3rd party lib speed
   return argv.nocrypto ? true : nacl.sign.detached.verify(a, b, c)
 }

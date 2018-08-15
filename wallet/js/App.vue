@@ -639,16 +639,27 @@ export default {
           :height=50>
         </trend>
       </div>
+     
+      <div v-if="K.ts < ts() - K.safe_sync_delay">
+        <h1>Syncing and validating new blocks</h1>
+        <p>Please wait until for the time you've been offline.</p>
+        <div class="progress" style="max-width:1400px">
+          <div class="progress-bar" v-bind:style="{ width: sync_progress+'%', 'background-color':'#5cb85c'}" role="progressbar">
+              synced
+          </div>
 
-      <div v-if="tab==''">
+        </div>
+
+      </div>
+      <div v-else-if="tab==''">
         <Home></Home>
       </div>
       <div v-else-if="tab=='metrics'">
         <h2>Node Metrics</h2>
 
         <p v-for="(obj, index) in metrics">
-          <b v-if="['settle','fail'].indexOf(index) == -1">Average {{index}}/s: {{commy(obj.last_avg)}} (max {{commy(obj.max)}}, total {{commy(obj.total)}}).</b>
-          <b v-else>Average {{index}}/s: {{obj.last_avg}} (max {{obj.max}}, total {{obj.total}}).</b>
+          <b v-if="['volume','fees'].indexOf(index) != -1">Average {{index}}/s: {{commy(obj.last_avg)}} (max {{commy(obj.max)}}, total {{commy(obj.total)}}).</b>
+          <b v-else>Current {{index}}/s: {{commy(obj.last_avg,false)}} (max {{commy(obj.max,false)}}, total {{commy(obj.total,false)}}).</b>
 
           <trend
             :data="obj.avgs.slice(obj.avgs.length-300)"
@@ -927,9 +938,9 @@ export default {
               
                 <tr>
                   <td>{{ch.hub.handle}}</td>
-                  <td @click="chAction(ch).withdrawAmount = commy(ch.insured)">{{commy(ch.insured)}}</td>
+                  <td @click="chAction(ch).withdrawAmount = commy(ch.insured)" class="dotted">{{commy(ch.insured)}}</td>
 
-                  <td v-if="my_hub" v-bind:style="[ch.d.they_requested_insurance ? {'background-color':'red'} : {}]" @click="chAction(ch).depositAmount=commy(ch.they_uninsured)">{{commy(ch.they_uninsured)}}</td>
+                  <td v-if="my_hub" v-bind:style="[ch.d.they_requested_insurance ? {'background-color':'red'} : {}]" @click="chAction(ch).depositAmount=commy(ch.they_uninsured)" class="dotted">{{commy(ch.they_uninsured)}}</td>
 
                   <td><input style="width:150px" type="text" class="form-control small-input" v-model="chAction(ch).withdrawAmount" placeholder="To withdraw"></td>
 
@@ -985,19 +996,20 @@ export default {
           <p v-else>Not enough funds to perform this transaction. Increase your withdrawals or decrease your deposits.</p>
 
 
-          <div v-if="batch.length > 0" class="alert alert-primary">
+          <div v-if="batch && batch.length > 0" class="alert alert-primary">
             <p>Globally broadcasted onchain transactions are expensive, so it's recommended to use them rarely and pack many actions in one batch. After you're done adding actions, choose the fee and click to broadcast it.</p>
             <ul>
-              <li v-for="tx in batch">Action {{tx[0]}}: {{tx[2].length}} items</li>
+              <li v-for="tx in batch"><b>{{tx[0]}}</b></li>
             </ul>
 
 
             <div class="slidecontainer">
               <input type="range" min="1" max="100" class="slider" v-model="gasprice">
-              <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee {{commy(gasprice * batch_estimate.size)}}</p>
+              <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}</p>
             </div>
 
-            <p><button type="button" class="btn btn-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button></p>
+            <p v-if="getAsset(1) - gasprice * batch_estimate.size >= 0"><button type="button" class="btn btn-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button></p>
+            <p v-else>Not enough funds on onchain FRD balance</p>
           </div>
 
 

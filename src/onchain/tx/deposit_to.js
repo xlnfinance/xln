@@ -26,8 +26,8 @@ module.exports = async (s, args) => {
     const withPartner =
       output[2].length == 0 ? false : await getUserByidOrKey(output[2])
 
-    // here we ensure both parties are registred, and take needed fees
-    if (!depositTo || !depositTo.id) {
+    // here we ensure both parties are registred (have id), and take needed fees
+    if (!depositTo.id) {
       // you must be registered first using asset 1
       if (s.asset != 1) {
         l('Not 1 asset')

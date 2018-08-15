@@ -2,6 +2,9 @@ module.exports = (ws, msg) => {
   // uws gives ArrayBuffer, we create a view
   let msgb = bin(msg)
 
+  // count total bandwidth
+  me.metrics.bandwidth.current += msgb.length
+
   // sanity checks 10mb
   if (msgb.length > 50000000) {
     l(`too long input ${msgb.length}`)

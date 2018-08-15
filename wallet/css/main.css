@@ -2,6 +2,11 @@
   max-width: 600px;
 }
 
+.dotted {
+  border-bottom: 1px dashed #999;
+  text-decoration: none;
+}
+
 .tpstrend {
   position: fixed;
   top: 92%;

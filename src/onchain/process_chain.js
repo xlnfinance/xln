@@ -2,9 +2,11 @@
 
 module.exports = async (args) => {
   return section('onchain', async () => {
-    const started = K.total_blocks
+    if (!cached_result.sync_started_at)
+      cached_result.sync_started_at = K.total_blocks
+
     let end = perf('processChain')
-    //l(`Sync since ${started} ${args.length}`)
+    //l(`Sync since ${cached_result.sync_started_at} ${args.length}`)
 
     // step 1: ensure entire chain is cross-linked with prev_hash
     // we don't check precommits yet
@@ -68,7 +70,7 @@ module.exports = async (args) => {
 
     end()
 
-    if (K.total_blocks - started <= 0) {
+    if (K.total_blocks - cached_result.sync_started_at <= 0) {
       return
     }
 
@@ -77,6 +79,12 @@ module.exports = async (args) => {
       l('So many blocks. Syncing one more time')
       //sync()
       //return
+    }
+
+    if (K.ts + K.blocktime * 2 > ts()) {
+      cached_result.sync_started_at = false
+
+      react({confirm: 'New blocks synced and validated!'})
     }
 
     //

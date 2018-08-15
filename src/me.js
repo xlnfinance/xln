@@ -31,7 +31,11 @@ class Me {
       volume: getMetric(),
       fail: getMetric(),
       settle: getMetric(),
-      fees: getMetric()
+      fees: getMetric(),
+
+      //
+      bandwidth: getMetric(),
+      ecverify: getMetric()
     }
     cached_result.metrics = this.metrics
 

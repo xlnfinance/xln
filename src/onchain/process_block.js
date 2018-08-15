@@ -107,6 +107,16 @@ module.exports = async (s, header, ordered_tx_body) => {
       }`
     )
 
+  // update browser UI about sync process
+  cached_result.synced_blocks = K.total_blocks - cached_result.sync_started_at
+  let sync_left = Math.round((ts() - K.ts) / K.blocktime)
+  cached_result.sync_progress = Math.round(
+    (cached_result.synced_blocks / (cached_result.synced_blocks + sync_left)) *
+      100
+  )
+
+  react({skip_private: true}, false)
+
   // todo: define what is considered a "usable" block
   if (ordered_tx_body.length < K.blocksize - 10000) {
     K.usable_blocks++

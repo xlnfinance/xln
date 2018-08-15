@@ -106,7 +106,7 @@ react = async (result = {}, force = true) => {
 
   //await update_cache()
 
-  if (me.id) {
+  if (me.id && !result.skip_private) {
     ;[result.payments, result.channels, result.record] = await Promise.all([
       Payment.findAll({
         order: [['id', 'desc']],
