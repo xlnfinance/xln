@@ -642,12 +642,10 @@ export default {
      
       <div v-if="sync_started_at && K.ts < ts() - K.safe_sync_delay">
         <h1>Syncing and validating new blocks</h1>
-        <p>Please wait for validation of all blocks that were created while your node was offline. To avoid this in the future enable background sync. Blocks synced so far: {{K.total_blocks - sync_started_at}}</p>
+        <p>Please wait for validation of all blocks that were created while your node was offline. To avoid this in the future enable background sync. Blocks synced so far: {{K.total_blocks - sync_started_at}}, tx: {{K.total_tx - sync_tx_started_at}}</p>
         <div class="progress" style="max-width:1400px">
           <div class="progress-bar" v-bind:style="{ width: sync_progress+'%', 'background-color':'#5cb85c'}" role="progressbar"></div>
-
         </div>
-
       </div>
       <div v-else-if="tab==''">
         <Home></Home>
@@ -936,15 +934,15 @@ export default {
               
                 <tr>
                   <td>{{ch.hub.handle}}</td>
-                  <td @click="chAction(ch).withdrawAmount = commy(ch.insured)" class="dotted">{{commy(ch.insured)}}</td>
+                  <td @click="chAction(ch).withdrawAmount = commy(ch.insured)" ><u class="dotted">{{commy(ch.insured)}}</u></td>
 
-                  <td v-if="my_hub" v-bind:style="[ch.d.they_requested_insurance ? {'background-color':'red'} : {}]" @click="chAction(ch).depositAmount=commy(ch.they_uninsured)" class="dotted">{{commy(ch.they_uninsured)}}</td>
+                  <td v-if="my_hub" v-bind:style="[ch.d.they_requested_insurance ? {'background-color':'red'} : {}]" @click="chAction(ch).depositAmount=commy(ch.they_uninsured)"><u class="dotted">{{commy(ch.they_uninsured)}}</u></td>
 
                   <td><input style="width:150px" type="text" class="form-control small-input" v-model="chAction(ch).withdrawAmount" placeholder="To withdraw"></td>
 
                   <td><input style="width:150px" type="text" class="form-control small-input" v-model="chAction(ch).depositAmount" placeholder="To deposit"></td>
 
-                  <td><input type="checkbox" v-model="chAction(ch).startDispute" :id="ch.d.id"></td>
+                  <td><span v-if="ch.ins.dispute_delayed">Until {{ch.ins.dispute_delayed}}</span><input v-else  type="checkbox" v-model="chAction(ch).startDispute" :id="ch.d.id"></td>
 
                 </tr>
               </template>
@@ -989,7 +987,7 @@ export default {
           <p>{{commy(getAsset(asset))}} (current onchain balance) + {{commy(totalWithdrawals())}} (all withdrawals) - {{commy(totalDeposits())}} (all deposits) </p><p>= {{commy(afterRebalance())}} (final balance)</p>
 
           <p v-if="afterRebalance() > 0">
-            <button type="button" class="btn btn-warning" @click="onchainPrepare()">Prepare Transaction</button>
+            <button type="button" class="btn btn-warning" @click="onchainPrepare()">Add to Batch</button>
           </p>
           <p v-else>Not enough funds to perform this transaction. Increase your withdrawals or decrease your deposits.</p>
 

@@ -100,7 +100,7 @@ module.exports = async (s, header, ordered_tx_body) => {
 
   K.total_blocks++
 
-  if (K.total_blocks % 200 == 0 && cached_result.sync_started_at) {
+  if (K.total_blocks % 50 == 0 && cached_result.sync_started_at) {
     l(
       `${base_port}: Block ${K.total_blocks} by ${built_by}. tx: ${
         ordered_tx.length

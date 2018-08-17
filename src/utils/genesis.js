@@ -217,6 +217,7 @@ module.exports = async (datadir) => {
     name: '@main (Main)'
   })
 
+  /*
   K.hubs.push({
     id: K.validators[3].id,
     location: K.validators[3].location,
@@ -227,6 +228,7 @@ module.exports = async (datadir) => {
     handle: 'second',
     name: '@second (Second)'
   })
+  */
 
   await Asset.create({
     ticker: 'FRD',

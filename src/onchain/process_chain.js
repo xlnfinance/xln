@@ -2,8 +2,10 @@
 
 module.exports = async (args) => {
   return section('onchain', async () => {
-    if (!cached_result.sync_started_at)
+    if (!cached_result.sync_started_at) {
       cached_result.sync_started_at = K.total_blocks
+      cached_result.sync_tx_started_at = K.total_tx
+    }
 
     let end = perf('processChain')
     //l(`Sync since ${cached_result.sync_started_at} ${args.length}`)
@@ -76,16 +78,22 @@ module.exports = async (args) => {
 
     // dirty hack to not backup k.json until all blocks are synced
     if (args.length >= K.sync_limit) {
-      l('So many blocks. Syncing one more time')
-      //sync()
       //return
     }
 
+    // are we completely synced now?
     if (K.ts + K.blocktime * 2 > ts()) {
-      if (K.total_blocks - cached_result.sync_started_at > 100) {
+      if (
+        cached_result.sync_started_at &&
+        K.total_blocks - cached_result.sync_started_at > 100
+      ) {
         react({confirm: 'New blocks synced and validated!'})
       }
       cached_result.sync_started_at = false
+      cached_result.sync_tx_started_at = false
+    } else {
+      l('So many blocks. Syncing one more time')
+      sync()
     }
 
     //

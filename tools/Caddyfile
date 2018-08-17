@@ -19,6 +19,7 @@ wallet.fairlayer.com {
 
 
 fairlayer.com { 
+  root /root/fair/dist
   proxy / localhost:8200 { 
     websocket 
   } 
