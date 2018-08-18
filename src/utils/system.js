@@ -160,7 +160,7 @@ syncdb = async (opts = {}) => {
   })
 }
 
-trim = (ad) => toHex(ad).substr(0, 4)
+trim = (buffer, len = 4) => toHex(buffer).substr(0, len)
 
 l = (...args) => {
   console.log(...args)
@@ -262,11 +262,20 @@ section.q = {}
 
 current_db_hash = () => {
   return Buffer.alloc(1)
-  /* TODO: fix. may cause race condition and lock db for reading breaking other operations
+}
 
-    var out = child_process.execSync(`shasum -a 256 ${datadir}/onchain/db*`).toString().split(/[ \n]/)
-    return fromHex(out)
-   */
+onchain_state = async () => {
+  await syncdb()
+  //TODO: fix. may cause race condition and lock db for reading breaking other operations
+
+  var out = child_process
+    .execSync(
+      `shasum -a 256 ${datadir}/onchain/k.json ${datadir}/onchain/db.sqlite `
+    )
+    .toString()
+    .split(/[ \n]/)
+
+  return sha3(concat(fromHex(out[0]), fromHex(out[3])))
 }
 
 localhost = '127.0.0.1'

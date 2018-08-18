@@ -80,7 +80,9 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
     } else {
       logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
 
-      fatal('Deadlock?!')
+      l('Deadlock')
+
+      //fatal('Deadlock?!')
       //await me.flushChannel(ch)
 
       return

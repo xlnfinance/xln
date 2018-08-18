@@ -7,6 +7,8 @@ module.exports = async (args) => {
       cached_result.sync_tx_started_at = K.total_tx
     }
 
+    let original_state = await onchain_state()
+
     let end = perf('processChain')
     //l(`Sync since ${cached_result.sync_started_at} ${args.length}`)
 
@@ -67,6 +69,19 @@ module.exports = async (args) => {
       if (!(await me.processBlock(s, block[1], block[2]))) {
         l('Bad chain?')
         break
+      }
+
+      if (K.total_blocks == parseInt(argv.stop_blocks)) {
+        // show current state hash and quit
+        let final_state = await onchain_state()
+
+        fatal(
+          `${trim(original_state, 8)} (${K.total_blocks}) => ${trim(
+            final_state,
+            8
+          )}`
+        )
+        return false
       }
     }
 
