@@ -67,11 +67,7 @@ class Me {
       .join('_')
       */
 
-    let encodable = [
-      bin(this.box.publicKey),
-      this.pubkey,
-      [1] // preferred hubs
-    ]
+    let encodable = [bin(this.box.publicKey), this.pubkey, PK.usedHubs]
 
     this.address = base58.encode(r(encodable))
     l('Logged in with address: ' + this.address)
@@ -80,6 +76,8 @@ class Me {
 
     PK.username = username
     PK.seed = seed.toString('hex')
+    PK.usedHubs = [1]
+
     await promise_writeFile(datadir + '/offchain/pk.json', JSON.stringify(PK))
   }
 
@@ -404,6 +402,7 @@ class Me {
       // find all existing channels (if you are hub)
       var deltas = await Delta.findAll()
       for (var d of deltas) {
+        // if not a hub, add as channel
         if (!K.hubs.find((h) => fromHex(h.pubkey).equals(d.partnerId))) {
           var ch = await me.getChannel(d.partnerId, d.asset)
           channels.push(ch)
@@ -411,11 +410,13 @@ class Me {
       }
     } else {
       for (var m of K.hubs) {
-        if (!me.record || me.record.id != m.id) {
-          for (let asset of assets) {
-            var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
-            channels.push(ch)
-          }
+        if (me.record && me.record.id == m.id) continue
+
+        if (!PK.usedHubs.includes(m.id)) continue
+
+        for (let asset of assets) {
+          var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
+          channels.push(ch)
         }
       }
     }

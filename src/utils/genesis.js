@@ -119,6 +119,10 @@ module.exports = async (datadir) => {
     min_fee: 1,
     max_fee: 5000,
 
+    // each hop is a hub. There's no sense in having too many hops
+    // too many hops increase chance of an error
+    max_hops: 3,
+
     // hashlock and dispute-related
     secret_len: 32,
     dispute_delay: 8, // in how many blocks disputes are considered final
@@ -211,11 +215,19 @@ module.exports = async (datadir) => {
     location: K.validators[0].location,
     pubkey: K.validators[0].pubkey,
 
-    fee: 0.001,
+    website: 'https://fairlayer.com',
+    // basis points
+    fee_bps: 10,
 
     handle: 'main',
     name: '@main (Main)'
   })
+
+  // similar to https://en.wikipedia.org/wiki/Nostro_and_vostro_accounts
+  // in fairlayer both parties are equally non-custodial (no one "holds" an account in another party)
+  // we don't expect more than 1-10k of hubs any time soon (there are about 10,000 traditional banks in the world)
+  // so in-JSON storage is fine
+  K.routes = []
 
   /*
   K.hubs.push({
@@ -259,7 +271,9 @@ module.exports = async (datadir) => {
     username: 'root',
     seed: hubSeed.toString('hex'),
     auth_code: toHex(crypto.randomBytes(32)),
-    pending_batch: null
+    pending_batch: null,
+
+    usedHubs: [1]
   }
 
   await writeGenesisOnchainConfig(K, datadir)

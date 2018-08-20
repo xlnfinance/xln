@@ -56,8 +56,13 @@ module.exports = async (opts) => {
         var chosenHub = K.hubs.find((h) => h.handle == opts.preferHub)
       }
 
+      let multihop = [chosenHub.fee]
+      if (!addr.hubs.includes(chosenHub.id)) {
+        //multihop.push(K.hubs.find(h=>h.id == addr.))
+      }
+
       // calculate entire chain of fees
-      var amountWithFees = beforeFees(amount, [chosenHub.fee])
+      var amountWithFees = beforeFees(amount, multihop)
       var via = fromHex(chosenHub.pubkey)
     }
 

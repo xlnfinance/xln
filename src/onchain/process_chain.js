@@ -31,7 +31,11 @@ module.exports = async (args) => {
         // hash of next header
         our_prev_hash = sha3(block[1])
       } else {
-        l('Not properly cross-linked chain')
+        l(
+          `Not properly cross-linked chain: ${K.total_blocks} ${readInt(
+            total_blocks
+          )}`
+        )
         return
       }
     }

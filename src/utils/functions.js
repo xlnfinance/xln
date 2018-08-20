@@ -136,8 +136,8 @@ const sync = () => {
       r([
         K.network_name,
         fromHex(K.prev_hash),
-        K.total_blocks,
-        parseInt(argv.synclimit ? argv.synclimit : K.sync_limit)
+        K.total_blocks, // start from
+        parseInt(argv.synclimit ? argv.synclimit : K.sync_limit) // how many
       ])
     )
   }

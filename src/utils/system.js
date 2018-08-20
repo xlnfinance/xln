@@ -364,14 +364,15 @@ beforeFees = (amount, fees) => {
 
   return new_amount
 }
-afterFees = (amount, fees) => {
-  if (!(fees instanceof Array)) fees = [fees]
-  for (var fee of fees) {
-    var fee = Math.round((amount / (1 + fee)) * fee)
-    if (fee == 0) fee = K.min_fee
-    if (fee > K.max_fee) fee = K.max_fee
-    amount = amount - fee
+afterFees = (amount, hubs) => {
+  if (!(hubs instanceof Array)) hubs = [hubs]
+  for (var hub of hubs) {
+    let taken_fee = Math.round((amount * hub.fee_bps) / 10000)
+    if (taken_fee == 0) taken_fee = K.min_fee
+    if (taken_fee > K.max_fee) taken_fee = K.max_fee
+    amount = amount - taken_fee
   }
+
   return amount
 }
 

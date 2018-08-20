@@ -71,7 +71,8 @@ module.exports = async (ws, json) => {
       break
 
     case 'createHub':
-      // nothing yet ಠ_ಠ
+      require('./create_hub')(json.params)
+
       react({confirm: 'Added to batch'})
       break
 
@@ -83,6 +84,23 @@ module.exports = async (ws, json) => {
     case 'cancelOrder':
       require('./cancel_order')(json.params)
       react({confirm: 'Added to batch'})
+      break
+
+    case 'getRoutes':
+      result = require('./get_routes')(json.params)
+      break
+
+    case 'toggleHub':
+      let index = PK.usedHubs.indexOf(json.params.id)
+      if (index == -1) {
+        PK.usedHubs.push(json.params.id)
+        result.confirm = 'Hub added'
+      } else {
+        // ensure no connection
+        PK.usedHubs.splice(index, 1)
+
+        result.confirm = 'Hub removed'
+      }
       break
 
     case 'getinfo':

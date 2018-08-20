@@ -239,6 +239,8 @@ module.exports = async (s, header, ordered_tx_body) => {
   if (me.my_validator || PK.explorer) {
     s.meta.missed_validators = s.missed_validators
     await Block.create({
+      id: K.total_blocks,
+
       prev_hash: fromHex(prev_hash),
       hash: sha3(header),
 

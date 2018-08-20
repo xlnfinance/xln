@@ -128,9 +128,10 @@ react = async (result = {}, force = true) => {
       }
     })
 
+    result.PK = PK
+
     result.address = me.address
     result.pubkey = toHex(me.pubkey)
-    result.pending_batch = PK.pending_batch
     result.batch = me.batch
     result.batch_estimate = await me.batch_estimate()
   }

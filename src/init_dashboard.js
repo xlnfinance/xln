@@ -1,4 +1,5 @@
 // serves default wallet and internal rpc on the same port
+const getChain = require('./external_rpc/get_chain')
 module.exports = async (a) => {
   const ooops = async (err) => {
     l('oops', err)
@@ -25,7 +26,7 @@ module.exports = async (a) => {
 
   let bundler
 
-  var cb = function(req, res) {
+  var cb = async function(req, res) {
     // Clickjacking protection
     res.setHeader('X-Frame-Options', 'DENY')
 
@@ -51,6 +52,22 @@ module.exports = async (a) => {
       } catch (e) {
         l(e)
       }
+    } else if (path.startsWith('/blocks')) {
+      let parts = path.split('_')
+
+      let args = {
+        their_block: parseInt(parts[1]),
+        limit: parseInt(parts[2])
+      }
+
+      // respond with raw chain as a file to save
+      let raw_chain = await getChain(args)
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename=Fair_blocks_${
+          args.their_block
+        }_${args.limit}`
+      })
     } else if (path == '/health') {
       res.end(
         JSON.stringify({

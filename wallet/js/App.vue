@@ -40,7 +40,7 @@ export default {
 
       asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
 
-      preferHub: 'auto',
+      chosenRoute: 0,
 
       gasprice: 1, 
 
@@ -48,6 +48,8 @@ export default {
       orders: [],
       channels: [],
 
+
+      
       new_asset: {
         name: 'Yen ¥',
         ticker: 'YEN',
@@ -55,10 +57,14 @@ export default {
         desc:
           'This asset represents Japanese Yen and is backed by the Bank of Japan.'
       },
+
+
       new_hub: {},
 
       pubkey: false,
       K: false,
+      PK: false,
+
       my_validator: false,
 
       pw: '',
@@ -89,7 +95,6 @@ export default {
       users: [],
 
       history: [],
-      pending_batch: null,
 
       proposal: [
         'Increase Blocksize After Client Optimization',
@@ -120,7 +125,8 @@ export default {
       hardfork: '',
 
       // useful for visual debugging
-      dev_mode: false
+      dev_mode: false,
+      sync_started_at: false
     }
   },
   computed: {
@@ -148,6 +154,29 @@ export default {
 
     ivoted: (voters) => {
       return voters.find((v) => v.id == app.record.id)
+    },
+
+    updateRoutes: ()=>{
+      app.call('getRoutes', {
+        address: app.outward_address,
+        amount: app.outward_amount
+      })
+    },
+
+    routeToText: (r)=>{
+      let info = "You → ";
+
+      let percent = p => {
+        return (p / 100).toFixed(2) + "%";
+      };
+      for (let hop of r[1]) {
+        let hub = K.hubs.find(h => h.id == hop);
+        if (hub) {
+          info += `${hub.id} (${percent(hub.fee_bps)}) → `;
+        }
+      }
+
+      return (percent(r[0]) + ": " + info + " Destination");
     },
 
     skipDate: (h, index) => {
@@ -612,7 +641,7 @@ export default {
           </li>
 
         </ul>
-        <span class="badge badge-danger" v-if="pending_batch" @click="go('onchain')">Onchain tx pending</span> &nbsp;
+        <span class="badge badge-danger" v-if="PK.pending_batch" @click="go('onchain')">Onchain tx pending</span> &nbsp;
         <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span><span v-else >Block #{{K.total_blocks}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
@@ -773,12 +802,12 @@ export default {
           <div class="col-sm-6" style="width:400px">
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_address" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_address" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2" @change="updateRoutes">
               </div>
             </p>
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_amount" :disabled="outward_editable=='none'" placeholder="Amount" aria-describedby="basic-addon2">
+                <input type="text" class="form-control small-input" v-model="outward_amount" :disabled="outward_editable=='none'" placeholder="Amount" aria-describedby="basic-addon2"  @change="updateRoutes">
               </div>
             </p>
             <p>
@@ -786,16 +815,19 @@ export default {
                 <input type="text" class="form-control small-input" v-model="outward_invoice" :disabled="['none','amount'].includes(outward_editable)" placeholder="Private Message (optional)" aria-describedby="basic-addon2">
               </div>
             </p>
-            <p>
+
+            <p v-if="bestRoutes.length > 0">
               <div class="input-group" style="width:400px">
-              <select v-model="preferHub" class="custom-select " style="width:400px">
-                <option value="auto">Choose hub automatically</option>
-                <option v-for="a in K.hubs" :value="a.handle">{{a.handle}}</option>
+              <select v-model="chosenRoute" class="custom-select " style="width:400px">
+
+                <option v-for="(r, index) in bestRoutes" :value="index">{{routeToText(r)}}</option>
+
               </select>
               </div>
             </p>
+            
             <p>
-              <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, preferHub: preferHub})">Pay Now → </button>
+              <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: chosenRoute})">Pay Now → </button>
 
               <button type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
 
@@ -893,12 +925,16 @@ export default {
           <button type="button" class="btn btn-danger" @click="setLimits()" href="#">Save</button>
         </p>
 
-        <p><button type="button" class="btn btn-danger" @click="call('logout')">Quit Node
+        <p>
+          <button type="button" class="btn btn-success" @click="go('hubs')" href="#">Add or remove hubs</button>
+        </p>
+
+        <p><button type="button" class="btn btn-danger" @click="call('logout')">Graceful Shutdown
         </button></p>
 
       </div>
       <div v-else-if="tab=='onchain'">
-        <div v-if="pending_batch">
+        <div v-if="PK.pending_batch">
           <h2 class="alert alert-primary">You just broadcasted a transaction, wait until it's included in a block by validators to make another one.</h2>
 
           <center><div class="loader"></div></center>
@@ -1298,23 +1334,59 @@ export default {
       <div v-else-if="tab=='hubs'">
         <h1>Hubs</h1>
         <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks.</p>
+
+
+
+
+        <div class="form-group">
+          <p><label for="comment">Handle:</label>
+          <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input></p>
+
+          
+          <p><label for="comment">Fee (in basis points, eg 10 is 0.1%):</label>
+          <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Location (Fairlayer-compatible RPC eg wss://fairlayer.com:8100):</label>
+          <input class="form-control" v-model="new_hub.location" rows="2"></input></p>
+
+          <p><label for="comment">Routes to add (their hub id, route agreement in hex):</label>
+          <input class="form-control" v-model="new_hub.add_routes" rows="2"></input></p>
+
+
+
+          <p v-if="record"><button class="btn btn-success" @click="call('createHub', new_hub)">Create Hub</button></p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+
+          <div class="alert alert-primary">After execution this account will be marked as a hub. Do not use this account for any other purposes.</div>
+        </div>
+          
+
+
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
               <th scope="col">#</th>
               <th scope="col">Name</th>
-              <th scope="col">Fee</th>
+              <th scope="col">Fee (bps)</th>
               <th scope="col">Location</th>
               <th scope="col">Total FRD Insurances</th>
+              <th v-if="PK" scope="col">Action</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="u in K.hubs">
               <th>{{u.id}}</th>
               <th>{{u.name}}</th>
-              <th>{{u.fee}}</th>
+              <th>{{u.fee_bps}}</th>
               <th>{{u.location}}</th>
+
               <th>{{commy(u.sumForUser)}}</th>
+
+              <th v-if="PK">
+                <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-danger" @click="call('toggleHub', {id: u.id})">Remove</button>
+                <button v-else class="btn btn-success" @click="call('toggleHub', {id: u.id})">Add</button>
+
+              </th>
             </tr>
           </tbody>
         </table>

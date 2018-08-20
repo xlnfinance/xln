@@ -1,4 +1,5 @@
-// Receives an ack and set of transitions to execute on top of it
+// This method receives set of transitions by another party and applies it
+// hubs normally pass forward payments, end users normally decode payloads and unlock hashlocks
 module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
   let ch = await me.getChannel(pubkey, asset)
   ch.last_used = ts()
@@ -222,7 +223,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub) {
         //loff(`Forward ${amount} to ${trim(destination)}`)
-        let outward_amount = afterFees(amount, me.my_hub.fee)
+        let outward_amount = afterFees(amount, me.my_hub)
         var dest_pubkey = parseAddress(destination_address).pubkey
 
         let dest_ch = await me.getChannel(dest_pubkey, asset)
