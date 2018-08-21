@@ -1,5 +1,8 @@
 const Router = {
-  max_hops: 5,
+  max_hops: 10,
+  // don't offer routes that cost more than 10% in total
+  // We don't want to deliberately burn money, right?
+  max_fee: 0.9,
 
   getRouteIndex: function(from, to) {
     // returns an index of a bidirectional route (from,to or to,from)
@@ -47,7 +50,23 @@ const Router = {
     return c.found
   },
 
-  bestRoutes: function(fromArray, toArray) {
+  // returns sorted and filtered routes to some nodes for specific asset/amount
+  bestRoutes: async function(toArray, args) {
+    let fromArray = []
+
+    // where do we have enough amount in payable
+    for (let candidate of PK.usedHubs) {
+      let hub = K.hubs.find((h) => h.id == candidate)
+      let ch = await me.getChannel(hub.pubkey, args.asset)
+
+      // account for potentially unpredictable fees?
+      if (ch.payable > args.amount) {
+        fromArray.push(candidate)
+      } else {
+        l('Not enough payable: ', ch.payable, args.amount)
+      }
+    }
+
     if (!fromArray || !toArray || fromArray.length == 0 || toArray.length == 0)
       return []
 
@@ -62,20 +81,38 @@ const Router = {
       })
     }
 
-    // sort by fee
-    return found
-      .map((route) => {
-        var afterfees = 1
-        for (let hop of route) {
-          let hub = K.hubs.find((h) => h.id == hop)
-          if (hub) {
-            afterfees *= 1 - hub.fee_bps / 10000
-          }
-        }
+    // ensure uniqness (a-b-c-d and a-c-b-d are pretty pointless)
+    let uniqSets = []
 
-        return [1 - afterfees, route]
-      })
-      .sort((a, b) => a[0] - b[0])
+    let filtered = []
+
+    for (let route of found) {
+      // sort by id and concatenate
+      let serialized = route.sort((a, b) => a - b).join(',')
+      if (!uniqSets.includes(serialized)) {
+        uniqSets.push(serialized)
+      } else {
+        // not uniq path
+        continue
+      }
+
+      // calculate total fees of entire path
+      var afterfees = 1
+      for (let hop of route) {
+        let hub = K.hubs.find((h) => h.id == hop)
+        if (hub) {
+          afterfees *= 1 - hub.fee_bps / 10000
+        }
+      }
+
+      // if not too crazy, add to filtered
+      if (afterfees > this.max_fee) {
+        filtered.push([1 - afterfees, route])
+      }
+    }
+
+    // sort by fee
+    return filtered.sort((a, b) => a[0] - b[0])
   }
 }
 

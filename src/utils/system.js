@@ -27,6 +27,37 @@ nacl = require('../../lib/nacl')
 encrypt_box = nacl.box
 open_box = nacl.box.open
 
+// more highlevel wrappers that operate purely with JSON
+encrypt_box_json = (box_data, target_pubkey) => {
+  // we don't care about authentication of box, but nacl requires that
+  let throwaway = nacl.box.keyPair()
+
+  let unlocker_nonce = crypto.randomBytes(24)
+
+  let box = encrypt_box(
+    bin(JSON.stringify(box_data)),
+    unlocker_nonce,
+    target_pubkey,
+    throwaway.secretKey
+  )
+  return r([bin(box), unlocker_nonce, bin(throwaway.publicKey)])
+}
+
+open_box_json = (box) => {
+  let unlocker = r(box)
+  let raw_box = open_box(
+    unlocker[0],
+    unlocker[1],
+    unlocker[2],
+    me.box.secretKey
+  )
+  if (raw_box == null) {
+    return false
+  } else {
+    return parse(bin(raw_box).toString())
+  }
+}
+
 ec = (a, b) => bin(nacl.sign.detached(a, b))
 ec.verify = (a, b, c) => {
   me.metrics.ecverify.current++
@@ -354,16 +385,15 @@ perf.stats = (label) => {
   }
 }
 
-beforeFees = (amount, fees) => {
-  for (var fee of fees) {
-    new_amount = Math.round(amount * (1 + fee))
-    if (new_amount == amount) new_amount = amount + K.min_fee
-    if (new_amount > amount + K.max_fee) new_amount = amount + K.max_fee
-    amount = new_amount
-  }
+beforeFee = (amount, hub) => {
+  new_amount = Math.round((amount / (10000 - hub.fee_bps)) * 10000)
+  if (new_amount == amount) new_amount = amount + K.min_fee
+  if (new_amount > amount + K.max_fee) new_amount = amount + K.max_fee
+  amount = new_amount
 
   return new_amount
 }
+
 afterFees = (amount, hubs) => {
   if (!(hubs instanceof Array)) hubs = [hubs]
   for (var hub of hubs) {

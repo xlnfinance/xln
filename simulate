@@ -31,7 +31,7 @@ killall node 2>/dev/null || true
 rm -rf data*
 rm -rf isolate*
 
-if node fair.js --genesis=test $db | grep "Genesis done"; then
+if node fair.js --genesis=test $db $global | grep "Genesis done"; then
   echo "Generating with maxport $maxport"
 
   for i in $(seq 8001 $maxport); do

@@ -40,7 +40,10 @@ export default {
 
       asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
 
-      bestRoutes: [],//none offered yet
+      bestRoutes: [],
+
+      bestRoutesLimit: 5,
+
       chosenRoute: 0,
 
       gasprice: 1, 
@@ -114,7 +117,7 @@ export default {
 
       settings: !localStorage.settings,
 
-      outward_address: hashargs['address'],
+      outward_address: hashargs['address'] ? hashargs['address'] : '',
       outward_amount: hashargs['amount'],
       outward_invoice: hashargs['invoice'],
       // which fields can be changed? all, amount, none
@@ -164,27 +167,30 @@ export default {
     },
 
     updateRoutes: ()=>{
+      l("updatingg")
+      // address or amount was changed - recalculate best offered routes
       app.call('getRoutes', {
         address: app.outward_address,
-        amount: app.outward_amount
+        amount: app.uncommy(app.outward_amount),
+        asset: app.asset
       })
     },
 
     routeToText: (r)=>{
-      let info = "You → ";
+      let info = "";
 
       for (let hop of r[1]) {
         let hub = app.K.hubs.find(h => h.id == hop);
         if (hub) {
-          info += `${app.to_user(hub.id)} (${app.bpsToPercent(hub.fee_bps)}) → `;
+          info += `@${app.to_user(hub.id)} (${app.bpsToPercent(hub.fee_bps)}) → `;
         }
       }
 
-      return (app.bpsToPercent(r[0]*10000) + ": " + info + " Destination");
+      return info 
     },
 
     bpsToPercent: (p)=>{
-        return (p / 100).toFixed(2) + "%";
+        return app.commy(p) + "%";
     },
 
     skipDate: (h, index) => {
@@ -439,7 +445,7 @@ export default {
     commy: (b, dot = true) => {
       let prefix = b < 0 ? '-' : ''
 
-      b = Math.abs(b).toString()
+      b = Math.abs(Math.round(b)).toString()
       if (dot) {
         if (b.length == 1) {
           b = '0.0' + b
@@ -453,13 +459,15 @@ export default {
       return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     },
     uncommy: (str) => {
-      if (str == '') return 0
+      if (str == '' || !str) return 0
       //if (str.indexOf('.') == -1) str += '.00'
 
       // commas are removed as they are just separators 
-      str = str.replace(',','')
+      str = str.replace(/,/g,'')
 
-      return Math.round(parseFloat(str) * 100) //parseInt(str.replace(/[^0-9]/g, ''))
+      return Math.round(parseFloat(str) * 100) 
+
+      //parseInt(str.replace(/[^0-9]/g, ''))
     },
 
     timeAgo: (time) => {
@@ -757,7 +765,7 @@ export default {
           <br>
           
           <template v-for="(ch, index) in channelsForAsset()">
-            <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}: {{commy(ch.payable)}}</h2>
+            <h2 style="display:inline-block">@{{ch.hub.handle}}: {{commy(ch.payable)}}</h2>
 
 
             <small v-if="ch.payable > 0">
@@ -811,12 +819,12 @@ export default {
           <div class="col-sm-6" style="width:400px">
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_address" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2" @change="updateRoutes">
+                <input type="text" class="form-control small-input" v-model="outward_address" :disabled="['none','amount'].includes(outward_editable)" placeholder="Address" aria-describedby="basic-addon2" @input="updateRoutes">
               </div>
             </p>
             <p>
               <div class="input-group" style="width:400px">
-                <input type="text" class="form-control small-input" v-model="outward_amount" :disabled="outward_editable=='none'" placeholder="Amount" aria-describedby="basic-addon2"  @change="updateRoutes">
+                <input type="text" class="form-control small-input" v-model="outward_amount" :disabled="outward_editable=='none'" placeholder="Amount" aria-describedby="basic-addon2"  @input="updateRoutes">
               </div>
             </p>
             <p>
@@ -827,28 +835,27 @@ export default {
 
 
           </div>
-
-            <p >
-              <div v-if="bestRoutes.length > 0"  class="input-group">
-
-              <p v-for="(r, index) in bestRoutes" >
-              <input type="radio" :value="index" :id="index" v-model="chosenRoute" >
-<label for="index">{{routeToText(r)}}</label>
- </p>
-
-
+          
+          <template v-if="outward_address.length > 0">
+            <p v-if="bestRoutes.length == 0">
+              No route found for this payment.
+            </p>
+            <template v-else>
+              <h5>Choose route/fee:</h5>
+              <div class="radio" v-for="(r, index) in bestRoutes.slice(0, bestRoutesLimit)" >
+                <label><input type="radio" :value="index" v-model="chosenRoute"> {{commy(uncommy(outward_amount) * r[0])}} ({{bpsToPercent(r[0]*10000)}}) <b>You</b> → {{routeToText(r)}} <b>Destination</b></label>
               </div>
-            </p>
-
-            <p>
-              <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: chosenRoute})">Pay Now → </button>
-
-              <button v-if="dev_mode" type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
+              <p v-if="bestRoutes.length > bestRoutesLimit" ><a class="dotted" @click="bestRoutesLimit += 5">Show More Routes</a></p>
+            </template>
+          </template>
 
 
-            </p>
+          <p>
+            <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: bestRoutes[chosenRoute][1]})">Pay Now → </button>
 
-            
+            <button v-if="dev_mode" type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
+          </p>            
+
 
           <table v-if="paymentsForAsset().length > 0" class="table">
             <thead>
@@ -879,7 +886,7 @@ export default {
           </table>
         </template>
         <template v-else-if="pubkey">
-          <h3 class="alert alert-danger">You haven't added any hubs. To use instant offchain payments of Fairlayer go to <a class="dotted" @click=go('hubs')>Hubs</a> and add some hubs based on your preferences.</h3>
+          <h3 class="alert alert-danger">You haven't added any hubs. To use instant offchain payments of Fairlayer go to <a class="dotted" @click=go('hubs')>Hubs</a> and choose them based on your location, preferences and fees.</h3>
         </template>
         <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
 
@@ -1361,7 +1368,8 @@ export default {
           <thead class="thead-dark">
             <tr>
               <th scope="col">#</th>
-              <th scope="col">Name</th>
+              <th scope="col">Handle</th>
+              <th scope="col">Created At</th>
               <th scope="col">Fee</th>
               <th scope="col">Location</th>
               <th scope="col">Total FRD Insurances</th>
@@ -1371,7 +1379,8 @@ export default {
           <tbody>
             <tr v-for="u in K.hubs">
               <th>{{u.id}}</th>
-              <th>{{u.name}}</th>
+              <th>{{u.handle}}</th>
+              <th>{{timeAgo(u.createdAt)}}</th>
               <th>{{bpsToPercent(u.fee_bps)}}</th>
               <th>{{u.location}}</th>
 
@@ -1388,7 +1397,7 @@ export default {
 
 
         <div class="form-group">
-          <h2>Create an Hub</h2>
+          <h2>Create a Hub</h2>
 
           <p><label for="comment">Handle:</label>
           <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input></p>

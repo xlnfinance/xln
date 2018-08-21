@@ -62,10 +62,9 @@ startFairlayer = async () => {
   try {
     await onchainDB.init()
     await offchainDB.init()
-  } catch(e) {
+  } catch (e) {
     throw e
   }
-
 
   // temporary measure
   global.onchainDB = onchainDB

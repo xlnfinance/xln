@@ -144,7 +144,7 @@ module.exports = async (a) => {
   // this serves dashboard HTML page
   var server = require('http').createServer(cb)
 
-  openBrowser = () => {
+  global.openBrowser = () => {
     const url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
     l(note(`Open ${link(url)} in your browser`))
     opn(url)

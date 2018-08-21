@@ -5,6 +5,8 @@ module.exports = (args) => {
 
   json.fee_bps = parseInt(json.fee_bps)
 
+  json.box_pubkey = toHex(bin(me.box.publicKey))
+
   if (json.add_routes.length > 0) {
     json.add_routes = json.add_routes.split(',').map((f) => parseInt(f))
   }

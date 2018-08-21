@@ -7,6 +7,9 @@ module.exports = async (s, args) => {
 
   if (!json.handle) return false
 
+  json.fee_bps = parseInt(json.fee_bps)
+  if (json.fee_bps > 500) return false
+
   hub = K.hubs.find((h) => h.handle == json.handle)
 
   // trying to modify someone else's hub
@@ -18,13 +21,16 @@ module.exports = async (s, args) => {
       id: s.signer.id,
       location: json.location,
       pubkey: toHex(s.signer.pubkey),
+      box_pubkey: json.box_pubkey,
 
       website: json.website,
       // basis points
-      fee_bps: parseInt(json.fee_bps),
+      fee_bps: json.fee_bps,
 
       handle: json.handle,
-      name: json.handle
+      name: json.handle,
+
+      createdAt: K.ts
     }
 
     K.hubs.push(hub)

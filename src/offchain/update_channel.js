@@ -95,10 +95,23 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
     let m = methodMap(readInt(t[0]))
 
     if (m == 'add' || m == 'addrisk') {
-      let [amount, hash, exp, destination_address, unlocker] = t[1]
-
-      destination_address = destination_address.toString()
+      let [amount, hash, exp, unlocker] = t[1]
       ;[exp, amount] = [exp, amount].map(readInt)
+      // every 'add' transition must pass an encrypted envelope (onion routing)
+
+      let box_data = open_box_json(unlocker)
+
+      // it contains amount/asset you are expected to get
+      // ensure to 'del' if there's any problem, or it will hang in your state forever
+      if (!box_data || box_data.amount != amount || box_data.asset != asset) {
+        loff('error: Bad data received: ', box_data)
+        inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+        inward_hl.status = 'new'
+
+        continue
+      }
+
+      l('Box received: ', box_data)
 
       let new_type = m
 
@@ -137,9 +150,6 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         hash: bin(hash),
         exp: exp,
 
-        unlocker: unlocker,
-        destination_address: destination_address.toString(),
-
         asset: asset,
 
         deltumId: ch.d.id
@@ -165,72 +175,48 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
       if (new_type != m) {
         // go to next transition - we failed this hashlock already
-      } else if (destination_address == me.getAddress()) {
-        unlocker = r(unlocker)
-        let raw_box = open_box(
-          unlocker[0],
-          unlocker[1],
-          unlocker[2],
-          me.box.secretKey
-        )
+      } else if (!box_data.unlocker) {
+        // we are final destination, no unlocker to pass
 
-        if (raw_box == null) {
-          loff('error: Bad unlocker')
-          inward_hl.type = m == 'add' ? 'del' : 'delrisk'
-          inward_hl.status = 'new'
-        } else {
-          // the sender encrypted for us JSON with payment params
+        // decode buffers from json
+        box_data.secret = fromHex(box_data.secret)
+        box_data.invoice = fromHex(box_data.invoice)
 
-          let box_data = JSON.parse(bin(raw_box).toString())
-          l('Box received: ', box_data)
-
-          // decode buffers from json
-          box_data.secret = fromHex(box_data.secret)
-          box_data.invoice = fromHex(box_data.invoice)
-
-          // ensure the amount & asset are as expected
-          // if any hashlock bug - del it
-          if (box_data.amount != amount) {
-            l('box mismatch: amount')
-            return
-          }
-          if (box_data.asset != asset) {
-            l('box mismatch: asset')
-            return
-          }
-
-          if (!sha3(box_data.secret).equals(hash)) {
-            l('box mismatch: secret')
-            return
-          }
-
-          // if any
-          inward_hl.source_address = box_data.source_address
-
-          inward_hl.invoice = box_data.invoice
-          inward_hl.secret = box_data.secret
-
-          inward_hl.type = m == 'add' ? 'del' : 'delrisk'
-          inward_hl.status = 'new'
-
-          if (trace)
-            l(`Received and unlocked a payment, changing addack->delnew`)
-
-          // at this point we reveal the secret from the box down the chain of senders, there is a chance the partner does not ACK our del on time and the hashlock expires making us lose the money.
-          // SECURITY: if after timeout the del is not ack, go to blockchain ASAP to reveal the preimage. See ensure_ack
+        // secret doesn't fit?
+        if (!sha3(box_data.secret).equals(hash)) {
+          l('box mismatch: secret')
+          return
         }
 
+        // optional refund address
+        inward_hl.source_address = box_data.source_address
+
+        inward_hl.invoice = box_data.invoice
+        inward_hl.secret = box_data.secret
+
+        inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+        inward_hl.status = 'new'
+
+        if (trace) l(`Received and unlocked a payment, changing addack->delnew`)
+
+        // at this point we reveal the secret from the box down the chain of senders,
+        // there is a chance the partner does not ACK our del on time and
+        // the hashlock expires making us lose the money.
+        // SECURITY: if after timeout the del is not ack, go to blockchain ASAP to reveal the preimage. See ensure_ack
+
         // no need to add to flushable - secret will be returned during ack to sender anyway
-      } else if (me.my_hub) {
+      } else if (me.my_hub && box_data.nextHop) {
         //loff(`Forward ${amount} to ${trim(destination)}`)
         let outward_amount = afterFees(amount, me.my_hub)
-        var dest_pubkey = parseAddress(destination_address).pubkey
 
-        let dest_ch = await me.getChannel(dest_pubkey, asset)
+        // ensure it's equal what they expect us to pay
+        let nextHop = fromHex(box_data.nextHop)
+
+        let dest_ch = await me.getChannel(nextHop, asset)
 
         // is online? Is payable?
 
-        if (me.users[dest_pubkey] && dest_ch.payable >= outward_amount) {
+        if (me.users[nextHop] && dest_ch.payable >= outward_amount) {
           var outward_hl = Payment.build({
             deltumId: dest_ch.d.id,
             type: m,
@@ -243,18 +229,15 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
             asset: asset,
 
-            unlocker: unlocker,
-            destination_address: destination_address,
+            // we pass nested unlocker for them
+            unlocker: fromHex(box_data.unlocker),
+
             inward_pubkey: bin(pubkey)
           })
           dest_ch.payments.push(outward_hl)
 
           if (trace)
-            l(
-              `Mediating ${outward_amount} payment to ${trim(
-                destination_address
-              )}`
-            )
+            l(`Mediating ${outward_amount} payment to ${trim(nextHop)}`)
 
           //if (argv.syncdb) all.push(outward_hl.save())
 

@@ -1,3 +1,5 @@
+const Router = require('../router')
+
 let respondNotAuthorized = (ws) => {
   if (ws.end) {
     ws.end(
@@ -87,7 +89,9 @@ module.exports = async (ws, json) => {
       break
 
     case 'getRoutes':
-      result = require('./get_routes')(json.params)
+      let addr = parseAddress(json.params.address)
+
+      result.bestRoutes = await Router.bestRoutes(addr.hubs, json.params)
       break
 
     case 'toggleHub':

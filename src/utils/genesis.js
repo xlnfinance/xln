@@ -23,6 +23,7 @@ const createValidator = async (username, pw, loc, website) => {
     location: loc,
     website: website,
     pubkey: toHex(me.pubkey),
+    box_pubkey: toHex(bin(me.box.publicKey)),
     block_pubkey: me.block_pubkey,
     missed_blocks: [],
     shares: 0
@@ -214,10 +215,12 @@ module.exports = async (datadir) => {
     id: K.validators[0].id,
     location: K.validators[0].location,
     pubkey: K.validators[0].pubkey,
+    box_pubkey: K.validators[0].box_pubkey,
 
     website: 'https://fairlayer.com',
     // basis points
     fee_bps: 10,
+    createdAt: ts(),
 
     handle: 'main',
     name: '@main (Main)'
@@ -229,13 +232,53 @@ module.exports = async (datadir) => {
   // so in-JSON storage is fine
   K.routes = []
 
+  global.K = K
+
+  const Router = require('../router')
+
+  if (argv.generate_airports || true) {
+    let addHub = (data) => {
+      //data.id = K.hubs.length + 1
+      data.fee_bps = Math.round(Math.random() * 500)
+      data.name = data.handle
+      data.pubkey = crypto.randomBytes(32)
+      data.createdAt = ts()
+      K.hubs.push(data)
+      return data
+    }
+
+    // https://www.kaggle.com/open-flights/flight-route-database/discussion
+    let data = fs.readFileSync('./tools/routes.csv', {encoding: 'utf8'})
+
+    let routes = data.split('\n').slice(0, 500)
+
+    for (let route of routes) {
+      let parts = route.split(',')
+
+      // direct flights only
+      if (parts[7] != '0') continue
+
+      //from 2 to 4
+      let from = K.hubs.find((h) => h.handle == parts[2])
+      let to = K.hubs.find((h) => h.handle == parts[4])
+
+      // if not exists, create stub-hubs
+      if (!from) from = addHub({handle: parts[2], id: parseInt(parts[3])})
+      if (!to) to = addHub({handle: parts[4], id: parseInt(parts[5])})
+
+      if (Router.getRouteIndex(from.id, to.id) == -1) {
+        // only unique routes are saved
+        K.routes.push([from.id, to.id])
+      }
+    }
+  }
+
   /*
   K.hubs.push({
     id: K.validators[3].id,
     location: K.validators[3].location,
     pubkey: K.validators[3].pubkey,
 
-    fee: 0.005,
 
     handle: 'second',
     name: '@second (Second)'
@@ -273,13 +316,18 @@ module.exports = async (datadir) => {
     auth_code: toHex(crypto.randomBytes(32)),
     pending_batch: null,
 
-    usedHubs: []
+    usedHubs: [],
+    usedAssets: []
   }
 
   await writeGenesisOnchainConfig(K, datadir)
   await writeGenesisOffchainConfig(PK, datadir)
 
-  l('Genesis done (' + datadir + '), quitting')
+  l(
+    `Genesis done (${datadir}). Hubs ${K.hubs.length}, routes ${
+      K.routes.length
+    }, quitting`
+  )
 
   // not graceful to not trigger hooks
   process.exit(0)

@@ -1,3 +1,4 @@
+const Router = require('../router')
 // short helper to create a Payment on some delta and flush the channel right after it
 module.exports = async (opts) => {
   section('pay', async () => {
@@ -42,58 +43,63 @@ module.exports = async (opts) => {
     // NaN
     if (!Number.isInteger(amount)) return
 
-    // if we are hub making a payment, don't add the fees on top
-    if (me.my_hub) {
-      var via = addr.pubkey
-      var amountWithFees = amount
-    } else {
-      // compare against addr.hubs?
-
-      if (!opts.preferHub || opts.preferHub == 'auto') {
-        // find channel where we have enough funds
-        var chosenHub = K.hubs[0]
-      } else {
-        var chosenHub = K.hubs.find((h) => h.handle == opts.preferHub)
-      }
-
-      let multihop = [chosenHub.fee]
-      if (!addr.hubs.includes(chosenHub.id)) {
-        //multihop.push(K.hubs.find(h=>h.id == addr.))
-      }
-
-      // calculate entire chain of fees
-      var amountWithFees = beforeFees(amount, multihop)
-      var via = fromHex(chosenHub.pubkey)
+    if (!opts.chosenRoute) {
+      // by default choose the cheapest one
+      opts.chosenRoute = await Router.bestRoutes(addr.hubs, {
+        amount: amount,
+        asset: opts.asset
+      })[0]
     }
 
-    let ch = await me.getChannel(via, opts.asset)
-
-    if (!ch) return
-
-    let unlocker_nonce = crypto.randomBytes(24)
-
-    // sender encrypts various JSON-encoded data for the receiver
-    // this is offchain transfer so we don't care about compact data format
-    let box_data = {
-      amount: amount,
-      asset: opts.asset,
-
-      // buffers are in hex for JSON
-      secret: toHex(secret),
-      invoice: toHex(opts.invoice),
-
-      ts: ts(),
-      source_address: me.getAddress()
+    if (!opts.chosenRoute) {
+      l('No such chosen route exists')
+      return false
     }
 
-    let unlocker_box = encrypt_box(
-      bin(JSON.stringify(box_data)),
-      unlocker_nonce,
-      addr.box_pubkey,
-      me.box.secretKey
+    // 1. encrypt msg for destination that has final amount/asset etc and empty envelope
+    let onion = encrypt_box_json(
+      {
+        amount: amount, // final amount
+        asset: opts.asset,
+
+        // buffers are in hex for JSON
+        secret: toHex(secret),
+        invoice: toHex(opts.invoice),
+
+        ts: ts(),
+        source_address: opts.provideSource ? me.getAddress() : null
+      },
+      addr.box_pubkey
     )
 
-    let unlocker = r([bin(unlocker_box), unlocker_nonce, bin(me.box.publicKey)])
+    let nextHop = addr.pubkey
+
+    // 2. encrypt msg for each hop in reverse order
+    let reversed = opts.chosenRoute.reverse()
+    l('Lets encrypt for ', reversed)
+    for (let hop of reversed) {
+      let hub = K.hubs.find((h) => h.id == hop)
+
+      amount = beforeFee(amount, hub)
+
+      onion = encrypt_box_json(
+        {
+          asset: opts.asset,
+          amount: amount,
+          nextHop: nextHop,
+
+          unlocker: onion
+        },
+        fromHex(hub.box_pubkey)
+      )
+
+      nextHop = hub.pubkey
+    }
+
+    // 3. now nextHop is equal our first hop, and amount includes all fees
+    let ch = await me.getChannel(nextHop, opts.asset)
+
+    if (!ch) return
 
     if (amount > ch.payable) {
       react({alert: `Not enough funds ${ch.payable}`}, false)
@@ -111,11 +117,11 @@ module.exports = async (opts) => {
         is_inward: false,
         asset: opts.asset,
 
-        amount: amountWithFees,
+        amount: amount,
         hash: bin(hash),
         exp: K.usable_blocks + K.hashlock_exp,
 
-        unlocker: unlocker,
+        unlocker: onion,
         destination_address: addr.address,
         invoice: opts.invoice
       })
