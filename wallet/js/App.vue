@@ -40,6 +40,7 @@ export default {
 
       asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
 
+      bestRoutes: [],//none offered yet
       chosenRoute: 0,
 
       gasprice: 1, 
@@ -59,7 +60,13 @@ export default {
       },
 
 
-      new_hub: {},
+      new_hub: {
+        handle: "YAY",
+        location:  `ws://${location.hostname}:${parseInt(location.port)+100}`,
+        fee_bps: 10,
+        add_routes: '1',
+        remove_routes: ''
+      },
 
       pubkey: false,
       K: false,
@@ -166,17 +173,18 @@ export default {
     routeToText: (r)=>{
       let info = "You → ";
 
-      let percent = p => {
-        return (p / 100).toFixed(2) + "%";
-      };
       for (let hop of r[1]) {
-        let hub = K.hubs.find(h => h.id == hop);
+        let hub = app.K.hubs.find(h => h.id == hop);
         if (hub) {
-          info += `${hub.id} (${percent(hub.fee_bps)}) → `;
+          info += `${app.to_user(hub.id)} (${app.bpsToPercent(hub.fee_bps)}) → `;
         }
       }
 
-      return (percent(r[0]) + ": " + info + " Destination");
+      return (app.bpsToPercent(r[0]*10000) + ": " + info + " Destination");
+    },
+
+    bpsToPercent: (p)=>{
+        return (p / 100).toFixed(2) + "%";
     },
 
     skipDate: (h, index) => {
@@ -742,12 +750,12 @@ export default {
           <button @click="call('hardfork', {hardfork: hardfork})" class="btn btn-danger">Execute Code</button>
         </p>
       </div>
+
       <div v-else-if="tab=='wallet'">
-        <template v-if="pubkey">
+        <template v-if="pubkey && channelsForAsset().length > 0">
           <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
           <br>
-
-
+          
           <template v-for="(ch, index) in channelsForAsset()">
             <h2 style="display:inline-block">{{to_ticker(ch.d.asset)}} Balance @{{ch.hub.handle}}: {{commy(ch.payable)}}</h2>
 
@@ -799,6 +807,7 @@ export default {
             <pre v-if="dev_mode" v-html="ch.ascii_states"></pre>
           </template>
           <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
+          
           <div class="col-sm-6" style="width:400px">
             <p>
               <div class="input-group" style="width:400px">
@@ -816,25 +825,31 @@ export default {
               </div>
             </p>
 
-            <p v-if="bestRoutes.length > 0">
-              <div class="input-group" style="width:400px">
-              <select v-model="chosenRoute" class="custom-select " style="width:400px">
 
-                <option v-for="(r, index) in bestRoutes" :value="index">{{routeToText(r)}}</option>
+          </div>
 
-              </select>
+            <p >
+              <div v-if="bestRoutes.length > 0"  class="input-group">
+
+              <p v-for="(r, index) in bestRoutes" >
+              <input type="radio" :value="index" :id="index" v-model="chosenRoute" >
+<label for="index">{{routeToText(r)}}</label>
+ </p>
+
+
               </div>
             </p>
-            
+
             <p>
               <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: chosenRoute})">Pay Now → </button>
 
-              <button type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
+              <button v-if="dev_mode" type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
 
 
             </p>
 
-          </div>
+            
+
           <table v-if="paymentsForAsset().length > 0" class="table">
             <thead>
               <tr>
@@ -862,6 +877,9 @@ export default {
               </tr>
 
           </table>
+        </template>
+        <template v-else-if="pubkey">
+          <h3 class="alert alert-danger">You haven't added any hubs. To use instant offchain payments of Fairlayer go to <a class="dotted" @click=go('hubs')>Hubs</a> and add some hubs based on your preferences.</h3>
         </template>
         <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
 
@@ -952,7 +970,7 @@ export default {
 
 
 
-          <table class="table">
+          <table class="table" v-if="channelsForAsset().length > 0">
             <thead class="thead-dark">
               <tr>
                 <th scope="col">Hub</th>
@@ -1335,30 +1353,7 @@ export default {
         <h1>Hubs</h1>
         <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks.</p>
 
-
-
-
-        <div class="form-group">
-          <p><label for="comment">Handle:</label>
-          <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input></p>
-
-          
-          <p><label for="comment">Fee (in basis points, eg 10 is 0.1%):</label>
-          <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input></p>
-
-          <p><label for="comment">Location (Fairlayer-compatible RPC eg wss://fairlayer.com:8100):</label>
-          <input class="form-control" v-model="new_hub.location" rows="2"></input></p>
-
-          <p><label for="comment">Routes to add (their hub id, route agreement in hex):</label>
-          <input class="form-control" v-model="new_hub.add_routes" rows="2"></input></p>
-
-
-
-          <p v-if="record"><button class="btn btn-success" @click="call('createHub', new_hub)">Create Hub</button></p>
-          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
-
-          <div class="alert alert-primary">After execution this account will be marked as a hub. Do not use this account for any other purposes.</div>
-        </div>
+        <p>Current routes: {{K.routes.map((pair)=>to_user(pair[0])+'-'+to_user(pair[1])).join(', ')}}</p>
           
 
 
@@ -1367,7 +1362,7 @@ export default {
             <tr>
               <th scope="col">#</th>
               <th scope="col">Name</th>
-              <th scope="col">Fee (bps)</th>
+              <th scope="col">Fee</th>
               <th scope="col">Location</th>
               <th scope="col">Total FRD Insurances</th>
               <th v-if="PK" scope="col">Action</th>
@@ -1377,48 +1372,55 @@ export default {
             <tr v-for="u in K.hubs">
               <th>{{u.id}}</th>
               <th>{{u.name}}</th>
-              <th>{{u.fee_bps}}</th>
+              <th>{{bpsToPercent(u.fee_bps)}}</th>
               <th>{{u.location}}</th>
 
               <th>{{commy(u.sumForUser)}}</th>
 
               <th v-if="PK">
                 <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-danger" @click="call('toggleHub', {id: u.id})">Remove</button>
+                <button v-else-if="my_hub && my_hub.id==u.id" class="btn btn-success">It's you!</button>
                 <button v-else class="btn btn-success" @click="call('toggleHub', {id: u.id})">Add</button>
-
               </th>
             </tr>
           </tbody>
         </table>
+
+
+        <div class="form-group">
+          <h2>Create an Hub</h2>
+
+          <p><label for="comment">Handle:</label>
+          <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input></p>
+
+          
+          <p><label for="comment">Fee (in basis points, eg 10 is 0.1%):</label>
+          <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Location (Fairlayer-compatible RPC):</label>
+          <input class="form-control" v-model="new_hub.location" rows="2"></input></p>
+
+          <p><label for="comment">Routes to add (their hub id, route agreement in hex):</label>
+          <input class="form-control" v-model="new_hub.add_routes" rows="2"></input></p>
+
+          <p><label for="comment">Routes to remove (comma separated ids):</label>
+          <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input></p>
+
+
+          <p v-if="record && !my_hub"><button class="btn btn-success" @click="call('createHub', new_hub)">Create Hub</button></p>
+          <p v-else-if="my_hub"><b>You are already a hub.</b></p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+
+          <div class="alert alert-primary">After execution this account will be marked as a hub. Do not use this account for any other purposes.</div>
+        </div>
+
+
+
       </div>
 
       <div v-else-if="tab=='assets'">
         <h1>Assets</h1>
         <p>Fair assets is the name for all kinds of fiat/crypto-currencies, tokens and stock you can create on top of the system.</p>
-
-
-        <div class="form-group">
-          <p><label for="comment">Name:</label>
-          <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input></p>
-
-          <p><label for="comment">Ticker (must be unique):</label>
-          <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input></p>
-          
-          <p><label for="comment">Amount:</label>
-          <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input></p>
-
-          <p><label for="comment">Division point (e.g. 0 for yen, 2 for dollar):</label>
-          <input class="form-control" v-model="new_asset.division" rows="2" id="comment"></input></p>
-
-          <p><label for="comment">Description:</label>
-          <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input></p>
-
-          <p v-if="record"><button class="btn btn-success" @click="call('createAsset', new_asset)">Create Asset</button></p>
-          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
-
-          <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can deposit it to a hub and start sending instantly to other users.</div>
-        </div>
-          
 
 
 
@@ -1442,6 +1444,33 @@ export default {
             </tr>
           </tbody>
         </table>
+
+
+        <div class="form-group">
+          <h2>Create an Asset</h2>
+          <p><label for="comment">Name:</label>
+          <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Ticker (must be unique):</label>
+          <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input></p>
+          
+          <p><label for="comment">Amount:</label>
+          <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Division point (e.g. 0 for yen, 2 for dollar):</label>
+          <input class="form-control" v-model="new_asset.division" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Description:</label>
+          <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input></p>
+
+          <p v-if="record"><button class="btn btn-success" @click="call('createAsset', new_asset)">Create Asset</button></p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+
+          <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can deposit it to a hub and start sending instantly to other users.</div>
+        </div>
+          
+
+
       </div>
     </div>
   </div>

@@ -55,6 +55,20 @@ module.exports = async (pubkey, asset, delta = false) => {
     if (delta) {
       ch.d = delta
     } else {
+      // we trust by default to @main hub in FRD asset
+      let defaultTrust = 'off'
+      if (asset == 1) {
+        // we are @main
+        if (me.record.id == 1) {
+          defaultTrust = 'we'
+        } else {
+          let them = my_hub(pubkey)
+          if (them && them.id == 1) {
+            defaultTrust = 'they'
+          }
+        }
+      }
+
       let created = await Delta.findOrCreate({
         where: {
           myId: me.pubkey,
@@ -66,11 +80,11 @@ module.exports = async (pubkey, asset, delta = false) => {
           status: 'master',
           offdelta: 0,
 
-          soft_limit: my_hub(pubkey) ? K.soft_limit : 0,
-          hard_limit: my_hub(pubkey) ? K.hard_limit : 0,
+          soft_limit: defaultTrust == 'they' ? K.soft_limit : 0,
+          hard_limit: defaultTrust == 'they' ? K.hard_limit : 0,
 
-          they_soft_limit: my_hub(me.pubkey) ? K.soft_limit : 0,
-          they_hard_limit: my_hub(me.pubkey) ? K.hard_limit : 0
+          they_soft_limit: defaultTrust == 'we' ? K.soft_limit : 0,
+          they_hard_limit: defaultTrust == 'we' ? K.hard_limit : 0
         }
       })
 

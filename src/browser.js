@@ -130,7 +130,7 @@ react = async (result = {}, force = true) => {
 
     result.PK = PK
 
-    result.address = me.address
+    result.address = me.getAddress()
     result.pubkey = toHex(me.pubkey)
     result.batch = me.batch
     result.batch_estimate = await me.batch_estimate()

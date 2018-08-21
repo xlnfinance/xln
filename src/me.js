@@ -67,18 +67,21 @@ class Me {
       .join('_')
       */
 
-    let encodable = [bin(this.box.publicKey), this.pubkey, PK.usedHubs]
-
-    this.address = base58.encode(r(encodable))
-    l('Logged in with address: ' + this.address)
+    l('Logged in with address: ' + this.getAddress())
 
     this.last_react = new Date()
 
     PK.username = username
     PK.seed = seed.toString('hex')
-    PK.usedHubs = [1]
+    PK.usedHubs = []
 
     await promise_writeFile(datadir + '/offchain/pk.json', JSON.stringify(PK))
+  }
+
+  // returns current address for offchain payments
+  getAddress() {
+    let encodable = [bin(this.box.publicKey), this.pubkey, PK.usedHubs]
+    return base58.encode(r(encodable))
   }
 
   is_me(pubkey) {
@@ -386,7 +389,7 @@ class Me {
         p.action ? p.action : 1,
         p.asset ? p.asset : 1,
         p.amount,
-        bin(me.address)
+        bin(me.getAddress())
       ])
     )
   }

@@ -5,9 +5,18 @@ module.exports = (args) => {
 
   json.fee_bps = parseInt(json.fee_bps)
 
-  json.add_routes = json.add_routes.split(',').map(parseInt)
-
+  if (json.add_routes.length > 0) {
+    json.add_routes = json.add_routes.split(',').map((f) => parseInt(f))
+  }
+  if (json.remove_routes.length > 0) {
+    json.remove_routes = json.remove_routes.split(',').map((f) => parseInt(f))
+  }
   l('create hub json ', json)
+
+  // starting WSS if not yet started. proactively before we are a hub
+  if (!me.external_wss_server) {
+    me.startExternalRPC(json.location)
+  }
 
   me.batch.push(['createHub', [stringify(json)]])
 }

@@ -100,7 +100,7 @@ const generateMonkeys = async () => {
     const seed = await derive(username, 'password')
     const me = new Me()
     await me.init(username, seed)
-    addr.push(me.address)
+    addr.push(me.getAddress())
   }
   // save new-line separated monkey addresses
   await promise_writeFile('./tools/monkeys.txt', addr.join('\n'))

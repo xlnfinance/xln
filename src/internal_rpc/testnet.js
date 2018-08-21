@@ -15,7 +15,7 @@ module.exports = (p) => {
     me.send(
       Validators.find((m) => m.id == p.partner),
       'testnet',
-      concat(bin([p.action, p.asset]), bin(me.address))
+      concat(bin([p.action, p.asset]), bin(me.getAddress()))
     )*/
   }
 

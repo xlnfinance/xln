@@ -40,7 +40,7 @@ const payMonkey = async (on_server, counter = 1) => {
 
 if (argv.monkey) {
   if (parseInt(base_port) > 8003) {
-    monkeys.splice(monkeys.indexOf(me.address), 1) // *except our addr
+    monkeys.splice(monkeys.indexOf(me.getAddress()), 1) // *except our addr
 
     setTimeout(() => {
       me.testnet({partner: 1, amount: 10000000})

@@ -88,7 +88,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
             t.amount < K.min_amount ||
             t.amount > K.max_amount ||
             t.amount > ch.payable ||
-            t.destination_address == me.address ||
+            t.destination_address == me.getAddress() ||
             ch.outwards.length >= K.max_hashlocks
           ) {
             loff(

@@ -273,7 +273,7 @@ module.exports = async (datadir) => {
     auth_code: toHex(crypto.randomBytes(32)),
     pending_batch: null,
 
-    usedHubs: [1]
+    usedHubs: []
   }
 
   await writeGenesisOnchainConfig(K, datadir)

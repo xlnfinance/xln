@@ -19,7 +19,7 @@ module.exports = async (opts) => {
       return
     }
 
-    if (addr.address == me.address) {
+    if (addr.address == me.getAddress()) {
       react({alert: `Cannot pay to yourself`}, false)
       return
     }
@@ -83,7 +83,7 @@ module.exports = async (opts) => {
       invoice: toHex(opts.invoice),
 
       ts: ts(),
-      source_address: me.address
+      source_address: me.getAddress()
     }
 
     let unlocker_box = encrypt_box(

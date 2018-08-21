@@ -32,8 +32,19 @@ module.exports = async (s, args) => {
 
   if (json.add_routes) {
     json.add_routes.map((r) => {
-      Router.addRoutes([hub.id, parseInt(r)])
+      Router.addRoute(hub.id, parseInt(r))
     })
+  }
+
+  if (json.remove_routes) {
+    json.remove_routes.map((r) => {
+      Router.removeRoute(hub.id, parseInt(r))
+    })
+  }
+
+  if (me.record && me.record.id == s.signer.id) {
+    // we just started our own hub
+    me.my_hub = hub
   }
 
   s.parsed_tx.events.push(['createHub', json.handle])

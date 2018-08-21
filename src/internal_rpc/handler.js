@@ -101,6 +101,10 @@ module.exports = async (ws, json) => {
 
         result.confirm = 'Hub removed'
       }
+      //
+      react({}, true)
+      //update_cache()
+
       break
 
     case 'getinfo':

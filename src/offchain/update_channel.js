@@ -165,7 +165,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
       if (new_type != m) {
         // go to next transition - we failed this hashlock already
-      } else if (destination_address == me.address) {
+      } else if (destination_address == me.getAddress()) {
         unlocker = r(unlocker)
         let raw_box = open_box(
           unlocker[0],
