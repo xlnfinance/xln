@@ -39,6 +39,11 @@ const payMonkey = async (on_server, counter = 1) => {
 }
 
 if (argv.monkey) {
+  if (base_port > 8000) {
+    // add main hub by default
+    PK.usedHubs.push(1)
+  }
+
   if (parseInt(base_port) > 8003) {
     monkeys.splice(monkeys.indexOf(me.getAddress()), 1) // *except our addr
 

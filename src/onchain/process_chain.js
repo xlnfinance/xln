@@ -5,6 +5,7 @@ module.exports = async (args) => {
     if (!cached_result.sync_started_at) {
       cached_result.sync_started_at = K.total_blocks
       cached_result.sync_tx_started_at = K.total_tx
+      cached_result.sync_progress = 0
     }
 
     let original_state = await onchain_state()

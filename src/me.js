@@ -67,8 +67,6 @@ class Me {
       .join('_')
       */
 
-    l('Logged in with address: ' + this.getAddress())
-
     this.last_react = new Date()
 
     PK.username = username
@@ -80,6 +78,9 @@ class Me {
 
   // returns current address for offchain payments
   getAddress() {
+    // if there are no hubs, no one can pay us
+    if (PK.usedHubs.length == 0) return false
+
     let encodable = [bin(this.box.publicKey), this.pubkey, PK.usedHubs]
     return base58.encode(r(encodable))
   }
@@ -219,40 +220,17 @@ class Me {
     // in json pubkeys are in hex
     me.record = await getUserByIdOrKey(bin(me.id.publicKey))
 
-    if (me.record) {
+    if (me.record && me.record.id) {
       me.my_validator = Validators.find((m) => m.id == me.record.id)
       me.my_hub = K.hubs.find((m) => m.id == me.record.id)
     }
 
-    /*
-
-    me.intervals.push(
-      setInterval(async () => {
-        var flushable = await Delta.findAll({
-          where: {
-            flush_requested_at: {
-              [Op.lt]: new Date() - K.flush_timeout
-            }
-          }
-        })
-
-        for (var fl of flushable) {
-          //l('Flushing channel for ', fl.partnerId)
-          //ch.d.flush_requested_at = null
-          await me.flushChannel(fl.partnerId, 1, true)
-        }
-
-        if (flushable.length > 0) {
-          react()
-        }
-      }, K.flush_timeout)
-    )
-    */
-
     // both validators and hubs must run external_wss
     if (me.my_validator) {
+      l('We are validator ', me.my_validator)
       me.startExternalRPC(me.my_validator.location)
     } else if (me.my_hub) {
+      l('We are hub ', me.my_hub)
       me.startExternalRPC(me.my_hub.location)
     }
 
@@ -373,7 +351,7 @@ class Me {
     })
 
     me.external_wss.on('error', function(err) {
-      fatal(err)
+      l(err)
     })
     me.external_wss.on('connection', function(ws) {
       ws.on('message', (msg) => {
@@ -461,9 +439,13 @@ class Me {
         me.users[m].send(msg, wscb)
         return true
       } else {
+        // try to find by this pubkey among validators/hubs
         var validator = Validators.find((f) => f.pubkey.equals(m))
+        var hub = K.hubs.find((f) => fromHex(f.pubkey).equals(m))
         if (validator) {
           m = validator
+        } else if (hub) {
+          m = hub
         } else {
           l(m, 'not online')
           return false

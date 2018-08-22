@@ -58,6 +58,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
         if (t.status != 'new') continue
 
         if (t.type == 'del') {
+          // remove a hashlock and provide either secret or reason of failure
           if (me.CHEAT_dontreveal) {
             loff('CHEAT: not revealing our secret to inward')
             continue
@@ -100,7 +101,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
             t.type = 'del'
             t.status = 'ack'
-
             //if (argv.syncdb) all.push(t.save())
 
             if (t.inward_pubkey) {
@@ -108,6 +108,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
               var pull_hl = inward.inwards.find((hl) => hl.hash.equals(t.hash))
               pull_hl.type = 'del'
               pull_hl.status = 'new'
+              let reason = `${me.my_hub.id} to ${ch.hub ? ch.hub.id : 'u'}`
+              l(reason)
+              pull_hl.secret = bin(reason)
               //if (argv.syncdb) all.push(pull_hl.save())
 
               flushable.push(inward.d.partnerId)

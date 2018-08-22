@@ -111,8 +111,6 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         continue
       }
 
-      l('Box received: ', box_data)
-
       let new_type = m
 
       if (amount < K.min_amount || amount > ch.they_payable) {
@@ -175,24 +173,25 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
       if (new_type != m) {
         // go to next transition - we failed this hashlock already
-      } else if (!box_data.unlocker) {
+      } else if (!box_data.unlocker && box_data.secret) {
         // we are final destination, no unlocker to pass
 
         // decode buffers from json
         box_data.secret = fromHex(box_data.secret)
         box_data.invoice = fromHex(box_data.invoice)
 
-        // secret doesn't fit?
-        if (!sha3(box_data.secret).equals(hash)) {
-          l('box mismatch: secret')
-          return
-        }
-
         // optional refund address
         inward_hl.source_address = box_data.source_address
 
         inward_hl.invoice = box_data.invoice
-        inward_hl.secret = box_data.secret
+
+        // secret doesn't fit?
+        if (sha3(box_data.secret).equals(hash)) {
+          inward_hl.secret = box_data.secret
+        } else {
+          l('box mismatch: secret')
+          inward_hl.secret = bin('box mismatch: secret')
+        }
 
         inward_hl.type = m == 'add' ? 'del' : 'delrisk'
         inward_hl.status = 'new'
@@ -259,11 +258,12 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
     } else if (m == 'del' || m == 'delrisk') {
       var [hash, outcome] = t[1]
 
+      // try to parse outcome as secret and check its hash
       if (outcome.length == K.secret_len && sha3(outcome).equals(hash)) {
         var valid = true
       } else {
+        // otherwise it is a reason why mediation failed
         var valid = false
-        outcome = null
       }
 
       // todo check expirations
@@ -281,10 +281,9 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         ch.d.offdelta += ch.left ? outward_hl.amount : -outward_hl.amount
       }
 
-      me.metrics[valid ? 'settle' : 'fail'].current++
-
       outward_hl.type = m
       outward_hl.status = 'ack'
+      // pass same outcome down the chain
       outward_hl.secret = outcome
 
       ch.d.nonce++
@@ -292,6 +291,8 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         fatal('error: Invalid state sig at ' + m)
         break
       }
+
+      me.metrics[valid ? 'settle' : 'fail'].current++
 
       //if (argv.syncdb) all.push(outward_hl.save())
 
@@ -340,8 +341,21 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
           me.metrics.volume.current += pull_hl.amount
         }
       } else {
-        // otherwise, we are user who made payment on its own
-        react({payment_complete: true, confirm: 'Payment completed'}, false)
+        if (valid) {
+          react(
+            {payment_outcome: 'success', confirm: 'Payment completed'},
+            false
+          )
+        } else {
+          // if not a hub, we are sender
+          react(
+            {
+              payment_outcome: 'fail',
+              alert: 'Payment failed, try another route: ' + outcome.toString()
+            },
+            false
+          )
+        }
       }
 
       if (me.CHEAT_dontack) {

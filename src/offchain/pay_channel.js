@@ -25,8 +25,6 @@ module.exports = async (opts) => {
       return
     }
 
-    //l('Paying to ', addr)
-
     // use user supplied private message, otherwise generate random tag
     // invoice inside the address takes priority
     if (addr.invoice || opts.invoice) {
@@ -49,13 +47,16 @@ module.exports = async (opts) => {
         opts.chosenRoute = []
       } else {
         // by default choose the cheapest one
-        opts.chosenRoute = await Router.bestRoutes(addr.hubs, {
+        let best = await Router.bestRoutes(addr.hubs, {
           amount: amount,
           asset: opts.asset
-        })[0]
-        if (!opts.chosenRoute) {
-          l('No such chosen route exists')
+        })
+        if (!best[0][1]) {
+          l('No route found:', best, addr.hubs)
           return false
+        } else {
+          // first is the cheapest
+          opts.chosenRoute = best[0][1]
         }
       }
     }
@@ -103,37 +104,40 @@ module.exports = async (opts) => {
     let ch = await me.getChannel(nextHop, opts.asset)
     if (!ch) return
 
+    // 4. do we have enough payable for this hop?
     if (amount > ch.payable) {
-      react({alert: `Not enough funds ${ch.payable}`}, false)
+      return react({alert: `Not enough funds ${ch.payable}`}, false)
     } else if (amount > K.max_amount) {
-      react({alert: `Maximum payment is $${commy(K.max_amount)}`}, false)
+      return react({alert: `Maximum payment is $${commy(K.max_amount)}`}, false)
     } else if (amount < K.min_amount) {
-      react({alert: `Minimum payment is $${commy(K.min_amount)}`}, false)
-    } else {
-      let outward = Payment.build({
-        deltumId: ch.d.id,
-        type: opts.addrisk ? 'addrisk' : 'add',
-        lazy_until: opts.lazy ? +new Date() + 30000 : null,
-
-        status: 'new',
-        is_inward: false,
-        asset: opts.asset,
-
-        amount: amount,
-        hash: bin(hash),
-        exp: K.usable_blocks + K.hashlock_exp,
-
-        unlocker: onion,
-        destination_address: addr.address,
-        invoice: opts.invoice
-      })
-
-      if (argv.syncdb) {
-        await outward.save()
-      }
-
-      ch.payments.push(outward)
+      return react({alert: `Minimum payment is $${commy(K.min_amount)}`}, false)
     }
+
+    let outward = Payment.build({
+      deltumId: ch.d.id,
+      type: opts.addrisk ? 'addrisk' : 'add',
+      lazy_until: opts.lazy ? +new Date() + 30000 : null,
+
+      status: 'new',
+      is_inward: false,
+      asset: opts.asset,
+
+      amount: amount,
+      hash: bin(hash),
+      exp: K.usable_blocks + K.hashlock_exp,
+
+      unlocker: onion,
+      destination_address: addr.address,
+      invoice: opts.invoice
+    })
+
+    if (argv.syncdb) {
+      await outward.save()
+    }
+
+    ch.payments.push(outward)
+
+    l('Paying to ', addr, reversed, onion.length)
 
     react({}, false)
     me.flushChannel(ch.d.partnerId, opts.asset, true)

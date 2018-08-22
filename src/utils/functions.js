@@ -95,13 +95,16 @@ const loadValidators = (validators) => {
 }
 
 const generateMonkeys = async () => {
-  const derive = require('./utils/derive')
+  const derive = require('./derive')
   const addr = []
-  for (let i = 8001; i < 8200; i++) {
+
+  for (let i = 8001; i < 8060; i++) {
     const username = i.toString()
     const seed = await derive(username, 'password')
     const me = new Me()
     await me.init(username, seed)
+    // all monkeys use main by default
+    PK.usedHubs = [1]
     addr.push(me.getAddress())
   }
   // save new-line separated monkey addresses
@@ -267,7 +270,7 @@ const getUserAsset = (user, asset) => {
   }
 }
 
-const setUserAsset  = (user, asset, diff) => {
+const setUserAsset = (user, asset, diff) => {
   const assetToken = 'balance' + asset
   if (user.attributes.includes(assetToken)) {
     return (user[assetToken] += diff)

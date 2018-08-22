@@ -238,7 +238,7 @@ module.exports = async (datadir) => {
 
   if (argv.generate_airports || true) {
     let addHub = (data) => {
-      //data.id = K.hubs.length + 1
+      data.id = K.hubs.length + 1000
       data.fee_bps = Math.round(Math.random() * 500)
       data.name = data.handle
       data.pubkey = crypto.randomBytes(32)
@@ -264,8 +264,8 @@ module.exports = async (datadir) => {
       let to = K.hubs.find((h) => h.handle == parts[4])
 
       // if not exists, create stub-hubs
-      if (!from) from = addHub({handle: parts[2], id: parseInt(parts[3])})
-      if (!to) to = addHub({handle: parts[4], id: parseInt(parts[5])})
+      if (!from) from = addHub({handle: parts[2]})
+      if (!to) to = addHub({handle: parts[4]})
 
       if (Router.getRouteIndex(from.id, to.id) == -1) {
         // only unique routes are saved

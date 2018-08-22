@@ -105,6 +105,12 @@ Array.prototype.randomElement = function() {
   return this[Math.floor(Math.random() * this.length)]
 }
 
+openBrowser = () => {
+  const url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
+  l(note(`Open ${link(url)} in your browser`))
+  opn(url)
+}
+
 // cache layer stores most commonly edited records:
 // channels, payments, users and insurances
 // also K.json is stored

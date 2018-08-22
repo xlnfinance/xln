@@ -157,7 +157,7 @@ window.render = (r) => {
 
   // verify if opener-initiated last hashargs payment succeded (we know secret for this invoice)
 
-  if (opener && r.payment_complete) {
+  if (opener && r.payment_outcome == 'success') {
     l('Pinging parent')
     opener.postMessage({status: 'paid'}, '*')
   }
