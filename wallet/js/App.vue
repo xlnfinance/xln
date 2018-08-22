@@ -403,9 +403,10 @@ export default {
 
 
     go: (path) => {
-      var authed = ['wallet', 'credit', 'onchain', 'testnet']
+      var authed = ['wallet', 'onchain', 'testnet']
 
       //if (authed.includes(path) && !localStorage.auth_code) path = ''
+
 
       if (path == '') {
         history.pushState('/', null, '/')
@@ -602,8 +603,8 @@ export default {
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
             <a class="nav-link" @click="go('wallet')">💰 Wallet</a>
           </li>
-          <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='credit' }">
-            <a class="nav-link" @click="go('credit')">💳 Credit Limits</a>
+          <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='hubs' }">
+            <a class="nav-link" title="Hubs that instantly process payments" @click="go('hubs')">⚡️ Hubs</a>
           </li>
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
@@ -627,7 +628,6 @@ export default {
               </li>
 
 
-              <li><a class="nav-link" @click="go('hubs')" title="Hubs that instantly process payments. Run your own!">⚡️ Hubs</a></li>
 
               <li><a class="nav-link" @click="go('validators')">🤵 Validators</a></li>
 
@@ -916,46 +916,115 @@ export default {
 
         </form>
       </div>
-      <div v-else-if="pubkey && tab=='credit'">
-        <h3>Credit Limits</h3>
+      <div v-else-if="tab=='hubs'">
+        <template v-if="pubkey && channelsForAsset().length > 0">
+          <h3>Credit Limits</h3>
 
-        <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
+          <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
 
 
 
-        <table class="table">
+          <table class="table">
+            <thead class="thead-dark">
+              <tr>
+                <th scope="col">Hub</th>
+                <th scope="col">Receivable</th>
+                <th scope="col">Hard limit</th>
+                <th scope="col">Soft limit</th>
+                <th scope="col">Request Insurance</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="ch in channelsForAsset()">
+                <td>{{ch.hub.handle}}</td>
+                <td>{{commy(ch.they_payable)}}</td>
+                <td><input type="text" class="form-control" v-model="chAction(ch).hard_limit"></td>
+                </td>
+                <td><input type="text" class="form-control" v-model="chAction(ch).soft_limit"></td>
+                <td><input type="checkbox" v-model="chAction(ch).request_insurance"> </td>
+              </tr>
+            </tbody>
+          </table>
+
+
+          <p>
+            <button type="button" class="btn btn-danger" @click="setLimits()" href="#">Save</button>
+          </p>
+
+          <p>
+            <button type="button" class="btn btn-success" @click="go('hubs')" href="#">Add or remove hubs</button>
+          </p>
+
+          <p><button type="button" class="btn btn-danger" @click="call('logout')">Graceful Shutdown
+          </button></p>
+        </template>
+        <h1>Hubs</h1>
+        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks.</p>
+
+        <p>Current routes: {{K.routes.map((pair)=>to_user(pair[0])+'-'+to_user(pair[1])).join(', ')}}</p>
+          
+
+
+        <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
-              <th scope="col">Hub</th>
-              <th scope="col">Receivable</th>
-              <th scope="col">Hard limit</th>
-              <th scope="col">Soft limit</th>
-              <th scope="col">Request Insurance</th>
+              <th scope="col">#</th>
+              <th scope="col">Handle</th>
+              <th scope="col">Created At</th>
+              <th scope="col">Fee</th>
+              <th scope="col">Location</th>
+              <th scope="col">Total FRD Insurances</th>
+              <th v-if="PK" scope="col">Action</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="ch in channelsForAsset()">
-              <td>{{ch.hub.handle}}</td>
-              <td>{{commy(ch.they_payable)}}</td>
-              <td><input type="text" class="form-control" v-model="chAction(ch).hard_limit"></td>
-              </td>
-              <td><input type="text" class="form-control" v-model="chAction(ch).soft_limit"></td>
-              <td><input type="checkbox" v-model="chAction(ch).request_insurance"> </td>
+            <tr v-for="u in K.hubs">
+              <th>{{u.id}}</th>
+              <th>{{u.handle}}</th>
+              <th>{{timeAgo(u.createdAt)}}</th>
+              <th>{{bpsToPercent(u.fee_bps)}}</th>
+              <th>{{u.location}}</th>
+
+              <th>{{commy(u.sumForUser)}}</th>
+
+              <th v-if="PK">
+                <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-danger" @click="call('toggleHub', {id: u.id})">Remove</button>
+                <button v-else-if="my_hub && my_hub.id==u.id" class="btn btn-success">It's you!</button>
+                <button v-else class="btn btn-success" @click="call('toggleHub', {id: u.id})">Add</button>
+              </th>
             </tr>
           </tbody>
         </table>
 
 
-        <p>
-          <button type="button" class="btn btn-danger" @click="setLimits()" href="#">Save</button>
-        </p>
+        <div class="form-group">
+          <h2>Create a Hub</h2>
 
-        <p>
-          <button type="button" class="btn btn-success" @click="go('hubs')" href="#">Add or remove hubs</button>
-        </p>
+          <p><label for="comment">Handle:</label>
+          <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input></p>
 
-        <p><button type="button" class="btn btn-danger" @click="call('logout')">Graceful Shutdown
-        </button></p>
+          
+          <p><label for="comment">Fee (in basis points, eg 10 is 0.1%):</label>
+          <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input></p>
+
+          <p><label for="comment">Location (Fairlayer-compatible RPC):</label>
+          <input class="form-control" v-model="new_hub.location" rows="2"></input></p>
+
+          <p><label for="comment">Routes to add (their hub id, route agreement in hex):</label>
+          <input class="form-control" v-model="new_hub.add_routes" rows="2"></input></p>
+
+          <p><label for="comment">Routes to remove (comma separated ids):</label>
+          <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input></p>
+
+
+          <p v-if="record && !my_hub"><button class="btn btn-success" @click="call('createHub', new_hub)">Create Hub</button></p>
+          <p v-else-if="my_hub"><b>You are already a hub.</b></p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+
+          <div class="alert alert-primary">After execution this account will be marked as a hub. Do not use this account for any other purposes.</div>
+        </div>
+
+
 
       </div>
       <div v-else-if="tab=='onchain'">
@@ -1356,76 +1425,7 @@ export default {
         </table>
       </div>
 
-      <div v-else-if="tab=='hubs'">
-        <h1>Hubs</h1>
-        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks.</p>
 
-        <p>Current routes: {{K.routes.map((pair)=>to_user(pair[0])+'-'+to_user(pair[1])).join(', ')}}</p>
-          
-
-
-        <table class="table table-striped">
-          <thead class="thead-dark">
-            <tr>
-              <th scope="col">#</th>
-              <th scope="col">Handle</th>
-              <th scope="col">Created At</th>
-              <th scope="col">Fee</th>
-              <th scope="col">Location</th>
-              <th scope="col">Total FRD Insurances</th>
-              <th v-if="PK" scope="col">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in K.hubs">
-              <th>{{u.id}}</th>
-              <th>{{u.handle}}</th>
-              <th>{{timeAgo(u.createdAt)}}</th>
-              <th>{{bpsToPercent(u.fee_bps)}}</th>
-              <th>{{u.location}}</th>
-
-              <th>{{commy(u.sumForUser)}}</th>
-
-              <th v-if="PK">
-                <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-danger" @click="call('toggleHub', {id: u.id})">Remove</button>
-                <button v-else-if="my_hub && my_hub.id==u.id" class="btn btn-success">It's you!</button>
-                <button v-else class="btn btn-success" @click="call('toggleHub', {id: u.id})">Add</button>
-              </th>
-            </tr>
-          </tbody>
-        </table>
-
-
-        <div class="form-group">
-          <h2>Create a Hub</h2>
-
-          <p><label for="comment">Handle:</label>
-          <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input></p>
-
-          
-          <p><label for="comment">Fee (in basis points, eg 10 is 0.1%):</label>
-          <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input></p>
-
-          <p><label for="comment">Location (Fairlayer-compatible RPC):</label>
-          <input class="form-control" v-model="new_hub.location" rows="2"></input></p>
-
-          <p><label for="comment">Routes to add (their hub id, route agreement in hex):</label>
-          <input class="form-control" v-model="new_hub.add_routes" rows="2"></input></p>
-
-          <p><label for="comment">Routes to remove (comma separated ids):</label>
-          <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input></p>
-
-
-          <p v-if="record && !my_hub"><button class="btn btn-success" @click="call('createHub', new_hub)">Create Hub</button></p>
-          <p v-else-if="my_hub"><b>You are already a hub.</b></p>
-          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
-
-          <div class="alert alert-primary">After execution this account will be marked as a hub. Do not use this account for any other purposes.</div>
-        </div>
-
-
-
-      </div>
 
       <div v-else-if="tab=='assets'">
         <h1>Assets</h1>

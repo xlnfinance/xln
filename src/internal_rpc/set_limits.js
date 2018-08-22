@@ -13,6 +13,8 @@ module.exports = async (p) => {
     ch.d.requested_insurance = action.request_insurance == 1
     await ch.d.save()
 
+    l('set limits to ', ch.hub)
+
     me.send(
       ch.hub,
       'setLimits',

@@ -334,6 +334,9 @@ class Me {
   }
 
   async startExternalRPC(advertized_url) {
+    if (!advertized_url) {
+      l('Cannot start rpc on ', advertized_url)
+    }
     // there's 2nd dedicated websocket server for validator/hub commands
 
     me.external_wss_server = require('http').createServer(async (req, res) => {

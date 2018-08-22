@@ -243,6 +243,7 @@ module.exports = async (datadir) => {
       data.name = data.handle
       data.pubkey = crypto.randomBytes(32)
       data.createdAt = ts()
+      data.location = 'ws://127.0.0.1:8100'
       K.hubs.push(data)
       return data
     }

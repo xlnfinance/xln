@@ -44,16 +44,20 @@ module.exports = async (opts) => {
     if (!Number.isInteger(amount)) return
 
     if (!opts.chosenRoute) {
-      // by default choose the cheapest one
-      opts.chosenRoute = await Router.bestRoutes(addr.hubs, {
-        amount: amount,
-        asset: opts.asset
-      })[0]
-    }
-
-    if (!opts.chosenRoute) {
-      l('No such chosen route exists')
-      return false
+      if (me.my_hub && addr.hubs.includes(me.my_hub.id)) {
+        // just pay direct
+        opts.chosenRoute = []
+      } else {
+        // by default choose the cheapest one
+        opts.chosenRoute = await Router.bestRoutes(addr.hubs, {
+          amount: amount,
+          asset: opts.asset
+        })[0]
+        if (!opts.chosenRoute) {
+          l('No such chosen route exists')
+          return false
+        }
+      }
     }
 
     // 1. encrypt msg for destination that has final amount/asset etc and empty envelope
@@ -76,7 +80,6 @@ module.exports = async (opts) => {
 
     // 2. encrypt msg for each hop in reverse order
     let reversed = opts.chosenRoute.reverse()
-    l('Lets encrypt for ', reversed)
     for (let hop of reversed) {
       let hub = K.hubs.find((h) => h.id == hop)
 
@@ -98,7 +101,6 @@ module.exports = async (opts) => {
 
     // 3. now nextHop is equal our first hop, and amount includes all fees
     let ch = await me.getChannel(nextHop, opts.asset)
-
     if (!ch) return
 
     if (amount > ch.payable) {

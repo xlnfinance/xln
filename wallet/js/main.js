@@ -131,6 +131,7 @@ window.renderRisk = (hist) => {
 }
 
 window.render = (r) => {
+  let firstLoad = !app.pubkey
   if (r.alert) notyf.alert(r.alert)
   if (r.confirm) notyf.confirm(r.confirm)
   if (r.reload) {
@@ -163,6 +164,10 @@ window.render = (r) => {
 
   Object.assign(window.app, r)
   window.app.$forceUpdate()
+
+  // go add hubs if no channels exist
+  if (firstLoad && app.tab == 'wallet' && app.channelsForAsset().length == 0)
+    app.go('hubs')
 
   if (r.history && window.riskcanvas) {
     renderRisk(r.history)

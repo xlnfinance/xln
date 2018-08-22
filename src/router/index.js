@@ -60,7 +60,8 @@ const Router = {
       let ch = await me.getChannel(hub.pubkey, args.asset)
 
       // account for potentially unpredictable fees?
-      if (ch.payable > args.amount) {
+      // 0 >= 0? return potential routes even for no amount
+      if (ch.payable >= args.amount) {
         fromArray.push(candidate)
       } else {
         l('Not enough payable: ', ch.payable, args.amount)
