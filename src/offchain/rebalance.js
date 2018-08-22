@@ -71,7 +71,7 @@ const rebalance = async function(asset) {
   for (let ch of netSpenders) {
     if (ch.d.withdrawal_sig) {
       weOwn += ch.d.withdrawal_amount
-      let user = await getUserByidOrKey(ch.d.partnerId)
+      let user = await getUserByIdOrKey(ch.d.partnerId)
 
       me.batch.push([
         'withdrawFrom',

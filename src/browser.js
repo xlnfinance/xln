@@ -114,7 +114,7 @@ react = async (result = {}, force = true) => {
         limit: 300
       }),
       me.channels(),
-      getUserByidOrKey(bin(me.id.publicKey))
+      getUserByIdOrKey(bin(me.id.publicKey))
     ])
 
     if (!result.record.id) result.record = null

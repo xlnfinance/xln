@@ -20,11 +20,11 @@ module.exports = async (s, args) => {
       return
     }
 
-    const depositTo = await getUserByidOrKey(output[1])
+    const depositTo = await getUserByIdOrKey(output[1])
     if (!depositTo) return
 
     const withPartner =
-      output[2].length == 0 ? false : await getUserByidOrKey(output[2])
+      output[2].length == 0 ? false : await getUserByIdOrKey(output[2])
 
     // here we ensure both parties are registred (have id), and take needed fees
     if (!depositTo.id) {

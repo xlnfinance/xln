@@ -85,7 +85,7 @@ module.exports = async (p) => {
         userId = Buffer.from(to, 'hex')
 
         // maybe this pubkey is already registred?
-        let u = await getUserByidOrKey(userId)
+        let u = await getUserByIdOrKey(userId)
 
         if (u.id) {
           userId = u.id
@@ -94,7 +94,7 @@ module.exports = async (p) => {
         // looks like numerical ID
         userId = parseInt(to)
 
-        let u = await getUserByidOrKey(userId)
+        let u = await getUserByIdOrKey(userId)
 
         if (!u) {
           result.alert = 'User with short ID ' + userId + " doesn't exist."

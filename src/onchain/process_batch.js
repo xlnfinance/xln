@@ -69,7 +69,7 @@ Tx.cancelOrder = async (s, args) => {
 module.exports = async (s, batch) => {
   let [id, sig, body] = r(batch)
 
-  s.signer = await getUserByidOrKey(readInt(id))
+  s.signer = await getUserByIdOrKey(readInt(id))
 
   if (!s.signer || !s.signer.id) {
     l(id, s.signer)
