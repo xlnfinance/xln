@@ -1,3 +1,5 @@
+const fs = require('fs')
+
 // returns validator making block right now, use skip=true to get validator for next slot
 const nextValidator = (skip = false) => {
   const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
@@ -248,26 +250,31 @@ const getUserByIdOrKey = async function(id) {
 }
 
 const userAsset = (user, asset, diff) => {
-  // native assets have dedicated column
-  if (user.attributes.includes('balance' + asset)) {
-    if (diff) {
-      return (user['balance' + asset] += diff)
-    } else {
-      return user['balance' + asset]
-    }
+  if (diff) {
+    return setUserAsset(user, asset, diff)
   } else {
-    // read and write on the fly
-    let bals = JSON.parse(user.balances || '{}')
-    if (diff) {
-      if (!bals[asset]) {
-        bals[asset] = 0
-      }
-      bals[asset] += diff
-      user.balances = stringify(bals)
-      return bals[asset]
-    } else {
-      // 0 by default
-      return bals[asset] ? bals[asset] : 0
+    return getUserAsset(user, asset)
+  }
+}
+
+const getUserAsset = (user, asset) => {
+  const assetToken = 'balance' + asset
+  if (user.attributes.includes(assetToken)) {
+    return user[assetToken]
+  } else {
+    const balances = JSON.parse(user.balances || '{}')
+    return balances[asset] ? balances[asset] : 0
+  }
+}
+
+const setUserAsset  = (user, asset, diff) => {
+  const assetToken = 'balance' + asset
+  if (user.attributes.includes(assetToken)) {
+    return (user[assetToken] += diff)
+  } else {
+    const balanes = JSON.parse(user.balances || '{}')
+    if (!balanes[asset]) {
+      balanes[asset] = 0
     }
     balanes[asset] += diff
     user.balances = stringify(balanes)
