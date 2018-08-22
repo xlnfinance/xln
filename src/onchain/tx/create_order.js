@@ -50,7 +50,7 @@ module.exports = async (s, args) => {
 
     //l('Suitable order', we_buy, they_buy, their)
 
-    const seller = await getUserByidOrKey(their.userId)
+    const seller = await getUserByIdOrKey(their.userId)
     if (we_buy > their.amount) {
       // close their order. give seller what they wanted
       userAsset(seller, their.buyAssetId, they_buy)

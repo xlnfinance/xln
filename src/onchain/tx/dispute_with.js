@@ -19,7 +19,7 @@ module.exports = async (s, args) => {
   for (const dispute of args) {
     const [id, sig, state] = dispute
 
-    const partner = await getUserByidOrKey(id)
+    const partner = await getUserByIdOrKey(id)
     if (!partner || !partner.id) {
       l('Your partner is not registred')
       await saveId(partner)
