@@ -6,7 +6,7 @@ module.exports = async (s, args) => {
 
     amount = readInt(amount)
 
-    const partner = await getUserByidOrKey(partnerId)
+    const partner = await getUserByIdOrKey(partnerId)
     if (!partner || !partner.id) {
       l('Cant withdraw from nonexistent partner')
       return

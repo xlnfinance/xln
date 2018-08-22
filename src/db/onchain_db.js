@@ -193,7 +193,7 @@ class OnсhainDB {
   }
 
   init() {
-    l('Initializing onchain db from ', this.datadir)
+    l('Initializing onchain db from', this.datadir)
 
     const [database, username, password, config] = getDBConfig(this.datadir)
     this.db = new Sequelize(database, username, password, config)

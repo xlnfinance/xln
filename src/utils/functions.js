@@ -1,3 +1,5 @@
+const fs = require('fs')
+
 // returns validator making block right now, use skip=true to get validator for next slot
 const nextValidator = (skip = false) => {
   const currentIndex = Math.floor(ts() / K.blocktime) % K.total_shares
@@ -210,7 +212,7 @@ const getInsuranceSumForUser = async function(id, asset = 1) {
   return Math.max(sum, 0)
 }
 
-const getUserByidOrKey = async function(id) {
+const getUserByIdOrKey = async function(id) {
   if (typeof id != 'number' && id.length != 32) {
     id = readInt(id)
   }
@@ -248,27 +250,35 @@ const getUserByidOrKey = async function(id) {
 }
 
 const userAsset = (user, asset, diff) => {
-  // native assets have dedicated column
-  if (user.attributes.includes('balance' + asset)) {
-    if (diff) {
-      return (user['balance' + asset] += diff)
-    } else {
-      return user['balance' + asset]
-    }
+  if (diff) {
+    return setUserAsset(user, asset, diff)
   } else {
-    // read and write on the fly
-    let bals = JSON.parse(user.balances || '{}')
-    if (diff) {
-      if (!bals[asset]) {
-        bals[asset] = 0
-      }
-      bals[asset] += diff
-      user.balances = stringify(bals)
-      return bals[asset]
-    } else {
-      // 0 by default
-      return bals[asset] ? bals[asset] : 0
+    return getUserAsset(user, asset)
+  }
+}
+
+const getUserAsset = (user, asset) => {
+  const assetToken = 'balance' + asset
+  if (user.attributes.includes(assetToken)) {
+    return user[assetToken]
+  } else {
+    const balances = JSON.parse(user.balances || '{}')
+    return balances[asset] ? balances[asset] : 0
+  }
+}
+
+const setUserAsset  = (user, asset, diff) => {
+  const assetToken = 'balance' + asset
+  if (user.attributes.includes(assetToken)) {
+    return (user[assetToken] += diff)
+  } else {
+    const balanes = JSON.parse(user.balances || '{}')
+    if (!balanes[asset]) {
+      balanes[asset] = 0
     }
+    balanes[asset] += diff
+    user.balances = stringify(balanes)
+    return balanes[asset]
   }
 }
 
@@ -278,7 +288,7 @@ const userPayDebts = async (user, asset, parsed_tx) => {
   const debts = await user.getDebts({where: {asset: asset}})
 
   for (const d of debts) {
-    var u = await getUserByidOrKey(d.oweTo)
+    var u = await getUserByIdOrKey(d.oweTo)
 
     // FRD cannot be enforced below safety limit,
     // otherwise the nodes won't be able to send onchain tx
@@ -353,8 +363,8 @@ const insuranceResolve = async (insurance) => {
     true
   )
 
-  var left = await getUserByidOrKey(insurance.leftId)
-  var right = await getUserByidOrKey(insurance.rightId)
+  var left = await getUserByIdOrKey(insurance.leftId)
+  var right = await getUserByIdOrKey(insurance.rightId)
 
   // splitting insurance between users
   userAsset(left, insurance.asset, resolved.insured)
@@ -445,7 +455,7 @@ const proposalExecute = async (proposal) => {
 
 const deltaGetDispute = async (delta) => {
   // post last sig if any
-  const partner = await getUserByidOrKey(delta.partnerId)
+  const partner = await getUserByIdOrKey(delta.partnerId)
 
   // the user is not even registered (we'd have to register them first)
   const id = partner.id ? partner.id : delta.partnerId
@@ -480,7 +490,7 @@ module.exports = {
   setupDirectories: setupDirectories,
   getInsuranceBetween: getInsuranceBetween,
   getInsuranceSumForUser: getInsuranceSumForUser,
-  getUserByidOrKey: getUserByidOrKey,
+  getUserByIdOrKey: getUserByIdOrKey,
   userAsset: userAsset,
   userPayDebts: userPayDebts,
   insuranceResolve: insuranceResolve,

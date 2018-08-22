@@ -25,7 +25,7 @@ module.exports = async (s, header, ordered_tx_body) => {
   built_by = readInt(built_by)
   prev_hash = toHex(prev_hash)
 
-  s.proposer = await getUserByidOrKey(built_by)
+  s.proposer = await getUserByIdOrKey(built_by)
 
   if (!s.proposer) {
     l(`This user doesnt exist ${built_by}`)

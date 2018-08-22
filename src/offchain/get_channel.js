@@ -94,7 +94,7 @@ module.exports = async (pubkey, asset, delta = false) => {
       }
     }
 
-    let user = await getUserByidOrKey(pubkey)
+    let user = await getUserByIdOrKey(pubkey)
 
     // default ins
     ch.ins = Insurance.build({

@@ -95,7 +95,7 @@ class Me {
       return false
     }
 
-    me.record = await getUserByidOrKey(bin(me.id.publicKey))
+    me.record = await getUserByIdOrKey(bin(me.id.publicKey))
     if (!me.record || !me.record.id) {
       //l("You can't broadcast if you are not registred")
       return false
@@ -217,7 +217,7 @@ class Me {
 
   async start() {
     // in json pubkeys are in hex
-    me.record = await getUserByidOrKey(bin(me.id.publicKey))
+    me.record = await getUserByIdOrKey(bin(me.id.publicKey))
 
     if (me.record) {
       me.my_validator = Validators.find((m) => m.id == me.record.id)
