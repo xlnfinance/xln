@@ -172,6 +172,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
       }
 
       if (new_type != m) {
+        l('Fail for no reason')
         // go to next transition - we failed this hashlock already
       } else if (!box_data.unlocker && box_data.secret) {
         // we are final destination, no unlocker to pass
@@ -205,7 +206,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub && box_data.nextHop) {
-        //loff(`Forward ${amount} to ${trim(destination)}`)
+        loff(`Forward ${amount} to ${box_data.nextHop}`)
         let outward_amount = afterFees(amount, me.my_hub)
 
         // ensure it's equal what they expect us to pay
@@ -213,9 +214,12 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
         let dest_ch = await me.getChannel(nextHop, asset)
 
-        // is online? Is payable?
-
-        if (me.users[nextHop] && dest_ch.payable >= outward_amount) {
+        // is next hop online? Is payable?
+        if (
+          me.users[nextHop] &&
+          dest_ch.status != 'disputed' &&
+          dest_ch.payable >= outward_amount
+        ) {
           var outward_hl = Payment.build({
             deltumId: dest_ch.d.id,
             type: m,
@@ -242,6 +246,9 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
           uniqAdd(dest_ch.d.partnerId)
         } else {
+          l('Failed to mediate')
+          inward_hl.secret = bin('nope')
+          // fail right now
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
 
@@ -265,6 +272,8 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         // otherwise it is a reason why mediation failed
         var valid = false
       }
+
+      l('Got outcome: ', outcome.length)
 
       // todo check expirations
       var outward_hl = ch.outwards.find((hl) => hl.hash.equals(hash))
@@ -321,6 +330,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
             continue
             //fatal('Not found pull hl')
           }
+          // pass same outcome down the chain
 
           pull_hl.secret = outcome
           pull_hl.type = 'del'

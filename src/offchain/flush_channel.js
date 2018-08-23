@@ -123,7 +123,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
             //continue
           }
 
-          args = [t.amount, t.hash, t.exp, t.unlocker]
+          // set exp right before flushing to keep it fresh
+          ;(t.exp = K.usable_blocks + K.hashlock_exp),
+            (args = [t.amount, t.hash, t.exp, t.unlocker])
         }
 
         t.status = 'sent'

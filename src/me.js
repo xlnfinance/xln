@@ -313,7 +313,11 @@ class Me {
 
   async startExternalRPC(advertized_url) {
     if (!advertized_url) {
-      l('Cannot start rpc on ', advertized_url)
+      return l('Cannot start rpc on ', advertized_url)
+    }
+
+    if (me.external_wss_server) {
+      return l('Already have external server started')
     }
     // there's 2nd dedicated websocket server for validator/hub commands
 
@@ -392,16 +396,17 @@ class Me {
           channels.push(ch)
         }
       }
-    } else {
-      for (var m of K.hubs) {
-        if (me.record && me.record.id == m.id) continue
+    }
 
-        if (!PK.usedHubs.includes(m.id)) continue
+    // now add all channels to used hubs
+    for (var m of K.hubs) {
+      if (me.record && me.record.id == m.id) continue
 
-        for (let asset of assets) {
-          var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
-          channels.push(ch)
-        }
+      if (!PK.usedHubs.includes(m.id)) continue
+
+      for (let asset of assets) {
+        var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
+        channels.push(ch)
       }
     }
 

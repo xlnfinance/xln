@@ -169,6 +169,19 @@ window.render = (r) => {
   if (firstLoad && app.tab == 'wallet' && app.channelsForAsset().length == 0)
     app.go('hubs')
 
+  if (firstLoad) {
+    setTimeout(() => {
+      drawHubgraph({
+        nodes: app.K.hubs.map((h) => {
+          return {id: h.id, handle: h.handle, group: 1}
+        }),
+        links: app.K.routes.map((r) => {
+          return {source: r[0], target: r[1], value: 1}
+        })
+      })
+    }, 500)
+  }
+
   if (r.history && window.riskcanvas) {
     renderRisk(r.history)
   }

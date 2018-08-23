@@ -55,10 +55,10 @@ module.exports = async (pubkey, asset, delta = false) => {
     if (delta) {
       ch.d = delta
     } else {
-      // we trust by default to @main hub in FRD asset
+      // we trust by default to @Europe hub in FRD asset
       let defaultTrust = 'off'
       if (asset == 1) {
-        // we are @main
+        // we are @Europe
         if (me.record.id == 1) {
           defaultTrust = 'we'
         } else {

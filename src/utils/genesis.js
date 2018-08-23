@@ -222,8 +222,8 @@ module.exports = async (datadir) => {
     fee_bps: 10,
     createdAt: ts(),
 
-    handle: 'main',
-    name: '@main (Main)'
+    handle: 'Europe',
+    name: '@Europe'
   })
 
   // similar to https://en.wikipedia.org/wiki/Nostro_and_vostro_accounts

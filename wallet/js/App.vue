@@ -961,6 +961,9 @@ export default {
         <h1>Hubs</h1>
         <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks.</p>
 
+
+
+        <svg width="1260" height="1000" id="hubgraph"></svg>
         <p>Current routes: {{K.routes.map((pair)=>to_user(pair[0])+'-'+to_user(pair[1])).join(', ')}}</p>
           
 

@@ -40,11 +40,21 @@ const payMonkey = async (on_server, counter = 1) => {
 
 if (argv.monkey) {
   if (base_port > 8000) {
-    // add main hub by default
+    // add Europe hub by default
     PK.usedHubs.push(1)
   }
 
-  if (parseInt(base_port) > 8003) {
+  if (base_port > 8000 && base_port <= 8003) {
+    require('./internal_rpc/create_hub')({
+      fee_bps: 5,
+      handle: ['Asia', 'America', 'Mallory'][base_port - 8001],
+      location: `ws://${localhost}:${base_port + 1000}`,
+      box_pubkey: bin(me.box.publicKey),
+      add_routes: '1,2,3,4'
+    })
+  }
+
+  if (base_port > 8003) {
     monkeys.splice(monkeys.indexOf(me.getAddress()), 1) // *except our addr
 
     setTimeout(() => {
@@ -69,6 +79,7 @@ if (argv.monkey) {
     return
   }
 
+  // only in monkey mode, not on end user node
   setInterval(me.broadcast, 6000)
 
   if (me.record.id == 1) {
@@ -170,7 +181,7 @@ if (argv.monkey) {
       externalDeposits: [
         {
           to: '3',
-          hub: 'main',
+          hub: 'Europe',
           depositAmount: 912,
           invoice: 'test'
         }

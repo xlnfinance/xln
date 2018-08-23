@@ -21,6 +21,8 @@
     <script src="js/notyf.js"></script>
     
     <script src="js/chart.js"></script>
+    <script src="https://d3js.org/d3.v4.min.js"></script>
+
 
 
     <style>
@@ -33,14 +35,33 @@
         -webkit-font-smoothing: antialiased
     }
     </style>
+<style>
 
+.links line {
+  stroke: #999;
+  stroke-opacity: 0.6;
+}
+
+.nodes circle {
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+text {
+  font-family: sans-serif;
+  font-size: 10px;
+}
+
+</style>
 
   </head>
 
   <body>
 
+
     <div id="app" style="display:none"></div>
       
     <script src="js/main.js"></script>
+    <script src="js/hubgraph.js"></script>
   </body>
 </html>

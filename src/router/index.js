@@ -61,7 +61,7 @@ const Router = {
 
       // account for potentially unpredictable fees?
       // 0 >= 0? return potential routes even for no amount
-      if (ch.payable >= args.amount) {
+      if (ch.d.status == 'master' && ch.payable >= args.amount) {
         fromArray.push(candidate)
       } else {
         l('Not enough payable: ', ch.payable, args.amount)
@@ -94,7 +94,7 @@ const Router = {
         uniqSets.push(serialized)
       } else {
         // not uniq path
-        continue
+        //continue
       }
 
       // calculate total fees of entire path

@@ -7,7 +7,6 @@ module.exports = async (opts) => {
 
     //l('paying ', opts.destination.length, toHex(opts.destination))
 
-    // todo not generate secret and exp here and do it during 'add'ing
     if (!opts.address) {
       l('Error: No address ', opts)
       return false
@@ -51,7 +50,7 @@ module.exports = async (opts) => {
           amount: amount,
           asset: opts.asset
         })
-        if (!best[0][1]) {
+        if (!best[0]) {
           l('No route found:', best, addr.hubs)
           return false
         } else {
@@ -124,7 +123,6 @@ module.exports = async (opts) => {
 
       amount: amount,
       hash: bin(hash),
-      exp: K.usable_blocks + K.hashlock_exp,
 
       unlocker: onion,
       destination_address: addr.address,
