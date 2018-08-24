@@ -162,6 +162,10 @@ window.render = (r) => {
     opener.postMessage({status: 'paid'}, '*')
   }
 
+  if (r.payments && r.payments.length != app.payments.length) {
+    app.updateRoutes()
+  }
+
   Object.assign(window.app, r)
   window.app.$forceUpdate()
 
@@ -170,16 +174,7 @@ window.render = (r) => {
     app.go('hubs')
 
   if (firstLoad) {
-    setTimeout(() => {
-      drawHubgraph({
-        nodes: app.K.hubs.map((h) => {
-          return {id: h.id, handle: h.handle, group: 1}
-        }),
-        links: app.K.routes.map((r) => {
-          return {source: r[0], target: r[1], value: 1}
-        })
-      })
-    }, 500)
+    setTimeout(app.showGraph, 500)
   }
 
   if (r.history && window.riskcanvas) {

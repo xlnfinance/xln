@@ -214,46 +214,58 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
         let dest_ch = await me.getChannel(nextHop, asset)
 
+        let fail = false
+
         // is next hop online? Is payable?
-        if (
-          me.users[nextHop] &&
-          dest_ch.status != 'disputed' &&
-          dest_ch.payable >= outward_amount
-        ) {
-          var outward_hl = Payment.build({
-            deltumId: dest_ch.d.id,
-            type: m,
-            status: 'new',
-            is_inward: false,
+        if (!me.users[nextHop]) {
+          fail = 'offline'
+        }
 
-            amount: outward_amount,
-            hash: bin(hash),
-            exp: exp,
+        if (dest_ch.status == 'disputed') {
+          fail = 'disputed'
+        }
+        if (dest_ch.payable < outward_amount) {
+          fail = 'nocapacity'
+        }
 
-            asset: asset,
-
-            // we pass nested unlocker for them
-            unlocker: fromHex(box_data.unlocker),
-
-            inward_pubkey: bin(pubkey)
-          })
-          dest_ch.payments.push(outward_hl)
-
-          if (trace)
-            l(`Mediating ${outward_amount} payment to ${trim(nextHop)}`)
-
-          //if (argv.syncdb) all.push(outward_hl.save())
-
-          uniqAdd(dest_ch.d.partnerId)
-        } else {
+        if (fail) {
           l('Failed to mediate')
-          inward_hl.secret = bin('nope')
+          inward_hl.secret = bin(fail)
           // fail right now
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
 
           me.metrics.fail.current++
+
+          continue
         }
+
+        // otherwise mediate
+
+        var outward_hl = Payment.build({
+          deltumId: dest_ch.d.id,
+          type: m,
+          status: 'new',
+          is_inward: false,
+
+          amount: outward_amount,
+          hash: bin(hash),
+          exp: exp,
+
+          asset: asset,
+
+          // we pass nested unlocker for them
+          unlocker: fromHex(box_data.unlocker),
+
+          inward_pubkey: bin(pubkey)
+        })
+        dest_ch.payments.push(outward_hl)
+
+        if (trace) l(`Mediating ${outward_amount} payment to ${trim(nextHop)}`)
+
+        //if (argv.syncdb) all.push(outward_hl.save())
+
+        uniqAdd(dest_ch.d.partnerId)
       } else {
         inward_hl.type = m == 'add' ? 'del' : 'delrisk'
         inward_hl.status = 'new'

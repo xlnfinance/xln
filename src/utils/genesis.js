@@ -236,7 +236,7 @@ module.exports = async (datadir) => {
 
   const Router = require('../router')
 
-  if (argv.generate_airports || true) {
+  if (argv.generate_airports) {
     let addHub = (data) => {
       data.id = K.hubs.length + 1000
       data.fee_bps = Math.round(Math.random() * 500)
@@ -251,7 +251,7 @@ module.exports = async (datadir) => {
     // https://www.kaggle.com/open-flights/flight-route-database/discussion
     let data = fs.readFileSync('./tools/routes.csv', {encoding: 'utf8'})
 
-    let routes = data.split('\n').slice(0, 500)
+    let routes = data.split('\n').slice(0, 200)
 
     for (let route of routes) {
       let parts = route.split(',')

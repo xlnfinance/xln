@@ -5,12 +5,17 @@ module.exports = async (p) => {
 
     if (!ch) return result
 
-    // if limits are same, skip
-    if (action.limits == [ch.d.hard_limit, ch.d.soft_limit]) {
+    ch.d.hard_limit = action.hard_limit
+    ch.d.soft_limit = action.soft_limit
+    if (action.request_insurance == 1) {
+      ch.d.requested_insurance = true
+    }
+
+    // nothing happened
+    if (!ch.d.changed()) {
       continue
     }
 
-    ch.d.requested_insurance = action.request_insurance == 1
     await ch.d.save()
 
     l('set limits to ', ch.hub)

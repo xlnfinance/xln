@@ -26,8 +26,10 @@ const Router = {
   },
   //https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
   dijkstra: function(c) {
+    l('Dijkstra', c)
     // gets context on input
-    if (c.targets.includes(c.from)) {
+    let last = c.used[c.used.length - 1]
+    if (c.targets.includes(last)) {
       c.found.push(c.used)
       //return found
     }
@@ -37,13 +39,11 @@ const Router = {
 
     for (let route of K.routes) {
       let context = Object.assign({}, c)
-      if (route[0] == c.from && !c.used.includes(route[1])) {
-        context.from = route[1]
-        context.used = c.used.concat(context.from)
+      if (route[0] == last && !c.used.includes(route[1])) {
+        context.used = c.used.concat(route[1])
         this.dijkstra(context)
-      } else if (route[1] == c.from && !c.used.includes(route[0])) {
-        context.from = route[0]
-        context.used = c.used.concat(context.from)
+      } else if (route[1] == last && !c.used.includes(route[0])) {
+        context.used = c.used.concat(route[0])
         this.dijkstra(context)
       }
     }
@@ -51,8 +51,18 @@ const Router = {
   },
 
   // returns sorted and filtered routes to some nodes for specific asset/amount
-  bestRoutes: async function(toArray, args) {
+  bestRoutes: async function(address, args) {
+    let addr = parseAddress(address)
+    if (!addr) return []
+
+    let toArray = addr.hubs
     let fromArray = []
+    var found = []
+
+    if (me.my_hub && addr.hubs.includes(me.my_hub.id)) {
+      // for faucet: return direct route as only option
+      return [[1, []]]
+    }
 
     // where do we have enough amount in payable
     for (let candidate of PK.usedHubs) {
@@ -61,7 +71,7 @@ const Router = {
 
       // account for potentially unpredictable fees?
       // 0 >= 0? return potential routes even for no amount
-      if (ch.d.status == 'master' && ch.payable >= args.amount) {
+      if (ch.d.status != 'disputed' && ch.payable >= args.amount) {
         fromArray.push(candidate)
       } else {
         l('Not enough payable: ', ch.payable, args.amount)
@@ -71,11 +81,8 @@ const Router = {
     if (!fromArray || !toArray || fromArray.length == 0 || toArray.length == 0)
       return []
 
-    var found = []
-
     for (let from of fromArray) {
       this.dijkstra({
-        from: from,
         targets: toArray,
         used: [from],
         found: found
@@ -89,13 +96,15 @@ const Router = {
 
     for (let route of found) {
       // sort by id and concatenate
-      let serialized = route.sort((a, b) => a - b).join(',')
+      /*
+      let serialized = route.slice().sort((a, b) => a - b).join(',')
       if (!uniqSets.includes(serialized)) {
         uniqSets.push(serialized)
       } else {
         // not uniq path
         //continue
       }
+      */
 
       // calculate total fees of entire path
       var afterfees = 1

@@ -48,7 +48,7 @@ if (argv.monkey) {
     require('./internal_rpc/create_hub')({
       fee_bps: 5,
       handle: ['Asia', 'America', 'Mallory'][base_port - 8001],
-      location: `ws://${localhost}:${base_port + 1000}`,
+      location: `ws://${localhost}:${base_port + 100}`,
       box_pubkey: bin(me.box.publicKey),
       add_routes: '1,2,3,4'
     })
@@ -99,10 +99,9 @@ if (argv.monkey) {
 
       let failed = []
 
-      if (me.metrics.settle.total < 100) failed.push('metrics.settled')
+      if (me.metrics.settle.total < 50) failed.push('metrics.settled')
       if (me.metrics.fail.total < 5) failed.push('metrics.failed')
-
-      if ((await Payment.count()) < 100) failed.push('payments')
+      if ((await Payment.count()) < 50) failed.push('payments')
 
       // was this entirely new user created since genesis?
       if (!monkey5) failed.push('monkey5')

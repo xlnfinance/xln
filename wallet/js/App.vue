@@ -51,6 +51,7 @@ export default {
       assets: [],
       orders: [],
       channels: [],
+      payments: [],
 
 
       
@@ -400,6 +401,19 @@ export default {
       }
     },
 
+    showGraph: ()=>{
+      if (!window.hubgraph) return
+
+      drawHubgraph({
+        nodes: app.K.hubs.map((h) => {
+          return {id: h.id, handle: h.handle, group: 1}
+        }),
+        links: app.K.routes.map((r) => {
+          return {source: r[0], target: r[1], value: 1}
+        })
+      })
+    },
+
 
 
     go: (path) => {
@@ -413,7 +427,13 @@ export default {
       } else {
         location.hash = '#' + path
       }
+
       app.tab = path
+
+
+      
+      app.showGraph()
+      
     },
 
     deltaColor: (d) => {
@@ -568,7 +588,7 @@ export default {
     payment_status: (t) => {
       var s = ''
       if (t.type == 'del' || t.type == 'delrisk') {
-        s = t.secret ? '✔' : '❌'
+        s = t.secret && t.secret.length == 64 ? '✔' : '❌'
       }
       if (t.type == 'add' || t.type == 'addrisk') {
         s = '🔒'
@@ -631,13 +651,13 @@ export default {
 
               <li><a class="nav-link" @click="go('validators')">🤵 Validators</a></li>
 
-              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">👨‍💼 Accounts</a></li>
+              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">🔐 Accounts</a></li>
 
 
               <li><a class="nav-link" @click="go('updates')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
 
                             
-              <li><a class="nav-link" @click="go('hashlocks')">🔐 Hashlocks</a></li>
+              <li><a class="nav-link" @click="go('routes')">☊ Routes</a></li>
 
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
 
@@ -688,7 +708,7 @@ export default {
       <div v-if="sync_started_at && K.ts < ts() - K.safe_sync_delay">
         <h1>Syncing and validating new blocks</h1>
         <p>Please wait for validation of all blocks that were created while your node was offline. To avoid this in the future enable background sync. Blocks synced so far: {{K.total_blocks - sync_started_at}}, tx: {{K.total_tx - sync_tx_started_at}}</p>
-        <div class="progress" style="max-width:1400px">
+        <div class="progress">
           <div class="progress-bar" v-bind:style="{ width: sync_progress+'%', 'background-color':'#5cb85c'}" role="progressbar"></div>
         </div>
       </div>
@@ -786,11 +806,11 @@ export default {
             </small>
 
 
-            <span class="badge badge-success" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, faucet_amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+            <span class="badge badge-success" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
             
             <p>
               <div v-if="ch.bar > 0">
-                <div class="progress" style="max-width:1400px">
+                <div class="progress">
                   <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
                     -{{commy(ch.they_uninsured)}} (they uninsured)
                   </div>
@@ -893,7 +913,6 @@ export default {
           <p><h4 class="danger danger-primary">To start using Fairlayer you must create your own digital identity. Make sure you don't forget your password - <b>password recovery is not possible.</b> If in doubt, write it down or email it to yourself.</h4></p>
 
 
-
           <label for="inputUsername" class="sr-only">Username</label>
           <input v-model="username" type="text" id="inputUsername" class="form-control" placeholder="Username" required autofocus>
           <br>
@@ -928,6 +947,7 @@ export default {
             <thead class="thead-dark">
               <tr>
                 <th scope="col">Hub</th>
+                <th scope="col">Payable</th>
                 <th scope="col">Receivable</th>
                 <th scope="col">Hard limit</th>
                 <th scope="col">Soft limit</th>
@@ -937,6 +957,7 @@ export default {
             <tbody>
               <tr v-for="ch in channelsForAsset()">
                 <td>{{ch.hub.handle}}</td>
+                <td>{{commy(ch.payable)}}</td>
                 <td>{{commy(ch.they_payable)}}</td>
                 <td><input type="text" class="form-control" v-model="chAction(ch).hard_limit"></td>
                 </td>
@@ -951,22 +972,12 @@ export default {
             <button type="button" class="btn btn-danger" @click="setLimits()" href="#">Save</button>
           </p>
 
-          <p>
-            <button type="button" class="btn btn-success" @click="go('hubs')" href="#">Add or remove hubs</button>
-          </p>
 
           <p><button type="button" class="btn btn-danger" @click="call('logout')">Graceful Shutdown
           </button></p>
         </template>
         <h1>Hubs</h1>
-        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks.</p>
-
-
-
-        <svg width="1260" height="1000" id="hubgraph"></svg>
-        <p>Current routes: {{K.routes.map((pair)=>to_user(pair[0])+'-'+to_user(pair[1])).join(', ')}}</p>
-          
-
+        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks. <a class="dotted" @click=go('routes')>See routes between them here</a>.</p>
 
         <table class="table table-striped">
           <thead class="thead-dark">
@@ -1407,25 +1418,10 @@ export default {
           </tbody>
         </table>
       </div>
-      <div v-else-if="tab=='hashlocks'">
-        <h1>Hashlocks</h1>
-        <p>Each payment with hashlock is atomic and protected from any party misbehaving. If your partner doesn't ack when you return the secret, your wallet reveals the secret to blockchain publicly. It will be stored for a while (about a week) and your hashlock will be considered unlocked. Make sure to end your disputes until the hashlock is deleted from blockchain. It is a global evidence that the payment was executed.</p>
-        <table class="table table-striped">
-          <thead class="thead-dark">
-            <tr>
-              <th scope="col">Hash</th>
-              <th scope="col">Revealed At</th>
-              <th scope="col">Delete At</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in hashlocks">
-              <th>{{u.hash}}</th>
-              <th>{{u.revealed_at}}</th>
-              <th>{{u.delete_at}}</th>
-            </tr>
-          </tbody>
-        </table>
+
+      <div v-else-if="tab=='routes'">
+        <svg width="800" height="600" id="hubgraph"></svg>
+        <p>Current routes: {{K.routes.map((pair)=>to_user(pair[0])+'-'+to_user(pair[1])).join(', ')}}</p>
       </div>
 
 

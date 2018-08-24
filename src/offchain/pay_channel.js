@@ -19,10 +19,13 @@ module.exports = async (opts) => {
       return
     }
 
+    /* for offchain rebalancing 
+
     if (addr.address == me.getAddress()) {
       react({alert: `Cannot pay to yourself`}, false)
       return
     }
+    */
 
     // use user supplied private message, otherwise generate random tag
     // invoice inside the address takes priority
@@ -46,7 +49,7 @@ module.exports = async (opts) => {
         opts.chosenRoute = []
       } else {
         // by default choose the cheapest one
-        let best = await Router.bestRoutes(addr.hubs, {
+        let best = await Router.bestRoutes(opts.address, {
           amount: amount,
           asset: opts.asset
         })
@@ -101,7 +104,10 @@ module.exports = async (opts) => {
 
     // 3. now nextHop is equal our first hop, and amount includes all fees
     let ch = await me.getChannel(nextHop, opts.asset)
-    if (!ch) return
+    if (!ch) {
+      l('No channel to ', nextHop)
+      return
+    }
 
     // 4. do we have enough payable for this hop?
     if (amount > ch.payable) {

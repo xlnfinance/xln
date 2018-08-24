@@ -13,11 +13,14 @@ module.exports = async (args) => {
   if (action == 1) {
     let asset = readInt(args[1])
     let amount = readInt(args[2])
-    me.payChannel({
+    let pay = {
       address: args[3],
       amount: amount,
       invoice: friendly_invoice,
       asset: asset
-    })
+    }
+
+    l('testnet', pay)
+    await me.payChannel(pay)
   }
 }

@@ -6,17 +6,7 @@ module.exports = (p) => {
   } else if (p.action == 6) {
     me.CHEAT_dontwithdraw = 1
   } else {
-    me.testnet({
-      partner: p.partner,
-      asset: p.asset,
-      amount: parseInt(p.faucet_amount)
-    })
-    /*
-    me.send(
-      Validators.find((m) => m.id == p.partner),
-      'testnet',
-      concat(bin([p.action, p.asset]), bin(me.getAddress()))
-    )*/
+    me.testnet(p)
   }
 
   let result = {confirm: 'Testnet action triggered'}

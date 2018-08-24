@@ -89,15 +89,30 @@ module.exports = async (ws, json) => {
       break
 
     case 'getRoutes':
-      let addr = parseAddress(json.params.address)
-
-      result.bestRoutes = await Router.bestRoutes(addr.hubs, json.params)
+      result.bestRoutes = await Router.bestRoutes(
+        json.params.address,
+        json.params
+      )
       break
 
     case 'toggleHub':
       let index = PK.usedHubs.indexOf(json.params.id)
       if (index == -1) {
         PK.usedHubs.push(json.params.id)
+
+        let hub = K.hubs.find((h) => h.id == json.params.id)
+
+        require('./set_limits')({
+          chActions: [
+            {
+              partnerId: hub.pubkey,
+              hard_limit: K.hard_limit,
+              soft_limit: K.soft_limit,
+              asset: 1
+            }
+          ]
+        })
+
         result.confirm = 'Hub added'
       } else {
         // ensure no connection
