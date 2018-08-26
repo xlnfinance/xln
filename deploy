@@ -10,6 +10,9 @@ set -o pipefail
 rm -rf data*
 rm -rf isolate*
 
+# put last git commit into readable file
+git rev-parse HEAD > HEAD
+
 rsync . root@fairlayer.com:~/fair -rv  --exclude '.git' --exclude 'node_modules' --exclude 'dist' --exclude '.cache'  
 #--delete
 

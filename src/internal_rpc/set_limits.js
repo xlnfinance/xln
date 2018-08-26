@@ -7,9 +7,6 @@ module.exports = async (p) => {
 
     ch.d.hard_limit = action.hard_limit
     ch.d.soft_limit = action.soft_limit
-    if (action.request_insurance == 1) {
-      ch.d.requested_insurance = true
-    }
 
     // nothing happened
     if (!ch.d.changed()) {
@@ -27,11 +24,10 @@ module.exports = async (p) => {
         methodMap('setLimits'),
         ch.d.asset,
         ch.d.soft_limit,
-        ch.d.hard_limit,
-        action.request_insurance // 1 or undefined
+        ch.d.hard_limit
       )
     )
   }
 
-  return {confirm: 'Updated limits with hubs'}
+  return {confirm: 'Updated credit limits with hubs'}
 }

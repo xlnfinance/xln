@@ -18,15 +18,6 @@ argv = require('minimist')(process.argv.slice(2), {
   string: ['username', 'pw']
 })
 
-on_server = !!argv['prod-server']
-
-if (on_server) {
-  let Raven = require('raven')
-  Raven.config(
-    'https://299a833b1763402f9216d8e7baeb6379@sentry.io/1226040'
-  ).install()
-}
-
 datadir = argv.datadir ? argv.datadir : 'data'
 base_port = argv.p ? parseInt(argv.p) : 8001
 trace = !!argv.trace
@@ -44,6 +35,19 @@ cache = {
 exitsync = false
 
 monkeys = []
+
+on_server = !!argv['prod-server']
+
+let git_commit = child_process
+  .execSync(on_server ? 'cat HEAD' : `cd ~/work/fair;git rev-parse HEAD`)
+  .toString()
+  .trim()
+
+// must stay global for logs
+Raven = require('raven')
+Raven.config('https://299a833b1763402f9216d8e7baeb6379@sentry.io/1226040', {
+  release: git_commit
+}).install()
 
 const OnchainDB = require('./db/onchain_db')
 const OffchainDB = require('./db/offchain_db')

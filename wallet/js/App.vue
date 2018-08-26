@@ -126,6 +126,7 @@ export default {
 
       addrisk: false,
       lazy: false,
+      visibleGraph: false,
 
       order: {
         amount: '',
@@ -183,7 +184,8 @@ export default {
       for (let hop of r[1]) {
         let hub = app.K.hubs.find(h => h.id == hop);
         if (hub) {
-          info += `@${app.to_user(hub.id)} (${app.bpsToPercent(hub.fee_bps)}) → `;
+        //(${app.bpsToPercent(hub.fee_bps)})
+          info += `@${app.to_user(hub.id)} → `;
         }
       }
 
@@ -268,7 +270,6 @@ export default {
           asset: channels[i].d.asset,
           hard_limit: app.uncommy(raw.hard_limit),
           soft_limit: app.uncommy(raw.soft_limit),
-          request_insurance: raw.request_insurance,
         }
 
         selectedActions.push(a)
@@ -402,6 +403,9 @@ export default {
     },
 
     showGraph: ()=>{
+      if (app.visibleGraph) return
+
+      app.visibleGraph = true
       if (!window.hubgraph) return
 
       drawHubgraph({
@@ -431,9 +435,22 @@ export default {
       app.tab = path
 
 
-      
-      app.showGraph()
-      
+    
+    },
+
+    paymentToDetails: (h)=>{
+      let ch = app.channels.find(ch=>{
+        return ch.d.id == h.deltumId
+      })
+      if (!ch) return 'no'
+      let via = app.to_user(ch.partner)
+
+
+      if (h.is_inward) {
+        return `From ${h.source_address ? app.trim(h.source_address) : 'Anonymous'} via ${via}`
+      } else {
+        return `To ${app.trim(h.destination_address)} via ${via}`
+      }
     },
 
     deltaColor: (d) => {
@@ -588,7 +605,8 @@ export default {
     payment_status: (t) => {
       var s = ''
       if (t.type == 'del' || t.type == 'delrisk') {
-        s = t.secret && t.secret.length == 64 ? '✔' : '❌'
+        //outcomeSecret
+        s = t.outcome_type == 31 ? '✔' : '❌'
       }
       if (t.type == 'add' || t.type == 'addrisk') {
         s = '🔒'
@@ -657,7 +675,6 @@ export default {
               <li><a class="nav-link" @click="go('updates')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
 
                             
-              <li><a class="nav-link" @click="go('routes')">☊ Routes</a></li>
 
               <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
 
@@ -796,7 +813,7 @@ export default {
 
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
 
-              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('setLimits', {asset: asset, chActions: [{partnerId: ch.d.partnerId, request_insurance: 1, asset: asset}]})">Request Insurance</span>
+              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('requestInsurance', {partnerId: ch.d.partnerId, asset: asset})">Request Insurance</span>
 
               <!--
               <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured> ch.d.soft_limit">over soft limit, expect rebalance</span>
@@ -893,7 +910,7 @@ export default {
                 <tr v-bind:key="h.id" v-for="(h, index) in paymentsForAsset().slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                  <td @click="outward_address=h.is_inward ? h.source_address : h.destination_address; outward_amount=commy(h.amount); outward_invoice = h.invoice"><u class="dotted">{{h.is_inward ? "From "+trim(h.source_address): "To "+trim(h.destination_address)}}</u>: {{h.invoice}}</td>
+                  <td @click="outward_address=h.is_inward ? h.source_address : h.destination_address; outward_amount=commy(h.amount); outward_invoice = h.invoice"><u class="dotted">{{paymentToDetails(h)}}</u>: {{h.invoice}}</td>
                   <td v-html="skipDate(h, index)"></td>
                 </tr>
 
@@ -951,7 +968,6 @@ export default {
                 <th scope="col">Receivable</th>
                 <th scope="col">Hard limit</th>
                 <th scope="col">Soft limit</th>
-                <th scope="col">Request Insurance</th>
               </tr>
             </thead>
             <tbody>
@@ -962,7 +978,6 @@ export default {
                 <td><input type="text" class="form-control" v-model="chAction(ch).hard_limit"></td>
                 </td>
                 <td><input type="text" class="form-control" v-model="chAction(ch).soft_limit"></td>
-                <td><input type="checkbox" v-model="chAction(ch).request_insurance"> </td>
               </tr>
             </tbody>
           </table>
@@ -977,7 +992,9 @@ export default {
           </button></p>
         </template>
         <h1>Hubs</h1>
-        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks. <a class="dotted" @click=go('routes')>See routes between them here</a>.</p>
+        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks. <a class="dotted" @click=showGraph>See ☊ routes between them here</a>.</p>
+
+        <svg v-show="visibleGraph" width="800" height="600" id="hubgraph"></svg>
 
         <table class="table table-striped">
           <thead class="thead-dark">
@@ -995,7 +1012,7 @@ export default {
             <tr v-for="u in K.hubs">
               <th>{{u.id}}</th>
               <th>{{u.handle}}</th>
-              <th>{{timeAgo(u.createdAt)}}</th>
+              <th>{{new Date(u.createdAt*1000).toDateString()}}</th>
               <th>{{bpsToPercent(u.fee_bps)}}</th>
               <th>{{u.location}}</th>
 
@@ -1418,13 +1435,6 @@ export default {
           </tbody>
         </table>
       </div>
-
-      <div v-else-if="tab=='routes'">
-        <svg width="800" height="600" id="hubgraph"></svg>
-        <p>Current routes: {{K.routes.map((pair)=>to_user(pair[0])+'-'+to_user(pair[1])).join(', ')}}</p>
-      </div>
-
-
 
       <div v-else-if="tab=='assets'">
         <h1>Assets</h1>

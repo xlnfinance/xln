@@ -49,7 +49,14 @@ module.exports = (i) => {
         'chain', // return X blocks since given prev_hash
         'requestWithdrawFrom',
         'ack',
-        'testnet'
+        'testnet',
+        'requestInsurance',
+
+        // outcomes
+        'outcomeSecret',
+        'outcomeCapacity',
+        'outcomeOffline',
+        'outcomeDisputed'
     ]
 
     if (typeof i === 'string') {

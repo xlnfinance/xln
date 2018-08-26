@@ -37,7 +37,11 @@ module.exports = async () => {
     // not getting an ack on time is bad, but the worst is losing settled hashlock
     for (var inward of ch.payments) {
       // we have secret for inward payment but it's not acked
-      if (inward.is_inward && inward.secret && inward.status != 'ack') {
+      if (
+        inward.is_inward &&
+        inward.outcome_type == methodMap('outcomeSecret') &&
+        inward.status != 'ack'
+      ) {
         // ensure they will still be revealed when resolve() happens. Extend lifetime if needed
         var unlocked = await Hashlock.findOne({where: {hash: inward.hash}})
         if (
@@ -45,7 +49,7 @@ module.exports = async () => {
           unlocked.delete_at <
             K.usable_blocks + K.dispute_delay + K.hashlock_exp // when we expect resolution of our dispute
         ) {
-          to_reveal.push(inward.secret)
+          to_reveal.push(inward.outcome)
         } else {
           l('Already unlocked in ', ch.d.dataValues)
         }

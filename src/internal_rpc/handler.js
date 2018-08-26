@@ -95,6 +95,20 @@ module.exports = async (ws, json) => {
       )
       break
 
+    case 'requestInsurance':
+      let ch = await me.getChannel(
+        fromHex(json.params.partnerId),
+        json.params.asset
+      )
+
+      me.send(
+        ch.hub,
+        'setLimits',
+        me.envelope(methodMap('requestInsurance'), ch.d.asset)
+      )
+      react({confirm: 'Requested insurance, please wait'})
+      break
+
     case 'toggleHub':
       let index = PK.usedHubs.indexOf(json.params.id)
       if (index == -1) {

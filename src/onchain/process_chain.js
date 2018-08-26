@@ -6,6 +6,7 @@ module.exports = async (args) => {
       cached_result.sync_started_at = K.total_blocks
       cached_result.sync_tx_started_at = K.total_tx
       cached_result.sync_progress = 0
+      var startHrtime = hrtime()
     }
 
     let original_state = await onchain_state()
@@ -76,17 +77,30 @@ module.exports = async (args) => {
         break
       }
 
-      if (K.total_blocks == parseInt(argv.stop_blocks)) {
-        // show current state hash and quit
-        let final_state = await onchain_state()
+      if (argv.nocrypto) {
+        if (K.total_blocks % 10000 == 0) {
+          // show current state hash and quit
+          let final_state = await onchain_state()
 
-        fatal(
-          `${trim(original_state, 8)} (${K.total_blocks}) => ${trim(
-            final_state,
-            8
-          )}`
-        )
-        return false
+          let msg = {
+            original: trim(original_state, 8),
+            total_blocks: K.total_blocks,
+            final: trim(final_state, 8),
+            benchmark: ((hrtime() - startHrtime) / 1000000).toFixed(6)
+          }
+
+          Raven.captureMessage('SyncDone', {
+            level: 'info',
+            extra: msg,
+            tags: msg
+          })
+        }
+
+        if (K.total_blocks == parseInt(argv.stop_blocks)) {
+          setTimeout(() => {
+            fatal('done')
+          }, 1000)
+        }
       }
     }
 

@@ -70,5 +70,8 @@ typings/
 # next.js build output
 .next
 
+# stores last git commit for error reporting
+HEAD
+
 .DS_Store
 tmp/

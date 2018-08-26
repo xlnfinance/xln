@@ -45,10 +45,13 @@ if (argv.monkey) {
   }
 
   if (base_port > 8000 && base_port <= 8003) {
+    let loc = on_server
+      ? `wss://fairlayer.com:${base_port + 100}`
+      : `ws://${localhost}:${base_port + 100}`
     require('./internal_rpc/create_hub')({
       fee_bps: 5,
       handle: ['Asia', 'America', 'Mallory'][base_port - 8001],
-      location: `ws://${localhost}:${base_port + 100}`,
+      location: loc,
       box_pubkey: bin(me.box.publicKey),
       add_routes: '1,2,3,4'
     })
@@ -113,10 +116,13 @@ if (argv.monkey) {
       if ((await Delta.count()) < 5) failed.push('deltas')
       if ((await Asset.count()) < 4) failed.push('assets')
 
-      let e2e =
-        '\n\ne2e result: ' +
-        (failed.length == 0 ? 'success' : failed.join(', '))
+      let e2e = 'e2e: ' + (failed.length == 0 ? 'success' : failed.join(', '))
       l(e2e)
+
+      Raven.captureMessage(e2e, {
+        level: 'info'
+      })
+
       child_process.exec(`osascript -e 'display notification "${e2e}"'`)
 
       if (failed.length != 0) {

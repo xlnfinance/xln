@@ -101,51 +101,26 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
       let box_data = open_box_json(unlocker)
 
-      // it contains amount/asset you are expected to get
-      // ensure to 'del' if there's any problem, or it will hang in your state forever
-      if (!box_data || box_data.amount != amount || box_data.asset != asset) {
-        loff('error: Bad data received: ', box_data)
-        inward_hl.type = m == 'add' ? 'del' : 'delrisk'
-        inward_hl.status = 'new'
-
-        continue
-      }
-
-      let new_type = m
-
+      // these things CANT happen, partner is malicious so just ignore and break
       if (amount < K.min_amount || amount > ch.they_payable) {
-        loff('error: invalid amount ', amount)
-        new_type = m == 'add' ? 'del' : 'delrisk'
+        break
       }
-
       if (hash.length != 32) {
-        loff('error: Hash must be 32 bytes')
         break
       }
-
       if (ch.inwards.length >= K.max_hashlocks) {
-        loff('error: too many hashlocks')
         break
-      }
-
-      let reveal_until = K.usable_blocks + K.hashlock_exp
-      // safe ranges when we can accept hashlock exp
-      // not earlier than few blocks in the past, but many in the future is fine
-      // we do not break here (it can happen during normal operation) and simply delack this payment
-      if (exp < reveal_until - 2 || exp > reveal_until + 6) {
-        new_type = m == 'add' ? 'del' : 'delrisk'
-        loff(`error: exp is out of supported range: ${exp} vs ${reveal_until}`)
       }
 
       // don't save in db just yet
       let inward_hl = Payment.build({
-        type: new_type,
         // we either add add/addrisk or del right away
-        status: new_type == m ? 'ack' : 'new',
+        type: 'add',
+        status: 'ack',
         is_inward: true,
 
         amount: amount,
-        hash: bin(hash),
+        hash: hash,
         exp: exp,
 
         asset: asset,
@@ -155,15 +130,9 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
       ch.payments.push(inward_hl)
 
-      if (m == 'add') {
-        // push a hashlock in-state
-      } else {
-        // off-state
-        ch.d.offdelta += ch.left ? amount : -amount
-      }
-
       // check new state and sig, save
       ch.d.nonce++
+
       if (!deltaVerify(ch.d, refresh(ch), t[2])) {
         loff('error: Invalid state sig add')
         logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
@@ -171,10 +140,43 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         break
       }
 
-      if (new_type != m) {
-        l('Fail for no reason')
+      let failure = false
+
+      // it contains amount/asset you are expected to get
+      // ensure to 'del' if there's any problem, or it will hang in your state forever
+
+      // things below can happen even when partner is honest
+      if (!box_data) {
+        failure = 'NoBox'
+      }
+
+      if (box_data.amount != amount) {
+        failure = 'WrongAmount'
+      }
+
+      if (box_data.asset != asset) {
+        failure = 'WrongAsset'
+      }
+
+      if (!me.my_hub && !box_data.secret) {
+        failure = 'NotHubNotReceiver'
+      }
+
+      let reveal_until = K.usable_blocks + K.hashlock_exp
+      // safe ranges when we can accept hashlock exp
+      if (exp < reveal_until - 2 || exp > reveal_until + 6) {
+        loff(`error: exp is out of supported range: ${exp} vs ${reveal_until}`)
+        failure = 'BadExp'
+      }
+
+      if (failure) {
+        l('Fail: ', failure)
         // go to next transition - we failed this hashlock already
-      } else if (!box_data.unlocker && box_data.secret) {
+        inward_hl.type = 'del'
+        inward_hl.status = 'new'
+        inward_hl.outcome_type = methodMap('outcomeCapacity')
+        inward_hl.outcome = bin(failure)
+      } else if (box_data.secret) {
         // we are final destination, no unlocker to pass
 
         // decode buffers from json
@@ -188,13 +190,14 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
         // secret doesn't fit?
         if (sha3(box_data.secret).equals(hash)) {
-          inward_hl.secret = box_data.secret
+          inward_hl.outcome_type = methodMap('outcomeSecret')
+          inward_hl.outcome = box_data.secret
         } else {
-          l('box mismatch: secret')
-          inward_hl.secret = bin('box mismatch: secret')
+          inward_hl.outcome_type = methodMap('outcomeCapacity')
+          inward_hl.outcome = bin('BadSecret')
         }
 
-        inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+        inward_hl.type = 'del'
         inward_hl.status = 'new'
 
         if (trace) l(`Received and unlocked a payment, changing addack->delnew`)
@@ -214,23 +217,22 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
         let dest_ch = await me.getChannel(nextHop, asset)
 
-        let fail = false
-
         // is next hop online? Is payable?
         if (!me.users[nextHop]) {
-          fail = 'offline'
+          inward_hl.outcome_type = methodMap('outcomeOffline')
         }
 
         if (dest_ch.status == 'disputed') {
-          fail = 'disputed'
-        }
-        if (dest_ch.payable < outward_amount) {
-          fail = 'nocapacity'
+          inward_hl.outcome_type = methodMap('outcomeDisputed')
         }
 
-        if (fail) {
+        if (dest_ch.payable < outward_amount) {
+          inward_hl.outcome_type = methodMap('outcomeCapacity')
+        }
+
+        if (inward_hl.outcome_type) {
           l('Failed to mediate')
-          inward_hl.secret = bin(fail)
+          inward_hl.outcome = bin(`id`)
           // fail right now
           inward_hl.type = m == 'add' ? 'del' : 'delrisk'
           inward_hl.status = 'new'
@@ -267,30 +269,32 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
         uniqAdd(dest_ch.d.partnerId)
       } else {
-        inward_hl.type = m == 'add' ? 'del' : 'delrisk'
+        inward_hl.type = 'del'
         inward_hl.status = 'new'
-
-        loff('error: arent receiver and arent a hub O_O')
+        inward_hl.outcome_type = methodMap('outcomeCapacity')
+        inward_hl.outcome = bin('UnknownError')
       }
 
       //if (argv.syncdb) all.push(inward_hl.save())
     } else if (m == 'del' || m == 'delrisk') {
-      var [hash, outcome] = t[1]
+      var [hash, outcome_type, outcome] = t[1]
+      outcome_type = readInt(outcome_type)
 
       // try to parse outcome as secret and check its hash
-      if (outcome.length == K.secret_len && sha3(outcome).equals(hash)) {
+      if (
+        outcome_type == methodMap('outcomeSecret') &&
+        sha3(outcome).equals(hash)
+      ) {
         var valid = true
       } else {
         // otherwise it is a reason why mediation failed
         var valid = false
       }
 
-      l('Got outcome: ', outcome.length)
-
       // todo check expirations
       var outward_hl = ch.outwards.find((hl) => hl.hash.equals(hash))
       if (!outward_hl) {
-        fatal('No such hashlock ', hash)
+        l('No such hashlock ', hash)
         continue
       }
 
@@ -305,7 +309,8 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
       outward_hl.type = m
       outward_hl.status = 'ack'
       // pass same outcome down the chain
-      outward_hl.secret = outcome
+      outward_hl.outcome_type = outcome_type
+      outward_hl.outcome = outcome
 
       ch.d.nonce++
       if (!deltaVerify(ch.d, refresh(ch), t[2])) {
@@ -344,7 +349,8 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
           }
           // pass same outcome down the chain
 
-          pull_hl.secret = outcome
+          pull_hl.outcome_type = outcome_type
+          pull_hl.outcome = outcome
           pull_hl.type = 'del'
           pull_hl.status = 'new'
           //if (argv.syncdb) all.push(pull_hl.save())
@@ -373,7 +379,10 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
           react(
             {
               payment_outcome: 'fail',
-              alert: 'Payment failed, try another route: ' + outcome.toString()
+              alert:
+                'Payment failed, try another route: ' +
+                methodMap(outcome_type) +
+                outcome.toString()
             },
             false
           )

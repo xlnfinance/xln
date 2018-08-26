@@ -57,11 +57,24 @@ const defineModels = (sequelize) => {
         defaultValue: 1
       },
 
-      soft_limit: Sequelize.INTEGER,
-      hard_limit: Sequelize.INTEGER, // we trust up to
+      // by default all limits set to 0
+      soft_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      },
+      hard_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      }, // we trust up to
 
-      they_soft_limit: Sequelize.INTEGER,
-      they_hard_limit: Sequelize.INTEGER, // they trust us
+      they_soft_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      },
+      they_hard_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      }, // they trust us
 
       requested_insurance: {
         type: Sequelize.BOOLEAN,
@@ -72,6 +85,11 @@ const defineModels = (sequelize) => {
         type: Sequelize.BOOLEAN,
         defaultValue: false
       },
+
+      they_fail_score: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      }, // how often they fail to route our payments
 
       flush_requested_at: Sequelize.DATE,
       ack_requested_at: {
@@ -146,8 +164,11 @@ const defineModels = (sequelize) => {
         type: Sequelize.INTEGER,
         defaultValue: 0
       },
-      // secret that unlocks hash
-      secret: Sequelize.BLOB,
+
+      // secret or fail reason
+      outcome_type: Sequelize.INTEGER,
+      // payload of outcome
+      outcome: Sequelize.BLOB,
 
       // string to be decrypted by outward
       unlocker: Sequelize.BLOB,
@@ -207,13 +228,21 @@ const defineModels = (sequelize) => {
     }
   )
 
+  // const OffchainOrder...
+
+  // a global log/history for current user
+  const Event = sequelize.define('event', {
+    desc: Sequelize.TEXT
+  })
+
   Delta.hasMany(Payment)
   Payment.belongsTo(Delta)
 
   return {
     Delta: Delta,
     Payment: Payment,
-    Block: Block
+    Block: Block,
+    Event: Event
   }
 }
 
@@ -287,6 +316,7 @@ class OffсhainDB {
     this.datadir = datadir
     this.dbtoken = dbtoken
     this.pool = pool || 1
+    // set to true when updated the schema
     this.force = force || false
   }
 

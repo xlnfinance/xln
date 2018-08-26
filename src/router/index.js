@@ -26,7 +26,7 @@ const Router = {
   },
   //https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
   dijkstra: function(c) {
-    l('Dijkstra', c)
+    //l('Dijkstra', c)
     // gets context on input
     let last = c.used[c.used.length - 1]
     if (c.targets.includes(last)) {

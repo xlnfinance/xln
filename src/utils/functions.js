@@ -55,7 +55,7 @@ const parseAddress = (address) => {
       address: addr
     }
   } else {
-    l('bad address ', addr)
+    l('bad address: ', addr)
     return false
   }
 }

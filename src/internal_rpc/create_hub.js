@@ -18,6 +18,10 @@ module.exports = (args) => {
   // starting WSS if not yet started. proactively before we are a hub
   if (!me.external_wss_server) {
     me.startExternalRPC(json.location)
+
+    me.intervals.push(
+      setInterval(require('../offchain/rebalance'), K.blocktime * 1000)
+    )
   }
 
   me.batch.push(['createHub', [stringify(json)]])

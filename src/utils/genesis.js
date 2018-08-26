@@ -236,6 +236,7 @@ module.exports = async (datadir) => {
 
   const Router = require('../router')
 
+  // testing stubs to check dijkstra
   if (argv.generate_airports) {
     let addHub = (data) => {
       data.id = K.hubs.length + 1000

@@ -3,6 +3,7 @@ import Vue from 'vue'
 import Trend from 'vuetrend'
 Vue.use(Trend)
 
+require('methods')
 import App from './App'
 
 window.jQuery = require('../assets/assets/js/vendor/jquery-slim.min.js')
@@ -169,13 +170,14 @@ window.render = (r) => {
   Object.assign(window.app, r)
   window.app.$forceUpdate()
 
-  // go add hubs if no channels exist
-  if (firstLoad && app.tab == 'wallet' && app.channelsForAsset().length == 0)
+  // go add hubs if logged in & no channels exist
+  if (
+    firstLoad &&
+    app.pubkey &&
+    app.tab == 'wallet' &&
+    app.channelsForAsset().length == 0
+  )
     app.go('hubs')
-
-  if (firstLoad) {
-    setTimeout(app.showGraph, 500)
-  }
 
   if (r.history && window.riskcanvas) {
     renderRisk(r.history)

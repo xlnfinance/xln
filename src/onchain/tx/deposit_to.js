@@ -10,13 +10,10 @@ module.exports = async (s, args) => {
     let amount = readInt(output[0])
     let original_amount = amount
 
-    if (amount > userAsset(s.signer, s.asset)) {
-      l(
-        `${s.signer.id} Trying to deposit ${amount} but has ${userAsset(
-          s.signer,
-          s.asset
-        )}`
-      )
+    let signer_has = userAsset(s.signer, s.asset)
+
+    if (amount > signer_has) {
+      l(`${s.signer.id} Trying to deposit ${amount} but has ${signer_has}`)
       return
     }
 
@@ -44,6 +41,8 @@ module.exports = async (s, args) => {
           l("Both partners don't exist")
           return
         }
+
+        throw 'yolo'
 
         const fee = K.standalone_balance + K.account_creation_fee
         if (amount < fee) return
@@ -123,7 +122,6 @@ module.exports = async (s, args) => {
         /*
         ins.insurance -= reimburse_txfee
         ins.ondelta -= compared * reimburse_txfee
-
         userAsset(s.signer, 1, reimburse_txfee)
         */
         // todo take from onchain balance instead

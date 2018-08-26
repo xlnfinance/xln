@@ -64,17 +64,17 @@ module.exports = async (pubkey, asset, opportunistic) => {
             continue
           }
 
-          if (t.secret && t.secret.length == K.secret_len) {
+          if (t.outcome_type == methodMap('outcomeSecret')) {
             ch.d.offdelta += ch.left ? t.amount : -t.amount
           }
-          var args = [t.hash, t.secret]
+          var args = [t.hash, t.outcome_type, t.outcome]
         } else if (t.type == 'delrisk') {
           // works like refund
-          if (!t.secret) {
-            ch.d.offdelta += ch.left ? -t.amount : t.amount
-          }
+          //if (!t.secret) {
+          ch.d.offdelta += ch.left ? -t.amount : t.amount
+          //}
 
-          var args = [t.hash, t.secret]
+          //var args = [t.hash, t.secret]
         } else if (t.type == 'add' || t.type == 'addrisk') {
           if (
             t.lazy_until &&
@@ -110,7 +110,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
               pull_hl.status = 'new'
               let reason = `${me.my_hub.id} to ${ch.hub ? ch.hub.id : 'u'}`
               l(reason)
-              pull_hl.secret = bin(reason)
+
+              pull_hl.outcome_type = methodMap('outcomeCapacity')
+              pull_hl.outcome = bin(reason)
               //if (argv.syncdb) all.push(pull_hl.save())
 
               flushable.push(inward.d.partnerId)
