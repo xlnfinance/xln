@@ -1,5 +1,5 @@
 module.exports = async () => {
-  await syncdb()
+  await Periodical.syncChanges()
 
   let result = {}
 

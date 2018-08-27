@@ -146,7 +146,7 @@ module.exports = async (s, header, ordered_tx_body) => {
 
   if (is_usable && K.usable_blocks % 20 == 0) {
     // Auto resolving disputes that are due
-    await syncdb()
+    await Periodical.syncChanges()
 
     all.push(
       Insurance.findAll({
@@ -207,7 +207,7 @@ module.exports = async (s, header, ordered_tx_body) => {
     s.meta.cron.push(['maturity'])
 
     // clear up from cache
-    await syncdb({flush: 'users'})
+    await Periodical.syncChanges({flush: 'users'})
 
     // first assignment must happen before zeroing
     await onchainDB.db.query('UPDATE users SET balance1 = balance1 + balance2')
@@ -281,7 +281,7 @@ module.exports = async (s, header, ordered_tx_body) => {
       await sleep(6000)
     } else {
       // it's important to flush current K to disk before snapshot
-      await syncdb()
+      await Periodical.syncChanges()
     }
 
     const path_filter = (path, stat) => {

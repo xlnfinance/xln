@@ -235,6 +235,14 @@ const defineModels = (sequelize) => {
     desc: Sequelize.TEXT
   })
 
+  // offchain order for instant trustless exchange
+  const OffOrder = sequelize.define('offorder', {
+    amount: Sequelize.INTEGER,
+    rate: Sequelize.FLOAT,
+    assetId: Sequelize.INTEGER,
+    buyAssetId: Sequelize.INTEGER
+  })
+
   Delta.hasMany(Payment)
   Payment.belongsTo(Delta)
 
@@ -242,7 +250,8 @@ const defineModels = (sequelize) => {
     Delta: Delta,
     Payment: Payment,
     Block: Block,
-    Event: Event
+    Event: Event,
+    OffOrder: OffOrder
   }
 }
 

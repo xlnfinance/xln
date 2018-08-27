@@ -52,17 +52,17 @@ module.exports = async (ws, json) => {
       result = require('./logout')()
       break
 
-    case 'send':
+    case 'sendOffchain':
       await me.payChannel(json.params)
       break
 
-    case 'rebalance':
-      await require('./rebalance')(json.params)
+    case 'prepareRebalance':
+      require('./prepare_rebalance')(json.params)
       return false
       break
 
     case 'broadcast':
-      me.broadcast(json.params)
+      Periodical.broadcast(json.params)
       react({confirm: 'Now await inclusion in block'})
       return false
       break
@@ -136,7 +136,7 @@ module.exports = async (ws, json) => {
       }
       //
       react({}, true)
-      //update_cache()
+      //Periodical.updateCache()
 
       break
 

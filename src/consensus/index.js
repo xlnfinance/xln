@@ -64,9 +64,6 @@ module.exports = async () => {
     } else if (me.status == 'precommit' && phase == 'await') {
       precommit_await()
     }
-
-    // watch for new events
-    setTimeout(me.consensus, 100)
   })
   return true
 }

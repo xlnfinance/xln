@@ -1,5 +1,6 @@
+const Periodical = require('../periodical')
 module.exports = () => {
-  sync()
+  Periodical.syncChain()
 
   let result = {confirm: 'Syncing the chain...'}
 

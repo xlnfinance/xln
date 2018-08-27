@@ -135,7 +135,7 @@ startFairlayer = async () => {
   }
 
   // start syncing as soon as the node is started
-  sync()
+  Periodical.syncChain()
 
   l(`\n${note('Welcome to Fair REPL!')}`)
   repl = require('repl').start(note(''))

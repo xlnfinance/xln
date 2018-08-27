@@ -148,7 +148,7 @@ module.exports = async (opts) => {
 
     if (argv.syncdb) {
       //all.push(ch.d.save())
-      await syncdb() //Promise.all(all)
+      await Periodical.syncChanges() //Promise.all(all)
     }
   })
 }

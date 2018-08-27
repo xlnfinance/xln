@@ -83,7 +83,7 @@ if (argv.monkey) {
   }
 
   // only in monkey mode, not on end user node
-  setInterval(me.broadcast, 6000)
+  Periodical.schedule('broadcast', K.blocktime * 1000)
 
   if (me.record.id == 1) {
     l('Scheduling e2e checks')
@@ -92,8 +92,8 @@ if (argv.monkey) {
       // no need to run test on server
       if (on_server) return
 
-      await syncdb()
-      update_cache()
+      await Periodical.syncChanges()
+      Periodical.updateCache()
 
       let monkey5 = await getUserByIdOrKey(5)
       let monkey5ins = await getInsuranceSumForUser(5)
@@ -173,7 +173,7 @@ if (argv.monkey) {
 
   if (me.record.id == 2) {
     // withdraw 12.34 from hub and deposit 9.12 to 3@1
-    require('./internal_rpc/rebalance')({
+    require('./internal_rpc/prepare_rebalance')({
       asset: 1,
 
       chActions: [

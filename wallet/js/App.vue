@@ -313,7 +313,7 @@ export default {
         selectedActions.push(a)
       }
 
-      app.call('rebalance', {
+      app.call('prepareRebalance', {
         asset: app.asset,
         chActions: selectedActions,
         externalDeposits: app.externalDeposits.map(dep=>{
@@ -443,13 +443,12 @@ export default {
         return ch.d.id == h.deltumId
       })
       if (!ch) return 'no'
-      let via = app.to_user(ch.partner)
 
 
       if (h.is_inward) {
-        return `From ${h.source_address ? app.trim(h.source_address) : 'Anonymous'} via ${via}`
+        return `From ${h.source_address ? app.trim(h.source_address) : 'N/A'} via ${ch.hub.handle}`
       } else {
-        return `To ${app.trim(h.destination_address)} via ${via}`
+        return `To ${h.destination_address ? app.trim(h.destination_address) : 'N/A'} via ${ch.hub.handle}`
       }
     },
 
@@ -798,17 +797,18 @@ export default {
 
       <div v-else-if="tab=='wallet'">
         <template v-if="pubkey && channelsForAsset().length > 0">
-          <h2 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h2>
-          <br>
+          <h4 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h4>
+
+
+          <h4 class="alert alert-primary" v-for="e in events">{{e.desc}} - {{timeAgo(e.createdAt)}}</h4>
           
           <template v-for="(ch, index) in channelsForAsset()">
-            <h2 style="display:inline-block">@{{ch.hub.handle}}: {{commy(ch.payable)}}</h2>
-
-
+            <p>
+            <h4 style="display:inline-block">@{{ch.hub.handle}}: {{commy(ch.payable)}}</h4>
             <small v-if="ch.payable > 0">
               = {{commy(ch.ins.insurance)}} insurance 
               {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
-              {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" spent" : ''}}
+              {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" they_insured" : ''}}
               {{ch.hashlock_hold[1] > 0 ? "- "+commy(ch.hashlock_hold[1])+" hashlocks" : ''}}
 
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
@@ -819,37 +819,34 @@ export default {
               <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured> ch.d.soft_limit">over soft limit, expect rebalance</span>
               <span title="When you spend large part of your insurance, the hub may request a withdrawal from you so they could deposit this insurance to someone else. It's recommended to come online more frequently, otherwise hub may start a dispute with you." class="badge badge-dark" v-if="!my_hub && ch.they_insured >= K.risk">stay online to cooperate</span>
               -->
-
             </small>
-
-
             <span class="badge badge-success" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
-            
-            <p>
-              <div v-if="ch.bar > 0">
-                <div class="progress">
-                  <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
-                    -{{commy(ch.they_uninsured)}} (they uninsured)
-                  </div>
-                  <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-                    {{commy(ch.insured)}} (insured)
-                  </div>
-                  <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
-                    -{{commy(ch.they_insured)}} (spent)
-                  </div>
-                  <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
-                    +{{commy(ch.uninsured)}} (uninsured)
-                  </div>
-                </div>
-              </div>
             </p>
+          
+            <div v-if="dev_mode && ch.bar > 0" class="progress">
+              <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
+                -{{commy(ch.they_uninsured)}} (they_uninsured)
+              </div>
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+                {{commy(ch.insured)}} (insured)
+              </div>
+              <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
+                -{{commy(ch.they_insured)}} (they_insured)
+              </div>
+              <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
+                +{{commy(ch.uninsured)}} (uninsured)
+              </div>
+            </div>
+
             
             <div v-if="dev_mode">
-            {{ch.d.status}} / 
-            {{ch.d.ack_requested_at}}
+              {{ch.d.status}} / 
+              {{ch.d.ack_requested_at}}
             </div>
             <pre v-if="dev_mode" v-html="ch.ascii_channel"></pre>
             <pre v-if="dev_mode" v-html="ch.ascii_states"></pre>
+
+
           </template>
           <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
           
@@ -888,7 +885,7 @@ export default {
 
 
           <p>
-            <button type="button" class="btn btn-success" @click="call('send', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: bestRoutes[chosenRoute][1]})">Pay Now → </button>
+            <button type="button" class="btn btn-success" @click="call('sendOffchain', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: bestRoutes[chosenRoute][1]})">Pay Now → </button>
 
             <button v-if="dev_mode" type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
           </p>            

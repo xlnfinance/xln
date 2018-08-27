@@ -18,7 +18,7 @@ General recommendations:
 
 */
 
-const withdraw = require('./withdraw')
+const withdraw = require('../offchain/withdraw')
 
 const rebalance = async function(asset) {
   var deltas = await Delta.findAll({

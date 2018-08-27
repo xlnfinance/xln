@@ -175,5 +175,5 @@ module.exports = async (a) => {
     })
   })
 
-  update_cache(true)
+  Periodical.updateCache(true)
 }
