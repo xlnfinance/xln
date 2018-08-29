@@ -1,4 +1,3 @@
-const Periodical = require('../periodical')
 module.exports = () => {
   Periodical.syncChain()
 

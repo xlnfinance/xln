@@ -1,5 +1,3 @@
-const Periodical = require('./periodical')
-
 // This file has browser-related helpers that cache and react into me.browser socket.
 
 // Called once in a while to cache current state of everything and flush it to browser
@@ -53,6 +51,8 @@ react = async (result = {}, force = true) => {
 
     if (!result.record.id) result.record = null
 
+    result.timeouts = Object.keys(Periodical.timeouts)
+
     result.payments.map((p) => {
       // prefix for invoice types: 1 is user set 2 is random
       if (p.invoice) {
@@ -75,7 +75,7 @@ react = async (result = {}, force = true) => {
   try {
     me.browser.send(
       JSON.stringify({
-        result: Object.assign(result, cached_result)
+        result: result //Object.assign(result, cached_result)
       })
     )
   } catch (e) {

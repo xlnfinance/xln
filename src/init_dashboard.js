@@ -6,7 +6,10 @@ module.exports = async (a) => {
     if (exitsync) return false
     exitsync = true
 
-    if (err.name == 'SequelizeTimeoutError') return
+    if (err.name == 'SequelizeTimeoutError') {
+      l(err)
+      return
+    }
     //flush changes to db
     //await syncdb()
     fatal('Bye')
@@ -175,5 +178,5 @@ module.exports = async (a) => {
     })
   })
 
-  Periodical.updateCache(true)
+  await Periodical.updateCache(true)
 }

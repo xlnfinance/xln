@@ -7,49 +7,59 @@ const Periodical = {
   updateCache: require('./update_cache'),
   rebalance: require('./rebalance'),
   ensureAck: require('./ensure_ack'),
-  broadcast: require('./broadcast')
+  broadcast: require('./broadcast'),
+  forceReact: () => {
+    react({})
+  },
+
+  timeouts: {}
 }
 
 Periodical.schedule = function schedule(task, timeout) {
-  if (me.scheduled[task]) {
+  if (Periodical.timeouts[task]) {
     // clear if there's existing timeout and re-schedule
-    clearTimeout(me.scheduled[task])
+    clearTimeout(Periodical.timeouts[task])
+    delete Periodical.timeouts[task]
   }
+
+  if (timeout == 0) return
 
   var wrap = async function() {
     //l('Start ', task)
     await Periodical[task]()
-    me.scheduled[task] = setTimeout(wrap, timeout)
+    Periodical.timeouts[task] = setTimeout(wrap, timeout)
   }
 
   wrap()
 }
 
-Periodical.scheduleAll = function() {
-  Periodical.schedule('consensus', 100)
+Periodical.startValidator = () => {
+  l('Starting validator ', me.my_validator)
+  me.startExternalRPC(me.my_validator.location)
+  Periodical.schedule('consensus', 200)
+}
 
-  Periodical.schedule('syncChain', 4000)
+Periodical.startHub = () => {
+  //if (!me.external_wss_server){
+  l('Starting hub ', me.my_hub)
+  me.startExternalRPC(me.my_hub.location)
+  //Periodical.schedule('syncChanges', K.blocktime * 4000)
+  Periodical.schedule('rebalance', K.blocktime * 3000)
+
+  // hubs have to force react regularly
+  Periodical.schedule('forceReact', K.blocktime * 3000)
+  //}
+}
+
+Periodical.scheduleAll = function() {
+  Periodical.schedule('syncChain', K.blocktime * 2000)
+
+  Periodical.schedule('syncChanges', K.blocktime * 2000)
 
   Periodical.schedule('updateMetrics', 1000)
-  Periodical.schedule('updateCache', K.blocktime * 2000)
+  Periodical.schedule('updateCache', K.blocktime * 1000)
 
-  Periodical.schedule('ensureAck', K.blocktime * 2000)
-
-  if (me.my_hub || me.my_validator) {
-    Periodical.schedule('syncChanges', K.blocktime * 2000)
-  }
-
-  if (me.my_hub) {
-    // turn on auto rebalance with --rebalance
-    //if (argv.rebalance) {
-    Periodical.schedule('rebalance', K.blocktime * 2000)
-    //}
-
-    // hubs have to force react regularly
-    setInterval(() => {
-      react({})
-    }, 15000)
-  }
+  //Periodical.schedule('ensureAck', K.blocktime * 2000)
 }
 
 module.exports = Periodical

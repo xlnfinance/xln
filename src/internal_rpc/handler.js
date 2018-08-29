@@ -46,6 +46,7 @@ module.exports = async (ws, json) => {
   switch (json.method) {
     case 'load':
       result = await require('./load')(json.params)
+      result = Object.assign(result, cached_result)
       break
 
     case 'logout':

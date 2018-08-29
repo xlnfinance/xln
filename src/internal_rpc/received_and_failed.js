@@ -1,5 +1,7 @@
 module.exports = async () => {
-  await Periodical.syncChanges()
+  l('receivedAndFailed')
+  //await Periodical.syncChanges()
+  return false
 
   let result = {}
 

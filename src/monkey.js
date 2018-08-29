@@ -34,7 +34,7 @@ const payMonkey = async (on_server, counter = 1) => {
   } else if (counter < 20) {
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
-    }, Math.round(200))
+    }, 300)
   }
 }
 
@@ -93,7 +93,6 @@ if (argv.monkey) {
       if (on_server) return
 
       await Periodical.syncChanges()
-      Periodical.updateCache()
 
       let monkey5 = await getUserByIdOrKey(5)
       let monkey5ins = await getInsuranceSumForUser(5)
@@ -144,8 +143,8 @@ if (argv.monkey) {
 
   if (me.record.id == 4) {
     // trigger the dispute from hub
-    me.CHEAT_dontack = true
-    me.CHEAT_dontwithdraw = true
+    //me.CHEAT_dontack = true
+    //me.CHEAT_dontwithdraw = true
 
     setTimeout(() => {
       me.payChannel({

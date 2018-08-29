@@ -65,7 +65,7 @@ export default {
 
 
       new_hub: {
-        handle: "YAY",
+        handle: "NewHub",
         location:  `ws://${location.hostname}:${parseInt(location.port)+100}`,
         fee_bps: 10,
         add_routes: '1',
@@ -169,7 +169,8 @@ export default {
     },
 
     updateRoutes: ()=>{
-      l("updatingg")
+      if (app.outward_address.length < 4) return
+      
       // address or amount was changed - recalculate best offered routes
       app.call('getRoutes', {
         address: app.outward_address,
@@ -369,6 +370,7 @@ export default {
     },
 
     to_user: (userId) => {
+      // returns either hub name or just id
       // todo: twitter-style tooltips with info on the user
 
       let h = app.K.hubs.find((h) => h.id == userId)
@@ -754,9 +756,26 @@ export default {
 
       <div v-else-if="tab=='validators'">
         <h1>Validators</h1>
-        <ul>
-          <li v-if="m.website" v-for="m in K.validators"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a> - <b>{{m.shares}} shares</b> </li>
-        </ul>
+
+        <table class="table">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Shares</th>
+              <th scope="col">Platform</th>
+              <th scope="col">Website</th>
+            </tr>
+          </thead>
+          <tbody>
+          <tr v-for="m in K.validators">
+            <td>{{m.username}}</td>
+            <td>{{m.shares}}</td>
+            <td>{{m.platform}}</td>
+            <td><a v-bind:href="m.website+'/#install'">{{m.website}}</a><td>
+          </tr>
+          </tbody>
+        </table>
+
       </div>
 
 
@@ -1223,7 +1242,7 @@ export default {
             <template v-for="b in orders">
               <tr>
                 <td>{{b.id}}</td>
-                <td>{{b.userId}}</td>
+                <td>{{to_user(b.userId)}}</td>
                 <td>{{to_ticker(b.assetId)}}</td>
                 <td>{{[b.assetId, b.buyAssetId].sort().reverse().map(to_ticker).join('/')}}</td>
                 <td>{{commy(b.amount)}}</td>
@@ -1271,7 +1290,7 @@ export default {
         <p v-else>Currently only validators can submit a smart update.</p>
         <div v-for="p in proposals">
           <h4>#{{p.id}}: {{p.desc}}</h4>
-          <small>Proposed by #{{p.user.id}}</small>
+          <small>Proposed by {{to_user(p.user.id)}}</small>
           <UserIcon :hash="p.user.pubkey" :size="30"></UserIcon>
           <Highlight lang="javascript" :code="p.code"></Highlight>
           <div v-if="p.patch">
@@ -1282,7 +1301,7 @@ export default {
           </div>
           <p v-for="u in p.voters">
             <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
-            <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by #{{u.id}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
+            <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by {{to_user(u.id)}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
           </p>
           <small>To be executed at {{p.delayed}} usable block</small>
           <div v-if="record">
@@ -1296,7 +1315,7 @@ export default {
       <div v-else-if="tab=='blockchain_explorer'">
         <h1>Blockchain Explorer</h1>
         <p>These transactions were publicly broadcasted and executed on every full node, including yours. Blockchain space is reserved for insurance rebalances, disputes and other high-level settlement actions.</p>
-        <p v-if="nextValidator">Next validator: {{nextValidator.id}}</p>
+        <p v-if="nextValidator">Next validator: {{to_user(nextValidator.id)}}</p>
         <table v-if="blocks.length>0" class="table">
           <thead class="thead-dark">
             <tr>
@@ -1320,7 +1339,7 @@ export default {
               </tr>
               <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
                 <td colspan="7">
-                  <span class="badge badge-warning">By {{batch.signer.id}} ({{batch.gas}}*{{commy(batch.gasprice)}}=${{commy(batch.txfee)}} fee):</span>&nbsp;
+                  <span class="badge badge-warning">By {{to_user(batch.signer.id)}} ({{batch.gas}}*{{commy(batch.gasprice)}}=${{commy(batch.txfee)}} fee):</span>&nbsp;
                   <template v-for="d in batch.events">
                     &nbsp;
 
@@ -1332,12 +1351,11 @@ export default {
                     <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{d[2]}}</span>
 
 
-
                     <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Reveal: {{trim(d[1])}}</span>
 
                     <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{d[2]}}</span>
 
-                    <span v-else-if="d[0]=='depositTo'" class="badge badge-success" >{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': d[2])+'@'+d[3]) : d[2]}}{{d[4] ? ' for '+d[4] : ''}}</span>
+                    <span v-else-if="d[0]=='depositTo'" class="badge badge-success" >{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': to_user(d[2]))+'@'+to_user(d[3])) : to_user(d[2])}}{{d[4] ? ' for '+d[4] : ''}}</span>
 
                     <span v-else-if="d[0]=='createOrder'" class="badge badge-dark">Created order {{commy(d[2])}} {{to_ticker(d[1])}} for {{to_ticker(d[3])}}</span>
 
@@ -1392,7 +1410,7 @@ export default {
               <th>
                 <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
               </th>
-              <th scope="row">{{u.id}}</th>
+              <th scope="row">{{to_user(u.id)}}</th>
               <td>{{u.username}}</td>
               <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
 

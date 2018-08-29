@@ -53,15 +53,15 @@ const OnchainDB = require('./db/onchain_db')
 const OffchainDB = require('./db/offchain_db')
 
 startFairlayer = async () => {
+  setupDirectories(datadir)
+
   const onchainDB = new OnchainDB(datadir, argv['genesis'])
   const offchainDB = new OffchainDB(
     datadir,
     argv['db'],
     argv['db-pool'],
-    argv['genesis']
+    argv.genesis
   )
-
-  setupDirectories(datadir)
 
   try {
     await onchainDB.init()
@@ -76,6 +76,19 @@ startFairlayer = async () => {
   Object.assign(global, global.onchainDB.models)
   Object.assign(global, global.offchainDB.models)
 
+  if (argv.genesis) {
+    return require('./utils/genesis')(datadir)
+  }
+
+  K = loadKFile(datadir)
+  Validators = loadValidators(K.validators)
+  PK = loadPKFile(datadir)
+
+  if (K.total_blocks <= 3) {
+    l('Syncing with force ' + K.total_blocks)
+    await offchainDB.db.sync({force: true})
+  }
+
   if (argv.generate_monkeys) {
     await generateMonkeys()
   }
@@ -83,16 +96,6 @@ startFairlayer = async () => {
   if (argv.monkey) {
     monkeys = loadMonkeys(argv.monkey)
   }
-
-  if (argv.genesis) {
-    startGenesis = require('./utils/genesis')
-    await startGenesis(datadir)
-    return
-  }
-
-  K = loadKFile(datadir)
-  Validators = loadValidators(K.validators)
-  PK = loadPKFile(datadir)
 
   // if (argv.cluster) {
   //   const cluster = require('cluster')
@@ -135,7 +138,7 @@ startFairlayer = async () => {
   }
 
   // start syncing as soon as the node is started
-  Periodical.syncChain()
+  //Periodical.syncChain()
 
   l(`\n${note('Welcome to Fair REPL!')}`)
   repl = require('repl').start(note(''))

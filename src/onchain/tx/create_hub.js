@@ -34,6 +34,12 @@ module.exports = async (s, args) => {
     }
 
     K.hubs.push(hub)
+
+    if (me.record && me.record.id == s.signer.id) {
+      // we just started our own hub
+      me.my_hub = hub
+      Periodical.startHub()
+    }
   }
 
   if (json.add_routes) {
@@ -46,11 +52,6 @@ module.exports = async (s, args) => {
     json.remove_routes.map((r) => {
       Router.removeRoute(hub.id, parseInt(r))
     })
-  }
-
-  if (me.record && me.record.id == s.signer.id) {
-    // we just started our own hub
-    me.my_hub = hub
   }
 
   s.parsed_tx.events.push(['createHub', json.handle])

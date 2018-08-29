@@ -186,7 +186,7 @@ const getDBConfig = (datadir) => {
   return [database, username, password, config]
 }
 
-class OnсhainDB {
+class OnchainDB {
   constructor(datadir, force) {
     this.datadir = datadir
     this.force = force || false
@@ -205,4 +205,4 @@ class OnсhainDB {
   }
 }
 
-module.exports = OnсhainDB
+module.exports = OnchainDB

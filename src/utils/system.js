@@ -182,6 +182,10 @@ section = async function(key, job) {
     key = JSON.stringify(key)
 
     if (section.q[key]) {
+      if (section.q[key].length > 5) {
+        l('Queue overflow for: ', key)
+      }
+
       section.q[key].push([job, resolve])
     } else {
       section.q[key] = [[job, resolve]]

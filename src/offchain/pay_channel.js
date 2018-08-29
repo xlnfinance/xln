@@ -141,14 +141,14 @@ module.exports = async (opts) => {
 
     ch.payments.push(outward)
 
-    l('Paying to ', addr, reversed, onion.length)
+    l('Paying to ', reversed, onion.length)
 
     react({}, false)
     me.flushChannel(ch.d.partnerId, opts.asset, true)
 
     if (argv.syncdb) {
       //all.push(ch.d.save())
-      await Periodical.syncChanges() //Promise.all(all)
+      //await Periodical.syncChanges() //Promise.all(all)
     }
   })
 }

@@ -125,6 +125,7 @@ const loadMonkeys = (monkey_port) => {
 
 const setupDirectories = (datadir) => {
   if (!fs.existsSync('./' + datadir)) {
+    l('Setting up ' + datadir)
     fs.mkdirSync('./' + datadir)
     fs.mkdirSync('./' + datadir + '/onchain')
     fs.mkdirSync('./' + datadir + '/offchain')
@@ -170,6 +171,8 @@ const getInsuranceBetween = async function(user1, user2, asset = 1) {
 // but the hubs with higher sum(insurance) locked around them are more trustworthy
 // and users probably own most part of insurances around them
 const getInsuranceSumForUser = async function(id, asset = 1) {
+  return 0
+
   const sum = await Insurance.sum('insurance', {
     where: {
       [Op.or]: [{leftId: id}, {rightId: id}],

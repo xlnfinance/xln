@@ -51,11 +51,13 @@ module.exports = async (opts = {}) => {
       let ch = cache.ch[key]
 
       await section(['use', ch.d.partnerId, ch.d.asset], async () => {
-        ch.payments = ch.payments.filter((t) => {
+        ch.payments = ch.payments.filter(async (t) => {
           if (t.changed()) {
-            all.push(t.save())
+            //all.push(t.save())
+            await t.save()
           }
 
+          // filter out finalized ones
           return t.type + t.status != 'delack'
         })
 

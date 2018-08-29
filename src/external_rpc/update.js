@@ -1,5 +1,3 @@
-Periodical = require('../periodical')
-
 const deltaRequestFlush = async (delta) => {
   if (!delta.flush_requested_at) {
     //delta.flush_requested_at = new Date()
@@ -57,8 +55,7 @@ module.exports = async (args) => {
 
   if (argv.syncdb) {
     //all.push(ch.d.save())
-
-    await Periodical.syncChanges() //Promise.all(all)
+    //await Periodical.syncChanges() //Promise.all(all)
   }
 
   // use lazy react for external requests

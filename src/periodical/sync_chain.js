@@ -5,10 +5,12 @@ module.exports = () => {
 
   const sendSync = () => {
     // if we're validator then sync from anyone except us
-    const validatorSet = me.my_validator
+    const usableSet = me.my_validator
       ? Validators.filter((m) => m != me.my_validator)
       : Validators
-    const randomChosenValidator = validatorSet.randomElement()
+    const randomChosenValidator = usableSet.randomElement()
+
+    l('Sync from ', randomChosenValidator.location)
 
     me.send(
       randomChosenValidator,
@@ -17,7 +19,7 @@ module.exports = () => {
         K.network_name,
         fromHex(K.prev_hash),
         K.total_blocks, // start from
-        parseInt(argv.synclimit ? argv.synclimit : K.sync_limit) // how many
+        parseInt(argv.sync_limit ? argv.sync_limit : K.sync_limit) // how many
       ])
     )
   }

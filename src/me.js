@@ -39,8 +39,6 @@ class Me {
     }
     cached_result.metrics = this.metrics
 
-    this.scheduled = {}
-
     // used to store current block to be added to chain
     this.proposed_block = {}
   }
@@ -204,11 +202,11 @@ class Me {
 
     // both validators and hubs must run external_wss
     if (me.my_validator) {
-      l('We are validator ', me.my_validator)
-      me.startExternalRPC(me.my_validator.location)
-    } else if (me.my_hub) {
-      l('We are hub ', me.my_hub)
-      me.startExternalRPC(me.my_hub.location)
+      Periodical.startValidator()
+    }
+
+    if (me.my_hub) {
+      Periodical.startHub()
     }
 
     if (me.my_validator) {
@@ -243,7 +241,6 @@ class Me {
       require('./monkey')
     }
 
-    const Periodical = require('./periodical')
     Periodical.scheduleAll()
   }
 

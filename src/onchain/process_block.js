@@ -238,6 +238,8 @@ module.exports = async (s, header, ordered_tx_body) => {
   // it is fine to delete a block after grace period ~3 months.
   if (me.my_validator || PK.explorer) {
     s.meta.missed_validators = s.missed_validators
+
+    l('Saving block ' + K.total_blocks)
     await Block.create({
       id: K.total_blocks,
 
