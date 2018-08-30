@@ -90,7 +90,7 @@ export default {
 
       chActions: {},
 
-      externalDeposits: [{to:'', hub: 'onchain', depositAmount: '0.00', invoice: ''}],
+      externalDeposit: {to:'', hub: 'onchain', depositAmount: '', invoice: ''},
 
       off_to: '',
       off_amount: '',
@@ -252,42 +252,20 @@ export default {
       })
     },
 
-    prepareRebalance: (id) => {
-      // only send currently visible actions (some are hidden) and uncommy them
-      
-      let raw = app.chActions[id]
-
-      app.call('prepareRebalance', {
-        withdrawAmount: app.uncommy(raw.withdrawAmount),
-        depositAmount: app.uncommy(raw.depositAmount),
-        id: id
-      })
-
-      app.call('setLimits', {
-        id: id,
-        hard_limit: app.uncommy(app.chActions[id].hard_limit),
-        soft_limit: app.uncommy(app.chActions[id].soft_limit)
-      })
-    },
 
 
-    onchainPrepare: () => {
-      /*
-      app.call('prepareRebalance', {
-        externalDeposits: app.externalDeposits.map(dep=>{
-          return {
-            depositAmount: app.uncommy(dep.depositAmount),
-            hub: dep.hub,
-            to: dep.to,
-            invoice: dep.invoice
-          }
-        })
+
+    addExternalDeposit: () => {
+      let d = app.externalDeposit
+      app.call('externalDeposit', {
+        depositAmount: app.uncommy(d.depositAmount),
+        hub: d.hub,
+        to: d.to,
+        invoice: d.invoice
       })
       
       // reset all formfields
-      app.externalDeposits = []
-      */
-
+      app.externalDeposit = {}
     },
 
 
@@ -546,17 +524,7 @@ export default {
       return Number.isInteger(total) ? total : 0*/
     },
 
-    totalDeposits: ()=>{
-       return 0
-       /*
-      app.channelsForAsset().map(ch=>{
-        total += app.uncommy(app.chAction(ch).depositAmount)
-      })
-      for (let dep of app.externalDeposits) {
-        total += app.uncommy(dep.depositAmount)
-      }
-      return total*/
-    },
+
 
     afterRebalance: ()=>{
       return app.getAsset(app.asset) + app.totalWithdrawals() - app.totalDeposits()
@@ -794,14 +762,14 @@ export default {
 
               {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
 
-              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('requestInsurance', {partnerId: ch.d.partnerId, asset: asset})">Request Insurance</span>
+              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('withChannel', {id: ch.d.id, op: 'requestInsurance'})">Request Insurance</span>
 
               <!--
               <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured> ch.d.soft_limit">over soft limit, expect rebalance</span>
               <span title="When you spend large part of your insurance, the hub may request a withdrawal from you so they could deposit this insurance to someone else. It's recommended to come online more frequently, otherwise hub may start a dispute with you." class="badge badge-dark" v-if="!my_hub && ch.they_insured >= K.risk">stay online to cooperate</span>
               -->
             </small>
-            <span class="badge badge-success" @click="call('testnet', { partner: ch.partner, asset: asset, action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+            <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet',  action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
             </p>
           
             <div v-if="dev_mode && ch.bar > 0" class="progress">
@@ -951,32 +919,46 @@ export default {
                 <p>They_uninsured: {{commy(ch.they_uninsured)}}</p>
 
 
+
                 <h4>Credit limits</h4>
                 <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
-
                 <p>Hard limit: {{commy(ch.d.hard_limit)}}</p>
+
+                <p><input type="text" class="form-control" v-model="chActions[ch.d.id].hard_limit"></p>
+
                 <p>Soft limit: {{commy(ch.d.soft_limit)}}</p>
+                <p><input type="text" class="form-control" v-model="chActions[ch.d.id].soft_limit"></p>
 
                 <p>
-                  <button type="button" class="btn btn-danger" @click="setLimits()" href="#">Save Credit Limits</button>
+                  <button type="button" class="btn btn-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: chActions[ch.d.id].hard_limit})" href="#">Update Credit Limits</button>
                 </p>
               </div>
               <div class="col-sm">
 
-            <h4>Onchain operations</h4>
-
-            <p><input type="text" class="form-control small-input" v-model="chActions[ch.d.id].withdrawAmount" placeholder="To withdraw">  
-            <button type="button" class="btn btn-danger" @click="setLimits()" href="#">Request Withdrawal 🌐</button></p>
-
-            <input style="width:150px" type="text" class="form-control small-input" v-model="chActions[ch.d.id].depositAmount" placeholder="To deposit">
+                <h4>Onchain operations</h4>
 
 
-            <p>If the hub becomes unresponsive, you are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the hub is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.
-            </p>
 
-            <span v-if="ch.ins.dispute_delayed">Until {{ch.ins.dispute_delayed}}</span>
+                <p><div class="input-group">
+                  <input type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="To withdraw" aria-describedby="basic-addon2">
+                  <div class="input-group-append">
+                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)})">Request Withdrawal 🌐</button>
+                  </div>
+                </div></p>
 
-            <button type="button" class="btn btn-danger" @click="startDispute(ch.d.id)" href="#">Start Dispute 🌐</button>
+
+                <p><div class="input-group">
+                  <input type="text" class="form-control" v-model="chActions[ch.d.id].depositAmount" placeholder="To deposit" aria-describedby="basic-addon2">
+                  <div class="input-group-append">
+                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].depositAmount)})">Add Deposit 🌐</button>
+                  </div>
+                </div></p>
+
+                <p>If the hub becomes unresponsive, you are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the hub is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.
+                </p>
+
+                <span v-if="ch.ins.dispute_delayed">Until {{ch.ins.dispute_delayed}}</span>
+                <p><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
 
 
               </div>
@@ -1070,7 +1052,7 @@ export default {
         </div>
 
         <div v-else-if="record">
-          <h1>Onchain Operations</h1>
+          <h3>Onchain Deposit</h3>
           <p>ID: {{record.id}}@onchain</p>
           <p>Current FRD balance: {{commy(getAsset(1))}}</p>
 
@@ -1079,44 +1061,21 @@ export default {
 
 
 
-          <table class="table" v-if="externalDeposits.length > 0">
-            <thead class="thead-dark">
-              <tr>
-                <th scope="col">ID</th>
-                <th scope="col">Hub</th>
-                <th scope="col">Deposit</th>
-                <th scope="col">Tag (optional)</th>
-                <th scope="col">Action</th>
-              </tr>
-            </thead>
+          <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="ID"></[td]>
 
-            <tbody>
-              <tr v-for="(dep, index) in externalDeposits" style="width:300px">
-                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.to" placeholder="ID"></td>
-
-                <td><select type="text" class="form-control" v-model="dep.hub" placeholder="Hub handle">
-                  <option value="onchain">onchain</option>
-                  <option v-for="hub in K.hubs" :value="hub.handle">{{hub.handle}}</option>
-                </select></td>
+          <p><select style="width:400px"  type="text" class="form-control" v-model="externalDeposit.hub" placeholder="Hub handle">
+            <option value="onchain">onchain</option>
+            <option v-for="hub in K.hubs" :value="hub.handle">{{hub.handle}}</option>
+          </select></p>
 
 
-                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.depositAmount" placeholder="Amount to deposit"></td>
+          <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit"></p>
 
-                <td><input style="width:200px" type="text" class="form-control small-input" v-model="dep.invoice" placeholder="Tag (optional)"></td>
+          <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Tag (optional)"></p>
 
-                <td><button v-if="externalDeposits.length > 0" type="button" class="btn btn-danger" @click="externalDeposits.splice(index, 1)">Remove</button></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <p><button type="button" class="btn btn-success" @click="externalDeposits.push({to:'', hub: 'onchain', depositAmount: '0.00', invoice: ''})">+ Add External Deposit</button></p>
-
-          <p>{{commy(getAsset(asset))}} (current onchain balance) + {{commy(totalWithdrawals())}} (all withdrawals) - {{commy(totalDeposits())}} (all deposits) </p><p>= {{commy(afterRebalance())}} (final balance)</p>
-
-          <p v-if="afterRebalance() > 0">
-            <button type="button" class="btn btn-warning" @click="onchainPrepare()">Add to Batch 🌐</button>
+          <p>
+            <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Add External Deposit 🌐</button>
           </p>
-          <p v-else>Not enough funds to perform this transaction. Increase your withdrawals or decrease your deposits.</p>
 
 
           <div v-if="batch && batch.length > 0" class="alert alert-primary">
@@ -1298,12 +1257,12 @@ export default {
 
                     <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">Set asset: {{to_ticker(d[1])}}</span>
 
-                    <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{d[2]}}</span>
+                    <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{to_user(d[2])}}</span>
 
 
                     <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Reveal: {{trim(d[1])}}</span>
 
-                    <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{d[2]}}</span>
+                    <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{to_user(d[2])}}</span>
 
                     <span v-else-if="d[0]=='depositTo'" class="badge badge-success" >{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': to_user(d[2]))+'@'+to_user(d[3])) : to_user(d[2])}}{{d[4] ? ' for '+d[4] : ''}}</span>
 
