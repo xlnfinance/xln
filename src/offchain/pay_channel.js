@@ -1,7 +1,7 @@
 const Router = require('../router')
 // short helper to create a Payment on some delta and flush the channel right after it
 module.exports = async (opts) => {
-  section('pay', async () => {
+  return await section('pay', async () => {
     let secret = crypto.randomBytes(32)
     let hash = sha3(secret)
 

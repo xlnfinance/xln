@@ -1,7 +1,7 @@
 // chain has blocks, block has batches, batch has transactions
 
 module.exports = async (args) => {
-  return section('onchain', async () => {
+  return await section('onchain', async () => {
     l('Start process chain')
 
     if (!cached_result.sync_started_at) {

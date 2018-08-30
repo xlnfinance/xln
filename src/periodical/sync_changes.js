@@ -2,7 +2,7 @@
 // channels, payments, users and insurances
 // also K.json is stored
 module.exports = async (opts = {}) => {
-  return section('syncChanges', async () => {
+  return await section('syncChanges', async () => {
     var all = []
 
     if (K) {
@@ -51,16 +51,19 @@ module.exports = async (opts = {}) => {
       let ch = cache.ch[key]
 
       await section(['use', ch.d.partnerId, ch.d.asset], async () => {
-        ch.payments = ch.payments.filter(async (t) => {
-          if (t.changed()) {
-            //all.push(t.save())
-            await t.save()
+        let all_payments = []
+
+        for (let i = 0; i < ch.payments.length; i++) {
+          let t = ch.payments[i]
+          //if (t.changed()) {
+          all_payments.push(t.save())
+          //}
+
+          // delacked payments are of no interest anymore
+          if (t.type + t.status == 'delack') {
+            ch.payments.slice(i, 1)
           }
-
-          // filter out finalized ones
-          return t.type + t.status != 'delack'
-        })
-
+        }
         let evict = ch.last_used < ts() - K.cache_timeout
 
         if (ch.d.changed()) {
@@ -76,12 +79,16 @@ module.exports = async (opts = {}) => {
         }*/
 
         //all.push(promise)
+        await Promise.all(all_payments)
       })
     }
 
     //cache.ch = new_ch
 
-    if (all.length > 0) l(`syncdb done: ${all.length}`)
+    if (all.length > 0) {
+      l(`syncdb done: ${all.length}`)
+    }
+
     return await Promise.all(all)
   })
 }

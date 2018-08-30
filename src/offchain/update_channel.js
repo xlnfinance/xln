@@ -66,7 +66,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
     }
     if (transitions.length == 0) {
       mismatch('Empty invalid ack ' + ch.d.status)
-      //fatal('Empty invalid ack ' + ch.d.status)
+      fatal('Empty invalid ack ' + ch.d.status)
       return
     }
 
