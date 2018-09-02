@@ -167,6 +167,19 @@ window.render = (r) => {
     app.updateRoutes()
   }
 
+  // ensure all chActions are prefilled
+  if (r.channels)
+    r.channels.map((ch) => {
+      if (!app.chActions[ch.d.id]) {
+        app.chActions[ch.d.id] = {
+          depositAmount: '',
+          withdrawAmount: '',
+          hard_limit: app.commy(ch.d.hard_limit),
+          soft_limit: app.commy(ch.d.soft_limit)
+        }
+      }
+    })
+
   Object.assign(window.app, r)
   window.app.$forceUpdate()
 

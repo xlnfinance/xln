@@ -1,4 +1,5 @@
 const Router = require('../router')
+const withdraw = require('../offchain/withdraw')
 
 let respondNotAuthorized = (ws) => {
   if (ws.end) {
@@ -46,23 +47,27 @@ module.exports = async (ws, json) => {
   switch (json.method) {
     case 'load':
       result = await require('./load')(json.params)
+      result = Object.assign(result, cached_result)
       break
 
     case 'logout':
       result = require('./logout')()
       break
 
-    case 'send':
+    case 'sendOffchain':
       await me.payChannel(json.params)
       break
 
-    case 'rebalance':
-      await require('./rebalance')(json.params)
-      return false
+    case 'withChannel':
+      require('./with_channel')(json.params)
+      break
+
+    case 'externalDeposit':
+      require('./external_deposit')(json.params)
       break
 
     case 'broadcast':
-      me.broadcast(json.params)
+      Periodical.broadcast(json.params)
       react({confirm: 'Now await inclusion in block'})
       return false
       break
@@ -95,20 +100,6 @@ module.exports = async (ws, json) => {
       )
       break
 
-    case 'requestInsurance':
-      let ch = await me.getChannel(
-        fromHex(json.params.partnerId),
-        json.params.asset
-      )
-
-      me.send(
-        ch.hub,
-        'setLimits',
-        me.envelope(methodMap('requestInsurance'), ch.d.asset)
-      )
-      react({confirm: 'Requested insurance, please wait'})
-      break
-
     case 'toggleHub':
       let index = PK.usedHubs.indexOf(json.params.id)
       if (index == -1) {
@@ -116,16 +107,21 @@ module.exports = async (ws, json) => {
 
         let hub = K.hubs.find((h) => h.id == json.params.id)
 
-        require('./set_limits')({
-          chActions: [
-            {
-              partnerId: hub.pubkey,
-              hard_limit: K.hard_limit,
-              soft_limit: K.soft_limit,
-              asset: 1
-            }
-          ]
-        })
+        let ch = await me.getChannel(hub.pubkey, 1)
+
+        ch.d.hard_limit = K.hard_limit
+        ch.d.soft_limit = K.soft_limit
+
+        me.send(
+          hub,
+          'setLimits',
+          me.envelope(
+            methodMap('setLimits'),
+            ch.d.asset,
+            ch.d.soft_limit,
+            ch.d.hard_limit
+          )
+        )
 
         result.confirm = 'Hub added'
       } else {
@@ -136,7 +132,7 @@ module.exports = async (ws, json) => {
       }
       //
       react({}, true)
-      //update_cache()
+      //Periodical.updateCache()
 
       break
 

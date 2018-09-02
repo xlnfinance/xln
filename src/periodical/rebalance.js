@@ -18,7 +18,7 @@ General recommendations:
 
 */
 
-const withdraw = require('./withdraw')
+const withdraw = require('../offchain/withdraw')
 
 const rebalance = async function(asset) {
   var deltas = await Delta.findAll({
@@ -107,7 +107,7 @@ const rebalance = async function(asset) {
       ])
 
       // nullify their insurance request
-      ch.d.they_requested_insurance = false
+      ch.d.they_requested_insurance = null
     } else {
       l(
         `Run out of funds for asset ${asset}, own ${weOwn} need ${

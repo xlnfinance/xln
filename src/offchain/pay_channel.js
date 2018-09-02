@@ -1,7 +1,7 @@
 const Router = require('../router')
 // short helper to create a Payment on some delta and flush the channel right after it
 module.exports = async (opts) => {
-  section('pay', async () => {
+  return await section('pay', async () => {
     let secret = crypto.randomBytes(32)
     let hash = sha3(secret)
 
@@ -141,14 +141,14 @@ module.exports = async (opts) => {
 
     ch.payments.push(outward)
 
-    l('Paying to ', addr, reversed, onion.length)
+    l('Paying to ', reversed, onion.length)
 
     react({}, false)
     me.flushChannel(ch.d.partnerId, opts.asset, true)
 
     if (argv.syncdb) {
       //all.push(ch.d.save())
-      await syncdb() //Promise.all(all)
+      //await Periodical.syncChanges() //Promise.all(all)
     }
   })
 }

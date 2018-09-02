@@ -56,7 +56,9 @@ module.exports = async (args) => {
   if (argv.syncdb) {
     //all.push(ch.d.save())
 
-    await syncdb() //Promise.all(all)
+    // end-users would prefer instant save for responsive UI
+    await Periodical.syncChanges()
+    //Promise.all(all)
   }
 
   // use lazy react for external requests

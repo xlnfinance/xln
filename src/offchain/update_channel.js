@@ -32,6 +32,18 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
   prettyState(theirFinalState)
   prettyState(theirSignedState)
 
+  let mismatch = (reason) => {
+    logstates(
+      reason,
+      ch.state,
+      ourSignedState,
+      theirInitialState,
+      theirSignedState,
+      theirFinalState,
+      transitions
+    )
+  }
+
   if (deltaVerify(ch.d, refresh(ch), ackSig)) {
     // our last known state has been ack.
     ch.payments.map((t, ind) => {
@@ -47,12 +59,13 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
   } else {
     if (ch.d.status == 'merge') {
       // we are in merge and yet we just received ackSig that doesnt ack latest state
-      logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
+      mismatch('Rollback cant rollback')
+
       fatal('Rollback cant rollback')
       return
     }
     if (transitions.length == 0) {
-      logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
+      mismatch('Empty invalid ack ' + ch.d.status)
       fatal('Empty invalid ack ' + ch.d.status)
       return
     }
@@ -79,11 +92,11 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
       ch.d.nonce = ourSignedState[1][2]
       ch.d.offdelta = ourSignedState[1][3]
     } else {
-      logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
+      mismatch('Deadlock')
 
       l('Deadlock')
 
-      //fatal('Deadlock?!')
+      fatal('Deadlock?!')
       //await me.flushChannel(ch)
 
       return
@@ -135,7 +148,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
       if (!deltaVerify(ch.d, refresh(ch), t[2])) {
         loff('error: Invalid state sig add')
-        logstates(ch.state, ourSignedState, theirInitialState, theirSignedState)
+        mismatch('error: Invalid state sig add')
 
         break
       }
@@ -291,10 +304,12 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         var valid = false
       }
 
+      refresh(ch)
+
       // todo check expirations
       var outward_hl = ch.outwards.find((hl) => hl.hash.equals(hash))
       if (!outward_hl) {
-        l('No such hashlock ', hash)
+        l('No such hashlock ', hash, ch.payments)
         continue
       }
 

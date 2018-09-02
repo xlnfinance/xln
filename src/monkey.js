@@ -34,7 +34,7 @@ const payMonkey = async (on_server, counter = 1) => {
   } else if (counter < 20) {
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
-    }, Math.round(200))
+    }, 300)
   }
 }
 
@@ -83,7 +83,7 @@ if (argv.monkey) {
   }
 
   // only in monkey mode, not on end user node
-  setInterval(me.broadcast, 6000)
+  Periodical.schedule('broadcast', K.blocktime * 1000)
 
   if (me.record.id == 1) {
     l('Scheduling e2e checks')
@@ -92,8 +92,7 @@ if (argv.monkey) {
       // no need to run test on server
       if (on_server) return
 
-      await syncdb()
-      update_cache()
+      await Periodical.syncChanges()
 
       let monkey5 = await getUserByIdOrKey(5)
       let monkey5ins = await getInsuranceSumForUser(5)
@@ -144,8 +143,8 @@ if (argv.monkey) {
 
   if (me.record.id == 4) {
     // trigger the dispute from hub
-    me.CHEAT_dontack = true
-    me.CHEAT_dontwithdraw = true
+    //me.CHEAT_dontack = true
+    //me.CHEAT_dontwithdraw = true
 
     setTimeout(() => {
       me.payChannel({
@@ -173,24 +172,20 @@ if (argv.monkey) {
 
   if (me.record.id == 2) {
     // withdraw 12.34 from hub and deposit 9.12 to 3@1
-    require('./internal_rpc/rebalance')({
+    me.getChannel(K.hubs[0].pubkey, 1).then((ch) => {
+      require('./internal_rpc/with_channel')({
+        id: ch.d.id,
+        op: 'withdraw',
+        amount: 912
+      })
+    })
+
+    require('./internal_rpc/external_deposit')({
       asset: 1,
-
-      chActions: [
-        {
-          partnerId: K.hubs[0].pubkey,
-          withdrawAmount: 1234
-        }
-      ],
-
-      externalDeposits: [
-        {
-          to: '3',
-          hub: 'Europe',
-          depositAmount: 912,
-          invoice: 'test'
-        }
-      ]
+      to: '3',
+      hub: 'Europe',
+      depositAmount: 912,
+      invoice: 'test'
     })
   }
 }

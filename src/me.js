@@ -39,9 +39,6 @@ class Me {
     }
     cached_result.metrics = this.metrics
 
-    this.updateMetricsInterval = 1000
-
-    this.intervals = []
     // used to store current block to be added to chain
     this.proposed_block = {}
   }
@@ -168,30 +165,10 @@ class Me {
 
     return {
       signed_batch: signed_batch,
-      size: to_sign.length
+      size: to_sign.length,
+      nonce: nonce,
+      batch_body: merged
     }
-  }
-
-  // signs and broadcasts
-  async broadcast(opts) {
-    if (PK.pending_batch) {
-      return l('Only 1 tx is supported')
-    }
-    // TODO: make batch persistent on disk
-
-    let estimated = await me.batch_estimate(opts)
-
-    if (!estimated) return
-
-    if (me.my_validator && me.my_validator == nextValidator(true)) {
-      me.mempool.push(estimated.signed_batch)
-    } else {
-      me.send(nextValidator(true), 'tx', r([estimated.signed_batch]))
-    }
-
-    // saving locally to ensure it is added, and rebroadcast if needed
-    PK.pending_batch = toHex(estimated.signed_batch)
-    me.batch = []
   }
 
   // tell all validators the same thing
@@ -227,11 +204,11 @@ class Me {
 
     // both validators and hubs must run external_wss
     if (me.my_validator) {
-      l('We are validator ', me.my_validator)
-      me.startExternalRPC(me.my_validator.location)
-    } else if (me.my_hub) {
-      l('We are hub ', me.my_hub)
-      me.startExternalRPC(me.my_hub.location)
+      Periodical.startValidator()
+    }
+
+    if (me.my_hub) {
+      Periodical.startHub()
     }
 
     if (me.my_validator) {
@@ -259,12 +236,6 @@ class Me {
       argv.CHEAT.split(',').map((flag) => (me['CHEAT_' + flag] = true))
     }
 
-    l('Setting up intervals')
-    // request latest blocks from nearest validator
-    me.intervals.push(setInterval(sync, 2000))
-    // cache onchain data regularly to present in Explorers
-    me.intervals.push(setInterval(update_cache, K.blocktime * 2000))
-
     if (K.total_blocks > 1) {
       snapshotHash()
     } else {
@@ -272,43 +243,7 @@ class Me {
       require('./monkey')
     }
 
-    // ensures all channels were acked, otherwise reveal hashlocks and start dispute onchain ASAP
-    me.intervals.push(setInterval(me.ensureAck, K.blocktime * 2000))
-
-    // updates tps metrics for nice sparklines graphs
-    me.intervals.push(setInterval(me.updateMetrics, me.updateMetricsInterval))
-
-    /*
-    me.intervals.push(
-      setInterval(() => {
-        // clean up old payments: all acked fails and settles
-        Payment.destroy({
-          where: {
-            [Op.or]: [{type: 'del', status: 'ack'}]
-          }
-        })
-      }, 120000)
-    )
-    */
-
-    //if (me.my_hub || me.my_validator) {
-    me.intervals.push(setInterval(syncdb, K.blocktime * 2000))
-
-    if (me.my_hub) {
-      // turn on auto rebalance with --rebalance
-      if (argv.rebalance) {
-        me.intervals.push(
-          setInterval(require('./offchain/rebalance'), K.blocktime * 1000)
-        )
-      }
-
-      // hubs have to force react regularly
-      me.intervals.push(
-        setInterval(() => {
-          react({})
-        }, 15000)
-      )
-    }
+    Periodical.scheduleAll()
   }
 
   async startExternalRPC(advertized_url) {
@@ -413,24 +348,6 @@ class Me {
     return channels
   }
 
-  updateMetrics() {
-    for (let name of Object.keys(me.metrics)) {
-      let m = me.metrics[name]
-      m.total += m.current
-      m.last_avg = Math.round(m.current)
-
-      if (m.last_avg > m.max) {
-        m.max = m.last_avg
-      }
-      m.avgs.push(m.last_avg)
-
-      // free up memory
-      if (m.avgs.length > 600) m.avgs.shift()
-
-      m.current = 0 // zero the counter for next period
-    }
-  }
-
   // a generic interface to send a websocket message to some user or validator
 
   send(m, method, tx) {
@@ -501,7 +418,6 @@ Me.prototype.payChannel = require('./offchain/pay_channel')
 Me.prototype.flushChannel = require('./offchain/flush_channel')
 Me.prototype.getChannel = require('./offchain/get_channel')
 Me.prototype.updateChannel = require('./offchain/update_channel')
-Me.prototype.ensureAck = require('./offchain/ensure_ack')
 
 module.exports = {
   Me: Me

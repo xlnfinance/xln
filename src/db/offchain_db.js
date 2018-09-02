@@ -235,6 +235,14 @@ const defineModels = (sequelize) => {
     desc: Sequelize.TEXT
   })
 
+  // offchain order for instant trustless exchange
+  const OffOrder = sequelize.define('offorder', {
+    amount: Sequelize.INTEGER,
+    rate: Sequelize.FLOAT,
+    assetId: Sequelize.INTEGER,
+    buyAssetId: Sequelize.INTEGER
+  })
+
   Delta.hasMany(Payment)
   Payment.belongsTo(Delta)
 
@@ -242,7 +250,8 @@ const defineModels = (sequelize) => {
     Delta: Delta,
     Payment: Payment,
     Block: Block,
-    Event: Event
+    Event: Event,
+    OffOrder: OffOrder
   }
 }
 
@@ -311,17 +320,21 @@ const getDBConfig = (datadir, dbtoken, dbpool) => {
   }
 }
 
-class OffсhainDB {
+class OffchainDB {
   constructor(datadir, dbtoken, pool, force) {
     this.datadir = datadir
     this.dbtoken = dbtoken
     this.pool = pool || 1
     // set to true when updated the schema
-    this.force = force || false
+    this.force = force || K.total_blocks <= 1
   }
 
   init() {
-    l('Initializing offchain db from ', this.datadir)
+    l(
+      `Initializing offchain db, datadir ${this.datadir}, dbtoken ${
+        this.dbtoken
+      }, force ${this.force}`
+    )
 
     const [database, username, password, config] = getDBConfig(
       this.datadir,
@@ -334,8 +347,8 @@ class OffсhainDB {
 
     Object.freeze(this)
 
-    return this.db.sync({force: this.force})
+    return //this.db.sync({force: this.force})
   }
 }
 
-module.exports = OffсhainDB
+module.exports = OffchainDB

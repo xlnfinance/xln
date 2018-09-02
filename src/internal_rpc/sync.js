@@ -1,5 +1,5 @@
 module.exports = () => {
-  sync()
+  Periodical.syncChain()
 
   let result = {confirm: 'Syncing the chain...'}
 

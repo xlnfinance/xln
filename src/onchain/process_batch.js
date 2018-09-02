@@ -130,14 +130,6 @@ module.exports = async (s, batch) => {
     }
   }
 
-  if (me.is_me(s.signer.pubkey)) {
-    if (PK.pending_batch == toHex(batch)) {
-      //l('Added to chain')
-      react({confirm: 'Your onchain transaction has been added!'}, false)
-      PK.pending_batch = null
-    }
-  }
-
   // Tx is valid, can take the fee
   userAsset(s.signer, 1, -txfee)
   userAsset(s.meta.proposer, 1, txfee)
@@ -176,6 +168,14 @@ module.exports = async (s, batch) => {
   await saveId(s.signer)
 
   s.meta['parsed_tx'].push(s.parsed_tx)
+
+  if (me.is_me(s.signer.pubkey)) {
+    if (PK.pending_batch == toHex(batch)) {
+      //l('Added to chain')
+      react({confirm: 'Your onchain transaction has been added!'}, false)
+      PK.pending_batch = null
+    }
+  }
 
   return {success: true}
 }

@@ -12,7 +12,7 @@ else
 fi
 
 
-db=
+db=--db=postgres:postgres:
 #--db=mysql:root:123123
 pm2_opts=--no-autorestart
 wallet_port=26678

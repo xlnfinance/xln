@@ -1,7 +1,9 @@
 // chain has blocks, block has batches, batch has transactions
 
 module.exports = async (args) => {
-  return section('onchain', async () => {
+  return await section('onchain', async () => {
+    l('Start process chain')
+
     if (!cached_result.sync_started_at) {
       cached_result.sync_started_at = K.total_blocks
       cached_result.sync_tx_started_at = K.total_tx
@@ -9,7 +11,9 @@ module.exports = async (args) => {
       var startHrtime = hrtime()
     }
 
-    let original_state = await onchain_state()
+    if (argv.nocrypto) {
+      var original_state = await onchain_state()
+    }
 
     let end = perf('processChain')
     //l(`Sync since ${cached_result.sync_started_at} ${args.length}`)
@@ -96,7 +100,7 @@ module.exports = async (args) => {
           })
         }
 
-        if (K.total_blocks == parseInt(argv.stop_blocks)) {
+        if (K.total_blocks >= parseInt(argv.stop_blocks)) {
           setTimeout(() => {
             fatal('done')
           }, 1000)
@@ -127,11 +131,11 @@ module.exports = async (args) => {
       cached_result.sync_tx_started_at = false
     } else {
       l('So many blocks. Syncing one more time')
-      sync()
+      //Periodical.syncChain()
     }
 
     //
-    update_cache()
+    //Periodical.updateCache()
     react({}, false)
 
     // Ensure our last broadcasted batch was added
@@ -143,10 +147,12 @@ module.exports = async (args) => {
     }
 
     // time to broadcast our next batch then. (Delay to ensure validator processed the block)
-    if (me.my_hub && argv.rebalance) {
+    /*
+    if (me.my_hub) {
       setTimeout(() => {
-        me.broadcast()
+        Periodical.broadcast()
       }, 2000)
     }
+    */
   })
 }

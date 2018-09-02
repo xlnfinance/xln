@@ -8,83 +8,6 @@ const isHeadless = () => {
   return !me.browser || me.browser.readyState != 1
 }
 
-update_cache = async (force = false) => {
-  if (!me.my_validator && isHeadless() && !force) return
-
-  if (K) {
-    cached_result.my_hub = me.my_hub
-
-    cached_result.my_validator = me.my_validator
-
-    cached_result.K = K
-
-    cached_result.nextValidator = nextValidator()
-
-    await Promise.all(
-      [
-        async () => {
-          cached_result.proposals = await Proposal.findAll({
-            order: [['id', 'DESC']],
-            include: {all: true}
-          })
-        },
-        async () => {
-          cached_result.users = await User.findAll({include: {all: true}})
-        },
-        async () => {
-          cached_result.insurances = await Insurance.findAll()
-        },
-        async () => {
-          for (var hub of cached_result.K.hubs) {
-            hub.sumForUser = await getInsuranceSumForUser(hub.id)
-          }
-        },
-        async () => {
-          cached_result.hashlocks = await Hashlock.findAll()
-        },
-        async () => {
-          cached_result.assets = await Asset.findAll()
-        },
-        async () => {
-          cached_result.orders = await Order.findAll()
-        },
-        async () => {
-          cached_result.blocks = (await Block.findAll({
-            limit: 50,
-            order: [['id', 'desc']],
-            where: me.show_empty_blocks
-              ? {}
-              : {
-                  meta: {[Op.ne]: null}
-                }
-          })).map((b) => {
-            var [
-              methodId,
-              built_by,
-              total_blocks,
-              prev_hash,
-              timestamp,
-              tx_root,
-              db_hash
-            ] = r(b.header)
-
-            return {
-              id: b.id,
-              prev_hash: toHex(b.prev_hash),
-              hash: toHex(b.hash),
-              built_by: readInt(built_by),
-              timestamp: readInt(timestamp),
-              meta: JSON.parse(b.meta),
-              total_tx: b.total_tx
-            }
-          })
-          return true
-        }
-      ].map((d) => d())
-    )
-  }
-}
-
 // Flush an object to browser websocket. Send force=false for lazy react (for high-tps nodes like hubs)
 react = async (result = {}, force = true) => {
   // hubs dont react OR no alive browser socket
@@ -99,25 +22,36 @@ react = async (result = {}, force = true) => {
   me.last_react = new Date()
 
   if (!me.my_hub) {
-    //await syncdb()
+    //await Periodical.syncChanges()
   }
 
   if (isHeadless()) return
 
-  //await update_cache()
+  //await Periodical.updateCache()
 
   if (me.id && !result.skip_private) {
-    ;[result.payments, result.channels, result.record] = await Promise.all([
+    ;[
+      result.payments,
+      result.channels,
+      result.record,
+      result.events
+    ] = await Promise.all([
       Payment.findAll({
         order: [['id', 'desc']],
         //include: {all: true},
         limit: 300
       }),
       me.channels(),
-      getUserByIdOrKey(bin(me.id.publicKey))
+      getUserByIdOrKey(bin(me.id.publicKey)),
+      Event.findAll({
+        order: [['id', 'desc']],
+        limit: 100
+      })
     ])
 
     if (!result.record.id) result.record = null
+
+    result.timeouts = Object.keys(Periodical.timeouts)
 
     result.payments.map((p) => {
       // prefix for invoice types: 1 is user set 2 is random
@@ -141,7 +75,7 @@ react = async (result = {}, force = true) => {
   try {
     me.browser.send(
       JSON.stringify({
-        result: Object.assign(result, cached_result)
+        result: result //Object.assign(result, cached_result)
       })
     )
   } catch (e) {
