@@ -1,21 +1,37 @@
+const rebroadcast = (signed_batch) => {
+  if (me.my_validator && me.my_validator == nextValidator(true)) {
+    me.mempool.push(signed_batch)
+  } else {
+    me.send(nextValidator(true), 'tx', r([signed_batch]))
+  }
+}
+
 // signs and broadcasts
 module.exports = async function(opts) {
-  if (PK.pending_batch) {
-    return l('Only 1 tx is supported')
-  }
-  // TODO: make batch persistent on disk
+  section('broadcast', async () => {
+    if (PK.pending_batch) {
+      return l('Only 1 tx is supported')
+    }
+    // TODO: make batch persistent on disk
 
-  let estimated = await me.batch_estimate(opts)
+    let estimated = await me.batch_estimate(opts)
 
-  if (!estimated) return
+    if (!estimated) return
 
-  if (me.my_validator && me.my_validator == nextValidator(true)) {
-    me.mempool.push(estimated.signed_batch)
-  } else {
-    me.send(nextValidator(true), 'tx', r([estimated.signed_batch]))
-  }
+    l('Broadcasting now with nonce ', estimated.nonce)
+    // saving locally to ensure it is added, and rebroadcast if needed
+    PK.pending_batch = toHex(estimated.signed_batch)
 
-  // saving locally to ensure it is added, and rebroadcast if needed
-  PK.pending_batch = toHex(estimated.signed_batch)
-  me.batch = []
+    rebroadcast(estimated.signed_batch)
+
+    /*
+    if (me.my_validator && me.my_validator == nextValidator(true)) {
+      me.mempool.push(estimated.signed_batch)
+    } else {
+      me.send(nextValidator(true), 'tx', r([estimated.signed_batch]))
+    }
+    */
+
+    me.batch = []
+  })
 }

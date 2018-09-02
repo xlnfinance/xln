@@ -258,6 +258,7 @@ export default {
     addExternalDeposit: () => {
       let d = app.externalDeposit
       app.call('externalDeposit', {
+        asset: app.asset,
         depositAmount: app.uncommy(d.depositAmount),
         hub: d.hub,
         to: d.to,
@@ -903,10 +904,11 @@ export default {
           <h1>Hubs</h1>
           <p>On this page you can see all your relationships with hubs.</p>
 
-          <template v-for="ch in channelsForAsset()">
+          <div class="alert alert-info" v-for="ch in channelsForAsset()">
 
-            <div class="row">
+            <div class="row" class="alert alert-warning">
               <div class="col-sm">
+ 
                 <h2>{{ch.hub.handle}}</h2>
                 
                 <p>Payable: {{commy(ch.payable)}}</p>
@@ -917,6 +919,8 @@ export default {
                 <p>They_insured: {{commy(ch.they_insured)}}</p>
                 <p>Uninsured: {{commy(ch.uninsured)}}</p>
                 <p>They_uninsured: {{commy(ch.they_uninsured)}}</p>
+
+                <p>They requested insurance: {{ch.d.they_requested_insurance}}</p>
 
 
 
@@ -964,9 +968,8 @@ export default {
               </div>
             </div>
 
-            <hr/>
 
-          </template>
+          </div>
 
 
 

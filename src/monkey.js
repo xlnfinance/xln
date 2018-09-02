@@ -172,24 +172,20 @@ if (argv.monkey) {
 
   if (me.record.id == 2) {
     // withdraw 12.34 from hub and deposit 9.12 to 3@1
-    require('./internal_rpc/prepare_rebalance')({
+    me.getChannel(K.hubs[0].pubkey, 1).then((ch) => {
+      require('./internal_rpc/with_channel')({
+        id: ch.d.id,
+        op: 'withdraw',
+        amount: 912
+      })
+    })
+
+    require('./internal_rpc/external_deposit')({
       asset: 1,
-
-      chActions: [
-        {
-          partnerId: K.hubs[0].pubkey,
-          withdrawAmount: 1234
-        }
-      ],
-
-      externalDeposits: [
-        {
-          to: '3',
-          hub: 'Europe',
-          depositAmount: 912,
-          invoice: 'test'
-        }
-      ]
+      to: '3',
+      hub: 'Europe',
+      depositAmount: 912,
+      invoice: 'test'
     })
   }
 }

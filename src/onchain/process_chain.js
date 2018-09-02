@@ -147,10 +147,12 @@ module.exports = async (args) => {
     }
 
     // time to broadcast our next batch then. (Delay to ensure validator processed the block)
+    /*
     if (me.my_hub) {
       setTimeout(() => {
         Periodical.broadcast()
       }, 2000)
     }
+    */
   })
 }

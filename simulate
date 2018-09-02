@@ -12,7 +12,7 @@ else
 fi
 
 
-db=
+db=--db=postgres:postgres:
 #--db=mysql:root:123123
 pm2_opts=--no-autorestart
 wallet_port=26678
@@ -41,7 +41,7 @@ if node fair.js --genesis=test $db $global | grep "Genesis done"; then
   pm2 start $pm2_opts --name wallet yarn -- parcel serve wallet -p $wallet_port
 
   fair_node_args="-p8433 --syncdb=off --rebalance $global"
-  pm2 start $pm2_opts --name fair8433 fair.js -- $fair_cluster_args $fair_node_args --db=postgres:postgres:
+  pm2 start $pm2_opts --name fair8433 fair.js -- $fair_cluster_args $fair_node_args
 
   for i in $(seq 8001 $maxport); do
     fair_node_args="-p$i --username=$i --pw=password --datadir=data$i $global"

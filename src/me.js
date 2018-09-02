@@ -165,7 +165,9 @@ class Me {
 
     return {
       signed_batch: signed_batch,
-      size: to_sign.length
+      size: to_sign.length,
+      nonce: nonce,
+      batch_body: merged
     }
   }
 

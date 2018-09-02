@@ -55,38 +55,41 @@ module.exports = async (opts = {}) => {
 
         for (let i = 0; i < ch.payments.length; i++) {
           let t = ch.payments[i]
-          //if (t.changed()) {
-          all_payments.push(t.save())
-          //}
+          if (t.changed()) {
+            all_payments.push(t.save())
+          }
 
           // delacked payments are of no interest anymore
           if (t.type + t.status == 'delack') {
-            ch.payments.slice(i, 1)
+            //delete ch.payments[i]
+            ch.payments.splice(i, 1)
           }
         }
+
         let evict = ch.last_used < ts() - K.cache_timeout
 
         if (ch.d.changed()) {
-          all.push(ch.d.save())
+          all_payments.push(ch.d.save())
         }
 
+        await Promise.all(all_payments)
+
         // the channel is only evicted after it is properly saved in db
-        /*if (evict) {
-          //delete cache.ch[key]
-          promise = promise.then(() => {
-            //l('Evict: ' + trim(ch.d.partnerId), ch.d.ack_requested_at)
-          })
-        }*/
+        if (evict) {
+          delete cache.ch[key]
+          //promise = promise.then(() => {
+          l('Evict: ' + trim(ch.d.partnerId), ch.d.ack_requested_at)
+          //})
+        }
 
         //all.push(promise)
-        await Promise.all(all_payments)
       })
     }
 
     //cache.ch = new_ch
 
     if (all.length > 0) {
-      l(`syncdb done: ${all.length}`)
+      l(`syncChanges done: ${all.length}`)
     }
 
     return await Promise.all(all)

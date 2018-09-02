@@ -32,7 +32,12 @@ module.exports = async (s, args) => {
     ])
 
     if (!ec.verify(body, withdrawal_sig, partner.pubkey)) {
-      l('Invalid withdrawal sig by partner ', amount, ins)
+      l(
+        'Invalid withdrawal sig by partner ',
+        amount,
+        withdrawal_sig,
+        partner.pubkey
+      )
       return
     }
 

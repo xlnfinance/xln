@@ -5,7 +5,7 @@ module.exports = async (args) => {
   let ch = await me.getChannel(pubkey, readInt(limits[1]))
 
   if (readInt(limits[0]) == methodMap('requestInsurance')) {
-    ch.d.requested_insurance = true
+    ch.d.they_requested_insurance = true
     l('Queued for insurance')
     return
   }
