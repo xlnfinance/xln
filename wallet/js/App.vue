@@ -577,7 +577,7 @@ export default {
             <a class="nav-link" title="Hubs that instantly process payments" @click="go('hubs')">⚡️ Hubs</a>
           </li>
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
-            <a class="nav-link" @click="go('onchain')">🌐 Onchain</a>
+            <a class="nav-link" @click="go('onchain')">🌐 Broadcast <span class="badge badge-danger" v-if="batch.length > 0 || PK.pending_batch">{{PK.pending_batch ? 'sent' : batch.length}}</span></a>
           </li>
 
 
@@ -626,7 +626,7 @@ export default {
           </li>
 
         </ul>
-        <span class="badge badge-danger" v-if="PK.pending_batch" @click="go('onchain')">Onchain tx pending</span> &nbsp;
+
         <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span><span v-else >Block #{{K.total_blocks}}</span> &nbsp;
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
@@ -741,7 +741,7 @@ export default {
           <textarea class="form-control" v-model="hardfork" rows="4" id="comment"></textarea>
         </div>
         <p>
-          <button @click="call('hardfork', {hardfork: hardfork})" class="btn btn-danger">Execute Code</button>
+          <button @click="call('hardfork', {hardfork: hardfork})" class="btn btn-outline-danger">Execute Code</button>
         </p>
       </div>
 
@@ -755,21 +755,7 @@ export default {
           <template v-for="(ch, index) in channelsForAsset()">
             <p>
             <h4 style="display:inline-block">@{{ch.hub.handle}}: {{commy(ch.payable)}}</h4>
-            <small v-if="ch.payable > 0">
-              = {{commy(ch.ins.insurance)}} insurance 
-              {{ch.uninsured > 0 ? "+ "+commy(ch.uninsured)+" uninsured" : ''}}
-              {{ch.they_insured > 0 ? "- "+commy(ch.they_insured)+" they_insured" : ''}}
-              {{ch.hashlock_hold[1] > 0 ? "- "+commy(ch.hashlock_hold[1])+" hashlocks" : ''}}
 
-              {{ch.d.they_hard_limit > 0 ? "+ "+commy(ch.d.they_hard_limit)+" uninsured limit" : ''}} 
-
-              <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('withChannel', {id: ch.d.id, op: 'requestInsurance'})">Request Insurance</span>
-
-              <!--
-              <span title="Your uninsured balance has gone over the soft credit limit you set. It's expected for hub to rebalance you soon. If this doesn't happen you can start a dispute with a hub" class="badge badge-dark" v-if="!my_hub && ch.uninsured> ch.d.soft_limit">over soft limit, expect rebalance</span>
-              <span title="When you spend large part of your insurance, the hub may request a withdrawal from you so they could deposit this insurance to someone else. It's recommended to come online more frequently, otherwise hub may start a dispute with you." class="badge badge-dark" v-if="!my_hub && ch.they_insured >= K.risk">stay online to cooperate</span>
-              -->
-            </small>
             <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet',  action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
             </p>
           
@@ -789,13 +775,6 @@ export default {
             </div>
 
             
-            <div v-if="dev_mode">
-              {{ch.d.status}} / 
-              {{ch.d.ack_requested_at}}
-            </div>
-            <pre v-if="dev_mode" v-html="ch.ascii_channel"></pre>
-            <pre v-if="dev_mode" v-html="ch.ascii_states"></pre>
-
 
           </template>
           <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
@@ -835,9 +814,9 @@ export default {
 
 
           <p>
-            <button type="button" class="btn btn-success" @click="call('sendOffchain', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: bestRoutes[chosenRoute][1]})">Pay Now → </button>
+            <button type="button" class="btn btn-outline-success" @click="call('sendOffchain', {address: outward_address, asset: asset, amount: uncommy(outward_amount), invoice: outward_invoice, addrisk: addrisk, lazy: lazy, chosenRoute: bestRoutes[chosenRoute][1]})">Pay Now → </button>
 
-            <button v-if="dev_mode" type="button" class="btn btn-danger" @click="stream()">Pay 100 times</button>
+            <button v-if="dev_mode" type="button" class="btn btn-outline-danger" @click="stream()">Pay 100 times</button>
           </p>            
 
 
@@ -884,7 +863,7 @@ export default {
           <input v-model="pw" type="password" id="inputPassword" class="form-control" placeholder="Password" required>
 
           
-          <button class="btn btn-lg btn-primary btn-block" id="login" type="submit">Generate Wallet</button>
+          <button class="btn btn-lg btn-outline-primary btn-block" id="login" type="submit">Generate Wallet</button>
 
           <br>
           <p class="alert alert-primary">
@@ -910,6 +889,7 @@ export default {
               <div class="col-sm">
  
                 <h2>{{ch.hub.handle}}</h2>
+                <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet',  action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
                 
                 <p>Payable: {{commy(ch.payable)}}</p>
                 <p>Receivable: {{commy(ch.they_payable)}}</p>
@@ -917,7 +897,7 @@ export default {
 
                 <p>Insured: {{commy(ch.insured)}}</p>
                 <p>They_insured: {{commy(ch.they_insured)}}</p>
-                <p>Uninsured: {{commy(ch.uninsured)}}</p>
+                <p>Uninsured: {{commy(ch.uninsured)}} <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('withChannel', {id: ch.d.id, op: 'requestInsurance'})">Request Insurance</span></p>
                 <p>They_uninsured: {{commy(ch.they_uninsured)}}</p>
 
                 <p>They requested insurance: {{ch.d.they_requested_insurance}}</p>
@@ -934,14 +914,12 @@ export default {
                 <p><input type="text" class="form-control" v-model="chActions[ch.d.id].soft_limit"></p>
 
                 <p>
-                  <button type="button" class="btn btn-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: chActions[ch.d.id].hard_limit})" href="#">Update Credit Limits</button>
+                  <button type="button" class="btn btn-outline-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: chActions[ch.d.id].hard_limit})" href="#">Update Credit Limits</button>
                 </p>
               </div>
               <div class="col-sm">
 
                 <h4>Onchain operations</h4>
-
-
 
                 <p><div class="input-group">
                   <input type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="To withdraw" aria-describedby="basic-addon2">
@@ -963,7 +941,15 @@ export default {
 
                 <span v-if="ch.ins.dispute_delayed">Until {{ch.ins.dispute_delayed}}</span>
                 <p><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
+                
+                <h4>Advanced</h4>
 
+                <p>Online: {{ch.online}}</p>
+                <p>Last used: {{timeAgo(new Date(ch.d.updatedAt))}}</p>
+                <p>Status: {{ch.d.status}}</p>
+                <p>Ack requested: {{timeAgo(ch.d.ack_requested_at)}}</p>
+
+                <pre v-html="ch.ascii_states"></pre>
 
               </div>
             </div>
@@ -973,7 +959,7 @@ export default {
 
 
 
-          <p><button type="button" class="btn btn-danger" @click="call('logout')">Graceful Shutdown
+          <p><button type="button" class="btn btn-outline-danger" @click="call('logout')">Graceful Shutdown
             </button></p>
 
 
@@ -1008,9 +994,9 @@ export default {
               <th>{{commy(u.sumForUser)}}</th>
 
               <th v-if="PK">
-                <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-danger" @click="call('toggleHub', {id: u.id})">Remove</button>
-                <button v-else-if="my_hub && my_hub.id==u.id" class="btn btn-success">It's you!</button>
-                <button v-else class="btn btn-success" @click="call('toggleHub', {id: u.id})">Add</button>
+                <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-outline-danger" @click="call('toggleHub', {id: u.id})">Remove</button>
+                <button v-else-if="my_hub && my_hub.id==u.id" class="btn btn-outline-success">It's you!</button>
+                <button v-else class="btn btn-outline-success" @click="call('toggleHub', {id: u.id})">Add</button>
               </th>
             </tr>
           </tbody>
@@ -1037,7 +1023,7 @@ export default {
           <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input></p>
 
 
-          <p v-if="record && !my_hub"><button class="btn btn-success" @click="call('createHub', new_hub)">Create Hub</button></p>
+          <p v-if="record && !my_hub"><button class="btn btn-outline-success" @click="call('createHub', new_hub)">Create Hub</button></p>
           <p v-else-if="my_hub"><b>You are already a hub.</b></p>
           <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
 
@@ -1055,13 +1041,10 @@ export default {
         </div>
 
         <div v-else-if="record">
-          <h3>Onchain Deposit</h3>
+          <h4>Onchain Deposit</h4>
+          <p>When your payment is too large to be sent through hubs you can make a direct settlement onchain. This will send assets from your onchain balance to receiver's onchain or hub balance. You can withdraw from one of your hubs at the same time if you don't have enough on your onchain balance.</p>
           <p>ID: {{record.id}}@onchain</p>
           <p>Current FRD balance: {{commy(getAsset(1))}}</p>
-
-
-
-
 
 
           <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="ID"></[td]>
