@@ -3,7 +3,7 @@ const derive = require('../utils/derive')
 module.exports = async (p) => {
   let result = {}
 
-  l('load')
+  //l('load')
 
   if (p.username) {
     //do we need to check for pw?
