@@ -1,16 +1,20 @@
 module.exports = async (s, args) => {
   // deposit from our onchain balance to another onchain balance or channel from some side
-  //await userPayDebts(s.signer, s.asset, s)
+  let asset = readInt(args[0])
+
+  s.parsed_tx.events.push(['setAsset', 'Deposit', asset])
+
+  await userPayDebts(s.signer, asset, s)
 
   // there's a tiny bias here, the hub always gets reimbursed more than fee paid
   // todo: consider splitting txfee based on % in total output volume
   // const reimburse_txfee = 1 + Math.floor(s.parsed_tx.txfee / args.length)
 
-  for (let output of args) {
+  for (let output of args[1]) {
     let amount = readInt(output[0])
     let original_amount = amount
 
-    let signer_has = userAsset(s.signer, s.asset)
+    let signer_has = userAsset(s.signer, asset)
 
     if (amount > signer_has) {
       l(`${s.signer.id} Trying to deposit ${amount} but has ${signer_has}`)
@@ -26,7 +30,7 @@ module.exports = async (s, args) => {
     // here we ensure both parties are registred (have id), and take needed fees
     if (!depositTo.id) {
       // you must be registered first using asset 1
-      if (s.asset != 1) {
+      if (asset != 1) {
         l('Not 1 asset')
         return
       }
@@ -34,8 +38,8 @@ module.exports = async (s, args) => {
       if (!withPartner) {
         if (amount < K.account_creation_fee) return
 
-        userAsset(depositTo, s.asset, amount - K.account_creation_fee)
-        userAsset(s.signer, s.asset, -amount)
+        userAsset(depositTo, asset, amount - K.account_creation_fee)
+        userAsset(s.signer, asset, -amount)
       } else {
         if (!withPartner.id) {
           l("Both partners don't exist")
@@ -47,9 +51,9 @@ module.exports = async (s, args) => {
         const fee = K.standalone_balance + K.account_creation_fee
         if (amount < fee) return
 
-        userAsset(depositTo, s.asset, K.standalone_balance)
+        userAsset(depositTo, asset, K.standalone_balance)
         amount -= fee
-        //userAsset(s.signer, s.asset, -fee)
+        //userAsset(s.signer, asset, -fee)
       }
 
       await saveId(depositTo)
@@ -62,14 +66,14 @@ module.exports = async (s, args) => {
 
           let fee = K.standalone_balance + K.account_creation_fee
           if (amount < fee) return
-          if (s.asset != 1) {
+          if (asset != 1) {
             l('Not 1 asset')
             return
           }
 
-          userAsset(withPartner, s.asset, K.standalone_balance)
+          userAsset(withPartner, asset, K.standalone_balance)
           amount -= fee
-          //userAsset(signer, s.asset, -fee)
+          //userAsset(signer, asset, -fee)
           await saveId(withPartner)
           // now it has id
 
@@ -93,8 +97,8 @@ module.exports = async (s, args) => {
           l('Trying to deposit to your onchain balance is pointless')
           return
         }
-        userAsset(depositTo, s.asset, amount)
-        userAsset(s.signer, s.asset, -amount)
+        userAsset(depositTo, asset, amount)
+        userAsset(s.signer, asset, -amount)
         await saveId(depositTo)
       }
     }
@@ -103,7 +107,7 @@ module.exports = async (s, args) => {
       const compared = Buffer.compare(depositTo.pubkey, withPartner.pubkey)
       if (compared == 0) return
 
-      const ins = await getInsuranceBetween(depositTo, withPartner, s.asset)
+      const ins = await getInsuranceBetween(depositTo, withPartner, asset)
 
       ins.insurance += amount
       if (depositTo.id == ins.leftId) ins.ondelta += amount
@@ -112,7 +116,7 @@ module.exports = async (s, args) => {
       const regfees = original_amount - amount
       ins.ondelta -= compared * regfees
 
-      userAsset(s.signer, s.asset, -amount)
+      userAsset(s.signer, asset, -amount)
 
       if (K.hubs.find((h) => h.id == s.signer.id)) {
         // The hub gets reimbursed for rebalancing users.
@@ -134,7 +138,7 @@ module.exports = async (s, args) => {
         // todo ensure it's in memory yet
         const ch = await me.getChannel(
           me.is_me(withPartner.pubkey) ? depositTo.pubkey : withPartner.pubkey,
-          s.asset
+          asset
         )
         ch.ins = ins
       }

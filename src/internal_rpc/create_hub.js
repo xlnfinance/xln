@@ -15,5 +15,5 @@ module.exports = (args) => {
   }
   l('create hub json ', json)
 
-  me.batch.push(['createHub', [stringify(json)]])
+  me.batchAdd('createHub', stringify(json))
 }

@@ -2,12 +2,14 @@
 import UserIcon from './UserIcon'
 import Highlight from './Highlight'
 import Home from './Home'
+import Tutorial from './Tutorial'
 
 export default {
   components: {
     UserIcon,
     Highlight,
-    Home
+    Home,
+    Tutorial
   },
   mounted() {
     window.app = this
@@ -54,6 +56,12 @@ export default {
       payments: [],
 
 
+      new_validator: {
+        handle: "Satoshi",
+        location:  `ws://${location.hostname}:${parseInt(location.port)+100}`
+      },
+
+
       
       new_asset: {
         name: 'Yen ¥',
@@ -71,6 +79,7 @@ export default {
         add_routes: '1',
         remove_routes: ''
       },
+
 
       pubkey: false,
       K: false,
@@ -552,6 +561,9 @@ export default {
 <template>
   
   <div>
+
+      <Tutorial ref="tutorial"></Tutorial>
+
 <div style="background-color: #FFFDDE; border:thin solid #EDDD00">
   <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days.</p> 
 </div>
@@ -707,6 +719,22 @@ export default {
           </tbody>
         </table>
 
+        <div class="form-group">
+          <h2>Become a Validator</h2>
+
+          <p><label for="comment">Identity verification:</label>
+          <input class="form-control" v-model="new_validator.handle" rows="2" placeholder="newhub"></input></p>
+
+
+          <p><label for="comment">Location (Fairlayer-compatible RPC):</label>
+          <input class="form-control" v-model="new_validator.location" rows="2"></input></p>
+
+          <p v-if="record && !my_validator"><button class="btn btn-outline-success" @click="call('propose', {op: 'validator', location: new_validator.location})">Propose Validator</button></p>
+          <p v-else-if="my_validator"><b>You are already a validator.</b></p>
+          <p v-else>You must have a registered account with FRD balance.</p>
+
+          <div class="alert alert-primary">If approved this account will be marked as a validator. Do not use this account for any other purposes.</div>
+        </div>
       </div>
 
 
@@ -754,9 +782,7 @@ export default {
           
           <template v-for="(ch, index) in channelsForAsset()">
             <p>
-            <h4 style="display:inline-block">@{{ch.hub.handle}}: {{commy(ch.payable)}}</h4>
-
-            <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet',  action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+              <h4 style="display:inline-block">@{{ch.hub.handle}}: {{commy(ch.payable)}}</h4>
             </p>
           
             <div v-if="dev_mode && ch.bar > 0" class="progress">
@@ -1023,7 +1049,7 @@ export default {
           <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input></p>
 
 
-          <p v-if="record && !my_hub"><button class="btn btn-outline-success" @click="call('createHub', new_hub)">Create Hub</button></p>
+          <p v-if="record && !my_hub"><button class="btn btn-outline-success" @click="call('createHub', new_hub)">Create Hub 🌐</button></p>
           <p v-else-if="my_hub"><b>You are already a hub.</b></p>
           <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
 
@@ -1064,20 +1090,23 @@ export default {
           </p>
 
 
-          <div v-if="batch && batch.length > 0" class="alert alert-primary">
-            <p>Globally broadcasted onchain transactions are expensive, so it's recommended to use them rarely and pack many actions in one batch. After you're done adding actions, choose the fee and click to broadcast it.</p>
-            <ul>
-              <li v-for="tx in batch"><b>{{tx[0]}}</b></li>
-            </ul>
+          <div class="alert alert-primary">
+            <p>Globally broadcasted onchain transactions are expensive, so it's recommended to use them rarely and pack many 🌐 actions in one batch. After you're done adding actions, choose the fee and click to broadcast it.</p>
 
+            <div v-if="batch && batch.length > 0">
+              <ul>
+                <li v-for="tx in batch"><b>{{tx[0]}}</b></li>
+              </ul>
 
-            <div class="slidecontainer">
-              <input type="range" min="1" max="100" class="slider" v-model="gasprice">
-              <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}</p>
+              <div class="slidecontainer">
+                <input type="range" min="1" max="100" class="slider" v-model="gasprice">
+                <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}</p>
+              </div>
+
+              <p v-if="getAsset(1) - gasprice * batch_estimate.size >= 0"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></p>
+              <p v-else>Not enough funds on onchain FRD balance</p>
+
             </div>
-
-            <p v-if="getAsset(1) - gasprice * batch_estimate.size >= 0"><button type="button" class="btn btn-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button></p>
-            <p v-else>Not enough funds on onchain FRD balance</p>
           </div>
 
 
@@ -1116,7 +1145,7 @@ export default {
         <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
 
         <p v-if="pubkey && record && getAsset(1) > 200">
-          <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order</button>
+          <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order 🌐</button>
         </p>
         <p v-else>In order to trade you must have a registered account with FRD balance.</p>
 
@@ -1142,8 +1171,8 @@ export default {
                 <td>{{[b.assetId, b.buyAssetId].sort().reverse().map(to_ticker).join('/')}}</td>
                 <td>{{commy(b.amount)}}</td>
                 <td>{{b.rate.toFixed(6)}}</td>
-                <td v-if="record && record.id == b.userId"><button  @click="call('cancelOrder', {id: b.id})" class="btn btn-success">Cancel</button></td>
-                <td v-else><button class="btn btn-success"  @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; estimate(false)">Fulfill</td>
+                <td v-if="record && record.id == b.userId"><button  @click="call('cancelOrder', {id: b.id})" class="btn btn-outline-success">Cancel</button></td>
+                <td v-else><button class="btn btn-outline-success"  @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; estimate(false)">Fulfill</td>
               </tr>
             </template>
           </tbody>
@@ -1177,12 +1206,11 @@ export default {
         </div>
         <div class="form-group">
           <input class="form-check-input" type="checkbox" v-model="proposal[2]"> Add patch
-          
         </div>
-        <p v-if="my_validator">
-          <button @click="call('propose', proposal)" class="btn btn-warning">Propose</button>
+        <p>
+          <button @click="call('propose', proposal)" class="btn btn-warning">Propose 🌐</button>
         </p>
-        <p v-else>Currently only validators can submit a smart update.</p>
+
         <div v-for="p in proposals">
           <h4>#{{p.id}}: {{p.desc}}</h4>
           <small>Proposed by {{to_user(p.user.id)}}</small>
@@ -1201,8 +1229,8 @@ export default {
           <small>To be executed at {{p.delayed}} usable block</small>
           <div v-if="record">
             <p v-if="!ivoted(p.voters)">
-              <button @click="call('vote', {approval: 1, id: p.id})" class="btn btn-success">Approve</button>
-              <button @click="call('vote', {approval: 0, id: p.id})" class="btn btn-danger">Deny</button>
+              <button @click="call('vote', {approval: 1, id: p.id})" class="btn btn-outline-success">Approve 🌐</button>
+              <button @click="call('vote', {approval: 0, id: p.id})" class="btn btn-outline-danger">Deny 🌐</button>
             </p>
           </div>
         </div>
@@ -1241,7 +1269,7 @@ export default {
                     <span v-if="d[0]=='disputeWith'" class="badge badge-primary" v-html="dispute_outcome(d[2], d[3], d[4])">
                     </span>
 
-                    <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">Set asset: {{to_ticker(d[1])}}</span>
+                    <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">{{d[1]}} {{to_ticker(d[2])}}</span>
 
                     <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{to_user(d[2])}}</span>
 
@@ -1391,7 +1419,7 @@ export default {
           <p><label for="comment">Description:</label>
           <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input></p>
 
-          <p v-if="record"><button class="btn btn-success" @click="call('createAsset', new_asset)">Create Asset</button></p>
+          <p v-if="record"><button class="btn btn-outline-success" @click="call('createAsset', new_asset)">Create Asset 🌐</button></p>
           <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
 
           <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can deposit it to a hub and start sending instantly to other users.</div>

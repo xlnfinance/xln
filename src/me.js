@@ -86,6 +86,35 @@ class Me {
     return me.pubkey && me.pubkey.equals(pubkey)
   }
 
+  batchAdd(method, args) {
+    let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
+
+    if (mergeable.includes(method)) {
+      let exists = me.batch.find((b) => b[0] == method && b[1][0] == args[0])
+
+      if (exists) {
+        // add to existing array
+        exists[1][1].push(args[1])
+      } else {
+        // create new set
+        me.batch.push([method, [args[0], [args[1]]]])
+      }
+    } else if (method == 'revealSecrets') {
+      let exists = me.batch.find((b) => b[0] == method)
+      // revealed secrets are not per-assets
+
+      if (exists) {
+        // add to existing array
+        exists[1].push(args)
+      } else {
+        // create new set
+        me.batch.push([method, [args]])
+      }
+    } else {
+      me.batch.push([method, args])
+    }
+  }
+
   // compiles signed tx from current batch, not state changing
   async batch_estimate(opts = {}) {
     // we select our record again to get our current nonce
@@ -99,62 +128,15 @@ class Me {
       return false
     }
 
-    // recommended canonical batch structure: 4 money-related arrays before everything else
-    let merged = [[methodMap('revealSecrets'), []]]
+    let by_first = (a, b) => b[0] - a[0]
 
-    let per_asset = {}
-    let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
-    // put into one of first arrays or add to the end
-    me.batch.map((kv) => {
-      //if (!kv) return
-
-      if (kv[0] == 'revealSecrets') {
-        // revealed secrets are not per-assets
-        merged[0][1] = merged[0][1].concat(kv[1])
-      } else if (mergeable.includes(kv[0])) {
-        // asset specific actions
-
-        if (!per_asset[kv[1]]) {
-          per_asset[kv[1]] = [[], [], []]
-        }
-        let ind = mergeable.indexOf(kv[0])
-        per_asset[kv[1]][ind] = per_asset[kv[1]][ind].concat(kv[2])
-      } else {
-        // these methods are not batchable and must go separately
-        merged.push([methodMap(kv[0]), kv[1]])
+    let merged = me.batch.map((m) => {
+      if (m[0] == 'depositTo' || m[0] == 'withdrawFrom') {
+        m[1][1].sort(by_first)
       }
+
+      return [methodMap(m[0]), m[1]]
     })
-
-    // finally merging per-asset batches
-    var multiasset = false
-    for (var i in per_asset) {
-      if (per_asset.hasOwnProperty(i)) {
-        // sort withdraws and deposits (easier to analyze)
-        per_asset[i][1].sort((a, b) => b[0] - a[0])
-        per_asset[i][2].sort((a, b) => b[0] - a[0])
-
-        if (i != '1' || multiasset) {
-          // 1 is default anyway
-          merged.push([methodMap('setAsset'), [parseInt(i)]])
-        }
-
-        if (per_asset[i][0].length > 0)
-          merged.push([methodMap('disputeWith'), per_asset[i][0]])
-
-        if (per_asset[i][1].length > 0)
-          merged.push([methodMap('withdrawFrom'), per_asset[i][1]])
-
-        if (per_asset[i][2].length > 0)
-          merged.push([methodMap('depositTo'), per_asset[i][2]])
-        multiasset = true
-      }
-    }
-
-    // remove empty transactions
-    merged = merged.filter((m) => m[1].length > 0)
-    if (merged.length == 0) {
-      return false
-    }
 
     let nonce = me.record.nonce
     let gaslimit = 0 //uncapped

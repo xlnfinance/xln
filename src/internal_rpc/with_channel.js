@@ -21,21 +21,19 @@ module.exports = async (p) => {
       return
     }
 
-    me.batch.push([
-      'withdrawFrom',
+    me.batchAdd('withdrawFrom', [
       ch.d.asset,
-      [[ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]]
+      [ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]
     ])
     react({confirm: 'OK'})
   } else if (p.op == 'deposit') {
-    me.batch.push([
-      'depositTo',
+    me.batchAdd('depositTo', [
       ch.d.asset,
-      [[p.amount, me.record.id, ch.partner, 0]]
+      [p.amount, me.record.id, ch.partner, 0]
     ])
     react({confirm: 'OK'})
   } else if (p.op == 'dispute') {
-    me.batch.push(['disputeWith', ch.d.asset, [await deltaGetDispute(ch.d)]])
+    me.batchAdd('disputeWith', [ch.d.asset, await deltaGetDispute(ch.d)])
     react({confirm: 'OK'})
   } else if (p.op == 'setLimits') {
     ch.d.hard_limit = p.hard_limit

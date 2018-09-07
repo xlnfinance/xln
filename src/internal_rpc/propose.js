@@ -13,7 +13,7 @@ module.exports = (p) => {
     }
   }
 
-  me.batch.push(['propose', p])
+  me.batchAdd('propose', p)
   let result = {confirm: 'Proposed'}
 
   return result
