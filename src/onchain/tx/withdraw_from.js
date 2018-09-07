@@ -1,7 +1,11 @@
 module.exports = async (s, args) => {
   // withdraw money from a channel by providing a sig of your partner
   // you can only withdraw from insured balance
-  for (const withdrawal of args) {
+  let asset = readInt(args[0])
+  s.parsed_tx.events.push(['setAsset', 'Withdraw', asset])
+
+  for (const withdrawal of args[1]) {
+    // how much? with who? their signature
     let [amount, partnerId, withdrawal_sig] = withdrawal
 
     amount = readInt(amount)
@@ -15,7 +19,7 @@ module.exports = async (s, args) => {
     const compared = Buffer.compare(s.signer.pubkey, partner.pubkey)
     if (compared == 0) return
 
-    const ins = await getInsuranceBetween(s.signer, partner, s.asset)
+    const ins = await getInsuranceBetween(s.signer, partner, asset)
 
     if (!ins || !ins.id || amount > ins.insurance) {
       l(`Invalid amount ${ins.insurance} vs ${amount}`)
@@ -50,7 +54,7 @@ module.exports = async (s, args) => {
     // .====| reduce insurance .==--| reduce ondelta .==|
     if (s.signer.id == ins.leftId) ins.ondelta -= amount
 
-    userAsset(s.signer, s.asset, amount)
+    userAsset(s.signer, asset, amount)
 
     ins.nonce++
 
@@ -60,7 +64,7 @@ module.exports = async (s, args) => {
     if (me.record && [partner.id, s.signer.id].includes(me.record.id)) {
       const ch = await me.getChannel(
         me.record.id == partner.id ? s.signer.pubkey : partner.pubkey,
-        s.asset
+        asset
       )
       // they planned to withdraw and they did. Nullify hold amount
       ch.d.they_withdrawal_amount = 0

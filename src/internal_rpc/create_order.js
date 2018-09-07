@@ -6,14 +6,11 @@ module.exports = (p) => {
       // more than you can theoretically have even after withdrawal
       react({alert: 'Not enough funds to trade this amount'})
     } else {
-      me.batch.push([
-        'createOrder',
-        [
-          asset,
-          parseInt(parseFloat(amount) * 100),
-          parseInt(p.order.buyAssetId),
-          parseInt(parseFloat(p.order.rate) * 1000000)
-        ]
+      me.batchAdd('createOrder', [
+        asset,
+        parseInt(parseFloat(amount) * 100),
+        parseInt(p.order.buyAssetId),
+        parseInt(parseFloat(p.order.rate) * 1000000)
       ])
     }
   }

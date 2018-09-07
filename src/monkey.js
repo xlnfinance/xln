@@ -14,10 +14,9 @@ const payMonkey = async (on_server, counter = 1) => {
   const reg = await getUserByIdOrKey(pubkey)
 
   // onchain payment (batched, not sent to validator yet)
-  me.batch.push([
-    'depositTo',
+  me.batchAdd('depositTo', [
     1,
-    [[Math.round(Math.random() * 1000), reg.id ? reg.id : pubkey, 0]]
+    [Math.round(Math.random() * 1000), reg.id ? reg.id : pubkey, 0]
   ])
 
   // run on server infinitely and with longer delays
@@ -134,11 +133,11 @@ if (argv.monkey) {
     // adding onchain balances to monkeys
     for (var dest of monkeys) {
       let [box_pubkey, pubkey] = r(base58.decode(dest))
-      me.batch.push(['depositTo', 1, [[1000000, pubkey, 0]]])
+      me.batchAdd('depositTo', [1, [1000000, pubkey, 0]])
     }
 
     // creating an initial FRB sell for FRD
-    me.batch.push(['createOrder', [2, 10000000, 1, 0.001 * 1000000]])
+    me.batchAdd('createOrder', [2, 10000000, 1, 0.001 * 1000000])
   }
 
   if (me.record.id == 4) {
@@ -155,19 +154,16 @@ if (argv.monkey) {
     }, 12000)
 
     // create an asset
-    me.batch.push([
-      'createAsset',
-      ['TESTCOIN', 13371337, 'Test coin', 'No goal']
-    ])
+    me.batchAdd('createAsset', ['TESTCOIN', 13371337, 'Test coin', 'No goal'])
   }
 
   if (me.record.id == 3) {
     // just to make sure there's no leaky unescaped injection
     var xss = '\'"><img src=x onerror=alert(0)>'
-    me.batch.push(['createAsset', ['XSS', 10000000, xss, xss]])
+    me.batchAdd('createAsset', ['XSS', 10000000, xss, xss])
 
     // buying bunch of FRB for $4
-    me.batch.push(['createOrder', [1, 400, 2, 0.001 * 1000000]])
+    me.batchAdd('createOrder', [1, 400, 2, 0.001 * 1000000])
   }
 
   if (me.record.id == 2) {

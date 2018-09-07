@@ -41,16 +41,13 @@ module.exports = async (dep) => {
     }
 
     if (amount > 0) {
-      me.batch.push([
-        'depositTo',
+      me.batchAdd('depositTo', [
         dep.asset,
         [
-          [
-            amount,
-            userId,
-            withPartner,
-            dep.invoice ? Buffer.from(dep.invoice, 'hex') : 0
-          ]
+          amount,
+          userId,
+          withPartner,
+          dep.invoice ? Buffer.from(dep.invoice, 'hex') : 0
         ]
       ])
     }

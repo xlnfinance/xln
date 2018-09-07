@@ -345,7 +345,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
           loff(
             'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
           )
-          me.batch.push(['revealSecrets', [outcome]])
+          me.batchAdd('revealSecrets', outcome)
         } else {
           // pulling the money after receiving secrets, down the chain of channels
           var pull_hl = inward.inwards.find((hl) => hl.hash.equals(hash))

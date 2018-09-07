@@ -63,8 +63,8 @@ module.exports = async () => {
         } missed ${missed_ack} with ${ch.d.ack_requested_at}`
       )
 
-      me.batch.push(['revealSecrets', to_reveal])
-      me.batch.push(['disputeWith', ch.d.asset, [await deltaGetDispute(ch.d)]])
+      me.batchAdd('revealSecrets', to_reveal)
+      me.batchAdd('disputeWith', [ch.d.asset, await deltaGetDispute(ch.d)])
       ch.d.status = 'disputed'
       ch.d.ack_requested_at = null
     }

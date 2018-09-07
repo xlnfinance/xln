@@ -17,16 +17,6 @@ const Tx = {
   vote: require('./tx/vote')
 }
 
-Tx.setAsset = async (s, args) => {
-  // all subsequent transactions are now implied to use this asset
-  // ensure this asset exists
-  const assetRecord = await Asset.findById(readInt(args[0]))
-  if (assetRecord) {
-    s.asset = assetRecord.id
-    s.parsed_tx.events.push(['setAsset', assetRecord.id])
-  }
-}
-
 Tx.revealSecrets = async (s, args) => {
   // someone tries to cheat in an atomic payment? Reveal the secrets onchain and dispute!
   // can be used not just for channels but any atomic actions. Stored according to Sprites approach
@@ -55,7 +45,7 @@ Tx.revealSecrets = async (s, args) => {
 }
 
 Tx.cancelOrder = async (s, args) => {
-  const id = readInt(args[0])
+  const id = readInt(args)
   const order = await Order.findOne({where: {id: id, userId: s.signer.id}})
   if (!order) {
     l('No such order for signer')
@@ -135,9 +125,6 @@ module.exports = async (s, batch) => {
   userAsset(s.meta.proposer, 1, txfee)
 
   K.collected_fees += txfee
-
-  // default asset id, can be changed many times with setAsset directive
-  s.asset = 1
 
   s.parsed_tx = {
     signer: s.signer,

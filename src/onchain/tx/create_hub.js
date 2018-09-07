@@ -1,16 +1,14 @@
 const Router = require('../../router')
 
 module.exports = async (s, args) => {
-  let json = parse(args[0].toString())
-
-  let hub
+  let json = parse(args.toString())
 
   if (!json.handle) return false
 
   json.fee_bps = parseInt(json.fee_bps)
   if (json.fee_bps > 500) return false
 
-  hub = K.hubs.find((h) => h.handle == json.handle)
+  let hub = K.hubs.find((h) => h.handle == json.handle)
 
   // trying to modify someone else's hub
   if (hub && hub.id != s.signer.id) return false

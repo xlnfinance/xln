@@ -30,6 +30,8 @@
 
             <p><strong>Extended Lightning Network</strong>. Fairlayer implements XLN scaling concept - we've fixed <a href="https://medium.com/fairlayer/xln-extended-lightning-network-80fa7acf80f3">original Lightning's capacity/liquidity issues with uninsured balances</a>. Also, payment channel functionality is implemented natively, instead of running it on top of a virtual machine opcodes. This dramatically reduces the complexity and makes the codebase easier to audit and maintain.</p>
 
+            <p><a href="https://github.com/fairlayer/wiki">Documentation</a></p>
+
 
 
           </div>

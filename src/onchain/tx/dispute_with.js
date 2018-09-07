@@ -9,14 +9,16 @@ const deltaStartDispute = async (delta, cheat = false) => {
     var d = await deltaGetDispute(delta)
   }
   delta.status = 'disputed'
-  me.batch.push(['disputeWith', delta.asset, [d]])
+  me.batchAdd('disputeWith', [delta.asset, d])
   await delta.save()
 }
 
 module.exports = async (s, args) => {
+  let asset = readInt(args[0])
   // our partner is unresponsive, so we provide dispute proof/state (signed offdelta, nonce, hashlocks etc all in one)
+  s.parsed_tx.events.push(['setAsset', 'Dispute', asset])
 
-  for (const dispute of args) {
+  for (const dispute of args[1]) {
     const [id, sig, state] = dispute
 
     const partner = await getUserByIdOrKey(id)
@@ -31,7 +33,7 @@ module.exports = async (s, args) => {
       return
     }
 
-    const ins = await getInsuranceBetween(s.signer, partner, s.asset)
+    const ins = await getInsuranceBetween(s.signer, partner, asset)
 
     let dispute_nonce = 0
     let offdelta = 0
@@ -55,7 +57,7 @@ module.exports = async (s, args) => {
         methodMap(readInt(methodId)) != 'disputeWith' ||
         !leftId.equals(compared == -1 ? s.signer.pubkey : partner.pubkey) ||
         !rightId.equals(compared == -1 ? partner.pubkey : s.signer.pubkey) ||
-        readInt(dispute_asset) != s.asset
+        readInt(dispute_asset) != asset
       ) {
         l('Invalid dispute')
         return
@@ -70,7 +72,7 @@ module.exports = async (s, args) => {
     }
 
     if (ins.dispute_nonce && dispute_nonce <= ins.dispute_nonce) {
-      l(`New nonce in dispute must be higher ${s.asset}`)
+      l(`New nonce in dispute must be higher ${asset}`)
       return
     }
 
@@ -120,7 +122,7 @@ module.exports = async (s, args) => {
         l('Channel with us is disputed')
         // now our job is to ensure our inward hashlocks are unlocked
         // and that we get most profitable outcome
-        const ch = await me.getChannel(s.signer.pubkey, s.asset)
+        const ch = await me.getChannel(s.signer.pubkey, asset)
         ch.d.status = 'disputed'
         //await ch.d.save()
         const our_nonce = ch.d.signed_state

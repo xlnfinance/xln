@@ -56,7 +56,7 @@ const rebalance = async function(asset) {
         ch.d.withdrawal_requested_at = ts()
       } else if (ch.d.withdrawal_requested_at + 600 < ts()) {
         l('User is offline for too long, or tried to cheat')
-        me.batch.push(['disputeWith', asset, [await deltaGetDispute(ch.d)]])
+        me.batchAdd('disputeWith', [asset, await deltaGetDispute(ch.d)])
       }
     }
   }
@@ -73,10 +73,9 @@ const rebalance = async function(asset) {
       weOwn += ch.d.withdrawal_amount
       let user = await getUserByIdOrKey(ch.d.partnerId)
 
-      me.batch.push([
-        'withdrawFrom',
+      me.batchAdd('withdrawFrom', [
         ch.d.asset,
-        [[ch.d.withdrawal_amount, user.id, ch.d.withdrawal_sig]]
+        [ch.d.withdrawal_amount, user.id, ch.d.withdrawal_sig]
       ])
     } else {
       // offline? dispute
@@ -100,10 +99,9 @@ const rebalance = async function(asset) {
   for (let ch of netReceivers) {
     weOwn -= ch.they_uninsured
     if (weOwn >= safety) {
-      me.batch.push([
-        'depositTo',
+      me.batchAdd('depositTo', [
         asset,
-        [[ch.they_uninsured, me.record.id, ch.d.partnerId, 0]]
+        [ch.they_uninsured, me.record.id, ch.d.partnerId, 0]
       ])
 
       // nullify their insurance request

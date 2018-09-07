@@ -100,6 +100,11 @@ module.exports = async (ws, json) => {
       )
       break
 
+    case 'clearBatch':
+      me.batch = []
+      react({confirm: 'Batch cleared'})
+      break
+
     case 'toggleHub':
       let index = PK.usedHubs.indexOf(json.params.id)
       if (index == -1) {
