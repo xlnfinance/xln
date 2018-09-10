@@ -82,7 +82,7 @@ module.exports = async (args) => {
       }
 
       if (argv.nocrypto) {
-        if (K.total_blocks % 10000 == 0) {
+        if (K.total_blocks >= parseInt(argv.stop_blocks)) {
           // show current state hash and quit
           let final_state = await onchain_state()
 
@@ -98,12 +98,14 @@ module.exports = async (args) => {
             extra: msg,
             tags: msg
           })
-        }
 
-        if (K.total_blocks >= parseInt(argv.stop_blocks)) {
+          l(msg)
+
           setTimeout(() => {
             fatal('done')
           }, 1000)
+
+          return
         }
       }
     }

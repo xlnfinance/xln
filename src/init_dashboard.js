@@ -62,15 +62,19 @@ module.exports = async (a) => {
         their_block: parseInt(parts[1]),
         limit: parseInt(parts[2])
       }
+      l('Dump chain: ', args)
 
       // respond with raw chain as a file to save
       let raw_chain = await getChain(args)
+
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': `attachment; filename=Fair_blocks_${
           args.their_block
         }_${args.limit}`
       })
+
+      res.end(raw_chain)
     } else if (path == '/health') {
       res.end(
         JSON.stringify({

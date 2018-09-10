@@ -55,6 +55,10 @@ const OffchainDB = require('./db/offchain_db')
 startFairlayer = async () => {
   setupDirectories(datadir)
 
+  if (argv.test) {
+    child_process.execSync(`cp test/simple/onchain/* data/onchain;`)
+  }
+
   const onchainDB = new OnchainDB(datadir, argv['genesis'])
   const offchainDB = new OffchainDB(
     datadir,
@@ -129,6 +133,15 @@ startFairlayer = async () => {
   if (username && password) {
     await me.init(username, password)
     await me.start()
+  }
+
+  if (argv.test) {
+    let binary = r(fs.readFileSync(`test/simple/blocks`))
+    argv.stop_blocks = binary.length
+    argv.nocrypto = true
+    l('Blocks: ' + binary.length)
+    await me.processChain(binary)
+    return
   }
 
   require('./init_dashboard')()
