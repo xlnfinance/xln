@@ -85,4 +85,5 @@ module.exports = async (p) => {
     }
     react({confirm: 'OK'})
   }
+  return {}
 }

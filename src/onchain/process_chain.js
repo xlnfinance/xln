@@ -99,7 +99,7 @@ module.exports = async (args) => {
             tags: msg
           })
 
-          l(msg)
+          l('Result: ' + (msg.final == 'b84905fe'))
 
           setTimeout(() => {
             fatal('done')

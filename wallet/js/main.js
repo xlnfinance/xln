@@ -132,6 +132,11 @@ window.renderRisk = (hist) => {
 }
 
 window.render = (r) => {
+  if (!r) {
+    l('Broken render obj', r)
+    return false
+  }
+
   let firstLoad = !app.pubkey
   if (r.alert) notyf.alert(r.alert)
   if (r.confirm) notyf.confirm(r.confirm)
@@ -217,7 +222,7 @@ FS.ws = new WebSocket(
 
 FS.ws.onmessage = (m) => {
   var data = JSON.parse(m.data)
-  render(data.result)
+  render(data)
 }
 
 FS.ws.onopen = () => {

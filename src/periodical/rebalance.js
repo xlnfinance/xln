@@ -105,7 +105,7 @@ const rebalance = async function(asset) {
       ])
 
       // nullify their insurance request
-      ch.d.they_requested_insurance = null
+      ch.d.they_requested_insurance = false
     } else {
       l(
         `Run out of funds for asset ${asset}, own ${weOwn} need ${
@@ -120,6 +120,7 @@ const rebalance = async function(asset) {
 module.exports = () => {
   if (PK.pending_batch || me.batch.length > 0) return l('There are pending tx')
 
+  l('Starting rebalance')
   // we iterate over all assets in existance and rebalance each separately
   for (let i = 1; i <= K.assets_created; i++) {
     rebalance(i)

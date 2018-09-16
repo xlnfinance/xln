@@ -11,6 +11,8 @@ else
   global="$1"
 fi
 
+git rev-parse HEAD > HEAD
+
 
 db=--db=postgres:postgres:
 #--db=mysql:root:123123

@@ -39,7 +39,7 @@ monkeys = []
 on_server = !!argv['prod-server']
 
 let git_commit = child_process
-  .execSync(on_server ? 'cat HEAD' : `cd ~/work/fair;git rev-parse HEAD`)
+  .execSync('cat HEAD')
   .toString()
   .trim()
 

@@ -194,7 +194,7 @@ export default {
       for (let hop of r[1]) {
         let hub = app.K.hubs.find(h => h.id == hop);
         if (hub) {
-        //(${app.bpsToPercent(hub.fee_bps)})
+          //(${app.bpsToPercent(hub.fee_bps)})
           info += `@${app.to_user(hub.id)} → `;
         }
       }
@@ -293,16 +293,6 @@ export default {
         ).toFixed(6)
       }
     },
-    derive: (f) => {
-      var data = {
-        username: inputUsername.value,
-        password: inputPassword.value
-      }
-
-      app.call('load', data)
-      return false
-    },
-
 
     buyAmount: (d) => {
       return (
@@ -877,7 +867,7 @@ export default {
         <template v-else-if="pubkey">
           <h3 class="alert alert-danger">You haven't added any hubs. To use instant offchain payments of Fairlayer go to <a class="dotted" @click=go('hubs')>Hubs</a> and choose them based on your location, preferences and fees.</h3>
         </template>
-        <form v-else class="form-signin" v-on:submit.prevent="call('load',{username, pw})">
+        <form v-else class="form-signin" v-on:submit.prevent="call('login',{username, pw})">
 
           <p><h4 class="danger danger-primary">To start using Fairlayer you must create your own digital identity. Make sure you don't forget your password - <b>password recovery is not possible.</b> If in doubt, write it down or email it to yourself.</h4></p>
 

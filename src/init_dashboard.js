@@ -62,13 +62,14 @@ module.exports = async (a) => {
         their_block: parseInt(parts[1]),
         limit: parseInt(parts[2])
       }
-      l('Dump chain: ', args)
 
       // respond with raw chain as a file to save
       let raw_chain = await getChain(args)
+      l('Dump chain: ', args, raw_chain.length)
 
       res.writeHead(200, {
-        'Content-Type': 'application/octet-stream',
+        'Content-Type': 'binary',
+        'Content-Length': raw_chain.length,
         'Content-Disposition': `attachment; filename=Fair_blocks_${
           args.their_block
         }_${args.limit}`

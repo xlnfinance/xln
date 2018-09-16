@@ -25,7 +25,10 @@ react = async (result = {}, force = true) => {
     //await Periodical.syncChanges()
   }
 
-  if (isHeadless()) return
+  if (isHeadless()) {
+    l('headless')
+    return
+  }
 
   //await Periodical.updateCache()
 
@@ -70,14 +73,8 @@ react = async (result = {}, force = true) => {
     result.batch_estimate = await me.batch_estimate()
   }
 
-  if (isHeadless()) return
-
   try {
-    me.browser.send(
-      JSON.stringify({
-        result: result //Object.assign(result, cached_result)
-      })
-    )
+    me.browser.send(JSON.stringify(result))
   } catch (e) {
     l(e)
   }

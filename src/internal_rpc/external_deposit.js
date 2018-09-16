@@ -52,4 +52,5 @@ module.exports = async (dep) => {
       ])
     }
   }
+  return {}
 }

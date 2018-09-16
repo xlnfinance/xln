@@ -222,7 +222,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
 
         // no need to add to flushable - secret will be returned during ack to sender anyway
       } else if (me.my_hub && box_data.nextHop) {
-        loff(`Forward ${amount} to ${box_data.nextHop}`)
+        //loff(`Forward ${amount} to ${box_data.nextHop}`)
         let outward_amount = afterFees(amount, me.my_hub)
 
         // ensure it's equal what they expect us to pay

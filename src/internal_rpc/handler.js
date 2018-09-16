@@ -1,30 +1,10 @@
 const Router = require('../router')
 const withdraw = require('../offchain/withdraw')
 
-let respondNotAuthorized = (ws) => {
-  if (ws.end) {
-    ws.end(
-      JSON.stringify({
-        authorized: false
-      })
-    )
-  } else {
-    ws.send(
-      JSON.stringify({
-        result: cached_result
-      })
-    )
-  }
-}
-
 let setBrowser = (ws) => {
   // new window replaces old one
   if (me.browser && me.browser.readyState == 1) {
-    me.browser.send(
-      JSON.stringify({
-        result: {already_opened: true}
-      })
-    )
+    me.browser.send(JSON.stringify({already_opened: true}))
   }
 
   me.browser = ws
@@ -36,18 +16,31 @@ module.exports = async (ws, json) => {
 
   if (json.auth_code != PK.auth_code && ws != 'admin') {
     //if (!json.auth_code) {
-    return respondNotAuthorized(ws)
+    l('Not authorized')
+    ws[ws.end ? 'end' : 'send'](JSON.stringify(cached_result))
+    return
   }
 
   if (ws.send && json.is_wallet && me.browser != ws) {
     setBrowser(ws)
   }
 
-  let result = {}
+  var result = {}
   switch (json.method) {
     case 'load':
-      result = await require('./load')(json.params)
-      result = Object.assign(result, cached_result)
+      // triggered by frontend to update
+
+      if (me.browser == ws) {
+        // public + private info
+        react(cached_result)
+      } else {
+        // public cache only
+        result = cached_result
+      }
+
+      break
+    case 'login':
+      result = await require('./login')(json.params)
       break
 
     case 'logout':
@@ -157,11 +150,6 @@ module.exports = async (ws, json) => {
       result = require('./sync')(json.params)
       break
 
-    case 'login':
-      require('./login')(ws, json.proxyOrigin)
-      return false
-      break
-
     // commonly called by merchant app on the same server
     case 'receivedAndFailed':
       result = await require('./received_and_failed')()
@@ -193,11 +181,7 @@ module.exports = async (ws, json) => {
   } else if (ws == 'admin') {
     return result
   } else {
-    /*ws.send(
-      JSON.stringify({
-        result: Object.assign(result, cached_result)
-      })
-    )*/
-    react(result)
+    ws.send(JSON.stringify(result))
+    //react(result)
   }
 }
