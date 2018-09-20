@@ -408,7 +408,7 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
         l('CHEAT: not acking the secret, but pulling from inward')
         ch.d.status = 'CHEAT_dontack'
         await ch.d.save()
-        react({}, false) // lazy react
+        react({private: true}) // lazy react
         return
       }
     }

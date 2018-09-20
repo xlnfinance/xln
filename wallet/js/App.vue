@@ -525,7 +525,6 @@ export default {
     },
 
 
-
     afterRebalance: ()=>{
       return app.getAsset(app.asset) + app.totalWithdrawals() - app.totalDeposits()
     },
@@ -549,14 +548,10 @@ export default {
 }
 </script>
 <template>
-  
   <div>
-
-      <Tutorial ref="tutorial"></Tutorial>
-
-<div style="background-color: #FFFDDE; border:thin solid #EDDD00">
-  <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days.</p> 
-</div>
+    <div style="background-color: #FFFDDE; border:thin solid #EDDD00">
+      <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days.</p> 
+    </div>
 
 
     <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">

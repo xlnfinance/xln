@@ -11,5 +11,5 @@ module.exports = async (p) => {
     desc: 'You just joined the network. Click faucet to get some free assets.'
   })
 
-  return {confirm: 'Welcome!'}
+  react({confirm: 'Welcome!', public: true, private: true, force: true})
 }

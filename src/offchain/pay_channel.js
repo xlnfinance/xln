@@ -22,7 +22,7 @@ module.exports = async (opts) => {
     /* for offchain rebalancing 
 
     if (addr.address == me.getAddress()) {
-      react({alert: `Cannot pay to yourself`}, false)
+      react({alert: `Cannot pay to yourself`})
       return
     }
     */
@@ -111,11 +111,11 @@ module.exports = async (opts) => {
 
     // 4. do we have enough payable for this hop?
     if (amount > ch.payable) {
-      return react({alert: `Not enough funds ${ch.payable}`}, false)
+      return react({alert: `Not enough funds ${ch.payable}`})
     } else if (amount > K.max_amount) {
-      return react({alert: `Maximum payment is $${commy(K.max_amount)}`}, false)
+      return react({alert: `Maximum payment is $${commy(K.max_amount)}`})
     } else if (amount < K.min_amount) {
-      return react({alert: `Minimum payment is $${commy(K.min_amount)}`}, false)
+      return react({alert: `Minimum payment is $${commy(K.min_amount)}`})
     }
 
     let outward = Payment.build({
@@ -143,7 +143,7 @@ module.exports = async (opts) => {
 
     l('Paying to ', reversed, onion.length)
 
-    react({}, false)
+    react({})
     me.flushChannel(ch.d.partnerId, opts.asset, true)
 
     if (argv.syncdb) {

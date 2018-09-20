@@ -117,7 +117,7 @@ module.exports = async (s, header, ordered_tx_body) => {
     )
 
     // moves loader animation faster
-    react({skip_private: true}, true)
+    react({public: true})
   }
 
   // todo: define what is considered a "usable" block

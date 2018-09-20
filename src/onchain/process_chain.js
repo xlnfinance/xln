@@ -138,7 +138,7 @@ module.exports = async (args) => {
 
     //
     //Periodical.updateCache()
-    react({}, false)
+    react({})
 
     // Ensure our last broadcasted batch was added
     if (PK.pending_batch) {

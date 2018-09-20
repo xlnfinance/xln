@@ -35,7 +35,7 @@ module.exports = async (dep) => {
       if (h) {
         withPartner = h.id
       } else {
-        react({alert: 'No such hub'})
+        react({alert: 'No such hub', force: true})
         return
       }
     }

@@ -9,9 +9,9 @@ const isHeadless = () => {
 }
 
 // Flush an object to browser websocket. Send force=false for lazy react (for high-tps nodes like hubs)
-react = async (result = {}, force = true) => {
+react = async (result) => {
   // hubs dont react OR no alive browser socket
-  if (me.my_hub && !force) {
+  if (me.my_hub && !result.force) {
     return //l('No working me.browser')
   }
 
@@ -21,36 +21,26 @@ react = async (result = {}, force = true) => {
   }
   me.last_react = new Date()
 
-  if (!me.my_hub) {
-    //await Periodical.syncChanges()
-  }
-
   if (isHeadless()) {
     l('headless')
     return
   }
 
-  //await Periodical.updateCache()
+  if (me.id && result.private) {
+    result.payments = await Payment.findAll({
+      order: [['id', 'desc']],
+      //include: {all: true},
+      limit: 300
+    })
 
-  if (me.id && !result.skip_private) {
-    ;[
-      result.payments,
-      result.channels,
-      result.record,
-      result.events
-    ] = await Promise.all([
-      Payment.findAll({
-        order: [['id', 'desc']],
-        //include: {all: true},
-        limit: 300
-      }),
-      me.channels(),
-      getUserByIdOrKey(bin(me.id.publicKey)),
-      Event.findAll({
-        order: [['id', 'desc']],
-        limit: 100
-      })
-    ])
+    result.channels = await me.channels()
+    l('Getting record')
+    result.record = await getUserByIdOrKey(bin(me.id.publicKey))
+
+    result.events = await Event.findAll({
+      order: [['id', 'desc']],
+      limit: 100
+    })
 
     if (!result.record.id) result.record = null
 
@@ -71,6 +61,10 @@ react = async (result = {}, force = true) => {
     result.pubkey = toHex(me.pubkey)
     result.batch = me.batch
     result.batch_estimate = await me.batch_estimate()
+  }
+
+  if (result.public) {
+    result = Object.assign(result, cached_result)
   }
 
   try {

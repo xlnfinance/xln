@@ -16,7 +16,7 @@ module.exports = async (ws, json) => {
 
   if (json.auth_code != PK.auth_code && ws != 'admin') {
     //if (!json.auth_code) {
-    l('Not authorized')
+    //l('Not authorized')
     ws[ws.end ? 'end' : 'send'](JSON.stringify(cached_result))
     return
   }
@@ -25,22 +25,22 @@ module.exports = async (ws, json) => {
     setBrowser(ws)
   }
 
+  // internal actions require authorization
+
   var result = {}
   switch (json.method) {
     case 'load':
       // triggered by frontend to update
 
-      if (me.browser == ws) {
-        // public + private info
-        react(cached_result)
-      } else {
-        // public cache only
-        result = cached_result
-      }
+      // public + private info
+      react({public: true, private: true})
+      return
 
       break
     case 'login':
-      result = await require('./login')(json.params)
+      await require('./login')(json.params)
+      return
+
       break
 
     case 'logout':
@@ -61,13 +61,13 @@ module.exports = async (ws, json) => {
 
     case 'broadcast':
       Periodical.broadcast(json.params)
-      react({confirm: 'Now await inclusion in block'})
+      react({confirm: 'Now await inclusion in block', force: true})
       return false
       break
 
     case 'createAsset':
       require('./create_asset')(json.params)
-      react({confirm: 'Added to batch'})
+      react({confirm: 'Added to batch', force: true})
       break
 
     case 'createHub':
@@ -129,7 +129,7 @@ module.exports = async (ws, json) => {
         result.confirm = 'Hub removed'
       }
       //
-      react({}, true)
+      react({force: true})
       //Periodical.updateCache()
 
       break

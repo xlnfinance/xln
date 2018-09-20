@@ -62,7 +62,7 @@ module.exports = async (args) => {
   }
 
   // use lazy react for external requests
-  react({}, false)
+  react({private: true})
 
   return
 }
