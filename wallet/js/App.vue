@@ -550,7 +550,7 @@ export default {
 <template>
   <div>
     <div style="background-color: #FFFDDE; border:thin solid #EDDD00">
-      <p style='margin: 10px;text-align:center'>This testnet is restarted once every few days.</p> 
+      <p style='margin: 10px;text-align:center'>Testnet deployed: {{timeAgo(K.created_at)}}</p> 
     </div>
 
 
@@ -968,8 +968,6 @@ export default {
       <div v-else-if="tab=='hubs'">
         <p><button type="button" class="btn btn-outline-danger" @click="call('logout')">Graceful Shutdown
           </button></p>
-
-
 
         <h1>List of hubs</h1>
         <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks. <a class="dotted" @click=showGraph>See ☊ routes between them here</a>.</p>

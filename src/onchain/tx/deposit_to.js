@@ -4,7 +4,7 @@ module.exports = async (s, args) => {
 
   s.parsed_tx.events.push(['setAsset', 'Deposit', asset])
 
-  await userPayDebts(s.signer, asset, s)
+  await userPayDebts(s.signer, asset, s.parsed_tx)
 
   // there's a tiny bias here, the hub always gets reimbursed more than fee paid
   // todo: consider splitting txfee based on % in total output volume
