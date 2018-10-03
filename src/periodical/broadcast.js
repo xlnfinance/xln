@@ -10,7 +10,9 @@ const rebroadcast = (signed_batch) => {
 module.exports = async function(opts) {
   section('broadcast', async () => {
     if (PK.pending_batch) {
-      return l('Only 1 tx is supported')
+      l('Have pending_batch, only 1 tx is supported')
+
+      return
     }
     // TODO: make batch persistent on disk
 

@@ -385,9 +385,9 @@ export default {
 
 
       if (h.is_inward) {
-        return `From ${h.source_address ? app.trim(h.source_address) : 'N/A'} via ${ch.hub.handle}`
+        return `From ${h.source_address ? app.trim(h.source_address) : 'N/A'}`
       } else {
-        return `To ${h.destination_address ? app.trim(h.destination_address) : 'N/A'} via ${ch.hub.handle}`
+        return `To ${h.destination_address ? app.trim(h.destination_address) : 'N/A'}`
       }
     },
 
@@ -767,8 +767,80 @@ export default {
           
           <template v-for="(ch, index) in channelsForAsset()">
             <p>
-              <h4 style="display:inline-block">@{{ch.hub.handle}}: {{commy(ch.payable)}}</h4>
+              <h4 class="dotted" @click="chActions[ch.d.id].expand = !chActions[ch.d.id].expand" style="display:inline-block">
+                @{{ch.hub.handle}}: {{commy(ch.payable)}}
+              </h4>
             </p>
+
+
+            <div v-if="chActions[ch.d.id].expand" class="row alert alert-info">
+              <div class="col-sm">
+                 <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet',  action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+                
+                <p>Payable: {{commy(ch.payable)}}</p>
+                <p>Receivable: {{commy(ch.they_payable)}}</p>
+
+
+                <p>Insured: {{commy(ch.insured)}}</p>
+                <p>They_insured: {{commy(ch.they_insured)}}</p>
+                <p>Uninsured: {{commy(ch.uninsured)}} <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('withChannel', {id: ch.d.id, op: 'requestInsurance'})">Request Insurance</span></p>
+                <p>They_uninsured: {{commy(ch.they_uninsured)}}</p>
+
+                <p>They requested insurance: {{ch.d.they_requested_insurance}}</p>
+
+
+
+                <h4>Credit limits</h4>
+                <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
+                <p>Hard limit: {{commy(ch.d.hard_limit)}}</p>
+
+                <p><input type="text" class="form-control" v-model="chActions[ch.d.id].hard_limit"></p>
+
+                <p>Soft limit: {{commy(ch.d.soft_limit)}}</p>
+                <p><input type="text" class="form-control" v-model="chActions[ch.d.id].soft_limit"></p>
+
+                <p>
+                  <button type="button" class="btn btn-outline-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: chActions[ch.d.id].hard_limit})" href="#">Update Credit Limits</button>
+                </p>
+              </div>
+              <div class="col-sm">
+
+                <h4>Onchain operations</h4>
+
+                <p><div class="input-group">
+                  <input type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="To withdraw" aria-describedby="basic-addon2">
+                  <div class="input-group-append">
+                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)})">Request Withdrawal 🌐</button>
+                  </div>
+                </div></p>
+
+
+                <p><div class="input-group">
+                  <input type="text" class="form-control" v-model="chActions[ch.d.id].depositAmount" placeholder="To deposit" aria-describedby="basic-addon2">
+                  <div class="input-group-append">
+                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].depositAmount)})">Add Deposit 🌐</button>
+                  </div>
+                </div></p>
+
+                <p>If the hub becomes unresponsive, you are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the hub is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.
+                </p>
+
+                <span v-if="ch.ins.dispute_delayed">Until {{ch.ins.dispute_delayed}}</span>
+                <p><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
+                
+                <h4>Advanced</h4>
+
+                <p>Online: {{ch.online}}</p>
+                <p>Last used: {{timeAgo(new Date(ch.d.updatedAt))}}</p>
+                <p>Status: {{ch.d.status}}</p>
+                <p>Ack requested: {{timeAgo(ch.d.ack_requested_at)}}</p>
+
+                <pre v-html="ch.ascii_states"></pre>
+
+              </div>
+            </div>
+
+
           
             <div v-if="dev_mode && ch.bar > 0" class="progress">
               <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
@@ -836,6 +908,7 @@ export default {
               <tr>
                 <th width="5%">Status</th>
                 <th width="10%">Amount</th>
+                <th width="10%">Hub</th>
                 <th width="65%">Details</th>
                 <th width="20%">Date</th>
               </tr>
@@ -847,6 +920,9 @@ export default {
                 <tr v-bind:key="h.id" v-for="(h, index) in paymentsForAsset().slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
+                  <td>{{channels.find(ch=>{
+        return ch.d.id == h.deltumId
+      }).hub.handle}}</td>
                   <td @click="outward_address=h.is_inward ? h.source_address : h.destination_address; outward_amount=commy(h.amount); outward_invoice = h.invoice"><u class="dotted">{{paymentToDetails(h)}}</u>: {{h.invoice}}</td>
                   <td v-html="skipDate(h, index)"></td>
                 </tr>
@@ -890,91 +966,9 @@ export default {
         </form>
       </div>
       <div v-else-if="tab=='hubs'">
-        <template v-if="pubkey && channelsForAsset().length > 0">
-          <h1>Hubs</h1>
-          <p>On this page you can see all your relationships with hubs.</p>
+        <p><button type="button" class="btn btn-outline-danger" @click="call('logout')">Graceful Shutdown
+          </button></p>
 
-          <div class="alert alert-info" v-for="ch in channelsForAsset()">
-
-            <div class="row" class="alert alert-warning">
-              <div class="col-sm">
- 
-                <h2>{{ch.hub.handle}}</h2>
-                <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet',  action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
-                
-                <p>Payable: {{commy(ch.payable)}}</p>
-                <p>Receivable: {{commy(ch.they_payable)}}</p>
-
-
-                <p>Insured: {{commy(ch.insured)}}</p>
-                <p>They_insured: {{commy(ch.they_insured)}}</p>
-                <p>Uninsured: {{commy(ch.uninsured)}} <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('withChannel', {id: ch.d.id, op: 'requestInsurance'})">Request Insurance</span></p>
-                <p>They_uninsured: {{commy(ch.they_uninsured)}}</p>
-
-                <p>They requested insurance: {{ch.d.they_requested_insurance}}</p>
-
-
-
-                <h4>Credit limits</h4>
-                <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
-                <p>Hard limit: {{commy(ch.d.hard_limit)}}</p>
-
-                <p><input type="text" class="form-control" v-model="chActions[ch.d.id].hard_limit"></p>
-
-                <p>Soft limit: {{commy(ch.d.soft_limit)}}</p>
-                <p><input type="text" class="form-control" v-model="chActions[ch.d.id].soft_limit"></p>
-
-                <p>
-                  <button type="button" class="btn btn-outline-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: chActions[ch.d.id].hard_limit})" href="#">Update Credit Limits</button>
-                </p>
-              </div>
-              <div class="col-sm">
-
-                <h4>Onchain operations</h4>
-
-                <p><div class="input-group">
-                  <input type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="To withdraw" aria-describedby="basic-addon2">
-                  <div class="input-group-append">
-                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)})">Request Withdrawal 🌐</button>
-                  </div>
-                </div></p>
-
-
-                <p><div class="input-group">
-                  <input type="text" class="form-control" v-model="chActions[ch.d.id].depositAmount" placeholder="To deposit" aria-describedby="basic-addon2">
-                  <div class="input-group-append">
-                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].depositAmount)})">Add Deposit 🌐</button>
-                  </div>
-                </div></p>
-
-                <p>If the hub becomes unresponsive, you are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the hub is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.
-                </p>
-
-                <span v-if="ch.ins.dispute_delayed">Until {{ch.ins.dispute_delayed}}</span>
-                <p><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
-                
-                <h4>Advanced</h4>
-
-                <p>Online: {{ch.online}}</p>
-                <p>Last used: {{timeAgo(new Date(ch.d.updatedAt))}}</p>
-                <p>Status: {{ch.d.status}}</p>
-                <p>Ack requested: {{timeAgo(ch.d.ack_requested_at)}}</p>
-
-                <pre v-html="ch.ascii_states"></pre>
-
-              </div>
-            </div>
-
-
-          </div>
-
-
-
-          <p><button type="button" class="btn btn-outline-danger" @click="call('logout')">Graceful Shutdown
-            </button></p>
-
-
-        </template>
 
 
         <h1>List of hubs</h1>
@@ -1088,7 +1082,7 @@ export default {
                 <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}</p>
               </div>
 
-              <p v-if="getAsset(1) - gasprice * batch_estimate.size >= 0"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></p>
+              <p v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></p>
               <p v-else>Not enough funds on onchain FRD balance</p>
 
             </div>

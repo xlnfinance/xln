@@ -52,8 +52,6 @@ Periodical.startHub = () => {
 }
 
 Periodical.scheduleAll = function() {
-  Periodical.schedule('syncChain', K.blocktime * 2000)
-
   Periodical.schedule('syncChanges', K.blocktime * 2000)
 
   Periodical.schedule('updateMetrics', 1000)

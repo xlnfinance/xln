@@ -29,11 +29,11 @@ const payMonkey = async (on_server, counter = 1) => {
 
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
-    }, Math.round(500 + Math.random() * 3000))
+    }, Math.round(1500 + Math.random() * 3000))
   } else if (counter < 20) {
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
-    }, 300)
+    }, 1500)
   }
 }
 

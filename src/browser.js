@@ -25,22 +25,24 @@ react = async (result) => {
     l('headless')
     return
   }
-
-  if (me.id && result.private) {
+  //&& result.private
+  if (me.id) {
     result.payments = await Payment.findAll({
       order: [['id', 'desc']],
       //include: {all: true},
-      limit: 300
+      limit: 100
     })
 
     result.channels = await me.channels()
     l('Getting record')
     result.record = await getUserByIdOrKey(bin(me.id.publicKey))
 
-    result.events = await Event.findAll({
+    result.events = []
+
+    /*await Event.findAll({
       order: [['id', 'desc']],
       limit: 100
-    })
+    })*/
 
     if (!result.record.id) result.record = null
 
@@ -63,9 +65,11 @@ react = async (result) => {
     result.batch_estimate = await me.batch_estimate()
   }
 
-  if (result.public) {
-    result = Object.assign(result, cached_result)
-  }
+  l('Assigning public')
+
+  //if (result.public) {
+  result = Object.assign(result, cached_result)
+  //}
 
   try {
     me.browser.send(JSON.stringify(result))
