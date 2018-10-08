@@ -88,10 +88,12 @@ startFairlayer = async () => {
   Validators = loadValidators(K.validators)
   PK = loadPKFile(datadir)
 
-  if (K.total_blocks <= 3) {
-    l('Syncing with force ' + K.total_blocks)
-    await offchainDB.db.sync({force: true})
-  }
+  //ensure for sqlite: if (!fs.existsSync('./' + datadir)) {
+
+  //if (K.total_blocks <= 3) {
+  l('Syncing with force ' + K.total_blocks)
+  await offchainDB.db.sync({force: true})
+  //}
 
   if (argv.generate_monkeys) {
     await generateMonkeys()

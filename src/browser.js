@@ -27,6 +27,7 @@ react = async (result) => {
   }
   //&& result.private
   if (me.id) {
+    l('Assign private')
     result.payments = await Payment.findAll({
       order: [['id', 'desc']],
       //include: {all: true},
