@@ -95,6 +95,11 @@ const defineModels = (sequelize) => {
     oweTo: Sequelize.INTEGER
   })
 
+  const OnchainBalance = sequelize.define('onchainbalance', {
+    asset: Sequelize.INTEGER,
+    amount: Sequelize.INTEGER
+  })
+
   const Order = sequelize.define('order', {
     amount: Sequelize.INTEGER,
     rate: Sequelize.FLOAT
@@ -136,6 +141,7 @@ const defineModels = (sequelize) => {
   })
 
   Debt.belongsTo(User)
+  OnchainBalance.belongsTo(User)
 
   User.hasMany(Debt)
   User.hasMany(Order)

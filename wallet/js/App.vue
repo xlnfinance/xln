@@ -4,12 +4,15 @@ import Highlight from './Highlight'
 import Home from './Home'
 import Tutorial from './Tutorial'
 
+import Dotsloader from './Dotsloader'
+
 export default {
   components: {
     UserIcon,
     Highlight,
     Home,
-    Tutorial
+    Tutorial,
+    Dotsloader
   },
   mounted() {
     window.app = this
@@ -98,6 +101,7 @@ export default {
 
 
       chActions: {},
+      expandedChannel: -1,
 
       externalDeposit: {to:'', hub: 'onchain', depositAmount: '', invoice: ''},
 
@@ -152,7 +156,7 @@ export default {
   },
   computed: {
     current_ch: () => {
-      // find current channel for selected asset and hub
+      // find current channel for selected asset and bank
 
       let chan = app.channels
         ? app.channels.find(
@@ -307,7 +311,7 @@ export default {
     },
 
     to_user: (userId) => {
-      // returns either hub name or just id
+      // returns either bank name or just id
       // todo: twitter-style tooltips with info on the user
 
       let h = app.K.hubs.find((h) => h.id == userId)
@@ -360,7 +364,7 @@ export default {
 
 
     go: (path) => {
-      var authed = ['wallet', 'onchain', 'testnet']
+      var authed = ['wallet', 'transfer', 'onchain', 'testnet']
 
       //if (authed.includes(path) && !localStorage.auth_code) path = ''
 
@@ -571,8 +575,13 @@ export default {
             <a class="nav-link" @click="go('wallet')">💰 Wallet</a>
           </li>
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='hubs' }">
-            <a class="nav-link" title="Hubs that instantly process payments" @click="go('hubs')">⚡️ Hubs</a>
+            <a class="nav-link" title="Banks that instantly process payments" @click="go('hubs')">⚡️ Banks</a>
           </li>
+
+          <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='transfer' }">
+            <a class="nav-link" @click="go('transfer')">Transfer</span></a>
+          </li>
+
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">🌐 Broadcast <span class="badge badge-danger" v-if="batch.length > 0 || PK.pending_batch">{{PK.pending_batch ? 'sent' : batch.length}}</span></a>
           </li>
@@ -586,7 +595,7 @@ export default {
           
               <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">📖 Blockchain</a></li>
 
-              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and hubs">💸 Insurances</a></li>
+              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and banks">💸 Insurances</a></li>
 
               <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 Assets</a></li>
 
@@ -731,7 +740,7 @@ export default {
         <p>Blocksize: {{K.blocksize}} bytes</p>
         <p>Account creation fee (pubkey registration): {{commy(K.account_creation_fee)}}</p>
         <p>Average onchain fee: {{commy(K.min_gasprice * 83)}} (to short ID) – {{commy(K.min_gasprice * 115)}} (to pubkey)</p>
-        <h2>Hubs & topology</h2>
+        <h2>Banks & topology</h2>
         <p>Risk limit: {{commy(K.risk)}}</p>
         <p>Hard risk limit: {{commy(K.hard_limit)}}</p>
         <h2>Snapshots</h2>
@@ -760,38 +769,67 @@ export default {
 
       <div v-else-if="tab=='wallet'">
         <template v-if="pubkey && channelsForAsset().length > 0">
-          <h4 class="alert alert-primary" v-if="my_hub">This node is a hub @{{my_hub.handle}}</h4>
+          <h4 class="alert alert-primary" v-if="my_hub">This node is a bank @{{my_hub.handle}}</h4>
 
 
           <h4 class="alert alert-primary" v-for="e in events">{{e.desc}} - {{timeAgo(e.createdAt)}}</h4>
           
           <template v-for="(ch, index) in channelsForAsset()">
             <p>
-              <h4 class="dotted" @click="chActions[ch.d.id].expand = !chActions[ch.d.id].expand" style="display:inline-block">
+              <h4 class="dotted" @click="expandedChannel = (expandedChannel == ch.d.id ? -1 : ch.d.id)" style="display:inline-block">
                 @{{ch.hub.handle}}: {{commy(ch.payable)}}
               </h4>
             </p>
 
+            <div v-if="dev_mode && ch.bar > 0" class="progress">
+              <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
+                -{{commy(ch.they_uninsured)}} (they_uninsured)
+              </div>
+              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+                {{commy(ch.insured)}} (insured)
+              </div>
+              <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
+                -{{commy(ch.they_insured)}} (they_insured)
+              </div>
+              <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
+                +{{commy(ch.uninsured)}} (uninsured)
+              </div>
+            </div>
 
-            <div v-if="chActions[ch.d.id].expand" class="row alert alert-info">
+            
+            <div v-show="expandedChannel == ch.d.id" class="row alert alert-info">
+
+
+
+
+
+
               <div class="col-sm">
-                 <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet',  action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+                 <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', asset: asset, action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
                 
                 <p>Payable: {{commy(ch.payable)}}</p>
                 <p>Receivable: {{commy(ch.they_payable)}}</p>
 
 
                 <p>Insured: {{commy(ch.insured)}}</p>
-                <p>They_insured: {{commy(ch.they_insured)}}</p>
-                <p>Uninsured: {{commy(ch.uninsured)}} <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('withChannel', {id: ch.d.id, op: 'requestInsurance'})">Request Insurance</span></p>
-                <p>They_uninsured: {{commy(ch.they_uninsured)}}</p>
+                <p>Uninsured: {{commy(ch.uninsured)}} <span class="badge badge-danger" v-if="ch.uninsured > 0" @click="call('withChannel', {id: ch.d.id, op: 'requestInsurance'})">Request Insurance</span> 
 
-                <p>They requested insurance: {{ch.d.they_requested_insurance}}</p>
+                  <dotsloader v-if="ch.d.requested_insurance"></dotsloader> 
+                </p>
+
+                <p>Total Insurance: {{commy(ch.ins.insurance)}}</p>
+  
+
+                <template v-if="my_hub">
+                  <p>They_insured: {{commy(ch.they_insured)}}</p>
+                  <p>They_uninsured: {{commy(ch.they_uninsured)}}</p>
+                  <p>They requested insurance: {{ch.d.they_requested_insurance}}</p>
+                </template>
 
 
 
                 <h4>Credit limits</h4>
-                <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this hub. Set rebalance limit and the hub will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
+                <p>Credit limit defines maximum uninsured balance you can have at any time. Setting uninsured limit is necessary to receive assets through this bank. Set rebalance limit and the bank will automatically insure you after this amount. Every rebalance costs a fee, leave empty to request insurance manually.</p>
                 <p>Hard limit: {{commy(ch.d.hard_limit)}}</p>
 
                 <p><input type="text" class="form-control" v-model="chActions[ch.d.id].hard_limit"></p>
@@ -822,42 +860,29 @@ export default {
                   </div>
                 </div></p>
 
-                <p>If the hub becomes unresponsive, you are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the hub is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another hub.
+                <p>If the bank becomes unresponsive, you are guaranteed to get <b>insured</b> part of your balance, but you may lose <b>uninsured</b> part if the bank is completely compromised. After a timeout assets will arrive to your onchain balance, then you will be able to move it to another bank.
                 </p>
 
-                <span v-if="ch.ins.dispute_delayed">Until {{ch.ins.dispute_delayed}}</span>
-                <p><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
+                <span v-if="ch.ins.dispute_delayed">
+                  Dispute will be resolved at #{{ch.ins.dispute_delayed}} <dotsloader></dotsloader> 
+                </span>
+                <p v-else><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
                 
-                <h4>Advanced</h4>
 
-                <p>Online: {{ch.online}}</p>
-                <p>Last used: {{timeAgo(new Date(ch.d.updatedAt))}}</p>
-                <p>Status: {{ch.d.status}}</p>
-                <p>Ack requested: {{timeAgo(ch.d.ack_requested_at)}}</p>
+                <template v-if="dev_mode">
+                  <p>Online: {{ch.online}}</p>
+                  <p>Last used: {{timeAgo(new Date(ch.d.updatedAt))}}</p>
+                  <p>Status: {{ch.d.status}}</p>
+                  <p>Ack requested: {{timeAgo(ch.d.ack_requested_at)}}</p>
 
-                <pre v-html="ch.ascii_states"></pre>
+                  <pre v-html="ch.ascii_states"></pre>
+                </template
 
               </div>
             </div>
 
 
           
-            <div v-if="dev_mode && ch.bar > 0" class="progress">
-              <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
-                -{{commy(ch.they_uninsured)}} (they_uninsured)
-              </div>
-              <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-                {{commy(ch.insured)}} (insured)
-              </div>
-              <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
-                -{{commy(ch.they_insured)}} (they_insured)
-              </div>
-              <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
-                +{{commy(ch.uninsured)}} (uninsured)
-              </div>
-            </div>
-
-            
 
           </template>
           <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
@@ -908,7 +933,7 @@ export default {
               <tr>
                 <th width="5%">Status</th>
                 <th width="10%">Amount</th>
-                <th width="10%">Hub</th>
+                <th width="10%">Bank</th>
                 <th width="65%">Details</th>
                 <th width="20%">Date</th>
               </tr>
@@ -936,7 +961,7 @@ export default {
           </table>
         </template>
         <template v-else-if="pubkey">
-          <h3 class="alert alert-danger">You haven't added any hubs. To use instant offchain payments of Fairlayer go to <a class="dotted" @click=go('hubs')>Hubs</a> and choose them based on your location, preferences and fees.</h3>
+          <h3 class="alert alert-danger">You haven't added any banks. To use instant offchain payments of Fairlayer go to <a class="dotted" @click=go('hubs')>Banks</a> and choose them based on your location, preferences and fees.</h3>
         </template>
         <form v-else class="form-signin" v-on:submit.prevent="call('login',{username, pw})">
 
@@ -969,8 +994,8 @@ export default {
         <p><button type="button" class="btn btn-outline-danger" @click="call('logout')">Graceful Shutdown
           </button></p>
 
-        <h1>List of hubs</h1>
-        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them hubs and they are like non-custodial banks. <a class="dotted" @click=showGraph>See ☊ routes between them here</a>.</p>
+        <h1>List of banks</h1>
+        <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them banks and they are non-custodial. <a class="dotted" @click=showGraph>See ☊ routes between them here</a>.</p>
 
         <svg v-show="visibleGraph" width="800" height="600" id="hubgraph"></svg>
 
@@ -1019,40 +1044,33 @@ export default {
           <p><label for="comment">Location (Fairlayer-compatible RPC):</label>
           <input class="form-control" v-model="new_hub.location" rows="2"></input></p>
 
-          <p><label for="comment">Routes to add (their hub id, route agreement in hex):</label>
+          <p><label for="comment">Routes to add (their bank id, route agreement in hex):</label>
           <input class="form-control" v-model="new_hub.add_routes" rows="2"></input></p>
 
           <p><label for="comment">Routes to remove (comma separated ids):</label>
           <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input></p>
 
 
-          <p v-if="record && !my_hub"><button class="btn btn-outline-success" @click="call('createHub', new_hub)">Create Hub 🌐</button></p>
-          <p v-else-if="my_hub"><b>You are already a hub.</b></p>
+          <p v-if="record && !my_hub"><button class="btn btn-outline-success" @click="call('createHub', new_hub)">Create Bank 🌐</button></p>
+          <p v-else-if="my_hub"><b>You are already a bank.</b></p>
           <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
 
-          <div class="alert alert-primary">After execution this account will be marked as a hub. Do not use this account for any other purposes.</div>
+          <div class="alert alert-primary">After execution this account will be marked as a bank. Do not use this account for any other purposes.</div>
         </div>
 
 
 
       </div>
-      <div v-else-if="tab=='onchain'">
-        <div v-if="PK.pending_batch">
-          <h2 class="alert alert-primary">You just broadcasted a transaction, wait until it's included in a block by validators to make another one.</h2>
-
-          <center><div class="loader"></div></center>
-        </div>
-
-        <div v-else-if="record">
-          <h4>Onchain Deposit</h4>
-          <p>When your payment is too large to be sent through hubs you can make a direct settlement onchain. This will send assets from your onchain balance to receiver's onchain or hub balance. You can withdraw from one of your hubs at the same time if you don't have enough on your onchain balance.</p>
+      <div v-else-if="tab=='transfer'">
+        <h4>Onchain Transfer</h4>
+          <p>When your payment is too large to be sent through banks you can make a direct settlement onchain. This will send assets from your onchain balance to receiver's onchain or bank balance. You can withdraw from one of your banks at the same time if you don't have enough on your onchain balance.</p>
           <p>ID: {{record.id}}@onchain</p>
           <p>Current FRD balance: {{commy(getAsset(1))}}</p>
 
 
           <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="ID"></[td]>
 
-          <p><select style="width:400px"  type="text" class="form-control" v-model="externalDeposit.hub" placeholder="Hub handle">
+          <p><select style="width:400px"  type="text" class="form-control" v-model="externalDeposit.hub" placeholder="Bank handle">
             <option value="onchain">onchain</option>
             <option v-for="hub in K.hubs" :value="hub.handle">{{hub.handle}}</option>
           </select></p>
@@ -1063,27 +1081,32 @@ export default {
           <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Tag (optional)"></p>
 
           <p>
-            <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Add External Deposit 🌐</button>
+            <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Add Transfer 🌐</button>
           </p>
+      </div>
+      <div v-else-if="tab=='onchain'">
+        <div v-if="PK.pending_batch">
+          <h2 class="alert alert-primary">You just broadcasted a transaction, wait until it's included in a block by validators to make another one.</h2>
 
+          <center><div class="loader"></div></center>
+        </div>
 
-          <div class="alert alert-primary">
-            <p>Globally broadcasted onchain transactions are expensive, so it's recommended to use them rarely and pack many 🌐 actions in one batch. After you're done adding actions, choose the fee and click to broadcast it.</p>
+        <div v-else-if="record">
+          <p>Globally broadcasted onchain transactions are expensive, so it's recommended to use them rarely and pack many 🌐 actions in one batch. After you're done adding actions, choose the fee and click to broadcast it.</p>
 
-            <div v-if="batch && batch.length > 0">
-              <ul>
-                <li v-for="tx in batch"><b>{{tx[0]}}</b></li>
-              </ul>
+          <div v-if="batch && batch.length > 0">
+            <ul>
+              <li v-for="tx in batch"><b>{{tx[0]}}</b></li>
+            </ul>
 
-              <div class="slidecontainer">
-                <input type="range" min="1" max="100" class="slider" v-model="gasprice">
-                <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}</p>
-              </div>
-
-              <p v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></p>
-              <p v-else>Not enough funds on onchain FRD balance</p>
-
+            <div class="slidecontainer">
+              <input type="range" min="1" max="100" class="slider" v-model="gasprice">
+              <p>{{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}</p>
             </div>
+
+            <p v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></p>
+            <p v-else>Not enough funds on onchain FRD balance</p>
+
           </div>
 
 
@@ -1263,7 +1286,7 @@ export default {
 
                     <span v-else-if="d[0]=='createAsset'" class="badge badge-dark">Created {{commy(d[2])}} of asset {{d[1]}}</span>
                     
-                    <span v-else-if="d[0]=='createHub'" class="badge badge-dark">Created hub {{d[1]}}</span>
+                    <span v-else-if="d[0]=='createHub'" class="badge badge-dark">Created bank {{d[1]}}</span>
 
                   </template>
                 </td>
@@ -1291,7 +1314,7 @@ export default {
       </div>
       <div v-else-if="tab=='account_explorer'">
         <h1>Account Explorer</h1>
-        <p>This is a table of registered users in the network. Onchain balance is normally used to pay transaction fees, and most assets are stored with hubs under Insurance explorer.</p>
+        <p>This is a table of registered users in the network. Onchain balance is normally used to pay transaction fees, and most assets are stored with banks under Insurance explorer.</p>
         <table class="table table-striped">
           <thead class="thead-dark">
             <tr>
@@ -1399,7 +1422,7 @@ export default {
           <p v-if="record"><button class="btn btn-outline-success" @click="call('createAsset', new_asset)">Create Asset 🌐</button></p>
           <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
 
-          <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can deposit it to a hub and start sending instantly to other users.</div>
+          <div class="alert alert-primary">After creation the entire supply will appear on your onchain balance, then you can deposit it to a bank and start sending instantly to other users.</div>
         </div>
           
 

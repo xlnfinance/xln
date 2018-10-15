@@ -34,6 +34,8 @@ react = async (result) => {
       limit: 100
     })
 
+    l('Payments')
+
     result.channels = await me.channels()
     l('Getting record')
     result.record = await getUserByIdOrKey(bin(me.id.publicKey))

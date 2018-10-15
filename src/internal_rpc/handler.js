@@ -33,7 +33,7 @@ module.exports = async (ws, json) => {
       // triggered by frontend to update
 
       // public + private info
-      react({public: true, private: true})
+      react({public: true, private: true, force: true})
       return
 
       break
@@ -153,10 +153,6 @@ module.exports = async (ws, json) => {
     // commonly called by merchant app on the same server
     case 'receivedAndFailed':
       result = await require('./received_and_failed')()
-      break
-
-    case 'testnet':
-      result = require('./testnet')(json.params)
       break
 
     case 'hardfork':

@@ -25,7 +25,7 @@ module.exports = async (ws, args) => {
     limit: readInt(args[3])
   })
 
-  l('Return chain ', raw_chain.length)
+  //l('Return chain ', raw_chain.length)
 
   if (raw_chain.length > 3) {
     ws.send(concat(bin(methodMap('chain')), raw_chain), wscb)

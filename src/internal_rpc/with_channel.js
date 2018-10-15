@@ -67,6 +67,8 @@ module.exports = async (p) => {
       me.envelope(methodMap('requestInsurance'), ch.d.asset)
     )
 
+    ch.d.requested_insurance = true
+
     react({confirm: 'Requested insurance, please wait'})
   } else if (p.op == 'testnet') {
     if (p.action == 4) {
@@ -78,7 +80,7 @@ module.exports = async (p) => {
     } else {
       me.testnet({
         action: 1,
-        asset: 1,
+        asset: ch.d.asset,
         amount: p.amount,
         partner: ch.partner
       })
