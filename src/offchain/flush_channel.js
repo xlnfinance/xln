@@ -97,6 +97,16 @@ module.exports = async (pubkey, asset, opportunistic) => {
               }.`
             )
 
+            if (me.my_hub && t.amount > ch.payable) {
+              me.send(
+                ch.d.partnerId,
+                'textMessage',
+                r([
+                  `Cant send ${t.amount} payable ${ch.payable}, extend credit`
+                ])
+              )
+            }
+
             me.metrics.fail.current++
 
             t.type = 'del'

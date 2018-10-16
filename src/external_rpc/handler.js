@@ -33,6 +33,11 @@ module.exports = (ws, msg) => {
         return require('./sync')(ws, args)
       case 'setLimits':
         return require('./set_limits')(args)
+
+      case 'textMessage':
+        react({alert: args[0].toString()})
+        return
+
       case 'requestWithdrawFrom':
         return require('./request_withdraw_from')(args)
       case 'withdrawFrom':

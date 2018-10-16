@@ -34,10 +34,16 @@ module.exports = async (a) => {
     res.setHeader('X-Frame-Options', 'DENY')
 
     var [path, query] = req.url.split('?')
-    if (path.match(/^\/Fair-([0-9]+)\.tar\.gz$/)) {
+    if (path.match(/^\/Fair-([0-9]+|latest)\.tar\.gz$/)) {
       // the snapshot may have been deleted meanwhile
       try {
-        var file = './' + datadir + '/offchain' + req.url
+        var file =
+          './' +
+          datadir +
+          '/offchain' +
+          (req.url == '/Fair-latest.tar.gz'
+            ? '/Fair-' + K.last_snapshot_height + '.tar.gz'
+            : req.url)
         var stat = fs.statSync(file)
         res.writeHeader(200, {'Content-Length': stat.size})
         var fReadStream = fs.createReadStream(file)

@@ -111,6 +111,15 @@ module.exports = async (opts) => {
 
     // 4. do we have enough payable for this hop?
     if (amount > ch.payable) {
+      if (me.my_hub) {
+        // ask to increase credit
+        me.send(
+          ch.d.partnerId,
+          'textMessage',
+          r([`Cant send ${amount} payable ${ch.payable}, extend credit`])
+        )
+      }
+
       return react({alert: `Not enough funds ${ch.payable}`})
     } else if (amount > K.max_amount) {
       return react({alert: `Maximum payment is $${commy(K.max_amount)}`})

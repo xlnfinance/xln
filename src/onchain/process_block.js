@@ -333,6 +333,11 @@ module.exports = async (s, header, ordered_tx_body) => {
               l('Removed old snapshot ' + old_height)
             }
           )
+
+          // link to latest snapshot
+          child_process.execSync(
+            `ln -sf ${datadir}/offchain/${filename}  ${datadir}/offchain/Fair-latest.tar.gz`
+          )
         }, 5 * 60 * 1000)
       }
       snapshotHash()

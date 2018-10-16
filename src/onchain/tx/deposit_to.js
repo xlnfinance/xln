@@ -141,6 +141,9 @@ module.exports = async (s, args) => {
           asset
         )
         ch.ins = ins
+
+        // rebalance happened, nullify
+        ch.d.requested_insurance = false
       }
 
       // rebalance by hub for our account = reimburse hub fees

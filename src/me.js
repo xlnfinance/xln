@@ -96,8 +96,11 @@ class Me {
         // add to existing array
         exists[1][1].push(args[1])
       } else {
-        // create new set
-        me.batch.push([method, [args[0], [args[1]]]])
+        // create new set, withdrawals go first
+        me.batch[method == 'withdrawFrom' ? 'unshift' : 'push']([
+          method,
+          [args[0], [args[1]]]
+        ])
       }
     } else if (method == 'revealSecrets') {
       let exists = me.batch.find((b) => b[0] == method)

@@ -796,7 +796,9 @@ export default {
               </div>
             </div>
 
-            
+
+            <transition name="slide-fade">
+
             <div v-show="expandedChannel == ch.d.id" class="row alert alert-info">
 
 
@@ -805,7 +807,7 @@ export default {
 
 
               <div class="col-sm">
-                 <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', asset: asset, action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+                 <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
                 
                 <p>Payable: {{commy(ch.payable)}}</p>
                 <p>Receivable: {{commy(ch.they_payable)}}</p>
@@ -838,7 +840,7 @@ export default {
                 <p><input type="text" class="form-control" v-model="chActions[ch.d.id].soft_limit"></p>
 
                 <p>
-                  <button type="button" class="btn btn-outline-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: chActions[ch.d.id].hard_limit})" href="#">Update Credit Limits</button>
+                  <button type="button" class="btn btn-outline-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: uncommy(chActions[ch.d.id].soft_limit)})" href="#">Update Credit Limits</button>
                 </p>
               </div>
               <div class="col-sm">
@@ -880,6 +882,7 @@ export default {
 
               </div>
             </div>
+            </transition>
 
 
           

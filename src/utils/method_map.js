@@ -56,7 +56,9 @@ module.exports = (i) => {
         'outcomeSecret',
         'outcomeCapacity',
         'outcomeOffline',
-        'outcomeDisputed'
+        'outcomeDisputed',
+
+        'textMessage' // random message to notify
     ]
 
     if (typeof i === 'string') {

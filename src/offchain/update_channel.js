@@ -414,6 +414,8 @@ module.exports = async (pubkey, asset, ackSig, transitions, debug) => {
     }
   }
 
+  refresh(ch)
+
   let ours = ascii_state(ch.state)
   let theirs = ascii_state(theirFinalState)
 
