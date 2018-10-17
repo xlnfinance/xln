@@ -58,6 +58,8 @@ export default {
       channels: [],
       payments: [],
 
+      batch: [],
+
 
       new_validator: {
         handle: "Satoshi",
@@ -553,8 +555,22 @@ export default {
 </script>
 <template>
   <div>
-    <div style="background-color: #FFFDDE; border:thin solid #EDDD00">
-      <p style='margin: 10px;text-align:center'>Testnet deployed: {{timeAgo(K.created_at)}}</p> 
+
+    <div style="background-color: #FFFDDE; border:thin solid #EDDD00" v-if="batch && batch.length > 0">
+      <p style='margin: 10px;text-align:center'>
+
+
+          <span v-for="tx in batch"><b>{{tx[0]}}</b></span>
+
+          <span class="slidecontainer" style="position:inline-block; width: 100px">
+            <input type="range" min="1" max="100" class="slider" v-model="gasprice">
+            {{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}
+          </span>
+
+          <span v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></span>
+          <span v-else>Not enough funds on onchain FRD balance</span>
+
+      </p> 
     </div>
 
 
@@ -578,7 +594,7 @@ export default {
             <a class="nav-link" title="Banks that instantly process payments" @click="go('hubs')">⚡️ Banks</a>
           </li>
 
-          <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='transfer' }">
+          <li v-if="pubkey && record" class="nav-item" v-bind:class="{ active: tab=='transfer' }">
             <a class="nav-link" @click="go('transfer')">Transfer</span></a>
           </li>
 

@@ -21,6 +21,8 @@ module.exports = async (args) => {
   ch.d.they_soft_limit = readInt(limits[2])
   ch.d.they_hard_limit = readInt(limits[3])
 
+  me.send(ch.d.partnerId, 'textMessage', r(['Updated limits ' + ch.d.asset]))
+
   l('Received updated limits in asset ' + ch.d.asset)
   //if (argv.syncdb) ch.d.save()
 }
