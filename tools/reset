@@ -1,0 +1,7 @@
+cd 
+rm -rf fair
+id=fair
+f=Fair-latest.tar.gz
+mkdir $id && cd $id && curl https://fairlayer.com/$f -o $f
+tar -xzf $f && rm $f && ./install
+node fair

@@ -144,6 +144,11 @@ module.exports = async (args) => {
     if (PK.pending_batch) {
       const raw = fromHex(PK.pending_batch)
       l('Rebroadcasting pending tx ', raw.length)
+      react({
+        alert: "Transaction wasn't included, rebroadcasting...",
+        force: true
+      })
+
       me.send(nextValidator(true), 'tx', r([raw]))
       return
     }

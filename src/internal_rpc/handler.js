@@ -171,6 +171,8 @@ module.exports = async (ws, json) => {
 
   result.authorized = true
 
+  react({public: true, private: true, force: true})
+
   // http or websocket?
   if (ws.end) {
     ws.end(JSON.stringify(result))

@@ -100,13 +100,13 @@ module.exports = async (a) => {
             rm -rf data${nextPort};
             mkdir data${nextPort}; 
             cp -r data/onchain data${nextPort}/onchain;
-            pm2 start --name f${nextPort} fair.js -- --datadir=data${nextPort} -p${nextPort} --s > /dev/null;`
+            pm2 start --name f${nextPort} fair.js -- --wallet-dist --datadir=data${nextPort} -p${nextPort} --s > /dev/null;`
             )
             .toString()
         )
         //--wallet-dist --prod-server
 
-        await sleep(2000)
+        await sleep(500)
 
         l('midway')
 
@@ -132,7 +132,7 @@ module.exports = async (a) => {
           //child_process.execSync(``)
           // free up port
           delete me.busyPorts[nextPort]
-        }, 10 * 60 * 1000)
+        }, 60 * 60 * 1000)
 
         res.end('redirect')
       } else {
