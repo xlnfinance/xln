@@ -12,6 +12,8 @@ module.exports = async (force = false) => {
 
     cached_result.K = K
 
+    cached_result.busyPorts = Object.keys(me.busyPorts).length
+
     cached_result.nextValidator = nextValidator()
 
     await Promise.all(

@@ -88,6 +88,8 @@ startFairlayer = async () => {
   Validators = loadValidators(K.validators)
   PK = loadPKFile(datadir)
 
+  await promise_writeFile(datadir + '/offchain/pk.json', JSON.stringify(PK))
+
   //ensure for sqlite: if (!fs.existsSync('./' + datadir)) {
 
   //if (K.total_blocks <= 3) {

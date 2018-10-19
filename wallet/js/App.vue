@@ -40,7 +40,7 @@ export default {
   },
   data() {
     return {
-      onServer: location.hostname!='127.0.0.1',
+      onServer: location.hostname=='fairlayer.com',
       auth_code: localStorage.auth_code,
 
       asset: hashargs['asset'] ? parseInt(hashargs['asset']) : 1,
@@ -59,6 +59,7 @@ export default {
       payments: [],
 
       batch: [],
+      busyPorts: 0,
 
 
       new_validator: {
@@ -105,7 +106,12 @@ export default {
       chActions: {},
       expandedChannel: -1,
 
-      externalDeposit: {to:'', hub: 'onchain', depositAmount: '', invoice: ''},
+      externalDeposit: {
+        to:'', 
+        hub: 'onchain', 
+        depositAmount: '', 
+        invoice: ''
+      },
 
       off_to: '',
       off_amount: '',
@@ -281,7 +287,7 @@ export default {
       })
       
       // reset all formfields
-      app.externalDeposit = {}
+      app.externalDeposit = {hub: 'onchain'}
     },
 
 
@@ -558,16 +564,19 @@ export default {
 
     <div style="background-color: #FFFDDE; border:thin solid #EDDD00" v-if="batch && batch.length > 0">
       <p style='margin: 10px;text-align:center'>
+          <span v-for="tx in batch">{{tx[0]}} </span>
 
+          <input type="number" v-model="gasprice">
 
-          <span v-for="tx in batch"><b>{{tx[0]}}</b></span>
-
-          <span class="slidecontainer" style="position:inline-block; width: 100px">
-            <input type="range" min="1" max="100" class="slider" v-model="gasprice">
-            {{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}
+          <span>
+          {{batch_estimate.size}} (gas required) * {{commy(gasprice)}} (gas price) = total fee ${{commy(gasprice * batch_estimate.size)}}
           </span>
 
-          <span v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: gasprice})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></span>
+          <!--<div class="slidecontainer" style="display:inline-block; width: 100px">
+            <input type="range" min="1" max="100" class="slider" v-model="gasprice">
+          </div>-->
+
+          <span v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: parseInt(gasprice)})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></span>
           <span v-else>Not enough funds on onchain FRD balance</span>
 
       </p> 
@@ -594,9 +603,7 @@ export default {
             <a class="nav-link" title="Banks that instantly process payments" @click="go('hubs')">⚡️ Banks</a>
           </li>
 
-          <li v-if="pubkey && record" class="nav-item" v-bind:class="{ active: tab=='transfer' }">
-            <a class="nav-link" @click="go('transfer')">Transfer</span></a>
-          </li>
+
 
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='onchain' }">
             <a class="nav-link" @click="go('onchain')">🌐 Broadcast <span class="badge badge-danger" v-if="batch.length > 0 || PK.pending_batch">{{PK.pending_batch ? 'sent' : batch.length}}</span></a>
@@ -789,7 +796,43 @@ export default {
 
 
           <h4 class="alert alert-primary" v-for="e in events">{{e.desc}} - {{timeAgo(e.createdAt)}}</h4>
-          
+            
+
+          <div v-if="record">
+            <h4 class="dotted" @click="expandedChannel = (expandedChannel == 0 ? -1 : 0)"  style="display:inline-block">
+              Onchain: {{commy(getAsset(asset))}}
+            </h4> 
+            <transition name="slide-fade" v-if="expandedChannel==0">
+              <div class=" alert alert-info">
+
+              <p>Onchain ID: {{record.id}}@onchain</p>
+
+              <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="ID"></[td]>
+
+              <p><select style="width:400px"  type="text" class="form-control" v-model="externalDeposit.hub">
+                <option value="onchain"> Onchain</option>
+                <option v-for="hub in K.hubs" :value="hub.handle"> {{hub.handle}}</option>
+              </select></p>
+
+
+              <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit"></p>
+
+              <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Tag (optional)"></p>
+
+
+              <p>
+                <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Pay from Onchain 🌐</button>
+              </p>
+              </div>
+            </transition>
+          </div>
+          <div v-else>
+            <h4 style="display:inline-block">
+              Onchain: not registered
+            </h4> 
+          </div>
+
+        
           <template v-for="(ch, index) in channelsForAsset()">
             <p>
               <h4 class="dotted" @click="expandedChannel = (expandedChannel == ch.d.id ? -1 : ch.d.id)" style="display:inline-block">
@@ -866,7 +909,7 @@ export default {
                 <p><div class="input-group">
                   <input type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="To withdraw" aria-describedby="basic-addon2">
                   <div class="input-group-append">
-                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)})">Request Withdrawal 🌐</button>
+                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)})">Withdraw to Onchain 🌐</button>
                   </div>
                 </div></p>
 
@@ -874,7 +917,7 @@ export default {
                 <p><div class="input-group">
                   <input type="text" class="form-control" v-model="chActions[ch.d.id].depositAmount" placeholder="To deposit" aria-describedby="basic-addon2">
                   <div class="input-group-append">
-                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].depositAmount)})">Add Deposit 🌐</button>
+                    <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].depositAmount)})">Pay from Onchain 🌐</button>
                   </div>
                 </div></p>
 
@@ -1080,29 +1123,7 @@ export default {
 
 
       </div>
-      <div v-else-if="tab=='transfer'">
-        <h4>Onchain Transfer</h4>
-          <p>When your payment is too large to be sent through banks you can make a direct settlement onchain. This will send assets from your onchain balance to receiver's onchain or bank balance. You can withdraw from one of your banks at the same time if you don't have enough on your onchain balance.</p>
-          <p>ID: {{record.id}}@onchain</p>
-          <p>Current FRD balance: {{commy(getAsset(1))}}</p>
 
-
-          <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="ID"></[td]>
-
-          <p><select style="width:400px"  type="text" class="form-control" v-model="externalDeposit.hub" placeholder="Bank handle">
-            <option value="onchain">onchain</option>
-            <option v-for="hub in K.hubs" :value="hub.handle">{{hub.handle}}</option>
-          </select></p>
-
-
-          <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit"></p>
-
-          <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Tag (optional)"></p>
-
-          <p>
-            <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Add Transfer 🌐</button>
-          </p>
-      </div>
       <div v-else-if="tab=='onchain'">
         <div v-if="PK.pending_batch">
           <h2 class="alert alert-primary">You just broadcasted a transaction, wait until it's included in a block by validators to make another one.</h2>
@@ -1113,7 +1134,7 @@ export default {
         <div v-else-if="record">
           <p>Globally broadcasted onchain transactions are expensive, so it's recommended to use them rarely and pack many 🌐 actions in one batch. After you're done adding actions, choose the fee and click to broadcast it.</p>
 
-          <div v-if="batch && batch.length > 0">
+          <div v-if="dev_mode && batch && batch.length > 0">
             <ul>
               <li v-for="tx in batch"><b>{{tx[0]}}</b></li>
             </ul>
@@ -1201,6 +1222,10 @@ export default {
       <div v-else-if="tab=='install'">
         <h4>Web Wallet (optimized for convenience)</h4>
         <p>If you are on mobile or want to store only small amounts you can use a <a href="https://web.fairlayer.com">custodian web wallet</a></p>
+
+        <h4>Fair Core Cloud Demo</h4>
+
+        <p>Test out security features of Fair Core such as disputes and operations with insurances without installing it on your computer. <a href="/demoinstance">Get your personal cloud instance for 5 minutes.</a> Busy slots: {{busyPorts}}</p>
 
         <h4>Fair Core (optimized for security)</h4>
         <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app and press Enter:</p>

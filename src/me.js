@@ -13,6 +13,8 @@ class Me {
 
     this.users = {}
 
+    this.busyPorts = [] // for cloud demos
+
     this.withdrawalRequests = {}
 
     // generic metric boilerplate: contains array of averages over time
@@ -331,6 +333,10 @@ class Me {
     }
 
     return channels
+  }
+
+  textMessage(partnerId, msg) {
+    me.send(partnerId, 'textMessage', r([msg]))
   }
 
   // a generic interface to send a websocket message to some user or validator

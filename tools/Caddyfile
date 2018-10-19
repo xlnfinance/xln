@@ -64,7 +64,3 @@ fairlayer.com:8103 {
 }
 
 
-
-failsafe.network {
-  redir https://fairlayer.com{uri}
-}

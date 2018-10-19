@@ -15,10 +15,9 @@ window.ts = () => Math.round(new Date() / 1000)
 
 document.title = 'Fair ' + location.port
 
-window.hashargs = location.hash.split('?')[1]
-
-hashargs = hashargs
-  ? hashargs
+window.hashargs = location.hash
+  ? location.hash
+      .slice(1)
       .split('&')
       .map((el) => el.split('='))
       .reduce((pre, cur) => {

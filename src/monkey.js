@@ -29,11 +29,11 @@ const payMonkey = async (on_server, counter = 1) => {
 
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
-    }, Math.round(1500 + Math.random() * 3000))
+    }, Math.round(3500 + Math.random() * 3000))
   } else if (counter < 20) {
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
-    }, 1500)
+    }, 500)
   }
 }
 
@@ -82,7 +82,9 @@ if (argv.monkey) {
   }
 
   // only in monkey mode, not on end user node
-  Periodical.schedule('broadcast', K.blocktime * 1000)
+  if (base_port != 8008) {
+    Periodical.schedule('broadcast', K.blocktime * 1000)
+  }
 
   if (me.record.id == 1) {
     l('Scheduling e2e checks')
@@ -159,7 +161,7 @@ if (argv.monkey) {
 
   if (me.record.id == 3) {
     // just to make sure there's no leaky unescaped injection
-    var xss = '\'"><img src=x onerror=alert(0)>'
+    var xss = 'XSSCOIN' //\'"><img src=x onerror=alert(0)>'
     me.batchAdd('createAsset', ['XSS', 10000000, xss, xss])
 
     // buying bunch of FRB for $4

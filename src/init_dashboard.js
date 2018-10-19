@@ -82,6 +82,64 @@ module.exports = async (a) => {
       })
 
       res.end(raw_chain)
+    } else if (path == '/demoinstance') {
+      for (var i = 8500; i < 8510; i++) {
+        if (!me.busyPorts[i]) {
+          var nextPort = i
+          me.busyPorts[nextPort] = ts()
+          break
+        }
+      }
+
+      if (nextPort) {
+        l('INit at ' + nextPort)
+        l(
+          child_process
+            .execSync(
+              `pm2 delete f${nextPort} > /dev/null; 
+            rm -rf data${nextPort};
+            mkdir data${nextPort}; 
+            cp -r data/onchain data${nextPort}/onchain;
+            pm2 start --name f${nextPort} fair.js -- --datadir=data${nextPort} -p${nextPort} --s > /dev/null;`
+            )
+            .toString()
+        )
+        //--wallet-dist --prod-server
+
+        await sleep(2000)
+
+        l('midway')
+
+        let instanceLog = child_process
+          .execSync(`cat data${nextPort}/offchain/pk.json`)
+          .toString()
+
+        l('instance log', instanceLog)
+
+        if (!instanceLog) {
+          return
+        }
+
+        let auth_code = instanceLog.split('auth_code":"')[1].split('"')[0]
+        // we redirect the user to authenticated cloud instance
+
+        res.writeHead(302, {
+          Location: `http://104.236.132.247:${nextPort}/#auth_code=${auth_code}`
+        })
+
+        setTimeout(() => {
+          l(`Destroying demo... ${nextPort}`)
+          //child_process.execSync(``)
+          // free up port
+          delete me.busyPorts[nextPort]
+        }, 10 * 60 * 1000)
+
+        res.end('redirect')
+      } else {
+        res.end(
+          'No available slot found for your cloud demo. Wait, or install locally.'
+        )
+      }
     } else if (path == '/health') {
       res.end(
         JSON.stringify({
@@ -172,12 +230,8 @@ module.exports = async (a) => {
       }
     })
 
-  // opn doesn't work in SSH console
-  if (!argv.silent && !argv.s) {
-    openBrowser()
-  } else {
-    l('In silent mode: open the wallet manually.')
-  }
+  openBrowser()
+
   internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
 
   internal_wss.on('error', function(err) {

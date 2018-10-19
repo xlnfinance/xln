@@ -1,4 +1,5 @@
 const fs = require('fs')
+const path = require('path')
 
 // returns validator making block right now, use skip=true to get validator for next slot
 const nextValidator = (skip = false) => {
@@ -62,7 +63,8 @@ const parseAddress = (address) => {
 
 const loadKFile = (datadir) => {
   l('Loading K data')
-  const kFile = './' + datadir + '/onchain/k.json'
+
+  const kFile = path.resolve(__dirname, '../../' + datadir + '/onchain/k.json')
   if (!fs.existsSync(kFile)) {
     fatal(`Unable to read ${highlight(kFile)}, quitting`)
   }

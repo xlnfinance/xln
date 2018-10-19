@@ -113,10 +113,9 @@ module.exports = async (opts) => {
     if (amount > ch.payable) {
       if (me.my_hub) {
         // ask to increase credit
-        me.send(
+        me.textMessage(
           ch.d.partnerId,
-          'textMessage',
-          r([`Cant send ${amount} payable ${ch.payable}, extend credit`])
+          `Cant send ${amount} payable ${ch.payable}, extend credit`
         )
       }
 

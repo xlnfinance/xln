@@ -6,6 +6,9 @@ set -o errexit
 set -o pipefail
 
 
+pm2 delete all || true
+killall Fairlayer 2>/dev/null || true
+
 db=--db=mysql:root:123123
 #db=--db=postgres:postgres:123123
 pm2_opts=--no-autorestart
@@ -29,9 +32,6 @@ npm run build
 
 
 #--node-args="--prof"
-
-pm2 delete all || true
-killall Fairlayer 2>/dev/null || true
 
 node fair.js --genesis=test $db --prod-server
 fair_node_args="-p8000 --db-pool=50 --rebalance"

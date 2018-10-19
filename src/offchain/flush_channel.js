@@ -98,12 +98,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
             )
 
             if (me.my_hub && t.amount > ch.payable) {
-              me.send(
+              me.textMessage(
                 ch.d.partnerId,
-                'textMessage',
-                r([
-                  `Cant send ${t.amount} payable ${ch.payable}, extend credit`
-                ])
+                `Cant send ${t.amount} payable ${ch.payable}, extend credit`
               )
             }
 

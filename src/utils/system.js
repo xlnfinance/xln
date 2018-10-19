@@ -107,9 +107,13 @@ Array.prototype.randomElement = function() {
 }
 
 openBrowser = () => {
-  const url = `http://${localhost}:${base_port}/#?auth_code=${PK.auth_code}`
+  const url = `http://${localhost}:${base_port}/#auth_code=${PK.auth_code}`
   l(note(`Open ${link(url)} in your browser`))
-  opn(url)
+
+  // opn doesn't work in SSH console
+  if (!argv.silent && !argv.s) {
+    opn(url)
+  }
 }
 
 trim = (buffer, len = 4) => toHex(buffer).substr(0, len)

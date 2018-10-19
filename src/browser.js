@@ -27,17 +27,17 @@ react = async (result) => {
   }
   //&& result.private
   if (me.id) {
-    l('Assign private')
+    //l('Assign private')
     result.payments = await Payment.findAll({
       order: [['id', 'desc']],
       //include: {all: true},
       limit: 100
     })
 
-    l('Payments')
+    //l('Payments')
 
     result.channels = await me.channels()
-    l('Getting record')
+    //l('Getting record')
     result.record = await getUserByIdOrKey(bin(me.id.publicKey))
 
     result.events = []
@@ -68,7 +68,7 @@ react = async (result) => {
     result.batch_estimate = await me.batch_estimate()
   }
 
-  l('Assigning public')
+  //l('Assigning public')
 
   //if (result.public) {
   result = Object.assign(result, cached_result)
