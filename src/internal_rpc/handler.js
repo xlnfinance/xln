@@ -17,7 +17,12 @@ module.exports = async (ws, json) => {
   if (json.auth_code != PK.auth_code && ws != 'admin') {
     //if (!json.auth_code) {
     //l('Not authorized')
-    ws[ws.end ? 'end' : 'send'](JSON.stringify(cached_result))
+    let resp =
+      json.method == 'login'
+        ? {alert: 'Invalid auth_code, restart node'}
+        : cached_result
+    ws[ws.end ? 'end' : 'send'](JSON.stringify(resp))
+
     return
   }
 

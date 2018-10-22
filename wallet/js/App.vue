@@ -794,6 +794,14 @@ export default {
 
       <div v-else-if="tab=='wallet'">
         <template v-if="pubkey">
+
+ 
+
+          <h4 class="alert alert-primary" v-if="my_hub">This node is a bank @{{my_hub.handle}}</h4>
+
+          <h4 class="alert alert-primary" v-for="e in events">{{e.desc}} - {{timeAgo(e.createdAt)}}</h4>
+
+
           <div v-if="record">
             <h4 class="dotted" @click="expandedChannel = (expandedChannel == 0 ? -1 : 0)"  style="display:inline-block">
               Onchain: {{commy(getAsset(asset))}}
@@ -801,7 +809,7 @@ export default {
             <transition name="slide-fade" v-if="expandedChannel==0">
               <div class=" alert alert-info">
 
-              <p>Onchain ID: {{record.id}}@onchain</p>
+              <p>Onchain ID: {{record.id}}</p>
 
               <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="ID"></[td]>
 
@@ -829,35 +837,36 @@ export default {
           </div>
 
 
-          <h4 class="alert alert-primary" v-if="my_hub">This node is a bank @{{my_hub.handle}}</h4>
-
-          <h4 class="alert alert-primary" v-for="e in events">{{e.desc}} - {{timeAgo(e.createdAt)}}</h4>
-
-
           <template v-if="channelsForAsset().length > 0">
           
           
             <template v-for="(ch, index) in channelsForAsset()">
               <p>
                 <h4 class="dotted" @click="expandedChannel = (expandedChannel == ch.d.id ? -1 : ch.d.id)" style="display:inline-block">
-                  @{{ch.hub.handle}}: {{commy(ch.payable)}}
+                  @{{ch.hub.handle}}: {{commy(ch.payable)}} 
+
+                  <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+
+
+
+                  <div v-if="dev_mode && ch.bar > 0" class="progress" style="width:400px">
+                    <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
+                      -{{commy(ch.they_uninsured)}} (they_uninsured)
+                    </div>
+                    <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+                      {{commy(ch.insured)}} (insured)
+                    </div>
+                    <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
+                      -{{commy(ch.they_insured)}} (they_insured)
+                    </div>
+                    <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
+                      +{{commy(ch.uninsured)}} (uninsured)
+                    </div>
+                  </div>
+
                 </h4>
               </p>
 
-              <div v-if="dev_mode && ch.bar > 0" class="progress">
-                <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
-                  -{{commy(ch.they_uninsured)}} (they_uninsured)
-                </div>
-                <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-                  {{commy(ch.insured)}} (insured)
-                </div>
-                <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
-                  -{{commy(ch.they_insured)}} (they_insured)
-                </div>
-                <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
-                  +{{commy(ch.uninsured)}} (uninsured)
-                </div>
-              </div>
 
 
               <transition name="slide-fade">
@@ -870,7 +879,7 @@ export default {
 
 
                 <div class="col-sm">
-                   <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+                   
                   
                   <p>Payable: {{commy(ch.payable)}}</p>
                   <p>Receivable: {{commy(ch.they_payable)}}</p>
@@ -1070,8 +1079,7 @@ export default {
 
         <h1>List of banks</h1>
         <p>Any user can escrow an insurance with any other user. However for effective routing some nodes get thoroughly verified and offered inside the wallet, we call them banks and they are non-custodial. <a class="dotted" @click=showGraph>See ☊ routes between them here</a>.</p>
-
-        <svg v-show="visibleGraph" width="800" height="600" id="hubgraph"></svg>
+        <svg v-if="visibleGraph" width="800" height="600" id="hubgraph"></svg>
 
         <table class="table table-striped">
           <thead class="thead-dark">
@@ -1237,7 +1245,7 @@ export default {
 
         <h4>Fair Core Cloud Demo</h4>
 
-        <p>Test out security features of Fair Core such as disputes and operations with insurances without installing it on your computer. <a href="/demoinstance">Get your personal cloud instance for 5 minutes.</a> Busy slots: {{busyPorts}}</p>
+        <p>Try Fair Core without installing it on your computer: <a href="/demoinstance">get your personal cloud instance for 1 hour.</a> Currently active sessions: {{busyPorts}}</p>
 
         <h4>Fair Core (optimized for security)</h4>
         <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app and press Enter:</p>

@@ -83,7 +83,7 @@ module.exports = async (a) => {
 
       res.end(raw_chain)
     } else if (path == '/demoinstance') {
-      for (var i = 8500; i < 8510; i++) {
+      for (var i = 8500; i < 8505; i++) {
         if (!me.busyPorts[i]) {
           var nextPort = i
           me.busyPorts[nextPort] = ts()
@@ -106,7 +106,7 @@ module.exports = async (a) => {
         )
         //--wallet-dist --prod-server
 
-        await sleep(500)
+        await sleep(2500)
 
         l('midway')
 
@@ -124,7 +124,7 @@ module.exports = async (a) => {
         // we redirect the user to authenticated cloud instance
 
         res.writeHead(302, {
-          Location: `http://104.236.132.247:${nextPort}/#auth_code=${auth_code}`
+          Location: `http://demo.fairlayer.com:${nextPort}/#auth_code=${auth_code}`
         })
 
         setTimeout(() => {
