@@ -61,7 +61,7 @@ if (argv.monkey) {
 
     setTimeout(() => {
       me.testnet({partner: 1, amount: 10000000})
-    }, 6000)
+    }, K.blocktime * 1000)
 
     setTimeout(() => {
       payMonkey(on_server)

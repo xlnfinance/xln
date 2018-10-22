@@ -806,6 +806,7 @@ export default {
             <h4 class="dotted" @click="expandedChannel = (expandedChannel == 0 ? -1 : 0)"  style="display:inline-block">
               Onchain: {{commy(getAsset(asset))}}
             </h4> 
+            
             <transition name="slide-fade" v-if="expandedChannel==0">
               <div class=" alert alert-info">
 
@@ -844,27 +845,27 @@ export default {
               <p>
                 <h4 class="dotted" @click="expandedChannel = (expandedChannel == ch.d.id ? -1 : ch.d.id)" style="display:inline-block">
                   @{{ch.hub.handle}}: {{commy(ch.payable)}} 
-
-                  <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
-
-
-
-                  <div v-if="dev_mode && ch.bar > 0" class="progress" style="width:400px">
-                    <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
-                      -{{commy(ch.they_uninsured)}} (they_uninsured)
-                    </div>
-                    <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
-                      {{commy(ch.insured)}} (insured)
-                    </div>
-                    <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
-                      -{{commy(ch.they_insured)}} (they_insured)
-                    </div>
-                    <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
-                      +{{commy(ch.uninsured)}} (uninsured)
-                    </div>
-                  </div>
-
                 </h4>
+
+                <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+
+
+
+                <div v-if="dev_mode && ch.bar > 0" class="progress" style="width:400px">
+                  <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
+                    -{{commy(ch.they_uninsured)}} (they_uninsured)
+                  </div>
+                  <div class="progress-bar" v-bind:style="{ width: Math.round(ch.insured*100/ch.bar)+'%', 'background-color':'#5cb85c'}" role="progressbar">
+                    {{commy(ch.insured)}} (insured)
+                  </div>
+                  <div v-bind:style="{ width: Math.round(ch.they_insured*100/ch.bar)+'%', 'background-color':'#007bff'}" class="progress-bar" role="progressbar">
+                    -{{commy(ch.they_insured)}} (they_insured)
+                  </div>
+                  <div v-bind:style="{ width: Math.round(ch.uninsured*100/ch.bar)+'%', 'background-color':'#dc3545'}" class="progress-bar" role="progressbar">
+                    +{{commy(ch.uninsured)}} (uninsured)
+                  </div>
+                </div>
+
               </p>
 
 

@@ -281,7 +281,7 @@ module.exports = async (s, header, ordered_tx_body) => {
 
     if (me.my_validator.id != 1) {
       // in dev mode only to prevent race for /data
-      await sleep(6000)
+      await sleep(K.blocktime * 1000)
     } else {
       // it's important to flush current K to disk before snapshot
       await Periodical.syncChanges()
