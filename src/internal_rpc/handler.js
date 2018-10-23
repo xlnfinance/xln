@@ -60,6 +60,21 @@ module.exports = async (ws, json) => {
       require('./with_channel')(json.params)
       break
 
+    case 'onchainFaucet':
+      me.send(
+        K.hubs[0],
+        'testnet',
+        r([
+          7,
+          json.params.asset ? json.params.asset : 1,
+          json.params.amount,
+          bin(me.pubkey)
+        ])
+      )
+      react({confirm: 'Await onchain faucet'})
+
+      break
+
     case 'externalDeposit':
       require('./external_deposit')(json.params)
       break

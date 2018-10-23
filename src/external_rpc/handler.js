@@ -35,7 +35,7 @@ module.exports = (ws, msg) => {
         return require('./set_limits')(args)
 
       case 'textMessage':
-        react({alert: args[0].toString()})
+        react({confirm: args[0].toString()})
         return
 
       case 'requestWithdrawFrom':

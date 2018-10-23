@@ -288,9 +288,10 @@ class Me {
 
   testnet(p) {
     l('Using testnet')
+    //      fromHex(K.hubs.find((h) => h.id == p.partner).pubkey),
 
     me.send(
-      fromHex(K.hubs.find((h) => h.id == p.partner).pubkey),
+      K.hubs.find((h) => h.id == p.partner),
       'testnet',
       r([
         p.action ? p.action : 1,

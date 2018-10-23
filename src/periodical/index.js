@@ -44,7 +44,7 @@ Periodical.startHub = () => {
   l('Starting hub ', me.my_hub)
   me.startExternalRPC(me.my_hub.location)
   //Periodical.schedule('syncChanges', K.blocktime * 4000)
-  Periodical.schedule('rebalance', K.blocktime * 3000)
+  Periodical.schedule('rebalance', K.blocktime * 2000)
 
   // hubs have to force react regularly
   Periodical.schedule('forceReact', K.blocktime * 3000)

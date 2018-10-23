@@ -178,8 +178,8 @@ window.render = (r) => {
         app.chActions[ch.d.id] = {
           depositAmount: '',
           withdrawAmount: '',
-          hard_limit: app.commy(ch.d.hard_limit),
-          soft_limit: app.commy(ch.d.soft_limit)
+          hard_limit: app.commy(ch.d.hard_limit, true, false),
+          soft_limit: app.commy(ch.d.soft_limit, true, false)
         }
       }
     })
@@ -193,8 +193,9 @@ window.render = (r) => {
     app.pubkey &&
     app.tab == 'wallet' &&
     app.channelsForAsset().length == 0
-  )
-    app.go('hubs')
+  ) {
+    //app.go('hubs')
+  }
 
   if (r.history && window.riskcanvas) {
     renderRisk(r.history)

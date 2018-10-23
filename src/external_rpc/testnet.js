@@ -22,5 +22,12 @@ module.exports = async (args) => {
 
     l('testnet', pay)
     await me.payChannel(pay)
+  } else if (action == 7) {
+    let asset = readInt(args[1])
+    let amount = readInt(args[2])
+
+    l('Added onchain faucet')
+
+    me.batchAdd('depositTo', [asset, [amount, args[3], 0, bin('faucet')]])
   }
 }

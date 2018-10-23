@@ -69,7 +69,7 @@ module.exports = async (p) => {
 
     ch.d.requested_insurance = true
 
-    react({confirm: 'Requested insurance, please wait'})
+    //react({confirm: 'Requested insurance, please wait'})
   } else if (p.op == 'testnet') {
     if (p.action == 4) {
       me.CHEAT_dontack = 1

@@ -55,18 +55,26 @@ module.exports = async (pubkey, asset, delta = false) => {
     if (delta) {
       ch.d = delta
     } else {
-      // we trust by default to @Europe hub in FRD asset
-      let defaultTrust = 'off'
-      if (asset == 1) {
-        // we are @Europe
-        if (me.record.id == 1) {
-          defaultTrust = 'we'
-        } else {
-          let them = my_hub(pubkey)
-          if (them && them.id == 1) {
-            defaultTrust = 'they'
-          }
-        }
+      let defaults = {
+        nonce: 0,
+        status: 'master',
+        offdelta: 0,
+
+        soft_limit: 0,
+        hard_limit: 0,
+
+        they_soft_limit: 0,
+        they_hard_limit: 0
+      }
+
+      // Testnet: all hubs are trusted by default in all assets
+      if (me.my_hub) {
+        defaults.they_soft_limit = K.soft_limit
+        defaults.they_hard_limit = K.hard_limit
+      }
+      if (my_hub(pubkey)) {
+        defaults.soft_limit = K.soft_limit
+        defaults.hard_limit = K.hard_limit
       }
 
       let created = await Delta.findOrCreate({
@@ -75,17 +83,7 @@ module.exports = async (pubkey, asset, delta = false) => {
           partnerId: pubkey,
           asset: asset
         },
-        defaults: {
-          nonce: 0,
-          status: 'master',
-          offdelta: 0,
-
-          soft_limit: defaultTrust == 'they' ? K.soft_limit : 0,
-          hard_limit: defaultTrust == 'they' ? K.hard_limit : 0,
-
-          they_soft_limit: defaultTrust == 'we' ? K.soft_limit : 0,
-          they_hard_limit: defaultTrust == 'we' ? K.hard_limit : 0
-        }
+        defaults: defaults
       })
 
       ch.d = created[0]
