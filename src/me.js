@@ -13,6 +13,9 @@ class Me {
 
     this.users = {}
 
+    // array of sockets to frontends
+    this.browsers = []
+
     this.busyPorts = [] // for cloud demos
 
     this.withdrawalRequests = {}

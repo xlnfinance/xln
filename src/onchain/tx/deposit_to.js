@@ -40,12 +40,23 @@ module.exports = async (s, args) => {
 
         userAsset(depositTo, asset, amount - K.account_creation_fee)
         userAsset(s.signer, asset, -amount)
+
+        if (me.is_me(depositTo.pubkey)) {
+          Event.create({
+            type: 'fee',
+            amount: -K.account_creation_fee,
+            asset: asset,
+            blockId: K.total_blocks,
+
+            desc: `Paid account creation fee`
+          })
+        }
       } else {
         if (!withPartner.id) {
           l("Both partners don't exist")
           return
         }
-
+        // todo: support usecase of paying to new account @hub
         throw 'yolo'
 
         const fee = K.standalone_balance + K.account_creation_fee
@@ -73,7 +84,7 @@ module.exports = async (s, args) => {
 
           userAsset(withPartner, asset, K.standalone_balance)
           amount -= fee
-          //userAsset(signer, asset, -fee)
+          //userAsset(s.signer, asset, -fee)
           await saveId(withPartner)
           // now it has id
 
@@ -133,7 +144,7 @@ module.exports = async (s, args) => {
 
       await saveId(ins)
 
-      if (me.is_me(withPartner.pubkey) || me.is_me(depositTo.pubkey)) {
+      if (me.is_me(depositTo.pubkey) || me.is_me(withPartner.pubkey)) {
         // hot reload
         // todo ensure it's in memory yet
         const ch = await me.getChannel(
@@ -162,11 +173,33 @@ module.exports = async (s, args) => {
     // invoice is an arbitrary tag to identify the payer for merchant
     const invoice = output[3] && output[3].length != 0 ? output[3] : false
 
-    // onchain payment for specific invoice (to us or one of our channels)
-    if (me.is_me(depositTo.pubkey) && invoice) {
-      // TODO: hook into SDK
+    // we sent onchain
+    if (me.is_me(s.signer.pubkey)) {
+      Event.create({
+        type: 'sent',
+        amount: -amount,
+        asset: asset,
+        invoice: invoice.toString(),
+        blockId: K.total_blocks,
+        userId: depositTo.id,
 
-      l('Invoice paid on chain ', invoice)
+        desc: `Sent to ${depositTo.id}`
+      })
+    }
+
+    // sent onchain to us
+    if (me.is_me(depositTo.pubkey)) {
+      // TODO: hook into SDK
+      Event.create({
+        type: 'received',
+        amount: amount,
+        asset: asset,
+        invoice: invoice.toString(),
+        blockId: K.total_blocks,
+        userId: s.signer.id,
+
+        desc: `Received from ${s.signer.id}`
+      })
     }
 
     s.parsed_tx.events.push([

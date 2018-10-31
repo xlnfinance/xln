@@ -1,5 +1,5 @@
 const isHeadless = () => {
-  return !me.browser || me.browser.readyState != 1
+  return me.browsers.length == 0 // || me.browser.readyState != 1
 }
 
 module.exports = async (force = false) => {

@@ -1,6 +1,7 @@
 const Router = require('../router')
 const withdraw = require('../offchain/withdraw')
 
+/*
 let setBrowser = (ws) => {
   // new window replaces old one
   if (me.browser && me.browser.readyState == 1) {
@@ -9,11 +10,13 @@ let setBrowser = (ws) => {
 
   me.browser = ws
 }
+*/
 
 module.exports = async (ws, json) => {
   // prevents all kinds of CSRF and DNS rebinding
   // strong coupling between the console and the browser client
 
+  // public RPC, return cached_result only
   if (json.auth_code != PK.auth_code && ws != 'admin') {
     //if (!json.auth_code) {
     //l('Not authorized')
@@ -26,11 +29,12 @@ module.exports = async (ws, json) => {
     return
   }
 
-  if (ws.send && json.is_wallet && me.browser != ws) {
-    setBrowser(ws)
+  if (ws.send && json.is_wallet && !me.browsers.includes(ws)) {
+    me.browsers.push(ws)
+    //setBrowser(ws)
   }
 
-  // internal actions require authorization
+  // internal actions that require authorization
 
   var result = {}
   switch (json.method) {
@@ -38,8 +42,8 @@ module.exports = async (ws, json) => {
       // triggered by frontend to update
 
       // public + private info
-      react({public: true, private: true, force: true})
-      return
+      //react({public: true, private: true, force: true})
+      //return
 
       break
     case 'login':
@@ -172,7 +176,7 @@ module.exports = async (ws, json) => {
 
     // commonly called by merchant app on the same server
     case 'receivedAndFailed':
-      result = await require('./received_and_failed')()
+      result = await require('./received_and_failed')(ws)
       break
 
     case 'hardfork':
@@ -191,7 +195,7 @@ module.exports = async (ws, json) => {
 
   result.authorized = true
 
-  react({public: true, private: true, force: true})
+  react({public: true, private: true, force: json.method == 'load'})
 
   // http or websocket?
   if (ws.end) {

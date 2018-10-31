@@ -83,7 +83,7 @@ module.exports = async (a) => {
 
       res.end(raw_chain)
     } else if (path == '/demoinstance') {
-      for (var i = 8500; i < 8505; i++) {
+      for (var i = 8500; i < 8500 + 10; i++) {
         if (!me.busyPorts[i]) {
           var nextPort = i
           me.busyPorts[nextPort] = ts()
@@ -92,7 +92,7 @@ module.exports = async (a) => {
       }
 
       if (nextPort) {
-        l('INit at ' + nextPort)
+        l('Started demoinstance ' + nextPort)
         l(
           child_process
             .execSync(
@@ -107,8 +107,6 @@ module.exports = async (a) => {
         //--wallet-dist --prod-server
 
         await sleep(2500)
-
-        l('midway')
 
         let instanceLog = child_process
           .execSync(`cat data${nextPort}/offchain/pk.json`)

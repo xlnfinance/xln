@@ -42,6 +42,8 @@ export default {
     return {
       onchain: 'Layer',
 
+      lang: 'en',
+
 
       onServer: location.hostname=='fairlayer.com',
       auth_code: localStorage.auth_code,
@@ -525,6 +527,8 @@ export default {
       }
     },
 
+    t: window.t,
+
     toggle: () => {
       if (localStorage.settings) {
         delete localStorage.settings
@@ -543,10 +547,10 @@ export default {
       for (let tx of batch) {
         if (['withdrawFrom', 'depositTo', 'disputeWith'].includes(tx[0])) {
 
-          r += `<span class="badge badge-danger">${tx[1][1].length} ${tx[0]} (in ${app.to_ticker(tx[1][0])})</span>`
+          r += `<span class="badge badge-danger">${tx[1][1].length} ${tx[0]} (in ${app.to_ticker(tx[1][0])})</span>&nbsp;`
 
         } else {
-          r += `<span class="badge badge-danger">${tx[0]}</span>`
+          r += `<span class="badge badge-danger">${tx[0]}</span>&nbsp;`
         }
 
       }
@@ -593,28 +597,42 @@ export default {
 </script>
 <template>
   <div>
+  
 
-    <div style="background-color: #FFFDDE; border:thin solid #EDDD00" v-if="PK.pending_batch || (batch && batch.length > 0)">
-      <p v-if="PK.pending_batch" style='margin: 10px;text-align:center'>
-        Wait for tx to be included in next block... <dotsloader></dotsloader>
-      </p>
-      <p v-else style='margin: 10px;text-align:center'>
-        <span v-html="prettyBatch(batch)"></span>
+  <template v-if="PK.pending_batch || (batch && batch.length > 0)">
+    <div style="
+      width:100%;
+      height:90px;"></div>
 
-        <span>
-        <input style="width: 80px" type="number" v-model="gasprice">
- (gas price) * {{batch_estimate.size}} (gas) = fee {{commy(gasprice * batch_estimate.size)}}
-        </span>
+    <div style="position:fixed;
+      z-index:999999;
+      opacity:0.9;
+      top:0px;
+      width:100%;
+      height:90px;
+      background-color: #FFFDDE; border:thin solid #EDDD00">
+          <p v-if="PK.pending_batch" style='margin: 25px;text-align:center'>
+            Wait for tx to be included in next block... <dotsloader></dotsloader>
+          </p>
+          <p v-else style='margin: 10px;text-align:center'>
+            <span v-html="prettyBatch(batch)"></span>
 
-        <!--<div class="slidecontainer" style="display:inline-block; width: 100px">
-          <input type="range" min="1" max="100" class="slider" v-model="gasprice">
-        </div>-->
+            <span>
+            <input style="width: 80px" type="number" v-model="gasprice">
+     (gas price) * {{batch_estimate.size}} (gas) = fee {{commy(gasprice * batch_estimate.size)}}
+            </span>
 
-        <span v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: parseInt(gasprice)})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></span>
-        <span v-else>Not enough FRD in {{onchain}}</span>
+            <!--<div class="slidecontainer" style="display:inline-block; width: 100px">
+              <input type="range" min="1" max="100" class="slider" v-model="gasprice">
+            </div>-->
 
-      </p> 
-    </div>
+            <span v-if="getAsset(1) - gasprice * batch_estimate.size >= 100"><button type="button" class="btn btn-outline-danger" @click="call('broadcast', {gasprice: parseInt(gasprice)})">Sign & Broadcast</button> or <a class="dotted" @click="call('clearBatch')">clear batch</a></span>
+            <span v-else>Not enough FRD in {{onchain}}</span>
+
+          </p> 
+        </div>
+
+  </template>
 
 
     <nav class="navbar navbar-expand-md navbar-light bg-faded mb-4">
@@ -625,34 +643,34 @@ export default {
       <div class="collapse navbar-collapse" id="navbarCollapse">
         <ul class="navbar-nav mr-auto">
           <li class="nav-item" v-bind:class="{ active: tab=='' }">
-            <a class="nav-link" @click="go('')">Home</a>
+            <a class="nav-link" @click="go('')">{{t('home')}}</a>
           </li>
           <li v-if="my_validator"  class="nav-item" v-bind:class="{ active: tab=='install' }">
             <a class="nav-link" @click="go('install')">⬇ Install</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
-            <a class="nav-link" @click="go('wallet')">💰 Wallet</a>
+            <a class="nav-link" @click="go('wallet')">💰 {{t('wallet')}}</a>
           </li>
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='hubs' }">
-            <a class="nav-link" title="Banks that instantly process payments" @click="go('hubs')">⚡️ Banks</a>
+            <a class="nav-link" title="Banks that instantly process payments" @click="go('hubs')">⚡️ {{t('banks')}}</a>
           </li>
 
 
 
-          <li class="nav-item dropdown">
-            <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">🔍 Explorers
+          <li style="width: 500px" class="nav-item dropdown">
+            <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">🔍 {{t('explorers')}}
         <span class="caret"></span></a>
             <ul class="dropdown-menu">
 
           
-              <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">📖 Blockchain</a></li>
+              <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">📖 {{t('blockchain_history')}}</a></li>
 
-              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and banks">💸 Insurances</a></li>
+              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and banks">💸 {{t('insurances')}}</a></li>
 
-              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 Assets</a></li>
+              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 {{t('assets')}}</a></li>
 
               <li v-bind:class="{ active: tab=='exchange' }">
-                <a class="nav-link" @click="go('exchange')">⇄ Exchange</a>
+                <a class="nav-link" @click="go('exchange')">⇄ {{t('onchain_exchange')}}</a>
               </li>
 
 
@@ -685,7 +703,10 @@ export default {
 
         </ul>
 
-        <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span><span v-else >Block #{{K.total_blocks}}</span> &nbsp;
+        <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span><span v-else-if="K.total_blocks">Block #{{K.total_blocks}}</span> &nbsp;
+
+
+
         <div v-if="pubkey">
           <span class="pull-left"><select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
             <option disabled>Select current asset</option>
@@ -697,6 +718,10 @@ export default {
             <UserIcon :hash="pubkey" :size="32"></UserIcon>
           </span>
         </div>
+
+
+        &nbsp;
+        <a class="dotted" @click="lang = lang == 'en' ? 'ru' : 'en'">{{lang}}</a>
         
       </div>
     </nav>
@@ -826,8 +851,7 @@ export default {
 
           <h4 class="alert alert-primary" v-if="my_hub">This node is a bank @{{my_hub.handle}}</h4>
 
-          <h4 class="alert alert-primary" v-for="e in events">{{e.desc}} - {{timeAgo(e.createdAt)}}</h4>
-
+          <p class="badge badge-success" @click="call('onchainFaucet', {amount: uncommy(prompt('How much you want to get?')) })">{{onchain}} Faucet</p>
 
           <div v-if="record">
             <h4 class="dotted" @click="expandedChannel = (expandedChannel == 0 ? -1 : 0)"  style="display:inline-block">
@@ -853,7 +877,7 @@ export default {
 
 
               <p>
-                <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Deposit from {{onchain}} 🌐</button>
+                <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Transfer 🌐</button>
               </p>
               </div>
             </transition>
@@ -863,16 +887,31 @@ export default {
               {{onchain}}: not registered
             </h4> 
             <h5><small>Temporary ID: {{pubkey}}</small></h5>
-            <div>
-
-            </div>
           </div>
 
 
-          <span class="badge badge-success" @click="call('onchainFaucet', {amount: uncommy(prompt('How much you want to get?')) })">{{onchain}} Faucet</span>
 
+          <table v-if="events.length > 0" class="table">
+            <thead>
+              <tr>
+                <th width="10%">Amount</th>
+                <th width="65%">Details</th>
+                <th width="10%">Invoice</th>
+                <th width="20%">Block #</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="e in events">
+                <td>{{commy(e.amount)}}</td>
+                <td>{{e.desc}}</td>
+                <td>{{e.invoice}}</td>
+                <td>{{e.blockId}}</td>
+              </tr>
+            </tbody>
+          </table>
 
-          <span class="border-top my-3"></span>
+          <hr class="my-4">
+
 
 
           <template v-if="channelsForAsset().length > 0">
@@ -884,11 +923,11 @@ export default {
                   {{ch.hub.handle}} bank: {{commy(ch.payable)}} 
                 </h4>
 
-                <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Faucet</span>
+                <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Bank Faucet</span>
 
 
 
-                <div v-if="ch.bar > 0" class="progress" style="width:600px; display:inline-flex">
+                <div v-if="ch.bar > 0" class="progress" style="width:700px; display:inline-flex">
                   <div v-bind:style="{ width: Math.round(ch.they_uninsured*100/ch.bar)+'%', 'background-color':'#0000FF'}" class="progress-bar" role="progressbar">
                     {{commy(ch.they_uninsured, true, false)}} (they_uninsured)
                   </div>
@@ -951,29 +990,26 @@ export default {
                 </div>
                 <div class="col-sm">
 
-                  <h4>{{onchain}} operations (public broadcast)</h4>
+                  <h4>{{onchain}} operations</h4>
                   <template v-if="record">
 
-                    <p><div class="input-group">
-                      <input type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="Amount" aria-describedby="basic-addon2">
-                      <div class="input-group-append">
-                        <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)})">Withdraw to {{onchain}} 🌐</button>
-                      </div>
+                    <p>
+
+                      <div class="input-group">
+                      <input style="max-width:300px;" type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="Amount" aria-describedby="basic-addon2">
+
+
+                        <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)}); chActions[ch.d.id].withdrawAmount=''">Withdraw 🌐</button>
+                      
+                        <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].withdrawAmount)}); chActions[ch.d.id].withdrawAmount=''">Deposit 🌐</button>
+
                     </div></p>
 
-
-                    <p><div class="input-group">
-                      <input type="text" class="form-control" v-model="chActions[ch.d.id].depositAmount" placeholder="Amount" aria-describedby="basic-addon2">
-                      <div class="input-group-append">
-                        <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].depositAmount)})">Deposit from {{onchain}} 🌐</button>
-                      </div>
-                    </div></p>
-
-                    <p>No matter what happens, you are guaranteed to get <b>insured</b> part of your balance, back to your {{onchain}} balance. You may lose <b>uninsured</b> balance if the bank is insolvent.
+                    <p>You are guaranteed to get <b>insured</b> part of your balance, but may lose <b>uninsured</b> part if the bank becomes insolvent. Always request insurance when your uninsured balance gets too high.
                     </p>
 
                     <span v-if="ch.ins.dispute_delayed">
-                      Dispute will be resolved at #{{ch.ins.dispute_delayed}} <dotsloader></dotsloader> 
+                      {{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks left until dispute resolution <dotsloader></dotsloader> 
                     </span>
                     <p v-else><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
                   </template>
@@ -1028,7 +1064,7 @@ export default {
               <template v-else>
                 <h5>Choose route/fee:</h5>
                 <div class="radio" v-for="(r, index) in bestRoutes.slice(0, bestRoutesLimit)" >
-                  <label><input type="radio" :value="index" v-model="chosenRoute"> {{commy(uncommy(outward_amount) * r[0])}} ({{bpsToPercent(r[0]*10000)}}) <b>You</b> → {{routeToText(r)}} <b>Destination</b></label>
+                  <label><input type="radio" :value="index" v-model="chosenRoute"> {{commy(uncommy(outward_amount) * r[0], true, false)}} ({{bpsToPercent(r[0]*10000)}}) <b>You</b> → {{routeToText(r)}} <b>Destination</b></label>
                 </div>
                 <p v-if="bestRoutes.length > bestRoutesLimit" ><a class="dotted" @click="bestRoutesLimit += 5">Show More Routes</a></p>
               </template>
@@ -1149,10 +1185,10 @@ export default {
           <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input></p>
 
           
-          <p><label for="comment">Fee (in basis points, eg 10 is 0.1%):</label>
+          <p><label for="comment">Fee (in basis points, 10 is 0.10%):</label>
           <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input></p>
 
-          <p><label for="comment">Location (Fairlayer-compatible RPC):</label>
+          <p><label for="comment">Fairlayer-compatible RPC:</label>
           <input class="form-control" v-model="new_hub.location" rows="2"></input></p>
 
           <p><label for="comment">Routes to add (their bank id, route agreement in hex):</label>

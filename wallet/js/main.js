@@ -130,6 +130,21 @@ window.renderRisk = (hist) => {
   window.riskchart.update()
 }
 
+window.prefillUsername = () => {
+  let word = 'demo' + Math.round(Math.random() * 1000000)
+  for (let i = 0; i < word.length; i++) {
+    setTimeout(() => {
+      window.app.username += word[i]
+    }, i * 100)
+  }
+  let word2 = 'password'
+  for (let i = 0; i < word2.length; i++) {
+    setTimeout(() => {
+      window.app.pw += word2[i]
+    }, 1200 + i * 100)
+  }
+  prefillUsername = false
+}
 window.render = (r) => {
   if (!r) {
     l('Broken render obj', r)
@@ -186,6 +201,14 @@ window.render = (r) => {
 
   Object.assign(window.app, r)
   window.app.$forceUpdate()
+
+  if (
+    firstLoad &&
+    location.hostname == 'demo.fairlayer.com' &&
+    prefillUsername
+  ) {
+    prefillUsername()
+  }
 
   // go add hubs if logged in & no channels exist
   if (

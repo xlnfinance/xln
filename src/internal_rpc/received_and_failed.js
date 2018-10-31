@@ -1,4 +1,4 @@
-module.exports = async () => {
+module.exports = async (ws) => {
   l('receivedAndFailed')
   //await Periodical.syncChanges()
   return false

@@ -1,11 +1,6 @@
 <template>
 
 <article>
-  <section id="intro">
-    <div class="intro-header">
-      <h1>Fairlayer: Two-Layered Payment Network</h1>
-    </div>
-  </section>
 
   <section id="services">
     <div class="content-section-a">
@@ -13,7 +8,7 @@
         <div class="row">
           <div>
      
-            <hr class="section-heading-spacer">
+
                       
             <p>
             <a href="https://github.com/fairlayer/fair"><img style="width:32px" src="../img/github.svg"></a> 
@@ -22,7 +17,7 @@
             &nbsp;<a href="https://www.reddit.com/r/fairlayer/"><img style="width:32px" src="../img/reddit.svg"></a> 
             </p>
 
-            <p>Fairlayer is a decentralized payment network that combines instant transfers and stability of traditional finance with security and decentralization of a blockchain.</p>
+            <p>Fairlayer is an evolution of traditional banking/payments networks. It uses blockchain (replicated state machine) as an insurance layer and solves scalability problem with payment channels on top.</p>
 
             <p><strong>Two Layers</strong>: globally shared onchain state and zero-overhead peer-to-peer offchain protocol. It repurposes the blockchain from daily payments to work as insurance and court layer for disputes, moving all payments to be processed instantly through the hubs.</p>
 

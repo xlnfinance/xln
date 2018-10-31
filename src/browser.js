@@ -1,11 +1,12 @@
-// This file has browser-related helpers that cache and react into me.browser socket.
+// This file has browser-related helpers that cache and react into me.browsers sockets.
 
 // Called once in a while to cache current state of everything and flush it to browser
 // TODO: better way to keep app reactive?
 
 // returns true if no active browser ws now
 const isHeadless = () => {
-  return !me.browser || me.browser.readyState != 1
+  return me.browsers.length == 0
+  // || me.browser.readyState != 1
 }
 
 // Flush an object to browser websocket. Send force=false for lazy react (for high-tps nodes like hubs)
@@ -40,12 +41,10 @@ react = async (result) => {
     //l('Getting record')
     result.record = await getUserByIdOrKey(bin(me.id.publicKey))
 
-    result.events = []
-
-    /*await Event.findAll({
+    result.events = await Event.findAll({
       order: [['id', 'desc']],
-      limit: 100
-    })*/
+      limit: 20
+    })
 
     if (!result.record.id) result.record = null
 
@@ -75,7 +74,12 @@ react = async (result) => {
   //}
 
   try {
-    me.browser.send(JSON.stringify(result))
+    let data = JSON.stringify(result)
+    me.browsers.map((ws) => {
+      if (ws.readyState == 1) {
+        ws.send(data)
+      }
+    })
   } catch (e) {
     l(e)
   }

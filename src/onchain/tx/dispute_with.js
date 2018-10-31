@@ -106,7 +106,12 @@ module.exports = async (s, args) => {
       ins.dispute_hashlocks = hashlocks
 
       ins.dispute_left = compared == -1
-      ins.dispute_delayed = K.usable_blocks + K.dispute_delay
+
+      // hubs are always online and react faster
+      let delay = K.hubs.find((h) => h.id == partner.id)
+        ? K.dispute_delay_for_hubs
+        : K.dispute_delay_for_users
+      ins.dispute_delayed = K.usable_blocks + delay
 
       s.parsed_tx.events.push([
         'disputeWith',

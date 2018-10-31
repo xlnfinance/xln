@@ -87,6 +87,9 @@ module.exports = async (s, header, ordered_tx_body) => {
 
   K.ts = timestamp
 
+  // increment current block number
+  K.total_blocks++
+
   // Processing transactions one by one
   // Long term TODO: parallel execution with section() critical sections
   for (let i = 0; i < ordered_tx.length; i++) {
@@ -97,8 +100,6 @@ module.exports = async (s, header, ordered_tx_body) => {
   }
 
   K.prev_hash = toHex(sha3(header))
-
-  K.total_blocks++
 
   if (K.total_blocks % 50 == 0 && cached_result.sync_started_at) {
     l(
@@ -145,7 +146,7 @@ module.exports = async (s, header, ordered_tx_body) => {
   // >>> Automatic crontab-like tasks <<<
   // Note that different tasks have different timeouts
 
-  if (is_usable && K.usable_blocks % 20 == 0) {
+  if (is_usable && K.usable_blocks % 2 == 0) {
     // Auto resolving disputes that are due
     await Periodical.syncChanges()
 

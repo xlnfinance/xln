@@ -47,7 +47,7 @@ module.exports = async () => {
         if (
           !unlocked ||
           unlocked.delete_at <
-            K.usable_blocks + K.dispute_delay + K.hashlock_exp // when we expect resolution of our dispute
+            K.usable_blocks + K.dispute_delay_for_users + K.hashlock_exp // when we expect resolution of our dispute
         ) {
           to_reveal.push(inward.outcome)
         } else {

@@ -47,7 +47,7 @@ module.exports = async (datadir) => {
   const K = {
     // Things that are different in testnet vs mainnet
     network_name: 'testnet',
-    blocksize: 1000,
+    blocksize: 20000,
     blocktime: 10,
     step_latency: 2, // how long is each consensus step: propose, prevote, precommit, await is the rest
     gossip_delay: 300, // anti clock skew, give others time to change state
@@ -113,20 +113,19 @@ module.exports = async (datadir) => {
     flush_timeout: 250,
 
     cache_timeout: 60, //s, keep channel in memory since last use
-    safe_sync_delay: 60, //s, after what time prohibit using wallet if unsynced
+    safe_sync_delay: 180, //s, after what time prohibit using wallet if unsynced
     sync_limit: 500, // how many blocks to share at once
 
     // global wide fee sanity limits
     min_fee: 1,
     max_fee: 5000,
 
-    // each hop is a hub. There's no sense in having too many hops
-    // too many hops increase chance of an error
-    max_hops: 3,
-
     // hashlock and dispute-related
     secret_len: 32,
-    dispute_delay: 8, // in how many blocks disputes are considered final
+
+    dispute_delay_for_users: 8, // in how many blocks disputes are considered final
+    dispute_delay_for_hubs: 3, // fast reaction is expected by hubs
+
     hashlock_exp: 16, // how many blocks (worst case scenario) a user needs to be a able to reveal secret
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)
     max_hashlocks: 20, // we don't want overweight huge dispute strings
