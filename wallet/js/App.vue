@@ -646,7 +646,7 @@ export default {
             <a class="nav-link" @click="go('')">{{t('home')}}</a>
           </li>
           <li v-if="my_validator"  class="nav-item" v-bind:class="{ active: tab=='install' }">
-            <a class="nav-link" @click="go('install')">⬇ Install</a>
+            <a class="nav-link" @click="go('install')">⬇ {{t('install')}}</a>
           </li>
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
             <a class="nav-link" @click="go('wallet')">💰 {{t('wallet')}}</a>
@@ -657,17 +657,17 @@ export default {
 
 
 
-          <li style="width: 500px" class="nav-item dropdown">
+          <li  class="nav-item dropdown">
             <a class="dropdown-toggle nav-link" data-toggle="dropdown" href="#" title="Insights, exploration and analytics of the network at your fingertips">🔍 {{t('explorers')}}
         <span class="caret"></span></a>
-            <ul class="dropdown-menu">
+            <ul class="dropdown-menu" style="width: 400px">
 
           
-              <li><a class="nav-link" @click="go('blockchain_explorer')" title="Learn about latest blocks and tx">📖 {{t('blockchain_history')}}</a></li>
+              <li><a class="nav-link" @click="go('blockchain_explorer')">📖 {{t('blockchain_history')}}</a></li>
 
-              <li><a class="nav-link" @click="go('channel_explorer')" title="Inspect insurances between different users and banks">💸 {{t('insurances')}}</a></li>
+              <li><a class="nav-link" @click="go('channel_explorer')">💸 {{t('insurances')}}</a></li>
 
-              <li><a class="nav-link" @click="go('assets')" title="Currently registred assets in the system. Create your own!">💱 {{t('assets')}}</a></li>
+              <li><a class="nav-link" @click="go('assets')">💱 {{t('assets')}}</a></li>
 
               <li v-bind:class="{ active: tab=='exchange' }">
                 <a class="nav-link" @click="go('exchange')">⇄ {{t('onchain_exchange')}}</a>
@@ -675,21 +675,21 @@ export default {
 
 
 
-              <li><a class="nav-link" @click="go('validators')">🤵 Validators</a></li>
+              <li><a class="nav-link" @click="go('validators')">🤵 {{t('validators')}}</a></li>
 
-              <li><a class="nav-link" @click="go('account_explorer')" title="Registred accounts in the system">🔐 Accounts</a></li>
+              <li><a class="nav-link" @click="go('account_explorer')">🔐 {{t('accounts')}}</a></li>
 
 
-              <li><a class="nav-link" @click="go('updates')" title="Latest offered proposals and voting process">💡 Smart Updates</a></li>
+              <li><a class="nav-link" @click="go('updates')">💡 {{t('smart_updates')}}</a></li>
 
                             
 
-              <li><a class="nav-link" @click="go('help')" title="Various info about the network and stats">📡 Network</a></li>
+              <li><a class="nav-link" @click="go('help')">📡 {{t('network_info')}}</a></li>
 
-              <li><a class="nav-link" @click="go('metrics')" title="Various productivity metrics of current node">🎛 Node Metrics</a></li>
+              <li><a class="nav-link" @click="go('metrics')">🎛 {{t('node_metrics')}}</a></li>
 
               <li>
-                <a class="nav-link" href="https://github.com/fairlayer/wiki">📒 Docs</a>
+                <a class="nav-link" href="https://github.com/fairlayer/wiki">📒 {{t('docs')}}</a>
               </li>
 
             </ul>
@@ -698,7 +698,7 @@ export default {
           </li>
 
           <li class="nav-item" v-if="onServer">
-            <a class="nav-link" href="https://web.fairlayer.com">Web Wallet</a>
+            <a class="nav-link" href="https://web.fairlayer.com">{{t('web_wallet')}}</a>
           </li>
 
         </ul>
@@ -1111,7 +1111,7 @@ export default {
             </table>
           </template>
           <template v-else>
-            <h3 class="alert alert-info">In order to send instant & cheap payments you need to use <a class="dotted" @click=go('hubs')>Banks</a>.</h3>
+            <h3 class="alert alert-info"><a class="dotted" @click=go('hubs')>Add banks</a> to send & receive payments instantly.</h3>
           </template>
 
         </template>
@@ -1130,15 +1130,6 @@ export default {
           
           <button class="btn btn-lg btn-outline-primary btn-block" id="login" type="submit">Generate Wallet</button>
 
-          <br>
-          <p class="alert alert-primary">
-            This testnet is slightly different from mainnet version:
-            <ul>
-              <li>Blocktime is 6s, in production 60s</li>
-              <li>Password derivation is fast, in production takes ~10s</li>
-              <li>You can click on a testnet faucet to get any asset for free</li>
-            </ul>
-          </p>
 
 
         </form>
