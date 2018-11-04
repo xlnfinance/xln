@@ -232,8 +232,10 @@ const defineModels = (sequelize) => {
 
   // a global log/history for current user
   const Event = sequelize.define('event', {
-    type: Sequelize.ENUM('received', 'sent', 'fee'),
+    type: Sequelize.STRING, //ENUM('received', 'sent', 'fee'),
     desc: Sequelize.TEXT,
+    data: Sequelize.TEXT,
+
     amount: Sequelize.INTEGER,
     asset: Sequelize.INTEGER,
     userId: Sequelize.INTEGER, // receiver/sender's id

@@ -280,9 +280,11 @@ WebSocketClient.prototype.send = function(data) {
     //this.instance.emit('error', e)
   }
 }
+
 WebSocketClient.prototype.reconnect = function(e) {
   // console.log(`WebSocketClient: retry in ${this.autoReconnectInterval}ms`);
   //this.instance.removeAllListeners()
+  app.online = false
   var that = this
   setTimeout(function() {
     that.open(that.url)
@@ -324,6 +326,8 @@ FS.ws.onmessage = (m) => {
 }
 
 FS.ws.onopen = () => {
+  app.online = true
+
   window.notyf = new Notyf({delay: 4000})
 
   // App is available as `window.app`

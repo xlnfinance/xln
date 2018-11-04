@@ -124,6 +124,14 @@ module.exports = async (s, batch) => {
   userAsset(s.signer, 1, -txfee)
   userAsset(s.meta.proposer, 1, txfee)
 
+  if (me.is_me(s.signer.pubkey)) {
+    me.addEvent({
+      type: 'onchainfee',
+      desc: `Our tx was included and fee taken`,
+      amount: txfee
+    })
+  }
+
   K.collected_fees += txfee
 
   s.parsed_tx = {

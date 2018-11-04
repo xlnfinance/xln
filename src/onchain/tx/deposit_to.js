@@ -42,7 +42,7 @@ module.exports = async (s, args) => {
         userAsset(s.signer, asset, -amount)
 
         if (me.is_me(depositTo.pubkey)) {
-          Event.create({
+          me.addEvent({
             type: 'fee',
             amount: -K.account_creation_fee,
             asset: asset,
@@ -175,12 +175,11 @@ module.exports = async (s, args) => {
 
     // we sent onchain
     if (me.is_me(s.signer.pubkey)) {
-      Event.create({
+      me.addEvent({
         type: 'sent',
         amount: -amount,
         asset: asset,
         invoice: invoice.toString(),
-        blockId: K.total_blocks,
         userId: depositTo.id,
 
         desc: `Sent to ${depositTo.id}`
@@ -190,12 +189,11 @@ module.exports = async (s, args) => {
     // sent onchain to us
     if (me.is_me(depositTo.pubkey)) {
       // TODO: hook into SDK
-      Event.create({
+      me.addEvent({
         type: 'received',
         amount: amount,
         asset: asset,
         invoice: invoice.toString(),
-        blockId: K.total_blocks,
         userId: s.signer.id,
 
         desc: `Received from ${s.signer.id}`

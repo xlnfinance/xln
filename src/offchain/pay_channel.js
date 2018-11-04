@@ -9,14 +9,14 @@ module.exports = async (opts) => {
 
     if (!opts.address) {
       l('Error: No address ', opts)
-      return false
+      return 'Error: No address'
     }
 
     let addr = parseAddress(opts.address)
 
     if (!addr) {
       l('Invalid address')
-      return
+      return 'Invalid address'
     }
 
     /* for offchain rebalancing 
@@ -41,7 +41,7 @@ module.exports = async (opts) => {
     let amount = parseInt(opts.amount)
 
     // NaN
-    if (!Number.isInteger(amount)) return
+    if (!Number.isInteger(amount)) return 'NaN'
 
     if (!opts.chosenRoute) {
       if (me.my_hub && addr.hubs.includes(me.my_hub.id)) {
@@ -55,7 +55,7 @@ module.exports = async (opts) => {
         })
         if (!best[0]) {
           l('No route found:', best, addr.hubs)
-          return false
+          return 'No route found:'
         } else {
           // first is the cheapest
           opts.chosenRoute = best[0][1]
@@ -106,7 +106,7 @@ module.exports = async (opts) => {
     let ch = await me.getChannel(nextHop, opts.asset)
     if (!ch) {
       l('No channel to ', nextHop)
-      return
+      return 'No channel to '
     }
 
     // 4. do we have enough payable for this hop?
@@ -153,6 +153,8 @@ module.exports = async (opts) => {
 
     react({})
     me.flushChannel(ch.d.partnerId, opts.asset, true)
+
+    return 'sent'
 
     if (argv.syncdb) {
       //all.push(ch.d.save())

@@ -399,6 +399,12 @@ const insuranceResolve = async (insurance) => {
     ch.d.status = 'master'
     ch.d.ack_requested_at = null
     //await ch.d.save()
+
+    me.addEvent({
+      type: 'disputeResolved',
+      weAre: me.is_me(left.pubkey) ? 'left' : 'right',
+      resolved: resolved
+    })
   }
 
   return resolved

@@ -91,6 +91,13 @@ class Me {
     return me.pubkey && me.pubkey.equals(pubkey)
   }
 
+  addEvent(data) {
+    Event.create({
+      blockId: K.total_blocks,
+      data: stringify(data)
+    })
+  }
+
   batchAdd(method, args) {
     let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
 
@@ -260,7 +267,7 @@ class Me {
           amount: parseInt(args.amount ? args.amount : 1000),
           asset: parseInt(args.asset ? args.asset : 1)
         })
-        res.end('sent')
+        res.end(status)
       }
     })
 
