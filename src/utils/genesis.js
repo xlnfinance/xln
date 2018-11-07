@@ -124,7 +124,7 @@ module.exports = async (datadir) => {
     secret_len: 32,
 
     dispute_delay_for_users: 8, // in how many blocks disputes are considered final
-    dispute_delay_for_hubs: 3, // fast reaction is expected by hubs
+    dispute_delay_for_hubs: 4, // fast reaction is expected by hubs
 
     hashlock_exp: 16, // how many blocks (worst case scenario) a user needs to be a able to reveal secret
     hashlock_keepalive: 100, // for how many blocks onchain keeps it unlocked since reveal (it takes space on all fullnodes, so it must be deleted eventually)

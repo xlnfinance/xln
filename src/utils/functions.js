@@ -402,8 +402,12 @@ const insuranceResolve = async (insurance) => {
 
     me.addEvent({
       type: 'disputeResolved',
-      weAre: me.is_me(left.pubkey) ? 'left' : 'right',
-      resolved: resolved
+
+      insured: me.is_me(left.pubkey) ? resolved.insured : resolved.they_insured,
+      uninsured: me.is_me(left.pubkey)
+        ? resolved.uninsured
+        : resolved.they_uninsured,
+      userId: me.is_me(left.pubkey) ? right.id : left.id
     })
   }
 

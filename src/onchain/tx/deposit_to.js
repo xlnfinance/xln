@@ -175,6 +175,8 @@ module.exports = async (s, args) => {
 
     // we sent onchain
     if (me.is_me(s.signer.pubkey)) {
+      me.record = s.signer
+
       me.addEvent({
         type: 'sent',
         amount: -amount,
@@ -188,6 +190,8 @@ module.exports = async (s, args) => {
 
     // sent onchain to us
     if (me.is_me(depositTo.pubkey)) {
+      me.record = depositTo
+
       // TODO: hook into SDK
       me.addEvent({
         type: 'received',

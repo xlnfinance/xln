@@ -62,6 +62,7 @@
           <li v-if="auth_code" class="nav-item" v-bind:class="{ active: tab=='wallet' }">
             <a class="nav-link" @click="go('wallet')">{{t('wallet')}}</a>
           </li>
+
           <li v-if="pubkey" class="nav-item" v-bind:class="{ active: tab=='hubs' }">
             <a class="nav-link" @click="go('hubs')">{{t('banks')}}</a>
           </li>
@@ -95,10 +96,6 @@
 
               <li><a class="nav-link" @click="go('metrics')">{{t('node_metrics')}}</a></li>
 
-              <li>
-                <a class="nav-link" href="https://github.com/fairlayer/wiki">{{t('docs')}}</a>
-              </li>
-
             </ul>
 
 
@@ -108,6 +105,11 @@
             <a class="nav-link" href="https://web.fairlayer.com">{{t('web_wallet')}}</a>
           </li>
 
+
+          <li class="nav-item">
+            <a class="nav-link" href="https://github.com/fairlayer/wiki">{{t('docs')}}</a>
+          </li>
+          
         </ul>
 
         <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span>
@@ -307,16 +309,13 @@
           <table v-if="events.length > 0" class="table">
             <thead>
               <tr>
-                <th width="20%">Block #</th>
-
+                <th width="5%">Block #</th>
                 <th width="65%">Details</th>
 
               </tr>
             </thead>
             <tbody>
-
               <Event v-for="ev in events" :ev="ev">
-
             </tbody>
           </table>
 

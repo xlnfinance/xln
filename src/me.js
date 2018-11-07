@@ -91,6 +91,7 @@ class Me {
     return me.pubkey && me.pubkey.equals(pubkey)
   }
 
+  // onchain events recorded for current user
   addEvent(data) {
     Event.create({
       blockId: K.total_blocks,
@@ -99,6 +100,11 @@ class Me {
   }
 
   batchAdd(method, args) {
+    if (!me.record || !me.record.id) {
+      react({alert: "You can't do onchain tx if you are not registred"})
+      return false
+    }
+
     let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
 
     if (mergeable.includes(method)) {
