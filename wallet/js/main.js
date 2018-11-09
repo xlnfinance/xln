@@ -10,6 +10,8 @@ window.jQuery = require('../assets/assets/js/vendor/jquery-slim.min.js')
 window.Popper = require('../assets/assets/js/vendor/popper.min.js')
 require('../assets/dist/js/bootstrap.min.js')
 
+window.Tour = require('./shepherd.min.js')
+
 window.l = console.log
 window.ts = () => Math.round(new Date() / 1000)
 
@@ -202,11 +204,7 @@ window.render = (r) => {
   Object.assign(window.app, r)
   window.app.$forceUpdate()
 
-  if (
-    firstLoad &&
-    location.hostname == 'demo.fairlayer.com' &&
-    prefillUsername
-  ) {
+  if (firstLoad && location.hostname.startsWith('demo-') && prefillUsername) {
     prefillUsername()
   }
 

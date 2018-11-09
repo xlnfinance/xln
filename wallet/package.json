@@ -1,17 +1,19 @@
 {
   "private": true,
   "name": "wallet",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "dependencies": {
     "axios": "0.18.0",
     "highlight.js": "9.12.0",
     "identicon.js": "2.3.2",
+    "shepherd.js": "2.0.0-beta.18",
     "vue": "2.5.16",
+    "vue-loader": "^15.4.2",
     "vuetrend": "0.3.2"
   },
   "devDependencies": {
     "@vue/component-compiler-utils": "1.1.0",
-    "vue-template-compiler": "2.5.16"
+    "vue-template-compiler": "2.5.17"
   },
   "prettier": {
     "semi": false,

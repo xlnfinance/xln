@@ -68,6 +68,8 @@
           </li>
 
 
+          <li class="nav-item" v-bind:class="{ active: tab=='assets'}"><a class="nav-link" @click="go('assets')">{{t('assets')}}</a></li>
+
 
           <li  class="nav-item dropdown">
             <a class="dropdown-toggle nav-link" data-toggle="dropdown">{{t('explorers')}}
@@ -82,8 +84,6 @@
               <li><a class="nav-link" @click="go('channel_explorer')">{{t('insurances')}}</a></li>
 
               <li><a class="nav-link" @click="go('validators')">{{t('validators')}}</a></li>
-
-              <li><a class="nav-link" @click="go('assets')">{{t('assets')}}</a></li>
 
 
               <li><a class="nav-link" @click="go('updates')">{{t('smart_updates')}}</a></li>
@@ -110,7 +110,10 @@
             <a class="nav-link" href="https://github.com/fairlayer/wiki">{{t('docs')}}</a>
           </li>
           
+
         </ul>
+
+
 
         <span v-if="K.ts < ts() - K.safe_sync_delay" @click="call('sync')" v-bind:class='["badge", "badge-danger"]'>#{{K.total_blocks}}/{{K.total_blocks + Math.round((ts() - K.ts)/K.blocktime)}}, {{timeAgo(K.ts)}}</span>
         <span v-else-if="K.total_blocks" class="navbar-text">Block #{{K.total_blocks}}</span> &nbsp;
@@ -130,8 +133,12 @@
         </div>
 
 
+        <a v-if="onServer" href="/demoinstance"><button class="btn btn-success">Try Demo</button></a>
+
         &nbsp;&nbsp;
         <span class="dotted navbar-text" @click="lang = lang == 'en' ? 'ru' : 'en'">{{lang}}</span>
+
+
         
       </div>
     </nav>
@@ -266,14 +273,14 @@
 
           <h4 class="alert alert-primary" v-if="my_hub">This node is a bank @{{my_hub.handle}}</h4>
 
-          <p class="badge badge-success" @click="call('onchainFaucet', {amount: uncommy(prompt('How much you want to get?')) })">{{onchain}} Faucet</p>
+          <p class="badge badge-success layer-faucet" @click="call('onchainFaucet', {amount: uncommy(prompt('How much you want to get?')) })">{{onchain}} Faucet</p>
 
           <div v-if="record">
             <h4 class="dotted" @click="expandedChannel = (expandedChannel == 0 ? -1 : 0)"  style="display:inline-block">
               {{onchain}}: {{commy(getAsset(asset))}}
             </h4> 
 
-            <h5><small>{{onchain}} ID: {{record.id}}</small></h5>
+            <h5><small>Your {{onchain}} ID: {{record.id}}</small></h5>
             
             <transition name="slide-fade" v-if="expandedChannel==0">
               <div class=" alert alert-secondary">
@@ -288,7 +295,7 @@
 
               <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit"></p>
 
-              <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Tag (optional)"></p>
+              <p><input style="width:400px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Public Message (optional)"></p>
 
 
               <p>
@@ -332,7 +339,7 @@
                   {{ch.hub.handle}} bank: {{commy(ch.payable)}} 
                 </h4>
 
-                <span class="badge badge-success" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Bank Faucet</span>
+                <span class="badge badge-success bank-faucet" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">Bank Faucet</span>
 
 
 
@@ -408,17 +415,15 @@
                       <input style="max-width:300px;" type="text" class="form-control" v-model="chActions[ch.d.id].withdrawAmount" placeholder="Amount" aria-describedby="basic-addon2">
 
 
-                        <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)}); chActions[ch.d.id].withdrawAmount=''">Withdraw 🌐</button>
+                        <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'withdraw', amount: uncommy(chActions[ch.d.id].withdrawAmount)}); chActions[ch.d.id].withdrawAmount=''">Withdraw to {{onchain}} 🌐</button>
                       
-                        <button class="btn btn-outline-secondary" type="button" @click="call('withChannel', {id: ch.d.id, op: 'deposit', amount: uncommy(chActions[ch.d.id].withdrawAmount)}); chActions[ch.d.id].withdrawAmount=''">Deposit 🌐</button>
-
                     </div></p>
 
                     <p>You are guaranteed to get <b>insured</b> part of your balance, but may lose <b>uninsured</b> part if the bank becomes insolvent. Always request insurance when your uninsured balance gets too high.
                     </p>
 
                     <span v-if="ch.ins.dispute_delayed">
-                      {{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks left until dispute resolution <dotsloader></dotsloader> 
+                      <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader> 
                     </span>
                     <p v-else><button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button></p>
                   </template>
@@ -537,7 +542,7 @@
           <input v-model="pw" type="password" id="inputPassword" class="form-control" placeholder="Password" required>
 
           
-          <button class="btn btn-lg btn-outline-primary btn-block" id="login" type="submit">Generate Wallet</button>
+          <button class="btn btn-lg btn-outline-primary btn-block step-login" id="login" type="submit">Generate Wallet</button>
 
 
 

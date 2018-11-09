@@ -105,7 +105,7 @@ const generateMonkeys = async () => {
     const seed = await derive(username, 'password')
     const me = new Me()
     await me.init(username, seed)
-    // all monkeys use Europe by default
+    // all monkeys use first bank by default
     PK.usedHubs = [1]
     addr.push(me.getAddress())
   }

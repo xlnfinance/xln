@@ -39,7 +39,7 @@ const payMonkey = async (on_server, counter = 1) => {
 
 if (argv.monkey) {
   if (base_port > 8000) {
-    // add Europe hub by default
+    // add First hub by default
     PK.usedHubs.push(1)
   }
 
@@ -49,7 +49,7 @@ if (argv.monkey) {
       : `ws://${localhost}:${base_port + 100}`
     require('./internal_rpc/create_hub')({
       fee_bps: 5,
-      handle: ['Asia', 'America', 'Mallory'][base_port - 8001],
+      handle: ['JPMorgan Chase', 'HSBC', 'Bank of America'][base_port - 8001],
       location: loc,
       box_pubkey: bin(me.box.publicKey),
       add_routes: '1,2,3,4'
@@ -181,7 +181,7 @@ if (argv.monkey) {
     require('./internal_rpc/external_deposit')({
       asset: 1,
       to: '3',
-      hub: 'Europe',
+      hub: 'Medici',
       depositAmount: 912,
       invoice: 'test'
     })

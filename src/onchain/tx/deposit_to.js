@@ -46,7 +46,6 @@ module.exports = async (s, args) => {
             type: 'fee',
             amount: -K.account_creation_fee,
             asset: asset,
-            blockId: K.total_blocks,
 
             desc: `Paid account creation fee`
           })

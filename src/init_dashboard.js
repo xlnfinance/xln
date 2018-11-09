@@ -83,7 +83,8 @@ module.exports = async (a) => {
 
       res.end(raw_chain)
     } else if (path == '/demoinstance') {
-      for (var i = 8500; i < 8500 + 10; i++) {
+      let startingPort = 8500
+      for (var i = startingPort; i < startingPort + 30; i++) {
         if (!me.busyPorts[i]) {
           var nextPort = i
           me.busyPorts[nextPort] = ts()
@@ -122,7 +123,8 @@ module.exports = async (a) => {
         // we redirect the user to authenticated cloud instance
 
         res.writeHead(302, {
-          Location: `http://demo.fairlayer.com:${nextPort}/#auth_code=${auth_code}`
+          Location: `https://demo-${nextPort -
+            startingPort}.fairlayer.com/#auth_code=${auth_code}`
         })
 
         setTimeout(() => {

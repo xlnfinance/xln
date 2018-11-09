@@ -51,6 +51,28 @@ const defineModels = (sequelize) => {
       // TODO: clone from Insurance table to Delta to avoid double querying both dbs
       disbalance: Sequelize.INTEGER,
 
+      they_fail_score: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      }, // how often they fail to route our payments
+
+      flush_requested_at: Sequelize.DATE,
+      ack_requested_at: {
+        type: Sequelize.DATE,
+        defaultValue: null
+      },
+
+      last_online: Sequelize.DATE,
+      withdrawal_requested_at: Sequelize.DATE,
+
+      sig: Sequelize.BLOB,
+      signed_state: Sequelize.BLOB,
+
+      // All the safety Byzantine checks start with cheat_
+      CHEAT_profitable_state: Sequelize.BLOB,
+      CHEAT_profitable_sig: Sequelize.BLOB,
+
+      // move to offdelta
       offdelta: Sequelize.INTEGER,
       asset: {
         type: Sequelize.INTEGER,
@@ -86,19 +108,68 @@ const defineModels = (sequelize) => {
         defaultValue: false
       },
 
-      they_fail_score: {
+      withdrawal_amount: {
         type: Sequelize.INTEGER,
         defaultValue: 0
-      }, // how often they fail to route our payments
+      },
+      withdrawal_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
+      they_withdrawal_amount: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      }
+    },
+    {
+      indexes: [
+        {
+          fields: [
+            {
+              attribute: 'partnerId',
+              length: 32
+            }
+          ]
+        }
+      ]
+    }
+  )
 
-      flush_requested_at: Sequelize.DATE,
-      ack_requested_at: {
-        type: Sequelize.DATE,
-        defaultValue: null
+  // each separate offdelta per asset
+  const AssetDelta = sequelize.define(
+    'assetdelta',
+    {
+      offdelta: Sequelize.INTEGER,
+      asset: {
+        type: Sequelize.INTEGER,
+        defaultValue: 1
       },
 
-      last_online: Sequelize.DATE,
-      withdrawal_requested_at: Sequelize.DATE,
+      // by default all limits set to 0
+      soft_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      },
+      hard_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      }, // we trust up to
+
+      they_soft_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      },
+      they_hard_limit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      }, // they trust us
+
+      requested_insurance: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: false
+      },
+
+      they_requested_insurance: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: false
+      },
 
       withdrawal_amount: {
         type: Sequelize.INTEGER,
@@ -108,26 +179,12 @@ const defineModels = (sequelize) => {
       they_withdrawal_amount: {
         type: Sequelize.INTEGER,
         defaultValue: 0
-      },
-
-      sig: Sequelize.BLOB,
-      signed_state: Sequelize.BLOB,
-
-      signed_nonce: Sequelize.INTEGER,
-      signed_offdelta: Sequelize.INTEGER,
-
-      // All the safety Byzantine checks start with cheat_
-      CHEAT_profitable_state: Sequelize.BLOB,
-      CHEAT_profitable_sig: Sequelize.BLOB
+      }
     },
     {
       indexes: [
         {
           fields: [
-            {
-              attribute: 'partnerId',
-              length: 32
-            },
             {
               attribute: 'asset'
             }
@@ -254,8 +311,12 @@ const defineModels = (sequelize) => {
   Delta.hasMany(Payment)
   Payment.belongsTo(Delta)
 
+  Delta.hasMany(AssetDelta)
+  AssetDelta.belongsTo(AssetDelta)
+
   return {
     Delta: Delta,
+    AssetDelta: AssetDelta,
     Payment: Payment,
     Block: Block,
     Event: Event,

@@ -4,11 +4,6 @@ web.fairlayer.com {
   } 
 }
 
-demo.fairlayer.com { 
-  proxy / localhost:3010 { 
-    websocket 
-  } 
-}
 
 wallet.fairlayer.com { 
   proxy / localhost:3010 { 
@@ -64,3 +59,114 @@ fairlayer.com:8103 {
 }
 
 
+
+
+
+
+
+
+demo-0.fairlayer.com {
+  proxy / localhost:8500 {
+    websocket
+  }
+}
+demo-1.fairlayer.com {
+  proxy / localhost:8501 {
+    websocket
+  }
+}
+demo-2.fairlayer.com {
+  proxy / localhost:8502 {
+    websocket
+  }
+}
+demo-3.fairlayer.com {
+  proxy / localhost:8503 {
+    websocket
+  }
+}
+demo-4.fairlayer.com {
+  proxy / localhost:8504 {
+    websocket
+  }
+}
+demo-5.fairlayer.com {
+  proxy / localhost:8505 {
+    websocket
+  }
+}
+demo-6.fairlayer.com {
+  proxy / localhost:8506 {
+    websocket
+  }
+}
+demo-7.fairlayer.com {
+  proxy / localhost:8507 {
+    websocket
+  }
+}
+demo-8.fairlayer.com {
+  proxy / localhost:8508 {
+    websocket
+  }
+}
+demo-9.fairlayer.com {
+  proxy / localhost:8509 {
+    websocket
+  }
+}
+demo-10.fairlayer.com {
+  proxy / localhost:8510 {
+    websocket
+  }
+}
+demo-11.fairlayer.com {
+  proxy / localhost:8511 {
+    websocket
+  }
+}
+demo-12.fairlayer.com {
+  proxy / localhost:8512 {
+    websocket
+  }
+}
+demo-13.fairlayer.com {
+  proxy / localhost:8513 {
+    websocket
+  }
+}
+demo-14.fairlayer.com {
+  proxy / localhost:8514 {
+    websocket
+  }
+}
+demo-15.fairlayer.com {
+  proxy / localhost:8515 {
+    websocket
+  }
+}
+demo-16.fairlayer.com {
+  proxy / localhost:8516 {
+    websocket
+  }
+}
+demo-17.fairlayer.com {
+  proxy / localhost:8517 {
+    websocket
+  }
+}
+demo-18.fairlayer.com {
+  proxy / localhost:8518 {
+    websocket
+  }
+}
+demo-19.fairlayer.com {
+  proxy / localhost:8519 {
+    websocket
+  }
+}
+demo-20.fairlayer.com {
+  proxy / localhost:8520 {
+    websocket
+  }
+}
