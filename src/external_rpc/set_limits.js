@@ -5,7 +5,7 @@ module.exports = async (args) => {
   let asset = readInt(limits[1])
 
   let ch = await Channel.get(pubkey)
-  let subch = ch.d.by('asset', asset)
+  let subch = ch.d.subchannels.by('asset', asset)
 
   if (readInt(limits[0]) == methodMap('requestInsurance')) {
     subch.they_requested_insurance = true

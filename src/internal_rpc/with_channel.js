@@ -2,11 +2,10 @@ const withdraw = require('../offchain/withdraw')
 
 module.exports = async (p) => {
   // perform a specific operation on given channel
-  let d = await Channel.findById(p.id)
-  let ch = await Channel.get(d.partnerId, d.asset, d)
+  let ch = await Channel.get(fromHex(p.partnerId))
 
   if (p.op == 'withdraw') {
-    if (p.amount > ch.insured) {
+    if (p.amount > ch.derived[p.asset].insured) {
       react({alert: 'More than you can withdraw from insured'})
       return
     }
@@ -19,29 +18,33 @@ module.exports = async (p) => {
     }
 
     me.batchAdd('withdrawFrom', [
-      ch.d.asset,
+      p.asset,
       [ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]
     ])
     react({confirm: 'OK'})
   } else if (p.op == 'deposit') {
-    me.batchAdd('depositTo', [
-      ch.d.asset,
-      [p.amount, me.record.id, ch.partner, 0]
-    ])
+    me.batchAdd('depositTo', [p.asset, [p.amount, me.record.id, ch.partner, 0]])
     react({confirm: 'OK'})
   } else if (p.op == 'dispute') {
-    me.batchAdd('disputeWith', [ch.d.asset, await deltaGetDispute(ch.d)])
+    me.batchAdd('disputeWith', [await deltaGetDispute(ch.d)])
     react({confirm: 'OK'})
   } else if (p.op == 'setLimits') {
-    ch.d.hard_limit = p.hard_limit
-    ch.d.soft_limit = p.soft_limit
+    let subch = ch.d.subchannels.by('asset', p.asset)
+
+    if (!subch) {
+      l('no subch')
+      return false
+    }
+
+    subch.hard_limit = p.hard_limit
+    subch.soft_limit = p.soft_limit
 
     // nothing happened
-    if (!ch.d.changed()) {
+    if (!subch.changed()) {
       return
     }
 
-    await ch.d.save()
+    await subch.save()
 
     l('set limits to ', ch.d.partnerId)
 
@@ -50,21 +53,28 @@ module.exports = async (p) => {
       'setLimits',
       me.envelope(
         methodMap('setLimits'),
-        ch.d.asset,
-        ch.d.soft_limit,
-        ch.d.hard_limit
+        subch.asset,
+        subch.soft_limit,
+        subch.hard_limit
       )
     )
 
     react({confirm: 'OK'})
   } else if (p.op == 'requestInsurance') {
+    let subch = ch.d.subchannels.by('asset', p.asset)
+
+    if (!subch) {
+      l('no subch')
+      return false
+    }
+
     me.send(
       ch.d.partnerId,
       'setLimits',
-      me.envelope(methodMap('requestInsurance'), ch.d.asset)
+      me.envelope(methodMap('requestInsurance'), p.asset)
     )
 
-    ch.d.requested_insurance = true
+    subch.requested_insurance = true
 
     //react({confirm: 'Requested insurance, please wait'})
   } else if (p.op == 'testnet') {
@@ -77,7 +87,7 @@ module.exports = async (p) => {
     } else {
       me.testnet({
         action: 1,
-        asset: ch.d.asset,
+        asset: p.asset,
         amount: p.amount,
         partner: ch.partner
       })

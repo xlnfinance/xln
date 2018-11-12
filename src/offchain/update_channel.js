@@ -112,13 +112,20 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       let [asset, amount, hash, exp, unlocker] = t[1]
       ;[asset, exp, amount] = [asset, exp, amount].map(readInt)
 
+      l(`Apply ${m} on ${asset} `)
+
       var derived = ch.derived[asset]
+      if (!derived) {
+        l('no derived')
+        continue
+      }
       // every 'add' transition must pass an encrypted envelope (onion routing)
 
       let box_data = open_box_json(unlocker)
 
       // these things CANT happen, partner is malicious so just ignore and break
       if (amount < K.min_amount || amount > derived.they_payable) {
+        l('Bad amount')
         break
       }
       if (hash.length != 32) {
@@ -127,6 +134,8 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       if (derived.inwards.length >= K.max_hashlocks) {
         break
       }
+
+      l('adding payment')
 
       // don't save in db just yet
       let inward_hl = Payment.build({
@@ -428,7 +437,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
   let theirs = ascii_state(theirFinalState)
 
   if (ours != theirs) {
-    l(ours, theirs)
+    l(ch.d.dispute_nonce, ch.payments, ch.state, theirFinalState)
     fatal('Unexpected final states after transitions ', transitions)
   }
 
@@ -448,6 +457,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
   }
 
   // CHEAT_: storing most profitable outcome for us
+  /*
   if (!ch.d.CHEAT_profitable_state) {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
@@ -461,6 +471,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
     ch.d.CHEAT_profitable_state = ch.d.signed_state
     ch.d.CHEAT_profitable_sig = ch.d.sig
   }
+  */
 
   //if (argv.syncdb) {
   //all.push(ch.d.save())

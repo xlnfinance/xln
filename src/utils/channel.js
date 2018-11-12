@@ -91,7 +91,7 @@ refresh = function(ch) {
     }
     // find the according subinsurance for subchannel
     let subins
-    if (ch.ins) {
+    if (ch.ins && ch.ins.subinsurances) {
       subins = ch.ins.subinsurances.by('asset', subch.asset)
     }
     if (!subins) subins = {balance: 0, ondelta: 0}
@@ -133,7 +133,7 @@ refresh = function(ch) {
     // inputs are like bearer cheques and can be used any minute, so we deduct them
     out.payable =
       out.insured +
-      ch.uninsured +
+      out.uninsured +
       subch.they_hard_limit -
       out.they_uninsured -
       out.hashlock_hold[1]

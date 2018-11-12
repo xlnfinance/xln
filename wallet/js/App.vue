@@ -263,7 +263,7 @@
                 <div v-for="subch in ch.d.subchannels">
                   {{JSON.stringify(subch)}}
 
-                  <span class="badge badge-success bank-faucet" @click="call('withChannel', {id: ch.d.id, op: 'testnet', action: 1, amount: uncommy(prompt('How much you want to get?')) })">+</span>
+                  <span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'testnet', action: 1, asset: subch.asset, amount: uncommy(prompt('How much you want to get?')) })">+</span>
                   
                 </div>
               </p>
@@ -281,7 +281,7 @@
                       <input type="text" class="form-control" v-model="chActions[ch.d.id].soft_limit">
                     </p>
                     <p>
-                      <button type="button" class="btn btn-outline-success" @click="call('withChannel', {id: ch.d.id, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: uncommy(chActions[ch.d.id].soft_limit)})" href="#">Update Credit Limits</button>
+                      <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: ch.d.partnerId, asset: asset, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: uncommy(chActions[ch.d.id].soft_limit)})" href="#">Update Credit Limits</button>
                     </p>
                     <template v-if="record">
                       <p>You are guaranteed to get <b>insured</b> part of your balance, but may lose <b>uninsured</b> part if the bank becomes insolvent. Always request insurance when your uninsured balance gets too high.
@@ -290,7 +290,7 @@
                       <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader> 
                     </span>
                       <p v-else>
-                        <button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {id: ch.d.id, op: 'dispute'})">Start Dispute 🌐</button>
+                        <button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'dispute'})">Start Dispute 🌐</button>
                       </p>
                     </template>
                     <div v-else>
@@ -965,7 +965,7 @@ export default {
       }
 
       if (confirm(app.record ? `Increasing insurance in ${app.onchain} costs a fee, continue?` : `You will be charged ${app.commy(app.K.account_creation_fee)} for registration, and ${app.commy(app.K.standalone_balance)} will be sent to your ${app.onchain} account. Continue?`)) {
-        app.call('withChannel', { id: ch.d.id, op: 'requestInsurance' })
+        app.call('withChannel', { partnerId: ch.d.partnerId, op: 'requestInsurance', asset: asset })
       }
     },
 

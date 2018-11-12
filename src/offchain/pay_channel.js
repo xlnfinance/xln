@@ -113,6 +113,8 @@ module.exports = async (opts) => {
     let subch = ch.d.subchannels.by('asset', asset)
     let payable = ch.derived[asset].payable
 
+    l(ch.derived[asset], amount)
+
     // 4. do we have enough payable for this hop?
     if (amount > payable) {
       if (me.my_hub) {
@@ -124,15 +126,18 @@ module.exports = async (opts) => {
           )}, extend credit`
         )
       }
+      react({alert: `Not enough funds ${payable}`})
 
-      return react({alert: `Not enough funds ${payable}`})
+      return
     } else if (amount > K.max_amount) {
       return react({alert: `Maximum payment is $${commy(K.max_amount)}`})
     } else if (amount < K.min_amount) {
       return react({alert: `Minimum payment is $${commy(K.min_amount)}`})
     }
 
-    let outward = ch.d.buildPayment({
+    let outward = Payment.build({
+      deltumId: ch.d.id,
+
       type: opts.addrisk ? 'addrisk' : 'add',
       lazy_until: opts.lazy ? +new Date() + 30000 : null,
 
