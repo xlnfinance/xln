@@ -23,6 +23,13 @@ base58 = require('base-x')(
   '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 )
 
+// shorter way to find by asset
+Array.prototype.by = function(attr, val) {
+  return this.find((obj) => {
+    return obj[attr] === val
+  })
+}
+
 nacl = require('../../lib/nacl')
 
 encrypt_box = nacl.box
@@ -82,8 +89,6 @@ rlp = require('../../lib/rlp') // patched rlp for signed-integer
 
 Sequelize = require('sequelize')
 Op = Sequelize.Op
-
-Me = require('../me').Me
 
 // globals
 K = false

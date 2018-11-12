@@ -1,15 +1,25 @@
-// This method gets Insurance from onchain db, Delta from offchain db
+// This method gets Insurance from onchain db, Channel from offchain db
 // then derives a ton of info about current channel: (un)insured balances
 
-// TODO: periodically clone Insurance to Delta db to only deal with one db having all data
-module.exports = async (pubkey, asset, delta = false) => {
+class WrappedChannel {
+  constructor() {}
+
+  //toJSON(){}
+}
+
+// TODO: periodically clone Insurance to Channel db to only deal with one db having all data
+module.exports = async (pubkey, delta = false) => {
   // this critical section protects from simultaneous getChannel and doublesaved db records
-  return await section(['get', pubkey, asset], async () => {
+  return await section(['get', pubkey], async () => {
+    if (!me.pubkey) {
+      return false
+    }
+
     let ch
 
     if (typeof pubkey == 'string') pubkey = fromHex(pubkey)
 
-    var key = stringify([pubkey, asset])
+    var key = stringify([pubkey])
     if (cache.ch[key]) {
       ch = cache.ch[key]
       refresh(ch)
@@ -18,56 +28,30 @@ module.exports = async (pubkey, asset, delta = false) => {
 
     //l('Loading channel from db: ', key)
 
-    if (!me.pubkey) {
-      return false
-    }
-
-    // accepts pubkey only
-    let compared = Buffer.compare(me.pubkey, pubkey)
-    if (compared == 0) {
+    if (me.pubkey.equals(pubkey)) {
       l('Channel to self?')
       return false
     }
 
-    if (!(asset > 0)) {
-      l('Invalid asset id', asset)
-      asset = 1
-    }
-
-    ch = {
-      left: compared == -1,
-
-      rollback: [0, 0], // used in merge situations
-
-      last_used: ts(), // for eviction from memory
-
-      online:
+    /*      online:
         me.users[pubkey] &&
         (me.users[pubkey].readyState == 1 ||
           (me.users[pubkey].instance &&
             me.users[pubkey].instance.readyState == 1))
-    }
 
-    let my_hub = (p) => K.hubs.find((m) => m.pubkey == toHex(p))
-    // users aren't hubs but can be represented by trimmed pubkey in UI
-    ch.hub = my_hub(pubkey) || {handle: toHex(pubkey).substr(0, 10)}
+*/
+
+    ch = {} //new WrappedChannel()
+    ch.derived = {}
+
+    ch.last_used = ts() // for eviction from memory
 
     if (delta) {
       ch.d = delta
     } else {
-      let defaults = {
-        nonce: 0,
-        status: 'master',
-        offdelta: 0,
+      /*
+      let defaults = {}
 
-        soft_limit: 0,
-        hard_limit: 0,
-
-        they_soft_limit: 0,
-        they_hard_limit: 0
-      }
-
-      // Testnet: all hubs are trusted by default in all assets
       if (me.my_hub) {
         defaults.they_soft_limit = K.soft_limit
         defaults.they_hard_limit = K.hard_limit
@@ -76,35 +60,44 @@ module.exports = async (pubkey, asset, delta = false) => {
         defaults.soft_limit = K.soft_limit
         defaults.hard_limit = K.hard_limit
       }
+      */
 
-      let created = await Delta.findOrCreate({
+      ch.d = await Channel.findOne({
         where: {
           myId: me.pubkey,
-          partnerId: pubkey,
-          asset: asset
+          partnerId: pubkey
         },
-        defaults: defaults
+        include: [Subchannel]
       })
 
-      ch.d = created[0]
-      if (created[1]) {
-        loff(`Creating channel ${trim(pubkey)} - ${asset}: ${ch.d.id}`)
+      if (!ch.d) {
+        loff(`Creating new channel ${trim(pubkey)}`)
+
+        ch.d = await Channel.create(
+          {
+            myId: me.pubkey,
+            partnerId: pubkey,
+            subchannels: [
+              {
+                asset: 1
+              },
+              {
+                asset: 2
+              }
+            ]
+          },
+          {include: [Subchannel]}
+        )
+        l('New one', ch.d.subchannels)
       }
     }
 
     let user = await getUserByIdOrKey(pubkey)
 
-    // default ins
-    ch.ins = Insurance.build({
-      insurance: 0,
-      ondelta: 0,
-      nonce: 0
-    })
-
     if (user && user.id) {
       ch.partner = user.id
       if (me.record) {
-        ch.ins = await getInsuranceBetween(me.record, user, asset)
+        ch.ins = await getInsuranceBetween(me.record, user)
       }
     }
 

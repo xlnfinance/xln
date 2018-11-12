@@ -1,11 +1,3 @@
-const deltaRequestFlush = async (delta) => {
-  if (!delta.flush_requested_at) {
-    //delta.flush_requested_at = new Date()
-    //await delta.save()
-    await me.flushChannel(delta.partnerId, 1, true)
-  }
-}
-
 module.exports = async (args) => {
   // New payment arrived
   let [pubkey, sig, body] = args
@@ -18,17 +10,15 @@ module.exports = async (args) => {
 
   // ackSig defines the sig of last known state between two parties.
   // then each transitions contains an action and an ackSig after action is committed
-  let [method, asset, ackSig, transitions, debug] = r(body)
+  let [method, ackSig, transitions, debug] = r(body)
   if (methodMap(readInt(method)) != 'update') {
     loff('Invalid update input')
     return false
   }
 
-  asset = readInt(asset)
-
-  let flushable = await section(['use', pubkey, asset], async () => {
+  let flushable = await section(['use', pubkey], async () => {
     //loff(`--- Start update ${trim(pubkey)} - ${transitions.length}`)
-    return me.updateChannel(pubkey, asset, ackSig, transitions, debug)
+    return me.updateChannel(pubkey, ackSig, transitions, debug)
   })
 
   /*
@@ -38,17 +28,16 @@ module.exports = async (args) => {
   Sometimes sender is already included in flushable, so don't flush twice
   */
 
-  let flushed = [me.flushChannel(pubkey, asset, transitions.length == 0)]
+  let flushed = [me.flushChannel(pubkey, transitions.length == 0)]
 
   if (flushable) {
     for (let fl of flushable) {
       // can be opportunistic also
       if (!fl.equals(pubkey)) {
-        flushed.push(me.flushChannel(fl, asset, true))
+        flushed.push(me.flushChannel(fl, true))
       } else {
         loff('Tried to flush twice')
       }
-      //await deltaRequestFlush(ch.d)
     }
   }
   await Promise.all(flushed)

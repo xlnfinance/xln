@@ -21,13 +21,8 @@ const defineModels = (sequelize) => {
       },
 
       pubkey: Sequelize.CHAR(32).BINARY,
-      nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
-      // FRD and FRB have dedicated db field
-      balance1: {type: Sequelize.BIGINT, defaultValue: 0},
-      balance2: {type: Sequelize.BIGINT, defaultValue: 0},
-      // all other assets, serialized
-      balances: {type: Sequelize.TEXT}
+      batch_nonce: {type: Sequelize.INTEGER, defaultValue: 0}
     },
     {
       indexes: [
@@ -38,6 +33,7 @@ const defineModels = (sequelize) => {
     }
   )
 
+  // stores high-level data about bidirectional relationship
   const Insurance = sequelize.define(
     'insurance',
     {
@@ -45,10 +41,7 @@ const defineModels = (sequelize) => {
       rightId: Sequelize.INTEGER,
 
       // for instant withdrawals, increase one by one
-      nonce: {type: Sequelize.INTEGER, defaultValue: 0},
-      asset: {type: Sequelize.INTEGER, defaultValue: 1},
-
-      insurance: {type: Sequelize.BIGINT, defaultValue: 0},
+      withdrawal_nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
       // what hub had already insured
       ondelta: {type: Sequelize.BIGINT, defaultValue: 0},
@@ -59,6 +52,9 @@ const defineModels = (sequelize) => {
       dispute_nonce: Sequelize.INTEGER,
       dispute_offdelta: Sequelize.INTEGER,
 
+      // actual state proposed, rlp-encoded
+      dispute_state: Sequelize.TEXT,
+
       // two arrays of hashlocks, inwards for left and inwards for right
       dispute_hashlocks: Sequelize.TEXT,
 
@@ -68,7 +64,26 @@ const defineModels = (sequelize) => {
     {
       indexes: [
         {
-          fields: ['leftId', 'rightId', 'asset']
+          fields: ['leftId', 'rightId']
+        }
+      ]
+    }
+  )
+
+  // stores actual insurance balances, per-asset
+  const Subinsurance = sequelize.define(
+    'subinsurance',
+    {
+      asset: {type: Sequelize.INTEGER, defaultValue: 1},
+      balance: {type: Sequelize.BIGINT, defaultValue: 0},
+
+      // moved when touched by left user
+      ondelta: {type: Sequelize.BIGINT, defaultValue: 0}
+    },
+    {
+      indexes: [
+        {
+          fields: ['asset']
         }
       ]
     }
@@ -95,9 +110,11 @@ const defineModels = (sequelize) => {
     oweTo: Sequelize.INTEGER
   })
 
-  const OnchainBalance = sequelize.define('onchainbalance', {
-    asset: Sequelize.INTEGER,
-    amount: Sequelize.INTEGER
+  // onchain balances (w/o bank)
+  const Balance = sequelize.define('balance', {
+    asset: {type: Sequelize.INTEGER, defaultValue: 1},
+
+    balance: {type: Sequelize.BIGINT, defaultValue: 0}
   })
 
   const Order = sequelize.define('order', {
@@ -140,15 +157,19 @@ const defineModels = (sequelize) => {
     total_supply: Sequelize.INTEGER
   })
 
-  Debt.belongsTo(User)
-  OnchainBalance.belongsTo(User)
+  Insurance.hasMany(Subinsurance)
+  Subinsurance.belongsTo(Insurance)
 
   User.hasMany(Debt)
-  User.hasMany(Order)
+  Debt.belongsTo(User)
+
+  User.hasMany(Balance)
+  Balance.belongsTo(User)
 
   Asset.hasMany(Order)
   Asset.hasMany(Order, {as: 'buyAsset', foreign_key: 'buyAsset'})
 
+  User.hasMany(Order)
   Order.belongsTo(User)
   Order.belongsTo(Asset)
   Order.belongsTo(Asset, {as: 'buyAsset'})
@@ -159,12 +180,15 @@ const defineModels = (sequelize) => {
   return {
     User: User,
     Insurance: Insurance,
+    Subinsurance: Subinsurance,
+
     Proposal: Proposal,
     Vote: Vote,
     Debt: Debt,
     Order: Order,
     Hashlock: Hashlock,
-    Asset: Asset
+    Asset: Asset,
+    Balance: Balance
   }
 }
 

@@ -107,6 +107,7 @@ const generateMonkeys = async () => {
     await me.init(username, seed)
     // all monkeys use first bank by default
     PK.usedHubs = [1]
+    PK.usedAssets = [1, 2]
     addr.push(me.getAddress())
   }
   // save new-line separated monkey addresses
@@ -143,7 +144,20 @@ const setupDirectories = (datadir) => {
   }
 }
 
-const getInsuranceBetween = async function(user1, user2, asset = 1) {
+const getSubchannel = async function(ch, asset = 1) {
+  let found = ch.d.subchannels.find((s) => s.asset == asset)
+
+  if (found) {
+    return found
+  } else {
+    found = await ch.d.createSubchannel({
+      asset: asset
+    })
+    return found
+  }
+}
+
+const getInsuranceBetween = async function(user1, user2) {
   if (user1.pubkey.length != 32 || user2.pubkey.length != 32) {
     return false
   }
@@ -153,16 +167,16 @@ const getInsuranceBetween = async function(user1, user2, asset = 1) {
 
   const wh = {
     leftId: compared == -1 ? user1.id : user2.id,
-    rightId: compared == -1 ? user2.id : user1.id,
-    asset: asset
+    rightId: compared == -1 ? user2.id : user1.id
   }
-  const str = stringify([wh.leftId, wh.rightId, wh.asset])
+  const str = stringify([wh.leftId, wh.rightId])
 
   let ins = cache.ins[str]
   if (ins) return ins
 
   ins = (await Insurance.findOrBuild({
-    where: wh
+    where: wh,
+    include: {all: true}
   }))[0]
 
   cache.ins[str] = ins
@@ -207,11 +221,12 @@ const getUserByIdOrKey = async function(id) {
   if (u) return u
 
   if (typeof id == 'number') {
-    u = await User.findById(id)
+    u = await User.findById(id, {include: {all: true}})
   } else {
     // buffer
     u = (await User.findOrBuild({
-      where: {pubkey: id}
+      where: {pubkey: id},
+      include: {all: true}
     }))[0]
   }
 
@@ -224,34 +239,22 @@ const getUserByIdOrKey = async function(id) {
 
 const userAsset = (user, asset, diff) => {
   if (diff) {
-    return setUserAsset(user, asset, diff)
-  } else {
-    return getUserAsset(user, asset)
-  }
-}
+    let b = user.balances.by('asset', asset)
 
-const getUserAsset = (user, asset) => {
-  const assetToken = 'balance' + asset
-  if (user.attributes.includes(assetToken)) {
-    return user[assetToken]
-  } else {
-    const balances = JSON.parse(user.balances || '{}')
-    return balances[asset] ? balances[asset] : 0
-  }
-}
-
-const setUserAsset = (user, asset, diff) => {
-  const assetToken = 'balance' + asset
-  if (user.attributes.includes(assetToken)) {
-    return (user[assetToken] += diff)
-  } else {
-    const balanes = JSON.parse(user.balances || '{}')
-    if (!balanes[asset]) {
-      balanes[asset] = 0
+    if (b) {
+      b.balance += diff
+      return b.balance
+    } else {
+      b = user.buildBalance({
+        asset: asset,
+        balance: diff
+      })
+      return b.balance
     }
-    balanes[asset] += diff
-    user.balances = stringify(balanes)
-    return balanes[asset]
+  } else {
+    let b = user.balances.by('asset', asset)
+
+    return b ? b.balance : 0
   }
 }
 
@@ -387,7 +390,7 @@ const insuranceResolve = async (insurance) => {
 
   // are we in this dispute? Unfreeze the channel
   if (withUs) {
-    var ch = await me.getChannel(withUs.pubkey, insurance.asset)
+    var ch = await Channel.get(withUs.pubkey, insurance.asset)
 
     // reset all credit limits - the relationship starts "from scratch"
     ch.d.soft_limit = 0
@@ -469,6 +472,8 @@ module.exports = {
   generateMonkeys: generateMonkeys,
   loadMonkeys: loadMonkeys,
   deltaVerify: deltaVerify,
+
+  getSubchannel: getSubchannel,
 
   setupDirectories: setupDirectories,
   getInsuranceBetween: getInsuranceBetween,

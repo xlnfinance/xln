@@ -16,6 +16,7 @@ window.t = function(str) {
 
     web_wallet: ['Web Wallet', 'Веб Кошелек'],
     install: ['Install', 'Установка'],
+    settings: ['Settings', 'Настройки'],
 
     assets: [`Assets`, `Ассеты`],
     onchain_exchange: [`Onchain Exchange`, `Ончейн Обменка`]

@@ -117,9 +117,9 @@ module.exports = async (s, args) => {
       const compared = Buffer.compare(depositTo.pubkey, withPartner.pubkey)
       if (compared == 0) return
 
-      const ins = await getInsuranceBetween(depositTo, withPartner, asset)
+      const ins = await getInsuranceBetween(depositTo, withPartner)
 
-      ins.insurance += amount
+      ins.balance += amount
       if (depositTo.id == ins.leftId) ins.ondelta += amount
 
       // user is paying themselves for registration
@@ -146,7 +146,7 @@ module.exports = async (s, args) => {
       if (me.is_me(depositTo.pubkey) || me.is_me(withPartner.pubkey)) {
         // hot reload
         // todo ensure it's in memory yet
-        const ch = await me.getChannel(
+        const ch = await Channel.get(
           me.is_me(withPartner.pubkey) ? depositTo.pubkey : withPartner.pubkey,
           asset
         )

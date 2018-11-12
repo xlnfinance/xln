@@ -19,7 +19,7 @@ module.exports = async (s, args) => {
     const compared = Buffer.compare(s.signer.pubkey, partner.pubkey)
     if (compared == 0) return
 
-    const ins = await getInsuranceBetween(s.signer, partner, asset)
+    const ins = await getInsuranceBetween(s.signer, partner)
 
     if (!ins || !ins.id || amount > ins.insurance) {
       l(`Invalid amount ${ins.insurance} vs ${amount}`)
@@ -30,7 +30,7 @@ module.exports = async (s, args) => {
       methodMap('withdrawFrom'),
       ins.leftId,
       ins.rightId,
-      ins.nonce,
+      ins.withdrawal_nonce,
       amount,
       ins.asset
     ])
@@ -56,13 +56,14 @@ module.exports = async (s, args) => {
 
     userAsset(s.signer, asset, amount)
 
-    ins.nonce++
+    // preventing double spend with same withdrawal
+    ins.withdrawal_nonce++
 
     await saveId(ins)
 
     // was this input related to us?
     if (me.record && [partner.id, s.signer.id].includes(me.record.id)) {
-      const ch = await me.getChannel(
+      const ch = await Channel.get(
         me.record.id == partner.id ? s.signer.pubkey : partner.pubkey,
         asset
       )

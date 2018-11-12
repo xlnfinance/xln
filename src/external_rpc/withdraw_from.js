@@ -4,13 +4,13 @@ module.exports = async (args) => {
 
   let [amount, asset] = r(body).map(readInt)
 
-  let ch = await me.getChannel(pubkey, asset)
+  let ch = await Channel.get(pubkey, asset)
 
   let withdrawal = [
     methodMap('withdrawFrom'),
     ch.ins.leftId,
     ch.ins.rightId,
-    ch.ins.nonce,
+    ch.ins.withdrawal_nonce,
     amount,
     ch.d.asset
   ]

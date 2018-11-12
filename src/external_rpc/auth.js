@@ -11,19 +11,6 @@ module.exports = async (ws, args) => {
       me.users[pubkey] = new WebSocketClient()
       me.users[pubkey].instance = ws
     }
-
-    /*if (me.my_hub) {
-      let ch = await me.getChannel(pubkey, 1)
-      ch.d.last_online = new Date()
-
-      // testnet: instead of cloud backups hub shares latest state
-      //me.send(pubkey, 'ack', me.envelope(0, ec(ch.state, me.id.secretKey)))
-
-      if (ch.withdrawal_requested_at) {
-        me.send(pubkey, 'requestWithdrawFrom', me.envelope(ch.insured))
-      }
-      await ch.d.save()
-    }*/
   } else {
     l('Invalid auth attempt')
     return false

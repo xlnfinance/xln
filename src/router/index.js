@@ -67,7 +67,7 @@ const Router = {
     // where do we have enough amount in payable
     for (let candidate of PK.usedHubs) {
       let hub = K.hubs.find((h) => h.id == candidate)
-      let ch = await me.getChannel(hub.pubkey, args.asset)
+      let ch = await Channel.get(hub.pubkey, args.asset)
 
       // account for potentially unpredictable fees?
       // 0 >= 0? return potential routes even for no amount

@@ -204,6 +204,7 @@ module.exports = async (s, header, ordered_tx_body) => {
     )
   }
 
+  /*
   if (K.bet_maturity && K.ts > K.bet_maturity) {
     l('🎉 Maturity day! Copy all FRB balances to FRD')
     s.meta.cron.push(['maturity'])
@@ -219,6 +220,7 @@ module.exports = async (s, header, ordered_tx_body) => {
 
     K.bet_maturity = false
   }
+  */
 
   // saving current proposer and their fees earned
   all.push(s.meta.proposer.save())

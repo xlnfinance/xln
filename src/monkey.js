@@ -43,6 +43,13 @@ if (argv.monkey) {
     PK.usedHubs.push(1)
   }
 
+  // only in monkey mode, not on end user node
+  if (base_port != 8008) {
+    Periodical.schedule('broadcast', K.blocktime * 1000)
+  }
+
+  return //TODO
+
   if (base_port > 8000 && base_port <= 8003) {
     let loc = on_server
       ? `wss://fairlayer.com:${base_port + 100}`
@@ -81,11 +88,6 @@ if (argv.monkey) {
     return
   }
 
-  // only in monkey mode, not on end user node
-  if (base_port != 8008) {
-    Periodical.schedule('broadcast', K.blocktime * 1000)
-  }
-
   if (me.record.id == 1) {
     l('Scheduling e2e checks')
     // after a while the hub checks environment, db counts etc and test fails if anything is unexpected
@@ -113,7 +115,7 @@ if (argv.monkey) {
 
       if ((await Block.count()) < 2) failed.push('blocks')
       if ((await Order.count()) < 1) failed.push('orders')
-      if ((await Delta.count()) < 5) failed.push('deltas')
+      if ((await Channel.count()) < 5) failed.push('deltas')
       if ((await Asset.count()) < 4) failed.push('assets')
 
       let e2e = 'e2e: ' + (failed.length == 0 ? 'success' : failed.join(', '))
@@ -170,7 +172,7 @@ if (argv.monkey) {
 
   if (me.record.id == 2) {
     // withdraw 12.34 from hub and deposit 9.12 to 3@1
-    me.getChannel(K.hubs[0].pubkey, 1).then((ch) => {
+    Channel.get(K.hubs[0].pubkey).then((ch) => {
       require('./internal_rpc/with_channel')({
         id: ch.d.id,
         op: 'withdraw',

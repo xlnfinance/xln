@@ -15,7 +15,7 @@ const deltaStartDispute = async (delta, cheat = false) => {
 
 module.exports = async (s, args) => {
   let asset = readInt(args[0])
-  // our partner is unresponsive, so we provide dispute proof/state (signed offdelta, nonce, hashlocks etc all in one)
+  // our partner is unresponsive, so we last signed state
   s.parsed_tx.events.push(['setAsset', 'Dispute', asset])
 
   for (const dispute of args[1]) {
@@ -33,7 +33,7 @@ module.exports = async (s, args) => {
       return
     }
 
-    const ins = await getInsuranceBetween(s.signer, partner, asset)
+    const ins = await getInsuranceBetween(s.signer, partner)
 
     let dispute_nonce = 0
     let offdelta = 0
@@ -45,7 +45,7 @@ module.exports = async (s, args) => {
         return
       }
 
-      // see Delta.prototype.getState to see how state it's built
+      // see ch.state= to see how state it's built
       let [
         methodId,
         [leftId, rightId, new_dispute_nonce, new_offdelta, dispute_asset],
@@ -72,7 +72,7 @@ module.exports = async (s, args) => {
     }
 
     if (ins.dispute_nonce && dispute_nonce <= ins.dispute_nonce) {
-      l(`New nonce in dispute must be higher ${asset}`)
+      l(`New dispute_nonce in dispute must be higher ${asset}`)
       return
     }
 
@@ -95,7 +95,7 @@ module.exports = async (s, args) => {
         ])
         l('Resolved with fraud proof')
       } else {
-        l('Old nonce or same counterparty')
+        l('Old dispute_nonce or same counterparty')
       }
     } else {
       // TODO: return to partner their part right away, and our part is delayed
@@ -127,15 +127,15 @@ module.exports = async (s, args) => {
         l('Channel with us is disputed')
         // now our job is to ensure our inward hashlocks are unlocked
         // and that we get most profitable outcome
-        const ch = await me.getChannel(s.signer.pubkey, asset)
+        const ch = await Channel.get(s.signer.pubkey, asset)
         ch.d.status = 'disputed'
         //await ch.d.save()
-        const our_nonce = ch.d.signed_state
+        const our_dispute_nonce = ch.d.signed_state
           ? readInt(r(ch.d.signed_state)[1][2])
           : 0
         //!me.CHEAT_dontack
-        if (our_nonce > ins.dispute_nonce && !me.CHEAT_dontack) {
-          l('Our last signed nonce is higher! ' + our_nonce)
+        if (our_dispute_nonce > ins.dispute_nonce && !me.CHEAT_dontack) {
+          l('Our last signed nonce is higher! ' + our_dispute_nonce)
           await deltaStartDispute(ch.d)
         }
       }

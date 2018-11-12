@@ -48,19 +48,29 @@ ascii_state = (state) => {
   if (!state[1]) return false
   let hash = toHex(sha3(r(state)))
 
+  l('state ', state)
+
   let locks = (hl) => {
     return hl
       .map((h) => h[0] + '/' + (h[1] ? trim(h[1]) : 'N/A') + '/' + h[2])
       .join(', ')
   }
 
+  let list = state[2]
+    .map((subch) => {
+      return `
+${subch[0]}: ${subch[1]}
++${locks(subch[2])}
+-${locks(subch[3])}
+`
+    })
+    .join('-----')
+
   return `Hash ${trim(hash)} | ${trim(state[1][0])}-${trim(state[1][1])} | #${
     state[1][2]
-  } | ${state[1][3]} | \$${state[1][4]}
+  }
 -----
-+${locks(state[2])}
------
--${locks(state[3])}
+${list}
 `
 }
 

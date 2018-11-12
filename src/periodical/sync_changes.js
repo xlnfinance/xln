@@ -50,7 +50,10 @@ module.exports = async (opts = {}) => {
     for (let key in cache.ch) {
       let ch = cache.ch[key]
 
-      await section(['use', ch.d.partnerId, ch.d.asset], async () => {
+      await section(['use', ch.d.partnerId], async () => {
+        // sync all Channel, Subchannel, Payments
+
+        return false
         let all_payments = []
 
         for (let i = 0; i < ch.payments.length; i++) {

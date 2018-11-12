@@ -5,14 +5,14 @@ module.exports = async () => {
   //l('Checking who has not ack')
   if (PK.pending_batch) return l('Pending batch')
 
-  var deltas = await Delta.findAll({
+  var deltas = await Channel.findAll({
     where: {
       myId: me.pubkey
     }
   })
 
   for (let d of deltas) {
-    let ch = await me.getChannel(d.partnerId, d.asset)
+    let ch = await Channel.get(d.partnerId, d.asset)
     //cache.ch[key]
     if (!ch) continue
 

@@ -70,10 +70,10 @@ module.exports = async (s, batch) => {
     return {error: `Invalid tx signature.`}
   }
 
-  let [methodId, nonce, gaslimit, gasprice, transactions] = r(body)
-  ;[methodId, nonce, gaslimit, gasprice] = [
+  let [methodId, batch_nonce, gaslimit, gasprice, transactions] = r(body)
+  ;[methodId, batch_nonce, gaslimit, gasprice] = [
     methodId,
-    nonce,
+    batch_nonce,
     gaslimit,
     gasprice
   ].map(readInt)
@@ -103,9 +103,11 @@ module.exports = async (s, batch) => {
       // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway
       return {error: 'Only 1 tx per block per user allowed'}
     } else {
-      if (s.signer.nonce != nonce) {
+      if (s.signer.batch_nonce != batch_nonce) {
         return {
-          error: `Invalid nonce dry_run ${s.signer.nonce} vs ${nonce}`
+          error: `Invalid batch_nonce dry_run ${
+            s.signer.batch_nonce
+          } vs ${batch_nonce}`
         }
       }
 
@@ -115,8 +117,10 @@ module.exports = async (s, batch) => {
       return {success: true, gas: gas, gasprice: gasprice, txfee: txfee}
     }
   } else {
-    if (s.signer.nonce != nonce) {
-      return {error: `Invalid nonce ${s.signer.nonce} vs ${nonce}`}
+    if (s.signer.batch_nonce != batch_nonce) {
+      return {
+        error: `Invalid batch_nonce ${s.signer.batch_nonce} vs ${batch_nonce}`
+      }
     }
   }
 
@@ -136,7 +140,7 @@ module.exports = async (s, batch) => {
 
   s.parsed_tx = {
     signer: s.signer,
-    nonce: nonce,
+    batch_nonce: batch_nonce,
     gas: gas,
     gasprice: gasprice,
     txfee: txfee,
@@ -159,7 +163,7 @@ module.exports = async (s, batch) => {
     }
   }
 
-  s.signer.nonce++
+  s.signer.batch_nonce++
   await saveId(s.signer)
 
   s.meta['parsed_tx'].push(s.parsed_tx)

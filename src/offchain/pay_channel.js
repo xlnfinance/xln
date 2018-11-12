@@ -4,6 +4,7 @@ module.exports = async (opts) => {
   return await section('pay', async () => {
     let secret = crypto.randomBytes(32)
     let hash = sha3(secret)
+    let asset = parseInt(opts.asset)
 
     //l('paying ', opts.destination.length, toHex(opts.destination))
 
@@ -51,7 +52,7 @@ module.exports = async (opts) => {
         // by default choose the cheapest one
         let best = await Router.bestRoutes(opts.address, {
           amount: amount,
-          asset: opts.asset
+          asset: asset
         })
         if (!best[0]) {
           l('No route found:', best, addr.hubs)
@@ -67,7 +68,7 @@ module.exports = async (opts) => {
     let onion = encrypt_box_json(
       {
         amount: amount, // final amount
-        asset: opts.asset,
+        asset: asset,
 
         // buffers are in hex for JSON
         secret: toHex(secret),
@@ -90,7 +91,7 @@ module.exports = async (opts) => {
 
       onion = encrypt_box_json(
         {
-          asset: opts.asset,
+          asset: asset,
           amount: amount,
           nextHop: nextHop,
 
@@ -103,37 +104,41 @@ module.exports = async (opts) => {
     }
 
     // 3. now nextHop is equal our first hop, and amount includes all fees
-    let ch = await me.getChannel(nextHop, opts.asset)
+    let ch = await Channel.get(nextHop)
     if (!ch) {
-      l('No channel to ', nextHop)
+      l('No channel to ', nextHop, asset)
       return 'No channel to '
     }
 
+    let subch = ch.d.subchannels.by('asset', asset)
+    let payable = ch.derived[asset].payable
+
     // 4. do we have enough payable for this hop?
-    if (amount > ch.payable) {
+    if (amount > payable) {
       if (me.my_hub) {
         // ask to increase credit
         me.textMessage(
           ch.d.partnerId,
-          `Cant send ${amount} payable ${ch.payable}, extend credit`
+          `Cannot send ${commy(amount)} when payable is ${commy(
+            payable
+          )}, extend credit`
         )
       }
 
-      return react({alert: `Not enough funds ${ch.payable}`})
+      return react({alert: `Not enough funds ${payable}`})
     } else if (amount > K.max_amount) {
       return react({alert: `Maximum payment is $${commy(K.max_amount)}`})
     } else if (amount < K.min_amount) {
       return react({alert: `Minimum payment is $${commy(K.min_amount)}`})
     }
 
-    let outward = Payment.build({
-      deltumId: ch.d.id,
+    let outward = ch.d.buildPayment({
       type: opts.addrisk ? 'addrisk' : 'add',
       lazy_until: opts.lazy ? +new Date() + 30000 : null,
 
       status: 'new',
       is_inward: false,
-      asset: opts.asset,
+      asset: asset,
 
       amount: amount,
       hash: bin(hash),
@@ -152,7 +157,7 @@ module.exports = async (opts) => {
     l('Paying to ', reversed, onion.length)
 
     react({})
-    me.flushChannel(ch.d.partnerId, opts.asset, true)
+    me.flushChannel(ch.d.partnerId, true)
 
     return 'sent'
 

@@ -61,19 +61,12 @@ class Me {
 
     this.box = nacl.box.keyPair.fromSecretKey(this.seed)
 
-    /*
-    var offered_partners = (await me.channels())
-      .sort((a, b) => b.they_payable - a.they_payable)
-      .filter((a) => a.they_payable >= amount)
-      .map((a) => a.partner)
-      .join('_')
-      */
-
     this.last_react = new Date()
 
     PK.username = username
     PK.seed = seed.toString('hex')
     PK.usedHubs = []
+    PK.usedAssets = [1, 2]
 
     await promise_writeFile(datadir + '/offchain/pk.json', JSON.stringify(PK))
   }
@@ -159,17 +152,22 @@ class Me {
       return [methodMap(m[0]), m[1]]
     })
 
-    let nonce = me.record.nonce
     let gaslimit = 0 //uncapped
     let gasprice = opts.gasprice ? parseInt(opts.gasprice) : K.min_gasprice
 
-    let to_sign = r([methodMap('batch'), nonce, gaslimit, gasprice, merged])
+    let to_sign = r([
+      methodMap('batch'),
+      me.record.batch_nonce,
+      gaslimit,
+      gasprice,
+      merged
+    ])
     let signed_batch = r([me.record.id, ec(to_sign, me.id.secretKey), to_sign])
 
     return {
       signed_batch: signed_batch,
       size: to_sign.length,
-      nonce: nonce,
+      batch_nonce: me.record.batch_nonce,
       batch_body: merged
     }
   }
@@ -318,40 +316,6 @@ class Me {
     )
   }
 
-  // takes channels with supported hubs (verified and custom ones)
-  async channels() {
-    let channels = []
-
-    let assets = cached_result.assets //await Asset.findAll()
-    // all assets with all hubs
-
-    if (me.my_hub) {
-      // find all existing channels (if you are hub)
-      var deltas = await Delta.findAll()
-      for (var d of deltas) {
-        // if not a hub, add as channel
-        if (!K.hubs.find((h) => fromHex(h.pubkey).equals(d.partnerId))) {
-          var ch = await me.getChannel(d.partnerId, d.asset)
-          channels.push(ch)
-        }
-      }
-    }
-
-    // now add all channels to used hubs
-    for (var m of K.hubs) {
-      if (me.record && me.record.id == m.id) continue
-
-      if (!PK.usedHubs.includes(m.id)) continue
-
-      for (let asset of assets) {
-        var ch = await me.getChannel(fromHex(m.pubkey), asset.id)
-        channels.push(ch)
-      }
-    }
-
-    return channels
-  }
-
   textMessage(partnerId, msg) {
     me.send(partnerId, 'textMessage', r([msg]))
   }
@@ -422,11 +386,10 @@ Me.prototype.processChain = require('./onchain/process_chain')
 Me.prototype.processBlock = require('./onchain/process_block')
 Me.prototype.processBatch = require('./onchain/process_batch')
 
+Channel.get = require('./offchain/get_channel')
+
 Me.prototype.payChannel = require('./offchain/pay_channel')
 Me.prototype.flushChannel = require('./offchain/flush_channel')
-Me.prototype.getChannel = require('./offchain/get_channel')
 Me.prototype.updateChannel = require('./offchain/update_channel')
 
-module.exports = {
-  Me: Me
-}
+module.exports = Me

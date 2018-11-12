@@ -52,7 +52,7 @@ rm ~/Caddyfile
 cp ./tools/Caddyfile ~/Caddyfile
 caddy -service restart
 
-# init demoapp at :3010
+# init Web wallet at :3010
 cd ~/web
 pm2 start app.js
 #node --prof fair.js -p443 --silent --wallet-dist --db=$db

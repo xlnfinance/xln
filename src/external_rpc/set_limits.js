@@ -2,10 +2,13 @@ module.exports = async (args) => {
   let [pubkey, sig, body] = args
   let limits = r(body)
 
-  let ch = await me.getChannel(pubkey, readInt(limits[1]))
+  let asset = readInt(limits[1])
+
+  let ch = await Channel.get(pubkey)
+  let subch = ch.d.by('asset', asset)
 
   if (readInt(limits[0]) == methodMap('requestInsurance')) {
-    ch.d.they_requested_insurance = true
+    subch.they_requested_insurance = true
     l('Queued for insurance')
     me.textMessage(ch.d.partnerId, 'Added to rebalance queue')
     return
@@ -19,8 +22,8 @@ module.exports = async (args) => {
     return false
   }
 
-  ch.d.they_soft_limit = readInt(limits[2])
-  ch.d.they_hard_limit = readInt(limits[3])
+  subch.they_soft_limit = readInt(limits[2])
+  subch.they_hard_limit = readInt(limits[3])
 
   me.textMessage(ch.d.partnerId, 'Updated credit limits')
 

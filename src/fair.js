@@ -80,6 +80,8 @@ startFairlayer = async () => {
   Object.assign(global, global.onchainDB.models)
   Object.assign(global, global.offchainDB.models)
 
+  Me = require('./me')
+
   if (argv.genesis) {
     return require('./utils/genesis')(datadir)
   }

@@ -29,34 +29,38 @@ const defineModels = (sequelize) => {
   // TODO: seamlessly cloud backup it. If signatures are lost, money is lost
 
   // we name our things "value", and counterparty's "they_value"
-  const Delta = sequelize.define(
-    'delta',
+  const Channel = sequelize.define(
+    'channel',
     {
       // between who and who
       myId: Sequelize.BLOB,
       partnerId: Sequelize.BLOB,
 
       // higher nonce is valid
-      nonce: Sequelize.INTEGER,
-      status: Sequelize.ENUM(
-        'master',
-        'sent',
-        'merge',
-        'disputed',
-        'CHEAT_dontack'
-      ),
+      dispute_nonce: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      },
+
+      // used during rollbacks
+      rollback_nonce: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      },
+
+      status: {
+        type: Sequelize.ENUM(
+          'master',
+          'sent',
+          'merge',
+          'disputed',
+          'CHEAT_dontack'
+        ),
+        defaultValue: 'master'
+      },
 
       pending: Sequelize.BLOB,
 
-      // TODO: clone from Insurance table to Delta to avoid double querying both dbs
-      disbalance: Sequelize.INTEGER,
-
-      they_fail_score: {
-        type: Sequelize.INTEGER,
-        defaultValue: 0
-      }, // how often they fail to route our payments
-
-      flush_requested_at: Sequelize.DATE,
       ack_requested_at: {
         type: Sequelize.DATE,
         defaultValue: null
@@ -70,53 +74,7 @@ const defineModels = (sequelize) => {
 
       // All the safety Byzantine checks start with cheat_
       CHEAT_profitable_state: Sequelize.BLOB,
-      CHEAT_profitable_sig: Sequelize.BLOB,
-
-      // move to offdelta
-      offdelta: Sequelize.INTEGER,
-      asset: {
-        type: Sequelize.INTEGER,
-        defaultValue: 1
-      },
-
-      // by default all limits set to 0
-      soft_limit: {
-        type: Sequelize.INTEGER,
-        defaultValue: 0
-      },
-      hard_limit: {
-        type: Sequelize.INTEGER,
-        defaultValue: 0
-      }, // we trust up to
-
-      they_soft_limit: {
-        type: Sequelize.INTEGER,
-        defaultValue: 0
-      },
-      they_hard_limit: {
-        type: Sequelize.INTEGER,
-        defaultValue: 0
-      }, // they trust us
-
-      requested_insurance: {
-        type: Sequelize.BOOLEAN,
-        defaultValue: false
-      },
-
-      they_requested_insurance: {
-        type: Sequelize.BOOLEAN,
-        defaultValue: false
-      },
-
-      withdrawal_amount: {
-        type: Sequelize.INTEGER,
-        defaultValue: 0
-      },
-      withdrawal_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
-      they_withdrawal_amount: {
-        type: Sequelize.INTEGER,
-        defaultValue: 0
-      }
+      CHEAT_profitable_sig: Sequelize.BLOB
     },
     {
       indexes: [
@@ -133,13 +91,22 @@ const defineModels = (sequelize) => {
   )
 
   // each separate offdelta per asset
-  const AssetDelta = sequelize.define(
-    'assetdelta',
+  const Subchannel = sequelize.define(
+    'subchannel',
     {
-      offdelta: Sequelize.INTEGER,
       asset: {
         type: Sequelize.INTEGER,
         defaultValue: 1
+      },
+
+      offdelta: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
+      },
+
+      rollback_offdelta: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0
       },
 
       // by default all limits set to 0
@@ -175,7 +142,9 @@ const defineModels = (sequelize) => {
         type: Sequelize.INTEGER,
         defaultValue: 0
       },
+
       withdrawal_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
+
       they_withdrawal_amount: {
         type: Sequelize.INTEGER,
         defaultValue: 0
@@ -308,18 +277,27 @@ const defineModels = (sequelize) => {
     buyAssetId: Sequelize.INTEGER
   })
 
-  Delta.hasMany(Payment)
-  Payment.belongsTo(Delta)
+  Channel.hasMany(Subchannel)
+  Subchannel.belongsTo(Subchannel)
 
-  Delta.hasMany(AssetDelta)
-  AssetDelta.belongsTo(AssetDelta)
+  Channel.hasMany(Payment)
+  Payment.belongsTo(Channel)
+
+  Channel.prototype.isLeft = function() {
+    return Buffer.compare(me.pubkey, this.partnerId) == -1
+  }
 
   return {
-    Delta: Delta,
-    AssetDelta: AssetDelta,
+    // actual channel
+    Channel: Channel,
+    // subchannels (offdeltas for assets)
+    Subchannel: Subchannel,
+    // hashlocks for offdeltas
     Payment: Payment,
-    Block: Block,
+    // user-specific onchain events
     Event: Event,
+
+    Block: Block,
     OffOrder: OffOrder
   }
 }

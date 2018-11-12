@@ -20,7 +20,7 @@ module.exports = async function(opts) {
 
     if (!estimated) return
 
-    l('Broadcasting now with nonce ', estimated.nonce)
+    l('Broadcasting now with batch_nonce ', estimated.batch_nonce)
     // saving locally to ensure it is added, and rebroadcast if needed
     PK.pending_batch = toHex(estimated.signed_batch)
 

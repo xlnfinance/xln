@@ -1,4 +1,4 @@
-var tour = new Tour.Tour({
+window.tour = new Tour.Tour({
   defaultStepOptions: {
     classes: 'shadow-md bg-purple-dark',
     scrollTo: true
@@ -19,7 +19,7 @@ tour.addStep('login-step', {
 
 tour.addStep('layer-faucet', {
   text: 'Get funds on your onchain balance.',
-  attachTo: '.step-login bottom',
+  attachTo: '.layer-faucet bottom',
   classes: 'example-step-extra-class',
   buttons: [
     {
@@ -29,6 +29,6 @@ tour.addStep('layer-faucet', {
   ]
 })
 
-tour.show('login-step')
+//tour.show('login-step')
 
 //tour.start()

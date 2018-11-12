@@ -2,8 +2,8 @@ const withdraw = require('../offchain/withdraw')
 
 module.exports = async (p) => {
   // perform a specific operation on given channel
-  let d = await Delta.findById(p.id)
-  let ch = await me.getChannel(d.partnerId, d.asset, d)
+  let d = await Channel.findById(p.id)
+  let ch = await Channel.get(d.partnerId, d.asset, d)
 
   if (p.op == 'withdraw') {
     if (p.amount > ch.insured) {
@@ -13,10 +13,7 @@ module.exports = async (p) => {
     await withdraw(ch, p.amount)
     if (ch.d.withdrawal_sig == null) {
       react({
-        alert:
-          'Failed to get withdrawal from: ' +
-          ch.hub.handle +
-          '. Try later or start a dispute.'
+        alert: 'Failed to get withdrawal. Try later or start a dispute.'
       })
       return
     }
@@ -46,10 +43,10 @@ module.exports = async (p) => {
 
     await ch.d.save()
 
-    l('set limits to ', ch.hub)
+    l('set limits to ', ch.d.partnerId)
 
     me.send(
-      ch.hub,
+      ch.d.partnerId,
       'setLimits',
       me.envelope(
         methodMap('setLimits'),
@@ -62,7 +59,7 @@ module.exports = async (p) => {
     react({confirm: 'OK'})
   } else if (p.op == 'requestInsurance') {
     me.send(
-      ch.hub,
+      ch.d.partnerId,
       'setLimits',
       me.envelope(methodMap('requestInsurance'), ch.d.asset)
     )

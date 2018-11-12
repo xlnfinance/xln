@@ -129,7 +129,7 @@ module.exports = async (ws, json) => {
 
         let hub = K.hubs.find((h) => h.id == json.params.id)
 
-        let ch = await me.getChannel(hub.pubkey, 1)
+        let ch = await Channel.get(hub.pubkey, 1)
 
         ch.d.hard_limit = K.hard_limit
         ch.d.soft_limit = K.soft_limit
@@ -155,6 +155,24 @@ module.exports = async (ws, json) => {
       //
       react({force: true})
       //Periodical.updateCache()
+
+      break
+    case 'toggleAsset':
+      if ([1, 2].includes(json.params.id)) {
+        react({alert: 'This asset is required by the system'})
+        return
+      }
+      let assetIndex = PK.usedAssets.indexOf(json.params.id)
+      if (assetIndex == -1) {
+        PK.usedAssets.push(json.params.id)
+
+        result.confirm = 'Asset added'
+      } else {
+        PK.usedAssets.splice(assetIndex, 1)
+
+        result.confirm = 'Asset removed'
+      }
+      react({force: true})
 
       break
 

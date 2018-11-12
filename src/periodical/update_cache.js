@@ -28,7 +28,9 @@ module.exports = async (force = false) => {
           cached_result.users = await User.findAll({include: {all: true}})
         },
         async () => {
-          cached_result.insurances = await Insurance.findAll()
+          cached_result.insurances = await Insurance.findAll({
+            include: {all: true}
+          })
         },
         async () => {
           for (var hub of cached_result.K.hubs) {

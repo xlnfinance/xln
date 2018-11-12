@@ -12,8 +12,8 @@ module.exports = async (args) => {
   amount = readInt(amount)
   asset = readInt(asset)
 
-  await section(['use', pubkey, asset], async () => {
-    let ch = await me.getChannel(pubkey, asset)
+  await section(['use', pubkey], async () => {
+    let ch = await Channel.get(pubkey)
 
     if (ch.d.they_withdrawal_amount > 0) {
       l('Partner already has withdrawal from us')
@@ -29,7 +29,7 @@ module.exports = async (args) => {
       methodMap('withdrawFrom'),
       ch.ins.leftId,
       ch.ins.rightId,
-      ch.ins.nonce,
+      ch.ins.withdrawal_nonce,
       amount,
       ch.d.asset
     ])

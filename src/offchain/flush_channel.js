@@ -15,11 +15,11 @@ during merge: no transitions can be applied, otherwise deadlock could happen.
 Always flush opportunistically, unless you are acking your direct partner who sent tx to you.
 */
 
-module.exports = async (pubkey, asset, opportunistic) => {
-  await section(['use', pubkey, asset], async () => {
+module.exports = async (pubkey, opportunistic) => {
+  await section(['use', pubkey], async () => {
     if (trace) l(`Started Flush ${trim(pubkey)} ${opportunistic}`)
 
-    let ch = await me.getChannel(pubkey, asset)
+    let ch = await Channel.get(pubkey)
     ch.last_used = ts()
 
     let flushable = []
@@ -57,6 +57,9 @@ module.exports = async (pubkey, asset, opportunistic) => {
       for (var t of ch.payments) {
         if (t.status != 'new') continue
 
+        let derived = ch.derived[t.asset]
+        let subch = ch.d.subchannels.by('asset', t.asset)
+
         if (t.type == 'del') {
           // remove a hashlock and provide either secret or reason of failure
           if (me.CHEAT_dontreveal) {
@@ -65,13 +68,13 @@ module.exports = async (pubkey, asset, opportunistic) => {
           }
 
           if (t.outcome_type == methodMap('outcomeSecret')) {
-            ch.d.offdelta += ch.left ? t.amount : -t.amount
+            subch.offdelta += ch.d.isLeft() ? t.amount : -t.amount
           }
-          var args = [t.hash, t.outcome_type, t.outcome]
+          var args = [t.asset, t.hash, t.outcome_type, t.outcome]
         } else if (t.type == 'delrisk') {
           // works like refund
           //if (!t.secret) {
-          ch.d.offdelta += ch.left ? -t.amount : t.amount
+          subch.offdelta += ch.d.isLeft() ? -t.amount : t.amount
           //}
 
           //var args = [t.hash, t.secret]
@@ -79,7 +82,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
           if (
             t.lazy_until &&
             t.lazy_until > new Date() &&
-            ch.payable - ch.ins.insurance < t.amount
+            t.amount > derived.uninsured
           ) {
             l('Still lazy, wait')
             continue
@@ -88,19 +91,21 @@ module.exports = async (pubkey, asset, opportunistic) => {
           if (
             t.amount < K.min_amount ||
             t.amount > K.max_amount ||
-            t.amount > ch.payable ||
-            ch.outwards.length >= K.max_hashlocks
+            t.amount > derived.payable ||
+            derived.outwards.length >= K.max_hashlocks
           ) {
             loff(
-              `error cannot transit ${t.amount}/${ch.payable}. Locks ${
-                ch.outwards.length
+              `error cannot transit ${t.amount}/${derived.payable}. Locks ${
+                derived.outwards.length
               }.`
             )
 
-            if (me.my_hub && t.amount > ch.payable) {
+            if (me.my_hub && t.amount > derived.payable) {
               me.textMessage(
                 ch.d.partnerId,
-                `Cant send ${t.amount} payable ${ch.payable}, extend credit`
+                `Cant send ${t.amount} payable ${
+                  derived.payable
+                }, extend credit`
               )
             }
 
@@ -111,11 +116,13 @@ module.exports = async (pubkey, asset, opportunistic) => {
             //if (argv.syncdb) all.push(t.save())
 
             if (t.inward_pubkey) {
-              var inward = await me.getChannel(t.inward_pubkey, ch.d.asset)
-              var pull_hl = inward.inwards.find((hl) => hl.hash.equals(t.hash))
+              var inward_ch = await Channel.get(t.inward_pubkey)
+              var pull_hl = inward_ch.derived[t.asset].inwards.find((hl) =>
+                hl.hash.equals(t.hash)
+              )
               pull_hl.type = 'del'
               pull_hl.status = 'new'
-              let reason = `${me.my_hub.id} to ${ch.hub ? ch.hub.id : 'u'}`
+              let reason = `${me.my_hub.id} to ${ch.d.partnerId}`
               l(reason)
 
               pull_hl.outcome_type = methodMap('outcomeCapacity')
@@ -127,21 +134,21 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
             continue
           }
-          if (ch.outwards.length >= K.max_hashlocks) {
+          if (derived.outwards.length >= K.max_hashlocks) {
             loff('error Cannot set so many hashlocks now, try later')
             //continue
           }
 
           // set exp right before flushing to keep it fresh
           ;(t.exp = K.usable_blocks + K.hashlock_exp),
-            (args = [t.amount, t.hash, t.exp, t.unlocker])
+            (args = [t.asset, t.amount, t.hash, t.exp, t.unlocker])
         }
 
         t.status = 'sent'
         //if (argv.syncdb) all.push(t.save())
 
         // increment nonce after each transition
-        ch.d.nonce++
+        ch.d.dispute_nonce++
 
         transitions.push([
           methodMap(t.type),
@@ -176,13 +183,7 @@ module.exports = async (pubkey, asset, opportunistic) => {
     ]
 
     // transitions: method, args, sig, new state
-    let envelope = me.envelope(
-      methodMap('update'),
-      asset,
-      ackSig,
-      transitions,
-      debug
-    )
+    let envelope = me.envelope(methodMap('update'), ackSig, transitions, debug)
 
     if (transitions.length > 0) {
       // if there were any transitions, we need an ack on top
@@ -200,6 +201,6 @@ module.exports = async (pubkey, asset, opportunistic) => {
 
     me.send(ch.d.partnerId, 'update', envelope)
 
-    return Promise.all(flushable.map((fl) => me.flushChannel(fl, asset, true)))
+    return Promise.all(flushable.map((fl) => me.flushChannel(fl, true)))
   })
 }

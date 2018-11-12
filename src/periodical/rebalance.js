@@ -21,7 +21,7 @@ General recommendations:
 const withdraw = require('../offchain/withdraw')
 
 const rebalance = async function(asset) {
-  var deltas = await Delta.findAll({
+  var deltas = await Channel.findAll({
     where: {
       myId: me.pubkey,
       asset: asset
@@ -35,7 +35,7 @@ const rebalance = async function(asset) {
   let minRisk = 100 //K.risk
 
   for (let d of deltas) {
-    let ch = await me.getChannel(d.partnerId, d.asset)
+    let ch = await Channel.get(d.partnerId, d.asset)
 
     // finding who has uninsured balances AND
     // requests insurance OR gone beyond soft limit
