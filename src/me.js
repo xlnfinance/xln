@@ -98,7 +98,7 @@ class Me {
       return false
     }
 
-    let mergeable = ['disputeWith', 'withdrawFrom', 'depositTo']
+    let mergeable = ['withdrawFrom', 'depositTo']
 
     if (mergeable.includes(method)) {
       let exists = me.batch.find((b) => b[0] == method && b[1][0] == args[0])

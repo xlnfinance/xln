@@ -195,8 +195,6 @@
       </div>
       <div v-else-if="tab=='wallet'">
         <template v-if="pubkey">
-
-
           <h4 class="alert alert-primary" v-if="my_hub">This node is a bank @{{my_hub.handle}}</h4>
           <p class="pull-left">
             <select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
@@ -206,38 +204,36 @@
           </p>
           <div v-if="record">
             <h4 style="display:inline-block">
-              {{onchain}} balances
+              Your {{onchain}} ID: {{record.id}}
             </h4>
             <div v-for="a in PK.usedAssets">{{to_ticker(a)}}: {{commy(getAsset(a))}} <span class="badge badge-success layer-faucet" @click="call('onchainFaucet', {amount: uncommy(prompt('How much you want to get?')), asset: a })">+</span></div>
-            <h5><small>Your {{onchain}} ID: {{record.id}}</small></h5>
 
-              <div class=" alert alert-secondary">
+            <br>
+
+              <p>
+                <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="Layer ID">
+                </[td]>
                 <p>
-                  <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="Layer ID">
-                  </[td]>
-                  <p>
-                    <select style="width:300px" type="text" class="form-control" v-model="externalDeposit.hub">
-                      <option value="onchain"> {{onchain}}</option>
-                      <option v-for="hub in K.hubs" :value="hub.handle"> {{hub.handle}}</option>
-                    </select>
-                  </p>
-                  <p>
-                    <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit">
-                  </p>
-                  <p>
-                    <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Public Message (optional)">
-                  </p>
-                  <p>
-                    <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Transfer 🌐</button>
-                  </p>
-              </div>
+                  <select style="width:300px" type="text" class="form-control" v-model="externalDeposit.hub">
+                    <option value="onchain"> {{onchain}}</option>
+                    <option v-for="hub in K.hubs" :value="hub.handle"> {{hub.handle}}</option>
+                  </select>
+                </p>
+                <p>
+                  <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit">
+                </p>
+                <p>
+                  <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Public Message (optional)">
+                </p>
+                <p>
+                  <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Transfer 🌐</button>
+                </p>
 
           </div>
           <div v-else>
             <h4 style="display:inline-block">
-              {{onchain}}: not registered
+              Temporary {{onchain}} ID: <small>{{pubkey}}</small> <span class="badge badge-success layer-faucet" @click="call('onchainFaucet', {amount: uncommy(prompt('How much you want to get?')), asset: 1 })">+</span>
             </h4>
-            <h5><small>Temporary ID: {{pubkey}}</small></h5>
           </div>
           <table v-if="events.length > 0" class="table">
             <thead>
@@ -257,46 +253,56 @@
                 <h4>
                   {{K.hubs.find(h=>h.pubkey==ch.d.partnerId).handle }}
                 </h4>
-                
+
+                {{ch.d.dispute_nonce}}
 
 
                 <div v-for="subch in ch.d.subchannels">
-                  {{JSON.stringify(subch)}}
+                <br>
+                  <pre>{{JSON.stringify(subch,2,2)}}</pre>
+                  <a class="dotted" @click="subchAction.asset=subch.asset;">{{to_ticker(subch.asset)}} {{commy(ch.derived[subch.asset].payable)}} {{JSON.stringify(ch.derived[subch.asset])}}</a>
+
+
+                    <p>Uninsured: {{commy(ch.derived[subch.asset].uninsured)}} <span class="badge badge-danger" @click="requestInsurance(ch, subch.asset)">Request Insurance</span>
+                      <dotsloader v-if="subch.requested_insurance"></dotsloader>
+                    </p>
+
+
+        <a class="dotted" @click="a=prompt(`How much to withdraw to onchain?`);if (a) {call('withChannel', {partnerId: ch.d.partnerId, asset: subch.asset, op: 'withdraw', amount: uncommy(a)})};">(withdraw to {{onchain}})</a>
+
+
 
                   <span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'testnet', action: 1, asset: subch.asset, amount: uncommy(prompt('How much you want to get?')) })">+</span>
-                  
                 </div>
               </p>
 
+                  <h4>Credit limits</h4>
+                  <p>Maximum uninsured balance</p>
+                  <p>
+                    <input type="text" class="form-control" v-model="subchAction.hard_limit">
+                  </p>
+                  <p>Automatically request insurance after</p>
+                  <p>
+                    <input type="text" class="form-control" v-model="subchAction.soft_limit">
+                  </p>
+                  <p>
+                    <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: ch.d.partnerId, asset: asset, op: 'setLimits', hard_limit: uncommy(subchAction.hard_limit), soft_limit: uncommy(subchAction.soft_limit)})" href="#">Update Credit Limits</button>
+                  </p>
 
-                <div class="row alert alert-secondary">
-                  <div class="col-sm">
-                    <h4>Credit limits</h4>
-                    <p>Maximum uninsured balance: {{commy(ch.d.hard_limit)}}</p>
-                    <p>
-                      <input type="text" class="form-control" v-model="chActions[ch.d.id].hard_limit">
+                  <template v-if="record">
+                    <p>You are guaranteed to get <b>insured</b> part of your balance, but may lose <b>uninsured</b> part if the bank becomes insolvent. Always request insurance when your uninsured balance gets too high.
                     </p>
-                    <p>Automatically request insurance after: {{commy(ch.d.soft_limit)}}</p>
-                    <p>
-                      <input type="text" class="form-control" v-model="chActions[ch.d.id].soft_limit">
-                    </p>
-                    <p>
-                      <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: ch.d.partnerId, asset: asset, op: 'setLimits', hard_limit: uncommy(chActions[ch.d.id].hard_limit), soft_limit: uncommy(chActions[ch.d.id].soft_limit)})" href="#">Update Credit Limits</button>
-                    </p>
-                    <template v-if="record">
-                      <p>You are guaranteed to get <b>insured</b> part of your balance, but may lose <b>uninsured</b> part if the bank becomes insolvent. Always request insurance when your uninsured balance gets too high.
-                      </p>
-                      <span v-if="ch.ins.dispute_delayed">
+                    <span v-if="ch.ins.dispute_delayed">
                       <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader> 
                     </span>
-                      <p v-else>
-                        <button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'dispute'})">Start Dispute 🌐</button>
-                      </p>
-                    </template>
-                    <div v-else>
-                      Request insurance to be registered.
-                    </div>
+                    <p v-else>
+                      <button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'dispute'})">Start Dispute 🌐</button>
+                    </p>
+                  </template>
+                  <div v-else>
+                    Request insurance to be registered.
                   </div>
+
 
             </template>
             <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
@@ -317,6 +323,12 @@
                 </div>
               </p>
             </div>
+
+
+
+
+
+
             <template v-if="outward_address.length > 0">
               <p v-if="bestRoutes.length == 0">
                 No route found for this payment.
@@ -348,7 +360,7 @@
                 <tr v-bind:key="h.id" v-for="(h, index) in payments.slice(0, history_limit)">
                   <td v-bind:title="h.id+h.type+h.status">{{payment_status(h)}}</td>
                   <td>{{commy(h.is_inward ? h.amount : -h.amount)}}</td>
-                  <td>{{h.deltumId}}</td>
+                  <td>{{h.channelId}}</td>
                   <td @click="outward_address=h.is_inward ? h.source_address : h.destination_address; outward_amount=commy(h.amount); outward_invoice = h.invoice"><u class="dotted">{{paymentToDetails(h)}}</u>: {{h.invoice}}</td>
                   <td v-html="skipDate(h, index)"></td>
                 </tr>
@@ -372,8 +384,8 @@
           <input v-model="pw" type="password" id="inputPassword" class="form-control" placeholder="Password" required>
           <button class="btn btn-lg btn-outline-primary btn-block step-login" id="login" type="submit">Generate Wallet</button>
         </form>
-        </div>
-        <div v-else-if="tab=='hubs'">
+      </div>
+      <div v-else-if="tab=='hubs'">
           <p>Banks inside Fairlayer are provably-solvent by design. Your device always stores a cryptographic dispute proof in case you need to get your assets back. Choose your banks based on people and businesses you transact with, your location and their track record. If a bank is compromised you may lose your uninsured balance, so don't forget to request insurance.</p>
           <table class="table table-striped">
             <thead class="thead-dark">
@@ -781,6 +793,7 @@ export default {
       chosenRoute: 0,
 
       gasprice: 1,
+      events: [],
 
       assets: [],
       orders: [],
@@ -832,7 +845,7 @@ export default {
       install_snippet: false,
 
 
-      chActions: {},
+      subchAction: {},
       expandedChannel: -1,
 
       externalDeposit: {
@@ -959,8 +972,8 @@ export default {
         .join('')
     },
 
-    requestInsurance: (ch) => {
-      if (!app.record && ch.d.asset != 1) {
+    requestInsurance: (ch, asset) => {
+      if (!app.record && asset != 1) {
         alert(`You can't have insurance in non-FRD assets now, ${onchain} registration is required. Request insurance in FRD asset first.`)
       }
 
@@ -983,14 +996,6 @@ export default {
     },
 
 
-
-    setLimits: (id) => {
-      app.call('setLimits', {
-        id: id,
-        hard_limit: app.uncommy(app.chActions[id].hard_limit),
-        soft_limit: app.uncommy(app.chActions[id].soft_limit)
-      })
-    },
 
 
 
@@ -1090,7 +1095,7 @@ export default {
 
     paymentToDetails: (h) => {
       let ch = app.channels.find(ch => {
-        return ch.d.id == h.deltumId
+        return ch.d.id == h.channelId
       })
       if (!ch) return 'no'
 

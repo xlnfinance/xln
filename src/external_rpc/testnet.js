@@ -20,7 +20,7 @@ module.exports = async (args) => {
       asset: asset
     }
 
-    l('testnet', pay)
+    //l('testnet', pay)
     await me.payChannel(pay)
   } else if (action == 7) {
     let asset = readInt(args[1])

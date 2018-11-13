@@ -6,12 +6,13 @@ set -o errexit
 set -o pipefail
 
 if [ $# -eq 0 ]; then
-  global=
+  global=--experimental-repl-await
 else
   global="$1"
 fi
 
 git rev-parse HEAD > HEAD
+
 
 
 db=

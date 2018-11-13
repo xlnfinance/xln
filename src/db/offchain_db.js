@@ -277,11 +277,13 @@ const defineModels = (sequelize) => {
     buyAssetId: Sequelize.INTEGER
   })
 
-  Channel.hasMany(Subchannel)
-  Subchannel.belongsTo(Subchannel)
+  let nonull = {foreignKey: {allowNull: false}, onDelete: 'CASCADE'}
 
-  Channel.hasMany(Payment)
-  Payment.belongsTo(Channel)
+  Channel.hasMany(Subchannel, nonull)
+  Subchannel.belongsTo(Channel, nonull)
+
+  Channel.hasMany(Payment, nonull)
+  Payment.belongsTo(Channel, nonull)
 
   Channel.prototype.isLeft = function() {
     return Buffer.compare(me.pubkey, this.partnerId) == -1

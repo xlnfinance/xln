@@ -117,7 +117,7 @@ module.exports = async (datadir) => {
     hubs: [],
     flush_timeout: 250,
 
-    cache_timeout: 60, //s, keep channel in memory since last use
+    cache_timeout: 90, //s, keep channel in memory since last use
     safe_sync_delay: 180, //s, after what time prohibit using wallet if unsynced
     sync_limit: 500, // how many blocks to share at once
 

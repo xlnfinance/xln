@@ -158,7 +158,12 @@ const getSubchannel = async function(ch, asset = 1) {
 }
 
 const getInsuranceBetween = async function(user1, user2) {
-  if (user1.pubkey.length != 32 || user2.pubkey.length != 32) {
+  if (
+    user1.pubkey.length != 32 ||
+    user2.pubkey.length != 32 ||
+    !user1.id ||
+    !user2.id
+  ) {
     return false
   }
 
@@ -176,10 +181,14 @@ const getInsuranceBetween = async function(user1, user2) {
 
   ins = (await Insurance.findOrBuild({
     where: wh,
-    include: {all: true}
+    defaults: {subinsurances: []}, //needed to get [] attr
+    include: [Subinsurance]
   }))[0]
 
-  cache.ins[str] = ins
+  if (ins.id) {
+    cache.ins[str] = ins
+  }
+
   return ins
 }
 
@@ -221,12 +230,14 @@ const getUserByIdOrKey = async function(id) {
   if (u) return u
 
   if (typeof id == 'number') {
-    u = await User.findById(id, {include: {all: true}})
+    u = await User.findById(id, {include: [Balance]})
   } else {
     // buffer
+
     u = (await User.findOrBuild({
       where: {pubkey: id},
-      include: {all: true}
+      defaults: {balances: []}, //needed to get [] attr
+      include: [Balance]
     }))[0]
   }
 
@@ -245,10 +256,14 @@ const userAsset = (user, asset, diff) => {
       b.balance += diff
       return b.balance
     } else {
-      b = user.buildBalance({
+      // todo is safe to not save now?
+      b = Balance.build({
+        userId: user.id,
         asset: asset,
         balance: diff
       })
+      user.balances.push(b)
+
       return b.balance
     }
   } else {

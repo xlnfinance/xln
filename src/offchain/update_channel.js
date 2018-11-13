@@ -135,8 +135,6 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
         break
       }
 
-      l('adding payment')
-
       // don't save in db just yet
       let inward_hl = Payment.build({
         // we either add add/addrisk or del right away
@@ -150,7 +148,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
 
         asset: asset,
 
-        deltumId: ch.d.id
+        channelId: ch.d.id
       })
 
       ch.payments.push(inward_hl)
@@ -270,7 +268,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
         // otherwise mediate
 
         var outward_hl = Payment.build({
-          deltumId: dest_ch.d.id,
+          channelId: dest_ch.d.id,
           type: m,
           status: 'new',
           is_inward: false,

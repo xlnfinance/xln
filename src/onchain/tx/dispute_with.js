@@ -9,7 +9,7 @@ const deltaStartDispute = async (delta, cheat = false) => {
     var d = await deltaGetDispute(delta)
   }
   delta.status = 'disputed'
-  me.batchAdd('disputeWith', [delta.asset, d])
+  me.batchAdd('disputeWith', [d])
   await delta.save()
 }
 

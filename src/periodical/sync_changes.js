@@ -53,11 +53,23 @@ module.exports = async (opts = {}) => {
       await section(['use', ch.d.partnerId], async () => {
         // sync all Channel, Subchannel, Payments
 
-        return false
+        //return false
         let all_payments = []
+
+        //l('Saving subch: ', ch.d.subchannels.length)
+        for (let subch of ch.d.subchannels) {
+          //if (ch.d.subchannels[i].changed()) {
+          //subch.channelId = ch.d.id
+
+          //l('Saving subch... ', subch)
+          all_payments.push(subch.save())
+          //}
+        }
 
         for (let i = 0; i < ch.payments.length; i++) {
           let t = ch.payments[i]
+          t.channelId = ch.d.id
+
           if (t.changed()) {
             all_payments.push(t.save())
           }
@@ -69,11 +81,11 @@ module.exports = async (opts = {}) => {
           }
         }
 
-        let evict = ch.last_used < ts() - K.cache_timeout
-
         if (ch.d.changed()) {
           all_payments.push(ch.d.save())
         }
+
+        let evict = ch.last_used < ts() - K.cache_timeout
 
         await Promise.all(all_payments)
 
@@ -81,7 +93,7 @@ module.exports = async (opts = {}) => {
         if (evict) {
           delete cache.ch[key]
           //promise = promise.then(() => {
-          l('Evict: ' + trim(ch.d.partnerId), ch.d.ack_requested_at)
+          l('Evict: ' + trim(ch.d.partnerId))
           //})
         }
 

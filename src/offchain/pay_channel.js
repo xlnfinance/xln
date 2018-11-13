@@ -136,7 +136,7 @@ module.exports = async (opts) => {
     }
 
     let outward = Payment.build({
-      deltumId: ch.d.id,
+      channelId: ch.d.id,
 
       type: opts.addrisk ? 'addrisk' : 'add',
       lazy_until: opts.lazy ? +new Date() + 30000 : null,

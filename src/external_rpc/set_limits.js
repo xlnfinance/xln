@@ -27,6 +27,6 @@ module.exports = async (args) => {
 
   me.textMessage(ch.d.partnerId, 'Updated credit limits')
 
-  l('Received updated limits in asset ' + ch.d.asset)
+  l('Received updated limits in asset ' + subch.asset)
   //if (argv.syncdb) ch.d.save()
 }

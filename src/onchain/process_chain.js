@@ -2,7 +2,7 @@
 
 module.exports = async (args) => {
   return await section('onchain', async () => {
-    l('Start process chain')
+    //l('Start process chain')
 
     if (!cached_result.sync_started_at) {
       cached_result.sync_started_at = K.total_blocks

@@ -88,7 +88,9 @@ module.exports = async (pubkey, delta = false) => {
           },
           {include: [Subchannel]}
         )
-        l('New one', ch.d.subchannels)
+        //l('New one', ch.d.subchannels)
+      } else {
+        //l('Foudn old ones ', ch.d.subchannels)
       }
     }
 
@@ -101,8 +103,9 @@ module.exports = async (pubkey, delta = false) => {
       }
     }
 
-    ch.payments = await ch.d.getPayments({
+    ch.payments = await Payment.findAll({
       where: {
+        channelId: ch.d.id,
         // delack is archive
         [Op.or]: [{type: {[Op.ne]: 'del'}}, {status: {[Op.ne]: 'ack'}}]
       },

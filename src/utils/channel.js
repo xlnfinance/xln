@@ -87,7 +87,8 @@ refresh = function(ch) {
       inwards: [],
       outwards: [],
       hashlock_hold: [0, 0],
-      asset: subch.asset
+      asset: subch.asset,
+      subch: subch
     }
     // find the according subinsurance for subchannel
     let subins
@@ -174,5 +175,13 @@ refresh = function(ch) {
 
 saveId = async function(obj) {
   // only save if it has no id now
-  if (!obj.id) await obj.save()
+  if (!obj.id) {
+    await obj.save()
+  }
+
+  if (obj.balances) {
+    for (let b of obj.balances) {
+      if (b.changed()) await b.save()
+    }
+  }
 }

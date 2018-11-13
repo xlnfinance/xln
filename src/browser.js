@@ -43,14 +43,14 @@ react = async (result) => {
 
     // now add all channels to used hubs
     for (var m of K.hubs) {
-      if ((me.record && me.record.id == m.id) || !PK.usedHubs.includes(m.id))
-        continue
+      let partnerId = fromHex(m.pubkey)
+      if (me.is_me(partnerId) || !PK.usedHubs.includes(m.id)) continue
 
-      result.channels.push(await Channel.get(fromHex(m.pubkey)))
+      result.channels.push(await Channel.get(partnerId))
     }
 
-    //l('Getting record')
     result.record = await getUserByIdOrKey(bin(me.id.publicKey))
+    //l('Getting record', result.record.id)
 
     result.events = await Event.findAll({
       order: [['id', 'desc']],

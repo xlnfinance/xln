@@ -9,7 +9,7 @@ module.exports = async (p) => {
       react({alert: 'More than you can withdraw from insured'})
       return
     }
-    await withdraw(ch, p.amount)
+    await withdraw(ch, p.asset, p.amount)
     if (ch.d.withdrawal_sig == null) {
       react({
         alert: 'Failed to get withdrawal. Try later or start a dispute.'
@@ -41,7 +41,7 @@ module.exports = async (p) => {
 
     // nothing happened
     if (!subch.changed()) {
-      return
+      //return
     }
 
     await subch.save()

@@ -63,18 +63,22 @@ const Router = {
       // for faucet: return direct route as only option
       return [[1, []]]
     }
+    // TODO: atomic multipath
 
     // where do we have enough amount in payable
     for (let candidate of PK.usedHubs) {
       let hub = K.hubs.find((h) => h.id == candidate)
-      let ch = await Channel.get(hub.pubkey, args.asset)
+      let ch = await Channel.get(hub.pubkey)
 
       // account for potentially unpredictable fees?
       // 0 >= 0? return potential routes even for no amount
-      if (ch.d.status != 'disputed' && ch.payable >= args.amount) {
+      if (
+        ch.d.status != 'disputed' &&
+        ch.derived[args.asset].payable >= args.amount
+      ) {
         fromArray.push(candidate)
       } else {
-        l('Not enough payable: ', ch.payable, args.amount)
+        //l('Not enough payable: ', ch.derived[args.asset].payable, args.amount)
       }
     }
 

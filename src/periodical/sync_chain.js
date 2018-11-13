@@ -10,7 +10,7 @@ module.exports = () => {
       : Validators
     const randomChosenValidator = usableSet.randomElement()
 
-    l('Sync from ', randomChosenValidator.location)
+    //l('Sync from ', randomChosenValidator.location)
 
     me.send(
       randomChosenValidator,
