@@ -20,9 +20,10 @@ module.exports = async (s, args) => {
     if (compared == 0) return
 
     const ins = await getInsuranceBetween(s.signer, partner)
+    let subins = ins.subinsurances.by('asset', asset)
 
-    if (!ins || !ins.id || amount > ins.insurance) {
-      l(`Invalid amount ${ins.insurance} vs ${amount}`)
+    if (!ins || !ins.id || amount > subins.balance) {
+      l(`Invalid amount ${subins.balance} vs ${amount}`)
       return
     }
 
@@ -32,7 +33,7 @@ module.exports = async (s, args) => {
       ins.rightId,
       ins.withdrawal_nonce,
       amount,
-      ins.asset
+      asset
     ])
 
     if (!ec.verify(body, withdrawal_sig, partner.pubkey)) {
@@ -49,10 +50,10 @@ module.exports = async (s, args) => {
     s.parsed_tx.events.push(['withdrawFrom', amount, partner.id])
     s.meta.inputs_volume += amount // todo: asset-specific
 
-    ins.insurance -= amount
+    subins.balance -= amount
     // if signer is left and reduces insurance, move ondelta to the left too
     // .====| reduce insurance .==--| reduce ondelta .==|
-    if (s.signer.id == ins.leftId) ins.ondelta -= amount
+    if (s.signer.id == ins.leftId) subins.ondelta -= amount
 
     userAsset(s.signer, asset, amount)
 
@@ -64,15 +65,15 @@ module.exports = async (s, args) => {
     // was this input related to us?
     if (me.record && [partner.id, s.signer.id].includes(me.record.id)) {
       const ch = await Channel.get(
-        me.record.id == partner.id ? s.signer.pubkey : partner.pubkey,
-        asset
+        me.record.id == partner.id ? s.signer.pubkey : partner.pubkey
       )
+      let subch = ch.d.subchannels.by('asset', asset)
       // they planned to withdraw and they did. Nullify hold amount
-      ch.d.they_withdrawal_amount = 0
+      subch.they_withdrawal_amount = 0
 
       // already used, nullify
-      ch.d.withdrawal_amount = 0
-      ch.d.withdrawal_sig = null
+      subch.withdrawal_amount = 0
+      subch.withdrawal_sig = null
 
       ch.ins = ins
 

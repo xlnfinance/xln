@@ -3,14 +3,19 @@ const withdraw = require('../offchain/withdraw')
 module.exports = async (p) => {
   // perform a specific operation on given channel
   let ch = await Channel.get(fromHex(p.partnerId))
+  let subch = ch.d.subchannels.by('asset', p.asset)
+  if (!subch) {
+    l('no subch')
+    return false
+  }
 
   if (p.op == 'withdraw') {
     if (p.amount > ch.derived[p.asset].insured) {
       react({alert: 'More than you can withdraw from insured'})
       return
     }
-    await withdraw(ch, p.asset, p.amount)
-    if (ch.d.withdrawal_sig == null) {
+    await withdraw(ch, subch, p.amount)
+    if (subch.withdrawal_sig == null) {
       react({
         alert: 'Failed to get withdrawal. Try later or start a dispute.'
       })
@@ -19,23 +24,14 @@ module.exports = async (p) => {
 
     me.batchAdd('withdrawFrom', [
       p.asset,
-      [ch.d.withdrawal_amount, ch.partner, ch.d.withdrawal_sig]
+      [subch.withdrawal_amount, ch.partner, subch.withdrawal_sig]
     ])
     react({confirm: 'OK'})
   } else if (p.op == 'deposit') {
+    // not used
     me.batchAdd('depositTo', [p.asset, [p.amount, me.record.id, ch.partner, 0]])
     react({confirm: 'OK'})
-  } else if (p.op == 'dispute') {
-    me.batchAdd('disputeWith', [await deltaGetDispute(ch.d)])
-    react({confirm: 'OK'})
   } else if (p.op == 'setLimits') {
-    let subch = ch.d.subchannels.by('asset', p.asset)
-
-    if (!subch) {
-      l('no subch')
-      return false
-    }
-
     subch.hard_limit = p.hard_limit
     subch.soft_limit = p.soft_limit
 
@@ -61,13 +57,6 @@ module.exports = async (p) => {
 
     react({confirm: 'OK'})
   } else if (p.op == 'requestInsurance') {
-    let subch = ch.d.subchannels.by('asset', p.asset)
-
-    if (!subch) {
-      l('no subch')
-      return false
-    }
-
     me.send(
       ch.d.partnerId,
       'setLimits',

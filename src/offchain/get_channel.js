@@ -90,7 +90,7 @@ module.exports = async (pubkey, delta = false) => {
         )
         //l('New one', ch.d.subchannels)
       } else {
-        //l('Foudn old ones ', ch.d.subchannels)
+        //l('Found old channel ', ch.d.subchannels)
       }
     }
 

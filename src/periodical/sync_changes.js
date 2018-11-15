@@ -68,7 +68,7 @@ module.exports = async (opts = {}) => {
 
         for (let i = 0; i < ch.payments.length; i++) {
           let t = ch.payments[i]
-          t.channelId = ch.d.id
+          //t.channelId = ch.d.id
 
           if (t.changed()) {
             all_payments.push(t.save())

@@ -125,7 +125,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
 
       // these things CANT happen, partner is malicious so just ignore and break
       if (amount < K.min_amount || amount > derived.they_payable) {
-        l('Bad amount')
+        l('Bad amount: ', amount, derived.they_payable)
         break
       }
       if (hash.length != 32) {

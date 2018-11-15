@@ -157,7 +157,7 @@ module.exports = async (s, header, ordered_tx_body) => {
       }).then(async (insurances) => {
         for (let ins of insurances) {
           // take from cache instead
-          let str = stringify([ins.leftId, ins.rightId, ins.asset])
+          let str = stringify([ins.leftId, ins.rightId])
           if (cache.ins[str]) ins = cache.ins[str]
 
           s.meta.cron.push(['resolved', ins, await insuranceResolve(ins)])

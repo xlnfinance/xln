@@ -4,7 +4,8 @@ module.exports = async (args) => {
 
   let [amount, asset] = r(body).map(readInt)
 
-  let ch = await Channel.get(pubkey, asset)
+  let ch = await Channel.get(pubkey)
+  let subch = ch.d.subchannels.by('asset', asset)
 
   let withdrawal = [
     methodMap('withdrawFrom'),
@@ -12,7 +13,7 @@ module.exports = async (args) => {
     ch.ins.rightId,
     ch.ins.withdrawal_nonce,
     amount,
-    ch.d.asset
+    asset
   ]
 
   if (!ec.verify(r(withdrawal), sig, pubkey)) {
@@ -21,11 +22,11 @@ module.exports = async (args) => {
   }
 
   l('Got withdrawal for ' + amount)
-  ch.d.withdrawal_amount = amount
-  ch.d.withdrawal_sig = sig
+  subch.withdrawal_amount = amount
+  subch.withdrawal_sig = sig
 
-  if (me.withdrawalRequests[ch]) {
-    me.withdrawalRequests[ch](ch)
+  if (me.withdrawalRequests[subch.id]) {
+    me.withdrawalRequests[subch.id](ch)
   }
 
   if (argv.syncdb) ch.d.save()

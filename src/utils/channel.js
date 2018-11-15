@@ -181,6 +181,17 @@ saveId = async function(obj) {
 
   if (obj.balances) {
     for (let b of obj.balances) {
+      b.userId = obj.id
+      if (b.changed()) await b.save()
+    }
+  }
+
+  if (obj.subinsurances) {
+    for (let b of obj.subinsurances) {
+      // create ref later
+      b.insuranceId = obj.id
+      //l('saved subins', b)
+
       if (b.changed()) await b.save()
     }
   }

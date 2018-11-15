@@ -51,14 +51,14 @@ const rebalance = async function(asset) {
     } else if (derived.insured >= minRisk) {
       if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
-        l('Request withdraw withdrawFrom')
-        netSpenders.push(withdraw(ch, asset, derived.insured))
+        l('Request withdraw withdrawFrom: ' + derived)
+        netSpenders.push(withdraw(ch, subch, derived.insured))
       } else if (subch.withdrawal_requested_at == null) {
         l('Delayed pull')
         subch.withdrawal_requested_at = ts()
       } else if (subch.withdrawal_requested_at + 600 < ts()) {
         l('User is offline for too long, or tried to cheat')
-        me.batchAdd('disputeWith', [await deltaGetDispute(ch.d)])
+        me.batchAdd('disputeWith', await startDispute(ch))
       }
     }
   }

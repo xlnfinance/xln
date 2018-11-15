@@ -43,21 +43,12 @@ const defineModels = (sequelize) => {
       // for instant withdrawals, increase one by one
       withdrawal_nonce: {type: Sequelize.INTEGER, defaultValue: 0},
 
-      // what hub had already insured
-      ondelta: {type: Sequelize.BIGINT, defaultValue: 0},
-
-      dispute_delayed: Sequelize.INTEGER,
-
       // increased offchain. When disputed, higher one is true
       dispute_nonce: Sequelize.INTEGER,
-      dispute_offdelta: Sequelize.INTEGER,
 
+      dispute_delayed: Sequelize.INTEGER,
       // actual state proposed, rlp-encoded
       dispute_state: Sequelize.TEXT,
-
-      // two arrays of hashlocks, inwards for left and inwards for right
-      dispute_hashlocks: Sequelize.TEXT,
-
       // started by left user?
       dispute_left: Sequelize.BOOLEAN
     },

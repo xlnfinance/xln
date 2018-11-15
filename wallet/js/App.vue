@@ -254,25 +254,23 @@
                   {{K.hubs.find(h=>h.pubkey==ch.d.partnerId).handle }}
                 </h4>
 
-                {{ch.d.dispute_nonce}}
-
 
                 <div v-for="subch in ch.d.subchannels">
-                <br>
-                  <pre>{{JSON.stringify(subch,2,2)}}</pre>
-                  <a class="dotted" @click="subchAction.asset=subch.asset;">{{to_ticker(subch.asset)}} {{commy(ch.derived[subch.asset].payable)}} {{JSON.stringify(ch.derived[subch.asset])}}</a>
+                  <br>
+
+                  <a class="dotted" @click="subchAction.asset=subch.asset;subchAction.hard_limit=subch.hard_limit;subchAction.soft_limit=subch.soft_limit;">{{to_ticker(subch.asset)}}: {{commy(ch.derived[subch.asset].payable)}} </a><span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'testnet', action: 1, asset: subch.asset, amount: uncommy(prompt('How much you want to get?')) })">+</span>
 
 
-                    <p>Uninsured: {{commy(ch.derived[subch.asset].uninsured)}} <span class="badge badge-danger" @click="requestInsurance(ch, subch.asset)">Request Insurance</span>
+                  <p>Insured: {{commy(ch.derived[subch.asset].insured)}} + Uninsured: {{commy(ch.derived[subch.asset].uninsured)}} <span class="badge badge-danger" @click="requestInsurance(ch, subch.asset)">Request Insurance</span>
                       <dotsloader v-if="subch.requested_insurance"></dotsloader>
                     </p>
 
 
-        <a class="dotted" @click="a=prompt(`How much to withdraw to onchain?`);if (a) {call('withChannel', {partnerId: ch.d.partnerId, asset: subch.asset, op: 'withdraw', amount: uncommy(a)})};">(withdraw to {{onchain}})</a>
+        <a class="dotted" @click="a=prompt(`How much to withdraw to onchain?`);if (a) {call('withChannel', {partnerId: ch.d.partnerId, asset: subch.asset, op: 'withdraw', amount: uncommy(a)})};">withdraw</a>
 
 
 
-                  <span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'testnet', action: 1, asset: subch.asset, amount: uncommy(prompt('How much you want to get?')) })">+</span>
+                  
                 </div>
               </p>
 
@@ -286,7 +284,7 @@
                     <input type="text" class="form-control" v-model="subchAction.soft_limit">
                   </p>
                   <p>
-                    <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: ch.d.partnerId, asset: asset, op: 'setLimits', hard_limit: uncommy(subchAction.hard_limit), soft_limit: uncommy(subchAction.soft_limit)})" href="#">Update Credit Limits</button>
+                    <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: ch.d.partnerId, asset: subchAction.asset, op: 'setLimits', hard_limit: uncommy(subchAction.hard_limit), soft_limit: uncommy(subchAction.soft_limit)})" href="#">Update Credit Limits</button>
                   </p>
 
                   <template v-if="record">
@@ -296,8 +294,9 @@
                       <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader> 
                     </span>
                     <p v-else>
-                      <button type="button" class="btn btn-outline-secondary" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'dispute'})">Start Dispute 🌐</button>
+                      <button type="button" class="btn btn-outline-secondary" @click="call('startDispute', {partnerId: ch.d.partnerId})">Start Dispute with Bank 🌐</button>
                     </p>
+
                   </template>
                   <div v-else>
                     Request insurance to be registered.
@@ -974,7 +973,8 @@ export default {
 
     requestInsurance: (ch, asset) => {
       if (!app.record && asset != 1) {
-        alert(`You can't have insurance in non-FRD assets now, ${onchain} registration is required. Request insurance in FRD asset first.`)
+        alert(`You can't have insurance in non-FRD assets now, ${app.onchain} registration is required. Request insurance in FRD asset first.`)
+        return
       }
 
       if (confirm(app.record ? `Increasing insurance in ${app.onchain} costs a fee, continue?` : `You will be charged ${app.commy(app.K.account_creation_fee)} for registration, and ${app.commy(app.K.standalone_balance)} will be sent to your ${app.onchain} account. Continue?`)) {
@@ -1235,7 +1235,7 @@ export default {
     prettyBatch: (batch) => {
       let r = ''
       for (let tx of batch) {
-        if (['withdrawFrom', 'depositTo', 'disputeWith'].includes(tx[0])) {
+        if (['withdrawFrom', 'depositTo'].includes(tx[0])) {
 
           r += `<span class="badge badge-danger">${tx[1][1].length} ${tx[0]} (in ${app.to_ticker(tx[1][0])})</span>&nbsp;`
 

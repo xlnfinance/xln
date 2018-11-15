@@ -28,7 +28,7 @@ export default {
       } else if (o.type == 'onchainfee') {
         return `Onchain tx fee ${app.commy(o.amount)}`
       } else if (o.type == 'disputeResolved') {
-        return `Resolved a dispute. Received ${app.commy(o.insured)} (insured) back to ${app.onchain}, created a debt for uninsured ${app.commy(o.uninsured)} (uninsured).`
+        return `Resolved a dispute. ${JSON.stringify(o.resolved)}`
       }
     }
   }

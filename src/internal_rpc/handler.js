@@ -60,6 +60,12 @@ module.exports = async (ws, json) => {
       await me.payChannel(json.params)
       break
 
+    case 'startDispute':
+      let ch = await Channel.get(json.params.partnerId)
+      me.batchAdd('disputeWith', await startDispute(ch))
+      react({confirm: 'OK'})
+
+      break
     case 'withChannel':
       require('./with_channel')(json.params)
       break
@@ -129,19 +135,20 @@ module.exports = async (ws, json) => {
 
         let hub = K.hubs.find((h) => h.id == json.params.id)
 
-        let ch = await Channel.get(hub.pubkey, 1)
+        let ch = await Channel.get(hub.pubkey)
+        let subch = ch.d.subchannels.by('asset', 1)
 
-        ch.d.hard_limit = K.hard_limit
-        ch.d.soft_limit = K.soft_limit
+        subch.hard_limit = K.hard_limit
+        subch.soft_limit = K.soft_limit
 
         me.send(
           hub,
           'setLimits',
           me.envelope(
             methodMap('setLimits'),
-            ch.d.asset,
-            ch.d.soft_limit,
-            ch.d.hard_limit
+            1,
+            subch.soft_limit,
+            subch.hard_limit
           )
         )
 

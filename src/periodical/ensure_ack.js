@@ -12,7 +12,7 @@ module.exports = async () => {
   })
 
   for (let d of deltas) {
-    let ch = await Channel.get(d.partnerId, d.asset)
+    let ch = await Channel.get(d.partnerId)
     //cache.ch[key]
     if (!ch) continue
 
@@ -51,7 +51,7 @@ module.exports = async () => {
         ) {
           to_reveal.push(inward.outcome)
         } else {
-          l('Already unlocked in ', ch.d.dataValues)
+          l('Already unlocked in ', ch.d)
         }
       }
     }
@@ -64,9 +64,7 @@ module.exports = async () => {
       )
 
       me.batchAdd('revealSecrets', to_reveal)
-      me.batchAdd('disputeWith', [await deltaGetDispute(ch.d)])
-      ch.d.status = 'disputed'
-      ch.d.ack_requested_at = null
+      me.batchAdd('disputeWith', await startDispute(ch))
     }
   }
 }

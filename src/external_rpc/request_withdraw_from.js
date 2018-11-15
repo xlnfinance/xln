@@ -14,14 +14,15 @@ module.exports = async (args) => {
 
   await section(['use', pubkey], async () => {
     let ch = await Channel.get(pubkey)
+    let subch = ch.d.subchannels.by('asset', asset)
 
-    if (ch.d.they_withdrawal_amount > 0) {
+    if (subch.they_withdrawal_amount > 0) {
       l('Partner already has withdrawal from us')
       //return false
     }
 
-    if (amount == 0 || amount > ch.they_insured) {
-      l(`Partner asks for ${amount} but owns ${ch.they_insured}`)
+    if (amount == 0 || amount > ch.derived[asset].they_insured) {
+      l(`Partner asks for ${amount} but owns ${ch.derived[asset].they_insured}`)
       return false
     }
 
@@ -31,12 +32,12 @@ module.exports = async (args) => {
       ch.ins.rightId,
       ch.ins.withdrawal_nonce,
       amount,
-      ch.d.asset
+      asset
     ])
 
-    if (amount > ch.d.they_withdrawal_amount) {
+    if (amount > subch.they_withdrawal_amount) {
       // only keep the highest amount we signed on
-      ch.d.they_withdrawal_amount = amount
+      subch.they_withdrawal_amount = amount
     }
 
     if (argv.syncdb) ch.d.save()
