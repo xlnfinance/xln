@@ -24,7 +24,6 @@ const payMonkey = async (on_server, counter = 1) => {
   if (on_server) {
     // replenish with testnet faucet once in a while
 
-    //if (ch.payable < 3000 && argv.monkey && !me.my_hub) {
     //if (counter % 300 == 10) me.testnet({partner: 1, amount: 10000000})
 
     setTimeout(() => {
@@ -47,8 +46,6 @@ if (argv.monkey) {
   if (base_port != 8008) {
     Periodical.schedule('broadcast', K.blocktime * 1000)
   }
-
-  return //TODO
 
   if (base_port > 8000 && base_port <= 8003) {
     let loc = on_server
@@ -174,7 +171,7 @@ if (argv.monkey) {
     // withdraw 12.34 from hub and deposit 9.12 to 3@1
     Channel.get(K.hubs[0].pubkey).then((ch) => {
       require('./internal_rpc/with_channel')({
-        id: ch.d.id,
+        partnerId: toHex(ch.d.partnerId),
         op: 'withdraw',
         amount: 912
       })

@@ -17,6 +17,9 @@ module.exports = (ws, msg) => {
     let inputType = methodMap(msgb[0])
 
     switch (inputType) {
+      case 'JSON':
+        return require('./with_channel')(ws, args)
+
       case 'auth':
         return require('./auth')(ws, args)
       case 'tx':
@@ -31,19 +34,11 @@ module.exports = (ws, msg) => {
         return me.processChain(args)
       case 'sync':
         return require('./sync')(ws, args)
-      case 'setLimits':
-        return require('./set_limits')(args)
 
       case 'textMessage':
         react({confirm: args[0].toString()})
         return
 
-      case 'requestWithdrawFrom':
-        return require('./request_withdraw_from')(args)
-      case 'withdrawFrom':
-        return require('./withdraw_from')(args)
-      case 'update':
-        return require('./update')(args)
       case 'testnet':
         return require('./testnet')(args)
       default:

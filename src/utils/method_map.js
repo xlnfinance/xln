@@ -47,16 +47,17 @@ module.exports = (i) => {
         'tx', // propose array of tx to add to block
         'sync', // i want to sync since this prev_hash
         'chain', // return X blocks since given prev_hash
-        'requestWithdrawFrom',
+
         'ack',
         'testnet',
-        'requestInsurance',
 
         // outcomes
         'outcomeSecret',
         'outcomeCapacity',
         'outcomeOffline',
         'outcomeDisputed',
+
+        'JSON',
 
         'textMessage' // random message to notify
     ]

@@ -22,8 +22,12 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       flushable.push(add)
     }
   }
+  l('got debug', debug)
 
-  let [theirInitialState, theirFinalState, theirSignedState] = debug
+  // decode from hex and unpack
+  let [theirInitialState, theirFinalState, theirSignedState] = debug.map(
+    (d) => (d ? r(fromHex(d)) : false)
+  )
 
   let ourSignedState = r(ch.d.signed_state)
   prettyState(ourSignedState)
@@ -106,11 +110,12 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
 
   // we apply a transition to canonical state, if sig is valid - execute the action
   for (let t of transitions) {
-    let m = methodMap(readInt(t[0]))
+    let m = methodMap(t[0])
 
     if (m == 'add' || m == 'addrisk') {
       let [asset, amount, hash, exp, unlocker] = t[1]
-      ;[asset, exp, amount] = [asset, exp, amount].map(readInt)
+      //;[asset, exp, amount] = [asset, exp, amount].map(readInt)
+      ;[hash, unlocker] = [hash, unlocker].map(fromHex)
 
       l(`Apply ${m} on ${asset} `)
 
@@ -156,7 +161,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       // check new state and sig, save
       ch.d.dispute_nonce++
 
-      if (!deltaVerify(ch.d, refresh(ch), t[2])) {
+      if (!deltaVerify(ch.d, refresh(ch), fromHex(t[2]))) {
         loff('error: Invalid state sig add')
         mismatch('error: Invalid state sig add')
 
@@ -301,8 +306,9 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       //if (argv.syncdb) all.push(inward_hl.save())
     } else if (m == 'del' || m == 'delrisk') {
       var [asset, hash, outcome_type, outcome] = t[1]
-      asset = readInt(asset)
-      outcome_type = readInt(outcome_type)
+      //asset = readInt(asset)
+      //outcome_type = readInt(outcome_type)
+      ;[hash, outcome] = [hash, outcome].map(fromHex)
 
       // try to parse outcome as secret and check its hash
       if (
@@ -341,7 +347,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       outward_hl.outcome = outcome
 
       ch.d.dispute_nonce++
-      if (!deltaVerify(ch.d, refresh(ch), t[2])) {
+      if (!deltaVerify(ch.d, refresh(ch), fromHex(t[2]))) {
         fatal('error: Invalid state sig at ' + m)
         break
       }

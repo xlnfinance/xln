@@ -44,24 +44,15 @@ module.exports = async (p) => {
 
     l('set limits to ', ch.d.partnerId)
 
-    me.send(
-      ch.d.partnerId,
-      'setLimits',
-      me.envelope(
-        methodMap('setLimits'),
-        subch.asset,
-        subch.soft_limit,
-        subch.hard_limit
-      )
-    )
+    me.sendJSON(ch.d.partnerId, 'setLimits', {
+      asset: subch.asset,
+      hard_limit: subch.hard_limit,
+      soft_limit: subch.soft_limit
+    })
 
     react({confirm: 'OK'})
   } else if (p.op == 'requestInsurance') {
-    me.send(
-      ch.d.partnerId,
-      'setLimits',
-      me.envelope(methodMap('requestInsurance'), p.asset)
-    )
+    me.sendJSON(ch.d.partnerId, 'requestInsurance', {asset: p.asset})
 
     subch.requested_insurance = true
 

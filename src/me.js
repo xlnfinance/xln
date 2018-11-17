@@ -322,6 +322,17 @@ class Me {
 
   // a generic interface to send a websocket message to some user or validator
 
+  sendJSON(m, method, tx) {
+    tx.method = method
+    let msg = bin(JSON.stringify(tx))
+
+    this.send(
+      m,
+      'JSON',
+      r([bin(me.id.publicKey), ec(msg, me.id.secretKey), msg])
+    )
+  }
+
   send(m, method, tx) {
     var msg = concat(bin([methodMap(method)]), tx)
 

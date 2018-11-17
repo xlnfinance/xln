@@ -176,14 +176,18 @@ module.exports = async (pubkey, opportunistic) => {
     }
 
     //only for debug, can be heavy
-    var debug = [
-      initialState, // state we started with
-      ch.state, // state we finished at
-      r(ch.d.signed_state) // signed state we have
+    let debug = [
+      r(initialState), // state we started with
+      r(ch.state), // state we finished at
+      ch.d.signed_state // signed state we have
     ]
 
     // transitions: method, args, sig, new state
-    let envelope = me.envelope(methodMap('update'), ackSig, transitions, debug)
+    let envelope = {
+      ackSig: ackSig,
+      transitions: transitions,
+      debug: debug
+    }
 
     if (transitions.length > 0) {
       // if there were any transitions, we need an ack on top
@@ -199,7 +203,7 @@ module.exports = async (pubkey, opportunistic) => {
         )
     }
 
-    me.send(ch.d.partnerId, 'update', envelope)
+    me.sendJSON(ch.d.partnerId, 'update', envelope)
 
     return Promise.all(flushable.map((fl) => me.flushChannel(fl, true)))
   })

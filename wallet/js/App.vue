@@ -1,15 +1,12 @@
 <template>
   <div>
     <template v-if="PK.pending_batch || (batch && batch.length > 0)">
-      <div style="
-      width:100%;
-      height:90px;"></div>
       <div style="position:fixed;
       z-index:999999;
       opacity:0.9;
-      top:0px;
+      bottom:0px;
       width:100%;
-      height:90px;
+      height:100px;
       background-color: #FFFDDE; border:thin solid #EDDD00">
         <p v-if="PK.pending_batch" style='margin: 25px;text-align:center'>
           Wait for tx to be included in next block...
@@ -207,28 +204,25 @@
               Your {{onchain}} ID: {{record.id}}
             </h4>
             <div v-for="a in PK.usedAssets">{{to_ticker(a)}}: {{commy(getAsset(a))}} <span class="badge badge-success layer-faucet" @click="call('onchainFaucet', {amount: uncommy(prompt('How much you want to get?')), asset: a })">+</span></div>
-
             <br>
-
+            <p>
+              <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="Layer ID">
+              </[td]>
               <p>
-                <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.to" placeholder="Layer ID">
-                </[td]>
-                <p>
-                  <select style="width:300px" type="text" class="form-control" v-model="externalDeposit.hub">
-                    <option value="onchain"> {{onchain}}</option>
-                    <option v-for="hub in K.hubs" :value="hub.handle"> {{hub.handle}}</option>
-                  </select>
-                </p>
-                <p>
-                  <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit">
-                </p>
-                <p>
-                  <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Public Message (optional)">
-                </p>
-                <p>
-                  <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Transfer 🌐</button>
-                </p>
-
+                <select style="width:300px" type="text" class="form-control" v-model="externalDeposit.hub">
+                  <option value="onchain"> {{onchain}}</option>
+                  <option v-for="hub in K.hubs" :value="hub.handle"> {{hub.handle}}</option>
+                </select>
+              </p>
+              <p>
+                <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.depositAmount" placeholder="Amount to deposit">
+              </p>
+              <p>
+                <input style="width:300px" type="text" class="form-control small-input" v-model="externalDeposit.invoice" placeholder="Public Message (optional)">
+              </p>
+              <p>
+                <button type="button" class="btn btn-outline-secondary" @click="addExternalDeposit">Transfer 🌐</button>
+              </p>
           </div>
           <div v-else>
             <h4 style="display:inline-block">
@@ -248,8 +242,8 @@
           </table>
           <hr class="my-4">
           <template v-if="channels.length > 0">
-            <template v-for="(ch, index) in channels">
-              <p>
+            <template v-for="ch in channels">
+ <p>
                 <h4>
                   {{K.hubs.find(h=>h.pubkey==ch.d.partnerId).handle }}
                 </h4>
@@ -258,7 +252,7 @@
                 <div v-for="subch in ch.d.subchannels">
                   <br>
 
-                  <a class="dotted" @click="subchAction.asset=subch.asset;subchAction.hard_limit=subch.hard_limit;subchAction.soft_limit=subch.soft_limit;">{{to_ticker(subch.asset)}}: {{commy(ch.derived[subch.asset].payable)}} </a><span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'testnet', action: 1, asset: subch.asset, amount: uncommy(prompt('How much you want to get?')) })">+</span>
+                  <a class="dotted" @click="subchAction.partnerId=ch.d.partnerId;subchAction.asset=subch.asset;subchAction.hard_limit=subch.hard_limit;subchAction.soft_limit=subch.soft_limit;">{{to_ticker(subch.asset)}}: {{commy(ch.derived[subch.asset].payable)}} </a><span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'testnet', action: 1, asset: subch.asset, amount: uncommy(prompt('How much you want to get?')) })">+</span>
 
 
                   <p>Insured: {{commy(ch.derived[subch.asset].insured)}} + Uninsured: {{commy(ch.derived[subch.asset].uninsured)}} <span class="badge badge-danger" @click="requestInsurance(ch, subch.asset)">Request Insurance</span>
@@ -274,19 +268,6 @@
                 </div>
               </p>
 
-                  <h4>Credit limits</h4>
-                  <p>Maximum uninsured balance</p>
-                  <p>
-                    <input type="text" class="form-control" v-model="subchAction.hard_limit">
-                  </p>
-                  <p>Automatically request insurance after</p>
-                  <p>
-                    <input type="text" class="form-control" v-model="subchAction.soft_limit">
-                  </p>
-                  <p>
-                    <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: ch.d.partnerId, asset: subchAction.asset, op: 'setLimits', hard_limit: uncommy(subchAction.hard_limit), soft_limit: uncommy(subchAction.soft_limit)})" href="#">Update Credit Limits</button>
-                  </p>
-
                   <template v-if="record">
                     <p>You are guaranteed to get <b>insured</b> part of your balance, but may lose <b>uninsured</b> part if the bank becomes insolvent. Always request insurance when your uninsured balance gets too high.
                     </p>
@@ -294,7 +275,7 @@
                       <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader> 
                     </span>
                     <p v-else>
-                      <button type="button" class="btn btn-outline-secondary" @click="call('startDispute', {partnerId: ch.d.partnerId})">Start Dispute with Bank 🌐</button>
+                      <button type="button" class="btn btn-outline-secondary" @click="call('startDispute', {partnerId: ch.d.partnerId})">Dispute 🌐</button>
                     </p>
 
                   </template>
@@ -302,8 +283,20 @@
                     Request insurance to be registered.
                   </div>
 
-
+  
             </template>
+            <h4>Credit limits</h4>
+            <p>Maximum uninsured balance</p>
+            <p>
+              <input type="text" class="form-control" v-model="subchAction.hard_limit">
+            </p>
+            <p>Automatically request insurance after</p>
+            <p>
+              <input type="text" class="form-control" v-model="subchAction.soft_limit">
+            </p>
+            <p>
+              <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: subchAction.partnerId, asset: subchAction.asset, op: 'setLimits', hard_limit: uncommy(subchAction.hard_limit), soft_limit: uncommy(subchAction.soft_limit)})" href="#">Update Credit Limits</button>
+            </p>
             <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
             <div class="col-sm-6" style="width:300px">
               <p>
@@ -322,12 +315,6 @@
                 </div>
               </p>
             </div>
-
-
-
-
-
-
             <template v-if="outward_address.length > 0">
               <p v-if="bestRoutes.length == 0">
                 No route found for this payment.
@@ -385,347 +372,337 @@
         </form>
       </div>
       <div v-else-if="tab=='hubs'">
-          <p>Banks inside Fairlayer are provably-solvent by design. Your device always stores a cryptographic dispute proof in case you need to get your assets back. Choose your banks based on people and businesses you transact with, your location and their track record. If a bank is compromised you may lose your uninsured balance, so don't forget to request insurance.</p>
-          <table class="table table-striped">
-            <thead class="thead-dark">
+        <p>Banks inside Fairlayer are provably-solvent by design. Your device always stores a cryptographic dispute proof in case you need to get your assets back. Choose your banks based on people and businesses you transact with, your location and their track record. If a bank is compromised you may lose your uninsured balance, so don't forget to request insurance.</p>
+
+
+        <template v-for="u in K.hubs">
+          <h1>{{u.handle}}</h1>
+
+          <small>Created at {{new Date(u.createdAt*1000).toDateString()}}</small>
+
+          <p>Fees: {{bpsToPercent(u.fee_bps)}}</p>
+
+          <p v-if="PK">
+            <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-outline-danger" @click="call('toggleHub', {id: u.id})">Close Account</button>
+            <button v-else-if="my_hub && my_hub.id==u.id" class="btn btn-outline-success">It's you</button>
+            <button v-else class="btn btn-outline-success" @click="call('toggleHub', {id: u.id})">Open an Account</button>
+          </p>
+        </template>
+
+        <div class="form-group">
+          <h2>Create a Bank</h2>
+          <p>
+            <label for="comment">Handle:</label>
+            <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input>
+          </p>
+          <p>
+            <label for="comment">Fee (in basis points, 10 is 0.10%):</label>
+            <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Fairlayer-compatible RPC:</label>
+            <input class="form-control" v-model="new_hub.location" rows="2"></input>
+          </p>
+          <p>
+            <label for="comment">Routes to add (their bank id, route agreement in hex):</label>
+            <input class="form-control" v-model="new_hub.add_routes" rows="2"></input>
+          </p>
+          <p>
+            <label for="comment">Routes to remove (comma separated ids):</label>
+            <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input>
+          </p>
+          <p v-if="record && !my_hub">
+            <button class="btn btn-outline-success" @click="call('createHub', new_hub)">Create Bank 🌐</button>
+          </p>
+          <p v-else-if="my_hub"><b>You are already a bank.</b></p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+          <div class="alert alert-primary">After execution this account will be marked as a bank. Do not use this account for any other purposes.</div>
+        </div>
+        <svg width="800" height="600" id="hubgraph"></svg>
+      </div>
+      <div v-else-if="tab=='exchange'">
+        <h3>Trustless {{onchain}} Exchange</h3>
+        <p>{{onchain}} exchange is best suitable for large atomic swaps between two assets - it always incurs an expensive fees but is free of any counterparty risk. If you're looking to trade frequently or small amounts, try any traditional exchange that supports Fair assets.</p>
+        <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
+        <p>
+          <input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
+        </p>
+        <p>Asset you are buying (you have {{commy(getAsset(order.buyAssetId))}}):</p>
+        <p>
+          <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
+            <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.name}} ({{a.ticker}})</option>
+          </select>
+        </p>
+        <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
+        <p>
+          <input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate" @input="estimate(false)">
+        </p>
+        <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
+        <p>
+          <input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)">
+        </p>
+        <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
+        <p v-if="pubkey && record && getAsset(1) > 200">
+          <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order 🌐</button>
+        </p>
+        <p v-else>In order to trade you must have a registered account with FRD in {{onchain}}.</p>
+        <table v-if="orders.length>0" class="table">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Seller ID</th>
+              <th scope="col">Sell Asset </th>
+              <th scope="col">Pair</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Rate</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="b in orders">
               <tr>
-                <th scope="col">#</th>
-                <th scope="col">Handle</th>
-                <th scope="col">Created At</th>
-                <th scope="col">Fee</th>
-                <th scope="col">Total FRD Insurances</th>
-                <th v-if="PK" scope="col">Action</th>
+                <td>{{b.id}}</td>
+                <td>{{to_user(b.userId)}}</td>
+                <td>{{to_ticker(b.assetId)}}</td>
+                <td>{{[b.assetId, b.buyAssetId].sort().reverse().map(to_ticker).join('/')}}</td>
+                <td>{{commy(b.amount)}}</td>
+                <td>{{b.rate.toFixed(6)}}</td>
+                <td v-if="record && record.id == b.userId">
+                  <button @click="call('cancelOrder', {id: b.id})" class="btn btn-outline-success">Cancel</button>
+                </td>
+                <td v-else>
+                  <button class="btn btn-outline-success" @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; estimate(false)">Fulfill</td>
               </tr>
-            </thead>
-            <tbody>
-              <tr v-for="u in K.hubs">
-                <th>{{u.id}}</th>
-                <th>{{u.handle}}</th>
-                <th>{{new Date(u.createdAt*1000).toDateString()}}</th>
-                <th>{{bpsToPercent(u.fee_bps)}}</th>
-                <th>{{commy(u.sumForUser)}}</th>
-                <th v-if="PK">
-                  <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-outline-danger" @click="call('toggleHub', {id: u.id})">Close Account</button>
-                  <button v-else-if="my_hub && my_hub.id==u.id" class="btn btn-outline-success">It's you</button>
-                  <button v-else class="btn btn-outline-success" @click="call('toggleHub', {id: u.id})">Open an Account</button>
-                </th>
-              </tr>
-            </tbody>
-          </table>
-          <div class="form-group">
-            <h2>Create a Bank</h2>
-            <p>
-              <label for="comment">Handle:</label>
-              <input class="form-control" v-model="new_hub.handle" rows="2" placeholder="newhub"></input>
-            </p>
-            <p>
-              <label for="comment">Fee (in basis points, 10 is 0.10%):</label>
-              <input class="form-control" v-model="new_hub.fee_bps" rows="2" id="comment"></input>
-            </p>
-            <p>
-              <label for="comment">Fairlayer-compatible RPC:</label>
-              <input class="form-control" v-model="new_hub.location" rows="2"></input>
-            </p>
-            <p>
-              <label for="comment">Routes to add (their bank id, route agreement in hex):</label>
-              <input class="form-control" v-model="new_hub.add_routes" rows="2"></input>
-            </p>
-            <p>
-              <label for="comment">Routes to remove (comma separated ids):</label>
-              <input class="form-control" v-model="new_hub.remove_routes" rows="2"></input>
-            </p>
-            <p v-if="record && !my_hub">
-              <button class="btn btn-outline-success" @click="call('createHub', new_hub)">Create Bank 🌐</button>
-            </p>
-            <p v-else-if="my_hub"><b>You are already a bank.</b></p>
-            <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
-            <div class="alert alert-primary">After execution this account will be marked as a bank. Do not use this account for any other purposes.</div>
-          </div>
-          <svg width="800" height="600" id="hubgraph"></svg>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div v-else-if="tab=='install'">
+        <h4>Web Wallet (optimized for convenience)</h4>
+        <p>If you are on mobile or want to store only small amounts you can use a <a href="https://web.fairlayer.com">custodian web wallet</a></p>
+        <h4>Instant Web Demo</h4>
+        <p><a href="/demoinstance">Try Fair Core for 1 hour without installing it on your computer.</a> Currently active sessions: {{busyPorts}}</p>
+        <h4>Fair Core (optimized for security)</h4>
+        <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app and press Enter:</p>
+        <div style="background-color: #FFFDDE; padding-left: 10px;">
+          <Highlight :white="true" lang="bash" :code="install_snippet"></Highlight>
         </div>
-        <div v-else-if="tab=='exchange'">
-          <h3>Trustless {{onchain}} Exchange</h3>
-          <p>{{onchain}} exchange is best suitable for large atomic swaps between two assets - it always incurs an expensive fees but is free of any counterparty risk. If you're looking to trade frequently or small amounts, try any traditional exchange that supports Fair assets.</p>
-          <p>Amount of {{to_ticker(asset)}} you want to sell (you have {{commy(getAsset(asset))}}):</p>
-          <p>
-            <input style="width:300px" class="form-control small-input" v-model="order.amount" placeholder="Amount to sell" @input="estimate(false)">
-          </p>
-          <p>Asset you are buying (you have {{commy(getAsset(order.buyAssetId))}}):</p>
-          <p>
-            <select v-model="order.buyAssetId" class="custom-select custom-select-lg lg-3">
-              <option v-for="(a,index) in assets" v-if="a.id!=asset" :value="a.id">{{a.name}} ({{a.ticker}})</option>
-            </select>
-          </p>
-          <p>Rate {{[asset, order.buyAssetId].sort().reverse().map(to_ticker).join('/')}}:</p>
-          <p>
-            <input style="width:300px" class="form-control small-input" v-model="order.rate" placeholder="Rate" @input="estimate(false)">
-          </p>
-          <p>{{to_ticker(order.buyAssetId)}} you will get:</p>
-          <p>
-            <input style="width:300px" class="form-control small-input" v-model="order.buyAmount" @input="estimate(true)">
-          </p>
-          <div v-if="![asset, order.buyAssetId].includes(1)" class="alert alert-danger">You are trading pair without FRD, beware of small orderbook and lower liquidity in direct pairs.</div>
-          <p v-if="pubkey && record && getAsset(1) > 200">
-            <button type="button" class="btn btn-warning" @click="call('createOrder', {order: order, asset: asset})">Create Order 🌐</button>
-          </p>
-          <p v-else>In order to trade you must have a registered account with FRD in {{onchain}}.</p>
-          <table v-if="orders.length>0" class="table">
-            <thead class="thead-dark">
-              <tr>
-                <th scope="col">#</th>
-                <th scope="col">Seller ID</th>
-                <th scope="col">Sell Asset </th>
-                <th scope="col">Pair</th>
-                <th scope="col">Amount</th>
-                <th scope="col">Rate</th>
-                <th scope="col">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="b in orders">
-                <tr>
-                  <td>{{b.id}}</td>
-                  <td>{{to_user(b.userId)}}</td>
-                  <td>{{to_ticker(b.assetId)}}</td>
-                  <td>{{[b.assetId, b.buyAssetId].sort().reverse().map(to_ticker).join('/')}}</td>
-                  <td>{{commy(b.amount)}}</td>
-                  <td>{{b.rate.toFixed(6)}}</td>
-                  <td v-if="record && record.id == b.userId">
-                    <button @click="call('cancelOrder', {id: b.id})" class="btn btn-outline-success">Cancel</button>
-                  </td>
-                  <td v-else>
-                    <button class="btn btn-outline-success" @click="order.amount = buyAmount(b); order.rate = b.rate; order.buyAssetId=b.assetId; asset = b.buyAssetId; estimate(false)">Fulfill</td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
+        <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
+        <ul>
+          <li v-for="m in K.validators" v-if="m.website && (!my_validator || m.id != my_validator.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
+        </ul>
+      </div>
+      <div v-else-if="tab=='updates'">
+        <h3>Smart Updates</h3>
+        <p>Smart updates solve the same problem as smart contracts - they are adding a new functionality into the blockchain. While smart contracts run inside a complicated virtual machine with execution overhead and opcode limitations, smart updates modify the underlying blockchain software and provide a more effective and powerful way to add a new feature or fix a problem. Anyone can propose a smart update, validators vote for it and then it is syncroniously applied across all nodes.</p>
+        <div class="form-group">
+          <label for="comment">Description:</label>
+          <textarea class="form-control" v-model="proposal[0]" rows="2" id="comment"></textarea>
         </div>
-        <div v-else-if="tab=='install'">
-          <h4>Web Wallet (optimized for convenience)</h4>
-          <p>If you are on mobile or want to store only small amounts you can use a <a href="https://web.fairlayer.com">custodian web wallet</a></p>
-          <h4>Instant Web Demo</h4>
-          <p><a href="/demoinstance">Try Fair Core for 1 hour without installing it on your computer.</a> Currently active sessions: {{busyPorts}}</p>
-          <h4>Fair Core (optimized for security)</h4>
-          <p>Install <a href="https://nodejs.org/en/download/">Node.js</a> (9.6.0+) and copy paste this snippet into your Terminal app and press Enter:</p>
-          <div style="background-color: #FFFDDE; padding-left: 10px;">
-            <Highlight :white="true" lang="bash" :code="install_snippet"></Highlight>
-          </div>
-          <p><b>For higher security</b> visit a few trusted nodes below and verify the snippet to ensure our server isn't compromised. Only paste the snippet into Terminal if there is exact match with other sources.</p>
-          <ul>
-            <li v-for="m in K.validators" v-if="m.website && (!my_validator || m.id != my_validator.id)"><a v-bind:href="m.website+'/#install'">{{m.website}} - by {{m.username}} ({{m.platform}})</a></li>
-          </ul>
+        <div class="form-group">
+          <label for="comment">Code to execute (optional):</label>
+          <textarea class="form-control" v-model="proposal[1]" rows="2" id="comment"></textarea>
         </div>
-        <div v-else-if="tab=='updates'">
-          <h3>Smart Updates</h3>
-          <p>Smart updates solve the same problem as smart contracts - they are adding a new functionality into the blockchain. While smart contracts run inside a complicated virtual machine with execution overhead and opcode limitations, smart updates modify the underlying blockchain software and provide a more effective and powerful way to add a new feature or fix a problem. Anyone can propose a smart update, validators vote for it and then it is syncroniously applied across all nodes.</p>
-          <div class="form-group">
-            <label for="comment">Description:</label>
-            <textarea class="form-control" v-model="proposal[0]" rows="2" id="comment"></textarea>
-          </div>
-          <div class="form-group">
-            <label for="comment">Code to execute (optional):</label>
-            <textarea class="form-control" v-model="proposal[1]" rows="2" id="comment"></textarea>
-          </div>
-          <div class="form-group">
-            <input class="form-check-input" type="checkbox" v-model="proposal[2]"> Add patch
-          </div>
-          <p>
-            <button @click="call('propose', proposal)" class="btn btn-warning">Propose 🌐</button>
-          </p>
-          <div v-for="p in proposals">
-            <h4>#{{p.id}}: {{p.desc}}</h4>
-            <small>Proposed by {{to_user(p.user.id)}}</small>
-            <UserIcon :hash="p.user.pubkey" :size="30"></UserIcon>
-            <Highlight lang="javascript" :code="p.code"></Highlight>
-            <div v-if="p.patch">
-              <div style="line-height:15px; font-size:12px;">
-                <Highlight lang="diff" :code="p.patch"></Highlight>
-              </div>
-            </div>
-            <p v-for="u in p.voters">
-              <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
-              <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by {{to_user(u.id)}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
-            </p>
-            <small>To be executed at {{p.delayed}} usable block</small>
-            <div v-if="record">
-              <p v-if="!ivoted(p.voters)">
-                <button @click="call('vote', {approval: 1, id: p.id})" class="btn btn-outline-success">Approve 🌐</button>
-                <button @click="call('vote', {approval: 0, id: p.id})" class="btn btn-outline-danger">Deny 🌐</button>
-              </p>
+        <div class="form-group">
+          <input class="form-check-input" type="checkbox" v-model="proposal[2]"> Add patch
+        </div>
+        <p>
+          <button @click="call('propose', proposal)" class="btn btn-warning">Propose 🌐</button>
+        </p>
+        <div v-for="p in proposals">
+          <h4>#{{p.id}}: {{p.desc}}</h4>
+          <small>Proposed by {{to_user(p.user.id)}}</small>
+          <UserIcon :hash="p.user.pubkey" :size="30"></UserIcon>
+          <Highlight lang="javascript" :code="p.code"></Highlight>
+          <div v-if="p.patch">
+            <div style="line-height:15px; font-size:12px;">
+              <Highlight lang="diff" :code="p.patch"></Highlight>
             </div>
           </div>
-        </div>
-        <div v-else-if="tab=='blockchain_explorer'">
-          <h1>Blockchain Explorer</h1>
-          <p>These transactions were publicly broadcasted and executed on every full node, including yours. Blockchain space is reserved for insurance rebalances, disputes and other high-level settlement actions.</p>
-          <p v-if="nextValidator">Next validator: {{to_user(nextValidator.id)}}</p>
-          <table v-if="blocks.length>0" class="table">
-            <thead class="thead-dark">
-              <tr>
-                <th scope="col">#</th>
-                <th scope="col">Prev Hash</th>
-                <th scope="col">Hash</th>
-                <th scope="col">Relayed By</th>
-                <th scope="col">Total Tx</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="b in blocks">
-                <tr>
-                  <td>{{b.id}}</td>
-                  <td>{{b.prev_hash.substr(0,10)}}</td>
-                  <td>{{b.hash.substr(0,10)}}</td>
-                  <td>{{b.built_by}} ({{new Date(b.timestamp*1000)}})</td>
-                  <td>{{b.total_tx}}</td>
-                </tr>
-                <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
-                  <td colspan="7">
-                    <span class="badge badge-warning">By {{to_user(batch.signer.id)}} ({{batch.gas}}*{{commy(batch.gasprice, true, false)}}={{commy(batch.txfee)}} fee):</span>&nbsp;
-                    <template v-for="d in batch.events">
-                      &nbsp;
-                      <span v-if="d[0]=='disputeWith'" class="badge badge-primary" v-html="dispute_outcome(d[2], d[3], d[4])">
-                    </span>
-                      <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">{{d[1]}} {{to_ticker(d[2])}}</span>
-                      <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{to_user(d[2])}}</span>
-                      <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Reveal: {{trim(d[1])}}</span>
-                      <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{to_user(d[2])}}</span>
-                      <span v-else-if="d[0]=='depositTo'" class="badge badge-success">{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': to_user(d[2]))+'@'+to_user(d[3])) : to_user(d[2])}}{{d[4] ? ' for '+d[4] : ''}}</span>
-                      <span v-else-if="d[0]=='createOrder'" class="badge badge-dark">Created order {{commy(d[2])}} {{to_ticker(d[1])}} for {{to_ticker(d[3])}}</span>
-                      <span v-else-if="d[0]=='cancelOrder'" class="badge badge-dark">Cancelled order {{d[1]}}</span>
-                      <span v-else-if="d[0]=='createAsset'" class="badge badge-dark">Created {{commy(d[2])}} of asset {{d[1]}}</span>
-                      <span v-else-if="d[0]=='createHub'" class="badge badge-dark">Created bank {{d[1]}}</span>
-                    </template>
-                  </td>
-                </tr>
-                <tr v-if="b.meta">
-                  <td v-if="b.meta.cron.length + b.meta.missed_validators.length > 0" colspan="7">
-                    <template v-if="b.meta.cron.length > 0" v-for="m in b.meta.cron">
-                      <span v-if="m[0] == 'maturity'" class="badge badge-primary">🎉 Maturity day! All FRB balances are copied to FRD balances.</span>
-                      <span v-else-if="m[0] == 'resolved'" class="badge badge-primary" v-html="dispute_outcome(m[0], m[1], m[2])"></span>
-                      <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
-                      <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span> &nbsp;
-                    </template>
-                    <span v-if="b.meta.missed_validators.length > 0" class="badge badge-danger">Missed signatures from validators: {{b.meta.missed_validators.join(', ')}}</span>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-          <div v-else>
-            <p><b>This node does not keep blocks. <a href="https://fairlayer.com/#blockchain_explorer">Try public explorer.</a></b></p>
-          </div>
-        </div>
-        <div v-else-if="tab=='account_explorer'">
-          <h1>Account Explorer</h1>
-          <p>This is a table of registered users in the network. {{onchain}} balance is normally used to pay transaction fees, and most assets are stored with banks under Insurance explorer.</p>
-          <table class="table table-striped">
-            <thead class="thead-dark">
-              <tr>
-                <th scope="col">Icon</th>
-                <th scope="col">ID</th>
-                <th scope="col">Name</th>
-                <th scope="col">Pubkey</th>
-                <th scope="col">Assets</th>
-                <th scope="col">Batch Nonce</th>
-                <th scope="col">Debts</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="u in users">
-                <th>
-                  <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
-                </th>
-                <th scope="row">{{to_user(u.id)}}</th>
-                <td>{{u.username}}</td>
-                <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
-                <td><span v-for="b in u.balances">{{to_ticker(b.asset)}}: {{commy(b.balance)}}</span></td>
-                <td>{{u.batch_nonce}}</td>
-                <td>{{u.debts.length}}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else-if="tab=='channel_explorer'">
-          <h1>Insurance Explorer</h1>
-          <p>Insurances represent collateral between two parties.</p>
-          <table class="table table-striped">
-            <thead class="thead-dark">
-              <tr>
-                <th scope="col">Left ID</th>
-                <th scope="col">Right ID</th>
-                <th scope="col">Insurances</th>
-                <th scope="col">Withdrawal Nonce</th>
-                <th scope="col">Dispute</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="ins in insurances">
-                <th v-html="to_user(ins.leftId)"></th>
-                <th v-html="to_user(ins.rightId)"></th>
-                <th><span v-for="subins in ins.subinsurances">{{to_ticker(subins.asset)}}: {{commy(subins.balance)}}</span></th>
-                <th>{{ins.withdrawal_nonce}}</th>
-                <th>{{ins.dispute_delayed ? "Until "+ins.dispute_delayed+" started by "+(ins.dispute_left ? 'Left' : 'Right') : "No" }}</th>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div v-else-if="tab=='assets'">
-          <h1>Assets</h1>
-          <p>Fair assets is the name for all kinds of fiat/crypto-currencies, tokens and stock you can create on top of the system.</p>
-          <table class="table table-striped">
-            <thead class="thead-dark">
-              <tr>
-                <th scope="col">Ticker</th>
-                <th scope="col">Name</th>
-                <th scope="col">Description</th>
-                <th scope="col">Total Supply</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="u in assets">
-                <th>{{u.ticker}}</th>
-                <th>{{u.name}}</th>
-                <th>{{u.desc}}</th>
-                <th>{{commy(u.total_supply)}}</th>
-                <th v-if="PK">
-                  <button v-if="PK.usedAssets.includes(u.id)" class="btn btn-outline-danger" @click="call('toggleAsset', {id: u.id})">Remove</button>
-                  <button v-else class="btn btn-outline-success" @click="call('toggleAsset', {id: u.id})">Add</button>
-                </th>
-              </tr>
-            </tbody>
-          </table>
-          <div class="form-group">
-            <h2>Create an Asset</h2>
-            <p>
-              <label for="comment">Name:</label>
-              <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input>
+          <p v-for="u in p.voters">
+            <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
+            <b>{{u.vote.approval ? 'Approved' : 'Denied'}}</b> by {{to_user(u.id)}}: {{u.vote.rationale ? u.vote.rationale : '(no rationale)'}}
+          </p>
+          <small>To be executed at {{p.delayed}} usable block</small>
+          <div v-if="record">
+            <p v-if="!ivoted(p.voters)">
+              <button @click="call('vote', {approval: 1, id: p.id})" class="btn btn-outline-success">Approve 🌐</button>
+              <button @click="call('vote', {approval: 0, id: p.id})" class="btn btn-outline-danger">Deny 🌐</button>
             </p>
-            <p>
-              <label for="comment">Ticker (must be unique):</label>
-              <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input>
-            </p>
-            <p>
-              <label for="comment">Amount:</label>
-              <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input>
-            </p>
-            <p>
-              <label for="comment">Division point (e.g. 0 for yen, 2 for dollar):</label>
-              <input class="form-control" v-model="new_asset.division" rows="2" id="comment"></input>
-            </p>
-            <p>
-              <label for="comment">Description:</label>
-              <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input>
-            </p>
-            <p v-if="record">
-              <button class="btn btn-outline-success" @click="call('createAsset', new_asset)">Create Asset 🌐</button>
-            </p>
-            <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
-            <div class="alert alert-primary">After creation the entire supply will appear on your {{onchain}} balance, then you can deposit it to a bank and start sending instantly to other users.</div>
           </div>
         </div>
       </div>
+      <div v-else-if="tab=='blockchain_explorer'">
+        <h1>Blockchain Explorer</h1>
+        <p>These transactions were publicly broadcasted and executed on every full node, including yours. Blockchain space is reserved for insurance rebalances, disputes and other high-level settlement actions.</p>
+        <p v-if="nextValidator">Next validator: {{to_user(nextValidator.id)}}</p>
+        <table v-if="blocks.length>0" class="table">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Prev Hash</th>
+              <th scope="col">Hash</th>
+              <th scope="col">Relayed By</th>
+              <th scope="col">Total Tx</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="b in blocks">
+              <tr>
+                <td>{{b.id}}</td>
+                <td>{{b.prev_hash.substr(0,10)}}</td>
+                <td>{{b.hash.substr(0,10)}}</td>
+                <td>{{b.built_by}} ({{new Date(b.timestamp*1000)}})</td>
+                <td>{{b.total_tx}}</td>
+              </tr>
+              <tr v-for="batch in (b.meta && b.meta.parsed_tx)">
+                <td colspan="7">
+                  <span class="badge badge-warning">By {{to_user(batch.signer.id)}} ({{batch.gas}}*{{commy(batch.gasprice, true, false)}}={{commy(batch.txfee)}} fee):</span>&nbsp;
+                  <template v-for="d in batch.events">
+                    &nbsp;
+                    <span v-if="d[0]=='disputeWith'" class="badge badge-primary" v-html="dispute_outcome(d[2], d[3], d[4])">
+                    </span>
+                    <span v-else-if="d[0]=='setAsset'" class="badge badge-dark">{{d[1]}} {{to_ticker(d[2])}}</span>
+                    <span v-else-if="d[0]=='withdrawFrom'" class="badge badge-danger">{{commy(d[1])}} from {{to_user(d[2])}}</span>
+                    <span v-else-if="d[0]=='revealSecrets'" class="badge badge-danger">Reveal: {{trim(d[1])}}</span>
+                    <span v-else-if="d[0]=='enforceDebt'" class="badge badge-dark">{{commy(d[1])}} debt to {{to_user(d[2])}}</span>
+                    <span v-else-if="d[0]=='depositTo'" class="badge badge-success">{{commy(d[1])}} to {{d[3] ? ((d[2] == batch.signer.id ? '': to_user(d[2]))+'@'+to_user(d[3])) : to_user(d[2])}}{{d[4] ? ' for '+d[4] : ''}}</span>
+                    <span v-else-if="d[0]=='createOrder'" class="badge badge-dark">Created order {{commy(d[2])}} {{to_ticker(d[1])}} for {{to_ticker(d[3])}}</span>
+                    <span v-else-if="d[0]=='cancelOrder'" class="badge badge-dark">Cancelled order {{d[1]}}</span>
+                    <span v-else-if="d[0]=='createAsset'" class="badge badge-dark">Created {{commy(d[2])}} of asset {{d[1]}}</span>
+                    <span v-else-if="d[0]=='createHub'" class="badge badge-dark">Created bank {{d[1]}}</span>
+                  </template>
+                </td>
+              </tr>
+              <tr v-if="b.meta">
+                <td v-if="b.meta.cron.length + b.meta.missed_validators.length > 0" colspan="7">
+                  <template v-if="b.meta.cron.length > 0" v-for="m in b.meta.cron">
+                    <span v-if="m[0] == 'maturity'" class="badge badge-primary">🎉 Maturity day! All FRB balances are copied to FRD balances.</span>
+                    <span v-else-if="m[0] == 'resolved'" class="badge badge-primary" v-html="dispute_outcome(m[0], m[1], m[2])"></span>
+                    <span v-else-if="m[0] == 'snapshot'" class="badge badge-primary">Generated a new snapshot at #{{m[1]}}</span>
+                    <span v-else-if="m[0] == 'executed'" class="badge badge-primary">Proposal {{m[1]}} gained majority vote and was executed</span> &nbsp;
+                  </template>
+                  <span v-if="b.meta.missed_validators.length > 0" class="badge badge-danger">Missed signatures from validators: {{b.meta.missed_validators.join(', ')}}</span>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div v-else>
+          <p><b>This node does not keep blocks. <a href="https://fairlayer.com/#blockchain_explorer">Try public explorer.</a></b></p>
+        </div>
+      </div>
+      <div v-else-if="tab=='account_explorer'">
+        <h1>Account Explorer</h1>
+        <p>This is a table of registered users in the network. {{onchain}} balance is normally used to pay transaction fees, and most assets are stored with banks under Insurance explorer.</p>
+        <table class="table table-striped">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">Icon</th>
+              <th scope="col">ID</th>
+              <th scope="col">Name</th>
+              <th scope="col">Pubkey</th>
+              <th scope="col">Assets</th>
+              <th scope="col">Batch Nonce</th>
+              <th scope="col">Debts</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in users">
+              <th>
+                <UserIcon :hash="u.pubkey" :size="30"></UserIcon>
+              </th>
+              <th scope="row">{{to_user(u.id)}}</th>
+              <td>{{u.username}}</td>
+              <td><small>{{u.pubkey.substr(0,10)}}..</small></td>
+              <td><span v-for="b in u.balances">{{to_ticker(b.asset)}}: {{commy(b.balance)}}</span></td>
+              <td>{{u.batch_nonce}}</td>
+              <td>{{u.debts.length}}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else-if="tab=='channel_explorer'">
+        <h1>Insurance Explorer</h1>
+        <p>Insurances represent collateral between two parties.</p>
+        <table class="table table-striped">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">Left ID</th>
+              <th scope="col">Right ID</th>
+              <th scope="col">Insurances</th>
+              <th scope="col">Withdrawal Nonce</th>
+              <th scope="col">Dispute</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="ins in insurances">
+              <th v-html="to_user(ins.leftId)"></th>
+              <th v-html="to_user(ins.rightId)"></th>
+              <th><span v-for="subins in ins.subinsurances">{{to_ticker(subins.asset)}}: {{commy(subins.balance)}}</span></th>
+              <th>{{ins.withdrawal_nonce}}</th>
+              <th>{{ins.dispute_delayed ? "Until "+ins.dispute_delayed+" started by "+(ins.dispute_left ? 'Left' : 'Right') : "No" }}</th>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else-if="tab=='assets'">
+        <h1>Assets</h1>
+        <p>Fair assets is the name for all kinds of fiat/crypto-currencies, tokens and stock you can create on top of the system.</p>
+        <table class="table table-striped">
+          <thead class="thead-dark">
+            <tr>
+              <th scope="col">Ticker</th>
+              <th scope="col">Name</th>
+              <th scope="col">Description</th>
+              <th scope="col">Total Supply</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in assets">
+              <th>{{u.ticker}}</th>
+              <th>{{u.name}}</th>
+              <th>{{u.desc}}</th>
+              <th>{{commy(u.total_supply)}}</th>
+              <th v-if="PK">
+                <button v-if="PK.usedAssets.includes(u.id)" class="btn btn-outline-danger" @click="call('toggleAsset', {id: u.id})">Remove</button>
+                <button v-else class="btn btn-outline-success" @click="call('toggleAsset', {id: u.id})">Add</button>
+              </th>
+            </tr>
+          </tbody>
+        </table>
+        <div class="form-group">
+          <h2>Create an Asset</h2>
+          <p>
+            <label for="comment">Name:</label>
+            <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Ticker (must be unique):</label>
+            <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Amount:</label>
+            <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Division point (e.g. 0 for yen, 2 for dollar):</label>
+            <input class="form-control" v-model="new_asset.division" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Description:</label>
+            <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input>
+          </p>
+          <p v-if="record">
+            <button class="btn btn-outline-success" @click="call('createAsset', new_asset)">Create Asset 🌐</button>
+          </p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+          <div class="alert alert-primary">After creation the entire supply will appear on your {{onchain}} balance, then you can deposit it to a bank and start sending instantly to other users.</div>
+        </div>
+      </div>
     </div>
+  </div>
 </template>
 
 <script>

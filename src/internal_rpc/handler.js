@@ -141,16 +141,11 @@ module.exports = async (ws, json) => {
         subch.hard_limit = K.hard_limit
         subch.soft_limit = K.soft_limit
 
-        me.send(
-          hub,
-          'setLimits',
-          me.envelope(
-            methodMap('setLimits'),
-            1,
-            subch.soft_limit,
-            subch.hard_limit
-          )
-        )
+        me.sendJSON(hub, 'setLimits', {
+          asset: 1,
+          soft_limit: subch.soft_limit,
+          hard_limit: subch.hard_limit
+        })
 
         result.confirm = 'Hub added'
       } else {

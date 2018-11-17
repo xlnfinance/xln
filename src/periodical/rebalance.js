@@ -38,6 +38,10 @@ const rebalance = async function(asset) {
     let derived = ch.derived[asset]
     let subch = ch.d.subchannels.by('asset', asset)
 
+    if (!derived) {
+      l('No derived', ch)
+    }
+
     // finding who has uninsured balances AND
     // requests insurance OR gone beyond soft limit
     if (
@@ -51,7 +55,7 @@ const rebalance = async function(asset) {
     } else if (derived.insured >= minRisk) {
       if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
-        l('Request withdraw withdrawFrom: ' + derived)
+        l('Request withdraw withdrawFrom: ', derived)
         netSpenders.push(withdraw(ch, subch, derived.insured))
       } else if (subch.withdrawal_requested_at == null) {
         l('Delayed pull')
@@ -127,7 +131,8 @@ module.exports = () => {
 
   l('Starting rebalance')
   // we iterate over all assets in existance and rebalance each separately
-  for (let i = 1; i <= K.assets_created; i++) {
+  //K.assets_created
+  for (let i = 1; i <= 2; i++) {
     rebalance(i)
   }
 }

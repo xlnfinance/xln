@@ -35,6 +35,7 @@ resolveChannel = (insurance, delta, is_left = true) => {
   }
 
   // visual representations of state in ascii and text
+  /*
   if (delta < 0) {
     parts.ascii_channel =
       '|' + bar(parts.they_uninsured, '-') + bar(parts.they_insured, '=')
@@ -45,6 +46,7 @@ resolveChannel = (insurance, delta, is_left = true) => {
     parts.ascii_channel =
       bar(parts.insured, '=') + bar(parts.uninsured, '-') + '|'
   }
+  */
 
   // default view is left. if current user is right, simply reverse
   if (!is_left) {

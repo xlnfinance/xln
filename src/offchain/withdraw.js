@@ -7,11 +7,10 @@ module.exports = async function(ch, subch, amount) {
 
   l('Withdrawal request for ' + amount)
 
-  me.send(
-    ch.d.partnerId,
-    'requestWithdrawFrom',
-    me.envelope(amount, subch.asset)
-  )
+  me.sendJSON(ch.d.partnerId, 'requestWithdrawal', {
+    amount: amount,
+    asset: subch.asset
+  })
 
   return new Promise(async (resolve) => {
     let timeout = setTimeout(() => {

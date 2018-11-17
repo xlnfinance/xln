@@ -113,8 +113,6 @@ module.exports = async (opts) => {
     let subch = ch.d.subchannels.by('asset', asset)
     let payable = ch.derived[asset].payable
 
-    l(ch.derived[asset], amount)
-
     // 4. do we have enough payable for this hop?
     if (amount > payable) {
       if (me.my_hub) {
