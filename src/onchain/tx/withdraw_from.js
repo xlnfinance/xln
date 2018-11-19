@@ -39,6 +39,8 @@ module.exports = async (s, args) => {
     if (!ec.verify(body, withdrawal_sig, partner.pubkey)) {
       l(
         'Invalid withdrawal sig by partner ',
+        asset,
+        ins.withdrawal_nonce,
         amount,
         withdrawal_sig,
         partner.pubkey

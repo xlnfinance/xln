@@ -3,6 +3,11 @@ const withdraw = require('../offchain/withdraw')
 module.exports = async (p) => {
   // perform a specific operation on given channel
   let ch = await Channel.get(fromHex(p.partnerId))
+  if (!ch) {
+    l('no channel')
+    return
+  }
+
   let subch = ch.d.subchannels.by('asset', p.asset)
   if (!subch) {
     l('no subch')
@@ -50,7 +55,7 @@ module.exports = async (p) => {
       soft_limit: subch.soft_limit
     })
 
-    react({confirm: 'OK'})
+    //react({confirm: 'OK'})
   } else if (p.op == 'requestInsurance') {
     me.sendJSON(ch.d.partnerId, 'requestInsurance', {asset: p.asset})
 

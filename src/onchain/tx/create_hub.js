@@ -37,6 +37,15 @@ module.exports = async (s, args) => {
       // we just started our own hub
       me.my_hub = hub
       Periodical.startHub()
+    } else {
+      // start trusting new hub automatically
+      require('../../internal_rpc/with_channel')({
+        op: 'setLimits',
+        partnerId: hub.pubkey,
+        asset: 1,
+        soft_limit: K.soft_limit,
+        hard_limit: K.hard_limit
+      })
     }
   }
 

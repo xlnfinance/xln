@@ -93,7 +93,7 @@ module.exports = async (opts = {}) => {
         if (evict) {
           delete cache.ch[key]
           //promise = promise.then(() => {
-          l('Evict: ' + trim(ch.d.partnerId))
+          //l('Evict: ' + trim(ch.d.partnerId))
           //})
         }
 

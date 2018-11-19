@@ -135,16 +135,12 @@ module.exports = async (ws, json) => {
 
         let hub = K.hubs.find((h) => h.id == json.params.id)
 
-        let ch = await Channel.get(hub.pubkey)
-        let subch = ch.d.subchannels.by('asset', 1)
-
-        subch.hard_limit = K.hard_limit
-        subch.soft_limit = K.soft_limit
-
-        me.sendJSON(hub, 'setLimits', {
+        require('./with_channel')({
+          op: 'setLimits',
+          partnerId: hub.pubkey,
           asset: 1,
-          soft_limit: subch.soft_limit,
-          hard_limit: subch.hard_limit
+          soft_limit: K.soft_limit,
+          hard_limit: K.hard_limit
         })
 
         result.confirm = 'Hub added'
@@ -203,10 +199,6 @@ module.exports = async (ws, json) => {
       //security: ensure it's not RCE and put extra safeguards
       //eval(json.params.hardfork)
       result.confirm = 'Executed'
-      break
-
-    case 'setLimits':
-      result = await require('./set_limits')(json.params)
       break
 
     default:

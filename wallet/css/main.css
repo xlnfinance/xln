@@ -9,6 +9,10 @@
   max-width: 600px;
 }
 
+body .notyf {
+  z-index: 9999 !important;
+}
+
 input[type='radio'] {
   margin-top: -3px;
   vertical-align: middle;

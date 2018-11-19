@@ -29,7 +29,7 @@ const payMonkey = async (on_server, counter = 1) => {
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
     }, Math.round(3500 + Math.random() * 3000))
-  } else if (counter < 2) {
+  } else if (counter < 1) {
     setTimeout(() => {
       payMonkey(on_server, counter + 1)
     }, 500)
@@ -38,8 +38,16 @@ const payMonkey = async (on_server, counter = 1) => {
 
 if (argv.monkey) {
   if (base_port > 8000) {
-    // add First hub by default
+    // add first hub by default and open limit
     PK.usedHubs.push(1)
+
+    require('./internal_rpc/with_channel')({
+      op: 'setLimits',
+      partnerId: K.hubs[0].pubkey,
+      asset: 1,
+      soft_limit: K.soft_limit,
+      hard_limit: K.hard_limit
+    })
   }
 
   // only in monkey mode, not on end user node
@@ -47,13 +55,25 @@ if (argv.monkey) {
     Periodical.schedule('broadcast', K.blocktime * 1000)
   }
 
+  let stubs = [
+    'Chase Bank',
+    'Bank of America',
+    'Barclays',
+    'BNP Paribas',
+    'Capital One',
+    'Citibank',
+    'Deutsche Bank',
+    'HSBC',
+    'UBS'
+  ]
+
   if (base_port > 8000 && base_port <= 8003) {
     let loc = on_server
       ? `wss://fairlayer.com:${base_port + 100}`
       : `ws://${localhost}:${base_port + 100}`
     require('./internal_rpc/create_hub')({
       fee_bps: 5,
-      handle: ['JPMorgan Chase', 'HSBC', 'Bank of America'][base_port - 8001],
+      handle: stubs[base_port - 8001],
       location: loc,
       box_pubkey: bin(me.box.publicKey),
       add_routes: '1,2,3,4'
@@ -68,7 +88,7 @@ if (argv.monkey) {
     }, K.blocktime * 1000)
 
     setTimeout(() => {
-      payMonkey(on_server)
+      //payMonkey(on_server)
 
       // intended to fail
       me.payChannel({

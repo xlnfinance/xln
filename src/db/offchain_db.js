@@ -167,8 +167,8 @@ const defineModels = (sequelize) => {
     'payment',
     {
       //todo: move to single field addnew, addsent ...
-      type: Sequelize.ENUM('add', 'del', 'addrisk', 'delrisk', 'onchain'),
-      status: Sequelize.ENUM('new', 'sent', 'ack'),
+      type: Sequelize.STRING, //ENUM('add', 'del', 'addrisk', 'delrisk', 'onchain'),
+      status: Sequelize.STRING, //ENUM('new', 'sent', 'ack'),
       is_inward: Sequelize.BOOLEAN,
 
       processed: {
@@ -192,7 +192,7 @@ const defineModels = (sequelize) => {
       },
 
       // secret or fail reason
-      outcome_type: Sequelize.INTEGER,
+      outcome_type: Sequelize.STRING,
       // payload of outcome
       outcome: Sequelize.BLOB,
 

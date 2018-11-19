@@ -43,10 +43,9 @@ module.exports = async (pubkey, opportunistic) => {
     }
 
     let ackSig = ec(r(refresh(ch)), me.id.secretKey)
-    let initialState = r(r(ch.state))
 
     // array of actions to apply to canonical state
-    var transitions = []
+    let transitions = []
 
     // merge cannot add new transitions because expects another ack
     // in merge mode all you do is ack last (merged) state
@@ -54,7 +53,7 @@ module.exports = async (pubkey, opportunistic) => {
       // hub waits a bit in case destination returns secret quickly
       if (me.my_hub && !opportunistic) await sleep(150)
 
-      for (var t of ch.payments) {
+      for (let t of ch.payments) {
         if (t.status != 'new') continue
 
         let derived = ch.derived[t.asset]
@@ -67,7 +66,7 @@ module.exports = async (pubkey, opportunistic) => {
             continue
           }
 
-          if (t.outcome_type == methodMap('outcomeSecret')) {
+          if (t.outcome_type == 'outcomeSecret') {
             subch.offdelta += ch.d.isLeft() ? t.amount : -t.amount
           }
           var args = [t.asset, t.hash, t.outcome_type, t.outcome]
@@ -125,7 +124,7 @@ module.exports = async (pubkey, opportunistic) => {
               let reason = `${me.my_hub.id} to ${ch.d.partnerId}`
               l(reason)
 
-              pull_hl.outcome_type = methodMap('outcomeCapacity')
+              pull_hl.outcome_type = 'outcomeCapacity'
               pull_hl.outcome = bin(reason)
               //if (argv.syncdb) all.push(pull_hl.save())
 
@@ -150,10 +149,13 @@ module.exports = async (pubkey, opportunistic) => {
         // increment nonce after each transition
         ch.d.dispute_nonce++
 
+        let nextState = r(refresh(ch))
+
         transitions.push([
-          methodMap(t.type),
+          t.type,
           args,
-          ec(r(refresh(ch)), me.id.secretKey)
+          ec(nextState, me.id.secretKey),
+          nextState
         ])
 
         if (trace)
@@ -177,8 +179,6 @@ module.exports = async (pubkey, opportunistic) => {
 
     //only for debug, can be heavy
     let debug = [
-      r(initialState), // state we started with
-      r(ch.state), // state we finished at
       ch.d.signed_state // signed state we have
     ]
 

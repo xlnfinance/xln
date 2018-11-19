@@ -7,7 +7,7 @@ module.exports = async (ws) => {
 
   let filters = [
     {is_inward: true},
-    {is_inward: false, outcome_type: {[Op.ne]: methodMap('outcomeSecret')}}
+    {is_inward: false, outcome_type: {[Op.ne]: 'outcomeSecret'}}
   ]
 
   // what we successfully received and must deposit in our app +

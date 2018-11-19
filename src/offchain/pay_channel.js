@@ -157,7 +157,7 @@ module.exports = async (opts) => {
 
     ch.payments.push(outward)
 
-    l('Paying to ', reversed, onion.length)
+    //l('Paying to ', reversed)
 
     react({})
     me.flushChannel(ch.d.partnerId, true)

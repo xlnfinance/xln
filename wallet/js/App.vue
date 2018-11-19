@@ -60,6 +60,8 @@
               <li><a class="nav-link" @click="go('account_explorer')">{{t('accounts')}}</a></li>
               <li><a class="nav-link" @click="go('channel_explorer')">{{t('insurances')}}</a></li>
               <li><a class="nav-link" @click="go('validators')">{{t('validators')}}</a></li>
+              <li><a class="nav-link" @click="go('bank_manager')">{{t('bank_manager')}}</a></li>
+              <li><a class="nav-link" @click="go('asset_manager')">{{t('asset_manager')}}</a></li>
               <li><a class="nav-link" @click="go('updates')">{{t('smart_updates')}}</a></li>
               <li><a class="nav-link" @click="go('help')">{{t('network_info')}}</a></li>
               <li><a class="nav-link" @click="go('metrics')">{{t('node_metrics')}}</a></li>
@@ -173,6 +175,8 @@
         <p>Smart updates created: {{K.proposals_created}}</p>
       </div>
       <div v-else-if="tab=='settings'">
+
+        <pre>Auth link: {{getAuthLink()}}</pre>
         <p>
           <button class="btn btn-dark" @click="dev_mode=!dev_mode">Toggle Devmode</button>
         </p>
@@ -192,7 +196,7 @@
       </div>
       <div v-else-if="tab=='wallet'">
         <template v-if="pubkey">
-          <h4 class="alert alert-primary" v-if="my_hub">This node is a bank @{{my_hub.handle}}</h4>
+          <h4 class="alert alert-primary" v-if="my_hub">This node is a bank: {{my_hub.handle}}</h4>
           <p class="pull-left">
             <select v-model="asset" class="custom-select custom-select-lg mb-6" @change="order.buyAssetId = (asset==1 ? 2 : 1)">
               <option disabled>Select current asset</option>
@@ -242,61 +246,34 @@
           </table>
           <hr class="my-4">
           <template v-if="channels.length > 0">
-            <template v-for="ch in channels">
- <p>
-                <h4>
+            <div class="alert alert-info" v-for="ch in channels">
+              
+              <p>
+                <h2>
                   {{K.hubs.find(h=>h.pubkey==ch.d.partnerId).handle }}
-                </h4>
-
-
-                <div v-for="subch in ch.d.subchannels">
-                  <br>
-
-                  <a class="dotted" @click="subchAction.partnerId=ch.d.partnerId;subchAction.asset=subch.asset;subchAction.hard_limit=subch.hard_limit;subchAction.soft_limit=subch.soft_limit;">{{to_ticker(subch.asset)}}: {{commy(ch.derived[subch.asset].payable)}} </a><span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: ch.d.partnerId, op: 'testnet', action: 1, asset: subch.asset, amount: uncommy(prompt('How much you want to get?')) })">+</span>
-
-
-                  <p>Insured: {{commy(ch.derived[subch.asset].insured)}} + Uninsured: {{commy(ch.derived[subch.asset].uninsured)}} <span class="badge badge-danger" @click="requestInsurance(ch, subch.asset)">Request Insurance</span>
-                      <dotsloader v-if="subch.requested_insurance"></dotsloader>
-                    </p>
-
-
-        <a class="dotted" @click="a=prompt(`How much to withdraw to onchain?`);if (a) {call('withChannel', {partnerId: ch.d.partnerId, asset: subch.asset, op: 'withdraw', amount: uncommy(a)})};">withdraw</a>
-
-
-
-                  
-                </div>
-              </p>
+                </h2>
 
                   <template v-if="record">
-                    <p>You are guaranteed to get <b>insured</b> part of your balance, but may lose <b>uninsured</b> part if the bank becomes insolvent. Always request insurance when your uninsured balance gets too high.
-                    </p>
                     <span v-if="ch.ins.dispute_delayed">
                       <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader> 
                     </span>
-                    <p v-else>
-                      <button type="button" class="btn btn-outline-secondary" @click="call('startDispute', {partnerId: ch.d.partnerId})">Dispute 🌐</button>
-                    </p>
-
+                    <button v-else type="button" class="btn btn-danger" style="float:right" @click="call('startDispute', {partnerId: ch.d.partnerId})">Dispute 🌐</button>
                   </template>
-                  <div v-else>
-                    Request insurance to be registered.
-                  </div>
+
+
+
+                <template v-for="subch in ch.d.subchannels">
+                  <button class="btn btn-outline-info" @click="mod={shown:true, ch:ch, subch: subch, hard_limit: subch.hard_limit, soft_limit: subch.soft_limit}">{{to_ticker(subch.asset)}}: {{commy(ch.derived[subch.asset].payable)}}</button>&nbsp;  
+                </template>
+              </p>
 
   
-            </template>
-            <h4>Credit limits</h4>
-            <p>Maximum uninsured balance</p>
-            <p>
-              <input type="text" class="form-control" v-model="subchAction.hard_limit">
-            </p>
-            <p>Automatically request insurance after</p>
-            <p>
-              <input type="text" class="form-control" v-model="subchAction.soft_limit">
-            </p>
-            <p>
-              <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: subchAction.partnerId, asset: subchAction.asset, op: 'setLimits', hard_limit: uncommy(subchAction.hard_limit), soft_limit: uncommy(subchAction.soft_limit)})" href="#">Update Credit Limits</button>
-            </p>
+            </div>
+
+
+
+
+
             <p style="word-wrap: break-word">Your Address: <b>{{address}}</b></p>
             <div class="col-sm-6" style="width:300px">
               <p>
@@ -377,10 +354,12 @@
 
         <template v-for="u in K.hubs">
           <h1>{{u.handle}}</h1>
+          <!--<img v-bind:src="'/img/icons/' + u.id +'.jpg'">-->
 
           <small>Created at {{new Date(u.createdAt*1000).toDateString()}}</small>
 
           <p>Fees: {{bpsToPercent(u.fee_bps)}}</p>
+          <small><a :href="u.website">{{u.website}}</a></small>
 
           <p v-if="PK">
             <button v-if="PK.usedHubs.includes(u.id)" class="btn btn-outline-danger" @click="call('toggleHub', {id: u.id})">Close Account</button>
@@ -388,6 +367,39 @@
             <button v-else class="btn btn-outline-success" @click="call('toggleHub', {id: u.id})">Open an Account</button>
           </p>
         </template>
+
+      </div>
+      <div v-else-if="tab=='asset_manager'">
+<div class="form-group">
+          <h2>Create an Asset</h2>
+          <p>
+            <label for="comment">Name:</label>
+            <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Ticker (must be unique):</label>
+            <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Amount:</label>
+            <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Division point (e.g. 0 for yen, 2 for dollar):</label>
+            <input class="form-control" v-model="new_asset.division" rows="2" id="comment"></input>
+          </p>
+          <p>
+            <label for="comment">Description:</label>
+            <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input>
+          </p>
+          <p v-if="record">
+            <button class="btn btn-outline-success" @click="call('createAsset', new_asset)">Create Asset 🌐</button>
+          </p>
+          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
+          <div class="alert alert-primary">After creation the entire supply will appear on your {{onchain}} balance, then you can deposit it to a bank and start sending instantly to other users.</div>
+        </div>
+      </div>
+      <div v-else-if="tab=='bank_manager'">
 
         <div class="form-group">
           <h2>Create a Bank</h2>
@@ -672,37 +684,66 @@
             </tr>
           </tbody>
         </table>
-        <div class="form-group">
-          <h2>Create an Asset</h2>
-          <p>
-            <label for="comment">Name:</label>
-            <input class="form-control" v-model="new_asset.name" rows="2" id="comment"></input>
-          </p>
-          <p>
-            <label for="comment">Ticker (must be unique):</label>
-            <input class="form-control" v-model="new_asset.ticker" rows="2" id="comment"></input>
-          </p>
-          <p>
-            <label for="comment">Amount:</label>
-            <input class="form-control" v-model="new_asset.amount" rows="2" id="comment"></input>
-          </p>
-          <p>
-            <label for="comment">Division point (e.g. 0 for yen, 2 for dollar):</label>
-            <input class="form-control" v-model="new_asset.division" rows="2" id="comment"></input>
-          </p>
-          <p>
-            <label for="comment">Description:</label>
-            <input class="form-control" v-model="new_asset.desc" rows="2" id="comment"></input>
-          </p>
-          <p v-if="record">
-            <button class="btn btn-outline-success" @click="call('createAsset', new_asset)">Create Asset 🌐</button>
-          </p>
-          <p v-else>In order to create your own asset you must have a registered account with FRD balance.</p>
-          <div class="alert alert-primary">After creation the entire supply will appear on your {{onchain}} balance, then you can deposit it to a bank and start sending instantly to other users.</div>
+        
+      </div>
+    </div>
+
+
+<div v-if="mod.shown" class="modal-backdrop fade show"></div>
+<div @click.self="mod.shown=false"  class="modal fade bd-example-modal-lg" v-if="mod.shown"  v-bind:style="{display: mod.shown ? 'block' : 'none'}" v-bind:class="{show: mod.shown}" >
+  <div style="min-width:70%;" class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Asset {{to_ticker(mod.subch.asset)}} in bank {{to_user(mod.ch.partner)}}</h5>
+        <button  @click="mod.shown=false"  type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+  <div class="container-fluid">
+    <div class="row">
+      <div class="col-md-6">
+        <h4>Information</h4>
+
+        <p>Payable: {{commy(derived.payable)}} <span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: mod.ch.d.partnerId, op: 'testnet', action: 1, asset: mod.subch.asset, amount: uncommy(prompt('How much you want to get?')) })">Use faucet</span></p>
+        <p>Receivable: {{commy(derived.they_payable)}}</p>
+        <p>Insured: {{commy(derived.insured)}}        <span class="badge badge-danger" @click="a=prompt(`How much to withdraw to onchain?`);if (a) {call('withChannel', {partnerId: mod.ch.d.partnerId, asset: mod.subch.asset, op: 'withdraw', amount: uncommy(a)})};">Withdraw to {{onchain}}</span>
+</p>
+        <p>Uninsured: {{commy(derived.uninsured)}} <span class="badge badge-danger" @click="requestInsurance(mod.ch, mod.subch.asset)">Request Insurance</span>
+                      <dotsloader v-if="derived.subch.requested_insurance"></dotsloader></p>
+
         </div>
+      <div class="col-md-6">
+
+            <h4>Credit limits</h4>
+            <p>Maximum uninsured balance</p>
+            <p>
+              <input type="text" class="form-control" v-model="mod.hard_limit">
+            </p>
+            <p>Automatically request insurance after</p>
+            <p>
+              <input type="text" class="form-control" v-model="mod.soft_limit">
+            </p>
+            <p>
+              <button type="button" class="btn btn-outline-success" @click="call('withChannel', {partnerId: mod.ch.d.partnerId, asset: mod.subch.asset, op: 'setLimits', hard_limit: uncommy(mod.hard_limit), soft_limit: uncommy(mod.soft_limit)})" href="#">Update Credit Limits</button>
+            </p>
+            </div>
+
+
+                </div>
+  </div>
+
+
+      </div>
+      <div class="modal-footer">
+        <button @click="mod.shown=false" type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
       </div>
     </div>
   </div>
+</div>
+  </div>
+
+
 </template>
 
 <script>
@@ -713,6 +754,7 @@ import Tutorial from './Tutorial'
 import Event from './Event'
 
 import Dotsloader from './Dotsloader'
+
 
 export default {
   components: {
@@ -747,6 +789,7 @@ export default {
   destroyed() {
     clearInterval(this.interval)
   },
+
   data() {
     return {
       onchain: 'Layer',
@@ -782,7 +825,7 @@ export default {
 
 
       new_validator: {
-        handle: "Satoshi",
+        handle: "Name",
         location: `ws://${location.hostname}:${parseInt(location.port)+100}`
       },
 
@@ -821,7 +864,14 @@ export default {
       install_snippet: false,
 
 
-      subchAction: {},
+      mod: {
+        shown: false,
+        subch: {},
+        ch: {},
+        soft_limit: '',
+        hard_limit: ''
+      },
+
       expandedChannel: -1,
 
       externalDeposit: {
@@ -880,6 +930,13 @@ export default {
       dev_mode: false,
       sync_started_at: false
     }
+  },
+  computed: {
+  derived: function(){
+    let ch = this.channels.find(ch=>ch.d.id == this.mod.ch.d.id)
+
+    return ch.derived[this.mod.subch.asset]
+  }
   },
   methods: {
     stream: () => {
@@ -1228,6 +1285,10 @@ export default {
       return window.prompt(a)
     },
 
+    getAuthLink: ()=>{
+      return location.origin +'#auth_code='+app.auth_code
+    },
+
 
 
     trim: (str) => {
@@ -1237,7 +1298,7 @@ export default {
       var s = ''
       if (t.type == 'del' || t.type == 'delrisk') {
         //outcomeSecret
-        s = t.outcome_type == 31 ? '✔' : '❌'
+        s = t.outcome_type == 'outcomeSecret' ? '✔' : '❌'
       }
       if (t.type == 'add' || t.type == 'addrisk') {
         s = '🔒'

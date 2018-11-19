@@ -21,27 +21,24 @@ prettyState = (state) => {
   })
 }
 
-logstates = (reason, a, b, c, d, e, tr) => {
+logstates = (reason, a, b, c, d, tr) => {
   l(`
 =========${reason}
 
-  Our state 
+  Current state 
   ${ascii_state(a)}
 
-  Our signed state
+  Their current state
   ${ascii_state(b)}
 
-  Their initial state
+  Our signed state
   ${ascii_state(c)}
 
-  Their final state
+  Their signed state
   ${ascii_state(d)}
 
-  Their signed state
-  ${ascii_state(e)}
-
   Transitions
-  ${ascii_tr(tr)}
+  ${stringify(tr)}
 =================
 
   `)
@@ -65,28 +62,11 @@ ascii_state = (state) => {
     })
     .join('')
 
-  return `Hash ${trim(hash)} | ${trim(state[1][0])}-${trim(state[1][1])} | #${
-    state[1][2]
-  }
+  return `${trim(state[1][0])}-${trim(state[1][1])} | #${state[1][2]} (${trim(
+    hash
+  )})
 -----
 ${list}
 `
 }
 
-ascii_tr = (transitions) => {
-  try {
-    var info = ''
-    for (var t of transitions) {
-      var m = methodMap(readInt(t[0]))
-
-      if (m == 'add') {
-        info += `add amt ${readInt(t[1][1])} hash ${trim(t[1][2])}`
-      } else {
-        info += `${m} ${trim(t[1][2])}`
-      }
-    }
-    return info
-  } catch (e) {
-    return 'empty'
-  }
-}

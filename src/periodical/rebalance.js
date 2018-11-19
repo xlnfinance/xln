@@ -55,7 +55,7 @@ const rebalance = async function(asset) {
     } else if (derived.insured >= minRisk) {
       if (me.users[ch.d.partnerId]) {
         // they either get added in this rebalance or next one
-        l('Request withdraw withdrawFrom: ', derived)
+        //l('Request withdraw withdrawFrom: ', derived)
         netSpenders.push(withdraw(ch, subch, derived.insured))
       } else if (subch.withdrawal_requested_at == null) {
         l('Delayed pull')
@@ -129,7 +129,7 @@ const rebalance = async function(asset) {
 module.exports = () => {
   if (PK.pending_batch || me.batch.length > 0) return l('There are pending tx')
 
-  l('Starting rebalance')
+  //l('Starting rebalance')
   // we iterate over all assets in existance and rebalance each separately
   //K.assets_created
   for (let i = 1; i <= 2; i++) {

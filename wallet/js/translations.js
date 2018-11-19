@@ -3,7 +3,7 @@ window.t = function(str) {
     home: [`Home`, `Главная`],
     wallet: ['Wallet', `Кошелек`],
     banks: ['Banks', `Банки`],
-    explorers: [`Explorers`, `Прочее`],
+    explorers: [`Advanced`, `Прочее`],
 
     blockchain_history: [`Blockchain History`, 'Блокчейн'],
     insurances: [`Insurances Table`, `База страховок`],
@@ -13,6 +13,9 @@ window.t = function(str) {
     network_info: [`Network Info`, `Статистика сети`],
     node_metrics: [`Node Metrics`, `Метрики`],
     docs: [`Docs`, `Документация`],
+
+    bank_manager: [`Bank Manager`, 'Управление Банком'],
+    asset_manager: [`Asset Manager`, 'Управление Ассетом'],
 
     web_wallet: ['Web Wallet', 'Веб Кошелек'],
     install: ['Install', 'Установка'],

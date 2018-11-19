@@ -17,7 +17,7 @@
             &nbsp;<a href="https://www.reddit.com/r/fairlayer/"><img style="width:32px" src="../img/reddit.svg"></a> 
             </p>
 
-            <p>Fairlayer is an evolution of traditional banking/payments networks. It uses blockchain (replicated state machine) as an insurance layer and solves scalability problem with payment channels on top.</p>
+            <p>Fairlayer is ownable and provably solvent platform to replace traditional banking networks.</p>
 
             <p><strong>Two Layers</strong>: globally shared onchain state and zero-overhead peer-to-peer offchain protocol. It repurposes the blockchain from daily payments to work as insurance and court layer for disputes, moving all payments to be processed instantly through the hubs.</p>
 
