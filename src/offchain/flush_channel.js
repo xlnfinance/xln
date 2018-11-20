@@ -179,7 +179,8 @@ module.exports = async (pubkey, opportunistic) => {
 
     //only for debug, can be heavy
     let debug = [
-      ch.d.signed_state // signed state we have
+      ch.d.signed_state, // signed state we have
+      r(ch.state)
     ]
 
     // transitions: method, args, sig, new state
@@ -195,12 +196,7 @@ module.exports = async (pubkey, opportunistic) => {
       //l('Set ack request ', ch.d.ack_requested_at, trim(pubkey))
       //ch.d.pending = envelope
       ch.d.status = 'sent'
-      if (trace)
-        l(
-          `Flushing ${transitions.length} (${envelope.length}b) to ${trim(
-            pubkey
-          )}`
-        )
+      if (trace) l(`Flushing ${transitions.length} to ${trim(pubkey)}`)
     }
 
     me.sendJSON(ch.d.partnerId, 'update', envelope)

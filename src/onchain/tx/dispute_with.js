@@ -92,6 +92,7 @@ module.exports = async (s, args) => {
       // and that we get most profitable outcome
       const ch = await Channel.get(s.signer.pubkey)
       ch.d.status = 'disputed'
+      ch.ins = ins
       //await ch.d.save()
       const our_dispute_nonce = ch.d.signed_state
         ? readInt(r(ch.d.signed_state)[1][2])

@@ -39,8 +39,6 @@ module.exports = (ws, msg) => {
         react({confirm: args[0].toString()})
         return
 
-      case 'testnet':
-        return require('./testnet')(args)
       default:
         return false
     }

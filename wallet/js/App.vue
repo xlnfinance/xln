@@ -247,25 +247,28 @@
           <hr class="my-4">
           <template v-if="channels.length > 0">
             <div class="alert alert-info" v-for="ch in channels">
-              
-              <p>
-                <h2>
-                  {{K.hubs.find(h=>h.pubkey==ch.d.partnerId).handle }}
-                </h2>
+            
+              <h2>
+                {{K.hubs.find(h=>h.pubkey==ch.d.partnerId).handle }}
+              </h2>
 
-                  <template v-if="record">
-                    <span v-if="ch.ins.dispute_delayed">
-                      <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader> 
-                    </span>
-                    <button v-else type="button" class="btn btn-danger" style="float:right" @click="call('startDispute', {partnerId: ch.d.partnerId})">Dispute 🌐</button>
-                  </template>
+              <template v-for="subch in ch.d.subchannels">
+                <button class="btn btn-outline-info" @click="mod={shown:true, ch:ch, subch: subch, hard_limit: subch.hard_limit, soft_limit: subch.soft_limit}">{{to_ticker(subch.asset)}}: {{commy(ch.derived[subch.asset].payable)}}</button>&nbsp;  
+              </template>
+
+              <hr>
+
+              <template v-if="record">
+                <span v-if="ch.ins.dispute_delayed">
+                  <b>{{ch.ins.dispute_delayed - K.usable_blocks}} usable blocks</b> left until dispute resolution <dotsloader></dotsloader>
+                </span>
+                <span v-else-if="ch.d.status=='dispute'">
+                  Wait until your dispute tx is broadcasted
+                </span>
+                <button v-else type="button" class="btn btn-danger" @click="call('startDispute', {partnerId: ch.d.partnerId})">Start Dispute 🌐</button>
+              </template>
 
 
-
-                <template v-for="subch in ch.d.subchannels">
-                  <button class="btn btn-outline-info" @click="mod={shown:true, ch:ch, subch: subch, hard_limit: subch.hard_limit, soft_limit: subch.soft_limit}">{{to_ticker(subch.asset)}}: {{commy(ch.derived[subch.asset].payable)}}</button>&nbsp;  
-                </template>
-              </p>
 
   
             </div>
@@ -705,7 +708,7 @@
       <div class="col-md-6">
         <h4>Information</h4>
 
-        <p>Payable: {{commy(derived.payable)}} <span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: mod.ch.d.partnerId, op: 'testnet', action: 1, asset: mod.subch.asset, amount: uncommy(prompt('How much you want to get?')) })">Use faucet</span></p>
+        <p>Payable: {{commy(derived.payable)}} <span class="badge badge-success bank-faucet" @click="call('withChannel', {partnerId: mod.ch.d.partnerId, op: 'testnet', action: 'faucet', asset: mod.subch.asset, amount: uncommy(prompt('How much you want to get?')) })">Use faucet</span></p>
         <p>Receivable: {{commy(derived.they_payable)}}</p>
         <p>Insured: {{commy(derived.insured)}}        <span class="badge badge-danger" @click="a=prompt(`How much to withdraw to onchain?`);if (a) {call('withChannel', {partnerId: mod.ch.d.partnerId, asset: mod.subch.asset, op: 'withdraw', amount: uncommy(a)})};">Withdraw to {{onchain}}</span>
 </p>

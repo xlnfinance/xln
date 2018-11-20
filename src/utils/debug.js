@@ -29,7 +29,7 @@ logstates = (reason, a, b, c, d, tr) => {
   ${ascii_state(a)}
 
   Their current state
-  ${ascii_state(b)}
+  ${b ? ascii_state(b) : '-'}
 
   Our signed state
   ${ascii_state(c)}

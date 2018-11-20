@@ -349,10 +349,10 @@ const insuranceResolve = async (ins) => {
     for (let subch of subchannels) {
       let asset = readInt(subch[0])
       let offdelta = readInt(subch[1])
+
+      // revealed in time hashlocks are applied to offdelta
       offdelta += await findRevealed(subch[2])
       offdelta -= await findRevealed(subch[3])
-
-      l('Processing subch dispute ' + asset)
 
       let subins = ins.subinsurances.by('asset', asset)
 
@@ -413,6 +413,7 @@ const insuranceResolve = async (ins) => {
   // are we in this dispute? Unfreeze the channel
   if (withUs) {
     var ch = await Channel.get(withUs.pubkey)
+    ch.ins = ins
     // reset all credit limits - the relationship starts "from scratch"
     // nullify offdeltas
     for (let subch of ch.d.subchannels) {

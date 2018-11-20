@@ -104,7 +104,7 @@ module.exports = async (opts = {}) => {
     //cache.ch = new_ch
 
     if (all.length > 0) {
-      l(`syncChanges done: ${all.length}`)
+      //l(`syncChanges done: ${all.length}`)
     }
 
     return await Promise.all(all)

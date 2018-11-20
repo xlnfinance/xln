@@ -28,7 +28,13 @@ export default {
       } else if (o.type == 'onchainfee') {
         return `Onchain tx fee ${app.commy(o.amount)}`
       } else if (o.type == 'disputeResolved') {
-        return `Resolved a dispute. ${JSON.stringify(o.resolved)}`
+        let str = "Insured / uninsured balances:";
+
+
+        str+=o.resolved.map(res=>`${app.to_ticker(res.asset)} ${app.commy(res.insured)} / ${app.commy(res.uninsured)}`).join(', ')
+
+
+        return `Resolved a dispute. ${str}`
       }
     }
   }

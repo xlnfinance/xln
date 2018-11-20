@@ -47,7 +47,7 @@ module.exports = async (p) => {
 
     await subch.save()
 
-    l('set limits to ', ch.d.partnerId)
+    //l('set limits to ', ch.d.partnerId)
 
     me.sendJSON(ch.d.partnerId, 'setLimits', {
       asset: subch.asset,
@@ -63,21 +63,12 @@ module.exports = async (p) => {
 
     //react({confirm: 'Requested insurance, please wait'})
   } else if (p.op == 'testnet') {
-    if (p.action == 4) {
-      me.CHEAT_dontack = 1
-    } else if (p.action == 5) {
-      me.CHEAT_dontreveal = 1
-    } else if (p.action == 6) {
-      me.CHEAT_dontwithdraw = 1
-    } else {
-      me.testnet({
-        action: 1,
-        asset: p.asset,
-        amount: p.amount,
-        partner: ch.partner
-      })
-    }
-    react({confirm: 'OK'})
+    me.sendJSON(ch.d.partnerId, 'testnet', {
+      action: p.action,
+      asset: p.asset,
+      amount: p.amount,
+      address: me.getAddress()
+    })
   }
   return {}
 }

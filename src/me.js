@@ -300,22 +300,6 @@ class Me {
     })
   }
 
-  testnet(p) {
-    l('Using testnet')
-    //      fromHex(K.hubs.find((h) => h.id == p.partner).pubkey),
-
-    me.send(
-      K.hubs.find((h) => h.id == p.partner),
-      'testnet',
-      r([
-        p.action ? p.action : 1,
-        p.asset ? p.asset : 1,
-        p.amount,
-        bin(me.getAddress())
-      ])
-    )
-  }
-
   textMessage(partnerId, msg) {
     me.send(partnerId, 'textMessage', r([msg]))
   }
@@ -333,6 +317,7 @@ class Me {
     )
   }
 
+  // accepts Buffer or valid Service object
   send(m, method, tx) {
     var msg = concat(bin([methodMap(method)]), tx)
 

@@ -30,11 +30,14 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
   let theirSignedState = debug[0] ? r(fromHex(debug[0])) : false
   prettyState(theirSignedState)
 
-  let mismatch = (reason, extra) => {
+  let theirState = debug[1] ? r(fromHex(debug[1])) : false
+  prettyState(theirState)
+
+  let mismatch = (reason) => {
     logstates(
       reason,
       ch.state,
-      extra,
+      theirState,
       ourSignedState,
       theirSignedState,
       transitions
@@ -85,6 +88,15 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       ch.d.rollback_nonce = ch.d.dispute_nonce - ourSignedState[1][2]
       ch.d.dispute_nonce = ourSignedState[1][2]
 
+      // resetting offdeltas in subchannels back to last signed state
+      ch.d.subchannels.map((subch) => {
+        let signed_offdelta = ourSignedState[2].find(
+          (signed) => signed[0] == subch.asset
+        )[1]
+        subch.rollback_offdelta = subch.offdelta - signed_offdelta
+        subch.offdelta = signed_offdelta
+      })
+
       l(`Start merge with ${trim(pubkey)}, rollback ${ch.d.rollback_nonce}`)
     } else {
       mismatch('Deadlock')
@@ -104,7 +116,6 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
 
     if (t[0] == 'add' || t[0] == 'addrisk') {
       let [asset, amount, hash, exp, unlocker] = t[1]
-      //;[asset, exp, amount] = [asset, exp, amount].map(readInt)
       ;[hash, unlocker] = [hash, unlocker].map(fromHex)
 
       var derived = ch.derived[asset]
@@ -152,7 +163,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
 
       if (!deltaVerify(ch.d, nextState, ackSig)) {
         loff('error: Invalid state sig add')
-        let theirState = r(fromHex(t[4]))
+        let theirState = r(fromHex(t[3]))
         prettyState(theirState)
         mismatch('error: Invalid state sig add', theirState)
 
@@ -297,8 +308,6 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
       //if (argv.syncdb) all.push(inward_hl.save())
     } else if (t[0] == 'del' || t[0] == 'delrisk') {
       var [asset, hash, outcome_type, outcome] = t[1]
-      //asset = readInt(asset)
-      //outcome_type = readInt(outcome_type)
       ;[hash, outcome] = [hash, outcome].map(fromHex)
 
       // try to parse outcome as secret and check its hash
@@ -365,7 +374,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
               trim(pubkey),
               toHex(hash),
               valid,
-              inward_ch.rollback_nonce,
+              inward_ch.d.rollback_nonce,
               ascii_state(inward_ch.state)
             )
             continue
@@ -405,7 +414,7 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
               payment_outcome: 'fail',
               alert:
                 'Payment failed, try another route: ' +
-                methodMap(outcome_type) +
+                outcome_type +
                 outcome.toString()
             },
             false
@@ -423,16 +432,22 @@ module.exports = async (pubkey, ackSig, transitions, debug) => {
     }
   }
 
-  refresh(ch)
+  //refresh(ch)
 
   // since we applied partner's diffs, all we need is to add the diff of our own transitions
-  if (ch.rollback_nonce > 0) {
+  if (ch.d.rollback_nonce > 0) {
     // merging and leaving rollback mode
-    ch.d.dispute_nonce += ch.rollback[0]
-    ch.d.offdelta += ch.rollback[1]
-    ch.rollback = [0, 0]
+    ch.d.dispute_nonce += ch.d.rollback_nonce
+    ch.d.rollback_nonce = 0
 
-    if (trace) l(`After merge our state is \n${ascii_state(refresh(ch))}`)
+    ch.d.subchannels.map((subch) => {
+      subch.offdelta += subch.rollback_offdelta
+      subch.rollback_offdelta = 0
+    })
+
+    refresh(ch)
+
+    if (trace) l(`After merge our state is \n${ascii_state(ch.state)}`)
 
     ch.d.status = 'merge'
   } else {

@@ -87,7 +87,29 @@ module.exports = async (ws, args) => {
         amount: amount,
         asset: asset
       })
-    } else if (json.method == 'update') {
+    } else if (json.method == 'testnet') {
+      if (json.action == 'faucet') {
+        var friendly_invoice = [
+          'You are welcome!',
+          'Demo',
+          "It's free money!",
+          "'\"><img src=x onerror=alert('pwned')>"
+        ].randomElement()
+
+        let pay = {
+          address: json.address,
+          amount: json.amount,
+          invoice: friendly_invoice,
+          asset: json.asset
+        }
+
+        await me.payChannel(pay)
+      } else if (json.action == 'onchainFaucet') {
+        me.batchAdd('depositTo', [
+          json.asset,
+          [json.amount, fromHex(json.pubkey), 0, bin('faucet')]
+        ])
+      }
     }
   })
 

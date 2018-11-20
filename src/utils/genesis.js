@@ -286,8 +286,7 @@ module.exports = async (datadir) => {
   await Asset.create({
     ticker: 'USD',
     name: 'U.S. Dollar',
-    desc:
-      'Fair Dollar is a fiat currency issued by Fair Foundation. It is collateralized and easy to sell for traditional fiat currencies at stable exchange rate.',
+    desc: 'USD',
     issuerId: 1,
     total_supply: 1000000000
   })
@@ -296,7 +295,7 @@ module.exports = async (datadir) => {
     ticker: 'EUR',
     name: 'Euro',
     desc:
-      'Fair Bet supply is capped at 100B FRB. FRB will be automatically converted into FRD 1-for-1 on 2030-08-19.',
+      'Capped at 100 billions, will be automatically converted into FRD 1-for-1 on 2030-08-19.',
     issuerId: 1,
     total_supply: 1000000000
   })

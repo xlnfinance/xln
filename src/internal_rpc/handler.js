@@ -71,16 +71,9 @@ module.exports = async (ws, json) => {
       break
 
     case 'onchainFaucet':
-      me.send(
-        K.hubs[0],
-        'testnet',
-        r([
-          7,
-          json.params.asset ? json.params.asset : 1,
-          json.params.amount,
-          bin(me.pubkey)
-        ])
-      )
+      json.params.pubkey = me.pubkey.toString()
+      json.params.action = 'onchainFaucet'
+      me.sendJSON(K.hubs[0], 'testnet', json.params)
       react({confirm: 'Await onchain faucet'})
 
       break
@@ -91,7 +84,7 @@ module.exports = async (ws, json) => {
 
     case 'broadcast':
       Periodical.broadcast(json.params)
-      react({confirm: 'Now await inclusion in block', force: true})
+      react({force: true})
       return false
       break
 
