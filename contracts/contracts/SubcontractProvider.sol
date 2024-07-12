@@ -48,6 +48,7 @@ contract SubcontractProvider is Console {
   function process(SubcontractParams memory params) public view returns (int[] memory deltas) {
     (Payment[] memory payments, 
     Swap[] memory swaps) = abi.decode(params.data, (Payment[], Swap[]));
+    //abi.decode(params.left_arguments, (int[] memory left_deltas));
 
     deltas = params.deltas;
 
