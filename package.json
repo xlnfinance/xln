@@ -1,0 +1,41 @@
+{
+  "name": "xlnfinance",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "tsc && node ./dist/test/channel.test.js",
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "env:build": "cd ./contracts && npx hardhat compile",
+    "env:run": "cd ./contracts && npx hardhat node",
+    "env:deploy": "cd ./contracts && npx hardhat ignition deploy ignition/modules/Lock.ts  --network localhost"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@tsconfig/node20": "^20.1.4",
+    "@types/node": "^20.13.0",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^7.11.0",
+    "@typescript-eslint/parser": "^7.11.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "hardhat": "^2.22.5",
+    "prettier": "^3.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^3.0.0-beta2",
+    "ethers": "^6.13.1",
+    "js-sha3": "^0.9.3",
+    "level": "^8.0.1",
+    "pino": "^9.1.0",
+    "ws": "^8.17.0",
+    "xlnfinance-contracts": "file:contracts"
+  }
+}
