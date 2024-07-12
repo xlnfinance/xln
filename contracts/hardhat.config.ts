@@ -11,6 +11,11 @@ const config: HardhatUserConfig = {
       },
     },
   },
+  networks: {
+    localhost: {
+      allowUnlimitedContractSize: true
+    }
+  }
 
 };
 

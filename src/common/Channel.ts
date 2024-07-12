@@ -57,6 +57,7 @@ export default class Channel implements IChannel {
       pendingBlock: null,
       mempool: [],
       pendingSignatures: [],
+      pendingEvents: [],
     };
   }
 
@@ -245,7 +246,7 @@ export default class Channel implements IChannel {
 
       this.applyBlock(this.privateState.isLeft, block);
 
-      this.privateState.pendingBlock = deepClone(block);
+      this.privateState.pendingBlock = deepClone(block); //зачем клон блока??
       this.privateState.sentTransitions = transitions.length;
       this.privateState.pendingSignatures = [
         hash<Block>(this.privateState.pendingBlock!),

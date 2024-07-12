@@ -10,6 +10,7 @@ import StorageContext from '../src/app/StorageContext';
 import IUserOptions from '../src/types/IUserOptions';
 
 import ENV from './env';
+import TextMessageTransition from '../src/types/Transitions/TextMessageTransition';
 
 async function main() {
   const hub = new HubApp({
@@ -42,13 +43,13 @@ async function main() {
   const channel1 = await user.getChannelToUser(userId2, 'hub1');
   const channel2 = await user2.getChannelToUser(userId1, 'hub1');
 
-  await channel1.push({ method: TransitionMethod.TextMessage, message: 'Hello world' } as Transition);
-  await channel1.push({ method: TransitionMethod.TextMessage, message: '100' } as Transition);
+  await channel1.push(new TextMessageTransition('Hello world'));
+  await channel1.push(new TextMessageTransition('100'));
   await channel1.send();
 
   await sleep(5000);
 
-  await channel2.push({ method: TransitionMethod.TextMessage, message: '150' } as Transition);
+  await channel2.push(new TextMessageTransition('150'));
   await channel2.send();
 
   await sleep(5000);

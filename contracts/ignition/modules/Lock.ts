@@ -11,8 +11,11 @@ const LockModule = buildModule("LockModule", (m) => {
     value: lockedAmount,
   });
   const dep = m.contract('Depository')
+  const erc20Mock = m.contract('ERC20Mock', ["ERC20Mock", "ERC20", 1000000])
+  const erc721Mock = m.contract('ERC721Mock', ["ERC721Mock", "ERC721"])
+  const erc1155Mock = m.contract('ERC1155Mock')
 
-  return { lock, dep };
+  return { lock, dep, erc20Mock, erc721Mock, erc1155Mock  };
 });
 
 export default LockModule;
