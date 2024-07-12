@@ -1,5 +1,8 @@
 import Transition from '../Transition';
+import { TransitionMethod } from './../TransitionMethod';
 
-export default interface TextMessageTransition extends Transition {
-  message: string;
+export default class TextMessageTransition extends Transition {
+  constructor() {
+    super(TransitionMethod.TextMessage);
+  }
 }

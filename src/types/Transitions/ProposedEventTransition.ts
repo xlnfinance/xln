@@ -1,20 +1,26 @@
 import Transition from '../Transition';
+import { TransitionMethod } from './../TransitionMethod';
 
 enum DepositoryEventType {
-    kCollateralChange,
-    kDeltaChange, // for test
+  kCollateralChange,
+  kDeltaChange,
 }
 
-export interface DepositoryEvent {
-    type: DepositoryEventType;
+export class DepositoryEvent {
+  type: DepositoryEventType;
+
+  constructor(type: DepositoryEventType) {
+    this.type = type;
+  }
 }
 
-export interface ProposedEvent extends DepositoryEvent {
-    
-}
+export interface ProposedEvent extends DepositoryEvent { }
 
+export default class ProposedEventTransition extends Transition {
+  event: DepositoryEvent;
 
-export default interface ProposedEventTransition extends Transition {
-    //event: ProposedEvent;
-    eventType: DepositoryEventType;
+  constructor(event: DepositoryEvent) {
+    super(TransitionMethod.ProposedEvent);
+    this.event = event;
+  }
 }

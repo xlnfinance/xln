@@ -1,5 +1,9 @@
 import { TransitionMethod } from './TransitionMethod';
 
-export default interface Transition {
+export default class Transition {
   method: TransitionMethod;
+
+  constructor(method: TransitionMethod) {
+    this.method = method;
+  }
 }
