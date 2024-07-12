@@ -12,16 +12,11 @@ contract SubcontractProvider is Console {
  
   struct SubcontractParams {
     int[] deltas;
-    uint[] tokenIds;
-
-    address left;
-    address right;
-
     bytes data;
-
     bytes left_arguments;
     bytes right_arguments;
   }
+
 
 
 
@@ -33,13 +28,22 @@ contract SubcontractProvider is Console {
   }
 
   struct Swap {
-    uint add_entry_id;
-    uint add_amount;
+    uint addIndex;
+    uint addAmount;
 
-    uint sub_entry_id;
-    uint sub_amount;
+    uint subIndex;
+    uint subAmount;
 
     uint8 multiplier;
+  }
+
+  // https://en.wikipedia.org/wiki/Credit_default_swap
+  struct CreditDefaultSwap {
+    uint deltaIndex;
+    int amount;
+    address referenceEntity;
+    uint tokenId;
+    uint exerciseUntilBlock;
   }
 
 
@@ -48,7 +52,8 @@ contract SubcontractProvider is Console {
   function process(SubcontractParams memory params) public view returns (int[] memory deltas) {
     (Payment[] memory payments, 
     Swap[] memory swaps) = abi.decode(params.data, (Payment[], Swap[]));
-    //abi.decode(params.left_arguments, (int[] memory left_deltas));
+
+    uint[] memory left_args = abi.decode(params.left_arguments, (uint[]));
 
     deltas = params.deltas;
 

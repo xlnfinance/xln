@@ -48,6 +48,7 @@ contract Depository is Console {
   Hub[] public hubs;
   
   event TransferReserveToCollateral(address indexed receiver, address indexed addr, uint collateral, int ondelta, uint tokenId);
+  event DisputeStarted(address indexed sender, address indexed peer, uint indexed disputeNonce, bytes initialArguments);
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
 
@@ -80,18 +81,18 @@ contract Depository is Console {
     ReserveToExternalToken[] reserveToExternalToken;
     ExternalTokenToReserve[] externalTokenToReserve;
 
-    // don't require a signature, as they are strictly increasing peer's balance
+    // don't require a signature
     ReserveToReserve[] reserveToReserve;
     ReserveToCollateral[] reserveToCollateral;
 
     // cooperativeUpdate and cooperativeProof are always signed by the peer
     CooperativeUpdate[] cooperativeUpdate;
 
-    // disputeProof is signed by the peer, but could be outdated
+    // initialDisputeProof is signed by the peer, but could be outdated
     // another peer has time to respond with a newer proof
-    DisputeProof[] disputeProof;
+    InitialDisputeProof[] initialDisputeProof;
 
-    RevealEntries[] revealEntries;
+    FinalDisputeProof[] finalDisputeProof;
 
     TokenAmountPair[] flashloans;
 
@@ -163,14 +164,14 @@ contract Depository is Console {
 
     //submitProof (Header / proofbody)
 
-    for (uint i = 0; i < batch.disputeProof.length; i++) {
-      if(!(disputeProof(batch.disputeProof[i]))){
+    for (uint i = 0; i < batch.initialDisputeProof.length; i++) {
+      if(!(initialDisputeProof(batch.initialDisputeProof[i]))){
         completeSuccess = false;
       }
     }
 
-    for (uint i = 0; i < batch.revealEntries.length; i++) {
-      if(!(revealEntries(batch.revealEntries[i]))){
+    for (uint i = 0; i < batch.finalDisputeProof.length; i++) {
+      if(!(finalDisputeProof(batch.finalDisputeProof[i]))){
         completeSuccess = false;
       }
     }
@@ -261,28 +262,36 @@ contract Depository is Console {
     SubcontractClause[] subcontracts;
   }
 
-  struct DisputeProof {
+  struct InitialDisputeProof {
     address peer;
-    uint cooperative_nonce;
-    uint dispute_nonce;
+    uint cooperativeNonce;
+    uint disputeNonce;
+    bytes32 proofbodyHash; 
+    bytes sig;
 
+    bytes initialArguments;
+  }
 
+  struct FinalDisputeProof {
+    address peer;
+    uint initialCooperativeNonce;
+    uint initialDisputeNonce;
+    uint disputeUntilBlock;
+    bytes32 initialProofbodyHash;
+    bytes initialArguments;
+    bool startedByLeft;
 
-    ProofBody proofbody;
-    bytes32 proofbody_hash; 
+    uint finalCooperativeNonce;
+    uint finalDisputeNonce;
+    ProofBody finalProofbody;
+    bytes finalArguments;
 
     bytes sig;
   }
 
-  struct RevealEntries {
-    address peer;
-    ProofBody proofbody;
-  }
-
-  // Internal structs
   struct Debt {
     uint amount;
-    address pay_to;
+    address creditor;
   }
   
   struct ChannelCollateral {
@@ -298,18 +307,10 @@ contract Depository is Console {
     // but unilateral reserveToCollateral would become tricky
 
     // used for cooperativeUpdate and cooperative close, stored forever
-    uint cooperative_nonce;
+    uint cooperativeNonce;
 
-    // used for dispute (non-cooperative) close 
-    uint dispute_nonce;
-
-    bool dispute_started_by_left;
-    uint dispute_until_block;
-
-    // hash of dispute state is stored after dispute is started
-    bytes32 proofbody_hash; 
-
-    bytes32 arguments_hash; 
+    // dispute state is stored after dispute is started
+    bytes32 disputeHash;
   }
   
 
@@ -326,9 +327,9 @@ contract Depository is Console {
     packed |= bytes32(uint256(tokenType));
 
     return packed;
-}
+  }
 
-function unpackTokenReference(bytes32 packed) public pure returns (address contractAddress, uint96 tokenId, uint8 tokenType) {
+  function unpackTokenReference(bytes32 packed) public pure returns (address contractAddress, uint96 tokenId, uint8 tokenType) {
     // Unpack the contractAddress from the most significant 160 bits
     contractAddress = address(uint160(uint256(packed) >> 96));
 
@@ -339,7 +340,7 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
     tokenType = uint8(uint256(packed) & 0xFF);
 
     return (contractAddress, tokenId, tokenType);
-}
+  }
 
 
 
@@ -475,7 +476,6 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
     uint memoryDebtIndex = _debtIndex[addr][tokenId];
     
     if (memoryReserve == 0){
-      // the user has nothing, try again later
       return debtsLength - memoryDebtIndex;
     }
     // allow partial enforcing in case there are too many _debts to pay off at once (over block gas limit)
@@ -485,11 +485,11 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
       if (memoryReserve >= debt.amount) {
         // can pay this debt off in full
         memoryReserve -= debt.amount;
-        _reserves[debt.pay_to][tokenId] += debt.amount;
+        _reserves[debt.creditor][tokenId] += debt.amount;
 
         delete _debts[addr][tokenId][memoryDebtIndex];
 
-        // last debt was paid off, the user is debt free now
+        // last debt was paid off, the entity is debt free now
         if (memoryDebtIndex+1 == debtsLength) {
           memoryDebtIndex = 0;
           // resets .length to 0
@@ -502,7 +502,7 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
         
       } else {
         // pay off the debt partially and break the loop
-        _reserves[debt.pay_to][tokenId] += memoryReserve;
+        _reserves[debt.creditor][tokenId] += memoryReserve;
         debt.amount -= memoryReserve;
         memoryReserve = 0;
         break;
@@ -575,14 +575,17 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
 
     return true;
   }
-  // mutually agreed update of channel state:
-  // tokenId: [leftReserve, rightReserve, collateral, ondelta] 
+
+
+
+
+  // mutually agreed update of channel state in a single atomic operation
   function cooperativeUpdate(CooperativeUpdate memory params) public returns (bool) {
     bytes memory ch_key = channelKey(msg.sender, params.peer);
 
     bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, 
     ch_key, 
-    _channels[ch_key].cooperative_nonce, 
+    _channels[ch_key].cooperativeNonce, 
     params.diffs, 
     params.forgiveDebtsInTokenIds);
 
@@ -595,25 +598,45 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
       return false;
     }
 
-    _channels[ch_key].cooperative_nonce++;
 
     for (uint i = 0; i < params.diffs.length; i++) {
       Diff memory diff = params.diffs[i];
-      // ensure that the user has enough funds to apply the diffs
-      //int memory totalDiff = diff.peerReserveDiff + diff.collateralDiff;
-      // ondeltaDiff can be arbitrary
-      //require(_reserves[msg.sender][diff.tokenId] >= uint(diff.peerReserveDiff), "Not enough reserve")
 
+      if (diff.peerReserveDiff < 0) {
+        enforceDebts(params.peer, diff.tokenId);
+        require(_reserves[params.peer][diff.tokenId] >= uint(-diff.peerReserveDiff), "Not enough peer reserve");
 
-      if (diff.peerReserveDiff > 0) {
-        _reserves[msg.sender][diff.tokenId] -= uint(diff.peerReserveDiff);
-        _reserves[params.peer][diff.tokenId] += uint(diff.peerReserveDiff);
-      } else {
         _reserves[params.peer][diff.tokenId] -= uint(-diff.peerReserveDiff);
-        _reserves[msg.sender][diff.tokenId] += uint(-diff.peerReserveDiff);
+      } else {
+        _reserves[params.peer][diff.tokenId] += uint(diff.peerReserveDiff);
       }
 
+
+      // ensure that the entity has enough funds to apply the diffs
+      int totalDiff = diff.peerReserveDiff + diff.collateralDiff;
+      if (totalDiff > 0) {
+        enforceDebts(msg.sender, diff.tokenId);
+        // if the sender is sending funds, they must have them
+        require(_reserves[msg.sender][diff.tokenId] >= uint(totalDiff), "Not enough sender reserve");
+
+        _reserves[msg.sender][diff.tokenId] -= uint(totalDiff);
+      } else {
+        // sender is receiving
+        _reserves[msg.sender][diff.tokenId] += uint(-totalDiff);
+      }
+
+
+      if (diff.collateralDiff < 0) {
+        require(_collaterals[ch_key][diff.tokenId].collateral >= uint(-diff.collateralDiff), "Not enough collateral");
+        _collaterals[ch_key][diff.tokenId].collateral -= uint(diff.collateralDiff);
+      } else {
+        _collaterals[ch_key][diff.tokenId].collateral += uint(diff.collateralDiff);
+      }
+
+      // ondeltaDiff can be arbitrary
+      _collaterals[ch_key][diff.tokenId].ondelta += diff.ondeltaDiff;
     }
+    _channels[ch_key].cooperativeNonce++;
 
     logChannel(msg.sender, params.peer);
     return true;
@@ -623,7 +646,7 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
   function cooperativeProof(CooperativeProof memory params) public returns (bool) {
     bytes memory ch_key = channelKey(msg.sender, params.peer);
 
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeProof, ch_key, _channels[ch_key].cooperative_nonce, _channels[ch_key].cooperative_nonce, params.entries);
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeProof, ch_key, _channels[ch_key].cooperativeNonce, params.entries);
 
     bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
     log('Encoded hash', hash);
@@ -644,21 +667,28 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
 
 
   // returns tokens to _reserves based on final deltas and _collaterals
-  // then increases cooperative_nonce to invalidate all previous dispute proofs
-  function finalizeChannel(address user1, address user2, ProofBody memory proofbody, bytes[] memory leftArguments, bytes[] memory rightArguments) internal returns (bool) {
-    address l_user;
-    address r_user;
-    if (user1 < user2) {
-      l_user = user1;
-      r_user = user2;
+  // then increases cooperativeNonce to invalidate all previous dispute proofs
+
+  // todo: private visability
+  function finalizeChannel(address entity1, 
+      address entity2, 
+      ProofBody memory proofbody, 
+      bytes memory leftArguments, 
+      bytes memory rightArguments) public returns (bool) 
+  {
+    address leftAddress;
+    address rightAddress;
+    if (entity1 < entity2) {
+      leftAddress = entity1;
+      rightAddress = entity2;
     } else {
-      l_user = user2;
-      r_user = user1;    
+      leftAddress = entity2;
+      rightAddress = entity1;    
     }
 
-    bytes memory ch_key = abi.encodePacked(l_user, r_user);
+    bytes memory ch_key = abi.encodePacked(leftAddress, rightAddress);
 
-    logChannel(l_user, r_user);
+    logChannel(leftAddress, rightAddress);
 
     // 1. create deltas (ondelta+offdelta) from proofbody
     int[] memory deltas = new int[](proofbody.offdeltas.length);
@@ -667,18 +697,18 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
     }
     
     // 2. process subcontracts and apply to deltas
+    bytes[] memory decodedLeftArguments = abi.decode(leftArguments, (bytes[]));
+    bytes[] memory decodedRightArguments = abi.decode(rightArguments, (bytes[]));
+    
     for (uint i = 0; i < proofbody.subcontracts.length; i++){
 
       SubcontractClause memory sub = proofbody.subcontracts[i];
       int[] memory newDeltas = SubcontractProvider(sub.subcontractProviderAddress).process(
         SubcontractProvider.SubcontractParams(
         deltas, 
-        proofbody.tokenIds, 
-        l_user, 
-        r_user, 
         sub.data, 
-        leftArguments[i],
-        rightArguments[i]
+        decodedLeftArguments[i],
+        decodedRightArguments[i]
       ));
 
 
@@ -701,14 +731,13 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
       ChannelCollateral storage col = _collaterals[ch_key][tokenId];
 
       if (delta >= 0 && uint(delta) <= col.collateral) {
-        // ChannelCollateral is split (standard no-credit LN resolution)
-        uint left_gets = uint(delta);
-        _reserves[l_user][tokenId] += left_gets;
-        _reserves[r_user][tokenId] += col.collateral - left_gets;
+        // collateral is split between entities
+        _reserves[leftAddress][tokenId] += uint(delta);
+        _reserves[rightAddress][tokenId] += col.collateral - uint(delta);
       } else {
-        // one user gets entire collateral, another pays uncovered credit from reserve or gets debt (resolution enabled by XLN)
-        address getsCollateral = delta < 0 ? r_user : l_user;
-        address getsDebt = delta < 0 ? l_user : r_user;
+        // one entity gets entire collateral, another pays credit from reserve or gets debt
+        address getsCollateral = delta < 0 ? rightAddress : leftAddress;
+        address getsDebt = delta < 0 ? leftAddress : rightAddress;
         uint debtAmount = delta < 0 ? uint(-delta) : uint(delta) - col.collateral;
         _reserves[getsCollateral][tokenId] += col.collateral;
         
@@ -727,7 +756,7 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
             _reserves[getsDebt][tokenId] = 0;
           }
           _debts[getsDebt][tokenId].push(Debt({
-            pay_to: getsCollateral,
+            creditor: getsCollateral,
             amount: debtAmount
           }));
           _activeDebts[getsDebt]++;
@@ -738,28 +767,28 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
     }
 
 
-    delete _channels[ch_key].proofbody_hash;
-    delete _channels[ch_key].dispute_nonce;
+    delete _channels[ch_key].disputeHash;
 
-    delete _channels[ch_key].dispute_until_block;
-    delete _channels[ch_key].dispute_started_by_left;
-
-    _channels[ch_key].cooperative_nonce++;
+    _channels[ch_key].cooperativeNonce++;
    
-    logChannel(l_user, r_user);
+    logChannel(leftAddress, rightAddress);
 
     return true;
 
   }
 
 
-  function disputeProof(DisputeProof memory params) public returns (bool) {
+  function initialDisputeProof(InitialDisputeProof memory params) public returns (bool) {
     bytes memory ch_key = channelKey(msg.sender, params.peer);
 
-    // users must always hold a dispute proof with cooperative_nonce equal or higher than the one in the contract
-    require(_channels[ch_key].cooperative_nonce <= params.cooperative_nonce, "Outdated cooperative_nonce");
+    // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
+    require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce, "Outdated cooperativeNonce");
 
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperative_nonce, params.dispute_nonce, params.proofbody_hash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, 
+      ch_key, 
+      params.cooperativeNonce, 
+      params.disputeNonce, 
+      params.proofbodyHash);
 
     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
@@ -767,50 +796,74 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
 
     require(ECDSA.recover(final_hash, params.sig) == params.peer, "Invalid signer");
 
-    if (_channels[ch_key].dispute_until_block == 0) {
-      // starting a dispute
-      _channels[ch_key].dispute_started_by_left = msg.sender < params.peer;
-      _channels[ch_key].dispute_nonce = params.dispute_nonce;
-      _channels[ch_key].proofbody_hash = params.proofbody_hash;
+    require(_channels[ch_key].disputeHash == bytes32(0), "Dispute already started");
 
-      // todo: hubs get shorter delay
-      _channels[ch_key].dispute_until_block = block.number + 20;
+    bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
+      params.disputeNonce, 
+      msg.sender < params.peer, // is started by left
+      block.number + 20,
+      params.proofbodyHash, 
+      keccak256(abi.encodePacked(params.initialArguments)));
 
-      log("set until", _channels[ch_key].dispute_until_block);
-    } else {
-      // providing another dispute proof with higher nonce
+    _channels[ch_key].disputeHash = keccak256(encodedDispute);
+    emit DisputeStarted(msg.sender, params.peer, params.disputeNonce, params.initialArguments);
+  }
+
+  function finalDisputeProof(FinalDisputeProof memory params) public returns (bool) {
+    bytes memory ch_key = channelKey(msg.sender, params.peer);
+    // verify the dispute was started
+
+    bytes memory encodedDispute = abi.encodePacked(params.initialCooperativeNonce,
+      params.initialDisputeNonce, 
+      params.startedByLeft, 
+      params.disputeUntilBlock,
+      params.initialProofbodyHash, 
+      keccak256(params.initialArguments));
+    
+    require(_channels[ch_key].disputeHash == keccak256(encodedDispute), "Dispute not found");
+
+    if (params.sig.length != 0) {
+      // counter proof was provided
+      bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
+      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, 
+        ch_key, 
+        params.finalCooperativeNonce, 
+        params.finalDisputeNonce, 
+        finalProofbodyHash);
+
+      bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+      log('encoded_msg',encoded_msg);
+      require(ECDSA.recover(final_hash, params.sig) == params.peer, "Invalid signer");
+
       // TODO: if nonce is same, Left one's proof is considered valid
-      require(!_channels[ch_key].dispute_started_by_left == msg.sender < params.peer, "Only your peer can respond to dispute");
 
-      require(_channels[ch_key].dispute_nonce < params.dispute_nonce, "New nonce must be greater");
+      require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
 
-      require(params.proofbody_hash == keccak256(abi.encode(params.proofbody)), "Invalid proofbody_hash");
       
-      bytes[] memory leftArguments;
-      bytes[] memory rightArguments;
-
-      finalizeChannel(msg.sender, params.peer, params.proofbody, leftArguments, rightArguments);
-      return true;
+    } else {
+      // counterparty agrees or does not respond 
+      bool senderIsCounterparty = params.startedByLeft != msg.sender < params.peer;
+      require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
+      require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
+    }
+    bytes memory leftArguments;
+    bytes memory rightArguments;
+    if (params.startedByLeft) {
+      leftArguments = params.initialArguments;
+      rightArguments = params.finalArguments;
+    } else {
+      leftArguments = params.finalArguments;
+      rightArguments = params.initialArguments;
     }
 
+    finalizeChannel(msg.sender, params.peer, params.finalProofbody, leftArguments, rightArguments);
+  
+
     return true;
   }
 
 
-  function revealEntries(RevealEntries memory params) public returns (bool success) {
-    bytes memory ch_key = channelKey(msg.sender, params.peer);
 
-    bool sender_is_left = msg.sender < params.peer;
- 
-    if ((_channels[ch_key].dispute_started_by_left == sender_is_left) && block.number < _channels[ch_key].dispute_until_block) {
-      return false;
-    } else if (_channels[ch_key].proofbody_hash != keccak256(abi.encode(params.proofbody))) {
-      return false;
-    } 
-
-    finalizeChannel(msg.sender, params.peer, params.proofbody, new bytes[](0), new bytes[](0));
-    return true;
-  }
 
 
 
@@ -877,9 +930,9 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
 
 
 
-  function createDebt(address addr, address pay_to, uint tokenId, uint amount) public {
+  function createDebt(address addr, address creditor, uint tokenId, uint amount) public {
     _debts[addr][tokenId].push(Debt({
-      pay_to: pay_to,
+      creditor: creditor,
       amount: amount
     }));
   }
@@ -888,11 +941,11 @@ function unpackTokenReference(bytes32 packed) public pure returns (address contr
   function logChannel(address a1, address a2) public {
     bytes memory ch_key = channelKey(a1, a2);
     log(">>> Logging channel", ch_key);
-    log("cooperative_nonce", _channels[ch_key].cooperative_nonce);
-    log("dispute_nonce", _channels[ch_key].dispute_nonce);
-    log("dispute_until_block", _channels[ch_key].dispute_until_block);
+    log("cooperativeNonce", _channels[ch_key].cooperativeNonce);
+    log("disputeHash", _channels[ch_key].disputeHash);
+
     for (uint i = 0; i < _tokens.length; i++) {
-      log("PackedToken", _tokens[i]);
+      log("Token", _tokens[i]);
       log("Left:", _reserves[a1][i]);
       log("Right:", _reserves[a2][i]);
       log("collateral", _collaterals[ch_key][i].collateral);

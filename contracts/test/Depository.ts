@@ -5,8 +5,12 @@ import {
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { expect } from "chai";
 import hre from "hardhat";
-import { Contract } from "ethers";
+import { Contract, AbiCoder } from "ethers";
 import { ethers } from "hardhat";
+
+
+const coder = AbiCoder.defaultAbiCoder()
+
 
 describe("Depository", function () {
   let depository: Contract;
@@ -151,6 +155,31 @@ describe("Depository", function () {
 
 
 
+
+    it("should finalize channel after reserveToCollateral", async function () {
+      const proofBody = {
+        offdeltas: [25],
+        tokenIds: [0],
+        subcontracts: []
+      };
+
+      const leftArguments = coder.encode(["bytes"], ["0x"]);
+      const rightArguments = coder.encode(["bytes"], ["0x"]);
+
+      await depository.finalizeChannel(owner.address, user1.address, proofBody, leftArguments, rightArguments);
+
+      const reserveOwner = await depository._reserves(owner.address, 0);
+      const reserveUser1 = await depository._reserves(user1.address, 0);
+
+      expect(reserveOwner).to.equal(9925);  // 25 collateral goes back to owner
+      expect(reserveUser1).to.equal(75);    // 25 for user1
+    });
+    
+
+
+
+
+
     it("should transfer ERC20 token back", async function () {
 
       expect(await erc20.balanceOf(owner.address)).to.equal(990000);
@@ -162,8 +191,6 @@ describe("Depository", function () {
 
     });
 
-
-    
       
     it("should transfer ERC721 token back", async function () {
 
