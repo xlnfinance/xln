@@ -2,7 +2,10 @@ import Transition from '../Transition';
 import { TransitionMethod } from './../TransitionMethod';
 
 export default class TextMessageTransition extends Transition {
-  constructor() {
+  message: string;
+
+  constructor(message: string) {
     super(TransitionMethod.TextMessage);
+    this.message = message;
   }
 }

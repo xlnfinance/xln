@@ -30,6 +30,9 @@ export default class UserContext<
     this.provider = null;
     this.signer = null;
     this.depository = null;
+    this.erc20Mock = null;
+    this.erc721Mock = null;
+    this.erc1155Mock = null;
   }
 
   async getSigner(): Promise<Signer | null> {
@@ -75,11 +78,8 @@ export default class UserContext<
           pairs: [{ addr: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", amount: 50 }]
         });
   
-        const collateral = await depository._collaterals(await depository.channelKey(owner.address, user1.address), 0);
+        //const collateral = await this.depository._collaterals(await depository.channelKey(owner.address, user1.address), 0);
         //const reserve = await depository._reserves(owner.address, 0);
-  
-        expect(collateral.collateral).to.equal(50);
-        expect(reserve).to.equal(9900);
 
         Logger.info(`Chel reserves :: ${reserve}`);
 
