@@ -55,8 +55,8 @@ export default class UserContext<
         this.erc721Mock = ERC721Mock__factory.connect('0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9', this.signer);
         this.erc1155Mock = ERC1155Mock__factory.connect('0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0', this.signer);
 
-        await this.erc721Mock.mint(this.getAddress(), 1);
-        await this.erc1155Mock.mint(this.getAddress(), 0, 100, "0x");
+        //await this.erc721Mock.mint(this.getAddress(), 1);
+        //await this.erc1155Mock.mint(this.getAddress(), 0, 100, "0x");
 
 
         const packedToken = await this.depository.packTokenReference(0, await this.erc20Mock.getAddress(), 0);
