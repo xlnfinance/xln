@@ -1,6 +1,7 @@
 // Need refactor this code
 export enum TransitionMethod {
   TextMessage,
+  ProposedEvent,
 }
 
 /*

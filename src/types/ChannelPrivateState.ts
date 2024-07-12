@@ -1,5 +1,6 @@
 import Block from './Block';
 import Transition from './Transition';
+import { DepositoryEvent } from './Transitions/ProposedEventTransition';
 
 export default interface ChannelPrivateState {
   mempool: Transition[];
@@ -8,4 +9,5 @@ export default interface ChannelPrivateState {
   pendingBlock: Block | null;
   pendingSignatures: Array<string>;
   rollbacks: number;
+  pendingEvents: Array<DepositoryEvent>;
 }
