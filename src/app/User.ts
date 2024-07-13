@@ -8,13 +8,13 @@ import Channel from '../common/Channel';
 import IUserContext from '../types/IUserContext';
 import IChannelContext from '../types/IChannelContext';
 import ChannelContext from './ChannelContext';
-import { IHubAppConnectionData } from '../types/IHubAppConnectionData';
+import { IHubConnectionData } from '../types/IHubConnectionData';
 import { BodyTypes } from '../types/IBody';
 
 export default class User implements ITransportListener {
   private _transports: Map<string, ITransport> = new Map();
   private _channelRecipientMapping: Map<ITransport, Map<string, IChannel>> = new Map();
-  private _hubInfoMap: Map<string, IHubAppConnectionData> = new Map();
+  private _hubInfoMap: Map<string, IHubConnectionData> = new Map();
 
   constructor(private context: IUserContext) {}
 
@@ -48,6 +48,22 @@ export default class User implements ITransportListener {
     }
   }
 
+  async addHub(data: IHubConnectionData) {
+    if (this._transports.has(data.name)) {
+      return;
+    }
+
+    this._hubInfoMap.set(data.name, data);
+
+    const transport = this.context.getTransportFactory().create(data, this.context.getAddress(), data.name);
+    this._transports.set(data.name, transport);
+    transport.setReceiver(this);
+
+    this._channelRecipientMapping.set(transport, new Map());
+
+    await transport.open();
+  }
+
   async start() {
     const signer = await this.context.getSigner();
     if (signer == null) {
@@ -56,17 +72,7 @@ export default class User implements ITransportListener {
     }
 
     for (const opt of this.context.getOptions().hubConnectionDataList) {
-      Logger.info(`Create transport for ${opt.name}`);
-
-      this._hubInfoMap.set(opt.name, opt);
-
-      const transport = this.context.getTransportFactory().create(opt, this.context.getAddress(), opt.name);
-      this._transports.set(opt.name, transport);
-      transport.setReceiver(this);
-
-      this._channelRecipientMapping.set(transport, new Map());
-
-      await transport.open();
+      await this.addHub(opt);
     }
     await this.context.getStorageContext().initialize(this.context.getAddress());
   }

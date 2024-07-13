@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import ITransport from '../types/ITransport';
 import IMessage from '../types/IMessage';
-import { IHubAppConnectionData } from '../types/IHubAppConnectionData';
+import { IHubConnectionData } from '../types/IHubConnectionData';
 import Logger from '../utils/Logger';
 import ITransportMessageReceiver from '../types/ITransportListener';
 import { decode, encode } from '../utils/Codec';
@@ -11,7 +11,7 @@ export default class Transport implements ITransport {
   private _receiver?: ITransportMessageReceiver;
   private _id: string;
 
-  constructor(connectionData: IHubAppConnectionData, userId: string, id: string) {
+  constructor(connectionData: IHubConnectionData, userId: string, id: string) {
     this._id = id;
     this._ws = new WebSocket(`ws://${connectionData.host}:${connectionData.port}`, {
       headers: { authorization: userId },
