@@ -52,20 +52,21 @@ async function Test() {
   let depository = Depository__factory.connect(ENV.depositoryContractAddress, user1_signer);
   let erc20Mock = ERC20Mock__factory.connect(ENV.erc20Address, user1_signer);
   
-  erc20Mock.transfer(ENV.firstUserAddress, 5000);
+  const testAllowance1 = await erc20Mock.allowance(ENV.firstUserAddress, await depository.getAddress());
 
   await erc20Mock.approve(await depository.getAddress(), 10000);
-
+  await erc20Mock.transfer(await depository.getAddress(), 10000);
+  
+  const testBalance1 = await erc20Mock.balanceOf(ENV.firstUserAddress);
   const testBalance3 = await erc20Mock.balanceOf(await depository.getAddress());
-  const testAllowance = await erc20Mock.allowance(ENV.firstUserAddress, ENV.depositoryContractAddress);
 
   const packedToken = await depository.packTokenReference(0, await erc20Mock.getAddress(), 0);
         
   await depository.externalTokenToReserve(
-    { packedToken, internalTokenId: 0n, amount: 1n }
+    { packedToken, internalTokenId: 0n, amount: 100n }
   );
 
-  const reserveTest1 = await depository._reserves(ENV.firstUserAddress, 0);
+  const reserveTest1 = await depository._reserves(ENV.firstUserAddress, 0n);
 
   await depository.reserveToCollateral({
     tokenId: 0,
@@ -76,7 +77,7 @@ async function Test() {
   const collateralTest = await depository._collaterals(
     await depository.channelKey(ENV.firstUserAddress, ENV.secondUserAddress), 0
     );
-  const reserveTest2 = await depository._reserves(ENV.firstUserAddress, 0);
+  const reserveTest2 = await depository._reserves(ENV.firstUserAddress, 0n);
 }
 
 async function main() {
