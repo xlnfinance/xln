@@ -56,7 +56,7 @@ contract Depository is Console {
   // Token type identifiers
   uint8 constant TypeERC20 = 0;
   uint8 constant TypeERC721 = 1;
-  uint8 constant TypeERC1155 = 2;
+  uint8 constant TypeERC1155 = 2;   
 
 
 
