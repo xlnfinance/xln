@@ -55,18 +55,43 @@ async function Test() {
   const testAllowance1 = await erc20Mock.allowance(ENV.firstUserAddress, await depository.getAddress());
 
   await erc20Mock.approve(await depository.getAddress(), 10000);
-  await erc20Mock.transfer(await depository.getAddress(), 10000);
+  //await erc20Mock.transfer(await depository.getAddress(), 10000);
   
-  const testBalance1 = await erc20Mock.balanceOf(ENV.firstUserAddress);
-  const testBalance3 = await erc20Mock.balanceOf(await depository.getAddress());
+  console.log("user1_balance_before", await erc20Mock.balanceOf(ENV.firstUserAddress));
+  console.log("depository_balance_before", await erc20Mock.balanceOf(await depository.getAddress()));
 
   const packedToken = await depository.packTokenReference(0, await erc20Mock.getAddress(), 0);
+  console.log(packedToken);
+  console.log(await depository.unpackTokenReference(packedToken));
+  console.log(await erc20Mock.getAddress());
         
-  await depository.externalTokenToReserve(
-    { packedToken, internalTokenId: 0n, amount: 100n }
+  console.log( 
+    await depository.externalTokenToReserve(
+      { packedToken, internalTokenId: 0n, amount: 10n }
+    ) 
   );
 
-  const reserveTest1 = await depository._reserves(ENV.firstUserAddress, 0n);
+  console.log("user1_balance_after", await erc20Mock.balanceOf(ENV.firstUserAddress))
+  console.log("depository_balance_after", await erc20Mock.balanceOf(await depository.getAddress()))
+  console.log("reserveTest1", await depository._reserves(ENV.firstUserAddress, 0));
+
+
+  // Query the console.log events
+  const filter = {
+    address: await depository.getAddress(),
+    topics: [
+      // Add the event topics you are interested in
+    ],
+  };
+
+  const logs = await provider.getLogs(filter);
+
+  logs.forEach(log => {
+    //const parsedLog = ethers.utils.defaultAbiCoder.decode(["address", "uint256", "uint256"], log.data);
+    console.log(log);
+  });
+
+
 
   await depository.reserveToCollateral({
     tokenId: 0,
