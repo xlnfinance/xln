@@ -16,6 +16,17 @@
             "outFiles": [
               "${workspaceFolder}/dist/**/*.js"
             ]
+          },
+          {
+            "type": "node",
+            "request": "launch",
+            "name": "Debug Hardhat",
+            "skipFiles": ["<node_internals>/**"],
+            "program": "${workspaceFolder}/node_modules/.bin/hardhat",
+            "args": ["test", "--network", "localhost"],
+            "runtimeExecutable": "node",
+            "runtimeArgs": ["--nolazy", "--inspect-brk=9229"],
+            "outputCapture": "std"
           }
     ]
 }
