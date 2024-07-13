@@ -26,7 +26,7 @@ contract SubcontractProvider is Console {
     Swap[] swap;
   }
 
-  // actual subcontracts
+  // actual subcontract structs
   struct Payment {
     uint deltaIndex;
     int amount;
@@ -54,34 +54,62 @@ contract SubcontractProvider is Console {
 
 
   // applies arbitrary changes to deltas
-  function process(SubcontractParams memory params) public view returns (int[] memory deltas) {
-    (Payment[] memory payments, 
-    Swap[] memory swaps) = abi.decode(params.data, (Payment[], Swap[]));
+  function process(SubcontractParams memory params) public returns (int[] memory deltas) {
+    Batch memory b = abi.decode(params.data, (Batch));
 
     uint[] memory left_args = abi.decode(params.left_arguments, (uint[]));
 
     deltas = params.deltas;
 
-    for (uint i = 0; i < payments.length; i++) {
-      Payment memory payment = payments[i];
-      uint revealed_at = hashToBlock[payment.hash];
-
-      // apply amount to delta if revealed on-time, otherwise ignore
-      // this is "sprites" approach (https://arxiv.org/pdf/1702.05812) 
-      // the opposite is "blitz" (https://www.usenix.org/system/files/sec21fall-aumayr.pdf)
-      if (revealed_at > 0 && revealed_at <= payment.revealedUntilBlock) {
-        deltas[payment.deltaIndex] += payment.amount;
-      }
-      
-
+    for (uint i = 0; i < b.payment.length; i++) {
+      processPayment(deltas, b.payment[i]);
     }
 
-
-
+    for (uint i = 0; i < b.swap.length; i++) {
+      processSwap(deltas, b.swap[i], params);
+    }
 
     return deltas;
 
   }
+  function processPayment(int[] memory deltas, Payment memory payment) private {
+    // apply amount to delta if revealed on-time, otherwise ignore
+    // this is "sprites" approach (https://arxiv.org/pdf/1702.05812) 
+    // the opposite is "blitz" (https://www.usenix.org/system/files/sec21fall-aumayr.pdf)
+
+    if (hashToBlock[payment.hash] == 0) {
+      // never revealed
+      return;
+    }
+
+    if (hashToBlock[payment.hash] > payment.revealedUntilBlock) {
+      // revealed too late
+      return;
+    }
+
+    deltas[payment.deltaIndex] += payment.amount;
+  }
+
+  function processSwap(int[] memory deltas, Swap memory swap, SubcontractParams memory params) private {
+    // apply swap to deltas
+
+    int left = deltas[swap.addIndex] + int(abi.decode(params.left_arguments, (uint[]))[swap.addIndex]);
+    int right = deltas[swap.subIndex] + int(abi.decode(params.right_arguments, (uint[]))[swap.subIndex]);
+    /*
+    if (left < swap.addAmount) {
+      return;
+    }
+
+    if (right < swap.subAmount) {
+      return;
+    }
+
+    deltas[swap.addIndex] -= swap.addAmount;
+    deltas[swap.subIndex] += swap.subAmount;*/
+  }
+
+
+
 
 
   function revealSecret(bytes32 secret) public {

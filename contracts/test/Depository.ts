@@ -8,7 +8,7 @@ import hre from "hardhat";
 import { Contract, AbiCoder, Signer } from "ethers";
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { Depository, SubcontractProvider, EntityProvider } from "../typechain-types";
+import { Depository, SubcontractProvider, EntityProvider, SubcontractProvider__factory } from "../typechain-types";
 
 
 const coder = AbiCoder.defaultAbiCoder()
@@ -18,9 +18,9 @@ describe("Depository", function () {
   let depository: Depository;
   let scProvider: SubcontractProvider;
   
-  let erc20: Contract;
-  let erc721: Contract;
-  let erc1155: Contract;
+  let erc20: Contract, erc20id: bigint;
+  let erc721: Contract, erc721id: bigint;
+  let erc1155: Contract, erc1155id: bigint;
 
   let user0: HardhatEthersSigner, user1: HardhatEthersSigner, user2: HardhatEthersSigner;
 
@@ -87,7 +87,9 @@ describe("Depository", function () {
 
       await depository.externalTokenToReserve({ packedToken, internalTokenId: 0, amount: 10000 });
 
-      const reserve = await depository._reserves(user0.address, 0);
+      erc20id = await depository.getTokensLength() - 1n;
+
+      const reserve = await depository._reserves(user0.address, erc20id);
 
       expect(reserve).to.equal(10000);
 
@@ -107,7 +109,8 @@ describe("Depository", function () {
       //console.log('off ', user0.address, await depository.getAddress(), 1);
 
       await depository.externalTokenToReserve({ receiver: user0.address, packedToken, internalTokenId: 0, amount: 1 });
-      const reserve = await depository._reserves(user0.address, 1);
+      erc721id = await depository.getTokensLength() - 1n;
+      const reserve = await depository._reserves(user0.address, erc721id);
 
       expect(await erc721.ownerOf(1)).to.equal(await depository.getAddress());
 
@@ -122,9 +125,10 @@ describe("Depository", function () {
 
       expect(await erc1155.balanceOf(user0.address, 0)).to.equal(100);
 
-      await depository.externalTokenToReserve({ receiver: user0.address, packedToken, internalTokenId: 0, amount: 50 });
+      await depository.externalTokenToReserve({ packedToken, internalTokenId: 0, amount: 50 });
+      erc1155id = await depository.getTokensLength() - 1n;
 
-      const reserve = await depository._reserves(user0.address, 2);
+      const reserve = await depository._reserves(user0.address, erc1155id);
 
       expect(reserve).to.equal(50);
 
@@ -137,9 +141,9 @@ describe("Depository", function () {
 
 
     it("should transfer ERC20 token from reserve to another reserve", async function () {
-      await depository.reserveToReserve({ receiver: user1.address, tokenId: 0, amount: 50 });
-      const reserveUser1 = await depository._reserves(user1.address, 0);
-      const reserveUser0 = await depository._reserves(user0.address, 0);
+      await depository.reserveToReserve({ receiver: user1.address, tokenId: erc20id, amount: 50 });
+      const reserveUser1 = await depository._reserves(user1.address, erc20id);
+      const reserveUser0 = await depository._reserves(user0.address, erc20id);
 
       expect(reserveUser1).to.equal(50);
       expect(reserveUser0).to.equal(9950);
@@ -148,13 +152,13 @@ describe("Depository", function () {
 
     it("should transfer ERC20 token from reserve to collateral", async function () {
       await depository.reserveToCollateral({
-        tokenId: 0,
+        tokenId: erc20id,
         receiver: user0.address,
         pairs: [{ addr: user1.address, amount: 50 }]
       });
 
-      const collateral = await depository._collaterals(await depository.channelKey(user0.address, user1.address), 0);
-      const reserve = await depository._reserves(user0.address, 0);
+      const collateral = await depository._collaterals(await depository.channelKey(user0.address, user1.address), erc20id);
+      const reserve = await depository._reserves(user0.address, erc20id);
 
       expect(collateral.collateral).to.equal(50);
       expect(reserve).to.equal(9900);
@@ -168,7 +172,7 @@ describe("Depository", function () {
     it("should finalizeChannel()", async function () {
       const proofBody = {
         offdeltas: [25, -5, -10],
-        tokenIds: [0, 1, 2],
+        tokenIds: [erc20id, erc721id, erc1155id],
         subcontracts: []
       };
 
@@ -177,11 +181,11 @@ describe("Depository", function () {
 
       await depository.finalizeChannel(user0.address, user1.address, proofBody, leftArguments, rightArguments);
 
-      const reserveUser0 = await depository._reserves(user0.address, 0);
-      const reserveUser1 = await depository._reserves(user1.address, 0);
+      const reserveUser0 = await depository._reserves(user0.address, erc20id);
+      const reserveUser1 = await depository._reserves(user1.address, erc20id);
 
       expect(await depository._activeDebts(user1.address)).to.equal(2);
-      const debt = (await depository.getDebts(user1.address, 1))[0][0]
+      const debt = (await depository.getDebts(user1.address, erc721id))[0][0]
 
       // check amount and creditor
       expect(debt[0]).to.equal(5);
@@ -200,7 +204,7 @@ describe("Depository", function () {
 
       expect(await erc20.balanceOf(user0.address)).to.equal(990000);
 
-      await depository.reserveToExternalToken({ receiver: user0.address, tokenId: 0, amount: 100 });
+      await depository.reserveToExternalToken({ receiver: user0.address, tokenId: erc20id, amount: 100 });
 
       const balance = await erc20.balanceOf(user0.address);
       expect(balance).to.equal(990100);
@@ -210,7 +214,7 @@ describe("Depository", function () {
       
     it("should transfer ERC721 token back", async function () {
 
-      await depository.reserveToExternalToken({ receiver: user0.address, tokenId: 1, amount: 1 });
+      await depository.reserveToExternalToken({ receiver: user0.address, tokenId: erc721id, amount: 1 });
 
       const ownerOfToken = await erc721.ownerOf(1);
       expect(ownerOfToken).to.equal(user0.address);
@@ -222,7 +226,7 @@ describe("Depository", function () {
     it("should transfer ERC1155 token back", async function () {
 
 
-      await depository.reserveToExternalToken({ receiver: user0.address, tokenId: 2, amount: 50 });
+      await depository.reserveToExternalToken({ receiver: user0.address, tokenId: erc1155id, amount: 50 });
       const balance = await erc1155.balanceOf(user0.address, 0);
       expect(balance).to.equal(100);
 
@@ -233,13 +237,13 @@ describe("Depository", function () {
     it("should process cooperative dispute proof correctly", async function () {
       // Initial collateral for channel 0-1 for tokens 0 and 2
       await depository.reserveToCollateral({
-        tokenId: 0,
+        tokenId: erc20id,
         receiver: user0.address,
         pairs: [{ addr: user1.address, amount: 50 }]
       });
 
       await depository.reserveToCollateral({
-        tokenId: 2,
+        tokenId: erc1155id,
         receiver: user0.address,
         pairs: [{ addr: user1.address, amount: 50 }]
       });
@@ -248,35 +252,39 @@ describe("Depository", function () {
       // Prepare dispute proof
 
 
-      const getAbiEntry = (name: string) => SubcontractProvider.abi.find(entry => entry.name === name);
+      const getAbiEntry = (name: string) => SubcontractProvider__factory.abi.find(entry => entry.name === name);
 
       const testhash = ethers.keccak256(Buffer.alloc(32));
       console.log(testhash)
       console.log(await scProvider.hashToBlock(testhash));
 
       // To encode an array of structs for use in SubcontractParams
-      const payment: SubcontractProvider.Payment = {
+      const payment: SubcontractProvider.SubcontractParamsStruct = {
         deltaIndex: 0,
         amount: 100,
         revealedUntilBlock: 123456,
         hash: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"
       };
 
-      const swap: Swap = {
+      const swap: SubcontractProvider__factory.Swap = {
         addIndex: 1,
         addAmount: 200,
         subIndex: 2,
         subAmount: 50
       };
 
-      const swaps: Swap[] = ;
+      const batch: SubcontractProvider__factory.Batch = {
+        payment: [payment], 
+        swap: [swap]
+      }
+      
 
+      SubcontractProvider__factory.abi.forEach(entry => console.log(entry.name))
       const encodedData = coder.encode(
         [
-          getAbiEntry('Payment').inputs, 
-          getAbiEntry("Swap").inputs
+          getAbiEntry('Batch').inputs
         ],
-        [[payment], [swap]]
+        [batch]
       );
 
       console.log("Encoded SubcontractParams Data:", encodedData);
