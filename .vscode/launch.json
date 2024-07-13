@@ -16,6 +16,19 @@
             "outFiles": [
               "${workspaceFolder}/dist/**/*.js"
             ]
+          },
+          {
+            "type": "node",
+            "request": "launch",
+            "name": "Start depository test",
+            "skipFiles": [
+              "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/dist/test/depository.test.js",
+            "preLaunchTask": "tsc: build - tsconfig.json",
+            "outFiles": [
+              "${workspaceFolder}/dist/**/*.js"
+            ]
           }
     ]
 }
