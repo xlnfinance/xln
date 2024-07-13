@@ -335,14 +335,14 @@ contract Depository is Console {
   }
   
 
-  function packTokenReference(uint8 tokenType, address contractAddress, uint96 tokenId) public pure returns (bytes32) {
+  function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) public pure returns (bytes32) {
     require(tokenType <= 255);
 
     // Pack the contractAddress into the most significant 160 bits
     bytes32 packed = bytes32(uint256(uint160(contractAddress)) << 96);
 
     // Pack the tokenId into the next 96 bits
-    packed |= bytes32(uint256(tokenId) << 8);
+    packed |= bytes32(uint256(externalTokenId) << 8);
 
     // Pack the tokenType into the least significant 8 bits
     packed |= bytes32(uint256(tokenType));
@@ -350,17 +350,17 @@ contract Depository is Console {
     return packed;
   }
 
-  function unpackTokenReference(bytes32 packed) public pure returns (address contractAddress, uint96 tokenId, uint8 tokenType) {
+  function unpackTokenReference(bytes32 packed) public pure returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
     // Unpack the contractAddress from the most significant 160 bits
     contractAddress = address(uint160(uint256(packed) >> 96));
 
-    // Unpack the tokenId from the next 96 bits
-    tokenId = uint96((uint256(packed) >> 8) & 0xFFFFFFFFFFFFFFFFFFFFFF);
+    // Unpack the externalTokenId from the next 96 bits
+    externalTokenId = uint96((uint256(packed) >> 8) & 0xFFFFFFFFFFFFFFFFFFFFFF);
 
     // Unpack the tokenType from the least significant 8 bits
     tokenType = uint8(uint256(packed) & 0xFF);
 
-    return (contractAddress, tokenId, tokenType);
+    return (contractAddress, externalTokenId, tokenType);
   }
 
 
@@ -393,7 +393,7 @@ contract Depository is Console {
       _tokens.push(params.packedToken);
       params.internalTokenId = _tokens.length - 1;
 
-      console.log("Saved new token:", params.internalTokenId);
+      //console.log("Saved new token:", params.internalTokenId);
     } else {
       params.packedToken = _tokens[params.internalTokenId];
       //require(_tokens[params.internalTokenId] == params.packedToken, "Token data mismatch");
@@ -401,7 +401,7 @@ contract Depository is Console {
 
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(params.packedToken);
-    console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
+    //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
 
     // todo: allow longer uint256 tokenId for ERC721 and ERC1155 
     // e.g. Rarible has format of 0xCreatorAddress..00000TokenId
@@ -429,7 +429,7 @@ contract Depository is Console {
     enforceDebts(msg.sender, params.tokenId);
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
-    console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
+    //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
 
     require(_reserves[msg.sender][params.tokenId] >= params.amount, "Not enough reserve");
 
