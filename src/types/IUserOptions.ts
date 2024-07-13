@@ -1,7 +1,7 @@
-import { IHubAppConnectionData } from './IHubAppConnectionData';
+import { IHubConnectionData } from './IHubAppConnectionData';
 
 export default interface IUserOptions {
-  hubConnectionDataList: Array<IHubAppConnectionData>;
+  hubConnectionDataList: Array<IHubConnectionData>;
   jsonRPCUrl: string;
   depositoryContractAddress: string;
   onExternalChannelRequestCallback?: (userId: string) => boolean;
