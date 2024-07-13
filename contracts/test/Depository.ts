@@ -80,7 +80,6 @@ describe("Depository", function () {
       const packedToken = await depository.packTokenReference(0, await erc20.getAddress(), 0);
       await erc20.approve(await depository.getAddress(), 10000);
 
-      console.log('packedToken', packedToken);
 
       expect(await erc20.balanceOf(user0.address)).to.equal(1000000);
 
@@ -256,20 +255,28 @@ describe("Depository", function () {
       console.log(await scProvider.hashToBlock(testhash));
 
       // To encode an array of structs for use in SubcontractParams
-      const payments: SubcontractProvider.Payment[] = [{
+      const payment: SubcontractProvider.Payment = {
         deltaIndex: 0,
         amount: 100,
         revealedUntilBlock: 123456,
         hash: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"
-      }];
-      const swaps: Swap[] = [swap];
+      };
+
+      const swap: Swap = {
+        addIndex: 1,
+        addAmount: 200,
+        subIndex: 2,
+        subAmount: 50
+      };
+
+      const swaps: Swap[] = ;
 
       const encodedData = coder.encode(
         [
           getAbiEntry('Payment').inputs, 
           getAbiEntry("Swap").inputs
         ],
-        [payments, swaps]
+        [[payment], [swap]]
       );
 
       console.log("Encoded SubcontractParams Data:", encodedData);

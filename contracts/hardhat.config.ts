@@ -16,7 +16,6 @@ const config: HardhatUserConfig = {
       allowUnlimitedContractSize: true
     }
   }
-
 };
 
 export default config;

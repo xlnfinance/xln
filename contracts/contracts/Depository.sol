@@ -1,17 +1,6 @@
 // SPDX-License-Identifier: unknown
 pragma solidity ^0.8.24;
 
-// Add necessary interfaces
-interface IERC20 {
-  function transfer(address to, uint256 value) external returns (bool);
-  function transferFrom(address from, address to, uint256 value) external returns (bool);
-}
-interface IERC721 {
-  function transferFrom(address from, address to, uint256 tokenId) external;
-}
-interface IERC1155 {
-  function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes calldata data) external;
-}
 //import "../openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 //import "../openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 //import "../openzeppelin-contracts/contracts/token/ERC1155/IERC1155.sol";
@@ -24,6 +13,17 @@ import "./EntityProvider.sol";
 
 import "./SubcontractProvider.sol";
 
+// Add necessary interfaces
+interface IERC20 {
+  function transfer(address to, uint256 value) external returns (bool);
+  function transferFrom(address from, address to, uint256 value) external returns (bool);
+}
+interface IERC721 {
+  function transferFrom(address from, address to, uint256 tokenId) external;
+}
+interface IERC1155 {
+  function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes calldata data) external;
+}
 contract Depository is Console {
 
   mapping (address entity => mapping (uint tokenId => uint)) public _reserves;
@@ -64,12 +64,18 @@ contract Depository is Console {
   bytes32[] public _tokens;
 
   constructor() {
+    _tokens.push(bytes32(0));
+    
     // empty record, hub_id==0 means not a hub
     hubs.push(Hub({
       addr: address(0),
       uri: '',
       gasused: 0
     }));
+  }
+  
+  function getTokensLength() public view returns (uint) {
+    return _tokens.length;
   }
 
 
@@ -382,7 +388,7 @@ contract Depository is Console {
     uint amount;
   }
   function externalTokenToReserve(ExternalTokenToReserve memory params) public {
-    if (params.internalTokenId == 0 && _tokens.length == 0) {
+    if (params.internalTokenId == 0) {
       // create new token
       _tokens.push(params.packedToken);
       params.internalTokenId = _tokens.length - 1;
