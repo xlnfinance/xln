@@ -10,12 +10,9 @@ import "hardhat/console.sol";
 
 contract SubcontractProvider is Console {
   mapping(bytes32 => uint) public hashToBlock;
-
   constructor() {
     revealSecret(bytes32(0));
-
   }
-
  
   struct SubcontractParams {
     int[] deltas;
@@ -24,9 +21,12 @@ contract SubcontractProvider is Console {
     bytes right_arguments;
   }
 
+  struct Batch {
+    Payment[] payment;
+    Swap[] swap;
+  }
 
-
-
+  // actual subcontracts
   struct Payment {
     uint deltaIndex;
     int amount;
@@ -40,7 +40,6 @@ contract SubcontractProvider is Console {
 
     uint subIndex;
     uint subAmount;
-
   }
 
   // https://en.wikipedia.org/wiki/Credit_default_swap
