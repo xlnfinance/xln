@@ -8,7 +8,7 @@ import hre from "hardhat";
 import { Contract, AbiCoder, Signer } from "ethers";
 import { ethers } from "hardhat";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { Depository } from "../typechain-types";
+import { Depository, SubcontractProvider, EntityProvider } from "../typechain-types";
 
 
 const coder = AbiCoder.defaultAbiCoder()
@@ -16,6 +16,7 @@ const coder = AbiCoder.defaultAbiCoder()
 
 describe("Depository", function () {
   let depository: Depository;
+  let scProvider: SubcontractProvider;
   
   let erc20: Contract;
   let erc721: Contract;
@@ -53,6 +54,11 @@ describe("Depository", function () {
     depository = await Depository.deploy();
     await depository.waitForDeployment();
 
+    const SubcontractProvider = await hre.ethers.getContractFactory("SubcontractProvider");
+    scProvider = await SubcontractProvider.deploy();
+    await scProvider.waitForDeployment();
+
+
 
     return { erc20, erc721, erc1155, depository, user0, user1, user2 };
   }
@@ -74,11 +80,13 @@ describe("Depository", function () {
       const packedToken = await depository.packTokenReference(0, await erc20.getAddress(), 0);
       await erc20.approve(await depository.getAddress(), 10000);
 
+      console.log('packedToken', packedToken);
+
       expect(await erc20.balanceOf(user0.address)).to.equal(1000000);
 
       //await erc20.transfer(await depository.getAddress(), 100000);
 
-      await depository.externalTokenToReserve({ receiver: user0.address, packedToken, internalTokenId: 0, amount: 10000 });
+      await depository.externalTokenToReserve({ packedToken, internalTokenId: 0, amount: 10000 });
 
       const reserve = await depository._reserves(user0.address, 0);
 
@@ -221,6 +229,97 @@ describe("Depository", function () {
 
     });
 
+
+
+    it("should process cooperative dispute proof correctly", async function () {
+      // Initial collateral for channel 0-1 for tokens 0 and 2
+      await depository.reserveToCollateral({
+        tokenId: 0,
+        receiver: user0.address,
+        pairs: [{ addr: user1.address, amount: 50 }]
+      });
+
+      await depository.reserveToCollateral({
+        tokenId: 2,
+        receiver: user0.address,
+        pairs: [{ addr: user1.address, amount: 50 }]
+      });
+
+    
+      // Prepare dispute proof
+
+
+      const getAbiEntry = (name: string) => SubcontractProvider.abi.find(entry => entry.name === name);
+
+      const testhash = ethers.keccak256(Buffer.alloc(32));
+      console.log(testhash)
+      console.log(await scProvider.hashToBlock(testhash));
+
+      // To encode an array of structs for use in SubcontractParams
+      const payments: SubcontractProvider.Payment[] = [{
+        deltaIndex: 0,
+        amount: 100,
+        revealedUntilBlock: 123456,
+        hash: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"
+      }];
+      const swaps: Swap[] = [swap];
+
+      const encodedData = coder.encode(
+        [
+          getAbiEntry('Payment').inputs, 
+          getAbiEntry("Swap").inputs
+        ],
+        [payments, swaps]
+      );
+
+      console.log("Encoded SubcontractParams Data:", encodedData);
+      return
+
+
+      const proofbody: Depository.ProofBodyStruct = { 
+        offdeltas: [10,10], 
+        tokenIds: [0, 2], 
+        subcontracts: []
+      };
+
+      proofbody.subcontracts.push({ subcontractProviderAddress: user1.address, 
+        data: encodedData,
+        allowences: [
+          { deltaIndex: 0, incrementDeltaAllowence: 10, decrementDeltaAllowence: 5 },
+          { deltaIndex: 1, incrementDeltaAllowence: 20, decrementDeltaAllowence: 15 },
+        ] 
+      })
+
+      const initialArguments = coder.encode(["uint"], [0]);
+      const finalArguments = coder.encode(["uint"], [0]);
+
+      // Sign the proof
+      const encoded_msg = coder.encode(
+        ['uint8', 'bytes', 'uint', 'bytes32', 'bytes32'],
+        [2, await depository.channelKey(user0.address, user1.address), 0, ethers.utils.keccak256(coder.encode(['uint'], [0])), ethers.utils.keccak256(initialArguments)]
+      );
+      const hash = ethers.utils.keccak256(encoded_msg);
+      const sig = await user1.signMessage(ethers.utils.arrayify(hash));
+
+      // Call cooperativeDisputeProof
+      await depository.cooperativeDisputeProof({
+        peer: user1.address,
+        proofbody: proofbody,
+        initialArguments: initialArguments,
+        finalArguments: finalArguments,
+        sig: sig,
+      });
+
+      // Validate results
+      const reserveUser0 = await depository._reserves(user0.address, 0);
+      const reserveUser1 = await depository._reserves(user1.address, 0);
+
+      expect(reserveUser0).to.equal(9950);  // 10000 initial - 50 collateral
+      expect(reserveUser1).to.equal(0);    // No reserve for user1
+
+      const collateral = await depository._collaterals(await depository.channelKey(user0.address, user1.address), 0);
+      expect(collateral.collateral).to.equal(50);
+    });
 
 
 

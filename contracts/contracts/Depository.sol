@@ -18,12 +18,11 @@ interface IERC1155 {
 
 import "./ECDSA.sol";
 import "./console.sol";
+import "hardhat/console.sol";
 
 import "./EntityProvider.sol";
 
 import "./SubcontractProvider.sol";
-
-import "hardhat/console.sol";
 
 contract Depository is Console {
 
@@ -383,7 +382,7 @@ contract Depository is Console {
     uint amount;
   }
   function externalTokenToReserve(ExternalTokenToReserve memory params) public {
-    if (params.internalTokenId == 0) {
+    if (params.internalTokenId == 0 && _tokens.length == 0) {
       // create new token
       _tokens.push(params.packedToken);
       params.internalTokenId = _tokens.length - 1;
@@ -403,7 +402,7 @@ contract Depository is Console {
     if (tokenType == TypeERC20) {
       //console.log("20", contractAddress, msg.sender, address(this));
 
-      require(IERC20(contractAddress).transferFrom(msg.sender, address(this), params.amount));
+      require(IERC20(contractAddress).transferFrom(msg.sender, address(this), params.amount), "Fail");
     } else if (tokenType == TypeERC721) {
       // 721 does not return bool on transfer
       IERC721(contractAddress).transferFrom(msg.sender, address(this), uint(tokenId));

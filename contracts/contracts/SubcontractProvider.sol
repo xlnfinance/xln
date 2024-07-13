@@ -3,11 +3,18 @@ pragma solidity ^0.8.24;
 pragma experimental ABIEncoderV2;
 
 import "./Token.sol";
+
 import "./ECDSA.sol";
 import "./console.sol";
+import "hardhat/console.sol";
 
 contract SubcontractProvider is Console {
   mapping(bytes32 => uint) public hashToBlock;
+
+  constructor() {
+    revealSecret(bytes32(0));
+
+  }
 
  
   struct SubcontractParams {
@@ -34,7 +41,6 @@ contract SubcontractProvider is Console {
     uint subIndex;
     uint subAmount;
 
-    uint8 multiplier;
   }
 
   // https://en.wikipedia.org/wiki/Credit_default_swap
@@ -80,12 +86,15 @@ contract SubcontractProvider is Console {
 
 
   function revealSecret(bytes32 secret) public {
+    console.log("Revealing HTLC secret:");
+    console.logBytes32(secret);
+    console.logBytes32(keccak256(abi.encode(secret)));
     hashToBlock[keccak256(abi.encode(secret))] = block.number;
   }
   
   // anyone can get gas refund by deleting very old revealed secrets
   function cleanSecret(bytes32 hash) public {
-    if (hashToBlock[hash] < block.number - 100000){
+    if (hashToBlock[hash] != 0 && hashToBlock[hash] < block.number - 100000){
       delete hashToBlock[hash];
     }
   }
