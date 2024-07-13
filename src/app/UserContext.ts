@@ -7,6 +7,20 @@ import Logger from '../utils/Logger';
 
 import { Depository, Depository__factory, ERC20Mock, ERC20Mock__factory, ERC721Mock, ERC721Mock__factory, ERC1155Mock, ERC1155Mock__factory } from '../../contracts/typechain-types/index';
 import { TransferReserveToCollateralEvent } from '../../contracts/typechain-types/contracts/Depository.sol/Depository';
+import { env } from 'process';
+
+const TEMP_ENV = {
+  hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+  firstUserAddress: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+  secondUserAddress: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+  depositoryContractAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+  erc20Address:'0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
+  rpcNodeUrl: 'http://127.0.0.1:8545',
+};
+
+//import hre from "hardhat";
+//import { Contract } from "ethers";
+//import { ethers } from "hardhat";
 
 export default class UserContext<
   TransportFactoryType extends ITransportFactory,
@@ -41,71 +55,37 @@ export default class UserContext<
         this.provider = new JsonRpcProvider(this.opt.jsonRPCUrl);
         this.signer = await this.provider.getSigner(this.getAddress());
 
-        this.depository = Depository__factory.connect('0x5FbDB2315678afecb367f032d93F642f64180aa3', this.signer);
+        this.depository = Depository__factory.connect(TEMP_ENV.depositoryContractAddress, this.signer);
 
-        const eventsFilter = this.depository.filters.TransferReserveToCollateral();
-          this.depository.on<TransferReserveToCollateralEvent.Event>(
-            eventsFilter,
-            (receiver, addr, collateral, ondelta, tokenId, event) => {
-              console.log(receiver, addr, collateral, ondelta, tokenId, event);
-            },
-        );
-        
-        this.erc20Mock = ERC20Mock__factory.connect('0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9', this.signer);
-        this.erc721Mock = ERC721Mock__factory.connect('0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9', this.signer);
-        this.erc1155Mock = ERC1155Mock__factory.connect('0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0', this.signer);
+        const fromBlockNumber = 3; // Replace with the desired starting block number
 
-        //await this.erc721Mock.mint(this.getAddress(), 1);
-        //await this.erc1155Mock.mint(this.getAddress(), 0, 100, "0x");
-
-
-        const packedToken = await this.depository.packTokenReference(0, await this.erc20Mock.getAddress(), 0);
-        await this.erc20Mock.approve(await this.depository.getAddress(), 10000);
-
-        //expect(await this.erc20Mock.balanceOf(this.getAddress())).to.equal(1000000);
-
-        //await erc20.transfer(await depository.getAddress(), 100000);
-
-        await this.depository.externalTokenToReserve(
-          { receiver: this.getAddress(), packedToken, internalTokenId: 0, amount: 10000 }
-        );
-
-        const reserve = await this.depository._reserves(this.getAddress(), 0);
-
-        await this.depository.reserveToCollateral({
-          tokenId: 0,
-          receiver: this.getAddress(),
-          pairs: [{ addr: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", amount: 50 }]
+        const eventFilter = this.depository.filters.TransferReserveToCollateral();
+        this.depository.queryFilter(eventFilter, fromBlockNumber).then((pastEvents) => {
+          pastEvents.forEach((event) => {
+            const { receiver, addr, collateral, ondelta, tokenId } = event.args;
+            console.log(receiver, addr, collateral, ondelta, tokenId, event);
+          });
         });
-  
-        //const collateral = await this.depository._collaterals(await depository.channelKey(owner.address, user1.address), 0);
-        //const reserve = await depository._reserves(owner.address, 0);
 
-        Logger.info(`Chel reserves :: ${reserve}`);
+        // Listen for future events starting from the latest block
+        this.depository.on<TransferReserveToCollateralEvent.Event>(
+          eventFilter,
+          (receiver, addr, collateral, ondelta, tokenId, event) => {
+            console.log(receiver, addr, collateral, ondelta, tokenId, event);
+          }
+        );
 
-        //expect(reserve).to.equal(10000);
-
-        //expect(await erc20.balanceOf(owner.address)).to.equal(990000);
-
-        //this.contract = new Contract('0x5FbDB2315678afecb367f032d93F642f64180aa3', abi, this.signer);
-        Logger.info(`Contract address :: ${await this.depository.getAddress()}`);
-        Logger.info(`Contract getAllHubs :: ${await this.depository.getAllHubs()}`);
-
-      //this.contract.on<TransferReserveToCollateralEvent.Event>((receiver, addr, collateral, ondelta, tokenId, event) => {
-      //    Logger.error(1);
-      //  });
-
-        //this.contract.on("TransferReserveToCollateralEvent",
-        //  (receiver, addr, collateral, ondelta, tokenId, event) => {
-        //    Logger.error(1);
-        //  }
-        //)}
-      //});
-
-      
+        //this.depository.queryFilter(TransferReserveToCollateralEvent, 1, 5);
+        //const eventsFilter = this.depository.filters.TransferReserveToCollateral();
           
-
-      } catch (exp) {
+        //this.depository.on<TransferReserveToCollateralEvent.Event>(
+        //    eventsFilter1,
+        //    (receiver, addr, collateral, ondelta, tokenId, event) => {
+        //      console.log(receiver, addr, collateral, ondelta, tokenId, event);
+        //    },
+        //);
+      } 
+      catch (exp: any) {
         this.signer = null;
         Logger.error(exp);
       }
