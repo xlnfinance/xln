@@ -8,7 +8,7 @@ import Channel from '../common/Channel';
 import IUserContext from '../types/IUserContext';
 import IChannelContext from '../types/IChannelContext';
 import ChannelContext from './ChannelContext';
-import { IHubConnectionData } from '../types/IHubAppConnectionData';
+import { IHubConnectionData } from '../types/IHubConnectionData';
 import { BodyTypes } from '../types/IBody';
 
 export default class User implements ITransportListener {

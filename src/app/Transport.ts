@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import ITransport from '../types/ITransport';
 import IMessage from '../types/IMessage';
-import { IHubConnectionData } from '../types/IHubAppConnectionData';
+import { IHubConnectionData } from '../types/IHubConnectionData';
 import Logger from '../utils/Logger';
 import ITransportMessageReceiver from '../types/ITransportListener';
 import { decode, encode } from '../utils/Codec';

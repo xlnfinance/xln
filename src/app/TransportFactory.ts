@@ -1,4 +1,4 @@
-import { IHubConnectionData } from '../types/IHubAppConnectionData';
+import { IHubConnectionData } from '../types/IHubConnectionData';
 import ITransport from '../types/ITransport';
 import ITransportFactory from '../types/ITransportFactory';
 import Transport from './Transport';

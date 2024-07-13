@@ -1,4 +1,4 @@
-import { IHubConnectionData } from './IHubAppConnectionData';
+import { IHubConnectionData } from './IHubConnectionData';
 
 export default interface IUserOptions {
   hubConnectionDataList: Array<IHubConnectionData>;

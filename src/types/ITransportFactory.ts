@@ -1,4 +1,4 @@
-import { IHubConnectionData } from './IHubAppConnectionData';
+import { IHubConnectionData } from './IHubConnectionData';
 import ITransport from './ITransport';
 
 export default interface ITransportFactory {
