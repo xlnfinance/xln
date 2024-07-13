@@ -62,7 +62,7 @@ async function Test() {
   const packedToken = await depository.packTokenReference(0, await erc20Mock.getAddress(), 0);
         
   await depository.externalTokenToReserve(
-    { receiver: ENV.depositoryContractAddress, packedToken, internalTokenId: 0n, amount: 1n }
+    { packedToken, internalTokenId: 0n, amount: 1n }
   );
 
   const reserveTest1 = await depository._reserves(ENV.firstUserAddress, 0);
