@@ -19,6 +19,10 @@ import { BodyTypes } from '../types/IBody';
 
 const BLOCK_LIMIT = 5;
 
+export class Subchannel {
+  private tokenId: string;
+}
+
 // в канал может прийти только блок, управляющие сообщения должны обрабытываться надканальной логикой
 //в канале должно быть recieveBlock
 
@@ -30,6 +34,7 @@ export default class Channel implements IChannel {
   private recipientUserId: string;
   private transport: ITransport;
   private storage: IChannelStorage;
+  private subchannels: Array<Subchannel>
 
   constructor(private ctx: IChannelContext) {
     this.syncQueue = new SyncQueueWorker();

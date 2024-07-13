@@ -27,13 +27,12 @@ export default class UserContext<
   StorageContextType extends IStorageContext,
 > implements IUserContext
 {
-  private provider: JsonRpcProvider | null;
-  private signer: Signer | null;
-  private depository: Depository | null;
-  private erc20Mock: ERC20Mock | null;
-  private erc721Mock: ERC721Mock | null;
-  private erc1155Mock: ERC1155Mock | null;
-
+  provider!: JsonRpcProvider;
+  signer!: Signer;
+  depository!: Depository;
+  erc20Mock!: ERC20Mock;
+  erc721Mock!: ERC721Mock;
+  erc1155Mock!: ERC1155Mock;
 
   constructor(
     private transportFactory: TransportFactoryType,
@@ -41,12 +40,7 @@ export default class UserContext<
     private userId: string,
     private opt: IUserOptions,
   ) {
-    this.provider = null;
-    this.signer = null;
-    this.depository = null;
-    this.erc20Mock = null;
-    this.erc721Mock = null;
-    this.erc1155Mock = null;
+    
   }
 
   async getSigner(): Promise<Signer | null> {
@@ -56,24 +50,6 @@ export default class UserContext<
         this.signer = await this.provider.getSigner(this.getAddress());
 
         this.depository = Depository__factory.connect(TEMP_ENV.depositoryContractAddress, this.signer);
-
-        const fromBlockNumber = 3; // Replace with the desired starting block number
-
-        const eventFilter = this.depository.filters.TransferReserveToCollateral();
-        this.depository.queryFilter(eventFilter, fromBlockNumber).then((pastEvents) => {
-          pastEvents.forEach((event) => {
-            const { receiver, addr, collateral, ondelta, tokenId } = event.args;
-            console.log(receiver, addr, collateral, ondelta, tokenId, event);
-          });
-        });
-
-        // Listen for future events starting from the latest block
-        this.depository.on<TransferReserveToCollateralEvent.Event>(
-          eventFilter,
-          (receiver, addr, collateral, ondelta, tokenId, event) => {
-            console.log(receiver, addr, collateral, ondelta, tokenId, event);
-          }
-        );
 
         //this.depository.queryFilter(TransferReserveToCollateralEvent, 1, 5);
         //const eventsFilter = this.depository.filters.TransferReserveToCollateral();
@@ -86,7 +62,7 @@ export default class UserContext<
         //);
       } 
       catch (exp: any) {
-        this.signer = null;
+        //this.signer = null;
         Logger.error(exp);
       }
     }
