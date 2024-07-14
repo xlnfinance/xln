@@ -6,6 +6,7 @@ import IUserOptions from '../src/types/IUserOptions';
 
 import ENV from './env';
 import TextMessageTransition from '../src/types/Transitions/TextMessageTransition';
+import PaymentTransition from '../src/types/Transitions/PaymentTransition';
 
 async function main() {
   const hub = new HubApp({
@@ -30,25 +31,26 @@ async function main() {
 
   await Promise.all([user.start(), user2.start()]);
 
-  const channel1 = await user.getChannelToHub('hub1');
-  const channel2 = await user2.getChannelToHub('hub1');
+  const channel1 = await user.getChannelToUser(userId2, 'hub1');
+  const channel2 = await user2.getChannelToUser(userId1, 'hub1');
 
-  const subChannel12 = await channel1.openSubChannel(userId2, 0);
-  const subChannel21 = await channel2.openSubChannel(userId1, 0);
+  channel1.openSubChannel(0);
+  channel2.openSubChannel(0);
 
-  await subChannel12.push(new TextMessageTransition('Hello world'));
-  await subChannel12.push(new TextMessageTransition('100'));
-  await subChannel12.send();
-
-  await sleep(5000);
-
-  await subChannel21.push(new TextMessageTransition('150'));
-  await subChannel21.send();
+  await channel1.push(new TextMessageTransition('Hello world'));
+  await channel1.push(new PaymentTransition(100, 0));
+  await channel1.send();
 
   await sleep(5000);
-  console.log('RESULT', subChannel12.getState(), subChannel21.getState());
 
-  if (JSON.stringify(subChannel12.getState()) === JSON.stringify(subChannel21.getState())) {
+  await channel2.push(new PaymentTransition(150, 0));
+  await channel2.send();
+
+  await sleep(5000);
+  console.log('RESULT', channel1.getState(), channel2.getState());
+  console.log('RESULT', channel1.openSubChannel(0), channel2.openSubChannel(0));
+
+  if (JSON.stringify(channel1.getState()) === JSON.stringify(channel2.getState())) {
     process.exit(0);
   } else {
     process.exit(1);

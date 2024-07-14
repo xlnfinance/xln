@@ -14,11 +14,11 @@ export default class ChannelContext implements IChannelContext {
     this.storages = new Map();
   }
 
-  getUserId(): string {
+  getUserAddress(): string {
     return this.user.thisUserAddress;
   }
 
-  getHubAddress(): string {
+  getRecipientAddress(): string {
     return this.recipientUserId;
   }
 

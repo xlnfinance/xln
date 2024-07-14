@@ -1,5 +1,7 @@
-import SubChannelSavePoint from './SubChannelSavePoint';
+import ChannelPrivateState from './ChannelPrivateState';
+import ChannelState from './ChannelState';
 
 export default interface ChannelSavePoint {
-  subChannels: Array<SubChannelSavePoint>;
+  privateState: ChannelPrivateState;
+  state: ChannelState;
 }

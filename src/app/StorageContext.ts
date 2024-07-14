@@ -6,7 +6,7 @@ export default class StorageContext implements IStorageContext {
   private _db!: Level;
 
   initialize(userId: string): Promise<void> {
-    this._db = new Level(`local-storage/local-storage-${userId}`, { valueEncoding: 'binary' });
+    this._db = new Level(`local-storage/${userId}`, { valueEncoding: 'binary' });
     return this._db.open();
   }
 
