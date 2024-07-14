@@ -1,3 +1,5 @@
+import { SubChannel } from "./SubChannel";
+
 export default interface ChannelState {
   left: string;
   right: string;
@@ -5,9 +7,9 @@ export default interface ChannelState {
   previousBlockHash: string;
   previousStateHash: string;
 
-  offDelta: number;
-
   timestamp: number;
   blockNumber: number;
   transitionNumber: number;
+
+  subChannels: Array<SubChannel>;
 }

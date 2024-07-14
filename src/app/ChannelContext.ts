@@ -1,28 +1,24 @@
 import IChannelContext from '../types/IChannelContext';
 import IChannelStorage from '../types/IChannelStorage';
 import ITransport from '../types/ITransport';
-import IUserContext from '../types/IUserContext';
+import User from './User';
 
 export default class ChannelContext implements IChannelContext {
-  private storage: IChannelStorage;
+  private storages: Map<string, IChannelStorage>;
 
   constructor(
-    private userCtx: IUserContext,
+    private user: User,
     private recipientUserId: string,
     private transport: ITransport,
   ) {
-    this.storage = this.userCtx.getStorageContext().getChannelStorage(this.makeChannelId());
+    this.storages = new Map();
   }
 
-  private makeChannelId() {
-    return `${this.userCtx.getAddress()}:${this.recipientUserId}`;
+  getUserAddress(): string {
+    return this.user.thisUserAddress;
   }
 
-  getUserId(): string {
-    return this.userCtx.getAddress();
-  }
-
-  getRecipientUserId(): string {
+  getRecipientAddress(): string {
     return this.recipientUserId;
   }
 
@@ -30,12 +26,18 @@ export default class ChannelContext implements IChannelContext {
     return this.transport;
   }
 
-  getStorage(): IChannelStorage {
-    return this.storage;
+  getStorage(otherUserAddress: string): IChannelStorage {
+    const channelId = `${this.user.thisUserAddress}:${otherUserAddress}`;
+    let storage = this.storages.get(channelId);
+    if (!storage) {
+      storage = this.user.storageContext.getChannelStorage(channelId);
+      this.storages.set(channelId, storage);
+    }
+    return storage;
   }
 
   signMessage(message: string): Promise<string> {
-    return this.userCtx.signMessage(message);
+    return this.user.signMessage(message);
   }
 
   async verifyMessage(message: string, signature: string, senderAddress: string): Promise<boolean> {
@@ -43,6 +45,6 @@ export default class ChannelContext implements IChannelContext {
     if (signature === '') {
       return true;
     }
-    return await this.userCtx.verifyMessage(message, signature, senderAddress);
+    return await this.user.verifyMessage(message, signature, senderAddress);
   }
 }

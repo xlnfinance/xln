@@ -1,5 +1,4 @@
 import ChannelState from '../types/ChannelState';
-import IChannel from '../types/IChannel';
 import IMessage from '../types/IMessage';
 import ITransport from '../types/ITransport';
 import Transition from '../types/Transition';
@@ -15,48 +14,46 @@ import SyncQueueWorker from '../utils/SyncQueueWorker';
 import hash from '../utils/Hash';
 import ChannelPrivateState from '../types/ChannelPrivateState';
 import IChannelContext from '../types/IChannelContext';
-import { BodyTypes } from '../types/IBody';
+import IChannel from '../types/IChannel';
+import PaymentTransition from '../types/Transitions/PaymentTransition';
+import ChannelSavePoint from '../types/ChannelSavePoint';
+import { SubChannel } from '../types/SubChannel';
 
 const BLOCK_LIMIT = 5;
 
-export class Subchannel {
-  private tokenId: string;
-}
-
-// в канал может прийти только блок, управляющие сообщения должны обрабытываться надканальной логикой
-//в канале должно быть recieveBlock
-
 export default class Channel implements IChannel {
-  private state: ChannelState;
+  state: ChannelState;
+  thisUserAddress: string;
+  otherUserAddress: string;
+
   private syncQueue: SyncQueueWorker;
   private privateState: ChannelPrivateState;
-  private userId: string;
-  private recipientUserId: string;
   private transport: ITransport;
   private storage: IChannelStorage;
-  private subchannels: Array<Subchannel>
 
-  constructor(private ctx: IChannelContext) {
+  constructor(
+    private ctx: IChannelContext
+  ) {
     this.syncQueue = new SyncQueueWorker();
 
-    this.userId = this.ctx.getUserId();
-    this.recipientUserId = this.ctx.getRecipientUserId();
+    this.thisUserAddress = this.ctx.getUserAddress();
+    this.otherUserAddress = this.ctx.getRecipientAddress();
     this.transport = this.ctx.getTransport();
-    this.storage = this.ctx.getStorage();
+    this.storage = this.ctx.getStorage(`${this.otherUserAddress}`);
 
     this.state = {
-      left: this.userId < this.recipientUserId ? this.userId : this.recipientUserId,
-      right: this.userId > this.recipientUserId ? this.userId : this.recipientUserId,
+      left: this.thisUserAddress < this.otherUserAddress ? this.thisUserAddress : this.otherUserAddress,
+      right: this.thisUserAddress > this.otherUserAddress ? this.thisUserAddress : this.otherUserAddress,
       previousBlockHash: '0x0',
       previousStateHash: '0x0',
       blockNumber: 0,
       timestamp: 0,
-      offDelta: 0,
       transitionNumber: 0,
+      subChannels: []
     };
 
     this.privateState = {
-      isLeft: this.userId < this.recipientUserId,
+      isLeft: this.thisUserAddress < this.otherUserAddress,
       rollbacks: 0,
       sentTransitions: 0,
       pendingBlock: null,
@@ -66,41 +63,46 @@ export default class Channel implements IChannel {
     };
   }
 
-  private savePrivateState(): Promise<void> {
-    return this.storage.setValue<ChannelPrivateState>('privateState', this.privateState);
-  }
-
-  private async loadPrivateState(): Promise<void> {
-    try {
-      this.privateState = await this.storage.getValue<ChannelPrivateState>('privateState');
-    } catch {
-      await this.savePrivateState();
+  openSubChannel(tokenId: number): SubChannel {
+    let subChannel = this.state.subChannels.find(subChannel => subChannel.tokenId === tokenId);
+    if (subChannel) {
+      return subChannel;
     }
-  }
 
-  private saveState(): Promise<void> {
-    return this.storage.setValue<ChannelState>('state', this.state);
-  }
+    subChannel = {tokenId: tokenId, offDelta: 0};
+    this.state.subChannels.push(subChannel);
 
-  private async loadState(): Promise<void> {
-    try {
-      this.state = await this.storage.getValue<ChannelState>('state');
-    } catch {
-      await this.saveState();
-    }
+    return subChannel;
   }
 
   getState(): ChannelState {
     return this.state;
   }
 
+  save(): Promise<void> {
+    const channelSavePoint: ChannelSavePoint = {
+      privateState: this.privateState,
+      state: this.state
+    };
+    return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
+  }
+
+  async load(): Promise<void> {
+    try {
+      const channelSavePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
+      this.privateState = channelSavePoint.privateState;
+      this.state = channelSavePoint.state;
+    } catch {
+      await this.save();
+    }
+  }
+
   async initialize() {
-    await this.loadState();
-    await this.loadPrivateState();
+    await this.load();
   }
 
   getId() {
-    return `${this.userId}:${this.recipientUserId}`;
+    return `${this.thisUserAddress}:${this.otherUserAddress}`;
   }
 
   private applyBlock(isLeft: boolean, block: Block) {
@@ -124,14 +126,16 @@ export default class Channel implements IChannel {
       case TransitionMethod.TextMessage:
         {
           const textMessageTransition = transition as TextMessageTransition;
-          const diff = Number.parseInt(textMessageTransition.message);
+          Logger.info(textMessageTransition.message);
+        }
+        break;
+      case TransitionMethod.PaymentTransition:
+        {
+          const paymentTransition = transition as PaymentTransition;
+          const subChannel = this.openSubChannel(paymentTransition.tokenId);
+          Logger.info(`Processing PaymentTransition ${subChannel.tokenId}`);
 
-          if (isNaN(diff)) {
-            Logger.info(textMessageTransition.message);
-          } else {
-            Logger.info(`Processing diff ${this.state.offDelta} ${diff}`);
-            this.state.offDelta += block.isLeft ? -diff : diff;
-          }
+          subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
         }
         break;
     }
@@ -149,7 +153,7 @@ export default class Channel implements IChannel {
         if (this.privateState.isLeft) allSignatures.reverse();
 
         await this.storage.put({ state: this.state, block: pendingBlock, allSignatures: allSignatures });
-        await this.saveState();
+        await this.save();
 
         this.privateState.mempool.splice(0, this.privateState.sentTransitions);
         this.privateState.sentTransitions = 0;
@@ -164,7 +168,7 @@ export default class Channel implements IChannel {
       }
     }
 
-    await this.savePrivateState();
+    await this.save();
     return true;
   }
 
@@ -189,7 +193,7 @@ export default class Channel implements IChannel {
         throw new Error('Invalid previousBlockHash');
       }
 
-      if (!(await this.ctx.verifyMessage(hash<Block>(block), message.newSignatures[0], this.recipientUserId))) {
+      if (!(await this.ctx.verifyMessage(hash<Block>(block), message.newSignatures[0], this.otherUserAddress))) {
         throw new Error('Invalid verify block signature');
       }
 
@@ -201,7 +205,7 @@ export default class Channel implements IChannel {
       if (privateState.isLeft) allSignatures.reverse();
 
       await this.storage.put({ state: this.state, block: message.block!, allSignatures: allSignatures });
-      await this.saveState();
+      await this.save();
 
       if (privateState.mempool.length > 0 || block.transitions.length > 0) {
         await this.flush();
@@ -212,7 +216,7 @@ export default class Channel implements IChannel {
   push(transition: Transition): Promise<void> {
     return this.syncQueue.sync(async () => {
       this.privateState.mempool.push(transition);
-      await this.savePrivateState();
+      await this.save();
     });
   }
 
@@ -227,13 +231,10 @@ export default class Channel implements IChannel {
 
     const message: IMessage = {
       header: {
-        from: this.userId,
-        to: this.recipientUserId,
+        from: this.thisUserAddress,
+        to: this.ctx.getRecipientAddress(),
       },
-      body: {
-        type: BodyTypes.kBlockMessage,
-        blockNumber: this.state.blockNumber,
-      } as BlockMessage,
+      body: new BlockMessage(this.state.blockNumber, [], []),
     };
 
     const transitions = this.privateState.mempool.slice(0, BLOCK_LIMIT);
@@ -258,15 +259,17 @@ export default class Channel implements IChannel {
         hash<ChannelState>(this.state),
       ];
 
-      await this.savePrivateState();
-
       this.state = previousState;
 
       const body = message.body as BlockMessage;
       body.block = block;
       body.newSignatures = [await this.ctx.signMessage(hash<Block>(block))];
 
-      Logger.info(`Channel send message from ${this.userId} to ${this.recipientUserId} with body ${message.body}`);
+      Logger.info(
+        `Sub channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
+      );
+
+      await this.save();
     }
 
     await this.transport.send(message);
