@@ -12,8 +12,16 @@ import { IHubConnectionData } from '../types/IHubConnectionData';
 import { BodyTypes } from '../types/IBody';
 import { TransferReserveToCollateralEvent } from '../../contracts/typechain-types/contracts/Depository.sol/Depository';
 import { Signer, verifyMessage as ethersVerifyMessage, JsonRpcProvider, BigNumberish } from 'ethers';
-import { Depository, Depository__factory, ERC20Mock, ERC20Mock__factory, ERC721Mock, ERC721Mock__factory, ERC1155Mock, ERC1155Mock__factory } from '../../contracts/typechain-types/index';
-
+import {
+  Depository,
+  Depository__factory,
+  ERC20Mock,
+  ERC20Mock__factory,
+  ERC721Mock,
+  ERC721Mock__factory,
+  ERC1155Mock,
+  ERC1155Mock__factory,
+} from '../../contracts/typechain-types/index';
 
 export default class User implements ITransportListener {
   private _transports: Map<string, ITransport> = new Map();
@@ -31,13 +39,14 @@ export default class User implements ITransportListener {
     if (message.body.type == BodyTypes.kBlockMessage) {
       const blockMessage = message.body as BlockMessage;
       const recipientChannelMap = this._channelRecipientMapping.get(transport);
-      let channel = recipientChannelMap?.get(message.header.from);
+      const channelAddress = message.header.to === this.context.getAddress() ? message.header.from : message.header.to;
+      let channel = recipientChannelMap?.get(channelAddress);
       if (!channel) {
         if (
           this.context.getOptions().onExternalChannelRequestCallback &&
-          this.context.getOptions().onExternalChannelRequestCallback!(message.header.from)
+          this.context.getOptions().onExternalChannelRequestCallback!(channelAddress)
         ) {
-          channel = await this.openChannel(message.header.from, transport);
+          channel = await this.openChannel(channelAddress, transport);
         }
       }
 
@@ -99,7 +108,7 @@ export default class User implements ITransportListener {
 
     return channel;
   }
-
+  /*
   async getChannelToUser(recipientUserId: string, hubName: string): Promise<IChannel> {
     Logger.info(`Open channel to user ${recipientUserId} use hub ${hubName}`);
 
@@ -116,10 +125,9 @@ export default class User implements ITransportListener {
     }
     return channel;
   }
-
-
+*/
   // TODO save fromBlockNumber to the storage
-  startDepositoryEventsListener(fromBlockNumber : number) : void {
+  startDepositoryEventsListener(fromBlockNumber: number): void {
     //const fromBlockNumber = 3; // Replace with the desired starting block number
 
     const eventFilter = this.context.depository.filters.TransferReserveToCollateral();
@@ -135,12 +143,11 @@ export default class User implements ITransportListener {
       eventFilter,
       (receiver, addr, collateral, ondelta, tokenId, event) => {
         console.log(receiver, addr, collateral, ondelta, tokenId, event);
-      }
+      },
     );
   }
 
-  async externalTokenToReserve(erc20Address: string, amount: BigNumberish): Promise<void> 
-  {
+  async externalTokenToReserve(erc20Address: string, amount: BigNumberish): Promise<void> {
     let erc20Mock: ERC20Mock = ERC20Mock__factory.connect(erc20Address, this.context.signer);
     let depository = this.context.depository;
     let thisUserAddress = this.context.getAddress();
@@ -149,38 +156,39 @@ export default class User implements ITransportListener {
 
     await erc20Mock.approve(await depository.getAddress(), amount);
     //await erc20Mock.transfer(await depository.getAddress(), 10000);
-    
-    console.log("user1_balance_before", await erc20Mock.balanceOf(thisUserAddress));
-    console.log("depository_balance_before", await erc20Mock.balanceOf(await depository.getAddress()));
+
+    console.log('user1_balance_before', await erc20Mock.balanceOf(thisUserAddress));
+    console.log('depository_balance_before', await erc20Mock.balanceOf(await depository.getAddress()));
 
     const packedToken = await depository.packTokenReference(0, await erc20Mock.getAddress(), 0);
     //console.log(packedToken);
     //console.log(await depository.unpackTokenReference(packedToken));
     //console.log(await erc20Mock.getAddress());
-          
+
+    /* TODO FIX ERROR MISSING ARGUMENT ResiverAddress
     await depository.externalTokenToReserve(
       { packedToken, internalTokenId: 0n, amount: 10n }
     );
-    
-    console.log("user1_balance_after", await erc20Mock.balanceOf(thisUserAddress))
-    console.log("depository_balance_after", await erc20Mock.balanceOf(await depository.getAddress()))
-    console.log("reserveTest1", await depository._reserves(thisUserAddress, 0));
+    */
+    console.log('user1_balance_after', await erc20Mock.balanceOf(thisUserAddress));
+    console.log('depository_balance_after', await erc20Mock.balanceOf(await depository.getAddress()));
+    console.log('reserveTest1', await depository._reserves(thisUserAddress, 0));
   }
 
-  async reserveToCollateral(otherUserOfChannelAddress: string, tokenId: number, amount: BigNumberish): Promise<void>
-  {
+  async reserveToCollateral(otherUserOfChannelAddress: string, tokenId: number, amount: BigNumberish): Promise<void> {
     let depository = this.context.depository;
     let thisUserAddress = this.context.getAddress();
 
     await depository.reserveToCollateral({
       tokenId: tokenId,
       receiver: thisUserAddress,
-      pairs: [{ addr: otherUserOfChannelAddress, amount: amount }]
+      pairs: [{ addr: otherUserOfChannelAddress, amount: amount }],
     });
-  
+
     const collateralTest = await depository._collaterals(
-      await depository.channelKey(thisUserAddress, otherUserOfChannelAddress), tokenId
-      );
+      await depository.channelKey(thisUserAddress, otherUserOfChannelAddress),
+      tokenId,
+    );
     const reserveTest2 = await depository._reserves(thisUserAddress, tokenId);
   }
 

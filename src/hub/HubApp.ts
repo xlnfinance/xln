@@ -80,10 +80,21 @@ export default class HubApp implements ITransportListener {
 
   private async receiveMessage(message: IMessage) {
     const recipientUserId = message.header.to;
-    const channel = await this.getChannel(recipientUserId);
 
     if (message.body.type == BodyTypes.kBlockMessage) {
-      await channel.receive(message.body as BlockMessage);
+      const blockMessage: BlockMessage = message.body as BlockMessage;
+
+      if (blockMessage.otherUserAddress !== this.opt.address) {
+        if (this._users.has(blockMessage.otherUserAddress)) {
+          const transport = this._users.get(blockMessage.otherUserAddress);
+          await transport!.send(message);
+        } else {
+          // TODO SEND TO NEXT HUB FOR DELIVERY MESSAGE TO NEX HUB
+        }
+      } else {
+        const channel = await this.getChannel(recipientUserId);
+        channel.receive(blockMessage);
+      }
     }
   }
 

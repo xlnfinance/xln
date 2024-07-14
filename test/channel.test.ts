@@ -2,8 +2,6 @@ import HubApp from '../src/hub/HubApp';
 
 import User from '../src/app/User';
 import TransportFactory from '../src/app/TransportFactory';
-import Transition from '../src/types/Transition';
-import { TransitionMethod } from '../src/types/TransitionMethod';
 import { sleep } from '../src/utils/Utils';
 import UserContext from '../src/app/UserContext';
 import StorageContext from '../src/app/StorageContext';
@@ -40,22 +38,25 @@ async function main() {
 
   await Promise.all([user.start(), user2.start()]);
 
-  const channel1 = await user.getChannelToUser(userId2, 'hub1');
-  const channel2 = await user2.getChannelToUser(userId1, 'hub1');
+  const channel1 = await user.getChannelToHub('hub1');
+  const channel2 = await user2.getChannelToHub('hub1');
 
-  await channel1.push(new TextMessageTransition('Hello world'));
-  await channel1.push(new TextMessageTransition('100'));
-  await channel1.send();
+  const subChannel12 = await channel1.openSubChannel(userId2, 0);
+  const subChannel21 = await channel2.openSubChannel(userId1, 0);
 
-  await sleep(5000);
-
-  await channel2.push(new TextMessageTransition('150'));
-  await channel2.send();
+  await subChannel12.push(new TextMessageTransition('Hello world'));
+  await subChannel12.push(new TextMessageTransition('100'));
+  await subChannel12.send();
 
   await sleep(5000);
-  console.log('RESULT', channel1.getState(), channel2.getState());
 
-  if (JSON.stringify(channel1.getState()) === JSON.stringify(channel2.getState())) {
+  await subChannel21.push(new TextMessageTransition('150'));
+  await subChannel21.send();
+
+  await sleep(5000);
+  console.log('RESULT', subChannel12.getState(), subChannel21.getState());
+
+  if (JSON.stringify(subChannel12.getState()) === JSON.stringify(subChannel21.getState())) {
     process.exit(0);
   } else {
     process.exit(1);
