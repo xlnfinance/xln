@@ -18,7 +18,7 @@ export default class ChannelContext implements IChannelContext {
     return this.user.thisUserAddress;
   }
 
-  getRecipientUserId(): string {
+  getHubAddress(): string {
     return this.recipientUserId;
   }
 

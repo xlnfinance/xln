@@ -3,7 +3,7 @@ import ITransport from './ITransport';
 
 export default interface IChannelContext {
   getUserId(): string;
-  getRecipientUserId(): string;
+  getHubAddress(): string;
   getTransport(): ITransport;
   getStorage(otherUserAddress: string): IChannelStorage;
   signMessage(message: string): Promise<string>;

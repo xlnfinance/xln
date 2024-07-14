@@ -226,7 +226,7 @@ export class SubChannel implements ISubChannel {
     const message: IMessage = {
       header: {
         from: this.thisUserAddress,
-        to: this.ctx.getRecipientUserId(),
+        to: this.ctx.getHubAddress(),
       },
       body: new BlockMessage(this.state.blockNumber, this.thisUserAddress, this.otherUserAddress, this.tokenId, [], []),
     };
