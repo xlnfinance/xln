@@ -1,9 +1,13 @@
 import Block from '../Block';
-import IBody from '../IBody';
+import IBody, { BodyTypes } from '../IBody';
 
-export default interface BlockMessage extends IBody {
-  block?: Block;
-  newSignatures: string[];
-  blockNumber: number;
-  ackSignatures: string[];
+export default class BlockMessage extends IBody {
+  constructor(
+    public blockNumber: number,
+    public newSignatures: string[],
+    public ackSignatures: string[],
+    public block?: Block,
+  ) {
+    super(BodyTypes.kBlockMessage);
+  }
 }

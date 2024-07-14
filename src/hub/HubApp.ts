@@ -80,10 +80,11 @@ export default class HubApp implements ITransportListener {
 
   private async receiveMessage(message: IMessage) {
     const recipientUserId = message.header.to;
-    const channel = await this.getChannel(recipientUserId);
 
     if (message.body.type == BodyTypes.kBlockMessage) {
-      await channel.receive(message.body as BlockMessage);
+      const blockMessage: BlockMessage = message.body as BlockMessage;
+      const channel = await this.getChannel(recipientUserId);
+      channel.receive(blockMessage);
     }
   }
 

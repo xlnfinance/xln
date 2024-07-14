@@ -14,7 +14,7 @@ export class DepositoryEvent {
   }
 }
 
-export interface ProposedEvent extends DepositoryEvent { }
+export interface ProposedEvent extends DepositoryEvent {}
 
 export default class ProposedEventTransition extends Transition {
   event: DepositoryEvent;

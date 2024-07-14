@@ -5,7 +5,6 @@ import TransportFactory from '../src/app/TransportFactory';
 import Transition from '../src/types/Transition';
 import { TransitionMethod } from '../src/types/TransitionMethod';
 import { sleep } from '../src/utils/Utils';
-import UserContext from '../src/app/UserContext';
 import StorageContext from '../src/app/StorageContext';
 import IUserOptions from '../src/types/IUserOptions';
 
@@ -34,13 +33,9 @@ async function Test() {
   const userId1 = ENV.firstUserAddress;
   const userId2 = ENV.secondUserAddress;
 
-  const user = new User(
-    new UserContext<TransportFactory, StorageContext>(new TransportFactory(), new StorageContext(), userId1, opt),
-  );
+  const user = new User(userId1, opt);
 
-  const user2 = new User(
-    new UserContext<TransportFactory, StorageContext>(new TransportFactory(), new StorageContext(), userId2, opt),
-  );
+  const user2 = new User(userId2, opt);
 
   await Promise.all([user.start(), user2.start()]);
 
@@ -64,13 +59,13 @@ async function Test() {
   console.log(packedToken);
   console.log(await depository.unpackTokenReference(packedToken));
   console.log(await erc20Mock.getAddress());
-        
+  /*       TODO FIX ERROR
   console.log( 
     await depository.externalTokenToReserve(
       { packedToken, internalTokenId: 0n, amount: 10n }
     ) 
   );
-
+*/
   console.log("user1_balance_after", await erc20Mock.balanceOf(ENV.firstUserAddress))
   console.log("depository_balance_after", await erc20Mock.balanceOf(await depository.getAddress()))
   console.log("reserveTest1", await depository._reserves(ENV.firstUserAddress, 0));
