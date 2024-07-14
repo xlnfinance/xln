@@ -4,18 +4,14 @@ import ITransport from '../types/ITransport';
 import IUserContext from '../types/IUserContext';
 
 export default class ChannelContext implements IChannelContext {
-  private storage: IChannelStorage;
+  private storages: Map<string, IChannelStorage>;
 
   constructor(
     private userCtx: IUserContext,
     private recipientUserId: string,
     private transport: ITransport,
   ) {
-    this.storage = this.userCtx.getStorageContext().getChannelStorage(this.makeChannelId());
-  }
-
-  private makeChannelId() {
-    return `${this.userCtx.getAddress()}:${this.recipientUserId}`;
+    this.storages = new Map();
   }
 
   getUserId(): string {
@@ -30,8 +26,14 @@ export default class ChannelContext implements IChannelContext {
     return this.transport;
   }
 
-  getStorage(): IChannelStorage {
-    return this.storage;
+  getStorage(otherUserAddress: string): IChannelStorage {
+    const channelId = `${this.userCtx.getAddress()}:${otherUserAddress}`;
+    let storage = this.storages.get(channelId);
+    if (!storage) {
+      storage = this.userCtx.getStorageContext().getChannelStorage(channelId);
+      this.storages.set(channelId, storage);
+    }
+    return storage;
   }
 
   signMessage(message: string): Promise<string> {

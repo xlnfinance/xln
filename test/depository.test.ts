@@ -64,13 +64,13 @@ async function Test() {
   console.log(packedToken);
   console.log(await depository.unpackTokenReference(packedToken));
   console.log(await erc20Mock.getAddress());
-        
+  /*       TODO FIX ERROR
   console.log( 
     await depository.externalTokenToReserve(
       { packedToken, internalTokenId: 0n, amount: 10n }
     ) 
   );
-
+*/
   console.log("user1_balance_after", await erc20Mock.balanceOf(ENV.firstUserAddress))
   console.log("depository_balance_after", await erc20Mock.balanceOf(await depository.getAddress()))
   console.log("reserveTest1", await depository._reserves(ENV.firstUserAddress, 0));

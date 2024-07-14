@@ -3,6 +3,10 @@ export enum BodyTypes {
   kBlockMessage = 1,
 }
 
-export default interface IBody {
+export default class IBody {
   type: BodyTypes;
+
+  constructor(type: BodyTypes) {
+    this.type = type;
+  }
 }

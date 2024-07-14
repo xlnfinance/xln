@@ -1,15 +1,10 @@
-import ChannelState from './ChannelState';
+import ISubChannel from './ISubChannel';
 import BlockMessage from './Messages/BlockMessage';
-import Transition from './Transition';
 
 export default interface IChannel {
-  push(transition: Transition): Promise<void>;
-
-  send(): Promise<void>;
-
-  getState(): ChannelState;
-
   initialize(): Promise<void>;
+
+  openSubChannel(otherUserAddress: string, tokenId: number): Promise<ISubChannel>;
 
   receive(message: BlockMessage): Promise<void>;
 }
