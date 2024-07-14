@@ -13,7 +13,7 @@ export default class Channel implements IChannel {
 
   constructor(private ctx: IChannelContext) {
     this.subChannels = new Map();
-    this.storage = this.ctx.getStorage(this.ctx.getRecipientUserId());
+    this.storage = this.ctx.getStorage(this.ctx.getHubAddress());
   }
 
   async openSubChannel(otherUserAddress: string, tokenId: number): Promise<ISubChannel> {
