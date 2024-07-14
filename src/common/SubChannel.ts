@@ -16,7 +16,6 @@ import ChannelPrivateState from '../types/ChannelPrivateState';
 import IChannelContext from '../types/IChannelContext';
 import ISubChannel from '../types/ISubChannel';
 
-
 const BLOCK_LIMIT = 5;
 
 export class SubChannel implements ISubChannel {
