@@ -1,75 +1,277 @@
-import IChannel from '../types/IChannel';
+import ChannelState from '../types/ChannelState';
+import IMessage from '../types/IMessage';
+import ITransport from '../types/ITransport';
+import Transition from '../types/Transition';
 import Logger from '../utils/Logger';
+
+import Block from '../types/Block';
+import { TransitionMethod } from '../types/TransitionMethod';
+import TextMessageTransition from '../types/Transitions/TextMessageTransition';
+import { deepClone, getTimestamp } from '../utils/Utils';
 import BlockMessage from '../types/Messages/BlockMessage';
 import IChannelStorage from '../types/IChannelStorage';
+import SyncQueueWorker from '../utils/SyncQueueWorker';
+import hash from '../utils/Hash';
+import ChannelPrivateState from '../types/ChannelPrivateState';
 import IChannelContext from '../types/IChannelContext';
-import ISubChannel from '../types/ISubChannel';
-import { SubChannel } from './SubChannel';
+import IChannel from '../types/IChannel';
+import PaymentTransition from '../types/Transitions/PaymentTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
+import { SubChannel } from '../types/SubChannel';
+
+const BLOCK_LIMIT = 5;
 
 export default class Channel implements IChannel {
-  private subChannels: Map<string, SubChannel>;
+  state: ChannelState;
+  thisUserAddress: string;
+  otherUserAddress: string;
+
+  private syncQueue: SyncQueueWorker;
+  private privateState: ChannelPrivateState;
+  private transport: ITransport;
   private storage: IChannelStorage;
 
-  constructor(private ctx: IChannelContext) {
-    this.subChannels = new Map();
-    this.storage = this.ctx.getStorage(this.ctx.getHubAddress());
+  constructor(
+    private ctx: IChannelContext
+  ) {
+    this.syncQueue = new SyncQueueWorker();
+
+    this.thisUserAddress = this.ctx.getUserAddress();
+    this.otherUserAddress = this.ctx.getRecipientAddress();
+    this.transport = this.ctx.getTransport();
+    this.storage = this.ctx.getStorage(`${this.otherUserAddress}`);
+
+    this.state = {
+      left: this.thisUserAddress < this.otherUserAddress ? this.thisUserAddress : this.otherUserAddress,
+      right: this.thisUserAddress > this.otherUserAddress ? this.thisUserAddress : this.otherUserAddress,
+      previousBlockHash: '0x0',
+      previousStateHash: '0x0',
+      blockNumber: 0,
+      timestamp: 0,
+      transitionNumber: 0,
+      subChannels: []
+    };
+
+    this.privateState = {
+      isLeft: this.thisUserAddress < this.otherUserAddress,
+      rollbacks: 0,
+      sentTransitions: 0,
+      pendingBlock: null,
+      mempool: [],
+      pendingSignatures: [],
+      pendingEvents: [],
+    };
   }
 
-  async openSubChannel(otherUserAddress: string, tokenId: number): Promise<ISubChannel> {
-    const uniqSubChannelId = this.getUniqSubChannelId(otherUserAddress, tokenId);
-    let subChannel = this.subChannels.get(uniqSubChannelId);
-    if (!subChannel) {
-      subChannel = await this.makeSubChannel(otherUserAddress, tokenId);
-      this.subChannels.set(uniqSubChannelId, subChannel);
+  openSubChannel(tokenId: number): SubChannel {
+    let subChannel = this.state.subChannels.find(subChannel => subChannel.tokenId === tokenId);
+    if (subChannel) {
+      return subChannel;
+    }
+
+    subChannel = {tokenId: tokenId, offDelta: 0};
+    this.state.subChannels.push(subChannel);
+
+    return subChannel;
+  }
+
+  getState(): ChannelState {
+    return this.state;
+  }
+
+  save(): Promise<void> {
+    const channelSavePoint: ChannelSavePoint = {
+      privateState: this.privateState,
+      state: this.state
+    };
+    return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
+  }
+
+  async load(): Promise<void> {
+    try {
+      const channelSavePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
+      this.privateState = channelSavePoint.privateState;
+      this.state = channelSavePoint.state;
+    } catch {
       await this.save();
     }
-    return subChannel;
   }
 
-  private async makeSubChannel(otherUserAddress: string, tokenId: number): Promise<SubChannel> {
-    const subChannel = new SubChannel(otherUserAddress, tokenId, this.ctx);
-    await subChannel.initialize();
-    return subChannel;
+  async initialize() {
+    await this.load();
   }
 
-  private getUniqSubChannelId(otherUserAddress: string, tokenId: number) {
-    return `${otherUserAddress}:${tokenId}`;
+  getId() {
+    return `${this.thisUserAddress}:${this.otherUserAddress}`;
   }
 
-  async initialize(): Promise<void> {
-    try {
-      const savePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
-      for (const subChannelInfo of savePoint.subChannels) {
-        const subChannel = await this.makeSubChannel(subChannelInfo.otherUserAddress, subChannelInfo.tokenId);
-        const uniqSubChannelId = this.getUniqSubChannelId(subChannelInfo.otherUserAddress, subChannelInfo.tokenId);
-        this.subChannels.set(uniqSubChannelId, subChannel);
-      }
-    } catch {
-      this.subChannels = new Map();
+  private applyBlock(isLeft: boolean, block: Block) {
+    Logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
+
+    this.state.blockNumber++;
+    this.state.timestamp = block.timestamp;
+    this.state.previousBlockHash = hash<Block>(block);
+    this.state.previousStateHash = hash<ChannelState>(this.state);
+
+    for (let i = 0; i < block.transitions.length; i++) {
+      const transition = block.transitions[i];
+      this.applyTransition(block, transition);
     }
+  }
+
+  private applyTransition(block: Block, transition: Transition) {
+    Logger.info(`applyTransition ${block.isLeft} ${transition}}`);
+
+    switch (transition.method) {
+      case TransitionMethod.TextMessage:
+        {
+          const textMessageTransition = transition as TextMessageTransition;
+          Logger.info(textMessageTransition.message);
+        }
+        break;
+      case TransitionMethod.PaymentTransition:
+        {
+          const paymentTransition = transition as PaymentTransition;
+          const subChannel = this.openSubChannel(paymentTransition.tokenId);
+          Logger.info(`Processing PaymentTransition ${subChannel.tokenId}`);
+
+          subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
+        }
+        break;
+    }
+
+    this.state.transitionNumber++;
+  }
+
+  private async syncSignatures(message: BlockMessage): Promise<boolean> {
+    if (this.privateState.pendingBlock != null) {
+      if (message.blockNumber == this.state.blockNumber + 1) {
+        const pendingBlock: Block = this.privateState.pendingBlock;
+        this.applyBlock(this.privateState.isLeft, pendingBlock);
+
+        const allSignatures = [message.ackSignatures, this.privateState.pendingSignatures];
+        if (this.privateState.isLeft) allSignatures.reverse();
+
+        await this.storage.put({ state: this.state, block: pendingBlock, allSignatures: allSignatures });
+        await this.save();
+
+        this.privateState.mempool.splice(0, this.privateState.sentTransitions);
+        this.privateState.sentTransitions = 0;
+        this.privateState.pendingBlock = null;
+      } else if (message.blockNumber == this.state.blockNumber && !this.privateState.isLeft) {
+        this.privateState.pendingBlock = null;
+        this.privateState.sentTransitions = 0;
+        this.privateState.rollbacks++;
+      } else {
+        //
+        return false;
+      }
+    }
+
+    await this.save();
+    return true;
   }
 
   async receive(message: BlockMessage): Promise<void> {
-    const uniqSubChannelId = this.getUniqSubChannelId(message.thisUserAddress, message.tokenId);
-    const channel = this.subChannels.get(uniqSubChannelId);
-    if (channel) {
-      await channel.receive(message);
+    const syncSignaturesResult = await this.syncSignatures(message);
+    if (!syncSignaturesResult) {
+      return;
     }
+
+    if (!message.block) {
+      return;
+    }
+
+    this.syncQueue.sync(async () => {
+      const block: Block = message.block!;
+
+      if (block.previousStateHash != hash<ChannelState>(this.state)) {
+        throw new Error('Invalid previousStateHash: ' + block.previousStateHash);
+      }
+
+      if (block.previousBlockHash != this.state.previousBlockHash) {
+        throw new Error('Invalid previousBlockHash');
+      }
+
+      if (!(await this.ctx.verifyMessage(hash<Block>(block), message.newSignatures[0], this.otherUserAddress))) {
+        throw new Error('Invalid verify block signature');
+      }
+
+      const privateState = this.privateState;
+
+      this.applyBlock(privateState.isLeft, block);
+
+      const allSignatures = [message.ackSignatures, privateState.pendingSignatures];
+      if (privateState.isLeft) allSignatures.reverse();
+
+      await this.storage.put({ state: this.state, block: message.block!, allSignatures: allSignatures });
+      await this.save();
+
+      if (privateState.mempool.length > 0 || block.transitions.length > 0) {
+        await this.flush();
+      }
+    });
   }
 
-  private async save(): Promise<void> {
-    const savePoint: ChannelSavePoint = {
-      subChannels: [],
-    };
+  push(transition: Transition): Promise<void> {
+    return this.syncQueue.sync(async () => {
+      this.privateState.mempool.push(transition);
+      await this.save();
+    });
+  }
 
-    for (const pair of this.subChannels) {
-      savePoint.subChannels.push({
-        otherUserAddress: pair[1].otherUserAddress,
-        tokenId: pair[1].tokenId,
-      });
+  send(): Promise<void> {
+    return this.syncQueue.sync(() => this.flush());
+  }
+
+  private async flush(): Promise<void> {
+    if (this.privateState.sentTransitions > 0) {
+      return;
     }
 
-    await this.storage.setValue<ChannelSavePoint>('channelSavePoint', savePoint);
+    const message: IMessage = {
+      header: {
+        from: this.thisUserAddress,
+        to: this.ctx.getRecipientAddress(),
+      },
+      body: new BlockMessage(this.state.blockNumber, [], []),
+    };
+
+    const transitions = this.privateState.mempool.slice(0, BLOCK_LIMIT);
+    if (transitions.length > 0) {
+      const previousState: ChannelState = deepClone(this.state);
+
+      const block: Block = {
+        isLeft: this.privateState.isLeft,
+        timestamp: getTimestamp(),
+        previousStateHash: hash<ChannelState>(previousState), // hash of previous state
+        previousBlockHash: this.state.previousBlockHash, // hash of previous block
+        blockNumber: this.state.blockNumber,
+        transitions: transitions,
+      };
+
+      this.applyBlock(this.privateState.isLeft, block);
+
+      this.privateState.pendingBlock = deepClone(block); //зачем клон блока??
+      this.privateState.sentTransitions = transitions.length;
+      this.privateState.pendingSignatures = [
+        hash<Block>(this.privateState.pendingBlock!),
+        hash<ChannelState>(this.state),
+      ];
+
+      this.state = previousState;
+
+      const body = message.body as BlockMessage;
+      body.block = block;
+      body.newSignatures = [await this.ctx.signMessage(hash<Block>(block))];
+
+      Logger.info(
+        `Sub channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
+      );
+
+      await this.save();
+    }
+
+    await this.transport.send(message);
   }
 }

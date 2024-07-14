@@ -13,11 +13,11 @@ export default class ChannelContext implements IChannelContext {
     private signer: Signer,
   ) {}
 
-  getUserId(): string {
+  getUserAddress(): string {
     return this.userId;
   }
 
-  getHubAddress(): string {
+  getRecipientAddress(): string {
     return this.recipientUserId;
   }
 

@@ -2,8 +2,8 @@ import IChannelStorage from './IChannelStorage';
 import ITransport from './ITransport';
 
 export default interface IChannelContext {
-  getUserId(): string;
-  getHubAddress(): string;
+  getUserAddress(): string;
+  getRecipientAddress(): string;
   getTransport(): ITransport;
   getStorage(otherUserAddress: string): IChannelStorage;
   signMessage(message: string): Promise<string>;

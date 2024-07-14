@@ -67,7 +67,7 @@ export default class User implements ITransportListener {
     if (message.body.type == BodyTypes.kBlockMessage) {
       const blockMessage = message.body as BlockMessage;
       const recipientChannelMap = this._channelRecipientMapping.get(transport);
-      const channelAddress = message.header.to === this.thisUserAddress ? message.header.from : message.header.to;
+      const channelAddress = message.header.from;
       let channel = recipientChannelMap?.get(channelAddress);
       if (!channel) {
         if (this.opt.onExternalChannelRequestCallback && this.opt.onExternalChannelRequestCallback!(channelAddress)) {
@@ -133,7 +133,7 @@ export default class User implements ITransportListener {
 
     return channel;
   }
-  /*
+
   async getChannelToUser(recipientUserId: string, hubName: string): Promise<IChannel> {
     Logger.info(`Open channel to user ${recipientUserId} use hub ${hubName}`);
 
@@ -150,7 +150,7 @@ export default class User implements ITransportListener {
     }
     return channel;
   }
-*/
+
   // TODO save fromBlockNumber to the storage
   startDepositoryEventsListener(fromBlockNumber: number): void {
     //const fromBlockNumber = 3; // Replace with the desired starting block number
