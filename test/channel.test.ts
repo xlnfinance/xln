@@ -1,10 +1,7 @@
 import HubApp from '../src/hub/HubApp';
 
 import User from '../src/app/User';
-import TransportFactory from '../src/app/TransportFactory';
 import { sleep } from '../src/utils/Utils';
-import UserContext from '../src/app/UserContext';
-import StorageContext from '../src/app/StorageContext';
 import IUserOptions from '../src/types/IUserOptions';
 
 import ENV from './env';
@@ -28,13 +25,8 @@ async function main() {
   const userId1 = ENV.firstUserAddress;
   const userId2 = ENV.secondUserAddress;
 
-  const user = new User(
-    new UserContext<TransportFactory, StorageContext>(new TransportFactory(), new StorageContext(), userId1, opt),
-  );
-
-  const user2 = new User(
-    new UserContext<TransportFactory, StorageContext>(new TransportFactory(), new StorageContext(), userId2, opt),
-  );
+  const user = new User(userId1, opt);
+  const user2 = new User(userId2, opt);
 
   await Promise.all([user.start(), user2.start()]);
 
