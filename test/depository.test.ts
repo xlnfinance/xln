@@ -5,7 +5,6 @@ import TransportFactory from '../src/app/TransportFactory';
 import Transition from '../src/types/Transition';
 import { TransitionMethod } from '../src/types/TransitionMethod';
 import { sleep } from '../src/utils/Utils';
-import UserContext from '../src/app/UserContext';
 import StorageContext from '../src/app/StorageContext';
 import IUserOptions from '../src/types/IUserOptions';
 
