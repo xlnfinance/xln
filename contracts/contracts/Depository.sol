@@ -44,7 +44,7 @@ contract Depository is Console {
     uint gasused;
     string uri;
   }
-  Hub[] public hubs;
+  Hub[] public _hubs;
   
   event TransferReserveToCollateral(address indexed receiver, address indexed addr, uint collateral, int ondelta, uint tokenId);
   event DisputeStarted(address indexed sender, address indexed peer, uint indexed disputeNonce, bytes initialArguments);
@@ -67,7 +67,7 @@ contract Depository is Console {
     _tokens.push(bytes32(0));
     
     // empty record, hub_id==0 means not a hub
-    hubs.push(Hub({
+    _hubs.push(Hub({
       addr: address(0),
       uri: '',
       gasused: 0
@@ -207,8 +207,8 @@ contract Depository is Console {
 
     // increase gasused for hubs
     // this is hardest to fake metric of real usage
-    if (batch.hub_id != 0 && msg.sender == hubs[batch.hub_id].addr){
-      hubs[batch.hub_id].gasused += startGas - gasleft();
+    if (batch.hub_id != 0 && msg.sender == _hubs[batch.hub_id].addr){
+      _hubs[batch.hub_id].gasused += startGas - gasleft();
     }
 
     return completeSuccess;
@@ -217,7 +217,6 @@ contract Depository is Console {
 
   
   enum MessageType {
-    JSON, // for offchain messages
     CooperativeUpdate,
     CooperativeDisputeProof,
     DisputeProof
@@ -260,12 +259,12 @@ contract Depository is Console {
 
   struct Allowence {
     uint deltaIndex;
-    uint incrementDeltaAllowence;
-    uint decrementDeltaAllowence;
+    uint rightAmount;
+    uint leftAmount;
   }
   struct SubcontractClause {
     address subcontractProviderAddress;
-    bytes data;
+    bytes encodedBatch;
     Allowence[] allowences;
   }
 
@@ -369,15 +368,15 @@ contract Depository is Console {
 
   function registerHub(uint hub_id, string memory new_uri) public returns (uint) {
     if (hub_id == 0) {
-      hubs.push(Hub({
+      _hubs.push(Hub({
         addr: msg.sender,
         uri: new_uri,
         gasused: 0
       }));
-      return hubs.length - 1;
+      return _hubs.length - 1;
     } else {
-      require(msg.sender == hubs[hub_id].addr);
-      hubs[hub_id].uri = new_uri;
+      require(msg.sender == _hubs[hub_id].addr);
+      _hubs[hub_id].uri = new_uri;
       return hub_id;
     }
   }
@@ -528,17 +527,6 @@ contract Depository is Console {
     return a1 < a2 ? abi.encodePacked(a1, a2) : abi.encodePacked(a2, a1);
   }
   
-  struct TokenReserveDebts {
-    uint reserve;
-    uint _debtIndex;
-    Debt[] _debts;
-  }
-  
-  struct UserReturn {
-    uint ETH_balance;
-    TokenReserveDebts[] _tokens;
-  }
-
 
   
 
@@ -691,31 +679,38 @@ contract Depository is Console {
     // 2. process subcontracts and apply to deltas
     bytes[] memory decodedLeftArguments = abi.decode(leftArguments, (bytes[]));
     bytes[] memory decodedRightArguments = abi.decode(rightArguments, (bytes[]));
-    
-    for (uint i = 0; i < proofbody.subcontracts.length; i++){
 
+    for (uint i = 0; i < proofbody.subcontracts.length; i++){
       SubcontractClause memory sc = proofbody.subcontracts[i];
-      int[] memory newDeltas = SubcontractProvider(sc.subcontractProviderAddress).process(
-        SubcontractProvider.SubcontractParams(
+      
+      // todo: check gas usage
+      int[] memory newDeltas = SubcontractProvider(sc.subcontractProviderAddress).applyBatch(
         deltas, 
-        sc.data, 
+        sc.encodedBatch, 
         decodedLeftArguments[i],
         decodedRightArguments[i]
-      ));
+      );
 
-
+      // sanity check 
+      if (newDeltas.length != deltas.length) continue;
 
       // iterate over allowences and apply to new deltas if they are respected
       for (uint j = 0; j < sc.allowences.length; j++){
         Allowence memory allowence = sc.allowences[j];
-        int maxDelta = deltas[allowence.deltaIndex] + int(allowence.incrementDeltaAllowence);
-        int minDelta = deltas[allowence.deltaIndex] - int(allowence.decrementDeltaAllowence);
-        if (minDelta <= newDeltas[allowence.deltaIndex] && newDeltas[allowence.deltaIndex] <= maxDelta){
-          deltas[allowence.deltaIndex] = newDeltas[allowence.deltaIndex];
+        int difference = newDeltas[allowence.deltaIndex] - deltas[allowence.deltaIndex];
+        if ((difference > 0 && uint(difference) > allowence.rightAmount) || 
+          (difference < 0 && uint(-difference) > allowence.leftAmount) || 
+          difference == 0){
+          continue;
         }
+        console.log("Update delta");
+        console.logInt(deltas[allowence.deltaIndex]);
+        console.logInt(newDeltas[allowence.deltaIndex]);
+        deltas[allowence.deltaIndex] = newDeltas[allowence.deltaIndex];
+      
       }
-    }
-    
+    }    
+
     // 3. split _collaterals
     for (uint i = 0;i<deltas.length;i++){
       uint tokenId = proofbody.tokenIds[i];
@@ -772,16 +767,23 @@ contract Depository is Console {
   function cooperativeDisputeProof (CooperativeDisputeProof memory params) public returns (bool) {
     bytes memory ch_key = channelKey(msg.sender, params.peer);
 
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, 
+
+    console.log("Received proof");
+    console.logBytes32(keccak256(abi.encode(params.proofbody)));
+    console.logBytes32(keccak256(params.initialArguments));
+
+    bytes memory encoded_msg = abi.encode(
+      MessageType.CooperativeDisputeProof, 
       ch_key, 
       _channels[ch_key].cooperativeNonce,
       keccak256(abi.encode(params.proofbody)),
       keccak256(params.initialArguments)
     );
 
-    bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+    bytes32 hash = keccak256(encoded_msg);
 
-    log('encoded_msg',encoded_msg);
+
+    bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
     require(ECDSA.recover(final_hash, params.sig) == params.peer);
 
@@ -877,33 +879,47 @@ contract Depository is Console {
 
 
 
+  struct TokenReserveDebts {
+    uint reserve;
+    uint debtIndex;
+    Debt[] debts;
+  }
+  
+  struct UserReturn {
+    uint ETH_balance;
+    TokenReserveDebts[] tokens;
+  }
 
-
-  function getUser(address addr) external view returns (UserReturn memory) {
-    UserReturn memory response = UserReturn({
-      ETH_balance: addr.balance,
-      _tokens: new TokenReserveDebts[](_tokens.length)
-    });
+  struct ChannelReturn{
+    ChannelInfo channel;
+    ChannelCollateral[] collaterals;
+  }
+  
+  
+  // return users with reserves in provided tokens
+  function getUsers(address[] memory addrs, uint[] memory tokenIds) external view returns (UserReturn[] memory response) {
+    response = new UserReturn[](addrs.length);
+    for (uint i = 0;i<addrs.length;i++){
+      address addr = addrs[i];
+      response[i] = UserReturn({
+        ETH_balance: addr.balance,
+        tokens: new TokenReserveDebts[](tokenIds.length)
+      });
     
-    for (uint i = 0;i<_tokens.length;i++){
-      response._tokens[i]=(TokenReserveDebts({
-        reserve: _reserves[addr][i],
-        _debtIndex: _debtIndex[addr][i],
-        _debts: _debts[addr][i]
-      }));
+      for (uint j = 0;j<tokenIds.length;j++){
+        response[i].tokens[j]= TokenReserveDebts({
+          reserve: _reserves[addr][tokenIds[j]],
+          debtIndex: _debtIndex[addr][tokenIds[j]],
+          debts: _debts[addr][tokenIds[j]]
+        });
+      }
     }
     
     return response;
   }
   
-  struct ChannelReturn{
-    address peer;
-    ChannelInfo channel;
-    ChannelCollateral[] _collaterals;
-  }
-  
-  // get many _channels around one address
-  function getChannels(address  addr, address[] memory peers) public view returns ( ChannelReturn[] memory response) {
+  // get many _channels around one address, with collaterals in provided tokens
+  function getChannels(address  addr, address[] memory peers, uint[] memory tokenIds) public view returns (ChannelReturn[] memory response) {
     bytes memory ch_key;
 
     // set length of the response array
@@ -913,30 +929,26 @@ contract Depository is Console {
       ch_key = channelKey(addr, peers[i]);
 
       response[i]=ChannelReturn({
-        peer: peers[i],
         channel: _channels[ch_key],
-        _collaterals: new ChannelCollateral[](_tokens.length)
+        collaterals: new ChannelCollateral[](tokenIds.length)
       });
 
-      for (uint tokenId = 0;tokenId<_tokens.length;tokenId++){
-        response[i]._collaterals[tokenId]=_collaterals[ch_key][tokenId];
-      }
-      
+      for (uint j = 0;j<tokenIds.length;j++){
+        response[i].collaterals[j]=_collaterals[ch_key][tokenIds[j]];
+      }      
     }
-
-    return response;
-
-    
+    return response;    
   }
 
+  /*
+
   function getAllHubs () public view returns (Hub[] memory) {
-    return hubs;
+    return _hubs;
   }
   function getAllTokens () public view returns (bytes32[] memory) {
     return _tokens;
   }
   
-
 
 
   function createDebt(address addr, address creditor, uint tokenId, uint amount) public {
@@ -945,9 +957,11 @@ contract Depository is Console {
       amount: amount
     }));
   }
+  */
 
 
   function logChannel(address a1, address a2) public {
+    /*
     bytes memory ch_key = channelKey(a1, a2);
     log(">>> Logging channel", ch_key);
     log("cooperativeNonce", _channels[ch_key].cooperativeNonce);
@@ -959,7 +973,7 @@ contract Depository is Console {
       log("Right:", _reserves[a2][i]);
       log("collateral", _collaterals[ch_key][i].collateral);
       log("ondelta", _collaterals[ch_key][i].ondelta);
-    }
+    }*/
   }       
 
   function onERC1155Received(

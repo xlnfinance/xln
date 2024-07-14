@@ -13,14 +13,7 @@ contract SubcontractProvider is Console {
   constructor() {
     revealSecret(bytes32(0));
   }
- 
-  struct SubcontractParams {
-    int[] deltas;
-    bytes data;
-    bytes left_arguments;
-    bytes right_arguments;
-  }
-
+  
   struct Batch {
     Payment[] payment;
     Swap[] swap;
@@ -51,28 +44,35 @@ contract SubcontractProvider is Console {
     uint exerciseUntilBlock;
   }
 
+  function encodeBatch (Batch memory b) public pure returns (bytes memory) {
+    return abi.encode(b);
+  }
+
 
 
   // applies arbitrary changes to deltas
-  function process(SubcontractParams memory params) public returns (int[] memory deltas) {
-    Batch memory b = abi.decode(params.data, (Batch));
+  function applyBatch(int[] memory deltas,
+    bytes calldata encodedBatch,
+    bytes calldata leftArguments,
+    bytes calldata rightArguments) public returns (int[] memory) {
 
-    uint[] memory left_args = abi.decode(params.left_arguments, (uint[]));
+    Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
-    deltas = params.deltas;
-
-    for (uint i = 0; i < b.payment.length; i++) {
-      processPayment(deltas, b.payment[i]);
+    uint[] memory lArgs = abi.decode(leftArguments, (uint[]));
+    uint[] memory rArgs = abi.decode(rightArguments, (uint[]));
+    
+    for (uint i = 0; i < decodedBatch.payment.length; i++) {
+      applyPayment(deltas, decodedBatch.payment[i]);
     }
 
-    for (uint i = 0; i < b.swap.length; i++) {
-      processSwap(deltas, b.swap[i], params);
+    for (uint i = 0; i < decodedBatch.swap.length; i++) {
+      applySwap(deltas, decodedBatch.swap[i], lArgs, rArgs);
     }
 
     return deltas;
-
   }
-  function processPayment(int[] memory deltas, Payment memory payment) private {
+
+  function applyPayment(int[] memory deltas, Payment memory payment) private {
     // apply amount to delta if revealed on-time, otherwise ignore
     // this is "sprites" approach (https://arxiv.org/pdf/1702.05812) 
     // the opposite is "blitz" (https://www.usenix.org/system/files/sec21fall-aumayr.pdf)
@@ -87,14 +87,18 @@ contract SubcontractProvider is Console {
       return;
     }
 
+    console.log("Payment applied");
+    console.logInt(deltas[payment.deltaIndex]);
+    console.logInt(payment.amount);
+
     deltas[payment.deltaIndex] += payment.amount;
   }
 
-  function processSwap(int[] memory deltas, Swap memory swap, SubcontractParams memory params) private {
+  function applySwap(int[] memory deltas, Swap memory swap, uint[] memory lArgs, uint[] memory rArgs) private {
     // apply swap to deltas
 
-    int left = deltas[swap.addIndex] + int(abi.decode(params.left_arguments, (uint[]))[swap.addIndex]);
-    int right = deltas[swap.subIndex] + int(abi.decode(params.right_arguments, (uint[]))[swap.subIndex]);
+    //int left = deltas[swap.addIndex] + int(abi.decode(params.leftArguments, (uint[]))[swap.addIndex]);
+    //int right = deltas[swap.subIndex] + int(abi.decode(params.rightArguments, (uint[]))[swap.subIndex]);
     /*
     if (left < swap.addAmount) {
       return;
