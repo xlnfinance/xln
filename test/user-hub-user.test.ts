@@ -38,6 +38,9 @@ async function main() {
   await user.createSubchannel('hub1', 1);
   //channel2.getSubChannel(1);
 
+  await sleep(2000);
+
+  await user.test_reserveToCollateral('hub1', 1, 1, 10);
   await sleep(5000);
 }
 
