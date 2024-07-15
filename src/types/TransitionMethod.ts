@@ -4,7 +4,7 @@ export enum TransitionMethod {
   ProposedEvent,
   PaymentTransition,
   CreateSubchannel,
-  CreateSubchannelResult,
+  AddCollateral,
 }
 
 /*

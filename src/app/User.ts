@@ -25,6 +25,8 @@ import IUserOptions from '../types/IUserOptions';
 import TransportFactory from './TransportFactory';
 import StorageContext from './StorageContext';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
+import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
+import { MoneyValue } from '../types/SubChannel';
 
 const TEMP_ENV = {
   hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -116,6 +118,7 @@ export default class User implements ITransportListener {
     await this.storageContext.initialize(this.thisUserAddress);
   }
 
+  // TODO думаю надо две разные функции getChannel и openChannel. Наверно лучше явно открывать канал, если необходимо
   async getChannel(userId: string): Promise<IChannel> {
     Logger.info(`Open channel to <user> ${userId}`);
 
@@ -218,6 +221,7 @@ export default class User implements ITransportListener {
     console.log('reserveTest1', await depository._reserves(thisUserAddress, 0));
   }
 
+  //TODO this is test function
   async reserveToCollateral(otherUserOfChannelAddress: string, tokenId: number, amount: BigNumberish): Promise<void> {
     let depository = this.depository;
     let thisUserAddress = this.thisUserAddress;
@@ -233,6 +237,16 @@ export default class User implements ITransportListener {
       tokenId,
     );
     const reserveTest2 = await depository._reserves(thisUserAddress, tokenId);
+  }
+
+  //TODO эта функция async только потому что getChannel async, когда переделаю getChannel, убрать тут async
+  // хотя функции канала тоже async, подумать
+  async test_reserveToCollateral(userId: string, chainId: number, tokenId: number, collateral: MoneyValue): Promise<void> {
+    const channel = await this.getChannel(userId);
+
+    const t: AddCollateralTransition = new AddCollateralTransition(chainId, tokenId, channel.isLeft(), collateral);
+    channel.push(t);
+    channel.send();
   }
 
   private async openChannel(recipientUserId: string, transport: ITransport): Promise<IChannel> {

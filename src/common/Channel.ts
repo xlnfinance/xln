@@ -18,7 +18,9 @@ import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { createSubchannelData, Subchannel } from '../types/SubChannel';
+import { createSubchannelData, MoneyValue, Subchannel } from '../types/SubChannel';
+import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
+import { BigNumberish } from 'ethers';
 
 const BLOCK_LIMIT = 5;
 
@@ -86,8 +88,8 @@ export default class Channel implements IChannel {
     return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
   }
 
-  async createSubсhannel(chainId: number): Promise<Subchannel> {
-    let subChannel = await this.getSubсhannel(chainId);
+  createSubсhannel(chainId: number): Subchannel {
+    let subChannel = this.getSubсhannel(chainId);
     if(subChannel)
       return subChannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
     
@@ -97,7 +99,7 @@ export default class Channel implements IChannel {
     return subChannel;
   }
 
-  async getSubсhannel(chainId: number): Promise<Subchannel | undefined> {
+  getSubсhannel(chainId: number): Subchannel | undefined {
     let subChannel = this.state.subChannels.find(subChannel => subChannel.chainId === chainId);
     return subChannel;
   }
@@ -108,6 +110,10 @@ export default class Channel implements IChannel {
   
   getId() {
     return `${this.thisUserAddress}:${this.otherUserAddress}`;
+  }
+
+  isLeft() : boolean {
+    return this.privateState.isLeft;
   }
 
   private async applyBlock(isLeft: boolean, block: Block): Promise<void> {
@@ -141,7 +147,7 @@ export default class Channel implements IChannel {
           if(subChannel) {
             Logger.info(`Processing PaymentTransition ${subChannel.chainId}`);
 
-            subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
+            //subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
           }
         }
         break;
@@ -150,6 +156,13 @@ export default class Channel implements IChannel {
           const subchannelTransition = transition as CreateSubchannelTransition;
           const subChannel = await this.createSubсhannel(subchannelTransition.chainId);
           Logger.info(`Processing CreateSubchannelTransition ${subChannel.chainId}`);
+        }
+        break;
+        case TransitionMethod.AddCollateral:
+        {
+          const tr = transition as AddCollateralTransition;
+          //TODO handle errors if subchannel, token or smth was not found
+          this.addCollateralToSubchannel(tr.chainId, tr.tokenId, tr.isLeft, tr.collateral);
         }
         break;
     }
@@ -287,5 +300,24 @@ export default class Channel implements IChannel {
     }
 
     await this.transport.send(message);
+  }
+
+  addCollateralToSubchannel(chainId: number, tokenId: number, isLeft: boolean, collateral: MoneyValue) : void {
+    let subchannel = this.getSubсhannel(chainId);
+    if(!subchannel)
+      return;
+
+    let delta = subchannel.deltas.find(delta => delta.tokenId === tokenId);
+
+    if (!delta) {
+      console.log(`TokenDelta with tokenId ${tokenId} not found.`);
+      return;
+    }
+
+    delta.collateral += collateral;
+
+    if(!isLeft) {
+      delta.offdelta += collateral;
+    }
   }
 }
