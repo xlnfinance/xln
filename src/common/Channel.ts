@@ -18,9 +18,10 @@ import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { createSubchannelData, MoneyValue, Subchannel } from '../types/SubChannel';
+import { createSubchannelData, MoneyValue, Subchannel, TokenDelta } from '../types/SubChannel';
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
 import { BigNumberish } from 'ethers';
+import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
 
 const BLOCK_LIMIT = 5;
 
@@ -162,7 +163,14 @@ export default class Channel implements IChannel {
         {
           const tr = transition as AddCollateralTransition;
           //TODO handle errors if subchannel, token or smth was not found
-          this.addCollateralToSubchannel(tr.chainId, tr.tokenId, tr.isLeft, tr.collateral);
+          this.addCollateral(tr.chainId, tr.tokenId, tr.isLeft, tr.collateral);
+        }
+        break;
+        case TransitionMethod.SetCreditLimit:
+        {
+          const tr = transition as SetCreditLimitTransition;
+          //TODO handle errors if subchannel, token or smth was not found
+          this.setCreditLimit(tr.chainId, tr.tokenId, tr.isLeft, tr.creditLimit);
         }
         break;
     }
@@ -302,13 +310,8 @@ export default class Channel implements IChannel {
     await this.transport.send(message);
   }
 
-  addCollateralToSubchannel(chainId: number, tokenId: number, isLeft: boolean, collateral: MoneyValue) : void {
-    let subchannel = this.getSubсhannel(chainId);
-    if(!subchannel)
-      return;
-
-    let delta = subchannel.deltas.find(delta => delta.tokenId === tokenId);
-
+  addCollateral(chainId: number, tokenId: number, isLeft: boolean, collateral: MoneyValue) : void {
+    let delta = this.getSubchannelDelta(chainId, tokenId);
     if (!delta) {
       console.log(`TokenDelta with tokenId ${tokenId} not found.`);
       return;
@@ -319,5 +322,28 @@ export default class Channel implements IChannel {
     if(!isLeft) {
       delta.offdelta += collateral;
     }
+  }
+
+  setCreditLimit(chainId: number, tokenId: number, isLeft: boolean, creditLimit: MoneyValue) : void {
+    let delta = this.getSubchannelDelta(chainId, tokenId);
+    if (!delta) {
+      console.log(`TokenDelta with tokenId ${tokenId} not found.`);
+      return;
+    }
+
+    if(isLeft) {
+      delta.leftCreditLimit = creditLimit;
+    }
+    else {
+      delta.rightCreditLimit = creditLimit;
+    }
+  }
+
+  private getSubchannelDelta(chainId: number, tokenId: number): TokenDelta | undefined {
+    let subchannel = this.getSubсhannel(chainId);
+    if(!subchannel)
+      return subchannel;
+
+    return subchannel.deltas.find(delta => delta.tokenId === tokenId);
   }
 }

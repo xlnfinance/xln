@@ -5,6 +5,7 @@ export enum TransitionMethod {
   PaymentTransition,
   CreateSubchannel,
   AddCollateral,
+  SetCreditLimit,
 }
 
 /*
