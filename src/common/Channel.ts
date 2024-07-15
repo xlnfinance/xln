@@ -22,13 +22,14 @@ import { createSubchannelData, MoneyValue, Subchannel, TokenDelta } from '../typ
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
 import { BigNumberish } from 'ethers';
 import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
+import UnsafePaymentTransition from '../types/Transitions/UnsafePaymentTransition';
 
 const BLOCK_LIMIT = 5;
 
 export default class Channel implements IChannel {
   state: ChannelState;
   thisUserAddress: string;
-  otherUserAddress: string;
+  otherUserAddress: string;  
 
   private syncQueue: SyncQueueWorker;
   private privateState: ChannelPrivateState;
@@ -173,6 +174,21 @@ export default class Channel implements IChannel {
           this.setCreditLimit(tr.chainId, tr.tokenId, tr.isLeft, tr.creditLimit);
         }
         break;
+        case TransitionMethod.UnsafePayment:
+        {
+          const tr = transition as UnsafePaymentTransition;
+          //TODO handle errors if subchannel, token or smth was not found
+          //TODO проверить допустимые лимиты для платежа, не выходит ли за пределы
+          this.applyUnsafePayment(tr.chainId, tr.tokenId, tr.isLeft, tr.amount);
+
+          if(this.thisUserAddress == tr.fromUserId || this.thisUserAddress == tr.toUserId) {
+            //do nothing
+          }
+          else {
+            // we are hub, resend payment to target channel
+          }
+        }
+        break;
     }
 
     this.state.transitionNumber++;
@@ -310,6 +326,8 @@ export default class Channel implements IChannel {
     await this.transport.send(message);
   }
 
+
+
   addCollateral(chainId: number, tokenId: number, isLeft: boolean, collateral: MoneyValue) : void {
     let delta = this.getSubchannelDelta(chainId, tokenId);
     if (!delta) {
@@ -319,7 +337,7 @@ export default class Channel implements IChannel {
 
     delta.collateral += collateral;
 
-    if(!isLeft) {
+    if(isLeft) {
       delta.offdelta += collateral;
     }
   }
@@ -337,6 +355,16 @@ export default class Channel implements IChannel {
     else {
       delta.rightCreditLimit = creditLimit;
     }
+  }
+
+  applyUnsafePayment(chainId: number, tokenId: number, isLeft: boolean, amount: MoneyValue) : void {
+    let delta = this.getSubchannelDelta(chainId, tokenId);
+    if (!delta) {
+      console.log(`TokenDelta with tokenId ${tokenId} not found.`);
+      return;
+    }
+
+    delta.offdelta += (isLeft ? -amount : amount);
   }
 
   private getSubchannelDelta(chainId: number, tokenId: number): TokenDelta | undefined {
