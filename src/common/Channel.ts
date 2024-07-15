@@ -16,7 +16,7 @@ import ChannelPrivateState from '../types/ChannelPrivateState';
 import IChannelContext from '../types/IChannelContext';
 import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
-import CreateSubchannelTransition, { CreateSubchannelResultTransition } from '../types/Transitions/CreateSubchannelTransition';
+import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
 import { Subchannel } from '../types/SubChannel';
 
@@ -151,20 +151,8 @@ export default class Channel implements IChannel {
           const subchannelTransition = transition as CreateSubchannelTransition;
           const subChannel = await this.createSubсhannel(subchannelTransition.chainId);
           Logger.info(`Processing CreateSubchannelTransition ${subChannel.chainId}`);
-
-          //const t: CreateSubchannelResultTransition = new CreateSubchannelResultTransition(subchannelTransition.chainId, true);
-          //this.push(t);
         }
         break;
-        /*case TransitionMethod.CreateSubchannelResult:
-        {
-          const tr = transition as CreateSubchannelResultTransition;
-          if(tr.isSuccess) {
-            await this.createSubсhannel(tr.chainId);
-          }
-          Logger.info(`Processing CreateSubchannelResultTransition ${tr.chainId}:${tr.isSuccess}`);
-        }
-        break;*/
     }
 
     this.state.transitionNumber++;
