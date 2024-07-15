@@ -34,7 +34,8 @@ async function main() {
   const channel1 = await user.getChannelToHub('hub1');
   //const channel2 = await user2.getChannelToHub('hub1');
 
-  await channel1.createSubсhannel(1);
+  //await channel1.createSubсhannel(1);
+  await user.createSubchannel('hub1', 1);
   //channel2.getSubChannel(1);
 
   await sleep(5000);

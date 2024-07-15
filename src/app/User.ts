@@ -24,6 +24,7 @@ import {
 import IUserOptions from '../types/IUserOptions';
 import TransportFactory from './TransportFactory';
 import StorageContext from './StorageContext';
+import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 
 const TEMP_ENV = {
   hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -123,7 +124,7 @@ export default class User implements ITransportListener {
       throw new Error(`Not found connection for hub with name ${hubName}`);
     }
 
-    const address = this._hubInfoMap.get(hubName)!.address;
+    const address = this.getHubAddressByName(hubName);
 
     const recipientChannelMap = this._channelRecipientMapping.get(transport);
     const channel = recipientChannelMap?.get(address);
@@ -132,6 +133,11 @@ export default class User implements ITransportListener {
     }
 
     return channel;
+  }
+
+  getHubAddressByName(hubName: string): string {
+    const address = this._hubInfoMap.get(hubName)!.address;
+    return address;
   }
 
   async getChannelToUser(recipientUserId: string, hubName: string): Promise<IChannel> {
@@ -149,6 +155,20 @@ export default class User implements ITransportListener {
       return await this.openChannel(recipientUserId, transport);
     }
     return channel;
+  }
+
+  async createSubchannel(hubName: string, tokenId: number) : Promise<void> {
+    const channel = await this.getChannelToHub(hubName);
+
+    // send notification to the other party to create the same subchannel on the other side
+    // TODO: should we await here for flush to be completed?
+    // если сначала создать саб-канал, а затем отправить сообщение, то мы снимем хеш с состояния, где есть один сабканал
+    // а на другой стороне revious state hash будет без этого сабканала и не сработает
+    const t: CreateSubchannelTransition = new CreateSubchannelTransition(tokenId.toString());
+    channel.push(t);
+    channel.send();
+
+    await channel.createSubсhannel(1);
   }
 
   // TODO save fromBlockNumber to the storage
