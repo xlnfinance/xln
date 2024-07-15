@@ -16,8 +16,9 @@ import ChannelPrivateState from '../types/ChannelPrivateState';
 import IChannelContext from '../types/IChannelContext';
 import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
+import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { SubChannel } from '../types/SubChannel';
+import { Subchannel } from '../types/SubChannel';
 
 const BLOCK_LIMIT = 5;
 
@@ -63,30 +64,8 @@ export default class Channel implements IChannel {
     };
   }
 
-  async getSubChannel(tokenId: number): Promise<SubChannel> {
-    let subChannel = this.state.subChannels.find(subChannel => subChannel.tokenId === tokenId);
-    if (subChannel) {
-      return subChannel;
-    }
-
-    subChannel = {tokenId: tokenId, offDelta: 0};
-    this.state.subChannels.push(subChannel);
-    this.state.subChannels.sort((a: SubChannel, b: SubChannel) => a.tokenId - b.tokenId); 
-
-    await this.save();
-    return subChannel;
-  }
-
-  getState(): ChannelState {
-    return this.state;
-  }
-
-  save(): Promise<void> {
-    const channelSavePoint: ChannelSavePoint = {
-      privateState: this.privateState,
-      state: this.state
-    };
-    return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
+  async initialize() {
+    await this.load();
   }
 
   async load(): Promise<void> {
@@ -99,10 +78,42 @@ export default class Channel implements IChannel {
     }
   }
 
-  async initialize() {
-    await this.load();
+  async save(): Promise<void> {
+    const channelSavePoint: ChannelSavePoint = {
+      privateState: this.privateState,
+      state: this.state
+    };
+    return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
   }
 
+  async createSubChannel(tokenId: number): Promise<Subchannel> {
+    let subChannel = await this.getSubChannel(tokenId);
+    if(subChannel)
+      return subChannel;
+    // send notification to the other party to create the same subchannel on the other side
+    // TODO: should we await here for flush to be completed?
+    // если сначала создать саб-канал, а затем отправить сообщение, то мы снимем хеш с состояния, где есть один сабканал
+    // а на другой стороне revious state hash будет без этого сабканала и не сработает
+    const t: CreateSubchannelTransition = new CreateSubchannelTransition(tokenId.toString());
+    this.push(t);
+    this.flush();
+
+    subChannel = {tokenId: tokenId, offDelta: 0};
+    this.state.subChannels.push(subChannel);
+    this.state.subChannels.sort((a: Subchannel, b: Subchannel) => a.tokenId - b.tokenId); 
+
+    return subChannel;
+  }
+
+  async getSubChannel(tokenId: number): Promise<Subchannel | undefined> {
+    let subChannel = this.state.subChannels.find(subChannel => subChannel.tokenId === tokenId);
+    return subChannel;
+  }
+
+  getState(): ChannelState {
+    return this.state;
+  }
+  
   getId() {
     return `${this.thisUserAddress}:${this.otherUserAddress}`;
   }
@@ -135,9 +146,18 @@ export default class Channel implements IChannel {
         {
           const paymentTransition = transition as PaymentTransition;
           const subChannel = await this.getSubChannel(paymentTransition.tokenId);
-          Logger.info(`Processing PaymentTransition ${subChannel.tokenId}`);
+          if(subChannel) {
+            Logger.info(`Processing PaymentTransition ${subChannel.tokenId}`);
 
-          subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
+            subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
+          }
+        }
+        case TransitionMethod.CreateSubchannel:
+        {
+          const subchannelTransition = transition as CreateSubchannelTransition;        
+          //TODO pass actial token ID
+          const subChannel = await this.createSubChannel(1/*subchannelTransition.tokenId.length*/);
+          Logger.info(`Processing CreateSubchannelTransition ${subChannel.tokenId}`);
         }
         break;
     }

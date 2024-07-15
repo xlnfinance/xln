@@ -33,6 +33,19 @@
           {
             "type": "node",
             "request": "launch",
+            "name": "Start user-hub-user test",
+            "skipFiles": [
+              "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/dist/test/user-hub-user.test.js",
+            "preLaunchTask": "tsc: build - tsconfig.json",
+            "outFiles": [
+              "${workspaceFolder}/dist/**/*.js"
+            ]
+          },
+          {
+            "type": "node",
+            "request": "launch",
              "name": "Debug Hardhat",
             "skipFiles": ["<node_internals>/**"],
             "program": "${workspaceFolder}/node_modules/.bin/hardhat",

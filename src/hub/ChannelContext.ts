@@ -12,7 +12,7 @@ export default class ChannelContext implements IChannelContext {
     private storage: IChannelStorage,
     private signer: Signer,
   ) {}
-
+  
   getUserAddress(): string {
     return this.userId;
   }

@@ -1,5 +1,5 @@
 import Block from './Block';
-import { SubChannel } from './SubChannel';
+import { Subchannel } from './SubChannel';
 import Transition from './Transition';
 import { DepositoryEvent } from './Transitions/ProposedEventTransition';
 
