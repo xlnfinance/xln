@@ -28,6 +28,7 @@ import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTra
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
 import { MoneyValue } from '../types/SubChannel';
 import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
+import UnsafePaymentTransition from '../types/Transitions/UnsafePaymentTransition';
 
 const TEMP_ENV = {
   hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -245,14 +246,31 @@ export default class User implements ITransportListener {
   async test_reserveToCollateral(userId: string, chainId: number, tokenId: number, collateral: MoneyValue): Promise<void> {
     const channel = await this.getChannel(userId);
 
+    //TODO это должно быть внутри канала, функцией. 
     const t: AddCollateralTransition = new AddCollateralTransition(chainId, tokenId, channel.isLeft(), collateral);
     channel.push(t);
     channel.send();
   }
-  async test_setCreditLimit(userId: string, chainId: number, tokenId: number, creditLimit: MoneyValue): Promise<void> {
+  async setCreditLimit(userId: string, chainId: number, tokenId: number, creditLimit: MoneyValue): Promise<void> {
     const channel = await this.getChannel(userId);
 
+    //TODO это должно быть внутри канала, функцией. 
     const t: SetCreditLimitTransition = new SetCreditLimitTransition(chainId, tokenId, channel.isLeft(), creditLimit);
+    channel.push(t);
+    channel.send();
+  }
+
+  async unsafePayment(toUserId: string, routeFirstHopId: string, chainId: number, tokenId: number, amount: MoneyValue): Promise<void> {
+    const channel = await this.getChannel(routeFirstHopId);
+
+    const t = Object.assign(new UnsafePaymentTransition(), {
+      toUserId: toUserId,
+      fromUserId: this.thisUserAddress,
+      chainId: chainId,
+      tokenId: tokenId,
+      isLeft: channel.isLeft(), //TODO это может вычисляться на лету, кроме того наверно лучше сделать isLeft(userId), так понятнее?
+      offdelta: amount,
+    });
     channel.push(t);
     channel.send();
   }

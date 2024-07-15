@@ -44,7 +44,7 @@ async function main() {
   await sleep(2000);
 
   await user.test_reserveToCollateral(user_hub_name, 1, 1, 10);
-  await user2.test_setCreditLimit(user_hub_name, 1, 1, 100);
+  await user2.setCreditLimit(user_hub_name, 1, 1, 100);
   await sleep(5000);
 }
 
