@@ -89,15 +89,8 @@ export default class Channel implements IChannel {
   async createSubсhannel(tokenId: number): Promise<Subchannel> {
     let subChannel = await this.getSubсhannel(tokenId);
     if(subChannel)
-      return subChannel;
-    // send notification to the other party to create the same subchannel on the other side
-    // TODO: should we await here for flush to be completed?
-    // если сначала создать саб-канал, а затем отправить сообщение, то мы снимем хеш с состояния, где есть один сабканал
-    // а на другой стороне revious state hash будет без этого сабканала и не сработает
-    const t: CreateSubchannelTransition = new CreateSubchannelTransition(tokenId.toString());
-    this.push(t);
-    this.flush();
-
+      return subChannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
+    
     subChannel = {tokenId: tokenId, offDelta: 0};
     this.state.subChannels.push(subChannel);
     this.state.subChannels.sort((a: Subchannel, b: Subchannel) => a.tokenId - b.tokenId); 
