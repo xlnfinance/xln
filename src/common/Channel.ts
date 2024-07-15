@@ -63,7 +63,7 @@ export default class Channel implements IChannel {
     };
   }
 
-  openSubChannel(tokenId: number): SubChannel {
+  async getSubChannel(tokenId: number): Promise<SubChannel> {
     let subChannel = this.state.subChannels.find(subChannel => subChannel.tokenId === tokenId);
     if (subChannel) {
       return subChannel;
@@ -71,7 +71,9 @@ export default class Channel implements IChannel {
 
     subChannel = {tokenId: tokenId, offDelta: 0};
     this.state.subChannels.push(subChannel);
+    this.state.subChannels.sort((a: SubChannel, b: SubChannel) => a.tokenId - b.tokenId); 
 
+    await this.save();
     return subChannel;
   }
 
@@ -105,7 +107,7 @@ export default class Channel implements IChannel {
     return `${this.thisUserAddress}:${this.otherUserAddress}`;
   }
 
-  private applyBlock(isLeft: boolean, block: Block) {
+  private async applyBlock(isLeft: boolean, block: Block): Promise<void> {
     Logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
 
     this.state.blockNumber++;
@@ -115,11 +117,11 @@ export default class Channel implements IChannel {
 
     for (let i = 0; i < block.transitions.length; i++) {
       const transition = block.transitions[i];
-      this.applyTransition(block, transition);
+      await this.applyTransition(block, transition);
     }
   }
 
-  private applyTransition(block: Block, transition: Transition) {
+  private async applyTransition(block: Block, transition: Transition): Promise<void> {
     Logger.info(`applyTransition ${block.isLeft} ${transition}}`);
 
     switch (transition.method) {
@@ -132,7 +134,7 @@ export default class Channel implements IChannel {
       case TransitionMethod.PaymentTransition:
         {
           const paymentTransition = transition as PaymentTransition;
-          const subChannel = this.openSubChannel(paymentTransition.tokenId);
+          const subChannel = await this.getSubChannel(paymentTransition.tokenId);
           Logger.info(`Processing PaymentTransition ${subChannel.tokenId}`);
 
           subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
@@ -147,7 +149,7 @@ export default class Channel implements IChannel {
     if (this.privateState.pendingBlock != null) {
       if (message.blockNumber == this.state.blockNumber + 1) {
         const pendingBlock: Block = this.privateState.pendingBlock;
-        this.applyBlock(this.privateState.isLeft, pendingBlock);
+        await this.applyBlock(this.privateState.isLeft, pendingBlock);
 
         const allSignatures = [message.ackSignatures, this.privateState.pendingSignatures];
         if (this.privateState.isLeft) allSignatures.reverse();
@@ -199,7 +201,7 @@ export default class Channel implements IChannel {
 
       const privateState = this.privateState;
 
-      this.applyBlock(privateState.isLeft, block);
+      await this.applyBlock(privateState.isLeft, block);
 
       const allSignatures = [message.ackSignatures, privateState.pendingSignatures];
       if (privateState.isLeft) allSignatures.reverse();
@@ -250,7 +252,7 @@ export default class Channel implements IChannel {
         transitions: transitions,
       };
 
-      this.applyBlock(this.privateState.isLeft, block);
+      await this.applyBlock(this.privateState.isLeft, block);
 
       this.privateState.pendingBlock = deepClone(block); //зачем клон блока??
       this.privateState.sentTransitions = transitions.length;
