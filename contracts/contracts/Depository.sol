@@ -259,8 +259,8 @@ contract Depository is Console {
 
   struct Allowence {
     uint deltaIndex;
-    uint rightAmount;
-    uint leftAmount;
+    uint rightAllowence;
+    uint leftAllowence;
   }
   struct SubcontractClause {
     address subcontractProviderAddress;
@@ -698,8 +698,8 @@ contract Depository is Console {
       for (uint j = 0; j < sc.allowences.length; j++){
         Allowence memory allowence = sc.allowences[j];
         int difference = newDeltas[allowence.deltaIndex] - deltas[allowence.deltaIndex];
-        if ((difference > 0 && uint(difference) > allowence.rightAmount) || 
-          (difference < 0 && uint(-difference) > allowence.leftAmount) || 
+        if ((difference > 0 && uint(difference) > allowence.rightAllowence) || 
+          (difference < 0 && uint(-difference) > allowence.leftAllowence) || 
           difference == 0){
           continue;
         }

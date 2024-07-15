@@ -10,6 +10,8 @@ import "hardhat/console.sol";
 
 contract SubcontractProvider is Console {
   mapping(bytes32 => uint) public hashToBlock;
+  uint MAXUINT32 = type(uint32).max;
+
   constructor() {
     revealSecret(bytes32(0));
   }
@@ -28,10 +30,12 @@ contract SubcontractProvider is Console {
   }
 
   struct Swap {
-    uint addIndex;
+    bool ownerIsLeft;
+
+    uint addDeltaIndex;
     uint addAmount;
 
-    uint subIndex;
+    uint subDeltaIndex;
     uint subAmount;
   }
 
@@ -51,10 +55,12 @@ contract SubcontractProvider is Console {
 
 
   // applies arbitrary changes to deltas
-  function applyBatch(int[] memory deltas,
+  function applyBatch(
+    int[] memory deltas,
     bytes calldata encodedBatch,
     bytes calldata leftArguments,
-    bytes calldata rightArguments) public returns (int[] memory) {
+    bytes calldata rightArguments
+  ) public returns (int[] memory) {
 
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
@@ -65,51 +71,42 @@ contract SubcontractProvider is Console {
       applyPayment(deltas, decodedBatch.payment[i]);
     }
 
+    uint leftSwaps = 0;
     for (uint i = 0; i < decodedBatch.swap.length; i++) {
-      applySwap(deltas, decodedBatch.swap[i], lArgs, rArgs);
+      Swap memory swap = decodedBatch.swap[i];
+
+      uint32 fillRatio = uint32(swap.ownerIsLeft ? lArgs[leftSwaps] : rArgs[i  - leftSwaps]);
+
+      applySwap(deltas, swap, fillRatio);
+      //logDeltas("Deltas after swap", deltas);
+
+      if (swap.ownerIsLeft) {
+        leftSwaps++;
+      }
     }
 
     return deltas;
   }
 
   function applyPayment(int[] memory deltas, Payment memory payment) private {
-    // apply amount to delta if revealed on-time, otherwise ignore
+    // apply amount to delta if revealed on time
     // this is "sprites" approach (https://arxiv.org/pdf/1702.05812) 
     // the opposite is "blitz" (https://www.usenix.org/system/files/sec21fall-aumayr.pdf)
-
-    if (hashToBlock[payment.hash] == 0) {
-      // never revealed
+    uint revealedAt = hashToBlock[payment.hash];
+    if (revealedAt == 0 || revealedAt > payment.revealedUntilBlock) {
       return;
     }
 
-    if (hashToBlock[payment.hash] > payment.revealedUntilBlock) {
-      // revealed too late
-      return;
-    }
-
-    console.log("Payment applied");
-    console.logInt(deltas[payment.deltaIndex]);
-    console.logInt(payment.amount);
-
+    logDeltas("Before payment", deltas);
     deltas[payment.deltaIndex] += payment.amount;
+    logDeltas("After payment", deltas);
   }
 
-  function applySwap(int[] memory deltas, Swap memory swap, uint[] memory lArgs, uint[] memory rArgs) private {
-    // apply swap to deltas
-
-    //int left = deltas[swap.addIndex] + int(abi.decode(params.leftArguments, (uint[]))[swap.addIndex]);
-    //int right = deltas[swap.subIndex] + int(abi.decode(params.rightArguments, (uint[]))[swap.subIndex]);
-    /*
-    if (left < swap.addAmount) {
-      return;
-    }
-
-    if (right < swap.subAmount) {
-      return;
-    }
-
-    deltas[swap.addIndex] -= swap.addAmount;
-    deltas[swap.subIndex] += swap.subAmount;*/
+  function applySwap(int[] memory deltas, Swap memory swap, uint32 fillRatio) private {
+    logDeltas("Before swap", deltas);
+    deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAXUINT32);
+    deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAXUINT32);
+    logDeltas("After swap", deltas);
   }
 
 
@@ -128,6 +125,14 @@ contract SubcontractProvider is Console {
     if (hashToBlock[hash] != 0 && hashToBlock[hash] < block.number - 100000){
       delete hashToBlock[hash];
     }
+  }
+
+  function logDeltas(string memory msg, int[] memory deltas) public {
+    console.log(msg);
+    for (uint i = 0; i < deltas.length; i++) {
+      console.logInt(deltas[i]);
+    }
+    console.log('====================');
   }
 
 

@@ -250,7 +250,7 @@ describe("Depository", function () {
 
 
     it("should process cooperative dispute proof correctly", async function () {
-      // Initial collateral for channel 0-1 for tokens 0 and 2
+      // Initial collateral for channel 0-1
       await depository.reserveToCollateral({
         tokenId: erc20id,
         receiver: user0.address,
@@ -262,14 +262,9 @@ describe("Depository", function () {
         receiver: user0.address,
         pairs: [{ addr: user1.address, amount: 50 }]
       });
-
     
       // Prepare dispute proof
-
       const testhash = ethers.keccak256(Buffer.alloc(32));
-      console.log(testhash)
-      console.log(await scProvider.hashToBlock(testhash));
-
 
       const batch: SubcontractProvider.BatchStruct = {
         payment: [], 
@@ -280,24 +275,31 @@ describe("Depository", function () {
         deltaIndex: 0,
         amount: 100,
         revealedUntilBlock: 123456,
-        hash: "0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"
+        hash: testhash
       } as SubcontractProvider.PaymentStruct);
 
 
       batch.swap.push({
-        addIndex: 1,
-        addAmount: 200,
-        subIndex: 2,
-        subAmount: 50
+        ownerIsLeft: true,
+        addDeltaIndex: 0,
+        addAmount: 1000,
+        subDeltaIndex: 1,
+        subAmount: 1000
+      } as SubcontractProvider.SwapStruct);
+
+      batch.swap.push({
+        ownerIsLeft: false,
+        addDeltaIndex: 0,
+        addAmount: 1000,
+        subDeltaIndex: 1,
+        subAmount: 1000
       } as SubcontractProvider.SwapStruct);
 
 
-      const batchAbi = SubcontractProvider__factory.abi.find(entry => entry.name === "encodeBatch").inputs[0]
+      const batchAbi = SubcontractProvider__factory.abi
+      .find(entry => entry.name === "encodeBatch").inputs[0]
     
       const encodedBatch = coder.encode([batchAbi], [batch]);
-
-      console.log("encodedBatch:", encodedBatch);
-
       
       const proofbody: Depository.ProofBodyStruct = { 
         offdeltas: [0, 0], 
@@ -309,15 +311,19 @@ describe("Depository", function () {
         subcontractProviderAddress: await scProvider.getAddress(), 
         encodedBatch,
         allowences: [
-          { deltaIndex: 0, leftAmount: 1000, rightAmount: 1000 },
-          { deltaIndex: 1, leftAmount: 1000, rightAmount: 1000 },
+          { deltaIndex: 0, leftAllowence: 1000, rightAllowence: 1000 },
+          { deltaIndex: 1, leftAllowence: 1000, rightAllowence: 1000 },
         ]
       })
 
-      const initialArguments = coder.encode(["bytes[]"], [
-        [coder.encode(["uint"], [0])]
+      const encodeArgs = (args: any) => coder.encode(["bytes[]"], [
+        [coder.encode(["uint[]"], args)]
       ]);
-      const finalArguments = initialArguments //coder.encode(["uint"], [0]);
+
+      const maxUint32: bigint = 0xFFFFFFFFn;
+
+      const initialArguments = encodeArgs([ [maxUint32/5n] ]);
+      const finalArguments = encodeArgs([ [maxUint32/2n+1n] ]);
 
       const proofABI = Depository__factory.abi
       .find(entry => entry.name === "processBatch").inputs[0].components
