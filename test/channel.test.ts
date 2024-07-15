@@ -34,8 +34,8 @@ async function main() {
   const channel1 = await user.getChannelToUser(userId2, 'hub1');
   const channel2 = await user2.getChannelToUser(userId1, 'hub1');
 
-  channel1.openSubChannel(0);
-  channel2.openSubChannel(0);
+  await channel1.getSubChannel(0);
+  await channel2.getSubChannel(0);
 
   await channel1.push(new TextMessageTransition('Hello world'));
   await channel1.push(new PaymentTransition(100, 0));
@@ -48,7 +48,7 @@ async function main() {
 
   await sleep(5000);
   console.log('RESULT', channel1.getState(), channel2.getState());
-  console.log('RESULT', channel1.openSubChannel(0), channel2.openSubChannel(0));
+  console.log('RESULT', await channel1.getSubChannel(0), await channel2.getSubChannel(0));
 
   if (JSON.stringify(channel1.getState()) === JSON.stringify(channel2.getState())) {
     process.exit(0);
