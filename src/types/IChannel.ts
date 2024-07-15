@@ -14,7 +14,7 @@ export default interface IChannel {
 
   receive(message: BlockMessage): Promise<void>;
 
-  getSubChannel(tokenId: number): Promise<Subchannel | undefined>;
+  getSubсhannel(tokenId: number): Promise<Subchannel | undefined>;
 
-  createSubChannel(tokenId: number): Promise<Subchannel>;
+  createSubсhannel(tokenId: number): Promise<Subchannel>;
 }
