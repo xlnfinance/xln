@@ -17,8 +17,10 @@ async function main() {
   });
   await hub.start();
 
+  const user_hub_name: string = 'usr_hub';
+
   const opt: IUserOptions = {
-    hubConnectionDataList: [{ host: '127.0.0.1', port: 10000, name: 'hub1', address: ENV.hubAddress }],
+    hubConnectionDataList: [{ host: '127.0.0.1', port: 10000, name: user_hub_name, address: ENV.hubAddress }],
     depositoryContractAddress: ENV.depositoryContractAddress,
     jsonRPCUrl: ENV.rpcNodeUrl,
   };
@@ -31,16 +33,18 @@ async function main() {
 
   await Promise.all([user.start(), user2.start()]);
 
-  const channel1 = await user.getChannel('hub1');
-  //const channel2 = await user2.getChannelToHub('hub1');
+  const channel1 = await user.getChannel(user_hub_name);
+  const channel2 = await user2.getChannel(user_hub_name);
 
   //await channel1.createSubсhannel(1);
-  await user.createSubchannel('hub1', 1);
+  await user.createSubchannel(user_hub_name, 1);
+  await user2.createSubchannel(user_hub_name, 1);
   //channel2.getSubChannel(1);
 
   await sleep(2000);
 
-  await user.test_reserveToCollateral('hub1', 1, 1, 10);
+  await user.test_reserveToCollateral(user_hub_name, 1, 1, 10);
+  await user2.test_setCreditLimit(user_hub_name, 1, 1, 100);
   await sleep(5000);
 }
 

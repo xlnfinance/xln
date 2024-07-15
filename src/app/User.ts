@@ -27,6 +27,7 @@ import StorageContext from './StorageContext';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
 import { MoneyValue } from '../types/SubChannel';
+import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
 
 const TEMP_ENV = {
   hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -245,6 +246,13 @@ export default class User implements ITransportListener {
     const channel = await this.getChannel(userId);
 
     const t: AddCollateralTransition = new AddCollateralTransition(chainId, tokenId, channel.isLeft(), collateral);
+    channel.push(t);
+    channel.send();
+  }
+  async test_setCreditLimit(userId: string, chainId: number, tokenId: number, creditLimit: MoneyValue): Promise<void> {
+    const channel = await this.getChannel(userId);
+
+    const t: SetCreditLimitTransition = new SetCreditLimitTransition(chainId, tokenId, channel.isLeft(), creditLimit);
     channel.push(t);
     channel.send();
   }
