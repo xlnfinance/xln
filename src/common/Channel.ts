@@ -18,7 +18,7 @@ import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { Subchannel } from '../types/SubChannel';
+import { createSubchannelData, Subchannel } from '../types/SubChannel';
 
 const BLOCK_LIMIT = 5;
 
@@ -91,7 +91,7 @@ export default class Channel implements IChannel {
     if(subChannel)
       return subChannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
     
-    subChannel = {chainId: chainId, offDelta: 0};
+    subChannel = createSubchannelData(chainId, 1);
     this.state.subChannels.push(subChannel);
     this.state.subChannels.sort((a: Subchannel, b: Subchannel) => a.chainId - b.chainId); 
 
