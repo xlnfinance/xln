@@ -16,5 +16,5 @@ export default interface IChannel {
 
   getSubсhannel(tokenId: number): Promise<Subchannel | undefined>;
 
-  createSubсhannel(tokenId: number): Promise<Subchannel>;
+  createSubсhannel(chainId: number): Promise<Subchannel>;
 }

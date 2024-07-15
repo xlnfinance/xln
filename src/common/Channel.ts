@@ -16,7 +16,7 @@ import ChannelPrivateState from '../types/ChannelPrivateState';
 import IChannelContext from '../types/IChannelContext';
 import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
-import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
+import CreateSubchannelTransition, { CreateSubchannelResultTransition } from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
 import { Subchannel } from '../types/SubChannel';
 
@@ -86,20 +86,20 @@ export default class Channel implements IChannel {
     return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
   }
 
-  async createSubсhannel(tokenId: number): Promise<Subchannel> {
-    let subChannel = await this.getSubсhannel(tokenId);
+  async createSubсhannel(chainId: number): Promise<Subchannel> {
+    let subChannel = await this.getSubсhannel(chainId);
     if(subChannel)
       return subChannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
     
-    subChannel = {tokenId: tokenId, offDelta: 0};
+    subChannel = {chainId: chainId, offDelta: 0};
     this.state.subChannels.push(subChannel);
-    this.state.subChannels.sort((a: Subchannel, b: Subchannel) => a.tokenId - b.tokenId); 
+    this.state.subChannels.sort((a: Subchannel, b: Subchannel) => a.chainId - b.chainId); 
 
     return subChannel;
   }
 
-  async getSubсhannel(tokenId: number): Promise<Subchannel | undefined> {
-    let subChannel = this.state.subChannels.find(subChannel => subChannel.tokenId === tokenId);
+  async getSubсhannel(chainId: number): Promise<Subchannel | undefined> {
+    let subChannel = this.state.subChannels.find(subChannel => subChannel.chainId === chainId);
     return subChannel;
   }
 
@@ -140,19 +140,31 @@ export default class Channel implements IChannel {
           const paymentTransition = transition as PaymentTransition;
           const subChannel = await this.getSubсhannel(paymentTransition.tokenId);
           if(subChannel) {
-            Logger.info(`Processing PaymentTransition ${subChannel.tokenId}`);
+            Logger.info(`Processing PaymentTransition ${subChannel.chainId}`);
 
             subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
           }
         }
+        break;
         case TransitionMethod.CreateSubchannel:
         {
-          const subchannelTransition = transition as CreateSubchannelTransition;        
-          //TODO pass actial token ID
-          const subChannel = await this.createSubсhannel(1/*subchannelTransition.tokenId.length*/);
-          Logger.info(`Processing CreateSubchannelTransition ${subChannel.tokenId}`);
+          const subchannelTransition = transition as CreateSubchannelTransition;
+          const subChannel = await this.createSubсhannel(subchannelTransition.chainId);
+          Logger.info(`Processing CreateSubchannelTransition ${subChannel.chainId}`);
+
+          //const t: CreateSubchannelResultTransition = new CreateSubchannelResultTransition(subchannelTransition.chainId, true);
+          //this.push(t);
         }
         break;
+        /*case TransitionMethod.CreateSubchannelResult:
+        {
+          const tr = transition as CreateSubchannelResultTransition;
+          if(tr.isSuccess) {
+            await this.createSubсhannel(tr.chainId);
+          }
+          Logger.info(`Processing CreateSubchannelResultTransition ${tr.chainId}:${tr.isSuccess}`);
+        }
+        break;*/
     }
 
     this.state.transitionNumber++;

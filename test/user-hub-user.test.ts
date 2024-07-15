@@ -31,7 +31,7 @@ async function main() {
 
   await Promise.all([user.start(), user2.start()]);
 
-  const channel1 = await user.getChannelToHub('hub1');
+  const channel1 = await user.getChannel('hub1');
   //const channel2 = await user2.getChannelToHub('hub1');
 
   //await channel1.createSubсhannel(1);
