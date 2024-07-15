@@ -116,15 +116,15 @@ export default class User implements ITransportListener {
     await this.storageContext.initialize(this.thisUserAddress);
   }
 
-  async getChannelToHub(hubName: string): Promise<IChannel> {
-    Logger.info(`Open channel to hub ${hubName}`);
+  async getChannel(userId: string): Promise<IChannel> {
+    Logger.info(`Open channel to <user> ${userId}`);
 
-    const transport = this._transports.get(hubName);
+    const transport = this._transports.get(userId);
     if (!transport) {
-      throw new Error(`Not found connection for hub with name ${hubName}`);
+      throw new Error(`Not found connection for hub with name ${userId}`);
     }
 
-    const address = this.getHubAddressByName(hubName);
+    const address = this.getHubAddressByName(userId);
 
     const recipientChannelMap = this._channelRecipientMapping.get(transport);
     const channel = recipientChannelMap?.get(address);
@@ -157,18 +157,16 @@ export default class User implements ITransportListener {
     return channel;
   }
 
-  async createSubchannel(hubName: string, tokenId: number) : Promise<void> {
-    const channel = await this.getChannelToHub(hubName);
+  async createSubchannel(userId: string, chainId: number) : Promise<void> {
+    const channel = await this.getChannel(userId);
 
     // send notification to the other party to create the same subchannel on the other side
     // TODO: should we await here for flush to be completed?
     // если сначала создать саб-канал, а затем отправить сообщение, то мы снимем хеш с состояния, где есть один сабканал
     // а на другой стороне revious state hash будет без этого сабканала и не сработает
-    const t: CreateSubchannelTransition = new CreateSubchannelTransition(tokenId.toString());
+    const t: CreateSubchannelTransition = new CreateSubchannelTransition(chainId);
     channel.push(t);
     channel.send();
-
-    await channel.createSubсhannel(1);
   }
 
   // TODO save fromBlockNumber to the storage
