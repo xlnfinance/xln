@@ -93,7 +93,6 @@ export default class Channel implements IChannel {
     
     subChannel = createSubchannelData(chainId, 1);
     this.state.subChannels.push(subChannel);
-    this.state.subChannels.sort((a: Subchannel, b: Subchannel) => a.chainId - b.chainId); 
 
     return subChannel;
   }
