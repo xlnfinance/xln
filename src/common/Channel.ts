@@ -86,8 +86,8 @@ export default class Channel implements IChannel {
     return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
   }
 
-  async createSubChannel(tokenId: number): Promise<Subchannel> {
-    let subChannel = await this.getSubChannel(tokenId);
+  async createSubсhannel(tokenId: number): Promise<Subchannel> {
+    let subChannel = await this.getSubсhannel(tokenId);
     if(subChannel)
       return subChannel;
     // send notification to the other party to create the same subchannel on the other side
@@ -105,7 +105,7 @@ export default class Channel implements IChannel {
     return subChannel;
   }
 
-  async getSubChannel(tokenId: number): Promise<Subchannel | undefined> {
+  async getSubсhannel(tokenId: number): Promise<Subchannel | undefined> {
     let subChannel = this.state.subChannels.find(subChannel => subChannel.tokenId === tokenId);
     return subChannel;
   }
@@ -145,7 +145,7 @@ export default class Channel implements IChannel {
       case TransitionMethod.PaymentTransition:
         {
           const paymentTransition = transition as PaymentTransition;
-          const subChannel = await this.getSubChannel(paymentTransition.tokenId);
+          const subChannel = await this.getSubсhannel(paymentTransition.tokenId);
           if(subChannel) {
             Logger.info(`Processing PaymentTransition ${subChannel.tokenId}`);
 
@@ -156,7 +156,7 @@ export default class Channel implements IChannel {
         {
           const subchannelTransition = transition as CreateSubchannelTransition;        
           //TODO pass actial token ID
-          const subChannel = await this.createSubChannel(1/*subchannelTransition.tokenId.length*/);
+          const subChannel = await this.createSubсhannel(1/*subchannelTransition.tokenId.length*/);
           Logger.info(`Processing CreateSubchannelTransition ${subChannel.tokenId}`);
         }
         break;
