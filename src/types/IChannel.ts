@@ -1,6 +1,6 @@
 import ChannelState from './ChannelState';
 import BlockMessage from './Messages/BlockMessage';
-import { SubChannel } from './SubChannel';
+import { Subchannel } from './SubChannel';
 import Transition from './Transition';
 
 export default interface IChannel {
@@ -14,5 +14,7 @@ export default interface IChannel {
 
   receive(message: BlockMessage): Promise<void>;
 
-  getSubChannel(tokenId: number): Promise<SubChannel>;
+  getSubChannel(tokenId: number): Promise<Subchannel | undefined>;
+
+  createSubChannel(tokenId: number): Promise<Subchannel>;
 }

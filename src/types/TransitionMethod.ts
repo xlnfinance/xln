@@ -3,6 +3,7 @@ export enum TransitionMethod {
   TextMessage,
   ProposedEvent,
   PaymentTransition,
+  CreateSubchannel,
 }
 
 /*

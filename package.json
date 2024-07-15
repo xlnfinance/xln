@@ -5,6 +5,7 @@
   "scripts": {
     "test": "tsc && node ./dist/test/channel.test.js",
     "test_dep": "tsc && node ./dist/test/depository.test.js",
+    "test_user_hub": "tsc && node ./dist/test/user-hub-user.test.js",
     "build": "tsc",
     "watch": "tsc --watch",
     "env:build": "cd ./contracts && npx hardhat compile",

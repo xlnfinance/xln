@@ -1,4 +1,4 @@
-export interface SubChannel {
+export interface Subchannel {
   offDelta: number;
   tokenId: number;
 }

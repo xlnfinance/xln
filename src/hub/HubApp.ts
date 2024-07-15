@@ -24,7 +24,9 @@ export default class HubApp implements ITransportListener {
   private _provider!: JsonRpcProvider | null;
   private _signer!: Signer | null;
 
-  constructor(private opt: IHubOptions) {}
+  constructor(private opt: IHubOptions) {
+    this._storage.initialize(opt.address);
+  }
 
   onClose(_: ITransport, id: string): void {
     this._users.delete(id);
@@ -79,11 +81,11 @@ export default class HubApp implements ITransportListener {
   }
 
   private async receiveMessage(message: IMessage) {
-    const recipientUserId = message.header.to;
+    const senderId = message.header.from;
 
     if (message.body.type == BodyTypes.kBlockMessage) {
       const blockMessage: BlockMessage = message.body as BlockMessage;
-      const channel = await this.getChannel(recipientUserId);
+      const channel = await this.getChannel(senderId);
       channel.receive(blockMessage);
     }
   }
@@ -105,7 +107,7 @@ export default class HubApp implements ITransportListener {
           this.opt.address,
           userId,
           transport,
-          this._storage.getChannelStorage(`${this.opt.address}-${userId}`),
+          this._storage.getChannelStorage(`${this.opt.address}${userId}`),
           this._signer!,
         ),
       );

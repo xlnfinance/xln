@@ -1,4 +1,4 @@
-import { SubChannel } from "./SubChannel";
+import { Subchannel } from "./SubChannel";
 
 export default interface ChannelState {
   left: string;
@@ -11,5 +11,5 @@ export default interface ChannelState {
   blockNumber: number;
   transitionNumber: number;
 
-  subChannels: Array<SubChannel>;
+  subChannels: Array<Subchannel>;
 }
