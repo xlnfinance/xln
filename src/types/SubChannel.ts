@@ -1,6 +1,6 @@
 import { BigNumberish } from "ethers";
 
-export type MoneyValue = number;
+export type MoneyValue = bigint;
 
 export interface TokenDelta {
   tokenId: number;
@@ -33,11 +33,11 @@ export interface Subchannel {
 export function createSubchannelData(chainId: number, tokenId: number): Subchannel {
   const delta: TokenDelta = {
     tokenId: tokenId,
-    collateral: 0,
-    ondelta: 0,
-    offdelta: 0,
-    leftCreditLimit: 0,
-    rightCreditLimit: 0,
+    collateral: 0n,
+    ondelta: 0n,
+    offdelta: 0n,
+    leftCreditLimit: 0n,
+    rightCreditLimit: 0n,
   };
 
   const subchannel: Subchannel = {

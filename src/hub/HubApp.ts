@@ -9,7 +9,7 @@ import ITransport from '../types/ITransport';
 import Transport from './Transport';
 import BlockMessage from '../types/Messages/BlockMessage';
 import IStorageContext from '../types/IStorageContext';
-import StorageContext from './StorageContext';
+import StorageContext from '../app/StorageContext';
 import ChannelContext from './ChannelContext';
 import { JsonRpcProvider, Signer } from 'ethers';
 import { BodyTypes } from '../types/IBody';
@@ -85,6 +85,7 @@ export default class HubApp implements ITransportListener {
 
     if (message.body.type == BodyTypes.kBlockMessage) {
       const blockMessage: BlockMessage = message.body as BlockMessage;
+      console.log('creating ch', new Date(), senderId)
       const channel = await this.getChannel(senderId);
       channel.receive(blockMessage);
     }
@@ -100,19 +101,27 @@ export default class HubApp implements ITransportListener {
     }
 
     let channel = this._channels.get(userId);
+    console.log("loaded _channels", channel)
+
 
     if (!channel) {
+      const channelKey = `${this.opt.address}${userId}`;
+      console.log("channelKey", channelKey);
+
       channel = new Channel(
         new ChannelContext(
           this.opt.address,
           userId,
           transport,
-          this._storage.getChannelStorage(`${this.opt.address}${userId}`),
+          this._storage.getChannelStorage(channelKey),
           this._signer!,
         ),
       );
 
       await channel.initialize();
+      this._channels.set(userId, channel);
+      
+      console.log("init _channels", channel?.getState())
     }
 
     return channel;

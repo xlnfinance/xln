@@ -8,7 +8,7 @@ export default class UnsafePaymentTransition extends Transition {
   chainId: number = 0;
   tokenId: number = 0;
   isLeft: boolean = false;
-  amount: MoneyValue = 0;
+  amount: MoneyValue = 0n;
 
   constructor() {
     super(TransitionMethod.UnsafePayment);

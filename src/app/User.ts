@@ -56,6 +56,8 @@ export default class User implements ITransportListener {
   erc721Mock!: ERC721Mock;
   erc1155Mock!: ERC1155Mock;
 
+  sectionQueue: any = {}
+
   constructor(address: string, opt: IUserOptions) {
     this.thisUserAddress = address;
     this.opt = opt;
@@ -75,6 +77,7 @@ export default class User implements ITransportListener {
       const channelAddress = message.header.from;
       let channel = recipientChannelMap?.get(channelAddress);
       if (!channel) {
+        throw new Error("External channel request");
         if (this.opt.onExternalChannelRequestCallback && this.opt.onExternalChannelRequestCallback!(channelAddress)) {
           channel = await this.openChannel(channelAddress, transport);
         }
@@ -118,6 +121,13 @@ export default class User implements ITransportListener {
       await this.addHub(opt);
     }
     await this.storageContext.initialize(this.thisUserAddress);
+    console.log("Try")
+    const test = await this.storageContext.getChannelStorage("test");
+    //test.
+    await test.db.put("test", "test");
+    console.log('Donetry')
+
+
   }
 
   // TODO думаю надо две разные функции getChannel и openChannel. Наверно лучше явно открывать канал, если необходимо
@@ -164,6 +174,7 @@ export default class User implements ITransportListener {
 
   async createSubchannel(userId: string, chainId: number) : Promise<void> {
     const channel = await this.getChannel(userId);
+    console.log("Working state ", channel.getState());
 
     // send notification to the other party to create the same subchannel on the other side
     // TODO: should we await here for flush to be completed?
@@ -171,7 +182,6 @@ export default class User implements ITransportListener {
     // а на другой стороне revious state hash будет без этого сабканала и не сработает
     const t: CreateSubchannelTransition = new CreateSubchannelTransition(chainId);
     channel.push(t);
-    channel.send();
   }
 
   // TODO save fromBlockNumber to the storage
@@ -248,16 +258,15 @@ export default class User implements ITransportListener {
 
     //TODO это должно быть внутри канала, функцией. 
     const t: AddCollateralTransition = new AddCollateralTransition(chainId, tokenId, channel.isLeft(), collateral);
-    channel.push(t);
-    channel.send();
+    await channel.push(t);
   }
   async setCreditLimit(userId: string, chainId: number, tokenId: number, creditLimit: MoneyValue): Promise<void> {
     const channel = await this.getChannel(userId);
 
     //TODO это должно быть внутри канала, функцией. 
     const t: SetCreditLimitTransition = new SetCreditLimitTransition(chainId, tokenId, channel.isLeft(), creditLimit);
-    channel.push(t);
-    channel.send();
+    await channel.push(t);
+    channel.flush();
   }
 
   async unsafePayment(toUserId: string, routeFirstHopId: string, chainId: number, tokenId: number, amount: MoneyValue): Promise<void> {
@@ -272,7 +281,7 @@ export default class User implements ITransportListener {
       offdelta: amount,
     });
     channel.push(t);
-    channel.send();
+    channel.flush();
   }
 
   private async openChannel(recipientUserId: string, transport: ITransport): Promise<IChannel> {
@@ -325,5 +334,45 @@ export default class User implements ITransportListener {
 
   async verifyMessage(message: string, signature: string, senderAddress: string): Promise<boolean> {
     return ethersVerifyMessage(message, signature) === senderAddress;
+  }
+
+
+  // https://en.wikipedia.org/wiki/Critical_section
+  async section(key: string, job: any): Promise<void> {
+    return new Promise(async (resolve) => {
+      key = JSON.stringify(key)
+
+      if (this.sectionQueue[key]) {
+        if (this.sectionQueue[key].length > 10) {
+          throw new Error ('Queue overflow for: ' + key)
+        }
+
+        this.sectionQueue[key].push([job, resolve])
+      } else {
+        this.sectionQueue[key] = [[job, resolve]]
+
+        while (this.sectionQueue[key].length > 0) {
+          try {
+            const [got_job, got_resolve] = this.sectionQueue[key].shift()
+            //const started = performance.now()
+
+            //let deadlock = setTimeout(function() {
+            //  this.fatal('Deadlock in q ' + key)
+            //}, 20000)
+
+            got_resolve(await got_job())
+
+            //clearTimeout(deadlock)
+            //l('Section took: ' + (performance.now() - started))
+          } catch (e) {
+            console.log('Error in critical section: ', e)
+            setTimeout(() => {
+              throw new Error(e as any);
+            }, 100)
+          }
+        }
+        delete this.sectionQueue[key]
+      }
+    })
   }
 }
