@@ -1,16 +1,20 @@
 import { Level } from 'level';
 import { StoragePoint } from '../types/StoragePoint';
 import IChannelStorage from '../types/IChannelStorage';
+import { decode, encode } from '../utils/Codec';
+
 
 export default class ChannelStorage implements IChannelStorage {
   constructor(
     private channelId: string,
-    private db: Level,
-  ) {}
+    public db: Level,
+  ) {
+  }
 
   async put(point: StoragePoint): Promise<void> {
     const storeAt = `${this.channelId}:${this.zeroPad(point.state.blockNumber)}`;
-    return this.db.put(storeAt, JSON.stringify(point));
+    
+    return this.db.put(storeAt, encode(point).toString());
   }
 
   async getLast(): Promise<StoragePoint | undefined> {
@@ -20,20 +24,21 @@ export default class ChannelStorage implements IChannelStorage {
       reverse: true, // Read in reverse order
       limit: 1,
     })) {
-      console.log('Key', key);
-      return JSON.parse(value) as StoragePoint;
+      const str = decode(Buffer.from(value)) as StoragePoint;
+      console.log("Storage point ",str);
+      return str;
     }
   }
 
   async getValue<T>(key: string): Promise<T> {
     const pathKey = `${this.channelId}-${key}`;
     const res = await this.db.get(pathKey);
-    return JSON.parse(res) as T;
+    return decode(Buffer.from(res)) as T;
   }
 
   setValue<T>(key: string, value: T): Promise<void> {
     const pathKey = `${this.channelId}-${key}`;
-    return this.db.put(pathKey, JSON.stringify(value));
+    return this.db.put(pathKey, encode(value).toString());
   }
 
   private zeroPad(num: number): string {

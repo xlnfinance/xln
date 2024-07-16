@@ -10,7 +10,6 @@ import TextMessageTransition from '../types/Transitions/TextMessageTransition';
 import { deepClone, getTimestamp } from '../utils/Utils';
 import BlockMessage from '../types/Messages/BlockMessage';
 import IChannelStorage from '../types/IChannelStorage';
-import SyncQueueWorker from '../utils/SyncQueueWorker';
 import hash from '../utils/Hash';
 import ChannelPrivateState from '../types/ChannelPrivateState';
 import IChannelContext from '../types/IChannelContext';
@@ -23,24 +22,25 @@ import AddCollateralTransition from '../types/Transitions/AddCollateralTransitio
 import { BigNumberish } from 'ethers';
 import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
 import UnsafePaymentTransition from '../types/Transitions/UnsafePaymentTransition';
+import { decode, encode } from '../utils/Codec';
+
 
 const BLOCK_LIMIT = 5;
+import { sleep } from '../utils/Utils';
 
 export default class Channel implements IChannel {
   state: ChannelState;
   thisUserAddress: string;
   otherUserAddress: string;  
 
-  private syncQueue: SyncQueueWorker;
+
   private privateState: ChannelPrivateState;
   private transport: ITransport;
-  private storage: IChannelStorage;
+  public storage: IChannelStorage;
 
   constructor(
     private ctx: IChannelContext
   ) {
-    this.syncQueue = new SyncQueueWorker();
-
     this.thisUserAddress = this.ctx.getUserAddress();
     this.otherUserAddress = this.ctx.getRecipientAddress();
     this.transport = this.ctx.getTransport();
@@ -77,7 +77,9 @@ export default class Channel implements IChannel {
       const channelSavePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
       this.privateState = channelSavePoint.privateState;
       this.state = channelSavePoint.state;
-    } catch {
+      Logger.info("Loaded last state ", this.state);
+    } catch (e) {
+      console.log("Load error", e);
       await this.save();
     }
   }
@@ -87,6 +89,9 @@ export default class Channel implements IChannel {
       privateState: this.privateState,
       state: this.state
     };
+
+    console.log("Saving state", this.isLeft(), channelSavePoint, new Date());
+
     return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
   }
 
@@ -121,11 +126,11 @@ export default class Channel implements IChannel {
   private async applyBlock(isLeft: boolean, block: Block): Promise<void> {
     Logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
 
+    // save previous hash first before changing this.state
     this.state.blockNumber++;
     this.state.timestamp = block.timestamp;
     this.state.previousBlockHash = hash<Block>(block);
     this.state.previousStateHash = hash<ChannelState>(this.state);
-
     for (let i = 0; i < block.transitions.length; i++) {
       const transition = block.transitions[i];
       await this.applyTransition(block, transition);
@@ -207,11 +212,13 @@ export default class Channel implements IChannel {
         await this.save();
 
         this.privateState.mempool.splice(0, this.privateState.sentTransitions);
+        console.log("Clear mempool ",this.privateState.mempool);
         this.privateState.sentTransitions = 0;
         this.privateState.pendingBlock = null;
       } else if (message.blockNumber == this.state.blockNumber && !this.privateState.isLeft) {
         this.privateState.pendingBlock = null;
         this.privateState.sentTransitions = 0;
+        console.log("Rollback");
         this.privateState.rollbacks++;
       } else {
         //
@@ -230,55 +237,63 @@ export default class Channel implements IChannel {
     }
 
     if (!message.block) {
+      if (this.privateState.mempool.length > 0) {
+        await this.flush()
+      } else {
+        await this.save();
+      }
       return;
     }
 
-    this.syncQueue.sync(async () => {
-      const block: Block = message.block!;
+    console.log("Receive ", this.isLeft(), message.block);
 
-      if (block.previousStateHash != hash<ChannelState>(this.state)) {
-        throw new Error('Invalid previousStateHash: ' + block.previousStateHash);
-      }
+    const block: Block = message.block!;
 
-      if (block.previousBlockHash != this.state.previousBlockHash) {
-        throw new Error('Invalid previousBlockHash');
-      }
+    if (block.previousStateHash != hash<ChannelState>(this.state)) {
+      console.log(decode(block.previousState), this.state);
+      throw new Error('Invalid previousStateHash: ' + block.previousStateHash);
+    }
 
-      if (!(await this.ctx.verifyMessage(hash<Block>(block), message.newSignatures[0], this.otherUserAddress))) {
-        throw new Error('Invalid verify block signature');
-      }
+    if (block.previousBlockHash != this.state.previousBlockHash) {
+      throw new Error('Invalid previousBlockHash');
+    }
 
-      const privateState = this.privateState;
+    if (!(await this.ctx.verifyMessage(hash<Block>(block), message.newSignatures[0], this.otherUserAddress))) {
+      throw new Error('Invalid verify block signature');
+    }
 
-      await this.applyBlock(privateState.isLeft, block);
+    const privateState = this.privateState;
 
-      const allSignatures = [message.ackSignatures, privateState.pendingSignatures];
-      if (privateState.isLeft) allSignatures.reverse();
+    await this.applyBlock(privateState.isLeft, block);
 
-      await this.storage.put({ state: this.state, block: message.block!, allSignatures: allSignatures });
-      await this.save();
+    const allSignatures = [message.ackSignatures, privateState.pendingSignatures];
+    if (privateState.isLeft) allSignatures.reverse();
 
-      if (privateState.mempool.length > 0 || block.transitions.length > 0) {
-        await this.flush();
-      }
-    });
+
+    await this.storage.put({ state: this.state, block: message.block!, allSignatures: allSignatures });
+    
+    await this.save();
+
+    console.log("Sending flush back as ", this.isLeft)
+    await this.flush();
+  
   }
 
-  push(transition: Transition): Promise<void> {
-    return this.syncQueue.sync(async () => {
-      this.privateState.mempool.push(transition);
-      await this.save();
-    });
+  async push(transition: Transition): Promise<void> {
+    this.privateState.mempool.push(transition);
+    console.log('Mempool', this.privateState.sentTransitions, this.privateState.mempool);
+    await this.save();
   }
 
-  send(): Promise<void> {
-    return this.syncQueue.sync(() => this.flush());
-  }
-
-  private async flush(): Promise<void> {
+  
+  async flush(): Promise<void> {
+    //await sleep(0);
     if (this.privateState.sentTransitions > 0) {
+      console.log("Already flushing ", this.privateState.isLeft, this.privateState.sentTransitions);
       return;
     }
+
+    console.log("Flushing ", this.privateState.isLeft, this.state);
 
     const message: IMessage = {
       header: {
@@ -290,11 +305,12 @@ export default class Channel implements IChannel {
 
     const transitions = this.privateState.mempool.slice(0, BLOCK_LIMIT);
     if (transitions.length > 0) {
-      const previousState: ChannelState = deepClone(this.state);
+      const previousState: ChannelState = decode(encode(this.state));
 
       const block: Block = {
         isLeft: this.privateState.isLeft,
-        timestamp: getTimestamp(),
+        timestamp: 123,
+        previousState: encode(previousState),
         previousStateHash: hash<ChannelState>(previousState), // hash of previous state
         previousBlockHash: this.state.previousBlockHash, // hash of previous block
         blockNumber: this.state.blockNumber,
@@ -303,7 +319,10 @@ export default class Channel implements IChannel {
 
       await this.applyBlock(this.privateState.isLeft, block);
 
-      this.privateState.pendingBlock = deepClone(block); //зачем клон блока??
+
+      this.privateState.pendingBlock = decode(encode(block)); //зачем клон блока??
+      console.log("block", block, this.privateState.pendingBlock);
+
       this.privateState.sentTransitions = transitions.length;
       this.privateState.pendingSignatures = [
         hash<Block>(this.privateState.pendingBlock!),
@@ -317,7 +336,7 @@ export default class Channel implements IChannel {
       body.newSignatures = [await this.ctx.signMessage(hash<Block>(block))];
 
       Logger.info(
-        `Sub channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
+        `channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
       );
 
       await this.save();

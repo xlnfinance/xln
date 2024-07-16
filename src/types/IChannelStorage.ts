@@ -1,6 +1,8 @@
 import { StoragePoint } from './StoragePoint';
 
 export default interface IChannelStorage {
+  db: any;
+
   put(point: StoragePoint): Promise<void>;
 
   getLast(): Promise<StoragePoint | undefined>;

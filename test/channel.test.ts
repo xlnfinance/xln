@@ -39,12 +39,12 @@ async function main() {
 
   await channel1.push(new TextMessageTransition('Hello world'));
   await channel1.push(new PaymentTransition(100, 0));
-  await channel1.send();
+  await channel1.flush();
 
   await sleep(5000);
 
   await channel2.push(new PaymentTransition(150, 0));
-  await channel2.send();
+  await channel2.flush();
 
   await sleep(5000);
   console.log('RESULT', channel1.getState(), channel2.getState());

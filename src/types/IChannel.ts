@@ -5,10 +5,11 @@ import { Subchannel } from './SubChannel';
 import Transition from './Transition';
 
 export default interface IChannel {
+  storage: any;
 
-  push(transition: Transition): Promise<void>;
+  push(transition: Transition): void;
 
-  send(): Promise<void>;
+  flush(): Promise<void>;
 
   getState(): ChannelState;
 

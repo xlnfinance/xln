@@ -8,6 +8,7 @@ export default class SyncQueueWorker {
       this.queue = [job];
       while (this.queue.length > 0) {
         const jobToWork = this.queue.shift()!;
+        console.log("Taking new job: ", this.queue.length, jobToWork);
         await jobToWork();
       }
     }
