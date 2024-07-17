@@ -12,7 +12,7 @@ import {encode, decode} from '../src/utils/Codec';
 
 import CreateSubchannelTransition from '../src/types/Transitions/CreateSubchannelTransition';
 import AddCollateralTransition from '../src/types/Transitions/AddCollateralTransition';
-import { MoneyValue } from '../src/types/Subсhannel';
+import { MoneyValue } from '../src/types/Subchannel';
 import SetCreditLimitTransition from '../src/types/Transitions/SetCreditLimitTransition';
 import UnsafePaymentTransition from '../src/types/Transitions/UnsafePaymentTransition';
 
@@ -52,7 +52,7 @@ async function main() {
   
   //const channel2 = await user2.getChannel(ENV.hubAddress);
 
-  //await channel1.createSubсhannel(1);
+  //await channel1.createSubchannel(1);
   let channel1 = await user.getChannel(ENV.hubAddress);
 
   const t: CreateSubchannelTransition = new CreateSubchannelTransition(1);
@@ -64,7 +64,7 @@ async function main() {
  
 
   //await user2.createSubchannel(ENV.hubAddress, 1);
-  //channel2.getSubсhannel(1);
+  //channel2.getSubchannel(1);
 
   //setTimeout(()=>{
     //channel1.flush();

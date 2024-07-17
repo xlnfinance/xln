@@ -16,7 +16,7 @@ import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { createSubchannelData, MoneyValue, Subchannel, TokenDelta } from '../types/Subсhannel';
+import { createSubchannelData, MoneyValue, Subchannel, TokenDelta } from '../types/Subchannel';
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
 import { BigNumberish } from 'ethers';
 import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
@@ -101,8 +101,8 @@ export default class Channel implements IChannel {
     return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
   }
 
-  createSubсhannel(chainId: number): Subchannel {
-    let subChannel = this.getSubсhannel(chainId);
+  createSubchannel(chainId: number): Subchannel {
+    let subChannel = this.getSubchannel(chainId);
     if(subChannel)
       return subChannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
     
@@ -112,7 +112,7 @@ export default class Channel implements IChannel {
     return subChannel;
   }
 
-  getSubсhannel(chainId: number): Subchannel | undefined {
+  getSubchannel(chainId: number): Subchannel | undefined {
     let subChannel = this.state.subChannels.find(subChannel => subChannel.chainId === chainId);
     return subChannel;
   }
@@ -156,7 +156,7 @@ export default class Channel implements IChannel {
       case TransitionMethod.PaymentTransition:
         {
           const paymentTransition = transition as PaymentTransition;
-          const subChannel = await this.getSubсhannel(paymentTransition.tokenId);
+          const subChannel = await this.getSubchannel(paymentTransition.tokenId);
           if(subChannel) {
             Logger.info(`Processing PaymentTransition ${subChannel.chainId}`);
 
@@ -167,7 +167,7 @@ export default class Channel implements IChannel {
         case TransitionMethod.CreateSubchannel:
         {
           const subchannelTransition = transition as CreateSubchannelTransition;
-          const subChannel = await this.createSubсhannel(subchannelTransition.chainId);
+          const subChannel = await this.createSubchannel(subchannelTransition.chainId);
           Logger.info(`Processing CreateSubchannelTransition ${subChannel.chainId}`);
         }
         break;
@@ -410,7 +410,7 @@ export default class Channel implements IChannel {
   }
 
   private getSubchannelDelta(chainId: number, tokenId: number): TokenDelta | undefined {
-    let subchannel = this.getSubсhannel(chainId);
+    let subchannel = this.getSubchannel(chainId);
     if(!subchannel)
       return subchannel;
 

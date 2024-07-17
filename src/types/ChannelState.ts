@@ -1,4 +1,4 @@
-import { Subchannel } from "./Subсhannel";
+import { Subchannel } from "./Subchannel";
 
 export default interface ChannelState {
   left: string;
