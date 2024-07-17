@@ -7,14 +7,14 @@ import { decode, encode } from '../utils/Codec';
 export default class ChannelStorage implements IChannelStorage {
   constructor(
     private channelId: string,
-    public db: Level,
+    public db: Level<string, Buffer>,
   ) {
   }
 
   async put(point: StoragePoint): Promise<void> {
     const storeAt = `${this.channelId}:${this.zeroPad(point.state.blockNumber)}`;
     
-    return this.db.put(storeAt, encode(point).toString());
+    return this.db.put(storeAt, encode(point));
   }
 
   async getLast(): Promise<StoragePoint | undefined> {
@@ -24,26 +24,20 @@ export default class ChannelStorage implements IChannelStorage {
       reverse: true, // Read in reverse order
       limit: 1,
     })) {
-      const str = decode(Buffer.from(value)) as StoragePoint;
-      console.log("Storage point ",str);
-      return str;
+      return decode(value) as StoragePoint;;
     }
   }
 
   async getValue<T>(key: string): Promise<T> {
     const pathKey = `${this.channelId}-${key}`;
-    const res = (await this.db.get(pathKey) as unknown) as Buffer;
+    const res = await this.db.get(pathKey);
 
-    console.log("resdec:"+key, res);
-
-    const decoded = decode(res) as T
-    console.log(decoded)
-    return decoded;
+    return decode(res) as T;
   }
 
   setValue<T>(key: string, value: T): Promise<void> {
     const pathKey = `${this.channelId}-${key}`;
-    return this.db.put(pathKey, encode(value) as any);
+    return this.db.put(pathKey, encode(value));
   }
 
   private zeroPad(num: number): string {

@@ -1,15 +1,14 @@
 import IChannelContext from '../types/IChannelContext';
 import IChannelStorage from '../types/IChannelStorage';
-import ITransport from '../types/ITransport';
+
 import User from './User';
 
 export default class ChannelContext implements IChannelContext {
   private storages: Map<string, IChannelStorage>;
 
   constructor(
-    private user: User,
-    private recipientUserId: string,
-    private transport: ITransport,
+    public user: User,
+    public recipientUserId: string
   ) {
     this.storages = new Map();
   }
@@ -20,10 +19,6 @@ export default class ChannelContext implements IChannelContext {
 
   getRecipientAddress(): string {
     return this.recipientUserId;
-  }
-
-  getTransport(): ITransport {
-    return this.transport;
   }
 
   getStorage(otherUserAddress: string): IChannelStorage {

@@ -9,6 +9,13 @@ import { channel } from 'diagnostics_channel';
 
 import {encode, decode} from '../src/utils/Codec';
 
+
+import CreateSubchannelTransition from '../src/types/Transitions/CreateSubchannelTransition';
+import AddCollateralTransition from '../src/types/Transitions/AddCollateralTransition';
+import { MoneyValue } from '../src/types/Subсhannel';
+import SetCreditLimitTransition from '../src/types/Transitions/SetCreditLimitTransition';
+import UnsafePaymentTransition from '../src/types/Transitions/UnsafePaymentTransition';
+
 async function main() {
 
 
@@ -29,54 +36,55 @@ async function main() {
   opt.hub = {
     host: '127.0.0.1',
     port: 10000,
-    address: ENV.hubAddress,
-    jsonRPCUrl: ENV.rpcNodeUrl,
+    address: ENV.hubAddress
   }
   const hub = new User(ENV.hubAddress, opt);
 
   await hub.start()
   console.log("hub started")
   
-  await sleep(100)
+  await sleep(1000)
 
   await Promise.all([user.start(), user2.start()]);
 
 
 
   
-  const channel2 = await user2.getChannel(ENV.hubAddress);
+  //const channel2 = await user2.getChannel(ENV.hubAddress);
 
   //await channel1.createSubсhannel(1);
-  const channel1 = await user.getChannel(ENV.hubAddress);
+  let channel1 = await user.getChannel(ENV.hubAddress);
 
-    
-  await user.createSubchannel(ENV.hubAddress, 1);
+  const t: CreateSubchannelTransition = new CreateSubchannelTransition(1);
+  await channel1.push(t);
+
 
   await channel1.flush()
 
  
 
   //await user2.createSubchannel(ENV.hubAddress, 1);
-  //channel2.getSubChannel(1);
+  //channel2.getSubсhannel(1);
 
   //setTimeout(()=>{
     //channel1.flush();
 
-  user.test_reserveToCollateral(ENV.hubAddress, 1, 1, 10n);
-  console.log(channel1)
+  //user.test_reserveToCollateral(ENV.hubAddress, 1, 1, 10n);
  
-  channel1.flush()
-  await sleep(1000);
+  //await channel1.flush()
+  await sleep(2000);
 
   //}, 1000)
-  await user2.createSubchannel(ENV.hubAddress, 1);
-  await channel2.flush()
+  //await user2.createSubchannel(ENV.hubAddress, 1);
+  //await channel2.flush()
 
-  await user2.setCreditLimit(ENV.hubAddress, 1, 1, 100n);
-  await channel2.flush()
+  //await user2.setCreditLimit(ENV.hubAddress, 1, 1, 100n);
+ // await channel2.flush()
   //await sleep(5000);
   const hubch = await hub.getChannel(ENV.firstUserAddress);
-  console.log(hubch.getState())
+  //console.log(hubch.getState())
+  channel1 = await user.getChannel(ENV.hubAddress);
+  console.log(channel1, hubch)
 
 }
 

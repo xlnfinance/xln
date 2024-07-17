@@ -1,6 +1,5 @@
 import ChannelState from '../types/ChannelState';
 import IMessage from '../types/IMessage';
-import ITransport from '../types/ITransport';
 import Transition from '../types/Transition';
 import Logger from '../utils/Logger';
 
@@ -11,13 +10,13 @@ import { deepClone, getTimestamp } from '../utils/Utils';
 import BlockMessage from '../types/Messages/BlockMessage';
 import IChannelStorage from '../types/IChannelStorage';
 import hash from '../utils/Hash';
-import ChannelPrivateState from '../types/ChannelPrivateState';
+import ChannelData from '../types/ChannelData';
 import IChannelContext from '../types/IChannelContext';
 import IChannel from '../types/IChannel';
 import PaymentTransition from '../types/Transitions/PaymentTransition';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { createSubchannelData, MoneyValue, Subchannel, TokenDelta } from '../types/SubChannel';
+import { createSubchannelData, MoneyValue, Subchannel, TokenDelta } from '../types/Subсhannel';
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
 import { BigNumberish } from 'ethers';
 import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
@@ -29,13 +28,12 @@ const BLOCK_LIMIT = 5;
 import { sleep } from '../utils/Utils';
 
 export default class Channel implements IChannel {
-  state: ChannelState;
+  public state: ChannelState;
   thisUserAddress: string;
   otherUserAddress: string;  
 
 
-  private privateState: ChannelPrivateState;
-  private transport: ITransport;
+  public data: ChannelData;
   public storage: IChannelStorage;
 
   constructor(
@@ -43,12 +41,18 @@ export default class Channel implements IChannel {
   ) {
     this.thisUserAddress = this.ctx.getUserAddress();
     this.otherUserAddress = this.ctx.getRecipientAddress();
-    this.transport = this.ctx.getTransport();
     this.storage = this.ctx.getStorage(`${this.otherUserAddress}`);
 
-    this.state = {
-      left: this.thisUserAddress < this.otherUserAddress ? this.thisUserAddress : this.otherUserAddress,
-      right: this.thisUserAddress > this.otherUserAddress ? this.thisUserAddress : this.otherUserAddress,
+    this.state = this.emptyState();
+    this.data = this.emptyData();
+  }
+
+
+
+  private emptyState(): ChannelState {
+    return {
+      left: this.ctx.getUserAddress() < this.ctx.getRecipientAddress() ? this.ctx.getUserAddress() : this.ctx.getRecipientAddress(),
+      right: this.ctx.getUserAddress() > this.ctx.getRecipientAddress() ? this.ctx.getUserAddress() : this.ctx.getRecipientAddress(),
       previousBlockHash: '0x0',
       previousStateHash: '0x0',
       blockNumber: 0,
@@ -56,9 +60,11 @@ export default class Channel implements IChannel {
       transitionNumber: 0,
       subChannels: []
     };
+  }
 
-    this.privateState = {
-      isLeft: this.thisUserAddress < this.otherUserAddress,
+  private emptyData(): ChannelData {
+    return {
+      isLeft: this.ctx.getUserAddress() < this.ctx.getRecipientAddress(),
       rollbacks: 0,
       sentTransitions: 0,
       pendingBlock: null,
@@ -68,25 +74,25 @@ export default class Channel implements IChannel {
     };
   }
 
-  async initialize() {
-    await this.load();
-  }
+
+
+
 
   async load(): Promise<void> {
     try {
       const channelSavePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
-      this.privateState = channelSavePoint.privateState;
+      this.data = channelSavePoint.data;
       this.state = channelSavePoint.state;
       Logger.info("Loaded last state ", this.state);
     } catch (e) {
       console.log("Load error", e);
-      await this.save();
+      //await this.save();
     }
   }
 
   async save(): Promise<void> {
     const channelSavePoint: ChannelSavePoint = {
-      privateState: this.privateState,
+      data: this.data,
       state: this.state
     };
 
@@ -120,7 +126,7 @@ export default class Channel implements IChannel {
   }
 
   isLeft() : boolean {
-    return this.privateState.isLeft;
+    return this.data.isLeft;
   }
 
   private async applyBlock(isLeft: boolean, block: Block): Promise<void> {
@@ -200,26 +206,32 @@ export default class Channel implements IChannel {
   }
 
   private async syncSignatures(message: BlockMessage): Promise<boolean> {
-    if (this.privateState.pendingBlock != null) {
+    if (this.data.pendingBlock != null) {
       if (message.blockNumber == this.state.blockNumber + 1) {
-        const pendingBlock: Block = this.privateState.pendingBlock;
-        await this.applyBlock(this.privateState.isLeft, pendingBlock);
+        const pendingBlock: Block = this.data.pendingBlock;
+        await this.applyBlock(this.data.isLeft, pendingBlock);
 
-        const allSignatures = [message.ackSignatures, this.privateState.pendingSignatures];
-        if (this.privateState.isLeft) allSignatures.reverse();
+        const allSignatures = [message.ackSignatures, this.data.pendingSignatures];
+        if (this.data.isLeft) allSignatures.reverse();
+
+
+        // verify signatures after the block is applied
+        if (!(await this.ctx.verifyMessage(hash<ChannelState>(this.state), message.ackSignatures[0], this.otherUserAddress))) {
+          throw new Error('Invalid verify pending block signature');
+        }
 
         await this.storage.put({ state: this.state, block: pendingBlock, allSignatures: allSignatures });
         await this.save();
 
-        this.privateState.mempool.splice(0, this.privateState.sentTransitions);
-        console.log("Clear mempool ",this.privateState.mempool);
-        this.privateState.sentTransitions = 0;
-        this.privateState.pendingBlock = null;
-      } else if (message.blockNumber == this.state.blockNumber && !this.privateState.isLeft) {
-        this.privateState.pendingBlock = null;
-        this.privateState.sentTransitions = 0;
+        this.data.mempool.splice(0, this.data.sentTransitions);
+        console.log("Clear mempool ",this.data.mempool);
+        this.data.sentTransitions = 0;
+        this.data.pendingBlock = null;
+      } else if (message.blockNumber == this.state.blockNumber && !this.data.isLeft) {
+        this.data.pendingBlock = null;
+        this.data.sentTransitions = 0;
         console.log("Rollback");
-        this.privateState.rollbacks++;
+        this.data.rollbacks++;
       } else {
         //
         return false;
@@ -237,7 +249,7 @@ export default class Channel implements IChannel {
     }
 
     if (!message.block) {
-      if (this.privateState.mempool.length > 0) {
+      if (this.data.mempool.length > 0) {
         await this.flush()
       } else {
         await this.save();
@@ -258,16 +270,17 @@ export default class Channel implements IChannel {
       throw new Error('Invalid previousBlockHash');
     }
 
-    if (!(await this.ctx.verifyMessage(hash<Block>(block), message.newSignatures[0], this.otherUserAddress))) {
-      throw new Error('Invalid verify block signature');
+    const data = this.data;
+
+    await this.applyBlock(data.isLeft, block);
+
+    // verify signatures after the block is applied
+    if (!(await this.ctx.verifyMessage(hash<ChannelState>(this.state), message.newSignatures[0], this.otherUserAddress))) {
+      throw new Error('Invalid verify new block signature');
     }
 
-    const privateState = this.privateState;
-
-    await this.applyBlock(privateState.isLeft, block);
-
-    const allSignatures = [message.ackSignatures, privateState.pendingSignatures];
-    if (privateState.isLeft) allSignatures.reverse();
+    const allSignatures = [message.ackSignatures, data.pendingSignatures];
+    if (data.isLeft) allSignatures.reverse();
 
 
     await this.storage.put({ state: this.state, block: message.block!, allSignatures: allSignatures });
@@ -280,36 +293,41 @@ export default class Channel implements IChannel {
   }
 
   async push(transition: Transition): Promise<void> {
-    this.privateState.mempool.push(transition);
-    console.log('Mempool', this.privateState.sentTransitions, this.privateState.mempool);
-    await this.save();
+    this.data.mempool.push(transition);
+    console.log('Mempool', this.data.sentTransitions, this.data.mempool);
+    return this.save();
   }
 
   
   async flush(): Promise<void> {
     //await sleep(0);
-    if (this.privateState.sentTransitions > 0) {
-      console.log("Already flushing ", this.privateState.isLeft, this.privateState.sentTransitions);
+    if (this.data.sentTransitions > 0) {
+      console.log("Already flushing ", this.data.isLeft, this.data.sentTransitions);
       return;
     }
 
-    console.log("Flushing ", this.privateState.isLeft, this.state);
 
     const message: IMessage = {
       header: {
         from: this.thisUserAddress,
         to: this.ctx.getRecipientAddress(),
       },
-      body: new BlockMessage(this.state.blockNumber, [], []),
+      body: (new BlockMessage(this.state.blockNumber, [], []) as BlockMessage)
     };
 
-    const transitions = this.privateState.mempool.slice(0, BLOCK_LIMIT);
+    const transitions = this.data.mempool.slice(0, BLOCK_LIMIT);
+    // flush may or may not include new block
     if (transitions.length > 0) {
-      const previousState: ChannelState = decode(encode(this.state));
+      const body = message.body as BlockMessage;
+      
+      // signed before block is applied
+      body.ackSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
 
+      console.log("Flushing ", this.data.isLeft, this.state, transitions);
+      const previousState: ChannelState = decode(encode(this.state));
       const block: Block = {
-        isLeft: this.privateState.isLeft,
-        timestamp: 123,
+        isLeft: this.data.isLeft,
+        timestamp: getTimestamp(),
         previousState: encode(previousState),
         previousStateHash: hash<ChannelState>(previousState), // hash of previous state
         previousBlockHash: this.state.previousBlockHash, // hash of previous block
@@ -317,32 +335,37 @@ export default class Channel implements IChannel {
         transitions: transitions,
       };
 
-      await this.applyBlock(this.privateState.isLeft, block);
+      await this.applyBlock(this.data.isLeft, block);
 
 
-      this.privateState.pendingBlock = decode(encode(block)); //зачем клон блока??
-      console.log("block", block, this.privateState.pendingBlock);
+      console.log("block", block, this.data.pendingBlock);
 
-      this.privateState.sentTransitions = transitions.length;
-      this.privateState.pendingSignatures = [
-        hash<Block>(this.privateState.pendingBlock!),
-        hash<ChannelState>(this.state),
-      ];
 
+      this.data.pendingBlock = decode(encode(block));
+      this.data.sentTransitions = transitions.length;
+
+      // signed after block is applied
+      body.newSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
+
+      this.data.pendingSignatures = body.newSignatures
+
+      // revert state to previous
       this.state = previousState;
-
-      const body = message.body as BlockMessage;
       body.block = block;
-      body.newSignatures = [await this.ctx.signMessage(hash<Block>(block))];
 
-      Logger.info(
-        `channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
-      );
+    } 
 
-      await this.save();
-    }
+    Logger.info(
+      `channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
+    );
 
-    await this.transport.send(message);
+    await this.save();
+
+
+    console.log("Sending flush ", this.otherUserAddress, message, message);
+  
+
+    await this.ctx.user.send(this.otherUserAddress, message);
   }
 
 

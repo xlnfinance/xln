@@ -1,7 +1,7 @@
 import User from '../app/User';
 import ChannelState from './ChannelState';
 import BlockMessage from './Messages/BlockMessage';
-import { Subchannel } from './SubChannel';
+import { Subchannel } from './Subсhannel';
 import Transition from './Transition';
 
 export default interface IChannel {
@@ -13,7 +13,7 @@ export default interface IChannel {
 
   getState(): ChannelState;
 
-  initialize(): Promise<void>;
+  load(): Promise<void>;
 
   receive(message: BlockMessage): Promise<void>;
 

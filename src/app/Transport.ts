@@ -45,17 +45,23 @@ export default class Transport implements ITransport {
   }
 
   private setupWebSocketListeners(): void {
+    console.log('serverrr')
+
     this._ws.onopen = (event: WebSocket.Event) => {
       Logger.info(`WebSocket connected: ${this._id}`);
       //this._receiver?.onOpen?.(this, this._id);
     };
 
     this._ws.onmessage = async (event: WebSocket.MessageEvent) => {
+      console.log("hubconn")
+
       if (this._receiver) {
         this._messageNumber++;
         const msg = decode(event.data as Buffer) as IMessage;
         Logger.info(`Handle message ${this._messageNumber}: ${encode(msg)}`);
         await this._receiver.onReceive(this, msg);
+      } else {
+        Logger.warn(`No message receiver set for transport ${this._id}`);
       }
     };
 
