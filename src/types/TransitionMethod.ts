@@ -1,27 +1,15 @@
-// Need refactor this code
 export enum TransitionMethod {
   TextMessage,
-  ProposedEvent,
-  PaymentTransition,
-  CreateSubchannel,
-  AddCollateral,
-  SetCreditLimit,
-  UnsafePayment,
-}
 
-/*
-enum E {
-  TextMessage,
-
-  AddChain,
-  RemoveChain,
+  AddSubchannel,
+  RemoveSubchannel,
 
   AddDelta,
   RemoveDelta,
 
-  AddOffchainUpdate,
-  RemoveOffchainUpdate,
-  AcceptOffchainUpdate,
+  DirectPayment,
+
+  ProposedEvent,
 
   SetCreditLimit,
 
@@ -31,5 +19,6 @@ enum E {
 
   AddSwapSubcontract,
   RemoveSwapSubcontract,
+
+
 }
-*/

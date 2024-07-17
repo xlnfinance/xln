@@ -1,13 +1,13 @@
 import User from '../app/User';
 import ChannelState from './ChannelState';
-import BlockMessage from './Messages/BlockMessage';
+import FlushMessage from './Messages/FlushMessage';
 import { Subchannel } from './Subchannel';
-import Transition from './Transition';
+import Transition, {AnyTransition} from './Transition';
 
 export default interface IChannel {
   storage: any;
 
-  push(transition: Transition): void;
+  push(transition: AnyTransition): void;
 
   flush(): Promise<void>;
 
@@ -15,11 +15,11 @@ export default interface IChannel {
 
   load(): Promise<void>;
 
-  receive(message: BlockMessage): Promise<void>;
+  receive(message: FlushMessage): Promise<void>;
 
   getSubchannel(chainId: number): Subchannel | undefined;
 
-  createSubchannel(chainId: number): Subchannel;
+  addSubchannel(chainId: number): Subchannel;
 
   isLeft(): boolean;
 }

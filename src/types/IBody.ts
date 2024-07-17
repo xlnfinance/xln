@@ -1,6 +1,6 @@
 export enum BodyTypes {
   kUndef = 0,
-  kBlockMessage = 1,
+  kFlushMessage = 1,
 }
 
 export default class IBody {

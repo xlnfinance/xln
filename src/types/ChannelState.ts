@@ -11,5 +11,5 @@ export default interface ChannelState {
   blockNumber: number;
   transitionNumber: number;
 
-  subChannels: Array<Subchannel>;
+  subchannels: Array<Subchannel>;
 }

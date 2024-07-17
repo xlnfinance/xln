@@ -2,7 +2,7 @@ import IChannel from '../types/IChannel';
 import IMessage from '../types/IMessage';
 import ITransport from '../types/ITransport';
 import ITransportListener from '../types/ITransportListener';
-import BlockMessage from '../types/Messages/BlockMessage';
+import FlushMessage from '../types/Messages/FlushMessage';
 import Logger from '../utils/Logger';
 import Channel from './Channel';
 import IChannelContext from '../types/IChannelContext';
@@ -25,11 +25,8 @@ import IUserOptions from '../types/IUserOptions';
 
 import StorageContext from './StorageContext';
 
-import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
-import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
-import { MoneyValue } from '../types/Subchannel';
-import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
-import UnsafePaymentTransition from '../types/Transitions/UnsafePaymentTransition';
+
+
 
 
 import WebSocket from 'ws';
@@ -107,8 +104,8 @@ export default class User implements ITransportListener  {
   async onReceive(transport: ITransport, message: IMessage): Promise<void> {
     console.log(`Received message from ${message.header.from} to ${message.header.to}`, message.body);
     //try {
-      if (message.body.type === BodyTypes.kBlockMessage) {
-        await this.handleBlockMessage(transport, message as IMessage & { body: BlockMessage });
+      if (message.body.type === BodyTypes.kFlushMessage) {
+        await this.handleFlushMessage(transport, message as IMessage & { body: FlushMessage });
       } else if (message.header.to !== this.opt.hub?.address) {
         await this.handleProxyMessage(message);
       } else {
@@ -122,7 +119,7 @@ export default class User implements ITransportListener  {
   }
   
 
-  private async handleBlockMessage(transport: ITransport, message: IMessage & { body: BlockMessage }): Promise<void> {
+  private async handleFlushMessage(transport: ITransport, message: IMessage & { body: FlushMessage }): Promise<void> {
     const addr = message.header.from;
     await this.criticalSection(addr, async () => {
       const channel = await this.getChannel(addr);
@@ -190,8 +187,6 @@ export default class User implements ITransportListener  {
       return;
     }
 
-    console.log('transpsend', transport)
-
     return transport.send(message);
   }
 
@@ -248,7 +243,7 @@ export default class User implements ITransportListener  {
 
 
   
-  
+  /*
 
   // TODO save fromBlockNumber to the storage
   startDepositoryEventsListener(fromBlockNumber: number): void {
@@ -289,11 +284,11 @@ export default class User implements ITransportListener  {
     //console.log(await depository.unpackTokenReference(packedToken));
     //console.log(await erc20Mock.getAddress());
 
-    /* TODO FIX ERROR MISSING ARGUMENT ResiverAddress
+
     await depository.externalTokenToReserve(
       { packedToken, internalTokenId: 0n, amount: 10n }
     );
-    */
+
     console.log('user1_balance_after', await erc20Mock.balanceOf(thisUserAddress));
     console.log('depository_balance_after', await erc20Mock.balanceOf(await depository.getAddress()));
     console.log('reserveTest1', await depository._reserves(thisUserAddress, 0));
@@ -319,23 +314,17 @@ export default class User implements ITransportListener  {
 
   //TODO эта функция async только потому что getChannel async, когда переделаю getChannel, убрать тут async
   // хотя функции канала тоже async, подумать
-  async test_reserveToCollateral(userId: string, chainId: number, tokenId: number, collateral: MoneyValue): Promise<void> {
+  async test_reserveToCollateral(userId: string, chainId: number, tokenId: number, collateral: bigint): Promise<void> {
     const channel = await this.getChannel(userId);
 
     //TODO это должно быть внутри канала, функцией. 
     const t: AddCollateralTransition = new AddCollateralTransition(chainId, tokenId, channel.isLeft(), collateral);
     await channel.push(t);
   }
-  async setCreditLimit(userId: string, chainId: number, tokenId: number, creditLimit: MoneyValue): Promise<void> {
-    const channel = await this.getChannel(userId);
 
-    //TODO это должно быть внутри канала, функцией. 
-    const t: SetCreditLimitTransition = new SetCreditLimitTransition(chainId, tokenId, channel.isLeft(), creditLimit);
-    await channel.push(t);
-    channel.flush();
-  }
 
-  async unsafePayment(toUserId: string, routeFirstHopId: string, chainId: number, tokenId: number, amount: MoneyValue): Promise<void> {
+  
+  async unsafePayment(toUserId: string, routeFirstHopId: string, chainId: number, tokenId: number, amount: bigint): Promise<void> {
     const channel = await this.getChannel(routeFirstHopId);
 
     const t = Object.assign(new UnsafePaymentTransition(), {
@@ -349,6 +338,8 @@ export default class User implements ITransportListener  {
     await channel.push(t);
     await channel.flush();
   }
+
+  */
 
 
 
