@@ -69,8 +69,11 @@ async function main() {
   await sleep(1000);
 
   //}, 1000)
-  //await user2.setCreditLimit(ENV.hubAddress, 1, 1, 100n);
-  //channel2.flush()
+  await user2.createSubchannel(ENV.hubAddress, 1);
+  await channel2.flush()
+
+  await user2.setCreditLimit(ENV.hubAddress, 1, 1, 100n);
+  await channel2.flush()
   //await sleep(5000);
   const hubch = await hub.getChannel(ENV.firstUserAddress);
   console.log(hubch.getState())
