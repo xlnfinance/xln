@@ -1,7 +1,7 @@
-import ChannelPrivateState from './ChannelPrivateState';
+import ChannelData from './ChannelData';
 import ChannelState from './ChannelState';
 
 export default interface ChannelSavePoint {
-  privateState: ChannelPrivateState;
+  data: ChannelData;
   state: ChannelState;
 }

@@ -1,9 +1,9 @@
 import Block from './Block';
-import { Subchannel } from './SubChannel';
+import { Subchannel } from './Subсhannel';
 import Transition from './Transition';
 import { DepositoryEvent } from './Transitions/ProposedEventTransition';
 
-export default interface ChannelPrivateState {
+export default interface ChannelData {
   mempool: Transition[];
   isLeft: boolean;
   sentTransitions: number;

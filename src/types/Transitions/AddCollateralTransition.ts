@@ -1,4 +1,4 @@
-import { MoneyValue } from '../SubChannel';
+import { MoneyValue } from '../Subсhannel';
 import Transition from '../Transition';
 import { TransitionMethod } from './../TransitionMethod';
 
