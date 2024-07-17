@@ -2,8 +2,7 @@ import User from '../src/app/User';
 import { sleep } from '../src/utils/Utils';
 import IUserOptions from '../src/types/IUserOptions';
 import ENV from './env';
-import TextMessageTransition from '../src/types/Transitions/TextMessageTransition';
-import PaymentTransition from '../src/types/Transitions/PaymentTransition';
+
 import Logger from '../src/utils/Logger';
 
 async function main() {
@@ -47,8 +46,8 @@ async function main() {
     const channel2 = await user2.getChannel(ENV.firstUserAddress);
 
     // Ensure subchannel 0 exists
-    await channel1.createSubchannel(0);
-    await channel2.createSubchannel(0);
+    await channel1.addSubchannel(0);
+    await channel2.addSubchannel(0);
 
     await channel1.push(new TextMessageTransition('Hello world'));
     await channel1.push(new PaymentTransition(0, 0, 100));

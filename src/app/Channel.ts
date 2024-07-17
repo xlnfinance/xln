@@ -1,26 +1,27 @@
 import ChannelState from '../types/ChannelState';
 import IMessage from '../types/IMessage';
-import Transition from '../types/Transition';
+
 import Logger from '../utils/Logger';
 
 import Block from '../types/Block';
-import { TransitionMethod } from '../types/TransitionMethod';
-import TextMessageTransition from '../types/Transitions/TextMessageTransition';
+
+
 import { deepClone, getTimestamp } from '../utils/Utils';
-import BlockMessage from '../types/Messages/BlockMessage';
+import FlushMessage from '../types/Messages/FlushMessage';
 import IChannelStorage from '../types/IChannelStorage';
 import hash from '../utils/Hash';
 import ChannelData from '../types/ChannelData';
 import IChannelContext from '../types/IChannelContext';
 import IChannel from '../types/IChannel';
-import PaymentTransition from '../types/Transitions/PaymentTransition';
-import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
+
+import Transition, {TransitionMethod, createTransition,AnyTransition} from '../types/Transition';
+
+
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { createSubchannelData, MoneyValue, Subchannel, TokenDelta } from '../types/Subchannel';
-import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
+import { createSubchannelData, Subchannel, TokenDelta } from '../types/Subchannel';
+
 import { BigNumberish } from 'ethers';
-import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
-import UnsafePaymentTransition from '../types/Transitions/UnsafePaymentTransition';
+
 import { decode, encode } from '../utils/Codec';
 
 
@@ -58,7 +59,7 @@ export default class Channel implements IChannel {
       blockNumber: 0,
       timestamp: 0,
       transitionNumber: 0,
-      subChannels: []
+      subchannels: []
     };
   }
 
@@ -69,8 +70,7 @@ export default class Channel implements IChannel {
       sentTransitions: 0,
       pendingBlock: null,
       mempool: [],
-      pendingSignatures: [],
-      pendingEvents: [],
+      pendingSignatures: []
     };
   }
 
@@ -101,22 +101,6 @@ export default class Channel implements IChannel {
     return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
   }
 
-  createSubchannel(chainId: number): Subchannel {
-    let subChannel = this.getSubchannel(chainId);
-    if(subChannel)
-      return subChannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
-    
-    subChannel = createSubchannelData(chainId, 1);
-    this.state.subChannels.push(subChannel);
-
-    return subChannel;
-  }
-
-  getSubchannel(chainId: number): Subchannel | undefined {
-    let subChannel = this.state.subChannels.find(subChannel => subChannel.chainId === chainId);
-    return subChannel;
-  }
-
   getState(): ChannelState {
     return this.state;
   }
@@ -143,110 +127,124 @@ export default class Channel implements IChannel {
     }
   }
 
-  private async applyTransition(block: Block, transition: Transition): Promise<void> {
+  private async applyTransition(block: Block, transition: any): Promise<void> {
     Logger.info(`applyTransition ${block.isLeft} ${transition}}`);
 
     switch (transition.method) {
       case TransitionMethod.TextMessage:
         {
-          const textMessageTransition = transition as TextMessageTransition;
-          Logger.info(textMessageTransition.message);
+          Logger.info(transition.message);
         }
         break;
-      case TransitionMethod.PaymentTransition:
+      case TransitionMethod.DirectPayment:
         {
-          const paymentTransition = transition as PaymentTransition;
-          const subChannel = await this.getSubchannel(paymentTransition.tokenId);
-          if(subChannel) {
-            Logger.info(`Processing PaymentTransition ${subChannel.chainId}`);
-
-            //subChannel.offDelta += block.isLeft ? -paymentTransition.amount : paymentTransition.amount;
+          const d = this.getSubchannelDelta(transition.chainId, transition.tokenId);
+          if(d) {
+            Logger.info(`Processing PaymentTransition ${transition.chainId}`);
+            d.offdelta += block.isLeft ? -transition.amount : transition.amount;
           }
         }
         break;
-        case TransitionMethod.CreateSubchannel:
+        case TransitionMethod.AddSubchannel:
         {
-          const subchannelTransition = transition as CreateSubchannelTransition;
-          const subChannel = await this.createSubchannel(subchannelTransition.chainId);
-          Logger.info(`Processing CreateSubchannelTransition ${subChannel.chainId}`);
+          const subchannel = this.addSubchannel(transition.chainId);
+          Logger.info(`Processing CreateSubchannelTransition ${subchannel.chainId}`);
         }
         break;
-        case TransitionMethod.AddCollateral:
+
+        /*
+        case TransitionMethod.ProposedEvent:
         {
-          const tr = transition as AddCollateralTransition;
-          //TODO handle errors if subchannel, token or smth was not found
-          this.addCollateral(tr.chainId, tr.tokenId, tr.isLeft, tr.collateral);
+          const subchannel = this.getSubchannel(transition.chainId);
+          if(subchannel) {
+            Logger.info(`Processing ProposedEvent ${transition.chainId}`);
+
+            if (subchannel.proposedEvents.length > 0) {
+              if (subchannel.proposedEventsByLeft == block.isLeft) {
+                // keep pushing
+                subchannel.proposedEvents.push(transition);
+              } else {
+                if (encode(subchannel.proposedEvents[0]) == encode(transition)) {
+                  // apply event
+                  const event = subchannel.proposedEvents.shift();
+
+                  const d = this.getSubchannelDelta(event.chainId, event.tokenId);
+                  d?.collateral = event.collateral;
+                  d?.ondelta = event.ondelta;
+
+                }
+              }
+                
+                
+            } else {
+              subchannel.proposedEvents.push(transition);
+              subchannel.proposedEventsByLeft = block.isLeft;
+            }
+          }
+
         }
         break;
+        
         case TransitionMethod.SetCreditLimit:
         {
           const tr = transition as SetCreditLimitTransition;
           //TODO handle errors if subchannel, token or smth was not found
-          this.setCreditLimit(tr.chainId, tr.tokenId, tr.isLeft, tr.creditLimit);
+          //this.setCreditLimit(tr.chainId, tr.tokenId, tr.isLeft, tr.creditLimit);
         }
-        break;
-        case TransitionMethod.UnsafePayment:
-        {
-          const tr = transition as UnsafePaymentTransition;
-          //TODO handle errors if subchannel, token or smth was not found
-          //TODO проверить допустимые лимиты для платежа, не выходит ли за пределы
-          this.applyUnsafePayment(tr.chainId, tr.tokenId, tr.isLeft, tr.amount);
-
-          if(this.thisUserAddress == tr.fromUserId || this.thisUserAddress == tr.toUserId) {
-            //do nothing
-          }
-          else {
-            // we are hub, resend payment to target channel
-          }
-        }
+          */
         break;
     }
 
     this.state.transitionNumber++;
   }
 
-  private async syncSignatures(message: BlockMessage): Promise<boolean> {
-    if (this.data.pendingBlock != null) {
-      if (message.blockNumber == this.state.blockNumber + 1) {
-        const pendingBlock: Block = this.data.pendingBlock;
-        await this.applyBlock(this.data.isLeft, pendingBlock);
+  private async handlePendingBlock(message: FlushMessage): Promise<boolean> {
+    if (message.blockNumber == this.state.blockNumber + 1) {
+      const pendingBlock: Block = this.data.pendingBlock!;
+      const previousState = decode(encode(this.state));
 
-        const allSignatures = [message.ackSignatures, this.data.pendingSignatures];
-        if (this.data.isLeft) allSignatures.reverse();
+      await this.applyBlock(this.data.isLeft, pendingBlock);
 
+      const allSignatures = [message.pendingSignatures, this.data.pendingSignatures];
+      if (this.data.isLeft) allSignatures.reverse();
 
-        // verify signatures after the block is applied
-        if (!(await this.ctx.verifyMessage(hash<ChannelState>(this.state), message.ackSignatures[0], this.otherUserAddress))) {
-          throw new Error('Invalid verify pending block signature');
-        }
-
-        await this.storage.put({ state: this.state, block: pendingBlock, allSignatures: allSignatures });
-        await this.save();
-
-        this.data.mempool.splice(0, this.data.sentTransitions);
-        console.log("Clear mempool ",this.data.mempool);
-        this.data.sentTransitions = 0;
-        this.data.pendingBlock = null;
-      } else if (message.blockNumber == this.state.blockNumber && !this.data.isLeft) {
-        this.data.pendingBlock = null;
-        this.data.sentTransitions = 0;
-        console.log("Rollback");
-        this.data.rollbacks++;
-      } else {
-        //
-        return false;
+      // verify signatures after the block is applied
+      if (!(await this.ctx.verifyMessage(hash<ChannelState>(this.state), message.pendingSignatures[0], this.otherUserAddress))) {
+        this.state = previousState;
+        throw new Error('Invalid verify pending block signature');
       }
-    }
 
-    await this.save();
+      await this.storage.put({ state: this.state, block: pendingBlock, allSignatures: allSignatures });
+      //await this.save();
+
+      this.data.mempool.splice(0, this.data.sentTransitions);
+      console.log("Clear mempool ",this.data.mempool);
+      this.data.sentTransitions = 0;
+      this.data.pendingBlock = null;
+    } else if (message.blockNumber == this.state.blockNumber && !this.data.isLeft) {
+      this.data.sentTransitions = 0;
+      this.data.pendingBlock = null;
+      console.log("Rollback");
+      this.data.rollbacks++;
+    } else {
+      //
+      return false;
+    }
+    
+
+    //await this.save();
     return true;
   }
 
-  async receive(message: BlockMessage): Promise<void> {
-    const syncSignaturesResult = await this.syncSignatures(message);
-    if (!syncSignaturesResult) {
-      return;
+  async receive(message: FlushMessage): Promise<void> {
+    console.log(`Receive ${this.thisUserAddress} from ${this.otherUserAddress}`, this.isLeft(), message);
+
+    if (this.data.pendingBlock) {
+      if (!await this.handlePendingBlock(message)) {
+        return;
+      }
     }
+    
 
     if (!message.block) {
       if (this.data.mempool.length > 0) {
@@ -257,7 +255,6 @@ export default class Channel implements IChannel {
       return;
     }
 
-    console.log("Receive ", this.isLeft(), message.block);
 
     const block: Block = message.block!;
 
@@ -270,29 +267,27 @@ export default class Channel implements IChannel {
       throw new Error('Invalid previousBlockHash');
     }
 
-    const data = this.data;
 
-    await this.applyBlock(data.isLeft, block);
+    await this.applyBlock(this.data.isLeft, block);
 
     // verify signatures after the block is applied
     if (!(await this.ctx.verifyMessage(hash<ChannelState>(this.state), message.newSignatures[0], this.otherUserAddress))) {
       throw new Error('Invalid verify new block signature');
     }
+    const ourNewSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
+    const allSignatures = [message.newSignatures, ourNewSignatures];
 
-    const allSignatures = [message.ackSignatures, data.pendingSignatures];
-    if (data.isLeft) allSignatures.reverse();
-
+    if (this.data.isLeft) allSignatures.reverse();
 
     await this.storage.put({ state: this.state, block: message.block!, allSignatures: allSignatures });
     
-    await this.save();
+    //await this.save();
 
     console.log("Sending flush back as ", this.isLeft)
     await this.flush();
-  
   }
 
-  async push(transition: Transition): Promise<void> {
+  async push(transition: AnyTransition): Promise<void> {
     this.data.mempool.push(transition);
     console.log('Mempool', this.data.sentTransitions, this.data.mempool);
     return this.save();
@@ -300,7 +295,6 @@ export default class Channel implements IChannel {
 
   
   async flush(): Promise<void> {
-    //await sleep(0);
     if (this.data.sentTransitions > 0) {
       console.log("Already flushing ", this.data.isLeft, this.data.sentTransitions);
       return;
@@ -312,16 +306,16 @@ export default class Channel implements IChannel {
         from: this.thisUserAddress,
         to: this.ctx.getRecipientAddress(),
       },
-      body: (new BlockMessage(this.state.blockNumber, [], []) as BlockMessage)
+      body: (new FlushMessage(this.state.blockNumber, [], []) as FlushMessage)
     };
 
     const transitions = this.data.mempool.slice(0, BLOCK_LIMIT);
     // flush may or may not include new block
     if (transitions.length > 0) {
-      const body = message.body as BlockMessage;
+      const body = message.body as FlushMessage;
       
       // signed before block is applied
-      body.ackSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
+      body.pendingSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
 
       console.log("Flushing ", this.data.isLeft, this.state, transitions);
       const previousState: ChannelState = decode(encode(this.state));
@@ -370,21 +364,9 @@ export default class Channel implements IChannel {
 
 
 
-  addCollateral(chainId: number, tokenId: number, isLeft: boolean, collateral: MoneyValue) : void {
-    let delta = this.getSubchannelDelta(chainId, tokenId);
-    if (!delta) {
-      throw new Error(`TokenDelta with tokenId ${tokenId} not found.`);
-      return;
-    }
+  
 
-    delta.collateral += collateral;
-
-    if(isLeft) {
-      delta.offdelta += collateral;
-    }
-  }
-
-  setCreditLimit(chainId: number, tokenId: number, isLeft: boolean, creditLimit: MoneyValue) : void {
+  setCreditLimit(chainId: number, tokenId: number, isLeft: boolean, creditLimit: bigint) : void {
     let delta = this.getSubchannelDelta(chainId, tokenId);
     if (!delta) {
       throw new Error(`TokenDelta with tokenId ${tokenId} not found.`);
@@ -399,7 +381,7 @@ export default class Channel implements IChannel {
     }
   }
 
-  applyUnsafePayment(chainId: number, tokenId: number, isLeft: boolean, amount: MoneyValue) : void {
+  applyUnsafePayment(chainId: number, tokenId: number, isLeft: boolean, amount: bigint) : void {
     let delta = this.getSubchannelDelta(chainId, tokenId);
     if (!delta) {
       console.log(`TokenDelta with tokenId ${tokenId} not found.`);
@@ -409,10 +391,26 @@ export default class Channel implements IChannel {
     delta.offdelta += (isLeft ? -amount : amount);
   }
 
+  public addSubchannel(chainId: number): Subchannel {
+    let subchannel = this.getSubchannel(chainId);
+    if(subchannel)
+      return subchannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
+    
+    subchannel = createSubchannelData(chainId, 1);
+    this.state.subchannels.push(subchannel);
+
+    return subchannel;
+  }
+
+  public getSubchannel(chainId: number): Subchannel | undefined {
+    let subchannel = this.state.subchannels.find(subchannel => subchannel.chainId === chainId);
+    return subchannel;
+  }
+
   private getSubchannelDelta(chainId: number, tokenId: number): TokenDelta | undefined {
     let subchannel = this.getSubchannel(chainId);
     if(!subchannel)
-      return subchannel;
+      return;
 
     return subchannel.deltas.find(delta => delta.tokenId === tokenId);
   }

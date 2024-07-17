@@ -3,18 +3,14 @@ import { sleep } from '../src/utils/Utils';
 import IUserOptions from '../src/types/IUserOptions';
 
 import ENV from './env';
-import TextMessageTransition from '../src/types/Transitions/TextMessageTransition';
-import PaymentTransition from '../src/types/Transitions/PaymentTransition';
+
 import { channel } from 'diagnostics_channel';
 
 import {encode, decode} from '../src/utils/Codec';
 
 
-import CreateSubchannelTransition from '../src/types/Transitions/CreateSubchannelTransition';
-import AddCollateralTransition from '../src/types/Transitions/AddCollateralTransition';
-import { MoneyValue } from '../src/types/Subchannel';
-import SetCreditLimitTransition from '../src/types/Transitions/SetCreditLimitTransition';
-import UnsafePaymentTransition from '../src/types/Transitions/UnsafePaymentTransition';
+
+import Transition, { createTransition } from '../src/types/Transition';
 
 async function main() {
 
@@ -50,41 +46,44 @@ async function main() {
 
 
   
-  //const channel2 = await user2.getChannel(ENV.hubAddress);
 
-  //await channel1.createSubchannel(1);
+
   let channel1 = await user.getChannel(ENV.hubAddress);
-
-  const t: CreateSubchannelTransition = new CreateSubchannelTransition(1);
-  await channel1.push(t);
+  let channel2 = await user2.getChannel(ENV.hubAddress);
 
 
+
+  await channel1.push(createTransition('addSubchannel', {chainId: 1}));
   await channel1.flush()
 
  
+  await channel2.push(createTransition('addSubchannel',{chainId: 1}));
+  await channel2.flush()
 
-  //await user2.createSubchannel(ENV.hubAddress, 1);
-  //channel2.getSubchannel(1);
-
-  //setTimeout(()=>{
-    //channel1.flush();
-
-  //user.test_reserveToCollateral(ENV.hubAddress, 1, 1, 10n);
  
+
+
+  //await channel1.push(new ProposedEventTransition(ENV.hubAddress, 1, 1, 10n))
   //await channel1.flush()
+
   await sleep(2000);
 
   //}, 1000)
-  //await user2.createSubchannel(ENV.hubAddress, 1);
+  //await user2.addSubchannel(ENV.hubAddress, 1);
   //await channel2.flush()
 
   //await user2.setCreditLimit(ENV.hubAddress, 1, 1, 100n);
  // await channel2.flush()
   //await sleep(5000);
-  const hubch = await hub.getChannel(ENV.firstUserAddress);
+  let hubch1 = await hub.getChannel(ENV.firstUserAddress);
+  let hubch2 = await hub.getChannel(ENV.secondUserAddress);
   //console.log(hubch.getState())
+
   channel1 = await user.getChannel(ENV.hubAddress);
-  console.log(channel1, hubch)
+  channel2 = await user2.getChannel(ENV.hubAddress);
+
+  console.log(channel1.getState(), hubch1.getState(), channel2.getState(), hubch2.getState())
+
 
 }
 
