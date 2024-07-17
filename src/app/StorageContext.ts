@@ -3,7 +3,7 @@ import ChannelStorage from '../common/ChannelStorage';
 import IStorageContext from '../types/IStorageContext';
 
 export default class StorageContext implements IStorageContext {
-  private _db!: Level;
+  public _db!: Level;
 
   initialize(userId: string): Promise<void> {
     this._db = new Level(`local-storage/${userId}`, { valueEncoding: 'binary' });

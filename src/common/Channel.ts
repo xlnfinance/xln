@@ -350,7 +350,7 @@ export default class Channel implements IChannel {
   addCollateral(chainId: number, tokenId: number, isLeft: boolean, collateral: MoneyValue) : void {
     let delta = this.getSubchannelDelta(chainId, tokenId);
     if (!delta) {
-      console.log(`TokenDelta with tokenId ${tokenId} not found.`);
+      throw new Error(`TokenDelta with tokenId ${tokenId} not found.`);
       return;
     }
 
@@ -364,7 +364,7 @@ export default class Channel implements IChannel {
   setCreditLimit(chainId: number, tokenId: number, isLeft: boolean, creditLimit: MoneyValue) : void {
     let delta = this.getSubchannelDelta(chainId, tokenId);
     if (!delta) {
-      console.log(`TokenDelta with tokenId ${tokenId} not found.`);
+      throw new Error(`TokenDelta with tokenId ${tokenId} not found.`);
       return;
     }
 

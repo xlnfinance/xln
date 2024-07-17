@@ -32,13 +32,18 @@ export default class ChannelStorage implements IChannelStorage {
 
   async getValue<T>(key: string): Promise<T> {
     const pathKey = `${this.channelId}-${key}`;
-    const res = await this.db.get(pathKey);
-    return decode(Buffer.from(res)) as T;
+    const res = (await this.db.get(pathKey) as unknown) as Buffer;
+
+    console.log("resdec:"+key, res);
+
+    const decoded = decode(res) as T
+    console.log(decoded)
+    return decoded;
   }
 
   setValue<T>(key: string, value: T): Promise<void> {
     const pathKey = `${this.channelId}-${key}`;
-    return this.db.put(pathKey, encode(value).toString());
+    return this.db.put(pathKey, encode(value) as any);
   }
 
   private zeroPad(num: number): string {
