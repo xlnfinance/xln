@@ -1,7 +1,7 @@
 import User from '../app/User';
 import ChannelState from './ChannelState';
 import BlockMessage from './Messages/BlockMessage';
-import { Subchannel } from './Subсhannel';
+import { Subchannel } from './Subchannel';
 import Transition from './Transition';
 
 export default interface IChannel {
@@ -17,9 +17,9 @@ export default interface IChannel {
 
   receive(message: BlockMessage): Promise<void>;
 
-  getSubсhannel(chainId: number): Subchannel | undefined;
+  getSubchannel(chainId: number): Subchannel | undefined;
 
-  createSubсhannel(chainId: number): Subchannel;
+  createSubchannel(chainId: number): Subchannel;
 
   isLeft(): boolean;
 }

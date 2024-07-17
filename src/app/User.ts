@@ -27,7 +27,7 @@ import StorageContext from './StorageContext';
 
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
-import { MoneyValue } from '../types/Subсhannel';
+import { MoneyValue } from '../types/Subchannel';
 import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
 import UnsafePaymentTransition from '../types/Transitions/UnsafePaymentTransition';
 
