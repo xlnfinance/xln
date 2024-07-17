@@ -22,13 +22,22 @@ import {
   ERC1155Mock__factory,
 } from '../../contracts/typechain-types/index';
 import IUserOptions from '../types/IUserOptions';
-import TransportFactory from './TransportFactory';
+
 import StorageContext from './StorageContext';
 import CreateSubchannelTransition from '../types/Transitions/CreateSubchannelTransition';
 import AddCollateralTransition from '../types/Transitions/AddCollateralTransition';
 import { MoneyValue } from '../types/SubChannel';
 import SetCreditLimitTransition from '../types/Transitions/SetCreditLimitTransition';
 import UnsafePaymentTransition from '../types/Transitions/UnsafePaymentTransition';
+
+
+import WebSocket from 'ws';
+import { IncomingMessage } from 'http';
+import Transport from './Transport';
+
+
+import {encode, decode} from '../utils/Codec';
+
 
 const TEMP_ENV = {
   hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -39,14 +48,18 @@ const TEMP_ENV = {
   rpcNodeUrl: 'http://127.0.0.1:8545',
 };
 
-export default class User implements ITransportListener {
+export default class User implements ITransportListener  {
+  // Hub-specific properties
+  private _server!: WebSocket.Server<typeof WebSocket, typeof import('http').IncomingMessage>;
+  private _channels: Map<string, Channel> = new Map();
+  
   private _transports: Map<string, ITransport> = new Map();
   private _channelRecipientMapping: Map<ITransport, Map<string, IChannel>> = new Map();
   private _hubInfoMap: Map<string, IHubConnectionData> = new Map();
 
   thisUserAddress: string;
   opt: IUserOptions;
-  transportFactory: TransportFactory;
+
   storageContext: StorageContext;
 
   provider!: JsonRpcProvider;
@@ -56,82 +69,185 @@ export default class User implements ITransportListener {
   erc721Mock!: ERC721Mock;
   erc1155Mock!: ERC1155Mock;
 
-  sectionQueue: any = {}
+  sectionQueue: any = {};
 
-  constructor(address: string, opt: IUserOptions) {
+
+  constructor(address: string, opt: IUserOptions) {    
     this.thisUserAddress = address;
     this.opt = opt;
-    this.transportFactory = new TransportFactory();
     this.storageContext = new StorageContext();
-  }
 
-  onClose(transport: ITransport, id: string): void {
-    this._transports.delete(id);
-    this._channelRecipientMapping.delete(transport);
-  }
-
-  async onReceive(transport: ITransport, message: IMessage): Promise<void> {
-    if (message.body.type == BodyTypes.kBlockMessage) {
-      const blockMessage = message.body as BlockMessage;
-      const recipientChannelMap = this._channelRecipientMapping.get(transport);
-      const channelAddress = message.header.from;
-      let channel = recipientChannelMap?.get(channelAddress);
-      if (!channel) {
-        throw new Error("External channel request");
-        if (this.opt.onExternalChannelRequestCallback && this.opt.onExternalChannelRequestCallback!(channelAddress)) {
-          channel = await this.openChannel(channelAddress, transport);
-        }
-      }
-
-      if (channel) {
-        try {
-          await channel.receive(blockMessage);
-        } catch (e) {
-          //TODO Collect error for send to client
-          Logger.error(e);
-        }
-      }
+    if (address == opt.hubConnectionDataList[0].address) {
+      console.log("we are hub",this.opt.hub)
     }
   }
 
+  // Combined onClose method
+  onClose(transport: ITransport, id: string): void {
+    this._transports.delete(id);
+    //this._channelRecipientMapping.delete(transport);
+
+    Logger.info(`Client disconnected ${id}`);
+  }
+
+
+
+  
+  // Combined onReceive method
+  async onReceive(transport: ITransport, message: IMessage): Promise<void> {
+    console.log('onReceive', this.thisUserAddress, message)
+
+    if (message.body.type == BodyTypes.kBlockMessage) {
+      const blockMessage: BlockMessage = message.body as BlockMessage;
+
+      const recipientChannelMap = this._channelRecipientMapping.get(transport);
+      const addr = message.header.from;
+
+      await this.section(addr, async () => {
+        let channel = recipientChannelMap?.get(addr);
+        if (!channel) {
+          if (this.opt.hub ||
+            this.opt.onExternalChannelRequestCallback && this.opt.onExternalChannelRequestCallback!(addr)) {
+            channel = await this.openChannel(addr, transport);
+          } else {
+            throw new Error("External channel request");
+          }
+        }
+
+        if (channel) {
+          try {
+            await channel.receive(blockMessage);
+          } catch (e) {
+            Logger.error(e);
+          }
+        }
+      });
+
+    } else if (message.header.to !== this.opt.hub?.address) {
+      const recipientUserId = message.header.to;
+      if (this._transports.has(recipientUserId)) {
+        const transport = this._transports.get(recipientUserId);
+        await transport!.send(message);
+      } else {
+        //TODO send error
+      }
+
+    } else {
+      throw new Error('Not implemented section');
+
+
+  
+    }
+  }
+
+
+
+ 
+
   async addHub(data: IHubConnectionData) {
-    if (this._transports.has(data.name)) {
+    if (this._transports.has(data.address)) {
       return;
     }
 
-    this._hubInfoMap.set(data.name, data);
+    this._hubInfoMap.set(data.address, data);
+    const transport = new Transport({
+        id: data.address,
+        receiver: this,
+        connectionData: data,
+        userId: this.thisUserAddress
+    });
+      
 
-    const transport = this.transportFactory.create(data, this.thisUserAddress, data.name);
-    this._transports.set(data.name, transport);
-    transport.setReceiver(this);
+    this._transports.set(data.address, transport);
 
     this._channelRecipientMapping.set(transport, new Map());
 
     await transport.open();
   }
 
+  
   async start() {
     const signer = await this.getSigner();
     if (signer == null) {
       Logger.error(`Cannot get user information from RPC server with id ${this.thisUserAddress}`);
       return;
     }
-
-    for (const opt of this.opt.hubConnectionDataList) {
-      await this.addHub(opt);
-    }
     await this.storageContext.initialize(this.thisUserAddress);
-    console.log("Try")
-    const test = await this.storageContext.getChannelStorage("test");
-    //test.
-    await test.db.put("test", "test");
-    console.log('Donetry')
+
+    // Start hub if this is a hub
+    if (this.opt.hub) {
+      console.log("Starting hub");
+      await this.startHub();
+    } else {
+      for (const opt of this.opt.hubConnectionDataList) {
+        await this.addHub(opt);
+      }
+  
+    }
 
 
   }
 
-  // TODO думаю надо две разные функции getChannel и openChannel. Наверно лучше явно открывать канал, если необходимо
+  // Hub-specific startHub method
+  async startHub(): Promise<void> {
+    if (!this.opt.hub) {
+      throw new Error("This user is not configured as a hub");
+    }
+
+    Logger.info(`Start listen ${this.opt.hub.host}:${this.opt.hub.port}`);
+
+    this._server = new WebSocket.Server({ port: this.opt.hub.port, host: this.opt.hub.host || '127.0.0.1' });
+
+    this._server.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+      const userId = req.headers.authorization;
+      if (!userId) {
+        Logger.error('Try connect user without identification information');
+        ws.close();
+        return;
+      }
+
+      Logger.info(`New user connection with id ${userId}`);
+        
+      const transport = new Transport({
+        id: userId,
+        receiver: this,
+        ws: ws
+      });
+      this._transports.set(userId, transport);
+      
+    });
+  }
+
+  // Modified getChannel method to work for both user and hub
   async getChannel(userId: string): Promise<IChannel> {
+    Logger.info(`Open channel to <user/hub> ${userId}`);
+
+    let transport = this._transports.get(userId);
+    let channel: IChannel | undefined;
+
+    if (!transport) {
+      // Check if this is a hub and the channel is for a connected user
+      if (this.opt.hub && this._transports.has(userId)) {
+        transport = this._transports.get(userId)!;
+      } else {
+        throw new Error(`Not found connection for hub/user with name ${userId}`);
+      }
+    }
+
+    const recipientChannelMap = this._channelRecipientMapping.get(transport);
+    channel = recipientChannelMap?.get(userId) || this._channels.get(userId);
+
+    if (!channel) {
+      channel = await this.openChannel(userId, transport);
+      if (this.opt.hub) {
+        this._channels.set(userId, channel as Channel);
+      }
+    }
+
+    return channel;
+  }
+  // TODO думаю надо две разные функции getChannel и openChannel. Наверно лучше явно открывать канал, если необходимо
+  async getChannel2(userId: string): Promise<IChannel> {
     Logger.info(`Open channel to <user> ${userId}`);
 
     const transport = this._transports.get(userId);
@@ -336,11 +452,13 @@ export default class User implements ITransportListener {
     return ethersVerifyMessage(message, signature) === senderAddress;
   }
 
+  
+
 
   // https://en.wikipedia.org/wiki/Critical_section
   async section(key: string, job: any): Promise<void> {
     return new Promise(async (resolve) => {
-      key = JSON.stringify(key)
+      //key = encode(key)
 
       if (this.sectionQueue[key]) {
         if (this.sectionQueue[key].length > 10) {
@@ -376,3 +494,9 @@ export default class User implements ITransportListener {
     })
   }
 }
+
+
+
+
+
+
