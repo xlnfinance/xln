@@ -39,6 +39,12 @@ import Transport from './Transport';
 import {encode, decode} from '../utils/Codec';
 
 
+import { performance } from 'perf_hooks';
+
+
+type Job<T> = () => Promise<T>;
+type QueueItem<T> = [Job<T>, (value: T | PromiseLike<T>) => void];
+
 const TEMP_ENV = {
   hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
   firstUserAddress: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
@@ -57,6 +63,8 @@ export default class User implements ITransportListener  {
   private _channelRecipientMapping: Map<ITransport, Map<string, IChannel>> = new Map();
   private _hubInfoMap: Map<string, IHubConnectionData> = new Map();
 
+  private sectionQueue: Record<string, QueueItem<any>[]> = {};
+
   thisUserAddress: string;
   opt: IUserOptions;
 
@@ -69,7 +77,6 @@ export default class User implements ITransportListener  {
   erc721Mock!: ERC721Mock;
   erc1155Mock!: ERC1155Mock;
 
-  sectionQueue: any = {};
 
 
   constructor(address: string, opt: IUserOptions) {    
@@ -103,7 +110,7 @@ export default class User implements ITransportListener  {
       const recipientChannelMap = this._channelRecipientMapping.get(transport);
       const addr = message.header.from;
 
-      await this.section(addr, async () => {
+      await this.criticalSection(addr, async () => {
         let channel = recipientChannelMap?.get(addr);
         if (!channel) {
           if (this.opt.hub ||
@@ -133,7 +140,7 @@ export default class User implements ITransportListener  {
       }
 
     } else {
-      throw new Error('Not implemented section');
+      throw new Error('Not implemented criticalSection');
 
 
   
@@ -452,47 +459,53 @@ export default class User implements ITransportListener  {
     return ethersVerifyMessage(message, signature) === senderAddress;
   }
 
-  
-
-
-  // https://en.wikipedia.org/wiki/Critical_section
-  async section(key: string, job: any): Promise<void> {
-    return new Promise(async (resolve) => {
-      //key = encode(key)
-
+  /**
+   * https://en.wikipedia.org/wiki/Critical_section
+   * Executes a job in a critical section, ensuring mutual exclusion.
+   * @param key - The unique identifier for the critical section.
+   * @param job - The asynchronous job to be executed.
+   * @returns A promise that resolves with the result of the job.
+   */
+  async criticalSection<T>(key: string, job: Job<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
       if (this.sectionQueue[key]) {
-        if (this.sectionQueue[key].length > 10) {
-          throw new Error ('Queue overflow for: ' + key)
+        if (this.sectionQueue[key].length >= 10) {
+          reject(new Error(`Queue overflow for: ${key}`));
+          return;
         }
-
-        this.sectionQueue[key].push([job, resolve])
+        this.sectionQueue[key].push([job, resolve]);
       } else {
-        this.sectionQueue[key] = [[job, resolve]]
-
-        while (this.sectionQueue[key].length > 0) {
-          try {
-            const [got_job, got_resolve] = this.sectionQueue[key].shift()
-            //const started = performance.now()
-
-            //let deadlock = setTimeout(function() {
-            //  this.fatal('Deadlock in q ' + key)
-            //}, 20000)
-
-            got_resolve(await got_job())
-
-            //clearTimeout(deadlock)
-            //l('Section took: ' + (performance.now() - started))
-          } catch (e) {
-            console.log('Error in critical section: ', e)
-            setTimeout(() => {
-              throw new Error(e as any);
-            }, 100)
-          }
-        }
-        delete this.sectionQueue[key]
+        this.sectionQueue[key] = [[job, resolve]];
+        this.processQueue(key).catch(reject);
       }
-    })
+    });
   }
+
+  private async processQueue(key: string): Promise<void> {
+    while (this.sectionQueue[key]?.length > 0) {
+      const [job, resolve] = this.sectionQueue[key].shift()!;
+      const start = performance.now();
+
+      try {
+        const result = await Promise.race([
+          job(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Job timeout')), 20000))
+        ]);
+        resolve(result);
+      } catch (error) {
+        Logger.error(`Error in critical criticalSection ${key}:`, error);
+        resolve(Promise.reject(error));
+      }
+
+      Logger.debug(`Section ${key} took ${performance.now() - start} ms`);
+    }
+
+    delete this.sectionQueue[key];
+  }
+
+
+
+  
 }
 
 
