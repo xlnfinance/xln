@@ -66,7 +66,7 @@ export default class User implements ITransportListener  {
   public readonly storageContext: StorageContext;
 
   private provider: JsonRpcProvider | null = null;
-  private signer: Signer | null = null;
+  public signer: Signer | null = null;
 
 
   
@@ -126,16 +126,15 @@ export default class User implements ITransportListener  {
 
       if (channel.getState().blockNumber === 0) {
         Logger.info(`Channel ${addr} is not initialized yet`);
-
       } 
       
       
 
-      try {
+      //try {
         await channel.receive(message.body);
-      } catch (e) {
-        Logger.error('Error processing block message', e);
-      }
+      //} catch (e) {
+       // Logger.error('Error processing block message', e);
+      //}
     
     });
   }
@@ -378,7 +377,7 @@ export default class User implements ITransportListener  {
   }
 
   async verifyMessage(message: string, signature: string, senderAddress: string): Promise<boolean> {
-    return true //ethersVerifyMessage(message, signature) === senderAddress;
+    return ethersVerifyMessage(message, signature) === senderAddress;
   }
 
   /**

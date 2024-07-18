@@ -10,7 +10,7 @@
     "watch": "tsc --watch",
     "env:build": "cd ./contracts && npx hardhat compile",
     "env:run": "cd ./contracts && npx hardhat node",
-    "env:deploy": "cd ./contracts && npx hardhat ignition deploy ignition/modules/Lock.ts  --network localhost",
+    "env:deploy": "cd ./contracts && npx hardhat ignition deploy ignition/modules/Depository.ts  --network localhost",
     "format": "prettier --write ./src",
     "check": "prettier --check ./src",
     "lint": "eslint ./src"
