@@ -6,10 +6,15 @@ import Logger from '../utils/Logger';
 import Block from '../types/Block';
 
 
+
+import ENV from '../../test/env';
+import { ethers, keccak256 } from 'ethers';
+import { Depository__factory, SubcontractProvider__factory } from '../../contracts/typechain-types/index';
+
 import { deepClone, getTimestamp } from '../utils/Utils';
-import FlushMessage from '../types/Messages/FlushMessage';
+import FlushMessage, {isValidFlushMessage} from '../types/Messages/FlushMessage';
 import IChannelStorage from '../types/IChannelStorage';
-import hash from '../utils/Hash';
+
 import ChannelData from '../types/ChannelData';
 import IChannelContext from '../types/IChannelContext';
 import IChannel from '../types/IChannel';
@@ -24,9 +29,19 @@ import { BigNumberish } from 'ethers';
 
 import { decode, encode } from '../utils/Codec';
 
+import {SubcontractBatchABI, ProofbodyABI} from '../types/ABI';
 
+
+const coder = ethers.AbiCoder.defaultAbiCoder()
+enum MessageType {
+  CooperativeUpdate,
+  CooperativeDisputeProof,
+  DisputeProof
+}
 const BLOCK_LIMIT = 5;
 import { sleep } from '../utils/Utils';
+import { util } from 'chai';
+import { keccak224 } from 'js-sha3';
 
 export default class Channel implements IChannel {
   public state: ChannelState;
@@ -51,9 +66,10 @@ export default class Channel implements IChannel {
 
 
   private emptyState(): ChannelState {
-    return {
-      left: this.ctx.getUserAddress() < this.ctx.getRecipientAddress() ? this.ctx.getUserAddress() : this.ctx.getRecipientAddress(),
-      right: this.ctx.getUserAddress() > this.ctx.getRecipientAddress() ? this.ctx.getUserAddress() : this.ctx.getRecipientAddress(),
+    const state: ChannelState = {
+      left: this.ctx.getUserAddress(),
+      right: this.ctx.getRecipientAddress(),
+      channelKey: '0x0',
       previousBlockHash: '0x0',
       previousStateHash: '0x0',
       blockNumber: 0,
@@ -61,6 +77,12 @@ export default class Channel implements IChannel {
       transitionNumber: 0,
       subchannels: []
     };
+
+    if (this.ctx.getUserAddress() > this.ctx.getRecipientAddress()) {
+      [state.left, state.right] = [state.right, state.left];
+    }
+    state.channelKey = ethers.solidityPackedKeccak256(['address', 'address'], [state.left, state.right]);
+    return state;
   }
 
   private emptyData(): ChannelData {
@@ -119,8 +141,8 @@ export default class Channel implements IChannel {
     // save previous hash first before changing this.state
     this.state.blockNumber++;
     this.state.timestamp = block.timestamp;
-    this.state.previousBlockHash = hash<Block>(block);
-    this.state.previousStateHash = hash<ChannelState>(this.state);
+    this.state.previousBlockHash = keccak256(encode(block));
+    this.state.previousStateHash = keccak256(encode(this.state));
     for (let i = 0; i < block.transitions.length; i++) {
       const transition = block.transitions[i];
       await this.applyTransition(block, transition);
@@ -216,16 +238,24 @@ export default class Channel implements IChannel {
 
       await this.applyBlock(this.data.isLeft, pendingBlock);
 
-      const allSignatures = [message.pendingSignatures, this.data.pendingSignatures];
-      if (this.data.isLeft) allSignatures.reverse();
+      if (message.pendingSignatures.length == 0) {
+        throw new Error('Invalid pending signatures length');
+      }
 
       // verify signatures after the block is applied
-      if (!(await this.ctx.verifyMessage(hash<ChannelState>(this.state), message.pendingSignatures[0], this.otherUserAddress))) {
+      const globalSig = message.pendingSignatures.pop() as string;
+      if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
         this.state = previousState;
         throw new Error('Invalid verify pending block signature');
       }
 
-      await this.storage.put({ state: this.state, block: pendingBlock, allSignatures: allSignatures });
+
+
+      const historicalBlock = { state: this.state, block: pendingBlock, leftSignatures: message.pendingSignatures, rightSignatures: this.data.pendingSignatures };
+      if (this.data.isLeft) {
+        [historicalBlock.leftSignatures, historicalBlock.rightSignatures] = [historicalBlock.rightSignatures, historicalBlock.leftSignatures];
+      }
+      await this.storage.put(historicalBlock);
       //await this.save();
 
       this.data.mempool.splice(0, this.data.sentTransitions);
@@ -247,7 +277,15 @@ export default class Channel implements IChannel {
     return true;
   }
 
+  
+
   async receive(message: FlushMessage): Promise<void> {
+    if (!isValidFlushMessage(message)) { 
+      console.log(message)
+      throw new Error('Invalid FlushMessage');
+    }
+
+
     console.log(`Receive ${this.thisUserAddress} from ${this.otherUserAddress}`, this.isLeft(), message);
 
     if (this.data.pendingBlock) {
@@ -269,7 +307,7 @@ export default class Channel implements IChannel {
 
     const block: Block = message.block!;
 
-    if (block.previousStateHash != hash<ChannelState>(this.state)) {
+    if (block.previousStateHash != keccak256(encode(this.state))) {
       console.log(decode(block.previousState), this.state);
       throw new Error('Invalid previousStateHash: ' + block.previousStateHash);
     }
@@ -282,20 +320,94 @@ export default class Channel implements IChannel {
     await this.applyBlock(this.data.isLeft, block);
 
     // verify signatures after the block is applied
-    if (!(await this.ctx.verifyMessage(hash<ChannelState>(this.state), message.newSignatures[0], this.otherUserAddress))) {
+    if (!message.newSignatures || message.newSignatures.length == 0) {
+      throw new Error('Invalid new signatures length');
+    }
+    const globalSig = message.newSignatures.pop() as string;
+    if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
+      console.log(block, this.state)
       throw new Error('Invalid verify new block signature');
     }
-    const ourNewSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
-    const allSignatures = [message.newSignatures, ourNewSignatures];
+    // verify each subchannel proof
 
-    if (this.data.isLeft) allSignatures.reverse();
 
-    await this.storage.put({ state: this.state, block: message.block!, allSignatures: allSignatures });
+    const newProofs = await this.getSubchannelProofs();
+
+    
+    const historicalBlock = { state: this.state, block: message.block!, 
+      leftSignatures: message.newSignatures, rightSignatures: newProofs.sigs
+     }
+
+    if (this.data.isLeft) {
+      [historicalBlock.leftSignatures, historicalBlock.rightSignatures] = [historicalBlock.rightSignatures, historicalBlock.leftSignatures];
+    }
+
+      
+    await this.storage.put(historicalBlock);
     
     //await this.save();
 
     console.log("Sending flush back as ", this.isLeft)
     await this.flush();
+  }
+
+
+  async getSubchannelProofs() {
+    const state = this.state;
+    const encodedProofBody: string[] = [];
+    const proofhash: any[] = [];
+    const sigs: string[] = [];
+
+    const proofbody: any[] = [];
+
+    // 1. Fill with deltas
+    for (let i = 0; i < state.subchannels.length; i++) {
+      let subch = state.subchannels[i];
+      proofbody[i] = {
+        offdeltas: [],
+        tokenIds: [],
+        subcontracts: []
+      };
+
+      for (let j = 0; j < subch.deltas.length; j++) {
+        let d = subch.deltas[j];
+        proofbody[i].offdeltas.push(d.offdelta);
+        proofbody[i].tokenIds.push(d.tokenId);
+      }
+
+      // Handle subcontracts if any
+      // This is a placeholder and should be implemented based on your specific requirements
+      // proofbody[i].subcontracts = ...
+    }
+    
+    for (let i = 0; i < state.subchannels.length; i++) {
+      encodedProofBody[i] = coder.encode([(ProofbodyABI as unknown) as ethers.ParamType], [proofbody[i]]);
+
+      const fullProof = [
+        MessageType.DisputeProof,
+        state.channelKey, 
+        state.subchannels[i].cooperativeNonce,
+        state.subchannels[i].disputeNonce,
+        keccak256(encodedProofBody[i])
+      ];
+
+      const encoded_msg = coder.encode(
+        ['uint8', 'bytes', 'uint', 'uint', 'bytes32'],
+        fullProof
+      );
+      proofhash[i] = keccak256(encoded_msg);
+
+      sigs[i] = await this.ctx.user.signer!.signMessage(proofhash[i]);
+    }
+    // add global state signature on top
+    sigs.push(await this.ctx.user.signer!.signMessage(keccak256(encode(this.state))));
+
+    return {
+      encodedProofBody,
+      proofbody,
+      proofhash,
+      sigs      
+    };
   }
 
   async push(transition: Transition.Any): Promise<void> {
@@ -317,24 +429,25 @@ export default class Channel implements IChannel {
         from: this.thisUserAddress,
         to: this.ctx.getRecipientAddress(),
       },
-      body: (new FlushMessage(this.state.blockNumber, [], []) as FlushMessage)
+      body: new FlushMessage(this.state.blockNumber, [])
     };
+
+    // signed before block is applied
+    const initialProofs = await this.getSubchannelProofs();
+    const body = message.body as FlushMessage;
+    body.pendingSignatures = initialProofs.sigs;
 
     const transitions = this.data.mempool.slice(0, BLOCK_LIMIT);
     // flush may or may not include new block
     if (transitions.length > 0) {
-      const body = message.body as FlushMessage;
       
-      // signed before block is applied
-      body.pendingSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
-
       console.log("Flushing ", this.data.isLeft, this.state, transitions);
       const previousState: ChannelState = decode(encode(this.state));
       const block: Block = {
         isLeft: this.data.isLeft,
         timestamp: getTimestamp(),
         previousState: encode(previousState),
-        previousStateHash: hash<ChannelState>(previousState), // hash of previous state
+        previousStateHash: keccak256(encode(previousState)), // hash of previous state
         previousBlockHash: this.state.previousBlockHash, // hash of previous block
         blockNumber: this.state.blockNumber,
         transitions: transitions,
@@ -350,8 +463,7 @@ export default class Channel implements IChannel {
       this.data.sentTransitions = transitions.length;
 
       // signed after block is applied
-      body.newSignatures = [await this.ctx.signMessage(hash<ChannelState>(this.state))];
-
+      body.newSignatures = (await this.getSubchannelProofs()).sigs;
       this.data.pendingSignatures = body.newSignatures
 
       // revert state to previous
@@ -375,6 +487,67 @@ export default class Channel implements IChannel {
 
 
 
+    public deriveDelta(chainId: number, tokenId: number, isLeft = true) {
+      const d = this.getSubchannelDelta(chainId, tokenId) as TokenDelta;
+      const delta = d.ondelta + d.offdelta
+      const collateral = d.collateral
+    
+      const o = {
+        delta: delta,
+        collateral: collateral, 
+    
+        inCollateral: delta > collateral ? 0n : delta > 0n ? collateral - delta : collateral,
+        outCollateral: delta > collateral ? collateral : delta > 0n ? delta : 0n,
+    
+        inOwnCredit: delta < 0n ? -delta : 0n,
+        outPeerCredit: delta > collateral ? delta - collateral : 0n,
+    
+        inAllowence: d.rightAllowence,
+        outAllowence: d.leftAllowence,
+    
+        totalCapacity: collateral + d.leftCreditLimit + d.rightCreditLimit,
+        
+        ownCreditLimit: d.leftCreditLimit,
+        peerCreditLimit: d.rightCreditLimit,
+        
+        inCapacity: 0n,
+        outCapacity: 0n,
+        
+        outOwnCredit: 0n,
+    
+        inPeerCredit: 0n,
+        ascii: ''
+      }
+    
+      if (!isLeft) {
+        [o.outCollateral, o.outPeerCredit, o.inCollateral, o.inOwnCredit] = [o.inCollateral, o.inOwnCredit, o.outCollateral, o.outPeerCredit];
+      }
+    
+      o.outOwnCredit = o.ownCreditLimit - o.inOwnCredit
+      o.inPeerCredit = o.peerCreditLimit - o.outPeerCredit
+    
+      o.inCapacity = o.inOwnCredit + o.inCollateral + o.inPeerCredit - o.inAllowence
+      o.outCapacity = o.outPeerCredit + o.outCollateral + o.outOwnCredit - o.outAllowence
+        
+      // ASCII visualization
+      const totalWidth = Number(o.totalCapacity);
+      const leftCreditWidth = Math.floor((Number(o.ownCreditLimit) / totalWidth) * 50);
+      const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);
+      const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
+      
+      const deltaPosition = Math.floor(((Number(delta) + Number(o.ownCreditLimit)) / totalWidth) * 50);
+      
+      let ascii = '[';
+      ascii += '-'.repeat(leftCreditWidth);
+      ascii += '='.repeat(collateralWidth);
+      ascii += '-'.repeat(rightCreditWidth);
+      ascii += ']';
+      
+      ascii = ascii.substring(0, deltaPosition) + '|' + ascii.substring(deltaPosition + 1);
+
+      o.ascii = ascii;
+      return o
+    }
   
 
   setCreditLimit(chainId: number, tokenId: number, isLeft: boolean, creditLimit: bigint) : void {

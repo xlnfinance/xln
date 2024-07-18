@@ -70,11 +70,11 @@ async function main() {
   await sleep(2000);
 
   //}, 1000)
-  //await user2.addSubchannel(ENV.hubAddress, 1);
-  //await channel2.flush()
+  await channel2.push(new Transition.AddSubchannel(1));
+  await channel2.flush()
 
-  //await user2.setCreditLimit(ENV.hubAddress, 1, 1, 100n);
- // await channel2.flush()
+  await channel2.push(new Transition.SetCreditLimit(1, 1, 100n));
+  await channel2.flush()
   //await sleep(5000);
   let hubch1 = await hub.getChannel(ENV.firstUserAddress);
   let hubch2 = await hub.getChannel(ENV.secondUserAddress);
@@ -82,7 +82,7 @@ async function main() {
 
   channel1 = await user.getChannel(ENV.hubAddress);
   channel2 = await user2.getChannel(ENV.hubAddress);
-
+  console.log('proofs ',await channel1.getSubchannelProofs());
   console.log(channel1.getState(), hubch1.getState(), channel2.getState(), hubch2.getState())
 
 

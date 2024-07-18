@@ -17,6 +17,8 @@ export default interface IChannel {
 
   receive(message: FlushMessage): Promise<void>;
 
+  getSubchannelProofs(): any;
+
   getSubchannel(chainId: number): Subchannel | undefined;
 
   addSubchannel(chainId: number): Subchannel;

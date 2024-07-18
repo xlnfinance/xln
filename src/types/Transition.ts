@@ -53,8 +53,22 @@ export namespace Transition {
       channel.addSubchannel(this.chainId);
     }
   }
+  
+  export class SetCreditLimit implements TransitionType {
+    readonly type = 'SetCreditLimit';
+    constructor(public readonly chainId: number, public readonly tokenId: number, public readonly amount: bigint) {}
 
-  export type Any = TextMessage | DirectPayment | AddSubchannel;
+    apply(channel: Channel): void {
+      const delta = channel.getSubchannelDelta(this.chainId, this.tokenId);
+      if (delta){
+        
+        delta.leftCreditLimit = this.amount;
+      }
+
+    }
+  }
+
+  export type Any = TextMessage | DirectPayment | AddSubchannel | SetCreditLimit;
 
   // Improved type guards with runtime checks
   export function isTextMessage(transition: any): transition is TextMessage {

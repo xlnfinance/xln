@@ -1,8 +1,8 @@
 import IChannelStorage from './IChannelStorage';
-
+import User from '../app/User';
 
 export default interface IChannelContext {
-  user: any;
+  user: User;
   getUserAddress(): string;
   getRecipientAddress(): string;
 

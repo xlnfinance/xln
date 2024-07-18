@@ -9,6 +9,8 @@ export interface TokenDelta {
   offdelta:bigint;
   leftCreditLimit:bigint;
   rightCreditLimit:bigint;
+  leftAllowence:bigint;
+  rightAllowence:bigint;
 }
 
 export interface Payment {
@@ -41,6 +43,8 @@ export function createSubchannelData(chainId: number, tokenId: number): Subchann
     offdelta: 0n,
     leftCreditLimit: 0n,
     rightCreditLimit: 0n,
+    leftAllowence: 0n,
+    rightAllowence: 0n
   };
 
   const subchannel: Subchannel = {
