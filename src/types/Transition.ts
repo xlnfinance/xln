@@ -1,98 +1,109 @@
-export enum TransitionMethod {
-  TextMessage,
-  AddSubchannel,
-  RemoveSubchannel,
-  AddDelta,
-  RemoveDelta,
-  DirectPayment,
-  ProposedEvent,
-  SetCreditLimit,
-  AddPaymentSubcontract,
-  UpdatePaymentSubcontract,
-  AddSwapSubcontract,
-  RemoveSwapSubcontract,
-}
 
-// Define interfaces for each transition type
-interface TextMessageTransitionData {
-  message: string;
-}
 
-interface PaymentTransitionData {
-  amount: number;
-  tokenId: number;
-}
+import Channel from '../app/Channel';
 
-interface AddSubchannelTransitionData {
-  chainId: number;
-}
+export namespace Transition {
 
-// Define a mapping between string literals and TransitionMethod
-const TransitionMethodMap = {
-  'textMessage': TransitionMethod.TextMessage,
-  'directPayment': TransitionMethod.DirectPayment,
-  'addSubchannel': TransitionMethod.AddSubchannel,
-  // Add other mappings here
-} as const;
-
-type TransitionMethodKeys = keyof typeof TransitionMethodMap;
-
-// Define a type that maps TransitionMethod to its corresponding data type
-type TransitionDataMap = {
-  [K in TransitionMethodKeys]: K extends 'textMessage' ? TextMessageTransitionData :
-                               K extends 'directPayment' ? PaymentTransitionData :
-                               K extends 'addSubchannel' ? AddSubchannelTransitionData :
-                               never;
-}
-
-// Type to check if all TransitionMethod enum values are accounted for
-type EnsureAllMethodsCovered = {
-  [K in TransitionMethod]: K extends (typeof TransitionMethodMap)[TransitionMethodKeys] ? true : never
-}[TransitionMethod];
-
-// This will cause a compile-time error if any TransitionMethod is not covered
-type _ensureAllMethodsCovered = EnsureAllMethodsCovered extends true ? true : never;
-
-// Main Transition class
-export default class Transition<T extends TransitionMethodKeys> {
-  readonly method: (typeof TransitionMethodMap)[T];
-
-  constructor(method: T, data: TransitionDataMap[T]) {
-    this.method = TransitionMethodMap[method];
-    Object.assign(this, data);
+  export enum Method {
+    TextMessage,
+    AddSubchannel,
+    RemoveSubchannel,
+    AddDelta,
+    RemoveDelta,
+    DirectPayment,
+    ProposedEvent,
+    SetCreditLimit,
+    AddPaymentSubcontract,
+    UpdatePaymentSubcontract,
+    AddSwapSubcontract,
+    RemoveSwapSubcontract,
   }
+
+  export interface TransitionType {
+    type: string;
+    apply(channel: Channel): void;
+  }
+
+  export class TextMessage implements TransitionType {
+    readonly type = 'TextMessage';
+    constructor(public readonly message: string) {}
+
+    apply(channel: Channel): void {
+      console.log(`Applying TextMessage: ${this.message}`);
+    }
+  }
+
+  export class DirectPayment implements TransitionType {
+    readonly type = 'DirectPayment';
+    constructor(public readonly chainId: number, public readonly tokenId: number, public readonly amount: bigint) {}
+ 
+    apply(channel: Channel): void {
+      const delta = channel.getSubchannelDelta(this.chainId, this.tokenId);
+      if (delta) {
+        delta.offdelta += channel.isLeft() ? -this.amount : this.amount;
+      }
+    }
+  }
+
+  export class AddSubchannel implements TransitionType {
+    readonly type = 'AddSubchannel';
+    constructor(public readonly chainId: number) {}
+
+    apply(channel: Channel): void {
+      channel.addSubchannel(this.chainId);
+    }
+  }
+
+  export type Any = TextMessage | DirectPayment | AddSubchannel;
+
+  // Improved type guards with runtime checks
+  export function isTextMessage(transition: any): transition is TextMessage {
+    return (
+      transition &&
+      typeof transition === 'object' &&
+      transition.type === 'TextMessage' &&
+      typeof transition.message === 'string'
+    );
+  }
+
+  export function isDirectPayment(transition: any): transition is DirectPayment {
+    return (
+      transition &&
+      typeof transition === 'object' &&
+      transition.type === 'DirectPayment' &&
+      typeof transition.amount === 'bigint' &&
+      typeof transition.tokenId === 'number'
+    );
+  }
+
+  export function isAddSubchannel(transition: any): transition is AddSubchannel {
+    return (
+      transition &&
+      typeof transition === 'object' &&
+      transition.type === 'AddSubchannel' &&
+      typeof transition.chainId === 'number'
+    );
+  }
+
+  // Function to safely create a transition from possibly untrusted data
+  export function createFromDecoded(data: any): Any {
+    if (isTextMessage(data)) {
+      return new TextMessage(data.message);
+    } else if (isDirectPayment(data)) {
+      return new DirectPayment(data.chainId, data.tokenId, data.amount);
+    } else if (isAddSubchannel(data)) {
+      return new AddSubchannel(data.chainId);
+    } else {
+      throw new Error(`Invalid transition data: ${JSON.stringify(data)}`);
+    }
+  }
+
+  
 }
 
-// Infer the correct return type for createTransition
-type InferTransitionType<T extends TransitionMethodKeys> = Transition<T> & TransitionDataMap[T];
-
-// Type-safe creation function
-export function createTransition<T extends TransitionMethodKeys>(
-  method: T,
-  data: TransitionDataMap[T]
-): InferTransitionType<T> {
-  return new Transition(method, data) as InferTransitionType<T>;
-}
 
 
 
-export type AnyTransition = Transition<TransitionMethodKeys>;
 
 
-
-/*
-// Usage examples
-const textTransition = createTransition('textMessage', { message: "Hello" });
-console.log(textTransition.message); // Directly access 'message'
-
-const paymentTransition = createTransition('directPayment', { amount: 100, tokenId: 1 });
-console.log(paymentTransition.amount); // Directly access 'amount'
-console.log(paymentTransition.amount); // Directly access 'tokenId'
-
-const subchannelTransition = createTransition('addSubchannel', { chainId: 1 });
-console.log(subchannelTransition.chainId); // Directly access 'chainId'
-
-// These would cause TypeScript errors:
-// const invalidTransition = createTransition('directPayment', { amount: "100" });
-// const missingTransition = createTransition('removeSubchannel', {});
-*/
+export default Transition;

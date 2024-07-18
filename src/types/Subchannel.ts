@@ -1,19 +1,18 @@
 import { BigNumberish } from "ethers";
-import Transition, { createTransition, AnyTransition } from './Transition';
+import Transition from './Transition';
 
-export type MoneyValue = bigint;
 
 export interface TokenDelta {
   tokenId: number;
-  collateral: MoneyValue;
-  ondelta: MoneyValue;
-  offdelta: MoneyValue;
-  leftCreditLimit: MoneyValue;
-  rightCreditLimit: MoneyValue;
+  collateral: bigint;
+  ondelta: bigint
+  offdelta:bigint;
+  leftCreditLimit:bigint;
+  rightCreditLimit:bigint;
 }
 
 export interface Payment {
-  amount: MoneyValue;
+  amount: bigint;
   hash: string;
   revealedUntilBlock: number;
 }
@@ -30,7 +29,7 @@ export interface Subchannel {
   disputeNonce: number;
   subcontracts: Subcontract[];
 
-  proposedEvents: AnyTransition[];
+  proposedEvents: Transition.Any[];
   proposedEventsByLeft: boolean;
 }
 

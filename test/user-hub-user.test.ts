@@ -10,7 +10,7 @@ import {encode, decode} from '../src/utils/Codec';
 
 
 
-import Transition, { createTransition } from '../src/types/Transition';
+import Transition from '../src/types/Transition';
 
 async function main() {
 
@@ -53,11 +53,12 @@ async function main() {
 
 
 
-  await channel1.push(createTransition('addSubchannel', {chainId: 1}));
+  await channel1.push(new Transition.AddSubchannel(1));
+
   await channel1.flush()
 
  
-  await channel2.push(createTransition('addSubchannel',{chainId: 1}));
+  await channel2.push(new Transition.AddSubchannel(1));
   await channel2.flush()
 
  

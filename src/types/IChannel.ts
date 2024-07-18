@@ -2,12 +2,12 @@ import User from '../app/User';
 import ChannelState from './ChannelState';
 import FlushMessage from './Messages/FlushMessage';
 import { Subchannel } from './Subchannel';
-import Transition, {AnyTransition} from './Transition';
+import Transition from './Transition';
 
 export default interface IChannel {
   storage: any;
 
-  push(transition: AnyTransition): void;
+  push(transition: Transition.Any): void;
 
   flush(): Promise<void>;
 
