@@ -14,7 +14,7 @@ import ChannelData from '../types/ChannelData';
 import IChannelContext from '../types/IChannelContext';
 import IChannel from '../types/IChannel';
 
-import Transition, {TransitionMethod, createTransition,AnyTransition} from '../types/Transition';
+import Transition from '../types/Transition';
 
 
 import ChannelSavePoint from '../types/ChannelSavePoint';
@@ -127,9 +127,20 @@ export default class Channel implements IChannel {
     }
   }
 
-  private async applyTransition(block: Block, transition: any): Promise<void> {
-    Logger.info(`applyTransition ${block.isLeft} ${transition}}`);
+  private async applyTransition(block: Block, transitionData: any): Promise<void> {
 
+    let transition: Transition.Any;
+    try {
+      transition = Transition.createFromDecoded(transitionData);
+    } catch (error: any) {
+      Logger.error(`Invalid transition data: ${error.message}`);
+      return;
+    }
+
+    Logger.info(`Applying transition: ${transition.type} ${transitionData.toString()}`);
+    transition.apply(this);
+    
+    /*
     switch (transition.method) {
       case TransitionMethod.TextMessage:
         {
@@ -151,7 +162,7 @@ export default class Channel implements IChannel {
           Logger.info(`Processing CreateSubchannelTransition ${subchannel.chainId}`);
         }
         break;
-
+     */
         /*
         case TransitionMethod.ProposedEvent:
         {
@@ -192,8 +203,8 @@ export default class Channel implements IChannel {
           //this.setCreditLimit(tr.chainId, tr.tokenId, tr.isLeft, tr.creditLimit);
         }
           */
-        break;
-    }
+      //  break;
+    //}
 
     this.state.transitionNumber++;
   }
@@ -287,7 +298,7 @@ export default class Channel implements IChannel {
     await this.flush();
   }
 
-  async push(transition: AnyTransition): Promise<void> {
+  async push(transition: Transition.Any): Promise<void> {
     this.data.mempool.push(transition);
     console.log('Mempool', this.data.sentTransitions, this.data.mempool);
     return this.save();
@@ -407,7 +418,7 @@ export default class Channel implements IChannel {
     return subchannel;
   }
 
-  private getSubchannelDelta(chainId: number, tokenId: number): TokenDelta | undefined {
+  public getSubchannelDelta(chainId: number, tokenId: number): TokenDelta | undefined {
     let subchannel = this.getSubchannel(chainId);
     if(!subchannel)
       return;

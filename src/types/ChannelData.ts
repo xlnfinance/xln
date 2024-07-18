@@ -1,10 +1,10 @@
 import Block from './Block';
 import { Subchannel } from './Subchannel';
-import Transition, { createTransition, AnyTransition }from './Transition';
+import Transition from './Transition';
 
 
 export default interface ChannelData {
-  mempool: AnyTransition[];
+  mempool: Transition.Any[];
   isLeft: boolean;
   sentTransitions: number;
   pendingBlock: Block | null;

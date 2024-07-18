@@ -40,7 +40,7 @@ function printFileTree(node, prefix = '') {
     return result;
 }
 
-const srcPath = path.resolve(__dirname, 'test');
+const srcPath = path.resolve(__dirname, 'src');
 const { node: fileTree, fileContents } = buildFileTree(srcPath, srcPath);
 const treeOutput = printFileTree(fileTree);
 

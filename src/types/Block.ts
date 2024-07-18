@@ -1,4 +1,4 @@
-import Transition, { createTransition, AnyTransition }from './Transition';
+import Transition from './Transition';
 
 export default interface Block {
   isLeft: boolean;
@@ -8,7 +8,7 @@ export default interface Block {
   previousBlockHash: string; // hash of previous block
   previousStateHash: string;
 
-  transitions: AnyTransition[];
+  transitions: Transition.Any[];
 
   blockNumber: number;
   timestamp: number;
