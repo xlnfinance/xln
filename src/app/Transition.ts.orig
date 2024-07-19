@@ -3,7 +3,6 @@
 import Channel, {stringify} from './Channel';
 
 
-import { encode } from '../utils/Codec';
 
 export namespace Transition {
 
@@ -23,14 +22,14 @@ export namespace Transition {
   }
   export interface TransitionType {
     type: string;
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void;
+    apply(channel: Channel, isLeft: boolean): void;
   }
 
   export class TextMessage implements TransitionType {
     readonly type = 'TextMessage';
     constructor(public readonly message: string) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    apply(channel: Channel, isLeft: boolean): void {
       channel.logger.log(`Applying TextMessage: ${this.message}`);
     }
   }
@@ -39,7 +38,7 @@ export namespace Transition {
     readonly type = 'AddSubchannel';
     constructor(public readonly chainId: number) {}
   
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    apply(channel: Channel, isLeft: boolean): void {
       const chainId = this.chainId;
 
       channel.logger.log('Current subchannels before adding:', stringify(channel.state.subchannels));
@@ -74,7 +73,7 @@ export namespace Transition {
       public readonly tokenId: number
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    apply(channel: Channel, isLeft: boolean): void {
       const subchannel = channel.getSubchannel(this.chainId);
       if (subchannel) {
         subchannel.deltas.push({
@@ -99,7 +98,7 @@ export namespace Transition {
       public readonly amount: bigint
     ) {}
  
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    apply(channel: Channel, isLeft: boolean): void {
       const delta = channel.getDelta(this.chainId, this.tokenId);
       if (delta) {
         delta.offdelta += isLeft ? -this.amount : this.amount;
@@ -115,7 +114,7 @@ export namespace Transition {
       public readonly amount: bigint
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    apply(channel: Channel, isLeft: boolean): void {
       const delta = channel.getDelta(this.chainId, this.tokenId);
       if (delta) {
         if (!isLeft) {
@@ -127,54 +126,7 @@ export namespace Transition {
     }
   }
 
-  export class ProposedEvent implements TransitionType {
-    readonly type = 'ProposedEvent';
-    constructor(
-      public readonly chainId: number,
-      public readonly tokenId: number,
-      public readonly collateral: bigint,
-      public readonly ondelta: bigint
-    ) {}
-  
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
-      const subchannel = channel.getSubchannel(this.chainId);
-      if (!subchannel) return;
-  
-      if (subchannel.proposedEvents.length > 0) {
-        if (subchannel.proposedEventsByLeft === isLeft) {
-          subchannel.proposedEvents.push(this);
-        } else {
-          if (encode(subchannel.proposedEvents[0]) === encode(this)) {
-            const event = subchannel.proposedEvents.shift();
-            if (event) {
-              const delta = channel.getDelta(event.chainId, event.tokenId);
-              if (delta) {
-                delta.collateral = event.collateral;
-                delta.ondelta = event.ondelta;
-              }
-            }
-          }
-        }
-      } else {
-        subchannel.proposedEvents.push(this);
-        subchannel.proposedEventsByLeft = isLeft;
-      }
-    }
-  }
-
-  export type Any = TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit | ProposedEvent;
-
-  export function isProposedEvent(transition: any): transition is ProposedEvent {
-    return (
-      transition &&
-      typeof transition === 'object' &&
-      transition.type === 'ProposedEvent' &&
-      typeof transition.chainId === 'number' &&
-      typeof transition.tokenId === 'number' &&
-      typeof transition.collateral === 'bigint' &&
-      typeof transition.ondelta === 'bigint'
-    );
-  }
+  export type Any = TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit;
 
   export function isTextMessage(transition: any): transition is TextMessage {
     return (
@@ -237,8 +189,6 @@ export namespace Transition {
       return new AddDelta(data.chainId, data.tokenId);
     } else if (isSetCreditLimit(data)) {
       return new SetCreditLimit(data.chainId, data.tokenId, data.amount);
-    } else if (isProposedEvent(data)) {
-      return new ProposedEvent(data.chainId, data.tokenId, data.collateral, data.ondelta);
     } else {
       throw new Error(`Invalid transition data: ${stringify(data)}`);
     }

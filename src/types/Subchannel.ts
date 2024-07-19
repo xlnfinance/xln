@@ -31,7 +31,7 @@ export interface Subchannel {
   disputeNonce: number;
   subcontracts: Subcontract[];
 
-  proposedEvents: Transition.Any[];
+  proposedEvents: Transition.ProposedEvent[];
   proposedEventsByLeft: boolean;
 }
 

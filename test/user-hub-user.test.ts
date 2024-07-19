@@ -13,10 +13,13 @@ import { channel } from 'diagnostics_channel';
 const logger = new Logger('TestRunner');
 
 
+import {exec} from 'child_process'
 
 
 let channel1: Channel, channel2: any;
 async function main() {
+  await exec('rm -rf local-storage')
+
   const opt: IUserOptions = {
     hubConnectionDataList: [{ host: '127.0.0.1', port: 10000, address: ENV.hubAddress }],
     depositoryContractAddress: ENV.depositoryContractAddress,
