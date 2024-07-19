@@ -14,15 +14,23 @@ export interface Delta {
 }
 
 export interface Payment {
+  deltaIndex: number; // Add this line
   amount: bigint;
   hash: string;
   revealedUntilBlock: number;
 }
-
 export interface Subcontract {
   payment: Payment[];
-  swap: [];
+  swap: {
+    ownerIsLeft: boolean;
+    addDeltaIndex: number;
+    addAmount: bigint;
+    subDeltaIndex: number;
+    subAmount: bigint;
+  }[];
 }
+
+
 
 export interface Subchannel {
   chainId: number;

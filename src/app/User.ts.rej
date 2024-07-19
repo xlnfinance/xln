@@ -1,0 +1,22 @@
+@@ -189,13 +189,17 @@
+     }
+     await this.storageContext.initialize(this.thisUserAddress);
+ 
+-    // Start hub if this is a hub
+-
+     if (this.isHub) {
+       await this.startHub();
+     } else {
+-      await Promise.all(this.opt.hubConnectionDataList.map(opt => this.addHub(opt)));
++      if (this.opt.hubConnectionDataList && this.opt.hubConnectionDataList.length > 0) {
++        await Promise.all(this.opt.hubConnectionDataList.map(opt => this.addHub(opt)));
++      }
+     }
++  }
++
++  async connectTo(address: string): Promise<void> {
++    await this.addHub({ host: '127.0.0.1', port: 10000, address: address });
+   }
+ 
+   // Hub-specific startHub method
+\ No newline at end of line

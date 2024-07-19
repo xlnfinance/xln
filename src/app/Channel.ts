@@ -282,7 +282,6 @@ export default class Channel {
 
     const proofbody: any[] = [];
 
-    // 1. Fill with deltas
     for (let i = 0; i < state.subchannels.length; i++) {
       let subch = state.subchannels[i];
       proofbody[i] = {
@@ -297,30 +296,26 @@ export default class Channel {
         proofbody[i].tokenIds.push(d.tokenId);
       }
 
-      // Handle subcontracts if any
-      // This is a placeholder and should be implemented based on your specific requirements
-      // proofbody[i].subcontracts = ...
+      // Handle subcontracts
+      for (let j = 0; j < subch.subcontracts.length; j++) {
+        const subcontract = subch.subcontracts[j];
+        const encodedBatch = ethers.AbiCoder.defaultAbiCoder().encode(
+          [(SubcontractBatchABI as unknown) as ethers.ParamType],
+          [{
+            payment: subcontract.payment,
+            swap: subcontract.swap
+          }]
+        );
+        proofbody[i].subcontracts.push({
+          subcontractProviderAddress: ENV.subcontractProviderAddress, // You need to add this to your options
+          encodedBatch: encodedBatch,
+          allowences: [] // You may need to implement allowance logic
+        });
+      }
     }
+
+
     
-    for (let i = 0; i < state.subchannels.length; i++) {
-      encodedProofBody[i] = coder.encode([(ProofbodyABI as unknown) as ethers.ParamType], [proofbody[i]]);
-
-      const fullProof = [
-        MessageType.DisputeProof,
-        state.channelKey, 
-        state.subchannels[i].cooperativeNonce,
-        state.subchannels[i].disputeNonce,
-        keccak256(encodedProofBody[i])
-      ];
-
-      const encoded_msg = coder.encode(
-        ['uint8', 'bytes', 'uint', 'uint', 'bytes32'],
-        fullProof
-      );
-      proofhash[i] = keccak256(encoded_msg);
-
-      sigs[i] = await this.ctx.user.signer!.signMessage(proofhash[i]);
-    }
     // add global state signature on top
     sigs.push(await this.ctx.user.signer!.signMessage(keccak256(encode(this.state))));
 

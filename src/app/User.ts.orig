@@ -42,7 +42,14 @@ import { performance } from 'perf_hooks';
 type Job<T> = () => Promise<T>;
 type QueueItem<T> = [Job<T>, (value: T | PromiseLike<T>) => void];
 
-import ENV from '../../test/env';
+const TEMP_ENV = {
+  hubAddress: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+  firstUserAddress: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+  secondUserAddress: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+  depositoryContractAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+  erc20Address: '0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',
+  rpcNodeUrl: 'http://127.0.0.1:8545',
+};
 
 export default class User implements ITransportListener  {
   // Hub-specific properties
@@ -50,7 +57,7 @@ export default class User implements ITransportListener  {
   public _channels: Map<string, Channel> = new Map();
   private readonly _transports: Map<string, ITransport> = new Map();
   private readonly _channelRecipientMapping: Map<ITransport, Map<string, Channel>> = new Map();
-
+  private readonly _hubInfoMap: Map<string, IHubConnectionData> = new Map();
   private readonly sectionQueue: Record<string, QueueItem<any>[]> = {};
 
   public readonly thisUserAddress: string;
@@ -98,16 +105,16 @@ export default class User implements ITransportListener  {
 
 
   get isHub(): boolean {
-    return this.opt.hub !== undefined;
+    return this.thisUserAddress === this.opt.hubConnectionDataList[0].address;
   }
 
   async onReceive(transport: ITransport, message: IMessage): Promise<void> {
     this.logger.log(`Received message from ${message.header.from} to ${message.header.to}`, message.body);
     //try {
-      if (this.isHub && message.header.to !== this.thisUserAddress) {
-        await this.handleProxyMessage(message);
-      } else if (message.body.type === BodyTypes.kFlushMessage) {
+      if (message.body.type === BodyTypes.kFlushMessage) {
         await this.handleFlushMessage(transport, message as IMessage & { body: FlushMessage });
+      } else if (message.header.to !== this.opt.hub?.address) {
+        await this.handleProxyMessage(message);
       } else {
         throw new Error('Unhandled message type');
       }
@@ -144,7 +151,7 @@ export default class User implements ITransportListener  {
     if (recipientTransport) {
       await recipientTransport.send(message);
     } else {
-      throw new Error(`No transport found for recipient: ${message.header.to}`);
+      this.logger.warn(`No transport found for recipient: ${message.header.to}`);
     }
   }
 
@@ -161,15 +168,17 @@ export default class User implements ITransportListener  {
 
   async addHub(data: IHubConnectionData) {
     if (this._transports.has(data.address)) {
-      return this._transports.get(data.address);
+      return;
     }
 
+    this._hubInfoMap.set(data.address, data);
     const transport = new Transport({
         id: data.address,
         receiver: this,
         connectionData: data,
         userId: this.thisUserAddress
     });
+      
 
     this._transports.set(data.address, transport);
     this.logger.log("Adding hub", data)
@@ -179,9 +188,9 @@ export default class User implements ITransportListener  {
   }
 
   public async send(addr: string, message: IMessage): Promise<void> {
-    let transport = this._transports.get(this._transports.has(addr) ? addr : ENV.hubAddress);
+    const transport = this._transports.get(addr);
     if (!transport) {
-      this.logger.error(`Transport not found for ${addr}`);
+      throw new Error('Transport not found');
       return;
     }
 
@@ -202,14 +211,9 @@ export default class User implements ITransportListener  {
     if (this.isHub) {
       await this.startHub();
     } else {
-      if (this.opt.hubConnectionDataList && this.opt.hubConnectionDataList.length > 0) {
-        await Promise.all(this.opt.hubConnectionDataList.map(opt => this.addHub(opt)));
-      }    
+      await Promise.all(this.opt.hubConnectionDataList.map(opt => this.addHub(opt)));
     }
-  }
 
-  async connectTo(address: string): Promise<void> {
-    await this.addHub({ host: '127.0.0.1', port: 10000, address: address });
   }
 
   // Hub-specific startHub method
@@ -354,7 +358,7 @@ export default class User implements ITransportListener  {
         this.provider = new JsonRpcProvider(this.opt.jsonRPCUrl);
         this.signer = await this.provider.getSigner(this.thisUserAddress);
 
-        this.depository = Depository__factory.connect(ENV.depositoryContractAddress, this.signer);
+        this.depository = Depository__factory.connect(TEMP_ENV.depositoryContractAddress, this.signer);
 
         //this.depository.queryFilter(TransferReserveToCollateralEvent, 1, 5);
         //const eventsFilter = this.depository.filters.TransferReserveToCollateral();

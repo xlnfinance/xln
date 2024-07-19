@@ -35,6 +35,125 @@ export namespace Transition {
     }
   }
 
+  export class AddPayment implements TransitionType {
+    readonly type = 'AddPayment';
+    constructor(
+      public readonly chainId: number,
+      public readonly deltaIndex: number,
+      public readonly amount: bigint,
+      public readonly hash: string
+    ) {}
+
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      const subchannel = channel.getSubchannel(this.chainId);
+      if (subchannel) {
+        subchannel.subcontracts.push({
+          payment: [{
+            deltaIndex: this.deltaIndex,
+            amount: this.amount,
+            revealedUntilBlock: 0, // Set to 0 initially
+            hash: this.hash
+          }],
+          swap: []
+        });
+      }
+    }
+  }
+
+  export class ResolvePayment implements TransitionType {
+    readonly type = 'ResolvePayment';
+    constructor(
+      public readonly chainId: number,
+      public readonly subcontractIndex: number,
+      public readonly secret: string | null
+    ) {}
+
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      const subchannel = channel.getSubchannel(this.chainId);
+      if (subchannel && subchannel.subcontracts[this.subcontractIndex]) {
+        const payment = subchannel.subcontracts[this.subcontractIndex].payment[0];
+        if (this.secret === null) {
+          // Remove the payment
+          subchannel.subcontracts.splice(this.subcontractIndex, 1);
+        } else {
+          // Resolve the payment
+          const delta = channel.getDelta(this.chainId, payment.deltaIndex);
+          if (delta) {
+            delta.offdelta += isLeft ? -payment.amount : payment.amount;
+          }
+          subchannel.subcontracts.splice(this.subcontractIndex, 1);
+        }
+      }
+    }
+  }
+
+  export class AddSwap implements TransitionType {
+    readonly type = 'AddSwap';
+    constructor(
+      public readonly chainId: number,
+      public readonly ownerIsLeft: boolean,
+      public readonly addDeltaIndex: number,
+      public readonly addAmount: bigint,
+      public readonly subDeltaIndex: number,
+      public readonly subAmount: bigint
+    ) {}
+
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      const subchannel = channel.getSubchannel(this.chainId);
+      if (subchannel) {
+        subchannel.subcontracts.push({
+          payment: [],
+          swap: [{
+            ownerIsLeft: this.ownerIsLeft,
+            addDeltaIndex: this.addDeltaIndex,
+            addAmount: this.addAmount,
+            subDeltaIndex: this.subDeltaIndex,
+            subAmount: this.subAmount
+          }]
+        });
+      }
+    }
+  }
+
+  export class ResolveSwap implements TransitionType {
+    readonly type = 'ResolveSwap';
+    constructor(
+      public readonly chainId: number,
+      public readonly subcontractIndex: number,
+      public readonly fillingRatio: number | null
+    ) {}
+
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      const subchannel = channel.getSubchannel(this.chainId);
+      if (subchannel && subchannel.subcontracts[this.subcontractIndex]) {
+        const swap = subchannel.subcontracts[this.subcontractIndex].swap[0];
+        if (swap) {
+          if (this.fillingRatio === null) {
+            // Remove the swap
+            subchannel.subcontracts.splice(this.subcontractIndex, 1);
+          } else {
+            // Resolve the swap
+            const addDelta = channel.getDelta(this.chainId, swap.addDeltaIndex);
+            const subDelta = channel.getDelta(this.chainId, swap.subDeltaIndex);
+            if (addDelta && subDelta) {
+              const filledAddAmount = BigInt(Math.floor(Number(swap.addAmount) * this.fillingRatio));
+              const filledSubAmount = BigInt(Math.floor(Number(swap.subAmount) * this.fillingRatio));
+              
+              if (swap.ownerIsLeft === isLeft) {
+                addDelta.offdelta -= filledAddAmount;
+                subDelta.offdelta += filledSubAmount;
+              } else {
+                addDelta.offdelta += filledAddAmount;
+                subDelta.offdelta -= filledSubAmount;
+              }
+            }
+            subchannel.subcontracts.splice(this.subcontractIndex, 1);
+          }
+        }
+      }
+    }
+    
+  }
   export class AddSubchannel implements TransitionType {
     readonly type = 'AddSubchannel';
     constructor(public readonly chainId: number) {}
@@ -162,7 +281,7 @@ export namespace Transition {
     }
   }
 
-  export type Any = TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit | ProposedEvent;
+  export type Any = TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit | ProposedEvent | AddPayment | ResolvePayment | AddSwap | ResolveSwap;
 
   export function isProposedEvent(transition: any): transition is ProposedEvent {
     return (

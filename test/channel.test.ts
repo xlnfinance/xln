@@ -4,6 +4,11 @@ import IUserOptions from '../src/types/IUserOptions';
 import ENV from './env';
 
 import Logger from '../src/utils/Logger';
+
+import {exec} from 'child_process'
+exec('rm -rf local-storage')
+
+
   /*
 async function main() {
     
