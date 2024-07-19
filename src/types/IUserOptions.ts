@@ -12,4 +12,5 @@ export default interface IUserOptions {
   depositoryContractAddress: string;
   onExternalChannelRequestCallback?: (userId: string) => boolean;
   hub?: IHubOptions;
+
 }
