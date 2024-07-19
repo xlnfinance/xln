@@ -18,7 +18,7 @@ function buildFileTree(dir, baseDir) {
                 const result = buildFileTree(filePath, baseDir);
                 node.children.push(result.node);
                 fileContents += result.fileContents;
-            } else if (path.extname(file) === '.ts' || path.extname(file) === '.sol'){
+            } else if (path.extname(file) === '.ts' || path.extname(file) === '.sol') {
                 node.children.push({ name: file, type: 'file' });
                 const relativePath = path.relative(baseDir, filePath);
                 const content = fs.readFileSync(filePath, 'utf8');
@@ -51,13 +51,13 @@ const treeOutput = printFileTree(fileTree);
 
 const srcPath2 = path.resolve(__dirname, 'test');
 const { node: fileTree2, fileContents: fileContents2 } = buildFileTree(srcPath2, srcPath2);
-
+/*
 const srcPath3 = path.resolve(__dirname, 'contracts/contracts');
 const { node: fileTree3, fileContents: fileContents3 } = buildFileTree(srcPath3, srcPath3);
+*/
 
 
-
-const fullOutput = `${fs.readFileSync('TODO', 'utf8')} File Tree:\n\n${treeOutput}\n\nFile Contents:${fileContents} ${fileContents2} ${fileContents3}`;
+const fullOutput = `${fs.readFileSync('TODO', 'utf8')} File Tree:\n\n${treeOutput}\n\nFile Contents:${fileContents} ${fileContents2}`;
 
 const outputPath = path.join(__dirname, 'output.txt');
 fs.writeFileSync(outputPath, fullOutput);

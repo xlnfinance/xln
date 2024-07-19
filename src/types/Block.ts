@@ -1,4 +1,4 @@
-import Transition from './Transition';
+import Transition from '../app/Transition';
 
 export default interface Block {
   isLeft: boolean;

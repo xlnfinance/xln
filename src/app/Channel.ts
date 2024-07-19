@@ -17,13 +17,13 @@ import IChannelStorage from '../types/IChannelStorage';
 
 import ChannelData from '../types/ChannelData';
 import IChannelContext from '../types/IChannelContext';
-import IChannel from '../types/IChannel';
 
-import Transition from '../types/Transition';
+
+import Transition from './Transition';
 
 
 import ChannelSavePoint from '../types/ChannelSavePoint';
-import { createSubchannelData, Subchannel, TokenDelta } from '../types/Subchannel';
+import { createSubchannelData, Subchannel, Delta } from '../types/Subchannel';
 
 import { BigNumberish } from 'ethers';
 
@@ -31,6 +31,16 @@ import { decode, encode } from '../utils/Codec';
 
 import {SubcontractBatchABI, ProofbodyABI} from '../types/ABI';
 
+export function stringify(obj: any) {
+  function replacer(key: string, value: any) {
+    if (typeof value === 'bigint') {
+        return value.toString() + 'n';  // indicate that this is a BigInt
+    }
+    return value;
+  }
+
+  return JSON.stringify(obj, replacer, 4)
+}
 
 const coder = ethers.AbiCoder.defaultAbiCoder()
 enum MessageType {
@@ -43,8 +53,9 @@ import { sleep } from '../utils/Utils';
 import { util } from 'chai';
 import { keccak224 } from 'js-sha3';
 
-export default class Channel implements IChannel {
+export default class Channel {
   public state: ChannelState;
+  public logger: Logger;
   thisUserAddress: string;
   otherUserAddress: string;  
 
@@ -55,12 +66,17 @@ export default class Channel implements IChannel {
   constructor(
     private ctx: IChannelContext
   ) {
+
     this.thisUserAddress = this.ctx.getUserAddress();
     this.otherUserAddress = this.ctx.getRecipientAddress();
     this.storage = this.ctx.getStorage(`${this.otherUserAddress}`);
 
+    this.logger = new Logger(this.thisUserAddress);
+
     this.state = this.emptyState();
     this.data = this.emptyData();
+
+    this.logger.log("New channel constructed "+this.thisUserAddress, this.otherUserAddress);
   }
 
 
@@ -100,28 +116,6 @@ export default class Channel implements IChannel {
 
 
 
-  async load(): Promise<void> {
-    try {
-      const channelSavePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
-      this.data = channelSavePoint.data;
-      this.state = channelSavePoint.state;
-      Logger.info("Loaded last state ", this.state);
-    } catch (e) {
-      console.log("Load error", e);
-      //await this.save();
-    }
-  }
-
-  async save(): Promise<void> {
-    const channelSavePoint: ChannelSavePoint = {
-      data: this.data,
-      state: this.state
-    };
-
-    console.log("Saving state", this.isLeft(), channelSavePoint, new Date());
-
-    return this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
-  }
 
   getState(): ChannelState {
     return this.state;
@@ -131,12 +125,9 @@ export default class Channel implements IChannel {
     return `${this.thisUserAddress}:${this.otherUserAddress}`;
   }
 
-  isLeft() : boolean {
-    return this.data.isLeft;
-  }
-
+  
   private async applyBlock(isLeft: boolean, block: Block): Promise<void> {
-    Logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
+    this.logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
 
     // save previous hash first before changing this.state
     this.state.blockNumber++;
@@ -148,88 +139,8 @@ export default class Channel implements IChannel {
       await this.applyTransition(block, transition);
     }
   }
-
-  private async applyTransition(block: Block, transitionData: any): Promise<void> {
-
-    let transition: Transition.Any;
-    try {
-      transition = Transition.createFromDecoded(transitionData);
-    } catch (error: any) {
-      Logger.error(`Invalid transition data: ${error.message}`);
-      return;
-    }
-
-    Logger.info(`Applying transition: ${transition.type} ${transitionData.toString()}`);
-    transition.apply(this);
-    
-    /*
-    switch (transition.method) {
-      case TransitionMethod.TextMessage:
-        {
-          Logger.info(transition.message);
-        }
-        break;
-      case TransitionMethod.DirectPayment:
-        {
-          const d = this.getSubchannelDelta(transition.chainId, transition.tokenId);
-          if(d) {
-            Logger.info(`Processing PaymentTransition ${transition.chainId}`);
-            d.offdelta += block.isLeft ? -transition.amount : transition.amount;
-          }
-        }
-        break;
-        case TransitionMethod.AddSubchannel:
-        {
-          const subchannel = this.addSubchannel(transition.chainId);
-          Logger.info(`Processing CreateSubchannelTransition ${subchannel.chainId}`);
-        }
-        break;
-     */
-        /*
-        case TransitionMethod.ProposedEvent:
-        {
-          const subchannel = this.getSubchannel(transition.chainId);
-          if(subchannel) {
-            Logger.info(`Processing ProposedEvent ${transition.chainId}`);
-
-            if (subchannel.proposedEvents.length > 0) {
-              if (subchannel.proposedEventsByLeft == block.isLeft) {
-                // keep pushing
-                subchannel.proposedEvents.push(transition);
-              } else {
-                if (encode(subchannel.proposedEvents[0]) == encode(transition)) {
-                  // apply event
-                  const event = subchannel.proposedEvents.shift();
-
-                  const d = this.getSubchannelDelta(event.chainId, event.tokenId);
-                  d?.collateral = event.collateral;
-                  d?.ondelta = event.ondelta;
-
-                }
-              }
-                
-                
-            } else {
-              subchannel.proposedEvents.push(transition);
-              subchannel.proposedEventsByLeft = block.isLeft;
-            }
-          }
-
-        }
-        break;
-        
-        case TransitionMethod.SetCreditLimit:
-        {
-          const tr = transition as SetCreditLimitTransition;
-          //TODO handle errors if subchannel, token or smth was not found
-          //this.setCreditLimit(tr.chainId, tr.tokenId, tr.isLeft, tr.creditLimit);
-        }
-          */
-      //  break;
-    //}
-
-    this.state.transitionNumber++;
-  }
+ 
+  
 
   private async handlePendingBlock(message: FlushMessage): Promise<boolean> {
     if (message.blockNumber == this.state.blockNumber + 1) {
@@ -250,22 +161,24 @@ export default class Channel implements IChannel {
       }
 
 
-
       const historicalBlock = { state: this.state, block: pendingBlock, leftSignatures: message.pendingSignatures, rightSignatures: this.data.pendingSignatures };
       if (this.data.isLeft) {
         [historicalBlock.leftSignatures, historicalBlock.rightSignatures] = [historicalBlock.rightSignatures, historicalBlock.leftSignatures];
       }
       await this.storage.put(historicalBlock);
-      //await this.save();
 
       this.data.mempool.splice(0, this.data.sentTransitions);
-      console.log("Clear mempool ",this.data.mempool);
+      this.logger.log("Clear mempool ",this.data.mempool);
       this.data.sentTransitions = 0;
       this.data.pendingBlock = null;
+      this.data.pendingSignatures = [];
+
+      await this.save();
+
     } else if (message.blockNumber == this.state.blockNumber && !this.data.isLeft) {
       this.data.sentTransitions = 0;
       this.data.pendingBlock = null;
-      console.log("Rollback");
+      this.logger.log("Rollback");
       this.data.rollbacks++;
     } else {
       //
@@ -273,20 +186,24 @@ export default class Channel implements IChannel {
     }
     
 
-    //await this.save();
+    await this.save();
     return true;
   }
 
   
 
+  get isLeft(): boolean {
+    return this.data.isLeft;
+  }
+  
   async receive(message: FlushMessage): Promise<void> {
     if (!isValidFlushMessage(message)) { 
-      console.log(message)
+      this.logger.log(message)
       throw new Error('Invalid FlushMessage');
     }
 
 
-    console.log(`Receive ${this.thisUserAddress} from ${this.otherUserAddress}`, this.isLeft(), message);
+    this.logger.log(`Receive ${this.thisUserAddress} from ${this.otherUserAddress}`, this.data.isLeft, message);
 
     if (this.data.pendingBlock) {
       if (!await this.handlePendingBlock(message)) {
@@ -308,7 +225,7 @@ export default class Channel implements IChannel {
     const block: Block = message.block!;
 
     if (block.previousStateHash != keccak256(encode(this.state))) {
-      console.log(decode(block.previousState), this.state);
+      this.logger.log(decode(block.previousState), this.state);
       throw new Error('Invalid previousStateHash: ' + block.previousStateHash);
     }
 
@@ -318,6 +235,7 @@ export default class Channel implements IChannel {
 
 
     await this.applyBlock(this.data.isLeft, block);
+    this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
     // verify signatures after the block is applied
     if (!message.newSignatures || message.newSignatures.length == 0) {
@@ -325,7 +243,7 @@ export default class Channel implements IChannel {
     }
     const globalSig = message.newSignatures.pop() as string;
     if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
-      console.log(block, this.state)
+      this.logger.log(block, this.state)
       throw new Error('Invalid verify new block signature');
     }
     // verify each subchannel proof
@@ -347,7 +265,7 @@ export default class Channel implements IChannel {
     
     //await this.save();
 
-    console.log("Sending flush back as ", this.isLeft)
+    this.logger.log("Sending flush back as ", this.data.isLeft)
     await this.flush();
   }
 
@@ -412,18 +330,16 @@ export default class Channel implements IChannel {
 
   async push(transition: Transition.Any): Promise<void> {
     this.data.mempool.push(transition);
-    console.log('Mempool', this.data.sentTransitions, this.data.mempool);
+    this.logger.log('Mempool', this.data.sentTransitions, this.data.mempool);
     return this.save();
   }
 
   
   async flush(): Promise<void> {
     if (this.data.sentTransitions > 0) {
-      console.log("Already flushing ", this.data.isLeft, this.data.sentTransitions);
+      this.logger.log("Already flushing ", this.data.isLeft, this.data.sentTransitions);
       return;
     }
-
-
     const message: IMessage = {
       header: {
         from: this.thisUserAddress,
@@ -441,22 +357,22 @@ export default class Channel implements IChannel {
     // flush may or may not include new block
     if (transitions.length > 0) {
       
-      console.log("Flushing ", this.data.isLeft, this.state, transitions);
       const previousState: ChannelState = decode(encode(this.state));
       const block: Block = {
         isLeft: this.data.isLeft,
         timestamp: getTimestamp(),
-        previousState: encode(previousState),
+        previousState: encode({}),
         previousStateHash: keccak256(encode(previousState)), // hash of previous state
         previousBlockHash: this.state.previousBlockHash, // hash of previous block
         blockNumber: this.state.blockNumber,
         transitions: transitions,
       };
 
+      this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
       await this.applyBlock(this.data.isLeft, block);
+      this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
-
-      console.log("block", block, this.data.pendingBlock);
+      this.logger.log("block", block, this.data.pendingBlock);
 
 
       this.data.pendingBlock = decode(encode(block));
@@ -472,14 +388,14 @@ export default class Channel implements IChannel {
 
     } 
 
-    Logger.info(
+    this.logger.info(
       `channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
     );
 
     await this.save();
 
 
-    console.log("Sending flush ", this.otherUserAddress, message, message);
+    this.logger.log("Sending flush ", this.otherUserAddress, message, message);
   
 
     await this.ctx.user.send(this.otherUserAddress, message);
@@ -488,7 +404,7 @@ export default class Channel implements IChannel {
 
 
     public deriveDelta(chainId: number, tokenId: number, isLeft = true) {
-      const d = this.getSubchannelDelta(chainId, tokenId) as TokenDelta;
+      const d = this.getDelta(chainId, tokenId) as Delta;
       const delta = d.ondelta + d.offdelta
       const collateral = d.collateral
     
@@ -551,9 +467,9 @@ export default class Channel implements IChannel {
   
 
   setCreditLimit(chainId: number, tokenId: number, isLeft: boolean, creditLimit: bigint) : void {
-    let delta = this.getSubchannelDelta(chainId, tokenId);
+    let delta = this.getDelta(chainId, tokenId);
     if (!delta) {
-      throw new Error(`TokenDelta with tokenId ${tokenId} not found.`);
+      throw new Error(`Delta with tokenId ${tokenId} not found.`);
       return;
     }
 
@@ -566,36 +482,71 @@ export default class Channel implements IChannel {
   }
 
   applyUnsafePayment(chainId: number, tokenId: number, isLeft: boolean, amount: bigint) : void {
-    let delta = this.getSubchannelDelta(chainId, tokenId);
+    let delta = this.getDelta(chainId, tokenId);
     if (!delta) {
-      console.log(`TokenDelta with tokenId ${tokenId} not found.`);
+      this.logger.log(`Delta with tokenId ${tokenId} not found.`);
       return;
     }
 
     delta.offdelta += (isLeft ? -amount : amount);
   }
 
-  public addSubchannel(chainId: number): Subchannel {
-    let subchannel = this.getSubchannel(chainId);
-    if(subchannel)
-      return subchannel; //TODO мы тут должны возвращать существующий или кидать ошибку?
-    
-    subchannel = createSubchannelData(chainId, 1);
-    this.state.subchannels.push(subchannel);
 
-    return subchannel;
+
+  public getDelta(chainId: number, tokenId: number): Delta | undefined {
+    const subchannel = this.getSubchannel(chainId);
+    const delta = subchannel?.deltas.find(delta => delta.tokenId === tokenId);
+
+    return delta;
   }
 
+  
   public getSubchannel(chainId: number): Subchannel | undefined {
-    let subchannel = this.state.subchannels.find(subchannel => subchannel.chainId === chainId);
+    this.logger.log('Getting subchannel. Current subchannels:', stringify(this.state.subchannels));
+    const subchannel = this.state.subchannels.find(subchannel => subchannel.chainId === chainId);
+    this.logger.log(`Getting subchannel ${chainId}:`, stringify(subchannel));
     return subchannel;
   }
 
-  public getSubchannelDelta(chainId: number, tokenId: number): TokenDelta | undefined {
-    let subchannel = this.getSubchannel(chainId);
-    if(!subchannel)
+  private async applyTransition(block: Block, transitionData: any): Promise<void> {
+    let transition: Transition.Any;
+    try {
+      transition = Transition.createFromDecoded(transitionData);
+    } catch (error: any) {
+      this.logger.error(`Invalid transition data: ${error.message}`);
       return;
+    }
 
-    return subchannel.deltas.find(delta => delta.tokenId === tokenId);
+    this.logger.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
+    transition.apply(this, block.isLeft);
+    this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
+    
+    this.state.transitionNumber++;
+  }
+
+
+
+  async save(): Promise<void> {
+    const channelSavePoint: ChannelSavePoint = {
+      data: this.data,
+      state: this.state
+    };
+
+    this.logger.log("Saving state"+this.thisUserAddress, this.data.isLeft, stringify(channelSavePoint), new Date());
+
+    await this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
+    this.logger.log("State saved successfully"+this.thisUserAddress);
+  }
+
+  async load(): Promise<void> {
+    try {
+      const channelSavePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
+      this.data = channelSavePoint.data;
+      this.state = channelSavePoint.state;
+      this.logger.log("Loaded last state "+this.thisUserAddress, stringify(this.state));
+    } catch (e) {
+      this.logger.log("Load error", e);
+      await this.save(); // Initialize with empty state if load fails
+    }
   }
 }

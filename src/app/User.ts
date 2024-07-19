@@ -1,4 +1,3 @@
-import IChannel from '../types/IChannel';
 import IMessage from '../types/IMessage';
 import ITransport from '../types/ITransport';
 import ITransportListener from '../types/ITransportListener';
@@ -55,9 +54,9 @@ const TEMP_ENV = {
 export default class User implements ITransportListener  {
   // Hub-specific properties
   private _server: WebSocket.Server | null = null; // cannot be readonly because it is assigned in start()
-  private readonly _channels: Map<string, Channel> = new Map();
+  public _channels: Map<string, Channel> = new Map();
   private readonly _transports: Map<string, ITransport> = new Map();
-  private readonly _channelRecipientMapping: Map<ITransport, Map<string, IChannel>> = new Map();
+  private readonly _channelRecipientMapping: Map<ITransport, Map<string, Channel>> = new Map();
   private readonly _hubInfoMap: Map<string, IHubConnectionData> = new Map();
   private readonly sectionQueue: Record<string, QueueItem<any>[]> = {};
 
@@ -68,6 +67,7 @@ export default class User implements ITransportListener  {
   private provider: JsonRpcProvider | null = null;
   public signer: Signer | null = null;
 
+  public logger: Logger;
 
   
   depository!: Depository;
@@ -78,21 +78,28 @@ export default class User implements ITransportListener  {
 
   
   constructor(address: string, opt: IUserOptions) {    
+    this.logger = new Logger(address);
     this.thisUserAddress = address;
     this.opt = Object.freeze({ ...opt });
     this.storageContext = new StorageContext();
+    this.logger.log('new User() constructed '+address);
 
-    if (address == opt.hubConnectionDataList[0].address) {
-      console.log("we are hub",this.opt.hub)
-    }
   }
 
   // Combined onClose method
   onClose(transport: ITransport, id: string): void {
     this._transports.delete(id);
-    this._channelRecipientMapping.delete(transport);
 
-    Logger.info(`Client disconnected ${id}`);
+    this.criticalSection(id, async () => {
+      if (this._channels.get(id)) {
+        await this._channels.get(id)?.save();
+        console.log("Freeing up channel slot "+id)
+        this._channels.delete(id);
+      }
+
+    })
+
+    this.logger.info(`Client disconnected ${id}`);
   }
 
 
@@ -102,7 +109,7 @@ export default class User implements ITransportListener  {
   }
 
   async onReceive(transport: ITransport, message: IMessage): Promise<void> {
-    console.log(`Received message from ${message.header.from} to ${message.header.to}`, message.body);
+    this.logger.log(`Received message from ${message.header.from} to ${message.header.to}`, message.body);
     //try {
       if (message.body.type === BodyTypes.kFlushMessage) {
         await this.handleFlushMessage(transport, message as IMessage & { body: FlushMessage });
@@ -112,7 +119,7 @@ export default class User implements ITransportListener  {
         throw new Error('Unhandled message type');
       }
     // } catch (error) {
-     // Logger.error('Unexpected error:', error);
+     // this.logger.error('Unexpected error:', error);
       // Implement general error recovery
       
     //}
@@ -125,7 +132,7 @@ export default class User implements ITransportListener  {
       const channel = await this.getChannel(addr);
 
       if (channel.getState().blockNumber === 0) {
-        Logger.info(`Channel ${addr} is not initialized yet`);
+        this.logger.info(`Channel ${addr} is not initialized yet`);
       } 
       
       
@@ -133,7 +140,7 @@ export default class User implements ITransportListener  {
       //try {
         await channel.receive(message.body);
       //} catch (e) {
-       // Logger.error('Error processing block message', e);
+       // this.logger.error('Error processing block message', e);
       //}
     
     });
@@ -144,15 +151,16 @@ export default class User implements ITransportListener  {
     if (recipientTransport) {
       await recipientTransport.send(message);
     } else {
-      Logger.warn(`No transport found for recipient: ${message.header.to}`);
+      this.logger.warn(`No transport found for recipient: ${message.header.to}`);
     }
   }
 
-  public async getChannel(userId: string): Promise<IChannel> {
+  public async getChannel(userId: string): Promise<Channel> {
     let channel = this._channels.get(userId);
     if (!channel) {
       channel = new Channel(new ChannelContext(this, userId));
       await channel.load();
+      this._channels.set(userId, channel);
     }
     return channel;
   }
@@ -173,7 +181,7 @@ export default class User implements ITransportListener  {
       
 
     this._transports.set(data.address, transport);
-    console.log("Adding hub", data)
+    this.logger.log("Adding hub", data)
 
 
     await transport.open();
@@ -193,7 +201,7 @@ export default class User implements ITransportListener  {
   async start() {
     const signer = await this.getSigner();
     if (signer == null) {
-      Logger.error(`Cannot get user information from RPC server with id ${this.thisUserAddress}`);
+      this.logger.error(`Cannot get user information from RPC server with id ${this.thisUserAddress}`);
       return;
     }
     await this.storageContext.initialize(this.thisUserAddress);
@@ -214,20 +222,20 @@ export default class User implements ITransportListener  {
       throw new Error("This user is not configured as a hub");
     }
 
-    Logger.info(`Start listen ${this.opt.hub.host}:${this.opt.hub.port}`);
+    this.logger.info(`Start listen ${this.opt.hub.host}:${this.opt.hub.port}`);
 
     this._server = new WebSocket.Server({ port: this.opt.hub.port, host: this.opt.hub.host || '127.0.0.1' });
 
     this._server.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const userId = req.headers.authorization;
       if (!userId) {
-        Logger.error('Try connect user without identification information');
+        this.logger.error('Try connect user without identification information');
         ws.close();
         return;
       }
 
 
-      Logger.info(`New user connection with id ${userId}`);
+      this.logger.info(`New user connection with id ${userId}`);
         
       const transport = new Transport({
         id: userId,
@@ -252,7 +260,7 @@ export default class User implements ITransportListener  {
     this.depository.queryFilter(eventFilter, fromBlockNumber).then((pastEvents) => {
       pastEvents.forEach((event) => {
         const { receiver, addr, collateral, ondelta, tokenId } = event.args;
-        console.log(receiver, addr, collateral, ondelta, tokenId, event);
+        this.logger.log(receiver, addr, collateral, ondelta, tokenId, event);
       });
     });
 
@@ -260,7 +268,7 @@ export default class User implements ITransportListener  {
     this.depository.on<TransferReserveToCollateralEvent.Event>(
       eventFilter,
       (receiver, addr, collateral, ondelta, tokenId, event) => {
-        console.log(receiver, addr, collateral, ondelta, tokenId, event);
+        this.logger.log(receiver, addr, collateral, ondelta, tokenId, event);
       },
     );
   }
@@ -275,22 +283,22 @@ export default class User implements ITransportListener  {
     await erc20Mock.approve(await depository.getAddress(), amount);
     //await erc20Mock.transfer(await depository.getAddress(), 10000);
 
-    console.log('user1_balance_before', await erc20Mock.balanceOf(thisUserAddress));
-    console.log('depository_balance_before', await erc20Mock.balanceOf(await depository.getAddress()));
+    this.logger.log('user1_balance_before', await erc20Mock.balanceOf(thisUserAddress));
+    this.logger.log('depository_balance_before', await erc20Mock.balanceOf(await depository.getAddress()));
 
     const packedToken = await depository.packTokenReference(0, await erc20Mock.getAddress(), 0);
-    //console.log(packedToken);
-    //console.log(await depository.unpackTokenReference(packedToken));
-    //console.log(await erc20Mock.getAddress());
+    //this.logger.log(packedToken);
+    //this.logger.log(await depository.unpackTokenReference(packedToken));
+    //this.logger.log(await erc20Mock.getAddress());
 
 
     await depository.externalTokenToReserve(
       { packedToken, internalTokenId: 0n, amount: 10n }
     );
 
-    console.log('user1_balance_after', await erc20Mock.balanceOf(thisUserAddress));
-    console.log('depository_balance_after', await erc20Mock.balanceOf(await depository.getAddress()));
-    console.log('reserveTest1', await depository._reserves(thisUserAddress, 0));
+    this.logger.log('user1_balance_after', await erc20Mock.balanceOf(thisUserAddress));
+    this.logger.log('depository_balance_after', await erc20Mock.balanceOf(await depository.getAddress()));
+    this.logger.log('reserveTest1', await depository._reserves(thisUserAddress, 0));
   }
 
   //TODO this is test function
@@ -356,12 +364,12 @@ export default class User implements ITransportListener  {
         //this.depository.on<TransferReserveToCollateralEvent.Event>(
         //    eventsFilter1,
         //    (receiver, addr, collateral, ondelta, tokenId, event) => {
-        //      console.log(receiver, addr, collateral, ondelta, tokenId, event);
+        //      this.logger.log(receiver, addr, collateral, ondelta, tokenId, event);
         //    },
         //);
       } catch (exp: any) {
         //this.signer = null;
-        Logger.error(exp);
+        this.logger.error(exp);
       }
     }
 
@@ -413,12 +421,12 @@ export default class User implements ITransportListener  {
           new Promise((_, reject) => setTimeout(() => reject(new Error('Job timeout')), 20000))
         ]);
         resolve(result);
-      } catch (error) {
-        Logger.error(`Error in critical criticalSection ${key}:`, error);
+      } catch (error: any) {
+        this.logger.error(`Error in critical criticalSection ${key}:`, error);
         resolve(Promise.reject(error));
       }
 
-      Logger.debug(`Section ${key} took ${performance.now() - start} ms`);
+      this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
     }
 
     delete this.sectionQueue[key];
