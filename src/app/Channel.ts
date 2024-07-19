@@ -126,7 +126,7 @@ export default class Channel {
   }
 
   
-  private async applyBlock(isLeft: boolean, block: Block): Promise<void> {
+  private async applyBlock(isLeft: boolean, block: Block, dryRun: boolean): Promise<void> {
     this.logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
 
     // save previous hash first before changing this.state
@@ -136,7 +136,7 @@ export default class Channel {
     this.state.previousStateHash = keccak256(encode(this.state));
     for (let i = 0; i < block.transitions.length; i++) {
       const transition = block.transitions[i];
-      await this.applyTransition(block, transition);
+      await this.applyTransition(block, transition, dryRun);
     }
   }
  
@@ -147,7 +147,7 @@ export default class Channel {
       const pendingBlock: Block = this.data.pendingBlock!;
       const previousState = decode(encode(this.state));
 
-      await this.applyBlock(this.data.isLeft, pendingBlock);
+      await this.applyBlock(this.data.isLeft, pendingBlock, true);
 
       if (message.pendingSignatures.length == 0) {
         throw new Error('Invalid pending signatures length');
@@ -233,8 +233,8 @@ export default class Channel {
       throw new Error('Invalid previousBlockHash');
     }
 
-
-    await this.applyBlock(this.data.isLeft, block);
+    const stateBeforeDryRun = structuredClone(this.state);
+    await this.applyBlock(this.data.isLeft, block, true);
     this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
     // verify signatures after the block is applied
@@ -247,6 +247,10 @@ export default class Channel {
       throw new Error('Invalid verify new block signature');
     }
     // verify each subchannel proof
+
+
+    this.state = stateBeforeDryRun;
+    await this.applyBlock(this.data.isLeft, block, false);
 
 
     const newProofs = await this.getSubchannelProofs();
@@ -358,6 +362,7 @@ export default class Channel {
     if (transitions.length > 0) {
       
       const previousState: ChannelState = decode(encode(this.state));
+
       const block: Block = {
         isLeft: this.data.isLeft,
         timestamp: getTimestamp(),
@@ -369,7 +374,7 @@ export default class Channel {
       };
 
       this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
-      await this.applyBlock(this.data.isLeft, block);
+      await this.applyBlock(this.data.isLeft, block, true);
       this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
       this.logger.log("block", block, this.data.pendingBlock);
@@ -508,7 +513,7 @@ export default class Channel {
     return subchannel;
   }
 
-  private async applyTransition(block: Block, transitionData: any): Promise<void> {
+  private async applyTransition(block: Block, transitionData: any, dryRun: boolean): Promise<void> {
     let transition: Transition.Any;
     try {
       transition = Transition.createFromDecoded(transitionData);
@@ -518,7 +523,7 @@ export default class Channel {
     }
 
     this.logger.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
-    transition.apply(this, block.isLeft);
+    transition.apply(this, block.isLeft, dryRun);
     this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
     
     this.state.transitionNumber++;
