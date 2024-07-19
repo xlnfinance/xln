@@ -4,9 +4,9 @@ import IUserOptions from '../src/types/IUserOptions';
 import ENV from './env';
 
 import Logger from '../src/utils/Logger';
-
+  /*
 async function main() {
-      /*
+    
 
   try {
     const hubOptions: IUserOptions = {
@@ -84,10 +84,10 @@ async function main() {
     Logger.error('Test failed with error:', error);
     process.exit(1);
   }
-    */
 }
 
 main().catch(error => {
-  Logger.error('Unhandled error in main:', error);
+  logger.error('Unhandled error in main:', error);
   process.exit(1);
 });
+    */

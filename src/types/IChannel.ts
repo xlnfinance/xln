@@ -1,8 +1,8 @@
 import User from '../app/User';
 import ChannelState from './ChannelState';
 import FlushMessage from './Messages/FlushMessage';
-import { Subchannel } from './Subchannel';
-import Transition from './Transition';
+import { Subchannel, Delta } from './Subchannel';
+import Transition from '../app/Transition';
 
 export default interface IChannel {
   storage: any;
@@ -20,6 +20,8 @@ export default interface IChannel {
   getSubchannelProofs(): any;
 
   getSubchannel(chainId: number): Subchannel | undefined;
+
+  getDelta(chainId: number, tokenId: number): Delta | undefined;
 
   addSubchannel(chainId: number): Subchannel;
 

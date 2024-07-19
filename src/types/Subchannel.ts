@@ -1,8 +1,8 @@
 import { BigNumberish } from "ethers";
-import Transition from './Transition';
+import Transition from '../app/Transition';
 
 
-export interface TokenDelta {
+export interface Delta {
   tokenId: number;
   collateral: bigint;
   ondelta: bigint
@@ -26,7 +26,7 @@ export interface Subcontract {
 
 export interface Subchannel {
   chainId: number;
-  deltas: TokenDelta[];
+  deltas: Delta[];
   cooperativeNonce: number;
   disputeNonce: number;
   subcontracts: Subcontract[];
@@ -36,7 +36,7 @@ export interface Subchannel {
 }
 
 export function createSubchannelData(chainId: number, tokenId: number): Subchannel {
-  const delta: TokenDelta = {
+  const delta: Delta = {
     tokenId: tokenId,
     collateral: 0n,
     ondelta: 0n,
@@ -49,7 +49,7 @@ export function createSubchannelData(chainId: number, tokenId: number): Subchann
 
   const subchannel: Subchannel = {
     chainId: chainId,
-    deltas: [delta],
+    deltas: [],
     cooperativeNonce: 0,
     disputeNonce: 0,
     subcontracts: [],

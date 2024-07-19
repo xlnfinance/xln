@@ -1,6 +1,6 @@
 import Block from './Block';
 import { Subchannel } from './Subchannel';
-import Transition from './Transition';
+import Transition from '../app/Transition';
 
 
 export default interface ChannelData {

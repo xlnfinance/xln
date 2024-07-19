@@ -39,7 +39,8 @@
     "ethers": "^6.13.1",
     "js-sha3": "^0.9.3",
     "level": "^8.0.1",
-    "pino": "^9.1.0",
+    "pino": "^9.3.1",
+    "pino-pretty": "^11.2.1",
     "ws": "^8.17.0",
     "xlnfinance-contracts": "file:contracts"
   }
