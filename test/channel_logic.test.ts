@@ -9,6 +9,7 @@ import assert from 'assert';
 import { ethers } from 'ethers';
 import Logger from '../src/utils/Logger';
 
+import * as crypto from 'crypto';
 
 const logger = new Logger('ChannelLogicTest');
 
@@ -73,55 +74,74 @@ async function main() {
     channel2.flush()
   ]);
 
-  await sleep(100);
-  await channel1.load();
-  await channel2.load();
+  await sleep(500);
 
+  
   // Check that only one payment was applied (the one from the left channel)
   const delta1 = channel1.getDelta(1, 1);
   const delta2 = channel2.getDelta(1, 1);
+
+  console.log(delta1, delta2, channel1.data.mempool, channel1.data.sentTransitions, channel2.data.mempool)
+
   assert(delta1 && delta1.offdelta === 50n, "Both channels should have the same state after rollback&reapply");
   assert(delta2 && delta2.offdelta === 50n, "Both channels should have the same state after rollback&reapply");
 
   // Test 3: Add and resolve payment subcontract
-  const paymentHash = ethers.keccak256(ethers.toUtf8Bytes("secret"));
-  await channel1.push(new Transition.AddPayment(1, 1, 200n, paymentHash));
+  const secret = crypto.randomBytes(32).toString('hex');
+  const paymentHash = ethers.keccak256(ethers.toUtf8Bytes(secret));
+
+  const nextHops = [ENV.secondUserAddress];
+
+  await sleep(700);
+
+  console.log(channel1.state, channel2.state, channel1.data.mempool);
+
+
+  await channel1.push(new Transition.AddPaymentSubcontract(1, 1, 200n, paymentHash, nextHops, {secret}));
+  console.log(channel1.state, channel2.state, channel1.data.mempool);
   await channel1.flush();
-  await sleep(100);
-  await channel2.load();
+  await sleep(700);
 
-  assert(channel2.getSubchannel(1)?.subcontracts.length === 1, "Payment subcontract should be added");
+  console.log(delta1, delta2, channel1.state, channel2.state)
+  console.log(channel1.state)
+  console.log(await user1.renderAsciiUI());
+  console.log(await user2.renderAsciiUI());
 
-  await channel2.push(new Transition.ResolvePayment(1, 0, "secret"));
+  assert(channel2.state.subcontracts.length === 1, "Payment subcontract should be added");
+  console.log(channel1.getDelta(1, 1));
+
+  await channel2.push(new Transition.UpdatePaymentSubcontract(1, 0, secret));
   await channel2.flush();
-  await sleep(100);
-  await channel1.load();
+  await sleep(500);
 
-  assert(channel1.getSubchannel(1)?.subcontracts.length === 0, "Payment subcontract should be resolved");
-  assert(channel1.getDelta(1, 1)?.offdelta === 100n, "Offdelta should be updated after resolving payment");
+  console.log(channel1.state)
+  assert(channel1.state.subcontracts.length === 0, "Payment subcontract should be resolved");
+  console.log(channel1.getDelta(1, 1));
+  assert(channel1.getDelta(1, 1)?.offdelta === -150n, "Offdelta should be updated after resolving payment");
 
   // Test 4: Add and resolve swap subcontract
   await channel1.push(new Transition.AddDelta(1, 2));
   await channel1.flush();
   await sleep(100);
-  await channel2.load();
 
-  await channel1.push(new Transition.AddSwap(1, true, 1, 100n, 2, 200n));
+  
+  await channel1.push(new Transition.AddSwapSubcontract(1, true, 1, 100n, 2, 200n));
   await channel1.flush();
   await sleep(100);
-  await channel2.load();
 
-  assert(channel2.getSubchannel(1)?.subcontracts.length === 1, "Swap subcontract should be added");
+  
+  assert(channel2.state.subcontracts.length === 1, "Swap subcontract should be added");
 
-  await channel2.push(new Transition.ResolveSwap(1, 0, 0.5));
+  await channel2.push(new Transition.UpdateSwapSubcontract(1, 0, 0.5));
   await channel2.flush();
   await sleep(100);
-  await channel1.load();
 
-  assert(channel1.getSubchannel(1)?.subcontracts.length === 0, "Swap subcontract should be resolved");
+  
+  assert(channel1.state.subcontracts.length === 0, "Swap subcontract should be resolved");
   const delta1After = channel1.getDelta(1, 1);
   const delta2After = channel1.getDelta(1, 2);
-  assert(delta1After && delta1After.offdelta === 50n, "Offdelta for token 1 should be updated after resolving swap");
+  console.log(delta1After, delta2After);
+  assert(delta1After && delta1After.offdelta === -200n, "Offdelta for token 1 should be updated after resolving swap");
   assert(delta2After && delta2After.offdelta === 100n, "Offdelta for token 2 should be updated after resolving swap");
 
   // Test 5: Generate and verify subchannel proofs

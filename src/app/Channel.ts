@@ -9,7 +9,7 @@ import Block from '../types/Block';
 
 import ENV from '../../test/env';
 import { ethers, keccak256 } from 'ethers';
-import { Depository__factory, SubcontractProvider__factory } from '../../contracts/typechain-types/index';
+import { Depository__factory, SubcontractProvider, SubcontractProvider__factory } from '../../contracts/typechain-types/index';
 
 import { deepClone, getTimestamp } from '../utils/Utils';
 import FlushMessage, {isValidFlushMessage} from '../types/Messages/FlushMessage';
@@ -64,7 +64,7 @@ export default class Channel {
   public storage: IChannelStorage;
 
   constructor(
-    private ctx: IChannelContext
+    public ctx: IChannelContext
   ) {
 
     this.thisUserAddress = this.ctx.getUserAddress();
@@ -76,6 +76,8 @@ export default class Channel {
     this.state = this.emptyState();
     this.data = this.emptyData();
 
+    this.state.subcontracts = [];
+    this.data.subcontracts = new Map();
     this.logger.log("New channel constructed "+this.thisUserAddress, this.otherUserAddress);
   }
 
@@ -91,7 +93,8 @@ export default class Channel {
       blockNumber: 0,
       timestamp: 0,
       transitionNumber: 0,
-      subchannels: []
+      subchannels: [],
+      subcontracts: []
     };
 
     if (this.ctx.getUserAddress() > this.ctx.getRecipientAddress()) {
@@ -103,6 +106,7 @@ export default class Channel {
 
   private emptyData(): ChannelData {
     return {
+      subcontracts: new Map(),
       isLeft: this.ctx.getUserAddress() < this.ctx.getRecipientAddress(),
       rollbacks: 0,
       sentTransitions: 0,
@@ -135,8 +139,7 @@ export default class Channel {
     this.state.previousBlockHash = keccak256(encode(block));
     this.state.previousStateHash = keccak256(encode(this.state));
     for (let i = 0; i < block.transitions.length; i++) {
-      const transition = block.transitions[i];
-      await this.applyTransition(block, transition, dryRun);
+      await this.applyTransition(block, block.transitions[i], dryRun);
     }
   }
  
@@ -147,7 +150,7 @@ export default class Channel {
       const pendingBlock: Block = this.data.pendingBlock!;
       const previousState = decode(encode(this.state));
 
-      await this.applyBlock(this.data.isLeft, pendingBlock, true);
+      await this.applyBlock(pendingBlock.isLeft, pendingBlock, true);
 
       if (message.pendingSignatures.length == 0) {
         throw new Error('Invalid pending signatures length');
@@ -233,8 +236,12 @@ export default class Channel {
       throw new Error('Invalid previousBlockHash');
     }
 
+    if (block.isLeft == this.data.isLeft) {
+      throw new Error('Invalid isLeft');
+    }
+
     const stateBeforeDryRun = structuredClone(this.state);
-    await this.applyBlock(this.data.isLeft, block, true);
+    await this.applyBlock(block.isLeft, block, true);
     this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
     // verify signatures after the block is applied
@@ -274,11 +281,22 @@ export default class Channel {
   }
 
 
+  addSubcontract(subcontract: any, hiddenData?: any) {
+    const transitionId = this.state.transitionNumber;
+    this.state.subcontracts.push({ ...subcontract, transitionId });
+    this.data.subcontracts.set(transitionId, { ...subcontract, hiddenData });
+  }
+
+  getSubcontractHiddenData(transitionId: number): any {
+    return this.data.subcontracts.get(transitionId)?.hiddenData;
+  }
+
   async getSubchannelProofs() {
     const state = this.state;
     const encodedProofBody: string[] = [];
     const proofhash: any[] = [];
     const sigs: string[] = [];
+    const subcontractBatch: SubcontractProvider.BatchStruct[] = [];
 
     const proofbody: any[] = [];
 
@@ -296,31 +314,99 @@ export default class Channel {
         proofbody[i].tokenIds.push(d.tokenId);
       }
 
-      // Handle subcontracts
-      for (let j = 0; j < subch.subcontracts.length; j++) {
-        const subcontract = subch.subcontracts[j];
-        const encodedBatch = ethers.AbiCoder.defaultAbiCoder().encode(
-          [(SubcontractBatchABI as unknown) as ethers.ParamType],
-          [{
-            payment: subcontract.payment,
-            swap: subcontract.swap
-          }]
-        );
-        proofbody[i].subcontracts.push({
-          subcontractProviderAddress: ENV.subcontractProviderAddress, // You need to add this to your options
-          encodedBatch: encodedBatch,
-          allowences: [] // You may need to implement allowance logic
-        });
-      }
+      // Build subcontracts for this subchannel
+      subcontractBatch[i] = {
+        payment: [],
+        swap: []
+      };
+
     }
 
+    // mapping subcontracts to respective subchannels
+    // figure out deltaIndexes that subcontractprovider uses internally from tokenIds
+      this.state.subcontracts.forEach((subcontract: any) => {
 
+        const subchannelIndex = this.state.subchannels.findIndex(subchannel => subchannel.chainId === subcontract.chainId);
+        if (subchannelIndex < 0) {
+          console.log(this.state)
+          throw new Error(`Subchannel with chainId ${subcontract.chainId} not found.`);
+        }
+
+        const deltaIndex = this.state.subchannels[subchannelIndex].deltas.findIndex(delta => delta.tokenId === subcontract.tokenId);
+        if (deltaIndex < 0) {
+          console.log(this.state)
+          throw new Error(`Delta with tokenId ${subcontract.tokenId} not found.`);
+        }
+
+
+        const hiddenData = this.getSubcontractHiddenData(subcontract.transitionId);
+        if (subcontract.type === 'AddPaymentSubcontract') {
+          subcontractBatch[subchannelIndex].payment.push({
+            deltaIndex: deltaIndex,
+            amount: subcontract.amount,
+            revealedUntilBlock: 1n,
+            hash: subcontract.hash,
+          });
+        } else if (subcontract.type === 'AddSwapSubcontract') {
+          const subTokenIndex = this.state.subchannels[subchannelIndex].deltas.findIndex(delta => delta.tokenId === subcontract.subTokenId);
+          subcontractBatch[subchannelIndex].swap.push({
+            ownerIsLeft: subcontract.ownerIsLeft,
+            addDeltaIndex: deltaIndex,
+            addAmount: subcontract.addAmount,
+            subDeltaIndex: subTokenIndex,
+            subAmount: subcontract.subAmount,
+          });
+
+        }
+      
+      });
+
+
+    
+
+
+    for (let i = 0; i < state.subchannels.length; i++) {
+ console.log(
+  [(SubcontractBatchABI as unknown) as ethers.ParamType],
+  [subcontractBatch[i]])
+      const encodedBatch = ethers.AbiCoder.defaultAbiCoder().encode(
+        [(SubcontractBatchABI as unknown) as ethers.ParamType],
+        [subcontractBatch[i]]
+      );
+
+      proofbody[i].subcontracts.push({
+        subcontractProviderAddress: ENV.subcontractProviderAddress,
+        encodedBatch: encodedBatch,
+        allowences: [] // Implement allowance logic if needed
+      });
+
+
+
+      encodedProofBody[i] = coder.encode([(ProofbodyABI as unknown) as ethers.ParamType], [proofbody[i]]);
+
+      const fullProof = [
+        MessageType.DisputeProof,
+        state.channelKey, 
+        state.subchannels[i].cooperativeNonce,
+        state.subchannels[i].disputeNonce,
+        keccak256(encodedProofBody[i])
+      ];
+
+      const encoded_msg = coder.encode(
+        ['uint8', 'bytes', 'uint', 'uint', 'bytes32'],
+        fullProof
+      );
+      proofhash[i] = keccak256(encoded_msg);
+
+      sigs[i] = await this.ctx.user.signer!.signMessage(proofhash[i]);
+    }
     
     // add global state signature on top
     sigs.push(await this.ctx.user.signer!.signMessage(keccak256(encode(this.state))));
 
     return {
       encodedProofBody,
+      subcontractBatch,
       proofbody,
       proofhash,
       sigs      
@@ -508,14 +594,15 @@ export default class Channel {
     return subchannel;
   }
 
+
   private async applyTransition(block: Block, transitionData: any, dryRun: boolean): Promise<void> {
     let transition: Transition.Any;
-    try {
+    //try {
       transition = Transition.createFromDecoded(transitionData);
-    } catch (error: any) {
-      this.logger.error(`Invalid transition data: ${error.message}`);
-      return;
-    }
+    //} catch (error: any) {
+    //  this.logger.error(`Invalid transition data: ${error.message}`);
+    //  return;
+    //}
 
     this.logger.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
     transition.apply(this, block.isLeft, dryRun);
@@ -523,8 +610,6 @@ export default class Channel {
     
     this.state.transitionNumber++;
   }
-
-
 
   async save(): Promise<void> {
     const channelSavePoint: ChannelSavePoint = {

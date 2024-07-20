@@ -1,11 +1,6 @@
 node_modules
 dist
 local-storage
+.DS_Store
 
-
-output.txt
-fulldiff.txt
-f.txt
-
-
-TODO
+*.txt
