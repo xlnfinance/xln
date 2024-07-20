@@ -14,10 +14,11 @@ const logger = new Logger('ChannelLogicTest');
 
 
 import {exec} from 'child_process'
-exec('rm -rf local-storage')
 
 async function main() {
-    
+  exec('rm -rf local-storage')
+  await sleep(100)
+
   const opt: IUserOptions = {
     hubConnectionDataList: ENV.hubConnectionDataList,
     depositoryContractAddress: ENV.depositoryContractAddress,

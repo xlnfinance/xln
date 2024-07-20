@@ -48,14 +48,11 @@ export namespace Transition {
       const subchannel = channel.getSubchannel(this.chainId);
       if (subchannel) {
         subchannel.subcontracts.push({
-          payment: [{
             deltaIndex: this.deltaIndex,
             amount: this.amount,
             revealedUntilBlock: 0, // Set to 0 initially
             hash: this.hash
-          }],
-          swap: []
-        });
+          });
       }
     }
   }

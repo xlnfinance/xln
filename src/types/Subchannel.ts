@@ -19,17 +19,17 @@ export interface Payment {
   hash: string;
   revealedUntilBlock: number;
 }
-export interface Subcontract {
-  payment: Payment[];
-  swap: {
-    ownerIsLeft: boolean;
-    addDeltaIndex: number;
-    addAmount: bigint;
-    subDeltaIndex: number;
-    subAmount: bigint;
-  }[];
+export interface Swap {
+  ownerIsLeft: boolean;
+  addDeltaIndex: number;
+  addAmount: bigint;
+  subDeltaIndex: number;
+  subAmount: bigint;
 }
 
+
+export type Subcontract = Payment | Swap;
+ 
 
 
 export interface Subchannel {

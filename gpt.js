@@ -22,7 +22,9 @@ function buildFileTree(dir, baseDir) {
                 node.children.push({ name: file, type: 'file' });
                 const relativePath = path.relative(baseDir, filePath);
                 const content = fs.readFileSync(filePath, 'utf8');
-                fileContents += `\n\n--- ${relativePath} ---\n\n${content}`;
+
+                const prefix = baseDir.split('/').pop();
+                fileContents += `--- ${prefix}/${relativePath} ---\n${content}\n`;
             }
         });
     }
@@ -57,7 +59,7 @@ const { node: fileTree3, fileContents: fileContents3 } = buildFileTree(srcPath3,
 */
 
 
-const fullOutput = `${fs.readFileSync('TODO', 'utf8')} File Tree:\n\n${treeOutput}\n\nFile Contents:${fileContents} ${fileContents2}`;
+const fullOutput = `${fileContents}${fileContents2}`;
 
 const outputPath = path.join(__dirname, 'output.txt');
 fs.writeFileSync(outputPath, fullOutput);
