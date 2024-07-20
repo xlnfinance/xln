@@ -13,4 +13,5 @@ export default interface ChannelState {
   transitionNumber: number;
 
   subchannels: Array<Subchannel>;
+  subcontracts: Array<any>;
 }
