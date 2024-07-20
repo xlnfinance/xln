@@ -242,7 +242,7 @@ export default class Channel {
 
     const stateBeforeDryRun = structuredClone(this.state);
     await this.applyBlock(block.isLeft, block, true);
-    this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
+    //this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
     // verify signatures after the block is applied
     if (!message.newSignatures || message.newSignatures.length == 0) {
@@ -588,9 +588,9 @@ export default class Channel {
 
   
   public getSubchannel(chainId: number): Subchannel | undefined {
-    this.logger.log('Getting subchannel. Current subchannels:', stringify(this.state.subchannels));
+    //this.logger.log('Getting subchannel. Current subchannels:', stringify(this.state.subchannels));
     const subchannel = this.state.subchannels.find(subchannel => subchannel.chainId === chainId);
-    this.logger.log(`Getting subchannel ${chainId}:`, stringify(subchannel));
+    //this.logger.log(`Getting subchannel ${chainId}:`, stringify(subchannel));
     return subchannel;
   }
 
@@ -604,9 +604,9 @@ export default class Channel {
     //  return;
     //}
 
-    this.logger.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
+    //this.logger.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
     transition.apply(this, block.isLeft, dryRun);
-    this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
+    //this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
     
     this.state.transitionNumber++;
   }
@@ -617,7 +617,7 @@ export default class Channel {
       state: this.state
     };
 
-    this.logger.log("Saving state"+this.thisUserAddress, this.data.isLeft, stringify(channelSavePoint), new Date());
+    //this.logger.log("Saving state"+this.thisUserAddress, this.data.isLeft, stringify(channelSavePoint), new Date());
 
     await this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
     this.logger.log("State saved successfully"+this.thisUserAddress);

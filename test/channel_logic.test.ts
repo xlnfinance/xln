@@ -101,6 +101,8 @@ async function main() {
   console.log(channel1.state, channel2.state, channel1.data.mempool);
   await channel1.flush();
   await sleep(700);
+  console.log(await user1.renderAsciiUI());
+  console.log(await user2.renderAsciiUI());
 
   console.log(delta1, delta2, channel1.state, channel2.state)
   console.log(channel1.state)
@@ -129,7 +131,9 @@ async function main() {
   await channel1.flush();
   await sleep(100);
 
-  
+  console.log(await user1.renderAsciiUI());
+  console.log(await user2.renderAsciiUI());
+
   assert(channel2.state.subcontracts.length === 1, "Swap subcontract should be added");
 
   await channel2.push(new Transition.UpdateSwapSubcontract(1, 0, 0.5));
@@ -140,7 +144,8 @@ async function main() {
   assert(channel1.state.subcontracts.length === 0, "Swap subcontract should be resolved");
   const delta1After = channel1.getDelta(1, 1);
   const delta2After = channel1.getDelta(1, 2);
-  console.log(delta1After, delta2After);
+  console.log(await user1.renderAsciiUI());
+  console.log(await user2.renderAsciiUI());
   assert(delta1After && delta1After.offdelta === -200n, "Offdelta for token 1 should be updated after resolving swap");
   assert(delta2After && delta2After.offdelta === 100n, "Offdelta for token 2 should be updated after resolving swap");
 
