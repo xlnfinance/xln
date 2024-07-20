@@ -18,7 +18,7 @@ export enum TransitionMethod {
   UpdatePaymentSubcontract,
 
   AddSwapSubcontract,
-  RemoveSwapSubcontract,
+  UpdateSwapSubcontract,
 
 
 }

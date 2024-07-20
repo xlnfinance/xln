@@ -59,29 +59,9 @@ export class AsciiUI {
     output += `Out Capacity: ${derived.outCapacity}\n\n`;
     output += `Balance Visualization:\n${derived.ascii}\n`;
 
-    output += this.renderSubcontracts(channel, chainId, delta.tokenId);
-
-    return output;
-  }
-  private static renderSubcontracts(channel: Channel, chainId: number, tokenId: number): string {
-    let output = '';
-    const subcontracts = (channel.state.subcontracts as any[]).filter(sc => sc.chainId === chainId && sc.tokenId === tokenId);
-
-    if (subcontracts.length > 0) {
-      output += '\nSubcontracts:\n';
-      subcontracts.forEach((sc, index) => {
-        if (sc.type === 'AddPaymentSubcontract') {
-          output += `  Payment ${index + 1}: Amount: ${sc.amount}, Hash: ${sc.hash.slice(0, 10)}...\n`;
-        } else if (sc.type === 'AddSwapSubcontract') {
-          output += `  Swap ${index + 1}: Add: ${sc.addAmount} (${sc.tokenId}), Sub: ${sc.subAmount} (${sc.subTokenId})\n`;
-        }
-      });
-    }
-
     return output;
   }
 
-    
   private static createBox(title: string): string {
     const paddedTitle = ` ${title} `;
     const sideWidth = Math.floor((this.BOX_WIDTH - paddedTitle.length) / 2);

@@ -1,7 +1,5 @@
 
 export const SubcontractBatchABI = {
-    "inputs": [
-      {
         "components": [
           {
             "components": [
@@ -67,18 +65,7 @@ export const SubcontractBatchABI = {
         "name": "b",
         "type": "tuple"
       }
-    ],
-    "name": "encodeBatch",
-    "outputs": [
-      {
-        "internalType": "bytes",
-        "name": "",
-        "type": "bytes"
-      }
-    ],
-    "stateMutability": "pure",
-    "type": "function"
-  }
+    
 
 export const ProofbodyABI = {
 "components": [

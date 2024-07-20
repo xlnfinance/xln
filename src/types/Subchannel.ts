@@ -13,23 +13,7 @@ export interface Delta {
   rightAllowence:bigint;
 }
 
-export interface Payment {
-  deltaIndex: number; // Add this line
-  amount: bigint;
-  hash: string;
-  revealedUntilBlock: number;
-}
-export interface Swap {
-  ownerIsLeft: boolean;
-  addDeltaIndex: number;
-  addAmount: bigint;
-  subDeltaIndex: number;
-  subAmount: bigint;
-}
 
-
-export type Subcontract = Payment | Swap;
- 
 
 
 export interface Subchannel {
@@ -37,7 +21,6 @@ export interface Subchannel {
   deltas: Delta[];
   cooperativeNonce: number;
   disputeNonce: number;
-  subcontracts: Subcontract[];
 
   proposedEvents: Transition.ProposedEvent[];
   proposedEventsByLeft: boolean;
@@ -60,8 +43,6 @@ export function createSubchannelData(chainId: number, tokenId: number): Subchann
     deltas: [],
     cooperativeNonce: 0,
     disputeNonce: 0,
-    subcontracts: [],
-
     proposedEvents: [],
     proposedEventsByLeft: false
   };

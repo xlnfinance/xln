@@ -23,7 +23,7 @@ import {
 import IUserOptions from '../types/IUserOptions';
 
 import StorageContext from './StorageContext';
-
+import Transition from './Transition';
 
 
 
@@ -248,6 +248,31 @@ export default class User implements ITransportListener  {
     return AsciiUI.renderUser(this);
   }
   
+  async forwardPayment(payment: Transition.AddPaymentSubcontract, nextHops: string[]): Promise<void> {
+    const nextHop = nextHops.pop();
+    if (nextHop) {
+      const nextChannel = await this.getChannel(nextHop);
+      const delta = nextChannel.getDelta(payment.chainId, payment.tokenId);
+      if (delta) {
+        const outboundCapacity = nextChannel.deriveDelta(payment.chainId, payment.tokenId).outCapacity;
+        if (outboundCapacity >= payment.amount) {
+          const newPayment = new Transition.AddPaymentSubcontract(
+            payment.chainId,
+            payment.tokenId,
+            payment.amount,
+            payment.hash,
+            nextHops
+          );
+          nextChannel.push(newPayment);
+          nextChannel.flush();
+        } else {
+          this.logger.error("Insufficient outbound capacity for forwarding payment");
+        }
+       }
+    } else {
+      this.logger.log("Final receiver reached for payment");
+     }
+  }
   /*
 
   // TODO save fromBlockNumber to the storage
@@ -413,16 +438,16 @@ export default class User implements ITransportListener  {
       const [job, resolve] = this.sectionQueue[key].shift()!;
       const start = performance.now();
 
-      try {
+      // try {
         const result = await Promise.race([
           job(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Job timeout')), 20000))
         ]);
         resolve(result);
-      } catch (error: any) {
-        this.logger.error(`Error in critical criticalSection ${key}:`, error);
-        resolve(Promise.reject(error));
-      }
+      //} catch (error: any) {
+      //  this.logger.error(`Error in critical criticalSection ${key}:`, error);
+      //  resolve(Promise.reject(error));
+      //}
 
       this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
     }

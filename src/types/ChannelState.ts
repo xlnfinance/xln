@@ -1,4 +1,5 @@
 import { Subchannel } from "./Subchannel";
+import Transition from "../app/Transition";
 
 export default interface ChannelState {
   left: string;
@@ -13,5 +14,5 @@ export default interface ChannelState {
   transitionNumber: number;
 
   subchannels: Array<Subchannel>;
-  subcontracts: Array<any>;
+  subcontracts: Array<Transition.Any>;
 }
