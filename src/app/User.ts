@@ -6,7 +6,7 @@ import Logger from '../utils/Logger';
 import Channel from './Channel';
 import IChannelContext from '../types/IChannelContext';
 import ChannelContext from './ChannelContext';
-import { IHubConnectionData } from '../types/IHubConnectionData';
+
 import { BodyTypes } from '../types/IBody';
 import { TransferReserveToCollateralEvent } from '../../contracts/typechain-types/contracts/Depository.sol/Depository';
 import { ethers, Signer, verifyMessage as ethersVerifyMessage, JsonRpcProvider, BigNumberish } from 'ethers';
@@ -20,18 +20,18 @@ import {
   ERC1155Mock,
   ERC1155Mock__factory,
 } from '../../contracts/typechain-types/index';
-import IUserOptions from '../types/IUserOptions';
 
 import StorageContext from './StorageContext';
 import Transition from './Transition';
 
-
+import ENV, {HubData} from '../env';
 
 
 import WebSocket from 'ws';
 import { IncomingMessage } from 'http';
 import Transport from './Transport';
 
+import { encrypt,decrypt, PrivateKey } from 'eciesjs';
 
 import {encode, decode} from '../utils/Codec';
 import { AsciiUI } from '../utils/AsciiUI';
@@ -42,10 +42,7 @@ import { performance } from 'perf_hooks';
 type Job<T> = () => Promise<T>;
 type QueueItem<T> = [Job<T>, (value: T | PromiseLike<T>) => void];
 
-import ENV from '../../test/env';
 
-
-import { encrypt,decrypt, PrivateKey } from 'eciesjs';
 
 export default class User implements ITransportListener  {
   // Hub-specific properties
@@ -57,7 +54,7 @@ export default class User implements ITransportListener  {
   private readonly sectionQueue: Record<string, QueueItem<any>[]> = {};
 
   public readonly thisUserAddress: string;
-  public readonly opt: Readonly<IUserOptions>;
+
   public readonly storageContext: StorageContext;
 
   private provider: JsonRpcProvider | null = null;
@@ -79,27 +76,27 @@ export default class User implements ITransportListener  {
   constructor(private email: string, private password: string) {    
 
     this.storageContext = new StorageContext();
-    this.encryptionKey =  new PrivateKey();
 
     const seed = ethers.keccak256(ethers.toUtf8Bytes(email + password));
     this.signer = new ethers.Wallet(seed);
-    this.encryptionKey = new PrivateKey(ethers.toUtf8Bytes(seed));
+    this.encryptionKey = new PrivateKey(Buffer.from(seed.slice('0x'.length), 'hex'));
 
     this.thisUserAddress = this.signer.address;
     this.logger = new Logger(this.thisUserAddress);
-    this.logger.log('new User() constructed '+address);
+    this.logger.log(`new User() constructed ${this.thisUserAddress} ${this.encryptionKey.publicKey.toHex()} ${this.encryptionKey.secret.toString('hex')}`);
+
   }
 
   async broadcastProfile() {
     const profile = {
       address: this.thisUserAddress,
       publicKey: this.encryptionKey.publicKey,
-      hubs: this.opt.hubConnectionDataList.map(hub => hub.address),
+      hubs: ENV.hubDataList.map(hub => hub.address),
     };
 
     const encodedProfile = encode(profile);    
     // Assuming the first hub in the list is the coordinator
-    const coordinatorHub = this.opt.hubConnectionDataList[0];
+    const coordinatorHub = ENV.hubDataList[0];
     await this.send(coordinatorHub.address, {
       header: {
         from: this.thisUserAddress,
@@ -130,9 +127,9 @@ export default class User implements ITransportListener  {
   }
 
 
-
-  get isHub(): boolean {
-    return this.opt.hub !== undefined;
+  getHub(): HubData | undefined {
+    const hub = ENV.hubDataList.find(hub => hub.address === this.thisUserAddress);
+    return hub;
   }
 
   async onReceive(transport: ITransport, message: IMessage): Promise<void> {
@@ -142,7 +139,7 @@ export default class User implements ITransportListener  {
         await this.handleBroadcastProfile(message);
       } else if (message.body.type === BodyTypes.kGetProfile) {
         await this.handleGetProfile(message);
-      } if (this.isHub && message.header.to !== this.thisUserAddress) {
+      } if (this.getHub() && message.header.to !== this.thisUserAddress) {
         await this.handleProxyMessage(message);
       } else if (message.body.type === BodyTypes.kFlushMessage) {
         await this.handleFlushMessage(transport, message as IMessage & { body: FlushMessage });
@@ -208,11 +205,6 @@ export default class User implements ITransportListener  {
   }
 
   public async getChannel(userId: string): Promise<Channel> {
-    if (!this.channels.has(userId)) {
-      return this.channels.get(userId)!;
-    }
-
-
     let channel = this._channels.get(userId);
     if (!channel) {
       channel = new Channel(new ChannelContext(this, userId));
@@ -223,7 +215,7 @@ export default class User implements ITransportListener  {
   }
  
 
-  async addHub(data: IHubConnectionData) {
+  async addHub(data: HubData) {
     if (this._transports.has(data.address)) {
       return this._transports.get(data.address);
     }
@@ -264,28 +256,25 @@ export default class User implements ITransportListener  {
 
     // Start hub if this is a hub
 
-    if (this.isHub) {
+    if (this.getHub()) {
       await this.startHub();
     } else {
-      if (this.opt.hubConnectionDataList && this.opt.hubConnectionDataList.length > 0) {
-        await Promise.all(this.opt.hubConnectionDataList.map(opt => this.addHub(opt)));
+      if (ENV.hubDataList && ENV.hubDataList.length > 0) {
+        await Promise.all(ENV.hubDataList.map(opt => this.addHub(opt)));
       }    
     }
   }
 
-  async connectTo(address: string): Promise<void> {
-    await this.addHub({ host: '127.0.0.1', port: 10000, address: address });
-  }
-
   // Hub-specific startHub method
   async startHub(): Promise<void> {
-    if (!this.opt.hub) {
+    const hub = this.getHub();
+    if (!this.getHub()) {
       throw new Error("This user is not configured as a hub");
     }
 
-    this.logger.info(`Start listen ${this.opt.hub.host}:${this.opt.hub.port}`);
+    this.logger.info(`Websocket Server started ${hub!.host}:${hub!.port}`);
 
-    this._server = new WebSocket.Server({ port: this.opt.hub.port, host: this.opt.hub.host || '127.0.0.1' });
+    this._server = new WebSocket.Server({ port: hub!.port, host: hub!.host || '127.0.0.1' });
 
     this._server.on('connection', (ws: WebSocket, req: IncomingMessage) => {
       const userId = req.headers.authorization;
@@ -295,7 +284,6 @@ export default class User implements ITransportListener  {
         return;
       }
 
-
       this.logger.info(`New user connection with id ${userId}`);
         
       const transport = new Transport({
@@ -303,10 +291,8 @@ export default class User implements ITransportListener  {
         receiver: this,
         ws: ws
       });
-      this._transports.set(userId, transport);
-      
+      this._transports.set(userId, transport);      
     });
-
   }
 
   async renderAsciiUI(): Promise<string> {
@@ -318,7 +304,7 @@ export default class User implements ITransportListener  {
   }
 
   async getChannels(): Promise<Channel[]> {
-    return Array.from(this.channels.values());
+    return Array.from(this._channels.values());
   }
 
 
@@ -327,25 +313,25 @@ export default class User implements ITransportListener  {
     await channel.load();
     this._channels.set(peerAddress, channel);
 
-
-    this.channels.set(channel.getId(), channel);
     return channel;
   }
 
   async encryptMessage(recipientAddress: string, message: string): Promise<string> {
-    const recipientPublicKey = await this.getPublicKeyForAddress(recipientAddress);
-    return encrypt(recipientPublicKey, Buffer.from(message)).toString('hex');
+    const recipient = await this.getProfile(recipientAddress);
+    return encrypt(recipient.publicKey, Buffer.from(message)).toString('hex');
   }
 
   async decryptMessage(senderAddress: string, encryptedMessage: string): Promise<string> {
     const decrypted = await decrypt(this.encryptionKey.secret, Buffer.from(encryptedMessage, 'hex'));
     return decrypted.toString();
   }
-
-  private async getPublicKeyForAddress(address: string): Promise<any> {
-    // Implement logic to fetch public key for a given address
-    // This might involve querying a central directory or using a discovery mechanism
+  async getProfile(address: string): Promise<any> {
+    return {
+      publicKey: ENV.profiles[address]
+    }
   }
+
+
   
   
   /*
@@ -379,7 +365,7 @@ export default class User implements ITransportListener  {
   async getSigner(): Promise<Signer | null> {
     if (!this.signer) {
       try {
-        //this.provider = new JsonRpcProvider(this.opt.jsonRPCUrl);
+        //this.provider = new JsonRpcProvider(ENV.jsonRPCUrl);
         //this.signer = await this.provider.getSigner(this.thisUserAddress);
 
         //this.depository = Depository__factory.connect(ENV.depositoryContractAddress, this.signer);
@@ -431,7 +417,7 @@ export default class User implements ITransportListener  {
         this.sectionQueue[key].push([job, resolve]);
       } else {
         this.sectionQueue[key] = [[job, resolve]];
-        this.processQueue(key).catch(reject);
+        this.processQueue(key) //.catch(reject);
       }
     });
   }

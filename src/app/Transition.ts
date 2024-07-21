@@ -48,7 +48,8 @@ export namespace Transition {
       if (subchannel) {
         channel.state.subcontracts.push(this);
       }
-          
+      throw new Error('Apply subc');
+
       if (dryRun) return;
   
       channel.decryptAndProcessPayment(this).then(secret => {
@@ -106,6 +107,10 @@ export namespace Transition {
     ) {}
 
     apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      if (this.ownerIsLeft == !isLeft) {
+        throw new Error('Incorrect0 owner for swap');
+      }
+
       channel.state.subcontracts.push(this);
     }
   }
@@ -123,7 +128,7 @@ export namespace Transition {
       const swap = createFromDecoded(channel.state.subcontracts[this.subcontractIndex]) as AddSwapSubcontract;
       
       if (subchannel && swap) {
-        if (swap.ownerIsLeft !== isLeft) {
+        if (swap.ownerIsLeft == isLeft) {
           throw new Error('Incorrect owner for swap');
         }
         if (this.fillingRatio === null) {
@@ -356,7 +361,7 @@ export namespace Transition {
       typeof transition.tokenId === 'number' &&
       typeof transition.amount === 'bigint' &&
       typeof transition.hash === 'string' &&
-      Array.isArray(transition.nextHops)
+      typeof transition.encryptedPackage === 'string'
     );
   }
 

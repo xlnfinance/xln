@@ -50,15 +50,15 @@ const srcPath = path.resolve(__dirname, 'src');
 const { node: fileTree, fileContents } = buildFileTree(srcPath, srcPath);
 const treeOutput = printFileTree(fileTree);
 
-const srcPath2 = path.resolve(__dirname, 'test');
-const { node: fileTree2, fileContents: fileContents2 } = buildFileTree(srcPath2, srcPath2);
+//const srcPath2 = path.resolve(__dirname, 'test');
+//const { node: fileTree2, fileContents: fileContents2 } = buildFileTree(srcPath2, srcPath2);
 
 const srcPath3 = path.resolve(__dirname, 'contracts/contracts');
 const { node: fileTree3, fileContents: fileContents3 } = buildFileTree(srcPath3, srcPath3);
 
 
 
-const fullOutput = `${fileContents3}${fileContents}${fileContents2}`;
+const fullOutput = `${fileContents3}${fileContents}`;
 
 const outputPath = path.join(__dirname, 'output.txt');
 fs.writeFileSync(outputPath, fullOutput);

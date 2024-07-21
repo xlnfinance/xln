@@ -1,9 +1,9 @@
-import User from '../src/app/User';
-import { sleep } from '../src/utils/Utils';
-import IUserOptions from '../src/types/IUserOptions';
-import ENV from './env';
+import User from '../app/User';
+import { sleep } from '../utils/Utils';
 
-import Logger from '../src/utils/Logger';
+import ENV from '../env';
+
+import Logger from '../utils/Logger';
 
 import {exec} from 'child_process'
 exec('rm -rf local-storage')
@@ -13,19 +13,8 @@ exec('rm -rf local-storage')
 async function main() {
     
 
-  try {
-    const hubOptions: IUserOptions = {
-      hubConnectionDataList: [],
-      depositoryContractAddress: ENV.depositoryContractAddress,
-      jsonRPCUrl: ENV.rpcNodeUrl,
-      hub: {
-        host: '127.0.0.1',
-        port: 10000,
-        address: ENV.hubAddress,
-      }
-    };
-
-    const hub = new User(ENV.hubAddress, hubOptions);
+  try { 
+    const hub = new User(ENV.hubAddress, '');
     await hub.start();
     Logger.info('Hub started');
 
@@ -41,8 +30,8 @@ async function main() {
       onExternalChannelRequestCallback: () => true // Allow external channel requests for testing
     };
 
-    const user1 = new User(ENV.firstUserAddress, userOptions);
-    const user2 = new User(ENV.secondUserAddress, userOptions);
+    const user1 = new User(ENV.firstUserAddress, '');
+    const user2 = new User(ENV.secondUserAddress, '');
 
     await Promise.all([user1.start(), user2.start()]);
     Logger.info('Users started');

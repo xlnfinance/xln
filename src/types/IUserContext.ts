@@ -1,6 +1,5 @@
-import IUserOptions from './IUserOptions';
 import IStorageContext from './IStorageContext';
-import ITransportFactory from './ITransportFactory';
+
 import { ethers } from 'ethers';
 import { Signer, verifyMessage as ethersVerifyMessage, JsonRpcProvider } from 'ethers';
 import Logger from '../utils/Logger';
@@ -26,14 +25,13 @@ export default interface IUserContext {
   erc721Mock: ERC721Mock;
   erc1155Mock: ERC1155Mock;
 
-  getTransportFactory(): ITransportFactory;
 
   getStorageContext(): IStorageContext;
 
   getAddress(): string;
 
-  getOptions(): IUserOptions;
 
+  
   getSigner(): Promise<ethers.Signer | null>;
 
   signMessage(message: string): Promise<string>;
