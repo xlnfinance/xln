@@ -4,7 +4,12 @@ import { ethers } from 'ethers';
 import User from './User';
 import { Transition } from './Transition';
 
-const Chalk = import('chalk');
+let chalk: any;
+import("chalk").then((chalk) => {
+  // Use chalk here
+  chalk = chalk;
+});
+
 export class XLNCommandLine {
   private program: Command;
 

@@ -3,10 +3,10 @@ import  User  from './User';
 import { Transition } from './Transition';
 
 export class XLNInteractiveDashboard {
-  private screen: blessed.screen;
-  private channelsBox: blessed.Widgets.BoxElement;
-  private chatBox: blessed.Widgets.BoxElement;
-  private inputBox: blessed.Widgets.TextboxElement;
+  private screen: any;
+  private channelsBox: any;
+  private chatBox: any;
+  private inputBox: any;
 
   constructor(private user: User) {
     this.screen = blessed.screen();
@@ -87,8 +87,10 @@ export class XLNInteractiveDashboard {
     let content = '';
     channels.forEach((channel, index) => {
       content += `${index + 1}. ${channel.getId()}\n`;
-      channel.state.getDeltas().forEach(({ chainId, tokenId }) => {
-        content += `  - ${channel.deriveDelta(chainId, tokenId)}\n`;
+      channel.state.subchannels.forEach(({ chainId, deltas }) => {
+        deltas.forEach(({ tokenId }) => {
+          content += `  - ${channel.deriveDelta(chainId, tokenId)}\n`;
+        });
       });
     });
     this.channelsBox.setContent(content);

@@ -1,15 +1,15 @@
-import HubApp from '../src/hub/HubApp';
+import HubApp from '../hub/HubApp';
 
-import User from '../src/app/User';
-import TransportFactory from '../src/app/TransportFactory';
-import Transition from '../src/types/Transition';
-import { TransitionMethod } from '../src/types/TransitionMethod';
-import { sleep } from '../src/utils/Utils';
-import StorageContext from '../src/app/StorageContext';
-import IUserOptions from '../src/types/IUserOptions';
+import User from '../app/User';
+import TransportFactory from '../app/TransportFactory';
+import Transition from '../types/Transition';
+import { TransitionMethod } from '../types/TransitionMethod';
+import { sleep } from '../utils/Utils';
+import StorageContext from '../app/StorageContext';
+import IUserOptions from '../types/IUserOptions';
 
 import ENV from './env';
-import TextMessageTransition from '../src/types/Transitions/TextMessageTransition';
+import TextMessageTransition from '../types/Transitions/TextMessageTransition';
 
 import { Signer, verifyMessage as ethersVerifyMessage, JsonRpcProvider } from 'ethers';
 import { Depository, Depository__factory, ERC20Mock, ERC20Mock__factory, ERC721Mock, ERC721Mock__factory, ERC1155Mock, ERC1155Mock__factory } from '../contracts/typechain-types/index';

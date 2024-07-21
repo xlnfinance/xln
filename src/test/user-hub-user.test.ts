@@ -1,13 +1,13 @@
-import User from '../src/app/User';
-import { sleep } from '../src/utils/Utils';
-import IUserOptions from '../src/types/IUserOptions';
-import ENV from './env';
-import {encode, decode} from '../src/utils/Codec';
-import Transition from '../src/app/Transition';
-import assert from 'assert';
-import Channel, {stringify} from '../src/app/Channel';
+import User from '../app/User';
+import { sleep } from '../utils/Utils';
 
-import Logger from '../src/utils/Logger';
+import ENV from '../env';
+import {encode, decode} from '../utils/Codec';
+import Transition from '../app/Transition';
+import assert from 'assert';
+import Channel, {stringify} from '../app/Channel';
+
+import Logger from '../utils/Logger';
 import { channel } from 'diagnostics_channel';
 
 const logger = new Logger('TestRunner');
@@ -20,25 +20,16 @@ exec('rm -rf local-storage')
 let channel1: Channel, channel2: any;
 async function main() {
 
-  const opt: IUserOptions = {
-    hubConnectionDataList: ENV.hubConnectionDataList,
-    depositoryContractAddress: ENV.depositoryContractAddress,
-    jsonRPCUrl: ENV.rpcNodeUrl,
-  };
-
+ 
   const clone = (obj: any) => {
     return decode(encode(obj));
   }
 
-  const user = new User(ENV.firstUserAddress, clone(opt));
-  const user2 = new User(ENV.secondUserAddress, clone(opt));
+  const user = new User(ENV.firstUserAddress, '');
+  const user2 = new User(ENV.secondUserAddress, '');
 
-  opt.hub = {
-    host: '127.0.0.1',
-    port: 10000,
-    address: ENV.hubAddress
-  }
-  const hub = new User(ENV.hubAddress, structuredClone(opt));
+  
+  const hub = new User(ENV.hubAddress, '');
   await hub.start()
   console.log("hub started")
   
@@ -166,8 +157,7 @@ async function main() {
   await sleep(100);
 
   await channel2.load();
-  logger.log('123123',channel2.data.mempool, channel2.state);
-
+ 
   if (channel2.data.mempool.length !=0){
     console.log(channel2.data.mempool, channel2.state);
     throw new Error('mempool should be empty')

@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import ITransport from '../types/ITransport';
 import IMessage from '../types/IMessage';
-import { IHubConnectionData } from '../types/IHubConnectionData';
+import ENV, { HubData } from '../env';
 import Logger from '../utils/Logger';
 import ITransportMessageReceiver from '../types/ITransportListener';
 import { decode, encode } from '../utils/Codec';
@@ -14,7 +14,7 @@ export default class Transport implements ITransport {
   private _id: string;
   private _isServer: boolean;
   private _url?: string;
-  private _connectionData?: IHubConnectionData;
+  private _connectionData?: HubData;
   private _userId?: string;
   private _autoReconnectInterval: number = 10000; // 10 seconds
   private _messageNumber: number = 0;
@@ -22,7 +22,7 @@ export default class Transport implements ITransport {
   constructor(options: {
     id: string;
     receiver: ITransportMessageReceiver;
-    connectionData?: IHubConnectionData;
+    connectionData?: HubData;
     userId?: string;
     ws?: WebSocket;
   }) {

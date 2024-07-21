@@ -7,7 +7,7 @@ import Block from '../types/Block';
 
 
 
-import ENV from '../../test/env';
+import ENV from '../env';
 import { ethers, keccak256 } from 'ethers';
 import { Depository__factory, SubcontractProvider, SubcontractProvider__factory } from '../../contracts/typechain-types/index';
 
@@ -31,6 +31,7 @@ import { decode, encode } from '../utils/Codec';
 
 import {SubcontractBatchABI, ProofbodyABI} from '../types/ABI';
 
+
 export function stringify(obj: any) {
   function replacer(key: string, value: any) {
     if (typeof value === 'bigint') {
@@ -50,6 +51,14 @@ enum MessageType {
 }
 const BLOCK_LIMIT = 5;
 
+interface SwapOrder {
+  chainId: number;
+  ownerIsLeft: boolean;
+  addAmount: bigint;
+  subAmount: bigint;
+  tokenId: number;
+  subTokenId: number;
+}
 
 import { encrypt, decrypt } from 'eciesjs';
 
@@ -521,23 +530,21 @@ export default class Channel {
   }
   
   private async encryptForRecipient(recipient: string, data: any): Promise<string> {
-    const recipientProfile = await this.getProfile(recipient);
-    const recipientPublicKey = Buffer.from(recipientProfile.publicKey, 'hex');
+    const recipientProfile = await this.ctx.user.getProfile(recipient);
 
     const encoded = encode(data);
-    const encrypted = await encrypt(recipientPublicKey, Buffer.from(encoded));
+    const encrypted = await encrypt(recipientProfile.publicKey, Buffer.from(encoded));
     return encrypted.toString('hex');
-  }
-  private async getProfile(address: string): Promise<any> {
-    return { publicKey: '0x' + '00'.repeat(64) };
   }
 
 
 
   async decryptAndProcessPayment(payment: Transition.AddPaymentSubcontract): Promise<string | null> {
+    console.log('decr', this.ctx.user.encryptionKey.secret, payment);
     const decrypted = decode(await decrypt(this.ctx.user.encryptionKey.secret, ethers.getBytes(payment.encryptedPackage)));
     
     if (decrypted.tokenId !== payment.tokenId || decrypted.amount !== payment.amount) {
+      throw new Error('mismat!')
       return this.failPayment(payment, "Mismatched tokenId or amount");
     }
   
@@ -550,6 +557,9 @@ export default class Channel {
       if (!nextTransport) {
         return this.failPayment(payment, "Next hop not available");
       }
+
+      // todo: is valid chainid token id and amount?
+      throw new Error('passin!')
   
       const nextChannel = await this.ctx.user.getChannel(decrypted.nextHop);
       const newPayment = new Transition.AddPaymentSubcontract(
@@ -727,6 +737,10 @@ export default class Channel {
   async receiveMessage(encryptedMessage: string): Promise<void> {
     const decryptedMessage = await this.ctx.user.decryptMessage(this.otherUserAddress, encryptedMessage);
     console.log(`Received message in channel ${this.getId()}: ${decryptedMessage}`);
+  }
+
+  getBalance(): bigint { 
+    return 123n;
   }
 
 }
