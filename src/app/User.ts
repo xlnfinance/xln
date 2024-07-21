@@ -9,7 +9,7 @@ import ChannelContext from './ChannelContext';
 import { IHubConnectionData } from '../types/IHubConnectionData';
 import { BodyTypes } from '../types/IBody';
 import { TransferReserveToCollateralEvent } from '../../contracts/typechain-types/contracts/Depository.sol/Depository';
-import { Signer, verifyMessage as ethersVerifyMessage, JsonRpcProvider, BigNumberish } from 'ethers';
+import { ethers, Signer, verifyMessage as ethersVerifyMessage, JsonRpcProvider, BigNumberish } from 'ethers';
 import {
   Depository,
   Depository__factory,
@@ -44,12 +44,15 @@ type QueueItem<T> = [Job<T>, (value: T | PromiseLike<T>) => void];
 
 import ENV from '../../test/env';
 
+
+import { encrypt,decrypt, PrivateKey } from 'eciesjs';
+
 export default class User implements ITransportListener  {
   // Hub-specific properties
   private _server: WebSocket.Server | null = null; // cannot be readonly because it is assigned in start()
   public _channels: Map<string, Channel> = new Map();
-  private readonly _transports: Map<string, ITransport> = new Map();
-  private readonly _channelRecipientMapping: Map<ITransport, Map<string, Channel>> = new Map();
+  public readonly _transports: Map<string, ITransport> = new Map();
+  public channels: Map<string, Channel> = new Map();
 
   private readonly sectionQueue: Record<string, QueueItem<any>[]> = {};
 
@@ -58,9 +61,11 @@ export default class User implements ITransportListener  {
   public readonly storageContext: StorageContext;
 
   private provider: JsonRpcProvider | null = null;
-  public signer: Signer | null = null;
+  public signer: ethers.Wallet | null = null;
 
   public logger: Logger;
+
+  public encryptionKey: PrivateKey;
 
   
   depository!: Depository;
@@ -68,16 +73,45 @@ export default class User implements ITransportListener  {
   erc721Mock!: ERC721Mock;
   erc1155Mock!: ERC1155Mock;
 
+  private profiles: Map<string, any> = new Map();
 
   
-  constructor(address: string, opt: IUserOptions) {    
-    this.logger = new Logger(address);
-    this.thisUserAddress = address;
-    this.opt = Object.freeze({ ...opt });
-    this.storageContext = new StorageContext();
-    this.logger.log('new User() constructed '+address);
+  constructor(private email: string, private password: string) {    
 
+    this.storageContext = new StorageContext();
+    this.encryptionKey =  new PrivateKey();
+
+    const seed = ethers.keccak256(ethers.toUtf8Bytes(email + password));
+    this.signer = new ethers.Wallet(seed);
+    this.encryptionKey = new PrivateKey(ethers.toUtf8Bytes(seed));
+
+    this.thisUserAddress = this.signer.address;
+    this.logger = new Logger(this.thisUserAddress);
+    this.logger.log('new User() constructed '+address);
   }
+
+  async broadcastProfile() {
+    const profile = {
+      address: this.thisUserAddress,
+      publicKey: this.encryptionKey.publicKey,
+      hubs: this.opt.hubConnectionDataList.map(hub => hub.address),
+    };
+
+    const encodedProfile = encode(profile);    
+    // Assuming the first hub in the list is the coordinator
+    const coordinatorHub = this.opt.hubConnectionDataList[0];
+    await this.send(coordinatorHub.address, {
+      header: {
+        from: this.thisUserAddress,
+        to: coordinatorHub.address,
+      },
+      body: {
+        type: BodyTypes.kBroadcastProfile,
+        profile: encodedProfile,
+      },
+    });
+  }
+
 
   // Combined onClose method
   onClose(transport: ITransport, id: string): void {
@@ -104,7 +138,11 @@ export default class User implements ITransportListener  {
   async onReceive(transport: ITransport, message: IMessage): Promise<void> {
     this.logger.log(`Received message from ${message.header.from} to ${message.header.to}`, message.body);
     //try {
-      if (this.isHub && message.header.to !== this.thisUserAddress) {
+      if (message.body.type === BodyTypes.kBroadcastProfile) {
+        await this.handleBroadcastProfile(message);
+      } else if (message.body.type === BodyTypes.kGetProfile) {
+        await this.handleGetProfile(message);
+      } if (this.isHub && message.header.to !== this.thisUserAddress) {
         await this.handleProxyMessage(message);
       } else if (message.body.type === BodyTypes.kFlushMessage) {
         await this.handleFlushMessage(transport, message as IMessage & { body: FlushMessage });
@@ -118,6 +156,27 @@ export default class User implements ITransportListener  {
     //}
   }
   
+
+  private async handleBroadcastProfile(message: IMessage) {
+    const profile = decode(message.body.profile);
+    this.profiles.set(profile.address, profile);
+  }
+
+  private async handleGetProfile(message: IMessage) {
+    const profile = this.profiles.get(message.body.address);
+    if (profile) {
+      await this.send(message.header.from, {
+        header: {
+          from: this.thisUserAddress,
+          to: message.header.from,
+        },
+        body: {
+          type: BodyTypes.kGetProfileResponse,
+          profile: encode(profile),
+        },
+      });
+    }
+  }
 
   private async handleFlushMessage(transport: ITransport, message: IMessage & { body: FlushMessage }): Promise<void> {
     const addr = message.header.from;
@@ -149,6 +208,11 @@ export default class User implements ITransportListener  {
   }
 
   public async getChannel(userId: string): Promise<Channel> {
+    if (!this.channels.has(userId)) {
+      return this.channels.get(userId)!;
+    }
+
+
     let channel = this._channels.get(userId);
     if (!channel) {
       channel = new Channel(new ChannelContext(this, userId));
@@ -195,6 +259,7 @@ export default class User implements ITransportListener  {
       this.logger.error(`Cannot get user information from RPC server with id ${this.thisUserAddress}`);
       return;
     }
+
     await this.storageContext.initialize(this.thisUserAddress);
 
     // Start hub if this is a hub
@@ -248,31 +313,41 @@ export default class User implements ITransportListener  {
     return AsciiUI.renderUser(this);
   }
   
-  async forwardPayment(payment: Transition.AddPaymentSubcontract, nextHops: string[]): Promise<void> {
-    const nextHop = nextHops.pop();
-    if (nextHop) {
-      const nextChannel = await this.getChannel(nextHop);
-      const delta = nextChannel.getDelta(payment.chainId, payment.tokenId);
-      if (delta) {
-        const outboundCapacity = nextChannel.deriveDelta(payment.chainId, payment.tokenId).outCapacity;
-        if (outboundCapacity >= payment.amount) {
-          const newPayment = new Transition.AddPaymentSubcontract(
-            payment.chainId,
-            payment.tokenId,
-            payment.amount,
-            payment.hash,
-            nextHops
-          );
-          nextChannel.push(newPayment);
-          nextChannel.flush();
-        } else {
-          this.logger.error("Insufficient outbound capacity for forwarding payment");
-        }
-       }
-    } else {
-      this.logger.log("Final receiver reached for payment");
-     }
+  async getBalance(): Promise<bigint> {
+    return 123n;
   }
+
+  async getChannels(): Promise<Channel[]> {
+    return Array.from(this.channels.values());
+  }
+
+
+  async createChannel(peerAddress: string): Promise<Channel> {
+    const channel = new Channel(new ChannelContext(this, peerAddress));
+    await channel.load();
+    this._channels.set(peerAddress, channel);
+
+
+    this.channels.set(channel.getId(), channel);
+    return channel;
+  }
+
+  async encryptMessage(recipientAddress: string, message: string): Promise<string> {
+    const recipientPublicKey = await this.getPublicKeyForAddress(recipientAddress);
+    return encrypt(recipientPublicKey, Buffer.from(message)).toString('hex');
+  }
+
+  async decryptMessage(senderAddress: string, encryptedMessage: string): Promise<string> {
+    const decrypted = await decrypt(this.encryptionKey.secret, Buffer.from(encryptedMessage, 'hex'));
+    return decrypted.toString();
+  }
+
+  private async getPublicKeyForAddress(address: string): Promise<any> {
+    // Implement logic to fetch public key for a given address
+    // This might involve querying a central directory or using a discovery mechanism
+  }
+  
+  
   /*
 
   // TODO save fromBlockNumber to the storage
@@ -295,79 +370,7 @@ export default class User implements ITransportListener  {
       },
     );
   }
-
-  async externalTokenToReserve(erc20Address: string, amount: BigNumberish): Promise<void> {
-    let erc20Mock: ERC20Mock = ERC20Mock__factory.connect(erc20Address, this.signer);
-    let depository = this.depository;
-    let thisUserAddress = this.thisUserAddress;
-
-    const testAllowance1 = await erc20Mock.allowance(thisUserAddress, await depository.getAddress());
-
-    await erc20Mock.approve(await depository.getAddress(), amount);
-    //await erc20Mock.transfer(await depository.getAddress(), 10000);
-
-    this.logger.log('user1_balance_before', await erc20Mock.balanceOf(thisUserAddress));
-    this.logger.log('depository_balance_before', await erc20Mock.balanceOf(await depository.getAddress()));
-
-    const packedToken = await depository.packTokenReference(0, await erc20Mock.getAddress(), 0);
-    //this.logger.log(packedToken);
-    //this.logger.log(await depository.unpackTokenReference(packedToken));
-    //this.logger.log(await erc20Mock.getAddress());
-
-
-    await depository.externalTokenToReserve(
-      { packedToken, internalTokenId: 0n, amount: 10n }
-    );
-
-    this.logger.log('user1_balance_after', await erc20Mock.balanceOf(thisUserAddress));
-    this.logger.log('depository_balance_after', await erc20Mock.balanceOf(await depository.getAddress()));
-    this.logger.log('reserveTest1', await depository._reserves(thisUserAddress, 0));
-  }
-
-  //TODO this is test function
-  async reserveToCollateral(otherUserOfChannelAddress: string, tokenId: number, amount: BigNumberish): Promise<void> {
-    let depository = this.depository;
-    let thisUserAddress = this.thisUserAddress;
-
-    await depository.reserveToCollateral({
-      tokenId: tokenId,
-      receiver: thisUserAddress,
-      pairs: [{ addr: otherUserOfChannelAddress, amount: amount }],
-    });
-
-    const collateralTest = await depository._collaterals(
-      await depository.channelKey(thisUserAddress, otherUserOfChannelAddress),
-      tokenId,
-    );
-    const reserveTest2 = await depository._reserves(thisUserAddress, tokenId);
-  }
-
-  //TODO эта функция async только потому что getChannel async, когда переделаю getChannel, убрать тут async
-  // хотя функции канала тоже async, подумать
-  async test_reserveToCollateral(userId: string, chainId: number, tokenId: number, collateral: bigint): Promise<void> {
-    const channel = await this.getChannel(userId);
-
-    //TODO это должно быть внутри канала, функцией. 
-    const t: AddCollateralTransition = new AddCollateralTransition(chainId, tokenId, channel.isLeft(), collateral);
-    await channel.push(t);
-  }
-
-
-  
-  async unsafePayment(toUserId: string, routeFirstHopId: string, chainId: number, tokenId: number, amount: bigint): Promise<void> {
-    const channel = await this.getChannel(routeFirstHopId);
-
-    const t = Object.assign(new UnsafePaymentTransition(), {
-      toUserId: toUserId,
-      fromUserId: this.thisUserAddress,
-      chainId: chainId,
-      tokenId: tokenId,
-      isLeft: channel.isLeft(), //TODO это может вычисляться на лету, кроме того наверно лучше сделать isLeft(userId), так понятнее?
-      offdelta: amount,
-    });
-    await channel.push(t);
-    await channel.flush();
-  }
+ 
 
   */
 
@@ -376,10 +379,10 @@ export default class User implements ITransportListener  {
   async getSigner(): Promise<Signer | null> {
     if (!this.signer) {
       try {
-        this.provider = new JsonRpcProvider(this.opt.jsonRPCUrl);
-        this.signer = await this.provider.getSigner(this.thisUserAddress);
+        //this.provider = new JsonRpcProvider(this.opt.jsonRPCUrl);
+        //this.signer = await this.provider.getSigner(this.thisUserAddress);
 
-        this.depository = Depository__factory.connect(ENV.depositoryContractAddress, this.signer);
+        //this.depository = Depository__factory.connect(ENV.depositoryContractAddress, this.signer);
 
         //this.depository.queryFilter(TransferReserveToCollateralEvent, 1, 5);
         //const eventsFilter = this.depository.filters.TransferReserveToCollateral();
@@ -459,9 +462,4 @@ export default class User implements ITransportListener  {
 
   
 }
-
-
-
-
-
 
