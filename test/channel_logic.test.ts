@@ -106,13 +106,15 @@ async function main() {
 
   console.log(delta1, delta2, channel1.state, channel2.state)
   console.log(channel1.state)
-  console.log(await user1.renderAsciiUI());
-  console.log(await user2.renderAsciiUI());
 
   assert(channel2.state.subcontracts.length === 1, "Payment subcontract should be added");
   console.log(channel1.getDelta(1, 1));
 
   await channel2.push(new Transition.UpdatePaymentSubcontract(1, 0, secret));
+
+  console.log(await user1.renderAsciiUI());
+  console.log(await user2.renderAsciiUI());
+
   await channel2.flush();
   await sleep(500);
 
@@ -129,14 +131,15 @@ async function main() {
   
   await channel1.push(new Transition.AddSwapSubcontract(1, true, 1, 100n, 2, 200n));
   await channel1.flush();
-  await sleep(100);
-
-  console.log(await user1.renderAsciiUI());
-  console.log(await user2.renderAsciiUI());
+  await sleep(400);
 
   assert(channel2.state.subcontracts.length === 1, "Swap subcontract should be added");
 
   await channel2.push(new Transition.UpdateSwapSubcontract(1, 0, 0.5));
+
+  console.log(await user1.renderAsciiUI());
+  console.log(await user2.renderAsciiUI());
+
   await channel2.flush();
   await sleep(100);
 

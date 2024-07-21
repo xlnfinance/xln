@@ -67,8 +67,10 @@ export class AsciiUI {
     let output = '';
     const subcontracts = (channel.state.subcontracts as any[]).filter(sc => sc.chainId === chainId && sc.tokenId === tokenId);
 
+
     if (subcontracts.length > 0) {
       output += '\nSubcontracts:\n';
+      
       subcontracts.forEach((sc, index) => {
         if (sc.type === 'AddPaymentSubcontract') {
           output += `  Payment ${index + 1}: Amount: ${sc.amount}, Hash: ${sc.hash.slice(0, 10)}...\n`;

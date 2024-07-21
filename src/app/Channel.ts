@@ -49,9 +49,9 @@ enum MessageType {
   DisputeProof
 }
 const BLOCK_LIMIT = 5;
-import { sleep } from '../utils/Utils';
-import { util } from 'chai';
-import { keccak224 } from 'js-sha3';
+
+
+import { encrypt, decrypt } from 'eciesjs';
 
 export default class Channel {
   public state: ChannelState;
@@ -157,10 +157,10 @@ export default class Channel {
       }
 
       // verify signatures after the block is applied
-      const globalSig = message.pendingSignatures.pop() as string;
-      if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
+      if (!await this.verifySignatures(message.pendingSignatures)) {
         this.state = previousState;
         throw new Error('Invalid verify pending block signature');
+        return false;
       }
 
 
@@ -197,6 +197,20 @@ export default class Channel {
 
   get isLeft(): boolean {
     return this.data.isLeft;
+  }
+  async verifySignatures(newSignatures: string[]): Promise<boolean> {
+    const globalSig = newSignatures.pop() as string;
+    if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
+      throw new Error('Invalid verify new block signature');
+    }
+    // verify each subchannel proof
+    const proofs = await this.getSubchannelProofs();
+    for (let i = 0; i < proofs.proofhash.length; i++) {
+      if (!(await this.ctx.user.verifyMessage(proofs.proofhash[i], newSignatures[i], this.otherUserAddress))) {
+        throw new Error('Invalid verify subchannel proof signature');
+      }
+    }
+    return true;
   }
   
   async receive(message: FlushMessage): Promise<void> {
@@ -248,12 +262,11 @@ export default class Channel {
     if (!message.newSignatures || message.newSignatures.length == 0) {
       throw new Error('Invalid new signatures length');
     }
-    const globalSig = message.newSignatures.pop() as string;
-    if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
+
+    if (!await this.verifySignatures(message.newSignatures)) {
       this.logger.log(block, this.state)
       throw new Error('Invalid verify new block signature');
     }
-    // verify each subchannel proof
 
 
     this.state = stateBeforeDryRun;
@@ -281,15 +294,7 @@ export default class Channel {
   }
 
 
-  addSubcontract(subcontract: any, hiddenData?: any) {
-    const transitionId = this.state.transitionNumber;
-    this.state.subcontracts.push({ ...subcontract, transitionId });
-    this.data.subcontracts.set(transitionId, { ...subcontract, hiddenData });
-  }
-
-  getSubcontractHiddenData(transitionId: number): any {
-    return this.data.subcontracts.get(transitionId)?.hiddenData;
-  }
+  
 
   async getSubchannelProofs() {
     const state = this.state;
@@ -338,8 +343,6 @@ export default class Channel {
           throw new Error(`Delta with tokenId ${subcontract.tokenId} not found.`);
         }
 
-
-        const hiddenData = this.getSubcontractHiddenData(subcontract.transitionId);
         if (subcontract.type === 'AddPaymentSubcontract') {
           subcontractBatch[subchannelIndex].payment.push({
             deltaIndex: deltaIndex,
@@ -488,6 +491,92 @@ export default class Channel {
   }
 
 
+  async createOnionEncryptedPayment(recipient: string, amount: bigint, chainId: number, tokenId: number, route: string[]): Promise<Transition.AddPaymentSubcontract> {
+    const secret = ethers.randomBytes(32);
+    const hash = ethers.keccak256(secret);
+  
+    let encryptedPackage = await this.encryptForRecipient(recipient, {
+      amount,
+      tokenId,
+      secret: ethers.hexlify(secret),
+      nextHop: null // Final recipient
+    });
+  
+    for (let i = route.length - 1; i >= 0; i--) {
+      encryptedPackage = await this.encryptForRecipient(route[i], {
+        amount,
+        tokenId,
+        nextHop: i === route.length - 1 ? recipient : route[i + 1],
+        encryptedPackage
+      });
+    }
+  
+    return new Transition.AddPaymentSubcontract(
+      chainId,
+      tokenId,
+      amount,
+      hash,
+      encryptedPackage
+    );
+  }
+  
+  private async encryptForRecipient(recipient: string, data: any): Promise<string> {
+    const recipientProfile = await this.getProfile(recipient);
+    const recipientPublicKey = Buffer.from(recipientProfile.publicKey, 'hex');
+
+    const encoded = encode(data);
+    const encrypted = await encrypt(recipientPublicKey, Buffer.from(encoded));
+    return encrypted.toString('hex');
+  }
+  private async getProfile(address: string): Promise<any> {
+    return { publicKey: '0x' + '00'.repeat(64) };
+  }
+
+
+
+  async decryptAndProcessPayment(payment: Transition.AddPaymentSubcontract): Promise<string | null> {
+    const decrypted = decode(await decrypt(this.ctx.user.encryptionKey.secret, ethers.getBytes(payment.encryptedPackage)));
+    
+    if (decrypted.tokenId !== payment.tokenId || decrypted.amount !== payment.amount) {
+      return this.failPayment(payment, "Mismatched tokenId or amount");
+    }
+  
+    if (decrypted.nextHop === null) {
+      // Final recipient
+      return decrypted.secret;
+    } else {
+      // Intermediate hop
+      const nextTransport = this.ctx.user._transports.get(decrypted.nextHop);
+      if (!nextTransport) {
+        return this.failPayment(payment, "Next hop not available");
+      }
+  
+      const nextChannel = await this.ctx.user.getChannel(decrypted.nextHop);
+      const newPayment = new Transition.AddPaymentSubcontract(
+        payment.chainId,
+        payment.tokenId,
+        payment.amount,
+        payment.hash,
+        decrypted.encryptedPackage
+      );
+      await nextChannel.push(newPayment);
+      await nextChannel.flush();
+      return null;
+    }
+  }
+  
+  private async failPayment(payment: Transition.AddPaymentSubcontract, reason: string): Promise<null> {
+    const updatePayment = new Transition.UpdatePaymentSubcontract(
+      payment.chainId, 
+      this.state.subcontracts.length - 1, 
+      null, 
+      reason
+    );
+    await this.push(updatePayment);
+    await this.flush();
+    return null;
+  }
+
 
     public deriveDelta(chainId: number, tokenId: number, isLeft = true) {
       const d = this.getDelta(chainId, tokenId) as Delta;
@@ -634,4 +723,10 @@ export default class Channel {
       await this.save(); // Initialize with empty state if load fails
     }
   }
+
+  async receiveMessage(encryptedMessage: string): Promise<void> {
+    const decryptedMessage = await this.ctx.user.decryptMessage(this.otherUserAddress, encryptedMessage);
+    console.log(`Received message in channel ${this.getId()}: ${decryptedMessage}`);
+  }
+
 }

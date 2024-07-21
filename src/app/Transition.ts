@@ -33,57 +33,62 @@ export namespace Transition {
       channel.logger.log(`Applying TextMessage: ${this.message}`);
     }
   }
-
   export class AddPaymentSubcontract implements TransitionType {
     readonly type = 'AddPaymentSubcontract';
     constructor(
       public readonly chainId: number,
       public readonly tokenId: number,
-
       public readonly amount: bigint,
       public readonly hash: string,
-      public readonly nextHops: string[],
-      private readonly hiddenData?: { secret: string }
-      
+      public readonly encryptedPackage: string
     ) {}
-
+  
     apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {      
       const subchannel = channel.getSubchannel(this.chainId);
       if (subchannel) {
         channel.state.subcontracts.push(this);
       }
-        
+          
       if (dryRun) return;
-
-      channel.ctx.user.forwardPayment(this, [...this.nextHops])
+  
+      channel.decryptAndProcessPayment(this).then(secret => {
+        if (secret) {
+          // Final recipient: verify and reveal the secret
+          if (ethers.keccak256(ethers.toUtf8Bytes(secret)) === this.hash) {
+            channel.push(new UpdatePaymentSubcontract(this.chainId, channel.state.subcontracts.length - 1, secret));
+            channel.flush();
+          } else {
+            channel.push(new UpdatePaymentSubcontract(this.chainId, channel.state.subcontracts.length - 1, null, "Invalid secret"));
+            channel.flush();
+          }
+        }
+      });
     }
   }
-
   export class UpdatePaymentSubcontract implements TransitionType {
     readonly type = 'UpdatePaymentSubcontract';
     constructor(
       public readonly chainId: number,
       public readonly subcontractIndex: number,
-      public readonly secret: string
+      public readonly secret: string | null,
+      public readonly failureReason?: string
     ) {}
-
+  
     apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
       const payment = channel.state.subcontracts[this.subcontractIndex] as AddPaymentSubcontract;
       
       if (payment) {
-        if (keccak256(ethers.toUtf8Bytes(this.secret)) === payment.hash) {
+        if (this.secret && ethers.keccak256(ethers.toUtf8Bytes(this.secret)) === payment.hash) {
           // Resolve the payment
           const delta = channel.getDelta(this.chainId, payment.tokenId);
           if (delta) {
-            console.log('befored', delta.offdelta)
             delta.offdelta += isLeft ? -payment.amount : payment.amount;
-            console.log('afterd', delta.offdelta)
           }
-
-        } else {
-          // Remove without impact on offdelta
+        } else if (this.failureReason) {
+          // Payment failed, log the reason
+          channel.logger.error(`Payment failed: ${this.failureReason}`);
         }
-
+  
         channel.state.subcontracts.splice(this.subcontractIndex, 1);
       }
     }
@@ -405,7 +410,7 @@ export namespace Transition {
     } else if (isProposedEvent(data)) {
       return new ProposedEvent(data.chainId, data.tokenId, data.collateral, data.ondelta);
     } else if (isAddPaymentSubcontract(data)) {
-      return new AddPaymentSubcontract(data.chainId, data.tokenId, data.amount, data.hash, data.nextHops);
+      return new AddPaymentSubcontract(data.chainId, data.tokenId, data.amount, data.hash, data.encryptedPackage);
     } else if (isUpdatePaymentSubcontract(data)) {
       return new UpdatePaymentSubcontract(data.chainId, data.subcontractIndex, data.secret);
     } else if (isAddSwapSubcontract(data)) {
