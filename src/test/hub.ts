@@ -21,7 +21,7 @@ export async function setupGlobalHub(port: number) {
     address: globalHub.thisUserAddress,
     publicKey: globalHub.encryptionKey.publicKey.toHex()
   }];
-
+  console.log(ENV.hubDataList);
   await globalHub.start();
 
   return globalHub;

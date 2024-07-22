@@ -92,7 +92,7 @@ export default class User implements ITransportListener  {
     this.logger = new Logger(this.thisUserAddress);
     this.logger.log(`new User() constructed ${this.thisUserAddress} ${this.encryptionKey.publicKey.toHex()} ${this.encryptionKey.secret.toString('hex')}`);
 
-    ENV.users[this.thisUserAddress] = this;
+    ENV.users.set(this.thisUserAddress, this);
   }
 
   async broadcastProfile() {
@@ -104,7 +104,7 @@ export default class User implements ITransportListener  {
     };
     ENV.profiles[profile.address] = profile;
 
-    const encodedProfile = encode(profile);    
+    const encodedProfile = encode(profile).toString('hex');    
     // Assuming the first hub in the list is the coordinator
     const coordinatorHub = ENV.hubDataList[0];
     await this.send(coordinatorHub.address, {
@@ -149,12 +149,12 @@ export default class User implements ITransportListener  {
         await this.handleBroadcastProfile(message);
       } else if (message.body.type === BodyTypes.kGetProfile) {
         await this.handleGetProfile(message);
-      } if (this.getHub() && message.header.to !== this.thisUserAddress) {
+      } else if (this.getHub() && message.header.to !== this.thisUserAddress) {
         await this.handleProxyMessage(message);
       } else if (message.body.type === BodyTypes.kFlushMessage) {
         await this.handleFlushMessage(transport, message as IMessage & { body: FlushMessage });
       } else {
-        throw new Error('Unhandled message type');
+        console.log('Unhandled message type', message.body);
       }
      } catch (error) {
       console.log('fatal', error);
@@ -170,9 +170,11 @@ export default class User implements ITransportListener  {
   
 
   private async handleBroadcastProfile(message: IMessage) {
-    const profile = decode(message.body.profile);
+    const profile = decode(Buffer.from(message.body.profile, 'hex'));
     this.profiles.set(profile.address, profile);
+    this.logger.log('Received profile broadcast:', profile);
   }
+  
 
   private async handleGetProfile(message: IMessage) {
     const profile = this.profiles.get(message.body.address);
@@ -183,8 +185,8 @@ export default class User implements ITransportListener  {
           to: message.header.from,
         },
         body: {
-          type: BodyTypes.kGetProfileResponse,
-          profile: encode(profile),
+          type: BodyTypes.kBroadcastProfile,
+          profile: encode(profile).toString('hex'),
         },
       });
     }
@@ -262,7 +264,6 @@ export default class User implements ITransportListener  {
 
   
   async start() {
-    this.broadcastProfile();
 
     const signer = await this.getSigner();
     if (signer == null) {
@@ -280,6 +281,7 @@ export default class User implements ITransportListener  {
       if (ENV.hubDataList && ENV.hubDataList.length > 0) {
         await Promise.all(ENV.hubDataList.map(opt => this.addHub(opt)));
       }    
+      this.broadcastProfile();
     }
   }
 
