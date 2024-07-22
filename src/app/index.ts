@@ -8,9 +8,7 @@ import { setupGlobalHub, teardownGlobalHub } from '../test/hub';
 
 const users: Map<string, User> = new Map();
 
-
-main().catch(console.error);
-
+ 
 async function main() {
   
 

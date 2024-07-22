@@ -159,13 +159,23 @@ export default class Channel {
       const pendingBlock: Block = this.data.pendingBlock!;
       const previousState = decode(encode(this.state));
 
-      await this.applyBlock(pendingBlock.isLeft, pendingBlock, true);
+      // dryRun: true to only change .state and check if sigs are valid
+      console.log('beforehandl',this.state)
+      await this.applyBlock(pendingBlock.isLeft, pendingBlock, true); // <--- dryRun until signature verification
+      console.log('afterhandl',this.state)
 
       if (message.pendingSignatures.length == 0) {
         throw new Error('Invalid pending signatures length');
       }
-
+      let debugState: any;
       // verify signatures after the block is applied
+      if (message.debugState) {
+        debugState = decode(Buffer.from(message.debugState, 'hex'));
+      }
+
+      this.logger.log('debug pending state', this.channelId, stringify(debugState), stringify(this.state))
+
+
       if (!await this.verifySignatures(message.pendingSignatures)) {
         this.state = previousState;
         throw new Error('Invalid verify pending block signature');
@@ -184,38 +194,68 @@ export default class Channel {
       this.data.sentTransitions = 0;
       this.data.pendingBlock = null;
       this.data.pendingSignatures = [];
+      //this.data.rollbacks = 0;
 
       await this.save();
+      return true;
 
-    } else if (message.blockNumber == this.state.blockNumber && !this.data.isLeft) {
-      this.data.sentTransitions = 0;
-      this.data.pendingBlock = null;
-      this.logger.log("Rollback");
-      this.data.rollbacks++;
+
+    } else if (message.blockNumber == this.state.blockNumber) {
+      if (this.data.isLeft) {
+        console.log("no rollback as left");
+        //throw new Error('left doesnt rollback');
+        return false;
+      } else {
+        console.log("rollback as Right")
+        this.data.sentTransitions = 0;
+        this.data.pendingBlock = null;
+        this.logger.log("Rollback");
+        this.data.rollbacks++;
+        await this.save();
+        return false;
+      }
     } else {
-      //
-      return false;
+      throw new Error('fatal weird');
     }
-    
-
     await this.save();
-    return true;
+
+    return false;
   }
 
   get isLeft(): boolean {
     return this.data.isLeft;
   }
 
-  async verifySignatures(newSignatures: string[]): Promise<boolean> {
-    const globalSig = newSignatures.pop() as string;
+  get channelId(): string {
+    let tags = ['(L)', '(R)'];
+    if (!this.data.isLeft) { tags.reverse(); }
+    const toName = (addr:string) => {
+      return ENV.profiles[addr] ? ENV.profiles[addr].name+" "+addr.substring(2,6) : addr;
+    }
+    
+    return `${tags[0]}${toName(this.thisUserAddress)}---${this.state.transitionNumber}---${tags[1]}${toName(this.otherUserAddress)}`;
+  }
+
+  async verifySignatures(sigs: string[]): Promise<boolean> {
+    const globalSig = sigs.pop() as string;
     if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
-      throw new Error('Invalid verify new block signature');
+
+      throw new Error('Invalid verify global signature');
+      return false
     }
     // verify each subchannel proof
     const proofs = await this.getSubchannelProofs();
+    if (proofs.sigs.length != sigs.length + 1) {
+      throw new Error('Invalid verify subchannel length');
+      return false;
+    }
+
     for (let i = 0; i < proofs.proofhash.length; i++) {
-      if (!(await this.ctx.user.verifyMessage(proofs.proofhash[i], newSignatures[i], this.otherUserAddress))) {
-        throw new Error('Invalid verify subchannel proof signature');
+      if (!(await this.ctx.user.verifyMessage(proofs.proofhash[i], sigs[i], this.otherUserAddress))) {
+        console.log(sigs, proofs)
+        throw new Error('Invalid verify subchannel signature');
+        return false;
+        //throw new Error('Invalid verify subchannel proof signature '+i);
       }
     }
     return true;
@@ -228,10 +268,12 @@ export default class Channel {
     }
 
 
-    this.logger.log(`Receive ${this.thisUserAddress} from ${this.otherUserAddress}`, this.data.isLeft, message);
+    this.logger.log(`Receive ${this.channelId}`, message);
 
     if (this.data.pendingBlock) {
       if (!await this.handlePendingBlock(message)) {
+        // don't throw, rollback is normal
+        //throw new Error("Invalid handle pending block");
         return;
       }
     }
@@ -250,7 +292,7 @@ export default class Channel {
     const block: Block = message.block!;
 
     if (block.previousStateHash != keccak256(encode(this.state))) {
-      this.logger.log(decode(block.previousState), this.state);
+      this.logger.log(decode(Buffer.from(message.debugState as any,'hex')), this.state);
       throw new Error('Invalid previousStateHash: ' + block.previousStateHash);
     }
 
@@ -258,7 +300,7 @@ export default class Channel {
       throw new Error('Invalid previousBlockHash');
     }
 
-    if (block.isLeft == this.data.isLeft) {
+    if (block.isLeft == this.isLeft) {
       throw new Error('Invalid isLeft');
     }
 
@@ -272,7 +314,6 @@ export default class Channel {
     }
 
     if (!await this.verifySignatures(message.newSignatures)) {
-      this.logger.log(block, this.state)
       throw new Error('Invalid verify new block signature');
     }
 
@@ -375,10 +416,7 @@ export default class Channel {
 
 
     for (let i = 0; i < state.subchannels.length; i++) {
-            console.log(
-        [(SubcontractBatchABI as unknown) as ethers.ParamType],
-        [subcontractBatch[i]])
-           const encodedBatch = ethers.AbiCoder.defaultAbiCoder().encode(
+      const encodedBatch = ethers.AbiCoder.defaultAbiCoder().encode(
         [(SubcontractBatchABI as unknown) as ethers.ParamType],
         [subcontractBatch[i]]
       );
@@ -441,11 +479,17 @@ export default class Channel {
       },
       body: new FlushMessage(this.state.blockNumber, [])
     };
+    
 
     // signed before block is applied
     const initialProofs = await this.getSubchannelProofs();
     const body = message.body as FlushMessage;
+    body.debugState = encode(this.state).toString('hex');
     body.pendingSignatures = initialProofs.sigs;
+
+    if (body.pendingSignatures.length != this.state.subchannels.length + 1) {
+      throw new Error('fatal: Invalid pending signatures length');
+    }
 
     const transitions = this.data.mempool.slice(0, BLOCK_LIMIT);
     // flush may or may not include new block
@@ -456,18 +500,17 @@ export default class Channel {
       const block: Block = {
         isLeft: this.data.isLeft,
         timestamp: getTimestamp(),
-        previousState: encode({}),
         previousStateHash: keccak256(encode(previousState)), // hash of previous state
         previousBlockHash: this.state.previousBlockHash, // hash of previous block
         blockNumber: this.state.blockNumber,
         transitions: transitions,
       };
 
-      this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
-      await this.applyBlock(this.data.isLeft, block, true);
+      //this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
+      await this.applyBlock(this.data.isLeft, block, true); // <--- only dryRun in flush()
       this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
-      this.logger.log("block", block, this.data.pendingBlock);
+      //this.logger.log("block", block, this.data.pendingBlock);
 
 
       this.data.pendingBlock = decode(encode(block));
@@ -477,20 +520,23 @@ export default class Channel {
       body.newSignatures = (await this.getSubchannelProofs()).sigs;
       this.data.pendingSignatures = body.newSignatures
 
+      if (body.newSignatures.length != this.state.subchannels.length + 1) {
+        throw new Error('fatal: Invalid pending signatures length');
+      }
       // revert state to previous
-      this.state = previousState;
+      this.state = previousState; // <--- revert state
       body.block = block;
 
     } 
 
     this.logger.info(
-      `channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with body ${message.body}`,
+      `channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with block ${message.body.block}`,
     );
 
     await this.save();
 
 
-    this.logger.log("Sending flush ", this.otherUserAddress, message, message);
+    //this.logger.log("Sending flush ", this.otherUserAddress, message, message);
   
 
     await this.ctx.user.send(this.otherUserAddress, message);
@@ -503,7 +549,7 @@ export default class Channel {
       const nonNegative = (x: bigint) => x < 0n ? 0n : x;
 
       const delta = d.ondelta + d.offdelta;
-      const collateral = d.collateral;
+      const collateral = nonNegative(d.collateral);
 
       let ownCreditLimit = isLeft ? d.leftCreditLimit : d.rightCreditLimit;
       let peerCreditLimit = isLeft ? d.rightCreditLimit : d.leftCreditLimit;
@@ -603,6 +649,7 @@ export default class Channel {
 
   private async applyTransition(block: Block, transitionData: any, dryRun: boolean): Promise<void> {
     let transition: Transition.Any;
+    this.state.transitionNumber++;
     //try {
       transition = Transition.createFromDecoded(transitionData) as Transition.Any;
     //} catch (error: any) {
@@ -610,11 +657,14 @@ export default class Channel {
     //  return;
     //}
 
-    //this.logger.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
-    await transition.apply(this, block.isLeft, dryRun);
-    //this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
+    console.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
+    try{
+      await transition.apply(this, block.isLeft, dryRun);
+    } catch(e){
+      console.log('fatal in applytransiton', e);
+    }
+  //this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
     
-    this.state.transitionNumber++;
   }
 
   async save(): Promise<void> {
@@ -626,7 +676,7 @@ export default class Channel {
     //this.logger.log("Saving state"+this.thisUserAddress, this.data.isLeft, stringify(channelSavePoint), new Date());
 
     await this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
-    this.logger.log("State saved successfully "+this.thisUserAddress);
+    //this.logger.log("State saved successfully "+this.thisUserAddress);
   }
 
   async load(): Promise<void> {
@@ -643,7 +693,7 @@ export default class Channel {
 
   async receiveMessage(encryptedMessage: string): Promise<void> {
     const decryptedMessage = await this.ctx.user.decryptMessage(this.otherUserAddress, encryptedMessage);
-    console.log(`Received message in channel ${this.getId()}: ${decryptedMessage}`);
+    //console.log(`Received message in channel ${this.getId()}: ${decryptedMessage}`);
   }
 
   getBalance(): bigint { 

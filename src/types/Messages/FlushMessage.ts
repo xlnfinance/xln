@@ -6,6 +6,7 @@ export interface IFlushMessage {
   pendingSignatures: string[];
   newSignatures?: string[];
   block?: Block;
+  debugState?: string;
 }
 
 export default class FlushMessage extends IBody implements IFlushMessage {
@@ -14,6 +15,7 @@ export default class FlushMessage extends IBody implements IFlushMessage {
     public pendingSignatures: string[] = [],
     public newSignatures?: string[],
     public block?: Block,
+    public debugState?: string,
   ) {
     super(BodyTypes.kFlushMessage);
   }

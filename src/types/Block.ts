@@ -2,8 +2,6 @@ import Transition from '../app/Transition';
 
 export default interface Block {
   isLeft: boolean;
-
-  previousState: any;
   
   previousBlockHash: string; // hash of previous block
   previousStateHash: string;
