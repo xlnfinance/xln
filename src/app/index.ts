@@ -3,17 +3,19 @@ import { XLNTerminal } from './XLNTerminal';
 import { XLNInteractiveDashboard } from './XLNInteractiveDashboard';
 import { XLNCommandLine } from './XLNCommandLine';
 import { setupGlobalHub, teardownGlobalHub } from '../test/hub';
+import ENV from '../env';
 
 
-
-const users: Map<string, User> = new Map();
-
+import { sleep } from '../utils/Utils';
  
 async function main() {
   
+  console.log(ENV)
 
-  setupGlobalHub(10010);
-  const terminal = new XLNTerminal(users);
+  await setupGlobalHub(10010);
+  await sleep()
+  console.log(ENV)
+  const terminal = new XLNTerminal(ENV.users);
   await terminal.start();
   /*
   const args = process.argv.slice(2);
