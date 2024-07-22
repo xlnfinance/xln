@@ -16,6 +16,10 @@ const ENV = {
 
   hubDataList: [] as HubData[],
 
+  db: {
+
+  } as any,
+
   profiles: {
     '0x7d577a597B2742b498Cb5Cf0C26cDCD726d39E6e': '036d11b37ef4fc909ae1ec6c63584f99843f04ea9466730f8e58950c8c7262e693',
     '0xDCEceAF3fc5C0a63d195d69b1A90011B7B19650D': '0294dd98401cf6ca0418580bb77ad0606a35ae8f442b22ab0f81011d8d2c78e70f',
@@ -25,12 +29,13 @@ const ENV = {
   rpcNodeUrl: 'http://127.0.0.1:8545'
 };
 
+/*
 ENV.hubDataList.push({ 
   host: '127.0.0.1', 
   port: 10000, 
   address: '0xE9a27A7dA7C0ECCce0586b2bA4F30a20AfB524f5', 
   name: 'test', 
   publicKey: '0xE9a27A7dA7C0ECCce0586b2bA4F30a20AfB524f5' 
-})
+})*/
 
 export default ENV;

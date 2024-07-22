@@ -1,47 +1,186 @@
 import * as readline from 'readline';
-import { ethers } from 'ethers';
 import User from './User';
+import Channel from './Channel';
 import { Transition } from './Transition';
-import * as crypto from 'crypto';
+import { ethers } from 'ethers';
 
 export class XLNTerminal {
   private rl: readline.Interface;
 
-  constructor(private user: User) {
+  constructor(private users: Map<string, User>) {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });
   }
 
-  async start() {
+  public async start() {
     while (true) {
-      await this.renderDashboard();
+      await this.showHomeScreen();
       const command = await this.prompt('Enter command: ');
       await this.handleCommand(command);
     }
   }
 
-  private async renderDashboard() {
+  private async showHomeScreen() {
     console.clear();
-    console.log(`
-╔════════════════════════════════════════════════════════════════╗
-║                     XLN Terminal Client                        ║
-╠════════════════════════════════════════════════════════════════╣
-║ Address: ${this.user.thisUserAddress.slice(0, 10)}...                                ║
-║ Balance: ${ethers.formatEther(await this.user.getBalance())} ETH                           ║
-╠════════════════════════════════════════════════════════════════╣
-║ Commands:                                                      ║
-║   pay <amount> <recipient> - Make a payment                    ║
-║   swap <amount> <fromToken> <toToken> - Perform a swap         ║
-║   balance - Show detailed balance                              ║
-║   channels - List open channels                                ║
-║   chat <channelId> - Open chat for a channel                   ║
-║   dispute <channelId> - Open a dispute                         ║
-║   exit - Exit the client                                       ║
-╚════════════════════════════════════════════════════════════════╝
-    `);
-    await this.listChannels();
+    console.log('╔════════════════════════════════════════════════════════════════╗');
+    console.log('║                     XLN Terminal - Home Screen                 ║');
+    console.log('╠════════════════════════════════════════════════════════════════╣');
+    console.log('║ Current Users:                                                 ║');
+    for (const [address, user] of this.users) {
+      console.log(`║ - ${address.padEnd(66)} ║`);
+    }
+    console.log('╠════════════════════════════════════════════════════════════════╣');
+    console.log('║ Commands:                                                      ║');
+    console.log('║   login <address> - Log into a user                            ║');
+    console.log('║   logout <address> - Log out a user                            ║');
+    console.log('║   exit - Exit the terminal                                     ║');
+    console.log('╚════════════════════════════════════════════════════════════════╝');
+  }
+
+  private async handleCommand(command: string) {
+    const [action, address] = command.split(' ');
+    switch (action) {
+      case 'login':
+        await this.loginUser(address);
+        break;
+      case 'logout':
+        await this.logoutUser(address);
+        break;
+      case 'exit':
+        this.rl.close();
+        process.exit(0);
+      default:
+        console.log('Unknown command');
+    }
+  }
+
+  private async loginUser(address: string) {
+    if (!this.users.has(address)) {
+      const user = new User(address, 'password'); // You might want to handle password differently
+      await user.start();
+      this.users.set(address, user);
+    }
+    await this.showUserScreen(address);
+  }
+
+  private async logoutUser(address: string) {
+    const user = this.users.get(address);
+    if (user) {
+      await user.stop();
+      this.users.delete(address);
+      console.log(`Logged out user: ${address}`);
+    } else {
+      console.log(`User not found: ${address}`);
+    }
+  }
+
+  private async showUserScreen(address: string) {
+    const user = this.users.get(address)!;
+    while (true) {
+      console.clear();
+      console.log(`╔════════════════════════════════════════════════════════════════╗`);
+      console.log(`║ User Screen - ${address.padEnd(55)} ║`);
+      console.log(`╠════════════════════════════════════════════════════════════════╣`);
+      console.log(`║ Channels:                                                      ║`);
+      const channels = await user.getChannels();
+      for (const channel of channels) {
+        console.log(`║ - ${channel.getId().padEnd(66)} ║`);
+      }
+      console.log(`╠════════════════════════════════════════════════════════════════╣`);
+      console.log(`║ Commands:                                                      ║`);
+      console.log(`║   channel <destination> - Open or create a channel             ║`);
+      console.log(`║   back - Return to home screen                                 ║`);
+      console.log(`╚════════════════════════════════════════════════════════════════╝`);
+      
+      const command = await this.prompt('Enter command: ');
+      if (command === 'back') break;
+      if (command.startsWith('channel ')) {
+        const destination = command.split(' ')[1];
+        await this.showChannelScreen(user, destination);
+      }
+    }
+  }
+
+  private async showChannelScreen(user: User, destination: string) {
+    const channel = await user.getChannel(destination);
+    while (true) {
+      console.clear();
+      console.log(`╔════════════════════════════════════════════════════════════════╗`);
+      console.log(`║ Channel Screen - ${channel.getId().padEnd(54)} ║`);
+      console.log(`╠════════════════════════════════════════════════════════════════╣`);
+      this.displayChannelInfo(channel);
+      console.log(`╠════════════════════════════════════════════════════════════════╣`);
+      console.log(`║ Commands:                                                      ║`);
+      console.log(`║   pay <amount> - Make a payment                                ║`);
+      console.log(`║   swap <amount> <fromToken> <toToken> - Perform a swap         ║`);
+      console.log(`║   /message - Send a text message                               ║`);
+      console.log(`║   back - Return to user screen                                 ║`);
+      console.log(`╚════════════════════════════════════════════════════════════════╝`);
+      
+      const command = await this.prompt('Enter command: ');
+      if (command === 'back') break;
+      if (command.startsWith('/')) {
+        await this.sendMessage(channel, command.slice(1));
+      } else {
+        await this.handleChannelCommand(channel, command);
+      }
+    }
+  }
+
+  private displayChannelInfo(channel: Channel) {
+    const state = channel.getState();
+    console.log(`║ Subchannels:                                                   ║`);
+    for (const subchannel of state.subchannels) {
+      console.log(`║   Chain ID: ${subchannel.chainId.toString().padEnd(58)} ║`);
+      for (const delta of subchannel.deltas) {
+        const derived = channel.deriveDelta(subchannel.chainId, delta.tokenId, channel.isLeft);
+        console.log(`║     Token ID: ${delta.tokenId.toString().padEnd(56)} ║`);
+        console.log(`║     Collateral: ${delta.collateral.toString().padEnd(54)} ║`);
+        console.log(`║     On-chain Delta: ${delta.ondelta.toString().padEnd(50)} ║`);
+        console.log(`║     Off-chain Delta: ${delta.offdelta.toString().padEnd(49)} ║`);
+        console.log(`║     Credit Layout: ${derived.ascii.padEnd(50)} ║`);
+      }
+    }
+    console.log(`║                                                                ║`);
+    console.log(`║ Recent Blocks:                                                 ║`);
+    // TODO: Implement logic to display recent blocks and transitions
+  }
+
+  private async handleChannelCommand(channel: Channel, command: string) {
+    const [action, ...args] = command.split(' ');
+    switch (action) {
+      case 'pay':
+        await this.makePayment(channel, args[0]);
+        break;
+      case 'swap':
+        await this.performSwap(channel, args[0], args[1], args[2]);
+        break;
+      default:
+        console.log('Unknown command');
+    }
+  }
+
+  private async makePayment(channel: Channel, amountStr: string) {
+    const amount = ethers.parseEther(amountStr);
+    const transition = new Transition.DirectPayment(1, 1, amount);
+    await channel.push(transition);
+    await channel.flush();
+    console.log(`Payment of ${amountStr} ETH sent successfully.`);
+  }
+
+  private async performSwap(channel: Channel, amountStr: string, fromToken: string, toToken: string) {
+    const amount = ethers.parseEther(amountStr);
+    // TODO: Implement swap logic
+    console.log(`Swap of ${amountStr} from ${fromToken} to ${toToken} initiated.`);
+  }
+
+  private async sendMessage(channel: Channel, message: string) {
+    const transition = new Transition.TextMessage(message);
+    await channel.push(transition);
+    await channel.flush();
+    console.log('Message sent successfully.');
   }
 
   private async prompt(question: string): Promise<string> {
@@ -50,80 +189,5 @@ export class XLNTerminal {
         resolve(answer);
       });
     });
-  }
-
-  private async handleCommand(command: string) {
-    const [action, ...args] = command.split(' ');
-    switch (action) {
-      case 'pay':
-        await this.handlePayment(args[0], args[1]);
-        break;
-      case 'swap':
-        await this.handleSwap(args[0], args[1], args[2]);
-        break;
-      case 'balance':
-        await this.showDetailedBalance();
-        break;
-      case 'channels':
-        await this.listChannels();
-        break;
-      case 'chat':
-        await this.openChat(args[0]);
-        break;
-      case 'dispute':
-        await this.openDispute(args[0]);
-        break;
-      case 'exit':
-        process.exit(0);
-      default:
-        console.log('Unknown command');
-    }
-    await this.prompt('Press Enter to continue...');
-  }
-
-  private async handlePayment(amount: string, recipient: string) {
-    // Implement payment logic
-    console.log(`Sending ${amount} to ${recipient}`);
-  }
-
-  private async handleSwap(amount: string, fromToken: string, toToken: string) {
-    // Implement swap logic
-    console.log(`Swapping ${amount} ${fromToken} to ${toToken}`);
-  }
-
-  private async showDetailedBalance() {
-    // Implement detailed balance display
-    console.log('Detailed balance:');
-    // ... display balance for each token
-  }
-
-  private async listChannels() {
-    const channels = await this.user.getChannels();
-    console.log('Open Channels:');
-    channels.forEach((channel, index) => {
-      console.log(`${index + 1}. ${channel.getId()} - Balance: ${channel.getBalance()}`);
-    });
-  }
-
-  private async openChat(channelId: string) {
-    console.log(`Opening chat for channel ${channelId}`);
-    while (true) {
-      const message = await this.prompt('Enter message (or "exit" to leave chat): ');
-      if (message.toLowerCase() === 'exit') break;
-      await this.sendEncryptedMessage(channelId, message);
-    }
-  }
-
-  private async sendEncryptedMessage(channelId: string, message: string) {
-    const channel = await this.user.getChannel(channelId);
-    const encryptedMessage = await this.user.encryptMessage(channel.otherUserAddress, message);
-    const transition = new Transition.TextMessage(encryptedMessage);
-    await channel.push(transition);
-    await channel.flush();
-  }
-
-  private async openDispute(channelId: string) {
-    console.log(`Opening dispute for channel ${channelId}`);
-    // Implement dispute logic
   }
 }

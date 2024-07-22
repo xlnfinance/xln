@@ -20,7 +20,7 @@ export function getTimestamp(): number {
   return Date.now();
 }
 
-export function sleep(ms: number): Promise<void> {
+export function sleep(ms: number = 200): Promise<void> {
   return new Promise((res) => {
     setTimeout(() => res(), ms);
   });
