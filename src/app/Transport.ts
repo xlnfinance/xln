@@ -56,7 +56,7 @@ export default class Transport implements ITransport {
       if (this._receiver) {
         this._messageNumber++;
         const msg = decode(event.data as Buffer) as IMessage;
-        logger.info(`Handle message ${this._messageNumber}: ${encode(msg)}`);
+        //logger.info(`Handle message ${this._messageNumber}: ${encode(msg)}`);
         await this._receiver.onReceive(this, msg);
       } else {
         logger.warn(`No message receiver set for transport ${this._id}`);
@@ -127,7 +127,7 @@ export default class Transport implements ITransport {
 
   send(msg: IMessage): Promise<void> {
     const jsonMsg = encode(msg);
-    logger.info(`Send message ${encode(msg)}`);
+    //logger.info(`Send message ${encode(msg)}`);
     return new Promise((resolve, reject) => {
       if (this._ws.readyState !== WebSocket.OPEN) {
         reject(new Error("WebSocket is not open"));

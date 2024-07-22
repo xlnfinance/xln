@@ -15,7 +15,7 @@ export namespace Transition {
     ProposedEvent,
     SetCreditLimit,
     AddPayment,
-    UpdatePayment,
+
     AddSwap,
     UpdateSwap,
     SettlePayment,
@@ -24,7 +24,7 @@ export namespace Transition {
 
   export interface TransitionType {
     type: string;
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void;
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void>;
   }
 
   export class AddPayment implements TransitionType {
@@ -38,41 +38,16 @@ export namespace Transition {
       public readonly encryptedPackage: string
     ) {}
   
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       channel.state.subcontracts.push(this);
 
-      if (!dryRun) channel.ctx.user.processPayment(channel, this);      
+      if (!dryRun && isLeft != channel.isLeft) {
+        await channel.ctx.user.processPayment(channel, this, isLeft === channel.isLeft);    
+      }  
     }
   }
 
-  export class UpdatePayment implements TransitionType {
-    readonly type = 'UpdatePayment';
-    constructor(
-      public readonly chainId: number,
-      public readonly subcontractIndex: number,
-      public readonly secret: string | null,
-      public readonly failureReason?: string
-    ) {}
   
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
-      const payment = channel.state.subcontracts[this.subcontractIndex] as AddPayment;
-      
-      if (payment) {
-        if (this.secret && ethers.keccak256(ethers.toUtf8Bytes(this.secret)) === payment.hashlock) {
-          // Settle the payment
-          const delta = channel.getDelta(this.chainId, payment.tokenId);
-          if (delta) {
-            delta.offdelta += isLeft ? -payment.amount : payment.amount;
-          }
-        } else if (this.failureReason) {
-          // Payment failed, log the reason
-          channel.logger.error(`Payment failed: ${this.failureReason}`);
-        }
-  
-        channel.state.subcontracts.splice(this.subcontractIndex, 1);
-      }
-    }
-  }
 
   export class SettlePayment implements TransitionType {
     readonly type = 'SettlePayment';
@@ -83,11 +58,65 @@ export namespace Transition {
       public readonly secret: string
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
-      const delta = channel.getDelta(this.chainId, this.tokenId);
-      if (delta) {
-        delta.offdelta += isLeft ? -this.amount : this.amount;
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
+      const hashlock = ethers.keccak256(ethers.toUtf8Bytes(this.secret))
+      console.log('applying secret, lock', this.secret, hashlock)
+
+
+      let payment: AddPayment | undefined;
+      let paymentIndex: number | undefined;
+      
+      for (let i = 0; i < channel.state.subcontracts.length; i++) {
+        const subcontract: any = channel.state.subcontracts[i];
+        //instanceof AddPayment
+        if (subcontract && subcontract.hashlock === hashlock) {
+          payment = subcontract;
+          paymentIndex = i;
+          break;      
+        }
       }
+      if (payment === undefined || paymentIndex === undefined) {
+        console.log(channel.state.subcontracts)
+        throw new Error('No such payment')
+        return;
+      }
+      
+      const delta = channel.getDelta(this.chainId, payment.tokenId);
+      if (!delta) {
+        throw new Error('Delta not found for payment');
+        return;
+      }
+      channel.state.subcontracts.splice(paymentIndex, 1);
+      delta.offdelta += isLeft ? -payment.amount : payment.amount;
+
+      if (dryRun) return; // <--- only channel.state mutations until this point
+
+      const paymentInfo = channel.ctx.user.hashlockMap.get(hashlock);
+      if (paymentInfo) {
+        if (paymentInfo.inPayment && paymentInfo.inAddress) {
+          paymentInfo.secret = this.secret;
+          console.log('Settling payment to previous hop', paymentInfo)
+          const inChannel = await channel.ctx.user.getChannel(paymentInfo.inAddress);
+          const settleTransition = new Transition.SettlePayment(
+            paymentInfo.inPayment.chainId,
+            paymentInfo.inPayment.tokenId,
+            paymentInfo.inPayment.amount,
+            this.secret
+          );
+          await inChannel.push(settleTransition);
+          await inChannel.flush();
+        } else {
+          if (paymentInfo.secret) {
+            console.log(`Payment is now settled ${channel.channelId}`, payment.amount, delta.offdelta, paymentInfo)
+          } else {
+            throw new Error('fatal No such paymentinfo or secret');
+          }
+        }
+      } else {
+        throw new Error('fatal No such paymentinfo');
+      }
+        
+      return;
     }
   }
 
@@ -100,7 +129,7 @@ export namespace Transition {
       public readonly hashlock: string
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       // Implementation for cancelling a payment
       // This might involve reverting the offdelta changes
       const delta = channel.getDelta(this.chainId, this.tokenId);
@@ -114,7 +143,7 @@ export namespace Transition {
     readonly type = 'TextMessage';
     constructor(public readonly message: string) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       channel.logger.log(`Applying TextMessage: ${this.message}`);
     }
   }
@@ -131,7 +160,7 @@ export namespace Transition {
       public readonly subAmount: bigint
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       if (this.ownerIsLeft == !isLeft) {
         throw new Error('Incorrect0 owner for swap');
       }
@@ -148,7 +177,7 @@ export namespace Transition {
       public readonly fillingRatio: number | null
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       const subchannel = channel.getSubchannel(this.chainId);
       const swap = createFromDecoded(channel.state.subcontracts[this.subcontractIndex]) as any;
       
@@ -184,7 +213,7 @@ export namespace Transition {
     readonly type = 'AddSubchannel';
     constructor(public readonly chainId: number) {}
   
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       const chainId = this.chainId;
 
       channel.logger.log('Current subchannels before adding:', stringify(channel.state.subchannels));
@@ -218,7 +247,7 @@ export namespace Transition {
       public readonly tokenId: number
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       const subchannel = channel.getSubchannel(this.chainId);
       if (subchannel) {
         subchannel.deltas.push({
@@ -245,7 +274,7 @@ export namespace Transition {
       public readonly amount: bigint
     ) {}
  
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       const delta = channel.getDelta(this.chainId, this.tokenId);
       const derived = channel.deriveDelta(this.chainId, this.tokenId, isLeft);
 
@@ -270,14 +299,20 @@ export namespace Transition {
       public readonly amount: bigint
     ) {}
 
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       const delta = channel.getDelta(this.chainId, this.tokenId);
       if (delta) {
+        console.log('setting credit to ', delta, isLeft, this.amount)
+
         if (!isLeft) {
           delta.leftCreditLimit = this.amount;
         } else {
           delta.rightCreditLimit = this.amount;
         }
+        console.log('setting credit to ', delta, isLeft, this.amount)
+
+      } else {
+        throw new Error("non existant delta");
       }
     }
   }
@@ -291,7 +326,7 @@ export namespace Transition {
       public readonly ondelta: bigint
     ) {}
   
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+    async apply(channel: Channel, isLeft: boolean, dryRun: boolean): Promise<void> {
       const subchannel = channel.getSubchannel(this.chainId);
       if (!subchannel) return;
   
@@ -317,7 +352,7 @@ export namespace Transition {
     }
   }
 
-  export type Any = TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit | ProposedEvent | AddPayment | UpdatePayment | AddSwap | UpdateSwap |
+  export type Any = TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit | ProposedEvent | AddPayment | AddSwap | UpdateSwap |
                     SettlePayment | CancelPayment;
 
   export function isAddPayment(transition: any): transition is AddPayment {
@@ -334,16 +369,7 @@ export namespace Transition {
     );
   }
 
-  export function isUpdatePayment(transition: any): transition is UpdatePayment {
-    return (
-      transition &&
-      typeof transition === 'object' &&
-      transition.type === 'UpdatePayment' &&
-      typeof transition.chainId === 'number' &&
-      typeof transition.subcontractIndex === 'number' &&
-      (transition.secret === null || typeof transition.secret === 'string')
-    );
-  }
+  
 
   export function isSettlePayment(transition: any): transition is SettlePayment {
     return (
@@ -473,8 +499,6 @@ export namespace Transition {
       return new ProposedEvent(data.chainId, data.tokenId, data.collateral, data.ondelta);
     } else if (isAddPayment(data)) {
       return new AddPayment(data.chainId, data.tokenId, data.amount, data.hashlock, data.timelock, data.encryptedPackage);
-    } else if (isUpdatePayment(data)) {
-      return new UpdatePayment(data.chainId, data.subcontractIndex, data.secret, data.failureReason);
     } else if (isSettlePayment(data)) {
       return new SettlePayment(data.chainId, data.tokenId, data.amount, data.secret);
     } else if (isCancelPayment(data)) {

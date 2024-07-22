@@ -65,6 +65,15 @@ export default class User implements ITransportListener  {
   public encryptionKey: PrivateKey;
 
   
+  public hashlockMap: Map<string, {
+    inAddress?: string,
+    outAddress?: string
+    inPayment?: Transition.AddPayment,
+    outPayment?: Transition.AddPayment,
+    secret?: string,
+  }> = new Map();
+
+
   depository!: Depository;
   erc20Mock!: ERC20Mock;
   erc721Mock!: ERC721Mock;
@@ -83,10 +92,12 @@ export default class User implements ITransportListener  {
     this.logger = new Logger(this.thisUserAddress);
     this.logger.log(`new User() constructed ${this.thisUserAddress} ${this.encryptionKey.publicKey.toHex()} ${this.encryptionKey.secret.toString('hex')}`);
 
+    ENV.users[this.thisUserAddress] = this;
   }
 
   async broadcastProfile() {
     const profile = {
+      name: this.username,
       address: this.thisUserAddress,
       publicKey: this.encryptionKey.publicKey.toHex(),
       hubs: ENV.hubDataList.map(hub => hub.address),
@@ -133,7 +144,7 @@ export default class User implements ITransportListener  {
 
   async onReceive(transport: ITransport, message: IMessage): Promise<void> {
     this.logger.log(`Received message from ${message.header.from} to ${message.header.to}`, message.body);
-    //try {
+    try {
       if (message.body.type === BodyTypes.kBroadcastProfile) {
         await this.handleBroadcastProfile(message);
       } else if (message.body.type === BodyTypes.kGetProfile) {
@@ -145,11 +156,16 @@ export default class User implements ITransportListener  {
       } else {
         throw new Error('Unhandled message type');
       }
-    // } catch (error) {
-     // this.logger.error('Unexpected error:', error);
-      // Implement general error recovery
+     } catch (error) {
+      console.log('fatal', error);
+      process.exit(1)
+      //this.logger.error('Unexpected error:', error);
       
-    //}
+     }
+  }
+
+  get toTag(): string {
+    return ENV.profiles[this.thisUserAddress].name+" "+this.thisUserAddress.substring(2,6) ;
   }
   
 
@@ -377,9 +393,13 @@ export default class User implements ITransportListener  {
 
   public async createOnionEncryptedPayment(recipient: string, amount: bigint, chainId: number, tokenId: number, route: string[]): Promise<Transition.AddPayment> {
     const secret = crypto.getRandomValues(Buffer.alloc(32)).toString('hex');
-    console.log(`Creating onion encrypted payment ${secret}: ${amount} from ${this.thisUserAddress} to ${recipient}`);
-
     const hashlock = ethers.keccak256(ethers.toUtf8Bytes(secret));
+
+    this.hashlockMap.set(hashlock, {
+      secret: secret
+    })
+
+    console.log(`Creating onion encrypted payment ${secret} hash ${hashlock}: ${amount} from ${this.thisUserAddress} to ${recipient}`);
     const timelock = Math.floor(Date.now() / 1000) + 3600; // 1 hour timelock
 
     let encryptedPackage = await this.encryptForRecipient(recipient, {
@@ -420,16 +440,40 @@ export default class User implements ITransportListener  {
     return decode(decrypted);
   }
 
-  public async processPayment(channel: Channel, payment: Transition.AddPayment): Promise<void> {
-    const derivedDelta = channel.deriveDelta(payment.chainId, payment.tokenId, channel.isLeft);
-    if (derivedDelta.outCapacity < payment.amount) {
-      throw new Error('Insufficient capacity');
-    }
-
+  public async processPayment(channel: Channel, payment: Transition.AddPayment, isSender: boolean): Promise<void> {
     try {
+      const derivedDelta = channel.deriveDelta(payment.chainId, payment.tokenId, channel.isLeft);
+      console.log(`capacityin${channel.isLeft} ${derivedDelta.inCapacity} channel ${channel.channelId}`, 
+        channel.getDelta(payment.chainId, payment.tokenId), derivedDelta);
+      if (derivedDelta.inCapacity < payment.amount) {
+        throw new Error(`Insufficient capacity ${derivedDelta.inCapacity} for payment ${payment.amount}  ${channel.channelId}`);
+      }
+
+
       const decryptedPackage = await this.decryptPackage(payment.encryptedPackage);
       console.log(`Processing payment in ${this.thisUserAddress}: ${payment.amount}`);
-      console.log(`Decrypted package:`, decryptedPackage);
+
+      let hashlockData = this.hashlockMap.get(payment.hashlock);
+      if (isSender) {
+        if (hashlockData) {
+          hashlockData.outPayment=payment;
+          hashlockData.outAddress=channel.otherUserAddress            
+        } else {
+          throw new Error('fatal, no hashlock for sender')
+        }      
+        console.log("now hashlock 123",this.hashlockMap.get(payment.hashlock))
+      } else {
+        if (hashlockData) {
+          throw new Error('fatal, receivers dont have hashlockdata')   
+        }else {
+          this.hashlockMap.set(payment.hashlock, {
+            inPayment: payment,
+            inAddress: channel.otherUserAddress
+          }); 
+
+        }
+      }
+      //this.hashlockMap.set(payment.hashlock, hashlock);  
 
       if (decryptedPackage.finalRecipient === this.thisUserAddress) {
         // Final recipient
@@ -447,11 +491,14 @@ export default class User implements ITransportListener  {
           payment.timelock,
           decryptedPackage.encryptedPackage
         );
+        this.hashlockMap.get(payment.hashlock)!.outAddress = decryptedPackage.nextHop;
+        this.hashlockMap.get(payment.hashlock)!.outPayment = forwardPayment;
 
         await this.forwardPayment(nextChannel, forwardPayment);
       }
     } catch (error: any) {
-      await this.cancelPayment(channel, payment, error.message);
+      //await this.cancelPayment(channel, payment, error.message);
+      throw new Error(error);
     }
   }
 
@@ -464,6 +511,7 @@ export default class User implements ITransportListener  {
     await channel.push(payment);
     await channel.flush();
 
+
     const FORWARD_TIMEOUT = 30000; // 30 seconds
     const timeout = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Payment forwarding timeout')), FORWARD_TIMEOUT)
@@ -472,7 +520,7 @@ export default class User implements ITransportListener  {
     try {
       await Promise.race([this.waitForPaymentSettlement(channel, payment.hashlock), timeout]);
     } catch (error: any) {
-      await this.cancelPayment(channel, payment, error.message);
+      //await this.cancelPayment(channel, payment, error.message);
       throw error;
     }
   }
@@ -484,6 +532,7 @@ export default class User implements ITransportListener  {
       const checkInterval = setInterval(() => {
         if (this.isPaymentSettled(channel, hashlock)) {
           clearInterval(checkInterval);
+          throw new Error('settled!')
           resolve();
         }
       }, 1000);
@@ -503,12 +552,16 @@ export default class User implements ITransportListener  {
     this.logger.error(`Payment cancelled: ${reason}`);
   }
 
+  
+
+
   public async settlePayment(channel: Channel, payment: Transition.AddPayment, secret: string): Promise<void> {
     const settleTransition = new Transition.SettlePayment(payment.chainId, payment.tokenId, payment.amount, secret);
     await channel.push(settleTransition);
     await channel.flush();
     this.logger.info(`Payment settled: ${payment.amount} of token ${payment.tokenId} on chain ${payment.chainId}`);
   }
+  
   async getSigner(): Promise<Signer | null> {
     if (!this.signer) {
       try {
@@ -558,13 +611,13 @@ export default class User implements ITransportListener  {
     return new Promise<T>((resolve, reject) => {
       if (this.sectionQueue[key]) {
         if (this.sectionQueue[key].length >= 10) {
-          reject(new Error(`Queue overflow for: ${key}`));
+          //reject(new Error(`Queue overflow for: ${key}`));
           return;
         }
         this.sectionQueue[key].push([job, resolve]);
       } else {
         this.sectionQueue[key] = [[job, resolve]];
-        this.processQueue(key) //.catch(reject);
+        this.processQueue(key).catch(reject);
       }
     });
   }
@@ -574,18 +627,19 @@ export default class User implements ITransportListener  {
       const [job, resolve] = this.sectionQueue[key].shift()!;
       const start = performance.now();
 
-      // try {
+      //try {
         const result = await Promise.race([
           job(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Job timeout')), 20000))
         ]);
         resolve(result);
       //} catch (error: any) {
-      //  this.logger.error(`Error in critical criticalSection ${key}:`, error);
-      //  resolve(Promise.reject(error));
+       // this.logger.error(`Error in critical criticalSection ${key}:`, error);
+        //reject(error)
+        //resolve(Promise.reject(error));
       //}
 
-      this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
+      //this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
     }
 
     delete this.sectionQueue[key];
