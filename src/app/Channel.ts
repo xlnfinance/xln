@@ -202,11 +202,10 @@ export default class Channel {
     return true;
   }
 
-  
-
   get isLeft(): boolean {
     return this.data.isLeft;
   }
+
   async verifySignatures(newSignatures: string[]): Promise<boolean> {
     const globalSig = newSignatures.pop() as string;
     if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
@@ -342,24 +341,22 @@ export default class Channel {
 
         const subchannelIndex = this.state.subchannels.findIndex(subchannel => subchannel.chainId === subcontract.chainId);
         if (subchannelIndex < 0) {
-          console.log(this.state)
           throw new Error(`Subchannel with chainId ${subcontract.chainId} not found.`);
         }
 
         const deltaIndex = this.state.subchannels[subchannelIndex].deltas.findIndex(delta => delta.tokenId === subcontract.tokenId);
         if (deltaIndex < 0) {
-          console.log(this.state)
           throw new Error(`Delta with tokenId ${subcontract.tokenId} not found.`);
         }
 
-        if (subcontract.type === 'AddPaymentSubcontract') {
+        if (subcontract.type === 'AddPayment') {
           subcontractBatch[subchannelIndex].payment.push({
             deltaIndex: deltaIndex,
             amount: subcontract.amount,
-            revealedUntilBlock: 1n,
-            hash: subcontract.hash,
+            revealedUntilBlock: subcontract.timelock,
+            hash: subcontract.hashlock,
           });
-        } else if (subcontract.type === 'AddSwapSubcontract') {
+        } else if (subcontract.type === 'AddSwap') {
           const subTokenIndex = this.state.subchannels[subchannelIndex].deltas.findIndex(delta => delta.tokenId === subcontract.subTokenId);
           subcontractBatch[subchannelIndex].swap.push({
             ownerIsLeft: subcontract.ownerIsLeft,
@@ -378,10 +375,10 @@ export default class Channel {
 
 
     for (let i = 0; i < state.subchannels.length; i++) {
- console.log(
-  [(SubcontractBatchABI as unknown) as ethers.ParamType],
-  [subcontractBatch[i]])
-      const encodedBatch = ethers.AbiCoder.defaultAbiCoder().encode(
+            console.log(
+        [(SubcontractBatchABI as unknown) as ethers.ParamType],
+        [subcontractBatch[i]])
+           const encodedBatch = ethers.AbiCoder.defaultAbiCoder().encode(
         [(SubcontractBatchABI as unknown) as ethers.ParamType],
         [subcontractBatch[i]]
       );
@@ -499,182 +496,92 @@ export default class Channel {
     await this.ctx.user.send(this.otherUserAddress, message);
   }
 
-
-  async createOnionEncryptedPayment(recipient: string, amount: bigint, chainId: number, tokenId: number, route: string[]): Promise<Transition.AddPaymentSubcontract> {
-    const secret = ethers.randomBytes(32);
-    const hash = ethers.keccak256(secret);
-  
-    let encryptedPackage = await this.encryptForRecipient(recipient, {
-      amount,
-      tokenId,
-      secret: ethers.hexlify(secret),
-      nextHop: null // Final recipient
-    });
-  
-    for (let i = route.length - 1; i >= 0; i--) {
-      encryptedPackage = await this.encryptForRecipient(route[i], {
-        amount,
-        tokenId,
-        nextHop: i === route.length - 1 ? recipient : route[i + 1],
-        encryptedPackage
-      });
-    }
-  
-    return new Transition.AddPaymentSubcontract(
-      chainId,
-      tokenId,
-      amount,
-      hash,
-      encryptedPackage
-    );
-  }
-  
-  private async encryptForRecipient(recipient: string, data: any): Promise<string> {
-    const recipientProfile = await this.ctx.user.getProfile(recipient);
-
-    const encoded = encode(data);
-    const encrypted = await encrypt(recipientProfile.publicKey, Buffer.from(encoded));
-    return encrypted.toString('hex');
-  }
-
-
-
-  async decryptAndProcessPayment(payment: Transition.AddPaymentSubcontract): Promise<string | null> {
-    console.log('decr', this.ctx.user.encryptionKey.secret, payment);
-    const decrypted = decode(await decrypt(this.ctx.user.encryptionKey.secret, ethers.getBytes(payment.encryptedPackage)));
-    
-    if (decrypted.tokenId !== payment.tokenId || decrypted.amount !== payment.amount) {
-      throw new Error('mismat!')
-      return this.failPayment(payment, "Mismatched tokenId or amount");
-    }
-  
-    if (decrypted.nextHop === null) {
-      // Final recipient
-      return decrypted.secret;
-    } else {
-      // Intermediate hop
-      const nextTransport = this.ctx.user._transports.get(decrypted.nextHop);
-      if (!nextTransport) {
-        return this.failPayment(payment, "Next hop not available");
-      }
-
-      // todo: is valid chainid token id and amount?
-      throw new Error('passin!')
-  
-      const nextChannel = await this.ctx.user.getChannel(decrypted.nextHop);
-      const newPayment = new Transition.AddPaymentSubcontract(
-        payment.chainId,
-        payment.tokenId,
-        payment.amount,
-        payment.hash,
-        decrypted.encryptedPackage
-      );
-      await nextChannel.push(newPayment);
-      await nextChannel.flush();
-      return null;
-    }
-  }
-  
-  private async failPayment(payment: Transition.AddPaymentSubcontract, reason: string): Promise<null> {
-    const updatePayment = new Transition.UpdatePaymentSubcontract(
-      payment.chainId, 
-      this.state.subcontracts.length - 1, 
-      null, 
-      reason
-    );
-    await this.push(updatePayment);
-    await this.flush();
-    return null;
-  }
-
-
-    public deriveDelta(chainId: number, tokenId: number, isLeft = true) {
+    // return various derived values of delta: inbound/outbound capacity, credit etc
+    public deriveDelta(chainId: number, tokenId: number, isLeft: boolean): any {
       const d = this.getDelta(chainId, tokenId) as Delta;
-      const delta = d.ondelta + d.offdelta
-      const collateral = d.collateral
+
+      const nonNegative = (x: bigint) => x < 0n ? 0n : x;
+
+      const delta = d.ondelta + d.offdelta;
+      const collateral = d.collateral;
+
+      let ownCreditLimit = isLeft ? d.leftCreditLimit : d.rightCreditLimit;
+      let peerCreditLimit = isLeft ? d.rightCreditLimit : d.leftCreditLimit;
+      
+      let inCollateral = delta > 0n ? nonNegative(collateral - delta) : collateral;
+      let outCollateral = delta > 0n ? (delta > collateral ? collateral : delta) : 0n;
+
+
+      let inOwnCredit = nonNegative(-delta);
+      if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
+
+      let outPeerCredit = nonNegative(delta - collateral);
+      if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
     
-      const o = {
-        delta: delta,
-        collateral: collateral, 
+      let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
+      let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
     
-        inCollateral: delta > collateral ? 0n : delta > 0n ? collateral - delta : collateral,
-        outCollateral: delta > collateral ? collateral : delta > 0n ? delta : 0n,
+      let inAllowence = isLeft ? d.rightAllowence : d.leftAllowence;
+      let outAllowence = isLeft ? d.leftAllowence : d.rightAllowence;
     
-        inOwnCredit: delta < 0n ? -delta : 0n,
-        outPeerCredit: delta > collateral ? delta - collateral : 0n,
+      const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
     
-        inAllowence: d.rightAllowence,
-        outAllowence: d.leftAllowence,
-    
-        totalCapacity: collateral + d.leftCreditLimit + d.rightCreditLimit,
-        
-        ownCreditLimit: d.leftCreditLimit,
-        peerCreditLimit: d.rightCreditLimit,
-        
-        inCapacity: 0n,
-        outCapacity: 0n,
-        
-        outOwnCredit: 0n,
-    
-        inPeerCredit: 0n,
-        ascii: ''
-      }
+      let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowence);
+      let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
     
       if (!isLeft) {
-        [o.outCollateral, o.outPeerCredit, o.inCollateral, o.inOwnCredit] = [o.inCollateral, o.inOwnCredit, o.outCollateral, o.outPeerCredit];
-      }
+        // flip the view
+
+
+        [inCollateral, inAllowence, inCapacity,
+         outCollateral, outAllowence, outCapacity] = 
+        [outCollateral, outAllowence, outCapacity,
+         inCollateral, inAllowence, inCapacity];
+
+        [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
+        // swap in<->out own<->peer credit
+        [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] = [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
+    }
+
+  
     
-      o.outOwnCredit = o.ownCreditLimit - o.inOwnCredit
-      o.inPeerCredit = o.peerCreditLimit - o.outPeerCredit
-    
-      o.inCapacity = o.inOwnCredit + o.inCollateral + o.inPeerCredit - o.inAllowence
-      o.outCapacity = o.outPeerCredit + o.outCollateral + o.outOwnCredit - o.outAllowence
-        
-      // ASCII visualization
-      const totalWidth = Number(o.totalCapacity);
-      const leftCreditWidth = Math.floor((Number(o.ownCreditLimit) / totalWidth) * 50);
+      // ASCII visualization (using number conversion only for display purposes)
+      const totalWidth = Number(totalCapacity);
+      const leftCreditWidth = Math.floor((Number(ownCreditLimit) / totalWidth) * 50);
       const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);
       const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
-      
-      const deltaPosition = Math.floor(((Number(delta) + Number(o.ownCreditLimit)) / totalWidth) * 50);
-      
-      let ascii = '[';
-      ascii += '-'.repeat(leftCreditWidth);
-      ascii += '='.repeat(collateralWidth);
-      ascii += '-'.repeat(rightCreditWidth);
-      ascii += ']';
-      
-      ascii = ascii.substring(0, deltaPosition) + '|' + ascii.substring(deltaPosition + 1);
-
-      o.ascii = ascii;
-      return o
+      const deltaPosition = Math.floor(((Number(delta) + Number(ownCreditLimit)) / totalWidth) * 50);
+    
+      const ascii = 
+        '[' + 
+        '-'.repeat(leftCreditWidth) +
+        '='.repeat(collateralWidth) +
+        '-'.repeat(rightCreditWidth) +
+        ']'.substring(0, deltaPosition) + 
+        '|' + 
+        ']'.substring(deltaPosition + 1);
+    
+      return {
+        delta,
+        collateral,
+        inCollateral,
+        outCollateral,
+        inOwnCredit,
+        outPeerCredit,
+        inAllowence,
+        outAllowence,
+        totalCapacity,
+        ownCreditLimit,
+        peerCreditLimit,
+        inCapacity,
+        outCapacity,
+        outOwnCredit,
+        inPeerCredit,
+        ascii
+      };    
     }
-  
-
-  setCreditLimit(chainId: number, tokenId: number, isLeft: boolean, creditLimit: bigint) : void {
-    let delta = this.getDelta(chainId, tokenId);
-    if (!delta) {
-      throw new Error(`Delta with tokenId ${tokenId} not found.`);
-      return;
-    }
-
-    if(isLeft) {
-      delta.leftCreditLimit = creditLimit;
-    }
-    else {
-      delta.rightCreditLimit = creditLimit;
-    }
-  }
-
-  applyUnsafePayment(chainId: number, tokenId: number, isLeft: boolean, amount: bigint) : void {
-    let delta = this.getDelta(chainId, tokenId);
-    if (!delta) {
-      this.logger.log(`Delta with tokenId ${tokenId} not found.`);
-      return;
-    }
-
-    delta.offdelta += (isLeft ? -amount : amount);
-  }
+    
+    
 
 
 
@@ -697,14 +604,14 @@ export default class Channel {
   private async applyTransition(block: Block, transitionData: any, dryRun: boolean): Promise<void> {
     let transition: Transition.Any;
     //try {
-      transition = Transition.createFromDecoded(transitionData);
+      transition = Transition.createFromDecoded(transitionData) as Transition.Any;
     //} catch (error: any) {
     //  this.logger.error(`Invalid transition data: ${error.message}`);
     //  return;
     //}
 
     //this.logger.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
-    transition.apply(this, block.isLeft, dryRun);
+    await transition.apply(this, block.isLeft, dryRun);
     //this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
     
     this.state.transitionNumber++;
@@ -719,7 +626,7 @@ export default class Channel {
     //this.logger.log("Saving state"+this.thisUserAddress, this.data.isLeft, stringify(channelSavePoint), new Date());
 
     await this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
-    this.logger.log("State saved successfully"+this.thisUserAddress);
+    this.logger.log("State saved successfully "+this.thisUserAddress);
   }
 
   async load(): Promise<void> {

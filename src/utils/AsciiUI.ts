@@ -41,7 +41,7 @@ export class AsciiUI {
   }
 
   private static renderDelta(delta: Delta, channel: Channel, chainId: number): string {
-    const derived = channel.deriveDelta(chainId, delta.tokenId);
+    const derived = channel.deriveDelta(chainId, delta.tokenId, channel.isLeft);
     let output = this.createBox(`Token ID: ${delta.tokenId}`);
     output += `Collateral: ${delta.collateral}\n`;
     output += `On-chain Delta: ${delta.ondelta}\n`;
@@ -72,9 +72,9 @@ export class AsciiUI {
       output += '\nSubcontracts:\n';
       
       subcontracts.forEach((sc, index) => {
-        if (sc.type === 'AddPaymentSubcontract') {
+        if (sc.type === 'AddPayment') {
           output += `  Payment ${index + 1}: Amount: ${sc.amount}, Hash: ${sc.hash.slice(0, 10)}...\n`;
-        } else if (sc.type === 'AddSwapSubcontract') {
+        } else if (sc.type === 'AddSwap') {
           output += `  Swap ${index + 1}: Add: ${sc.addAmount} (${sc.tokenId}), Sub: ${sc.subAmount} (${sc.subTokenId})\n`;
         }
       });

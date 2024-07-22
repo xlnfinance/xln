@@ -7,4 +7,6 @@ export default interface ITransport {
   setReceiver(receiver: ITransportMessageReceiver): void;
 
   send(msg: IMessage): Promise<void>;
+  close(): void;
+  
 }

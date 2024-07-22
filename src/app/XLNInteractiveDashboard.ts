@@ -89,7 +89,7 @@ export class XLNInteractiveDashboard {
       content += `${index + 1}. ${channel.getId()}\n`;
       channel.state.subchannels.forEach(({ chainId, deltas }) => {
         deltas.forEach(({ tokenId }) => {
-          content += `  - ${channel.deriveDelta(chainId, tokenId)}\n`;
+          content += `  - ${channel.deriveDelta(chainId, tokenId, channel.isLeft)}\n`;
         });
       });
     });

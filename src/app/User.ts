@@ -46,18 +46,18 @@ type QueueItem<T> = [Job<T>, (value: T | PromiseLike<T>) => void];
 
 export default class User implements ITransportListener  {
   // Hub-specific properties
-  private _server: WebSocket.Server | null = null; // cannot be readonly because it is assigned in start()
+  public _server: WebSocket.Server | null = null; // cannot be readonly because it is assigned in start()
   public _channels: Map<string, Channel> = new Map();
   public readonly _transports: Map<string, ITransport> = new Map();
   public channels: Map<string, Channel> = new Map();
 
-  private readonly sectionQueue: Record<string, QueueItem<any>[]> = {};
+  public readonly sectionQueue: Record<string, QueueItem<any>[]> = {};
 
   public readonly thisUserAddress: string;
 
   public readonly storageContext: StorageContext;
 
-  private provider: JsonRpcProvider | null = null;
+  public provider: JsonRpcProvider | null = null;
   public signer: ethers.Wallet | null = null;
 
   public logger: Logger;
@@ -70,14 +70,12 @@ export default class User implements ITransportListener  {
   erc721Mock!: ERC721Mock;
   erc1155Mock!: ERC1155Mock;
 
-  private profiles: Map<string, any> = new Map();
+  public profiles: Map<string, any> = new Map();
 
   
-  constructor(private email: string, private password: string) {    
-
+  constructor(public username: string, public password: string) {    
     this.storageContext = new StorageContext();
-
-    const seed = ethers.keccak256(ethers.toUtf8Bytes(email + password));
+    const seed = ethers.keccak256(ethers.toUtf8Bytes(username + password));
     this.signer = new ethers.Wallet(seed);
     this.encryptionKey = new PrivateKey(Buffer.from(seed.slice('0x'.length), 'hex'));
 
@@ -90,9 +88,10 @@ export default class User implements ITransportListener  {
   async broadcastProfile() {
     const profile = {
       address: this.thisUserAddress,
-      publicKey: this.encryptionKey.publicKey,
+      publicKey: this.encryptionKey.publicKey.toHex(),
       hubs: ENV.hubDataList.map(hub => hub.address),
     };
+    ENV.profiles[profile.address] = profile;
 
     const encodedProfile = encode(profile);    
     // Assuming the first hub in the list is the coordinator
@@ -237,6 +236,7 @@ export default class User implements ITransportListener  {
   public async send(addr: string, message: IMessage): Promise<void> {
     let transport = this._transports.get(this._transports.has(addr) ? addr : ENV.hubAddress);
     if (!transport) {
+      throw new Error(`Transport not found for ${addr}`);
       this.logger.error(`Transport not found for ${addr}`);
       return;
     }
@@ -246,6 +246,8 @@ export default class User implements ITransportListener  {
 
   
   async start() {
+    this.broadcastProfile();
+
     const signer = await this.getSigner();
     if (signer == null) {
       this.logger.error(`Cannot get user information from RPC server with id ${this.thisUserAddress}`);
@@ -295,6 +297,19 @@ export default class User implements ITransportListener  {
     });
   }
 
+  public async stop() {
+    // disconnect all scokets
+    for (const id of this._transports.keys()) {
+      const transport = this._transports.get(id);
+      if (transport) {
+        transport.close();
+      }
+    }
+
+
+    // Implementation for stopping the user
+    // This might involve closing channels, saving state, etc.
+  }
   async renderAsciiUI(): Promise<string> {
     return AsciiUI.renderUser(this);
   }
@@ -326,9 +341,7 @@ export default class User implements ITransportListener  {
     return decrypted.toString();
   }
   async getProfile(address: string): Promise<any> {
-    return {
-      publicKey: ENV.profiles[address]
-    }
+    return ENV.profiles[address];
   }
 
 
@@ -362,6 +375,140 @@ export default class User implements ITransportListener  {
 
 
 
+  public async createOnionEncryptedPayment(recipient: string, amount: bigint, chainId: number, tokenId: number, route: string[]): Promise<Transition.AddPayment> {
+    const secret = crypto.getRandomValues(Buffer.alloc(32)).toString('hex');
+    console.log(`Creating onion encrypted payment ${secret}: ${amount} from ${this.thisUserAddress} to ${recipient}`);
+
+    const hashlock = ethers.keccak256(ethers.toUtf8Bytes(secret));
+    const timelock = Math.floor(Date.now() / 1000) + 3600; // 1 hour timelock
+
+    let encryptedPackage = await this.encryptForRecipient(recipient, {
+      amount,
+      tokenId,
+      secret,
+      finalRecipient: recipient
+    });
+
+    for (let i = route.length - 1; i >= 0; i--) {
+      encryptedPackage = await this.encryptForRecipient(route[i], {
+        amount,
+        tokenId,
+        nextHop: i === route.length - 1 ? recipient : route[i + 1],
+        encryptedPackage
+      });
+    }
+
+    return new Transition.AddPayment(
+      chainId,
+      tokenId,
+      amount,
+      hashlock,
+      timelock,
+      encryptedPackage
+    );
+  }
+
+  public async encryptForRecipient(recipient: string, data: any): Promise<string> {
+    const recipientProfile = await this.getProfile(recipient);
+    const encoded = encode(data);
+    const encrypted = await encrypt(recipientProfile.publicKey, Buffer.from(encoded));
+    return encrypted.toString('hex');
+  }
+
+  public async decryptPackage(encryptedPackage: string): Promise<any> {
+    const decrypted = await decrypt(this.encryptionKey.secret, Buffer.from(encryptedPackage, 'hex'));
+    return decode(decrypted);
+  }
+
+  public async processPayment(channel: Channel, payment: Transition.AddPayment): Promise<void> {
+    const derivedDelta = channel.deriveDelta(payment.chainId, payment.tokenId, channel.isLeft);
+    if (derivedDelta.outCapacity < payment.amount) {
+      throw new Error('Insufficient capacity');
+    }
+
+    try {
+      const decryptedPackage = await this.decryptPackage(payment.encryptedPackage);
+      console.log(`Processing payment in ${this.thisUserAddress}: ${payment.amount}`);
+      console.log(`Decrypted package:`, decryptedPackage);
+
+      if (decryptedPackage.finalRecipient === this.thisUserAddress) {
+        // Final recipient
+        await this.settlePayment(channel, payment, decryptedPackage.secret);
+      } else {
+        // Intermediate node
+        const fee = this.calculateFee(payment.amount);
+        const forwardAmount = payment.amount - fee;
+        const nextChannel = await this.getChannel(decryptedPackage.nextHop);
+        const forwardPayment = new Transition.AddPayment(
+          payment.chainId,
+          payment.tokenId,
+          forwardAmount,
+          payment.hashlock,
+          payment.timelock,
+          decryptedPackage.encryptedPackage
+        );
+
+        await this.forwardPayment(nextChannel, forwardPayment);
+      }
+    } catch (error: any) {
+      await this.cancelPayment(channel, payment, error.message);
+    }
+  }
+
+  public calculateFee(amount: bigint): bigint {
+    const FEE_RATE = 0.001; // 0.1% fee
+    return amount * BigInt(Math.floor(FEE_RATE * 10000)) / 10000n;
+  }
+
+  public async forwardPayment(channel: Channel, payment: Transition.AddPayment): Promise<void> {
+    await channel.push(payment);
+    await channel.flush();
+
+    const FORWARD_TIMEOUT = 30000; // 30 seconds
+    const timeout = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Payment forwarding timeout')), FORWARD_TIMEOUT)
+    );
+
+    try {
+      await Promise.race([this.waitForPaymentSettlement(channel, payment.hashlock), timeout]);
+    } catch (error: any) {
+      await this.cancelPayment(channel, payment, error.message);
+      throw error;
+    }
+  }
+
+  public async waitForPaymentSettlement(channel: Channel, hashlock: string): Promise<void> {
+    // Implementation depends on how you're notifying about payment settlements
+    // This is a placeholder
+    return new Promise((resolve) => {
+      const checkInterval = setInterval(() => {
+        if (this.isPaymentSettled(channel, hashlock)) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 1000);
+    });
+  }
+
+  public isPaymentSettled(channel: Channel, hashlock: string): boolean {
+    // Implementation depends on how you're tracking payment settlements
+    // This is a placeholder
+    return false;
+  }
+
+  public async cancelPayment(channel: Channel, payment: Transition.AddPayment, reason: string): Promise<void> {
+    const cancelTransition = new Transition.CancelPayment(payment.chainId, payment.tokenId, payment.amount, payment.hashlock);
+    await channel.push(cancelTransition);
+    await channel.flush();
+    this.logger.error(`Payment cancelled: ${reason}`);
+  }
+
+  public async settlePayment(channel: Channel, payment: Transition.AddPayment, secret: string): Promise<void> {
+    const settleTransition = new Transition.SettlePayment(payment.chainId, payment.tokenId, payment.amount, secret);
+    await channel.push(settleTransition);
+    await channel.flush();
+    this.logger.info(`Payment settled: ${payment.amount} of token ${payment.tokenId} on chain ${payment.chainId}`);
+  }
   async getSigner(): Promise<Signer | null> {
     if (!this.signer) {
       try {
@@ -443,6 +590,8 @@ export default class User implements ITransportListener  {
 
     delete this.sectionQueue[key];
   }
+
+  
 
 
 

@@ -5,7 +5,6 @@ import { token } from '../../contracts/typechain-types/@openzeppelin/contracts';
 import { BinaryLike } from 'crypto';
 import { Subchannel } from '../types/Subchannel';
 export namespace Transition {
-
   export enum Method {
     TextMessage,
     AddSubchannel,
@@ -15,59 +14,39 @@ export namespace Transition {
     DirectPayment,
     ProposedEvent,
     SetCreditLimit,
-    AddPaymentSubcontract,
-    UpdatePaymentSubcontract,
-    AddSwapSubcontract,
-    UpdateSwapSubcontract,
+    AddPayment,
+    UpdatePayment,
+    AddSwap,
+    UpdateSwap,
+    SettlePayment,
+    CancelPayment,
   }
+
   export interface TransitionType {
     type: string;
     apply(channel: Channel, isLeft: boolean, dryRun: boolean): void;
   }
 
-  export class TextMessage implements TransitionType {
-    readonly type = 'TextMessage';
-    constructor(public readonly message: string) {}
-
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
-      channel.logger.log(`Applying TextMessage: ${this.message}`);
-    }
-  }
-  export class AddPaymentSubcontract implements TransitionType {
-    readonly type = 'AddPaymentSubcontract';
+  export class AddPayment implements TransitionType {
+    readonly type = 'AddPayment';
     constructor(
       public readonly chainId: number,
       public readonly tokenId: number,
       public readonly amount: bigint,
-      public readonly hash: string,
+      public readonly hashlock: string,
+      public readonly timelock: number,
       public readonly encryptedPackage: string
     ) {}
   
-    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {      
-      const subchannel = channel.getSubchannel(this.chainId);
-      if (subchannel) {
-        channel.state.subcontracts.push(this);
-      }
-      throw new Error('Apply subc');
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      channel.state.subcontracts.push(this);
 
-      if (dryRun) return;
-  
-      channel.decryptAndProcessPayment(this).then(secret => {
-        if (secret) {
-          // Final recipient: verify and reveal the secret
-          if (ethers.keccak256(ethers.toUtf8Bytes(secret)) === this.hash) {
-            channel.push(new UpdatePaymentSubcontract(this.chainId, channel.state.subcontracts.length - 1, secret));
-            channel.flush();
-          } else {
-            channel.push(new UpdatePaymentSubcontract(this.chainId, channel.state.subcontracts.length - 1, null, "Invalid secret"));
-            channel.flush();
-          }
-        }
-      });
+      if (!dryRun) channel.ctx.user.processPayment(channel, this);      
     }
   }
-  export class UpdatePaymentSubcontract implements TransitionType {
-    readonly type = 'UpdatePaymentSubcontract';
+
+  export class UpdatePayment implements TransitionType {
+    readonly type = 'UpdatePayment';
     constructor(
       public readonly chainId: number,
       public readonly subcontractIndex: number,
@@ -76,11 +55,11 @@ export namespace Transition {
     ) {}
   
     apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
-      const payment = channel.state.subcontracts[this.subcontractIndex] as AddPaymentSubcontract;
+      const payment = channel.state.subcontracts[this.subcontractIndex] as AddPayment;
       
       if (payment) {
-        if (this.secret && ethers.keccak256(ethers.toUtf8Bytes(this.secret)) === payment.hash) {
-          // Resolve the payment
+        if (this.secret && ethers.keccak256(ethers.toUtf8Bytes(this.secret)) === payment.hashlock) {
+          // Settle the payment
           const delta = channel.getDelta(this.chainId, payment.tokenId);
           if (delta) {
             delta.offdelta += isLeft ? -payment.amount : payment.amount;
@@ -95,8 +74,54 @@ export namespace Transition {
     }
   }
 
-  export class AddSwapSubcontract implements TransitionType {
-    readonly type = 'AddSwapSubcontract';
+  export class SettlePayment implements TransitionType {
+    readonly type = 'SettlePayment';
+    constructor(
+      public readonly chainId: number,
+      public readonly tokenId: number,
+      public readonly amount: bigint,
+      public readonly secret: string
+    ) {}
+
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      const delta = channel.getDelta(this.chainId, this.tokenId);
+      if (delta) {
+        delta.offdelta += isLeft ? -this.amount : this.amount;
+      }
+    }
+  }
+
+  export class CancelPayment implements TransitionType {
+    readonly type = 'CancelPayment';
+    constructor(
+      public readonly chainId: number,
+      public readonly tokenId: number,
+      public readonly amount: bigint,
+      public readonly hashlock: string
+    ) {}
+
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      // Implementation for cancelling a payment
+      // This might involve reverting the offdelta changes
+      const delta = channel.getDelta(this.chainId, this.tokenId);
+      if (delta) {
+        delta.offdelta -= isLeft ? -this.amount : this.amount;
+      }
+    }
+  }
+
+  export class TextMessage implements TransitionType {
+    readonly type = 'TextMessage';
+    constructor(public readonly message: string) {}
+
+    apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
+      channel.logger.log(`Applying TextMessage: ${this.message}`);
+    }
+  }
+  
+
+  export class AddSwap implements TransitionType {
+    readonly type = 'AddSwap';
     constructor(
       public readonly chainId: number,
       public readonly ownerIsLeft: boolean,
@@ -115,8 +140,8 @@ export namespace Transition {
     }
   }
 
-  export class UpdateSwapSubcontract implements TransitionType {
-    readonly type = 'UpdateSwapSubcontract';
+  export class UpdateSwap implements TransitionType {
+    readonly type = 'UpdateSwap';
     constructor(
       public readonly chainId: number,
       public readonly subcontractIndex: number,
@@ -125,7 +150,7 @@ export namespace Transition {
 
     apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
       const subchannel = channel.getSubchannel(this.chainId);
-      const swap = createFromDecoded(channel.state.subcontracts[this.subcontractIndex]) as AddSwapSubcontract;
+      const swap = createFromDecoded(channel.state.subcontracts[this.subcontractIndex]) as any;
       
       if (subchannel && swap) {
         if (swap.ownerIsLeft == isLeft) {
@@ -222,11 +247,16 @@ export namespace Transition {
  
     apply(channel: Channel, isLeft: boolean, dryRun: boolean): void {
       const delta = channel.getDelta(this.chainId, this.tokenId);
+      const derived = channel.deriveDelta(this.chainId, this.tokenId, isLeft);
 
-      if (delta) {
+      console.log("Derived as ",isLeft, derived.outCapacity, this.amount)
+
+      if (delta && this.amount > 0 && derived.outCapacity >= this.amount) {
         console.log(`Apply delta ${delta.offdelta}, ${isLeft} ${this.amount}`)
         delta.offdelta += isLeft ? -this.amount : this.amount;
         console.log(`Result ${delta.offdelta}`)
+      } else {
+        throw new Error("Insufficient capacity for direct "+derived.outCapacity);
       }
 
     }
@@ -286,9 +316,58 @@ export namespace Transition {
       }
     }
   }
-  export type AnySubcontract = AddPaymentSubcontract | UpdatePaymentSubcontract | AddSwapSubcontract | UpdateSwapSubcontract;
 
-  export type Any = AnySubcontract | TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit | ProposedEvent
+  export type Any = TextMessage | DirectPayment | AddSubchannel | AddDelta | SetCreditLimit | ProposedEvent | AddPayment | UpdatePayment | AddSwap | UpdateSwap |
+                    SettlePayment | CancelPayment;
+
+  export function isAddPayment(transition: any): transition is AddPayment {
+    return (
+      transition &&
+      typeof transition === 'object' &&
+      transition.type === 'AddPayment' &&
+      typeof transition.chainId === 'number' &&
+      typeof transition.tokenId === 'number' &&
+      typeof transition.amount === 'bigint' &&
+      typeof transition.hashlock === 'string' &&
+      typeof transition.timelock === 'number' &&
+      typeof transition.encryptedPackage === 'string'
+    );
+  }
+
+  export function isUpdatePayment(transition: any): transition is UpdatePayment {
+    return (
+      transition &&
+      typeof transition === 'object' &&
+      transition.type === 'UpdatePayment' &&
+      typeof transition.chainId === 'number' &&
+      typeof transition.subcontractIndex === 'number' &&
+      (transition.secret === null || typeof transition.secret === 'string')
+    );
+  }
+
+  export function isSettlePayment(transition: any): transition is SettlePayment {
+    return (
+      transition &&
+      typeof transition === 'object' &&
+      transition.type === 'SettlePayment' &&
+      typeof transition.chainId === 'number' &&
+      typeof transition.tokenId === 'number' &&
+      typeof transition.amount === 'bigint' &&
+      typeof transition.secret === 'string'
+    );
+  }
+
+  export function isCancelPayment(transition: any): transition is CancelPayment {
+    return (
+      transition &&
+      typeof transition === 'object' &&
+      transition.type === 'CancelPayment' &&
+      typeof transition.chainId === 'number' &&
+      typeof transition.tokenId === 'number' &&
+      typeof transition.amount === 'bigint' &&
+      typeof transition.hashlock === 'string'
+    );
+  }
 
   export function isProposedEvent(transition: any): transition is ProposedEvent {
     return (
@@ -352,35 +431,13 @@ export namespace Transition {
     );
   }
 
-  export function isAddPaymentSubcontract(transition: any): transition is AddPaymentSubcontract {
-    return (
-      transition &&
-      typeof transition === 'object' &&
-      transition.type === 'AddPaymentSubcontract' &&
-      typeof transition.chainId === 'number' &&
-      typeof transition.tokenId === 'number' &&
-      typeof transition.amount === 'bigint' &&
-      typeof transition.hash === 'string' &&
-      typeof transition.encryptedPackage === 'string'
-    );
-  }
+  
 
-  export function isUpdatePaymentSubcontract(transition: any): transition is UpdatePaymentSubcontract {
+  export function isAddSwap(transition: any): transition is AddSwap {
     return (
       transition &&
       typeof transition === 'object' &&
-      transition.type === 'UpdatePaymentSubcontract' &&
-      typeof transition.chainId === 'number' &&
-      typeof transition.subcontractIndex === 'number' &&
-      (transition.secret === null || typeof transition.secret === 'string')
-    );
-  }
-
-  export function isAddSwapSubcontract(transition: any): transition is AddSwapSubcontract {
-    return (
-      transition &&
-      typeof transition === 'object' &&
-      transition.type === 'AddSwapSubcontract' &&
+      transition.type === 'AddSwap' &&
       typeof transition.chainId === 'number' &&
       typeof transition.ownerIsLeft === 'boolean' &&
       typeof transition.tokenId === 'number' &&
@@ -390,11 +447,11 @@ export namespace Transition {
     );
   }
 
-  export function isUpdateSwapSubcontract(transition: any): transition is UpdateSwapSubcontract {
+  export function isUpdateSwap(transition: any): transition is UpdateSwap {
     return (
       transition &&
       typeof transition === 'object' &&
-      transition.type === 'UpdateSwapSubcontract' &&
+      transition.type === 'UpdateSwap' &&
       typeof transition.chainId === 'number' &&
       typeof transition.subcontractIndex === 'number' &&
       (transition.fillingRatio === null || typeof transition.fillingRatio === 'number')
@@ -414,15 +471,14 @@ export namespace Transition {
       return new SetCreditLimit(data.chainId, data.tokenId, data.amount);
     } else if (isProposedEvent(data)) {
       return new ProposedEvent(data.chainId, data.tokenId, data.collateral, data.ondelta);
-    } else if (isAddPaymentSubcontract(data)) {
-      return new AddPaymentSubcontract(data.chainId, data.tokenId, data.amount, data.hash, data.encryptedPackage);
-    } else if (isUpdatePaymentSubcontract(data)) {
-      return new UpdatePaymentSubcontract(data.chainId, data.subcontractIndex, data.secret);
-    } else if (isAddSwapSubcontract(data)) {
-      return new AddSwapSubcontract(data.chainId, data.ownerIsLeft, data.tokenId, data.addAmount, data.subTokenId, data.subAmount);
-    } else if (isUpdateSwapSubcontract(data)) {
-      return new UpdateSwapSubcontract(data.chainId, data.subcontractIndex, data.fillingRatio);
-        
+    } else if (isAddPayment(data)) {
+      return new AddPayment(data.chainId, data.tokenId, data.amount, data.hashlock, data.timelock, data.encryptedPackage);
+    } else if (isUpdatePayment(data)) {
+      return new UpdatePayment(data.chainId, data.subcontractIndex, data.secret, data.failureReason);
+    } else if (isSettlePayment(data)) {
+      return new SettlePayment(data.chainId, data.tokenId, data.amount, data.secret);
+    } else if (isCancelPayment(data)) {
+      return new CancelPayment(data.chainId, data.tokenId, data.amount, data.hashlock);
     } else {
       throw new Error(`Invalid transition data: ${stringify(data)}`);
     }
