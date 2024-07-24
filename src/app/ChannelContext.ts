@@ -35,11 +35,4 @@ export default class ChannelContext implements IChannelContext {
     return this.user.signMessage(message);
   }
 
-  async verifyMessage(message: string, signature: string, senderAddress: string): Promise<boolean> {
-    // TODO DEBUG CODE FOR WORK HUB CHANNEL
-    if (signature === '') {
-      return true;
-    }
-    return await this.user.verifyMessage(message, signature, senderAddress);
-  }
 }

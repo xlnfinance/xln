@@ -1,4 +1,4 @@
-import ChannelState from '../types/ChannelState';
+import ChannelState, { StoredSubcontract } from '../types/ChannelState';
 import IMessage from '../types/IMessage';
 
 import Logger from '../utils/Logger';
@@ -99,9 +99,9 @@ export default class Channel {
       channelKey: '0x0',
       previousBlockHash: '0x0',
       previousStateHash: '0x0',
-      blockNumber: 0,
+      blockId: 0,
       timestamp: 0,
-      transitionNumber: 0,
+      transitionId: 0,
       subchannels: [],
       subcontracts: []
     };
@@ -139,23 +139,10 @@ export default class Channel {
   }
 
   
-  private async applyBlock(isLeft: boolean, block: Block, dryRun: boolean): Promise<void> {
-    this.logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
-
-    // save previous hash first before changing this.state
-    this.state.blockNumber++;
-    this.state.timestamp = block.timestamp;
-    this.state.previousBlockHash = keccak256(encode(block));
-    this.state.previousStateHash = keccak256(encode(this.state));
-    for (let i = 0; i < block.transitions.length; i++) {
-      await this.applyTransition(block, block.transitions[i], dryRun);
-    }
-  }
- 
   
 
   private async handlePendingBlock(message: FlushMessage): Promise<boolean> {
-    if (message.blockNumber == this.state.blockNumber + 1) {
+    if (message.blockId == this.state.blockId + 1) {
       const pendingBlock: Block = this.data.pendingBlock!;
       const previousState = decode(encode(this.state));
 
@@ -200,7 +187,7 @@ export default class Channel {
       return true;
 
 
-    } else if (message.blockNumber == this.state.blockNumber) {
+    } else if (message.blockId == this.state.blockId) {
       if (this.data.isLeft) {
         console.log("no rollback as left");
         //throw new Error('left doesnt rollback');
@@ -233,7 +220,7 @@ export default class Channel {
       return ENV.profiles[addr] ? ENV.profiles[addr].name+" "+addr.substring(2,6) : addr;
     }
     
-    return `${tags[0]}${toName(this.thisUserAddress)}---${this.state.transitionNumber}---${tags[1]}${toName(this.otherUserAddress)}`;
+    return `${tags[0]}${toName(this.thisUserAddress)}---${this.state.blockId}.${this.state.transitionId}---${tags[1]}${toName(this.otherUserAddress)}`;
   }
 
   async verifySignatures(sigs: string[]): Promise<boolean> {
@@ -328,12 +315,9 @@ export default class Channel {
     const historicalBlock = { state: this.state, block: message.block!, 
       leftSignatures: message.newSignatures, rightSignatures: newProofs.sigs
      }
-
     if (this.data.isLeft) {
       [historicalBlock.leftSignatures, historicalBlock.rightSignatures] = [historicalBlock.rightSignatures, historicalBlock.leftSignatures];
     }
-
-      
     await this.storage.put(historicalBlock);
     
     //await this.save();
@@ -378,7 +362,8 @@ export default class Channel {
 
     // mapping subcontracts to respective subchannels
     // figure out deltaIndexes that subcontractprovider uses internally from tokenIds
-      this.state.subcontracts.forEach((subcontract: any) => {
+      this.state.subcontracts.forEach((storedSubcontract: StoredSubcontract) => {
+        const subcontract = storedSubcontract.originalTransition as Transition.AddPayment | Transition.AddSwap;
 
         const subchannelIndex = this.state.subchannels.findIndex(subchannel => subchannel.chainId === subcontract.chainId);
         if (subchannelIndex < 0) {
@@ -477,7 +462,7 @@ export default class Channel {
         from: this.thisUserAddress,
         to: this.ctx.getRecipientAddress(),
       },
-      body: new FlushMessage(this.state.blockNumber, [])
+      body: new FlushMessage(this.state.blockId, [])
     };
     
 
@@ -502,7 +487,7 @@ export default class Channel {
         timestamp: getTimestamp(),
         previousStateHash: keccak256(encode(previousState)), // hash of previous state
         previousBlockHash: this.state.previousBlockHash, // hash of previous block
-        blockNumber: this.state.blockNumber,
+        blockId: this.state.blockId,
         transitions: transitions,
       };
 
@@ -637,7 +622,6 @@ export default class Channel {
 
     return delta;
   }
-
   
   public getSubchannel(chainId: number): Subchannel | undefined {
     //this.logger.log('Getting subchannel. Current subchannels:', stringify(this.state.subchannels));
@@ -646,10 +630,24 @@ export default class Channel {
     return subchannel;
   }
 
+  private async applyBlock(isLeft: boolean, block: Block, dryRun: boolean): Promise<void> {
+    this.logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
+
+    // save previous hash first before changing this.state
+    this.state.previousStateHash = keccak256(encode(this.state));
+
+    this.state.blockId++;
+    this.state.timestamp = block.timestamp;
+    this.state.previousBlockHash = keccak256(encode(block));
+    for (let i = 0; i < block.transitions.length; i++) {
+      await this.applyTransition(block, block.transitions[i], dryRun);
+    }
+  }
+ 
 
   private async applyTransition(block: Block, transitionData: any, dryRun: boolean): Promise<void> {
     let transition: Transition.Any;
-    this.state.transitionNumber++;
+    this.state.transitionId++;
     //try {
       transition = Transition.createFromDecoded(transitionData) as Transition.Any;
     //} catch (error: any) {
@@ -659,7 +657,7 @@ export default class Channel {
 
     console.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
     try{
-      await transition.apply(this, block.isLeft, dryRun);
+      await transition.apply(this, block, dryRun);
     } catch(e){
       console.log('fatal in applytransiton', e);
     }

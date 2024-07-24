@@ -14,8 +14,8 @@ describe('Transition Unit Tests', function() {
       previousBlockHash: '0x0000...',
       previousStateHash: '0x0000...',
       timestamp: Date.now(),
-      blockNumber: 0,
-      transitionNumber: 0,
+      blockId: 0,
+      transitionId: 0,
       subchannels: [
         {
           chainId: 1,
