@@ -10,11 +10,10 @@
     "test:onionpayment": "mocha -r ts-node/register src/test/onionpayment.test.ts --timeout 10000 --exit",
     "test:swap": "mocha -r ts-node/register src/test/swap.test.ts --timeout 10000 --exit",
     "test:network": "mocha -r ts-node/register src/test/network.test.ts --timeout 10000 --exit",
+    "test:derive": "mocha -r ts-node/register src/test/derive.test.ts --timeout 10000 --exit",
+    "test:transition": "mocha -r ts-node/register src/test/transition.test.ts --timeout 10000 --exit",
 
-    "t": "tsc && node ./dist/src/test/channel.test.js",
-    "t2": "tsc && node ./dist/src/test/channel_logic.test.js",
-    "t3": "tsc && node ./dist/src/test/depository.test.js",
-    "t4": "tsc && node ./dist/src/test/user-hub-user.test.js",
+
     "build": "tsc",
     "watch": "tsc --watch",
     "env:build": "cd ./contracts && npx hardhat compile",

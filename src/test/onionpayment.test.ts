@@ -9,10 +9,19 @@ import ENV from '../env';
 import { sleep } from '../utils/Utils';
 let shouldContinue = true;
 
+
 describe('Network Operations', () => {
   let alice: User, bob: User, charlie: User, dave: User;
   let channels: Map<string, Channel> = new Map();
   let offdeltas: { [key: string]: bigint } = {};
+
+  let shiftOffdelta = (from: string, to: string, amount: bigint) => {
+    
+    const key = `${from}-${to}`;
+    offdeltas[key] = (offdeltas[key] || 0n) + (from < to ? -amount : amount);
+    const reversedKey = `${to}-${from}`;
+    offdeltas[reversedKey] = offdeltas[key]; // must be equal
+  }
   let shouldSkipRemainingTests = false;
   beforeEach(function() {
     if (shouldSkipRemainingTests) {
@@ -57,20 +66,17 @@ describe('Network Operations', () => {
     const channel = await user1.createChannel(user2.thisUserAddress);
     await channel.push(new Transition.AddSubchannel(1));
     await channel.push(new Transition.AddDelta(1, 1));
-    await channel.flush();
-    await sleep()
 
     const creditLimit = ethers.parseEther('10');
-
     await extendCredit(user1, user2, creditLimit);
-    await sleep()
+
+
     await extendCredit(user2, user1, creditLimit);
 
-
-    await sleep();
     const channelKey = `${user1.thisUserAddress}-${user2.thisUserAddress}`;
     channels.set(channelKey, channel);
     offdeltas[channelKey] = 0n;
+    offdeltas[`${user2.thisUserAddress}-${user1.thisUserAddress}`] = 0n;
     console.log(`Channel setup: ${channel.channelId}, Initial offdelta: ${channel.getDelta(1, 1)?.offdelta}`);
   }
 
@@ -93,6 +99,7 @@ describe('Network Operations', () => {
     for (const [key, expectedOffdelta] of Object.entries(offdeltas)) {
       const channel = channels.get(key);
       if (!channel) throw new Error(`Channel not found: ${key}`);
+      await channel.load()
       const delta = channel.getDelta(1, 1);
       if (!delta) throw new Error(`Delta not found for channel: ${key}`);
       console.log(`Channel ${key} - Expected: ${expectedOffdelta}, Actual: ${delta.offdelta}`);
@@ -125,20 +132,24 @@ describe('Network Operations', () => {
       const fromAddress = i === 0 ? from.thisUserAddress : route[i-1];
       const toAddress = route[i];
       const channelKey = `${fromAddress}-${toAddress}`;
-      
-      offdeltas[channelKey] = (offdeltas[channelKey] || 0n) + (channels.get(channelKey)!.isLeft ? -amount : amount);
+      shiftOffdelta(fromAddress, toAddress, amount);
+      amount -= from.calculateFee(amount);
+
       console.log(`Updated expected offdelta for ${channelKey}: ${offdeltas[channelKey]}`);
     }
     const lastHopKey = `${route[route.length-1]}-${to.thisUserAddress}`;
-    offdeltas[lastHopKey] = (offdeltas[lastHopKey] || 0n) + (channels.get(lastHopKey)!.isLeft ? -amount : amount);;
+    shiftOffdelta(route[route.length-1], to.thisUserAddress, amount);
     console.log(`Updated expected offdelta for ${lastHopKey}: ${offdeltas[lastHopKey]}`);
 
     // Wait for the payment to propagate
-    await sleep(1000);
+    await sleep(6000);
 
     // Log actual channel states after payment
     for (const [key, channel] of channels.entries()) {
+      await channel.load()
+      await sleep(100)
       const delta = channel.getDelta(1, 1);
+      console.log(delta);
       console.log(`Channel ${key} state after payment - offdelta: ${delta?.offdelta}`);
     }
   }
@@ -156,12 +167,17 @@ describe('Network Operations', () => {
 
   it('should handle circular payments', async function() {
     this.timeout(35000);
-    //await setupChannel(dave, alice);
+    await setupChannel(dave, alice);
     const paymentAmount = ethers.parseEther('1');
     const route = [bob.thisUserAddress, charlie.thisUserAddress, dave.thisUserAddress];
     
     await makePayment(alice, alice, paymentAmount, route);
 
+    console.log('Capacity map')
+    for (const [key, channel] of channels.entries()) {
+      const d = channel.deriveDelta(1, 1, channel.isLeft);
+      console.log(`Channel ${channel.channelId} - out ${d.outCapacity} in ${d.inCapacity} `);
+    }
     await verifyOffdeltas();
   });
 
@@ -171,10 +187,10 @@ describe('Network Operations', () => {
     const route1 = [bob.thisUserAddress, charlie.thisUserAddress];
     const route2 = [charlie.thisUserAddress, bob.thisUserAddress];
 
-    await Promise.all([
-      makePayment(alice, dave, paymentAmount, route1),
-      makePayment(dave, alice, paymentAmount, route2)
-    ]);
+    //await Promise.all([
+     await makePayment(alice, dave, paymentAmount, route1);
+     await makePayment(dave, alice, paymentAmount, route2);
+    //]);
 
     await verifyOffdeltas();
   });

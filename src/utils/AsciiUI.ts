@@ -19,7 +19,7 @@ export class AsciiUI {
   private static async renderChannel(channel: Channel): Promise<string> {
     const state = channel.getState();
     let output = this.createBox(`Channel with: ${channel.otherUserAddress}`);
-    output += `Block Number: ${state.blockNumber}\n`;
+    output += `Block Number: ${state.blockId}\n`;
 
     for (const subchannel of state.subchannels) {
       output += this.renderSubchannel(subchannel, channel);

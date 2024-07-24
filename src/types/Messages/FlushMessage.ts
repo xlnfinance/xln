@@ -2,7 +2,7 @@ import IBody, { BodyTypes } from '../IBody';
 import Block from '../Block';
 
 export interface IFlushMessage {
-  blockNumber: number;
+  blockId: number;
   pendingSignatures: string[];
   newSignatures?: string[];
   block?: Block;
@@ -11,7 +11,7 @@ export interface IFlushMessage {
 
 export default class FlushMessage extends IBody implements IFlushMessage {
   constructor(
-    public blockNumber: number,
+    public blockId: number,
     public pendingSignatures: string[] = [],
     public newSignatures?: string[],
     public block?: Block,
@@ -26,7 +26,7 @@ export function isValidFlushMessage(obj: any): obj is IFlushMessage {
     return false;
   }
 
-  if (typeof obj.blockNumber !== 'number' || isNaN(obj.blockNumber) || obj.blockNumber < 0) {
+  if (typeof obj.blockId !== 'number' || isNaN(obj.blockId) || obj.blockId < 0) {
     return false;
   }
 
@@ -50,7 +50,7 @@ export function isValidFlushMessage(obj: any): obj is IFlushMessage {
         typeof obj.block.timestamp !== 'number' ||
         typeof obj.block.previousStateHash !== 'string' ||
         typeof obj.block.previousBlockHash !== 'string' ||
-        typeof obj.block.blockNumber !== 'number' ||
+        typeof obj.block.blockId !== 'number' ||
         !Array.isArray(obj.block.transitions)) {
 
       return false;

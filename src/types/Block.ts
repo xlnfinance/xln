@@ -8,6 +8,6 @@ export default interface Block {
 
   transitions: Transition.Any[];
 
-  blockNumber: number;
+  blockId: number;
   timestamp: number;
 }

@@ -12,7 +12,7 @@ export default class ChannelStorage implements IChannelStorage {
   }
 
   async put(point: StoragePoint): Promise<void> {
-    const storeAt = `${this.channelId}:${this.zeroPad(point.state.blockNumber)}`;
+    const storeAt = `${this.channelId}:${this.zeroPad(point.state.blockId)}`;
     
     return this.db.put(storeAt, encode(point));
   }

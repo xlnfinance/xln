@@ -67,7 +67,7 @@ describe('Swaps', () => {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Bob accepts the swap
-    const updateSwapTransition = new Transition.UpdateSwap(1, 0, 1); // Assuming it's the first swap in the subcontracts array
+    const updateSwapTransition = new Transition.SettleSwap(1, 0, 1); // Assuming it's the first swap in the subcontracts array
     await bobAliceChannel.push(updateSwapTransition);
     await bobAliceChannel.flush();
     await sleep()
@@ -100,7 +100,7 @@ describe('Swaps', () => {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Bob accepts half of the swap
-    const updateSwapTransition = new Transition.UpdateSwap(1, 0, 0.5);
+    const updateSwapTransition = new Transition.SettleSwap(1, 0, 0.5);
     await bobAliceChannel.push(updateSwapTransition);
     await bobAliceChannel.flush();
     await sleep()
