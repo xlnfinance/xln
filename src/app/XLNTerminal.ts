@@ -223,8 +223,7 @@ export class XLNTerminal {
     try {
       const paymentAmount = ethers.parseEther(amount);
       const transition = new Transition.DirectPayment(1, parseInt(token), paymentAmount);
-      await this.currentChannel.push(transition);
-      await this.currentChannel.flush();
+      await this.currentUser.addToMempool(this.currentChannel.otherUserAddress, transition, true);
       console.log(colors.green(`Payment of ${amount} ${token} sent successfully`));
     } catch (error) {
       console.log(colors.red(`Error making payment: ${(error as Error).message}`));
@@ -265,9 +264,7 @@ export class XLNTerminal {
         1,
         hops
       );
-      const firstHopChannel = await this.currentUser.getChannel(hops[0]);
-      await firstHopChannel.push(paymentTransition);
-      await firstHopChannel.flush();
+      await this.currentUser.addToMempool(hops[0], paymentTransition, true);
       console.log(colors.green(`Onion routed payment of ${amount} ETH sent to ${destination}`));
     } catch (error) {
       console.log(colors.red(`Error sending onion routed payment: ${(error as Error).message}`), error);

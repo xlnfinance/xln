@@ -6,8 +6,6 @@ import Logger from '../utils/Logger';
 import ITransportMessageReceiver from '../types/ITransportListener';
 import { decode, encode } from '../utils/Codec';
 
-const logger = new Logger('Transport');
-
 export default class Transport implements ITransport {
   private _ws!: WebSocket; // Use definite assignment assertion
   private _receiver?: ITransportMessageReceiver;
@@ -18,10 +16,12 @@ export default class Transport implements ITransport {
   private _userId?: string;
   private _autoReconnectInterval: number = 10000; // 10 seconds
   private _messageNumber: number = 0;
+  private logger: Logger;
 
   constructor(options: {
     id: string;
     receiver: ITransportMessageReceiver;
+    logger: Logger
     connectionData?: HubData;
     userId?: string;
     ws?: WebSocket;
@@ -29,6 +29,7 @@ export default class Transport implements ITransport {
     this._id = options.id;
     this.setReceiver(options.receiver);
     this._isServer = !!options.ws;
+    this.logger = options.logger;
 
     if (this._isServer) {
       // Server-side initialization
@@ -48,7 +49,7 @@ export default class Transport implements ITransport {
 
   private setupWebSocketListeners(): void {
     this._ws.onopen = (event: WebSocket.Event) => {
-      logger.info(`WebSocket connected: ${this._id}`);
+      this.logger.info(`WebSocket connected: ${this._id}`);
       //this._receiver?.onOpen?.(this, this._id);
     };
 
@@ -56,15 +57,15 @@ export default class Transport implements ITransport {
       if (this._receiver) {
         this._messageNumber++;
         const msg = decode(event.data as Buffer) as IMessage;
-        //logger.info(`Handle message ${this._messageNumber}: ${encode(msg)}`);
+        //this.logger.info(`Handle message ${this._messageNumber}: ${encode(msg)}`);
         await this._receiver.onReceive(this, msg);
       } else {
-        logger.warn(`No message receiver set for transport ${this._id}`);
+        this.logger.warn(`No message receiver set for transport ${this._id}`);
       }
     };
 
     this._ws.onclose = (event: WebSocket.CloseEvent) => {
-      logger.info(`WebSocket closed: ${event.reason}`);
+      this.logger.info(`WebSocket closed: ${event.reason}`);
       this._receiver?.onClose(this, this._id);
       if (!this._isServer && event.code !== 1000) {
         this.reconnect();
@@ -72,7 +73,7 @@ export default class Transport implements ITransport {
     };
 
     this._ws.onerror = (event: WebSocket.ErrorEvent) => {
-      logger.error(`WebSocket error: ${event.message}`);
+      this.logger.error(`WebSocket error: ${event.message}`);
       if (!this._isServer) {
         this.reconnect();
       }
@@ -80,7 +81,7 @@ export default class Transport implements ITransport {
   }
 
   private reconnect(): void {
-    logger.info(`Attempting to reconnect in ${this._autoReconnectInterval}ms`);
+    this.logger.info(`Attempting to reconnect in ${this._autoReconnectInterval}ms`);
     setTimeout(() => {
       if (!this._isServer) {
         this.open();
@@ -110,14 +111,14 @@ export default class Transport implements ITransport {
 
       this._ws.onopen = (event: WebSocket.Event) => {
         clearTimeout(timeout);
-        logger.info(`WebSocket connected: ${this._id}`);
+        this.logger.info(`WebSocket connected: ${this._id}`);
         resolve();
       };
 
       // Set temporary error handler for connection phase
       const tempErrorHandler = (event: WebSocket.ErrorEvent) => {
         clearTimeout(timeout);
-        logger.error(`WebSocket connection error: ${event.message}`);
+        this.logger.error(`WebSocket connection error: ${event.message}`);
         reject(new Error(`WebSocket connection failed: ${event.message}`));
       };
 
@@ -127,7 +128,7 @@ export default class Transport implements ITransport {
 
   send(msg: IMessage): Promise<void> {
     const jsonMsg = encode(msg);
-    //logger.info(`Send message ${encode(msg)}`);
+    //this.logger.info(`Send message ${encode(msg)}`);
     return new Promise((resolve, reject) => {
       if (this._ws.readyState !== WebSocket.OPEN) {
         reject(new Error("WebSocket is not open"));
@@ -136,7 +137,7 @@ export default class Transport implements ITransport {
 
       this._ws.send(jsonMsg, (err) => {
         if (err) {
-          logger.error(`Failed to send message: ${err.message}`);
+          this.logger.error(`Failed to send message: ${err.message}`);
           reject(err);
         } else {
           resolve();
@@ -149,7 +150,7 @@ export default class Transport implements ITransport {
     return new Promise((resolve) => {
       this._ws.close(1000); // Normal closure
       this._ws.onclose = () => {
-        logger.info(`WebSocket closed: ${this._id}`);
+        this.logger.info(`WebSocket closed: ${this._id}`);
         resolve();
       };
     });

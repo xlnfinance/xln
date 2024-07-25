@@ -37,8 +37,8 @@ describe('Channel Tests', () => {
 
   it('should create channels between two users', async () => {
     try {
-      aliceChannel = await alice.createChannel(bob.thisUserAddress);
-      bobChannel = await bob.createChannel(alice.thisUserAddress);
+      aliceChannel = await alice.getChannel(bob.thisUserAddress);
+      bobChannel = await bob.getChannel(alice.thisUserAddress);
       console.log('Alice channel state:', aliceChannel.getState());
       console.log('Bob channel state:', bobChannel.getState());
       expect(aliceChannel.thisUserAddress).to.equal(alice.thisUserAddress);
@@ -54,8 +54,8 @@ describe('Channel Tests', () => {
 
   (shouldContinue ? it : it.skip)('should add a subchannel correctly', async () => {
     try {
-      await aliceChannel.push(new Transition.AddSubchannel(1));
-      await aliceChannel.flush();
+      await alice.addToMempool(aliceChannel.otherUserAddress, new Transition.AddSubchannel(1), true);
+
       await sleep(500);
       console.log('Alice channel state after adding subchannel:', aliceChannel.getState());
       console.log('Bob channel state after adding subchannel:', bobChannel.getState());
@@ -74,8 +74,7 @@ describe('Channel Tests', () => {
 
   (shouldContinue ? it : it.skip)('should add a delta to a subchannel', async () => {
     try {
-      await aliceChannel.push(new Transition.AddDelta(1, 1));
-      await aliceChannel.flush();
+      await alice.addToMempool(aliceChannel.otherUserAddress, new Transition.AddDelta(1, 1),true);
       await sleep(500);
       console.log('Alice channel state after adding delta:', aliceChannel.getState());
       console.log('Bob channel state after adding delta:', bobChannel.getState());
@@ -95,8 +94,8 @@ describe('Channel Tests', () => {
   (shouldContinue ? it : it.skip)('should set credit limit correctly', async () => {
     try {
       const creditLimit = ethers.parseEther('10');
-      await aliceChannel.push(new Transition.SetCreditLimit(1, 1, creditLimit));
-      await aliceChannel.flush();
+      await alice.addToMempool(aliceChannel.otherUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit),true);
+
       await sleep(500);
       console.log('Alice channel state after setting credit limit:', aliceChannel.getState());
       console.log('Bob channel state after setting credit limit:', bobChannel.getState());
@@ -121,8 +120,9 @@ describe('Channel Tests', () => {
       const aliceDerivedDelta = aliceChannel.deriveDelta(1, 1, aliceChannel.isLeft);
       const bobDerivedDelta = bobChannel.deriveDelta(1, 1, bobChannel.isLeft);
       console.log(aliceDerivedDelta, bobDerivedDelta);
-      console.log('Alice derived delta:', aliceDerivedDelta);
-      console.log('Bob derived delta:', bobDerivedDelta);
+      console.log('Alice derived delta:', aliceChannel.isLeft, aliceDerivedDelta);
+      console.log('Bob derived delta:', bobChannel.isLeft, bobDerivedDelta);
+
       expect(aliceDerivedDelta.totalCapacity).to.equal(creditLimit);
       expect(bobDerivedDelta.totalCapacity).to.equal(creditLimit);
       expect(aliceDerivedDelta.inCapacity).to.equal(creditLimit);
@@ -138,8 +138,8 @@ describe('Channel Tests', () => {
 
   (shouldContinue ? it : it.skip)('should use hub as transport proxy', async () => {
     try {
-      await aliceChannel.push(new Transition.AddSubchannel(2));
-      await aliceChannel.flush();
+      await alice.addToMempool(aliceChannel.otherUserAddress, new Transition.AddSubchannel(2), true);
+
       await sleep(500);
       console.log('Global hub transports:', globalHub._transports);
       expect(globalHub._transports.has(alice.thisUserAddress), 'Alice should be connected to the hub').to.be.true;

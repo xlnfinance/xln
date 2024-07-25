@@ -20,7 +20,7 @@ import IChannelContext from '../types/IChannelContext';
 
 
 import Transition from './Transition';
-
+import { sleep } from '../utils/Utils';
 
 import ChannelSavePoint from '../types/ChannelSavePoint';
 import { createSubchannelData, Subchannel, Delta } from '../types/Subchannel';
@@ -40,7 +40,7 @@ export function stringify(obj: any) {
     return value;
   }
 
-  return JSON.stringify(obj, replacer, 4)
+  return JSON.stringify(obj, replacer, 1)
 }
 
 const coder = ethers.AbiCoder.defaultAbiCoder()
@@ -80,13 +80,13 @@ export default class Channel {
     this.otherUserAddress = this.ctx.getRecipientAddress();
     this.storage = this.ctx.getStorage(`${this.otherUserAddress}`);
 
-    this.logger = new Logger(this.thisUserAddress);
+    this.logger = ctx.user.logger;
 
     this.state = this.emptyState();
     this.data = this.emptyData();
 
     this.state.subcontracts = [];
-    this.data.subcontracts = new Map();
+
     this.logger.log("New channel constructed "+this.thisUserAddress, this.otherUserAddress);
   }
 
@@ -115,12 +115,10 @@ export default class Channel {
 
   private emptyData(): ChannelData {
     return {
-      subcontracts: new Map(),
       isLeft: this.ctx.getUserAddress() < this.ctx.getRecipientAddress(),
       rollbacks: 0,
       sentTransitions: 0,
       pendingBlock: null,
-      mempool: [],
       pendingSignatures: []
     };
   }
@@ -147,9 +145,7 @@ export default class Channel {
       const previousState = decode(encode(this.state));
 
       // dryRun: true to only change .state and check if sigs are valid
-      console.log('beforehandl',this.state)
-      await this.applyBlock(pendingBlock.isLeft, pendingBlock, true); // <--- dryRun until signature verification
-      console.log('afterhandl',this.state)
+      await this.applyBlock(pendingBlock, true); // <--- dryRun until signature verification
 
       if (message.pendingSignatures.length == 0) {
         throw new Error('Invalid pending signatures length');
@@ -159,9 +155,6 @@ export default class Channel {
       if (message.debugState) {
         debugState = decode(Buffer.from(message.debugState, 'hex'));
       }
-
-      this.logger.log('debug pending state', this.channelId, stringify(debugState), stringify(this.state))
-
 
       if (!await this.verifySignatures(message.pendingSignatures)) {
         this.state = previousState;
@@ -176,33 +169,40 @@ export default class Channel {
       }
       await this.storage.put(historicalBlock);
 
-      this.data.mempool.splice(0, this.data.sentTransitions);
-      this.logger.log("Clear mempool ",this.data.mempool);
+
+      let mempool = this.ctx.user.mempoolMap.get(this.otherUserAddress)!
+      if (mempool === undefined) {
+        mempool = [];
+      }
+      mempool.splice(0, this.data.sentTransitions);
+      this.logger.info("Clear mempool ",mempool);
+
       this.data.sentTransitions = 0;
       this.data.pendingBlock = null;
       this.data.pendingSignatures = [];
       //this.data.rollbacks = 0;
 
+      this.logger.logState(this.channelId, this.state);
       await this.save();
       return true;
 
 
     } else if (message.blockId == this.state.blockId) {
       if (this.data.isLeft) {
-        console.log("no rollback as left");
+        this.logger.warn("no rollback as left");
         //throw new Error('left doesnt rollback');
         return false;
       } else {
-        console.log("rollback as Right")
+        this.logger.warn("rollback as Right")
         this.data.sentTransitions = 0;
         this.data.pendingBlock = null;
-        this.logger.log("Rollback");
+        this.logger.error("Rollback");
         this.data.rollbacks++;
         await this.save();
         return false;
       }
     } else {
-      throw new Error('fatal weird');
+      throw new Error('fatal unexpected');
     }
     await this.save();
 
@@ -220,8 +220,33 @@ export default class Channel {
       return ENV.profiles[addr] ? ENV.profiles[addr].name+" "+addr.substring(2,6) : addr;
     }
     
-    return `${tags[0]}${toName(this.thisUserAddress)}---${this.state.blockId}.${this.state.transitionId}---${tags[1]}${toName(this.otherUserAddress)}`;
+    return `${toName(this.thisUserAddress)}${tags[0]}---${toName(this.otherUserAddress)}${tags[1]}`;
   }
+
+  async onready(timeout: number = 5000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (this.data.sentTransitions === 0) {
+        resolve();
+        return;
+      }
+  
+      const checkInterval = 50; // Check every 50ms
+      let elapsedTime = 0;
+  
+      const timer = setInterval(() => {
+        if (this.data.sentTransitions === 0) {
+          clearInterval(timer);
+          resolve();
+        } else if (elapsedTime >= timeout) {
+          clearInterval(timer);
+          reject(new Error('Timeout waiting for flush to complete'));
+        }
+        elapsedTime += checkInterval;
+      }, checkInterval);
+    });
+  }
+
+
 
   async verifySignatures(sigs: string[]): Promise<boolean> {
     const globalSig = sigs.pop() as string;
@@ -239,7 +264,7 @@ export default class Channel {
 
     for (let i = 0; i < proofs.proofhash.length; i++) {
       if (!(await this.ctx.user.verifyMessage(proofs.proofhash[i], sigs[i], this.otherUserAddress))) {
-        console.log(sigs, proofs)
+        this.logger.warn('invalid proofs',sigs, proofs)
         throw new Error('Invalid verify subchannel signature');
         return false;
         //throw new Error('Invalid verify subchannel proof signature '+i);
@@ -249,6 +274,8 @@ export default class Channel {
   }
   
   async receive(message: FlushMessage): Promise<void> {
+    this.logger.logState(this.channelId, this.state);
+
     if (!isValidFlushMessage(message)) { 
       this.logger.log(message)
       throw new Error('Invalid FlushMessage');
@@ -267,7 +294,8 @@ export default class Channel {
     
 
     if (!message.block) {
-      if (this.data.mempool.length > 0) {
+      const mempool = this.ctx.user.mempoolMap.get(this.thisUserAddress)!;
+      if (mempool && mempool.length > 0) {
         await this.flush()
       } else {
         await this.save();
@@ -292,9 +320,10 @@ export default class Channel {
     }
 
     const stateBeforeDryRun = structuredClone(this.state);
-    await this.applyBlock(block.isLeft, block, true);
-    //this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
+    await this.applyBlock(block, true);
+    this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
+    
     // verify signatures after the block is applied
     if (!message.newSignatures || message.newSignatures.length == 0) {
       throw new Error('Invalid new signatures length');
@@ -306,7 +335,7 @@ export default class Channel {
 
 
     this.state = stateBeforeDryRun;
-    await this.applyBlock(this.data.isLeft, block, false);
+    await this.applyBlock(block, false);
 
 
     const newProofs = await this.getSubchannelProofs();
@@ -322,7 +351,8 @@ export default class Channel {
     
     //await this.save();
 
-    this.logger.log("Sending flush back as ", this.data.isLeft)
+    this.logger.logState(this.channelId, this.state);
+    this.logger.info(`Sending flush back ${this.channelId}`)
     await this.flush();
   }
 
@@ -445,12 +475,6 @@ export default class Channel {
     };
   }
 
-  async push(transition: Transition.Any): Promise<void> {
-    this.data.mempool.push(transition);
-    this.logger.log('Mempool', this.data.sentTransitions, this.data.mempool);
-    return this.save();
-  }
-
   
   async flush(): Promise<void> {
     if (this.data.sentTransitions > 0) {
@@ -475,11 +499,12 @@ export default class Channel {
     if (body.pendingSignatures.length != this.state.subchannels.length + 1) {
       throw new Error('fatal: Invalid pending signatures length');
     }
+    const mempool = this.ctx.user.mempoolMap.get(this.otherUserAddress);
 
-    const transitions = this.data.mempool.slice(0, BLOCK_LIMIT);
     // flush may or may not include new block
-    if (transitions.length > 0) {
-      
+    if (mempool && mempool.length > 0) {
+      const transitions = mempool.slice(0, BLOCK_LIMIT);
+
       const previousState: ChannelState = decode(encode(this.state));
 
       const block: Block = {
@@ -492,8 +517,8 @@ export default class Channel {
       };
 
       //this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
-      await this.applyBlock(this.data.isLeft, block, true); // <--- only dryRun in flush()
-      this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
+      await this.applyBlock(block, true); // <--- only dryRun in flush()
+      //this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
       //this.logger.log("block", block, this.data.pendingBlock);
 
@@ -536,8 +561,8 @@ export default class Channel {
       const delta = d.ondelta + d.offdelta;
       const collateral = nonNegative(d.collateral);
 
-      let ownCreditLimit = isLeft ? d.leftCreditLimit : d.rightCreditLimit;
-      let peerCreditLimit = isLeft ? d.rightCreditLimit : d.leftCreditLimit;
+      let ownCreditLimit = d.leftCreditLimit;
+      let peerCreditLimit = d.rightCreditLimit;
       
       let inCollateral = delta > 0n ? nonNegative(collateral - delta) : collateral;
       let outCollateral = delta > 0n ? (delta > collateral ? collateral : delta) : 0n;
@@ -552,8 +577,8 @@ export default class Channel {
       let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
       let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
     
-      let inAllowence = isLeft ? d.rightAllowence : d.leftAllowence;
-      let outAllowence = isLeft ? d.leftAllowence : d.rightAllowence;
+      let inAllowence = d.rightAllowence;
+      let outAllowence = d.leftAllowence;
     
       const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
     
@@ -571,7 +596,8 @@ export default class Channel {
 
         [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
         // swap in<->out own<->peer credit
-        [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] = [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
+        [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] = 
+        [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
     }
 
   
@@ -630,8 +656,7 @@ export default class Channel {
     return subchannel;
   }
 
-  private async applyBlock(isLeft: boolean, block: Block, dryRun: boolean): Promise<void> {
-    this.logger.info(`applyBlock ${block.isLeft} isLeft ${isLeft}}`);
+  private async applyBlock(block: Block, dryRun: boolean): Promise<void> {
 
     // save previous hash first before changing this.state
     this.state.previousStateHash = keccak256(encode(this.state));
@@ -642,6 +667,7 @@ export default class Channel {
     for (let i = 0; i < block.transitions.length; i++) {
       await this.applyTransition(block, block.transitions[i], dryRun);
     }
+    this.logger.info(`applyBlockEnd`);
   }
  
 
@@ -655,12 +681,14 @@ export default class Channel {
     //  return;
     //}
 
-    console.log(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
-    try{
+    this.logger.debug(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
+    //try{
       await transition.apply(this, block, dryRun);
-    } catch(e){
-      console.log('fatal in applytransiton', e);
-    }
+   // } catch(e){
+     // this.logger.log(e);
+     // this.logger.debug('fatal in applytransiton', e);
+     // throw(e);
+    //}
   //this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(this.state));
     
   }
@@ -682,9 +710,9 @@ export default class Channel {
       const channelSavePoint = await this.storage.getValue<ChannelSavePoint>('channelSavePoint');
       this.data = channelSavePoint.data;
       this.state = channelSavePoint.state;
-      this.logger.log("Loaded last state "+this.thisUserAddress, stringify(this.state));
+      //this.logger.log("Loaded last state "+this.thisUserAddress, stringify(this.state));
     } catch (e) {
-      this.logger.log("Load error", e);
+      //this.logger.log("Load error", e);
       await this.save(); // Initialize with empty state if load fails
     }
   }

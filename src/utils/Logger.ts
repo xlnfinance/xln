@@ -1,71 +1,203 @@
-// src/utils/Logger.ts
-import { stringify } from '../app/Channel';
+// Logger.ts
+
+import colors from '../app/colors';
+import {stringify} from '../app/Channel'
+// Logger.ts
+function shortenLongWords(input: string) {
+  return input.replace(/\b[a-zA-Z0-9]{20,}\b/g, match => match.slice(0, 8) + '...');
+}
+// Logger.ts
+
 
 class Logger {
-  static idCounter: number = 0;
+  private static idCounter: number = 0;
   public static _loggers: Logger[] = [];
-  
-  id?: number;
-  userAddress?: string;
+  private static timeline: {time: number, user: string, level: string, event: string}[] = [];
+  private static states: {[key: string]: any} = {};
+  private static paused: boolean = false;
+  private static stepMode: boolean = false;
+  private static columnWidth: number = 40;
+  private static renderInterval: NodeJS.Timeout | null = null;
 
+  private id!: number;
+  private userAddress!: string;
+  private color!: (text: string) => string;
 
   constructor(userAddress: string) {
     let logger = Logger._loggers.find(logger => logger.userAddress === userAddress);
-    if (logger) {
-      return logger;
-    }
+    if (logger) return logger;
 
-    console.log("new logger "+userAddress)
-
-    this.id = ++Logger.idCounter;
-    this.userAddress = userAddress;
-
-    Logger._loggers.push(this);
+    this.initialize(userAddress);
   }
 
-  private getColorForId(id: number): string {
-    const colors = [
-      '\x1b[31m', // red
-      '\x1b[32m', // green
-      '\x1b[33m', // yellow
-      '\x1b[34m', // blue
-      '\x1b[35m', // magenta
-      '\x1b[36m', // cyan
-      '\x1b[37m', // white
-    ];
-    return colors[id % colors.length];
+  private initialize(userAddress: string): void {
+    this.id = ++Logger.idCounter;
+    this.userAddress = userAddress;
+    this.color = this.getColorForId(this.id);
+    Logger._loggers.push(this);
+
+    if (!Logger.renderInterval) {
+      Logger.renderInterval = setInterval(() => this.renderTimeline(), 1000);
+    }
+  }
+
+  private getColorForId(id: number): (text: string) => string {
+    const colorFunctions = [colors.red, colors.green, colors.yellow, colors.blue, colors.magenta, colors.cyan];
+    return colorFunctions[id % colorFunctions.length];
   }
 
   private formatMessage(level: string, ...args: any[]): string {
-    const color = this.getColorForId(this.id!);
-    const paddedId = this.id!.toString().padStart(2, '0');
     const timestamp = new Date().toISOString();
-    let formattedMessage = `${color}[${paddedId}:${this.userAddress!.slice(0, 6)}]\x1b[0m [${level}] [${timestamp}]`;
+    const shortAddress = this.userAddress;
+    const message = args.map(arg => typeof arg === 'object' ? stringify(arg) : arg).join(' ');
+    const shortEvent = shortenLongWords(message.replace(/(\n)/gm, '')); //shortenLongWords(message.replace(/\s{10,}|(\r\n|\n|\r)/gm, ''))
+    Logger.timeline.push({time: Date.now(), user: shortAddress, level, event: shortEvent});
 
-    const messageParts = args.map(arg => (typeof arg === 'object' ? stringify(arg) : arg));
-    formattedMessage += ' ' + messageParts.join(' ');
 
-    return formattedMessage;
+    return `${shortAddress} | ${level.padEnd(5)} | ${timestamp} | ${message}`;
+  }
+
+  private renderTimeline() {
+    //console.clear();
+    const users = Logger._loggers.map(logger => logger.userAddress);
+    const header = users.map(user => user.padEnd(Logger.columnWidth)).join(' ');
+    console.log(header);
+    console.log('='.repeat(Logger.columnWidth * users.length));
+
+    const events: string[][] = users.map(() => []);
+    Logger.timeline.forEach(event => {
+      if (event.level === 'STATE') {
+        console.log(event.event);
+        return;
+      };
+
+      let lines = Math.floor(event.event.length / Logger.columnWidth);
+      if (lines > 3) lines = 3;
+      for (let shift = 0; shift <= lines * Logger.columnWidth; shift += Logger.columnWidth){
+
+        const line = users.map((_, index) => {
+          let body;
+          if (shift == 0) {
+            body = `${event.level.padEnd(5)} | ${event.event.slice(shift, shift+Logger.columnWidth - 8)}`
+          } else {
+            const startAt = shift - 8;
+            body = `${event.event.slice(startAt, startAt+Logger.columnWidth)}`
+          }
+        
+          return (event.user == _ ? body : '').padEnd(Logger.columnWidth)
+
+
+        }).join('|');
+        const m = event.level ? event.level.toLocaleLowerCase() : 'log';
+        (console as any)[m](line);
+      }
+      console.log();
+      console.log();
+    });
+
+    Logger.timeline = [];
   }
 
   log(...args: any[]): void {
-    console.log(this.formatMessage('LOG', ...args));
+    const message = this.formatMessage('LOG', ...args);
+    //console.log(this.color(message));
   }
 
   info(...args: any[]): void {
-    console.log(this.formatMessage('INFO', ...args));
+    const message = this.formatMessage('INFO', ...args);
+    //console.log(this.color(message));
   }
 
   error(...args: any[]): void {
-    console.error(this.formatMessage('ERROR', ...args));
+    const message = this.formatMessage('ERROR', ...args);
+    console.error(this.color(message));
   }
 
   warn(...args: any[]): void {
-    console.warn(this.formatMessage('WARN', ...args));
+    const message = this.formatMessage('WARN', ...args);
+    //console.warn(this.color(message));
   }
 
   debug(...args: any[]): void {
-    console.debug(this.formatMessage('DEBUG', ...args));
+    const message = this.formatMessage('DEBUG', ...args);
+    //console.debug(this.color(message));
+  }
+
+  logState(addr: string, state: any): void {
+    const oldState = Logger.states[addr] || {};
+    const stateDiff = this.diffJson(state, oldState);
+
+    let str = ''
+    stateDiff.forEach(part => {
+      const color = part.added ? '\x1b[32m' : // Green for added
+                    part.removed ? '\x1b[31m' : // Red for removed
+                    '\x1b[0m'; // Reset for unchanged
+                    
+      if (color != '\x1b[0m') str+=(color + part.value + '\x1b[0m');
+    });
+    Logger.timeline.push({time: Date.now(), user: this.userAddress, level: 'STATE', event: `State diff ${addr}:\n${str}`});
+    Logger.states[addr] = state;
+    //console.log(str); // For newline at the end
+  }
+
+
+  diffJson(oldObj: any, newObj: any) {
+    const diff = [];
+    const oldStr = stringify(oldObj);
+    const newStr = stringify(newObj);
+
+    const oldLines = oldStr.split('\n');
+    const newLines = newStr.split('\n');
+
+    let i = 0, j = 0;
+    while (i < oldLines.length && j < newLines.length) {
+      if (oldLines[i] === newLines[j]) {
+        diff.push({ value: oldLines[i] + '\n' });
+        i++;
+        j++;
+      } else if (oldLines[i] !== newLines[j]) {
+        diff.push({ removed: true, value: oldLines[i] + '\n' });
+        diff.push({ added: true, value: newLines[j] + '\n' });
+        i++;
+        j++;
+      }
+    }
+
+    while (i < oldLines.length) {
+      diff.push({ removed: true, value: oldLines[i] + '\n' });
+      i++;
+    }
+
+    while (j < newLines.length) {
+      diff.push({ added: true, value: newLines[j] + '\n' });
+      j++;
+    }
+
+    return diff;
+  }
+  logState2(state: any): void {
+    const oldState = Logger.states[this.userAddress] || {};
+    const stateDiff = stringify(state);
+    Logger.states[this.userAddress] = state;
+    this.log('State diff:', stateDiff);
+  }
+
+  static pauseExecution(): void {
+    Logger.paused = true;
+  }
+
+  static resumeExecution(): void {
+    Logger.paused = false;
+    Logger.stepMode = false;
+  }
+
+  static toggleView(): void {
+    if (Logger.renderInterval) {
+      clearInterval(Logger.renderInterval);
+      Logger.renderInterval = null;
+    } else {
+      Logger.renderInterval = setInterval(() => new Logger('').renderTimeline(), 1000);
+    }
   }
 }
 

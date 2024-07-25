@@ -33,11 +33,13 @@ describe('DerivedDelta Tests', () => {
     bob = new User('bob', 'password2');
     await alice.start();
     await bob.start();
-    channel = await alice.createChannel(bob.thisUserAddress);
-    await channel.push(new Transition.AddSubchannel(1));
-    await channel.push(new Transition.AddDelta(1, 1));
-    await channel.flush();
-    await sleep();
+    channel = await alice.getChannel(bob.thisUserAddress);
+    await alice.addToMempool(bob.thisUserAddress, new Transition.AddSubchannel(1));
+    await alice.addToMempool(bob.thisUserAddress, new Transition.AddDelta(1, 1), true);
+
+    await sleep(500);
+
+    console.log(channel.state);
   });
 
   after(async () => {

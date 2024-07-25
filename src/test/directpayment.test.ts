@@ -36,21 +36,23 @@ describe('Payment Tests', () => {
   });
 
   async function setupChannels() {
-    aliceBobChannel = await alice.createChannel(bob.thisUserAddress);
-    bobAliceChannel = await bob.createChannel(alice.thisUserAddress);
+    aliceBobChannel = await alice.getChannel(bob.thisUserAddress);
+    bobAliceChannel = await bob.getChannel(alice.thisUserAddress);
 
     offdeltas['alice-bob'] = 0n;
 
-    await aliceBobChannel.push(new Transition.AddSubchannel(1));
-    await aliceBobChannel.push(new Transition.AddDelta(1, 1));
+    await alice.addToMempool(bob.thisUserAddress, new Transition.AddSubchannel(1));
+    await alice.addToMempool(bob.thisUserAddress, new Transition.AddDelta(1, 1));
     const creditLimit = ethers.parseEther('10');
-    await aliceBobChannel.push(new Transition.SetCreditLimit(1, 1, creditLimit));
-    await aliceBobChannel.flush();
+    await alice.addToMempool(bob.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit), true);
 
-    await bobAliceChannel.push(new Transition.AddSubchannel(1));
-    await bobAliceChannel.push(new Transition.AddDelta(1, 1));
-    await bobAliceChannel.push(new Transition.SetCreditLimit(1, 1, creditLimit));
-    await bobAliceChannel.flush();
+    await sleep(100)
+
+    
+    //await bob.addToMempool(alice.thisUserAddress, new Transition.AddSubchannel(1));
+    //await bob.addToMempool(alice.thisUserAddress, new Transition.AddDelta(1, 1));
+    await bob.addToMempool(alice.thisUserAddress,new Transition.SetCreditLimit(1, 1, creditLimit),true);
+
     await sleep()
   }
 
@@ -71,8 +73,8 @@ describe('Payment Tests', () => {
   (shouldContinue ? it : it.skip)('should perform a direct payment correctly', async () => {
     try {
       const paymentAmount = ethers.parseEther('1');
-      await aliceBobChannel.push(new Transition.DirectPayment(1, 1, paymentAmount));
-      await aliceBobChannel.flush();
+      await alice.addToMempool(bob.thisUserAddress, new Transition.DirectPayment(1, 1, paymentAmount), true);
+
       offdeltas['alice-bob'] += aliceBobChannel.isLeft ? -paymentAmount : paymentAmount;
       await sleep()
 
@@ -117,16 +119,16 @@ describe('Payment Tests', () => {
       const payment1 = ethers.parseEther('2');
       const payment2 = ethers.parseEther('3');
       
-      await aliceBobChannel.push(new Transition.DirectPayment(1, 1, payment1));
-      await aliceBobChannel.flush();
+      await alice.addToMempool(bob.thisUserAddress, new Transition.DirectPayment(1, 1, payment1), true);
+      await sleep(1000)
+
       offdeltas['alice-bob'] += aliceBobChannel.isLeft ? -payment1 : payment1;
 
-      await bobAliceChannel.push(new Transition.DirectPayment(1, 1, payment2));
-      await bobAliceChannel.flush();
+      await bob.addToMempool(alice.thisUserAddress, new Transition.DirectPayment(1, 1, payment2), true);
+
       offdeltas['alice-bob'] += bobAliceChannel.isLeft ? -payment2 : payment2;
 
       await sleep(1000)
-      console.log('after sleep', aliceBobChannel, bobAliceChannel);
 
       const aliceDelta = aliceBobChannel.getDelta(1, 1);
       const bobDelta = bobAliceChannel.getDelta(1, 1);
@@ -147,9 +149,9 @@ describe('Payment Tests', () => {
   (shouldContinue ? it : it.skip)('should update derived delta correctly after payment', async () => {
     try {
       const paymentAmount = ethers.parseEther('1');
-      await aliceBobChannel.push(new Transition.DirectPayment(1, 1, paymentAmount));
+      await alice.addToMempool(bob.thisUserAddress, new Transition.DirectPayment(1, 1, paymentAmount), true);
       offdeltas['alice-bob'] += aliceBobChannel.isLeft ? -paymentAmount : paymentAmount;
-      await aliceBobChannel.flush();
+
       await sleep()
 
       const aliceDerivedDelta = aliceBobChannel.deriveDelta(1, 1, aliceBobChannel.isLeft);
@@ -170,7 +172,7 @@ describe('Payment Tests', () => {
   (shouldContinue ? it : it.skip)('should use hub as transport proxy for payments', async () => {
     try {
       const paymentAmount = ethers.parseEther('1');
-      await aliceBobChannel.push(new Transition.DirectPayment(1, 1, paymentAmount));
+      await alice.addToMempool(bob.thisUserAddress, new Transition.DirectPayment(1, 1, paymentAmount));
       offdeltas['alice-bob'] += aliceBobChannel.isLeft ? -paymentAmount : paymentAmount;
 
       await aliceBobChannel.flush();
