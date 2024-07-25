@@ -20,6 +20,9 @@ export default class StorageContext implements IStorageContext {
   }
 
   getChannelStorage(channelId: string) {
+    if (this._db === undefined) {
+      throw new Error('StorageContext not initialized');
+    }
     return new ChannelStorage(channelId, this._db);
   }
 }

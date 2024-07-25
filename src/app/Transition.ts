@@ -39,7 +39,7 @@ export namespace Transition {
       public readonly amount: bigint,
       public readonly hashlock: string,
       public readonly timelock: number,
-      public readonly encryptedPackage: string
+      public encryptedPackage: string
     ) {}
   
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
@@ -69,7 +69,7 @@ export namespace Transition {
 
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
       const hashlock = ethers.keccak256(ethers.toUtf8Bytes(this.secret))
-      console.log('applying secret, lock', this.secret, hashlock)
+      channel.logger.log('applying secret, lock', this.secret, hashlock)
      // use scId instead of hashlock
 
       let payment: AddPayment | undefined;
@@ -86,7 +86,7 @@ export namespace Transition {
         }
       }
       if (payment === undefined || paymentIndex === undefined) {
-        console.log(channel.state.subcontracts)
+        channel.logger.log(channel.state.subcontracts)
         throw new Error('No such payment')
         return;
       }
@@ -98,10 +98,10 @@ export namespace Transition {
       }
       // other way around, because Settle is echoed back
       if (payment.hashlock === hashlock) {
-        console.log('outcome unlocked')
+        channel.logger.log('outcome unlocked')
         delta.offdelta += !block.isLeft ? -payment.amount : payment.amount;        
       } else {
-        console.log('fatal reason for fail '+this.secret);
+        channel.logger.log('fatal reason for fail '+this.secret);
       }
       channel.state.subcontracts.splice(paymentIndex, 1);
 
@@ -279,12 +279,12 @@ export namespace Transition {
       const delta = channel.getDelta(this.chainId, this.tokenId);
       const derived = channel.deriveDelta(this.chainId, this.tokenId, block.isLeft);
 
-      console.log("Derived as ",block.isLeft, derived.outCapacity, this.amount)
+      channel.logger.log("Derived as ",block.isLeft, derived.outCapacity, this.amount)
 
       if (delta && this.amount > 0 && derived.outCapacity >= this.amount) {
-        console.log(`Apply delta ${delta.offdelta}, ${block.isLeft} ${this.amount}`)
+        channel.logger.log(`Apply delta ${delta.offdelta}, ${block.isLeft} ${this.amount}`)
         delta.offdelta += block.isLeft ? -this.amount : this.amount;
-        console.log(`Result ${delta.offdelta}`)
+        channel.logger.log(`Result ${delta.offdelta}`)
       } else {
         throw new Error("Insufficient capacity for direct "+derived.outCapacity);
       }
@@ -303,14 +303,12 @@ export namespace Transition {
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
       const delta = channel.getDelta(this.chainId, this.tokenId);
       if (delta) {
-        console.log('setting credit to ', delta, block.isLeft, this.amount)
 
         if (!block.isLeft) {
           delta.leftCreditLimit = this.amount;
         } else {
           delta.rightCreditLimit = this.amount;
         }
-        console.log('setting credit to ', delta, block.isLeft, this.amount)
 
       } else {
         throw new Error("non existant delta");

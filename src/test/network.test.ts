@@ -28,12 +28,12 @@ describe('Network Operations', () => {
   });
 
   async function setupChannel(user1: User, user2: User) {
-    const channel = await user1.createChannel(user2.thisUserAddress);
-    await channel.push(new Transition.AddSubchannel(1));
-    await channel.push(new Transition.AddDelta(1, 1));
+    const channel = await user1.getChannel(user2.thisUserAddress);
+    user1.addToMempool(user2.thisUserAddress, new Transition.AddSubchannel(1));
+    user1.addToMempool(user2.thisUserAddress, new Transition.AddDelta(1, 1));
     const creditLimit = ethers.parseEther('10');
-    await channel.push(new Transition.SetCreditLimit(1, 1, creditLimit));
-    await channel.flush();
+    user1.addToMempool(user2.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit));
+    await user1.flushChannel(user2.thisUserAddress);
     await sleep(500);
     channels.set(`${user1.thisUserAddress}-${user2.thisUserAddress}`, channel);
     offdeltas[`${user1.thisUserAddress}-${user2.thisUserAddress}`] = 0n;
@@ -68,7 +68,7 @@ describe('Network Operations', () => {
     );
 
     const firstHopChannel = channels.get(`${from.thisUserAddress}-${route[0]}`)!;
-    await firstHopChannel.push(paymentTransition);
+    await from.addToMempool(to.thisUserAddress, paymentTransition);
     await firstHopChannel.flush();
 
     console.log(`Payment initiated: ${from.thisUserAddress} -> ${to.thisUserAddress}, Amount: ${amount}`);

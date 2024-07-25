@@ -141,9 +141,8 @@ export class XLNCommandLine {
       if (answer.message.toLowerCase() === 'exit') break;
 
       const encryptedMessage = await this.user.encryptMessage(channel.otherUserAddress, answer.message);
-      const transition = new Transition.TextMessage(encryptedMessage);
-      await channel.push(transition);
-      await channel.flush();
+      this.user.addToMempool(channel.otherUserAddress, new Transition.TextMessage(encryptedMessage), true);
+
       console.log(chalk.green('Message sent!'));
     }
   }

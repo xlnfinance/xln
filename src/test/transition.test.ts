@@ -2,11 +2,16 @@ import { expect } from 'chai';
 import { Transition } from '../app/Transition';
 import ChannelState from '../types/ChannelState';
 import { Subchannel, Delta } from '../types/Subchannel';
+import Channel from '../app/Channel';
+import User from '../app/User';
 
 describe('Transition Unit Tests', function() {
   let mockState: ChannelState;
+  let block = {isLeft:true} as any;
+  let mockChannel: Channel;
+  let alice, bob: User;
 
-  beforeEach(function() {
+  beforeEach(async function() {
     mockState = {
       left: '0x1234...', // replace with full address
       right: '0x5678...', // replace with full address
@@ -39,18 +44,25 @@ describe('Transition Unit Tests', function() {
       ],
       subcontracts: []
     };
+    alice = new User('alice', 'password1');
+    bob = new User('bob', 'password1');
+    await alice.start();
+
+    mockChannel = await alice.getChannel(bob.thisUserAddress);
+    
+    mockChannel.state = mockState;
   });
 
-  it('should correctly apply DirectPayment transition', function() {
+  it('should correctly apply DirectPayment transition', async function() {
     const transition = new Transition.DirectPayment(1, 1, 50n);
-    transition.apply({ state: mockState } as any, true, true);
+    await transition.apply(mockChannel, block, true);
     
     expect(mockState.subchannels[0].deltas[0].offdelta).to.equal(-50n);
   });
 
   it('should correctly apply AddSubchannel transition', function() {
     const transition = new Transition.AddSubchannel(2);
-    transition.apply({ state: mockState } as any, true, true);
+    transition.apply(mockChannel, block, true);
     
     expect(mockState.subchannels.length).to.equal(2);
     expect(mockState.subchannels[1].chainId).to.equal(2);
@@ -58,7 +70,7 @@ describe('Transition Unit Tests', function() {
 
   it('should correctly apply AddDelta transition', function() {
     const transition = new Transition.AddDelta(1, 2);
-    transition.apply({ state: mockState } as any, true, true);
+    transition.apply(mockChannel, block, true);
     
     expect(mockState.subchannels[0].deltas.length).to.equal(2);
     expect(mockState.subchannels[0].deltas[1].tokenId).to.equal(2);
@@ -66,9 +78,10 @@ describe('Transition Unit Tests', function() {
 
   it('should correctly apply SetCreditLimit transition', function() {
     const transition = new Transition.SetCreditLimit(1, 1, 200n);
-    transition.apply({ state: mockState } as any, true, true);
+    transition.apply(mockChannel, block, true);
+    const v = mockChannel.isLeft ? 'rightCreditLimit' : 'leftCreditLimit';
     
-    expect(mockState.subchannels[0].deltas[0].leftCreditLimit).to.equal(200n);
+    expect(mockState.subchannels[0].deltas[0][v]).to.equal(200n);
   });
 
   // Add more tests for other transition types...

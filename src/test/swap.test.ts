@@ -37,16 +37,16 @@ describe('Swaps', () => {
   });
 
   async function setupChannels() {
-    aliceBobChannel = await alice.createChannel(bob.thisUserAddress);
-    bobAliceChannel = await bob.createChannel(alice.thisUserAddress);
+    aliceBobChannel = await alice.getChannel(bob.thisUserAddress);
+    bobAliceChannel = await bob.getChannel(alice.thisUserAddress);
 
     for (const channel of [aliceBobChannel, bobAliceChannel]) {
-      await channel.push(new Transition.AddSubchannel(1));
-      await channel.push(new Transition.AddDelta(1, 1)); // Token 1
-      await channel.push(new Transition.AddDelta(1, 2)); // Token 2
+      await channel.addToMempool(new Transition.AddSubchannel(1));
+      await channel.addToMempool(new Transition.AddDelta(1, 1)); // Token 1
+      await channel.addToMempool(new Transition.AddDelta(1, 2)); // Token 2
       const creditLimit = ethers.parseEther('10');
-      await channel.push(new Transition.SetCreditLimit(1, 1, creditLimit));
-      await channel.push(new Transition.SetCreditLimit(1, 2, creditLimit));
+      await channel.addToMempool(new Transition.SetCreditLimit(1, 1, creditLimit));
+      await channel.addToMempool(new Transition.SetCreditLimit(1, 2, creditLimit));
       await channel.flush();
       await sleep()
 
@@ -59,7 +59,7 @@ describe('Swaps', () => {
     const swapAmount2 = ethers.parseEther('3');
 
     const swapTransition = new Transition.AddSwap(1, aliceBobChannel.isLeft, 1, swapAmount1, 2, swapAmount2);
-    await aliceBobChannel.push(swapTransition);
+    await aliceBobChannel.addToMempool(swapTransition);
     await aliceBobChannel.flush();
     await sleep()
 
@@ -68,7 +68,7 @@ describe('Swaps', () => {
 
     // Bob accepts the swap
     const updateSwapTransition = new Transition.SettleSwap(1, 0, 1); // Assuming it's the first swap in the subcontracts array
-    await bobAliceChannel.push(updateSwapTransition);
+    await bobAliceChannel.addToMempool(updateSwapTransition);
     await bobAliceChannel.flush();
     await sleep()
 
@@ -92,7 +92,7 @@ describe('Swaps', () => {
     const swapAmount2 = ethers.parseEther('6');
 
     const swapTransition = new Transition.AddSwap(1, aliceBobChannel.isLeft, 1, swapAmount1, 2, swapAmount2);
-    await aliceBobChannel.push(swapTransition);
+    await aliceBobChannel.addToMempool(swapTransition);
     await aliceBobChannel.flush();
     await sleep()
 
@@ -101,7 +101,7 @@ describe('Swaps', () => {
 
     // Bob accepts half of the swap
     const updateSwapTransition = new Transition.SettleSwap(1, 0, 0.5);
-    await bobAliceChannel.push(updateSwapTransition);
+    await bobAliceChannel.addToMempool(updateSwapTransition);
     await bobAliceChannel.flush();
     await sleep()
 
@@ -124,9 +124,11 @@ describe('Swaps', () => {
     const excessiveAmount = ethers.parseEther('11');
 
     const swapTransition = new Transition.AddSwap(1, aliceBobChannel.isLeft, 1, excessiveAmount, 2, excessiveAmount);
+
+    alice.addToMempool(bob.thisUserAddress, swapTransition);
     
     await expect(
-      aliceBobChannel.push(swapTransition)
+      aliceBobChannel.flush()
     ).to.be.rejectedWith('Insufficient capacity');
   });
 });

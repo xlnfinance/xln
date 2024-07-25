@@ -75,6 +75,20 @@ export default class User implements ITransportListener  {
     secret?: string,
   }> = new Map();
 
+  
+  public mempoolMap: Map<string, Array<Transition.Any>> = new Map();
+
+  addToMempool(address: string, transition: Transition.Any, flushNow: boolean = false) {
+    if (!this.mempoolMap.has(address)) {
+      this.mempoolMap.set(address, []);
+    }
+    this.mempoolMap.get(address)?.push(transition);
+    
+    if (flushNow) {
+      return this.flushChannel(address);
+    }
+  }
+
 
   depository!: Depository;
   erc20Mock!: ERC20Mock;
@@ -91,10 +105,12 @@ export default class User implements ITransportListener  {
     this.encryptionKey = new PrivateKey(Buffer.from(seed.slice('0x'.length), 'hex'));
 
     this.thisUserAddress = this.signer.address;
-    this.logger = new Logger(this.thisUserAddress);
+    this.logger = new Logger(username);
     this.logger.log(`new User() constructed ${this.thisUserAddress} ${this.encryptionKey.publicKey.toHex()} ${this.encryptionKey.secret.toString('hex')}`);
 
     ENV.users.set(this.thisUserAddress, this);
+
+    //this.periodicFlush();
   }
 
   async broadcastProfile() {
@@ -104,7 +120,7 @@ export default class User implements ITransportListener  {
       publicKey: this.encryptionKey.publicKey.toHex(),
       hubs: ENV.hubDataList.map(hub => hub.address),
     };
-    console.log("Broadcasting profile", profile)
+    this.logger.log("Broadcasting profile", profile)
     ENV.profiles[profile.address] = profile;
 
     const encodedProfile = encode(profile).toString('hex');    
@@ -147,29 +163,35 @@ export default class User implements ITransportListener  {
   }
 
   async onReceive(transport: ITransport, message: IMessage): Promise<void> {
-    this.logger.log(`Received message from ${message.header.from} to ${message.header.to}`, message.body);
+    this.logger.info(`Receive from ${this.toTag(message.header.from)}`, message);
     try {
       if (message.body.type === BodyTypes.kBroadcastProfile) {
         await this.handleBroadcastProfile(message);
       } else if (message.body.type === BodyTypes.kGetProfile) {
         await this.handleGetProfile(message);
+      } else if (message.header.from == this.thisUserAddress) {
+        this.logger.error("Proxy send failed")
+        //await this.handleProxyMessage(message);
       } else if (this.getHub() && message.header.to !== this.thisUserAddress) {
         await this.handleProxyMessage(message);
       } else if (message.body.type === BodyTypes.kFlushMessage) {
         await this.handleFlushMessage(transport, message as IMessage & { body: FlushMessage });
       } else {
-        console.log('Unhandled message type', message.body);
+        this.logger.error('Unhandled message type', message.body);
       }
      } catch (error) {
-      console.log('fatal', error);
-      process.exit(1)
+      console.log(error)
+      this.logger.error(`Fatal onreceive ${encode(error)}`, );
+      throw(error)
+      //process.exit(0)
+
       //this.logger.error('Unexpected error:', error);
       
      }
   }
 
-  get toTag(): string {
-    return ENV.profiles[this.thisUserAddress].name+" "+this.thisUserAddress.substring(2,6) ;
+  toTag(addr: string = this.thisUserAddress): string {
+    return ENV.profiles[addr].name+" "+addr.substring(2,6) ;
   }
   
 
@@ -198,6 +220,10 @@ export default class User implements ITransportListener  {
 
   private async handleFlushMessage(transport: ITransport, message: IMessage & { body: FlushMessage }): Promise<void> {
     const addr = message.header.from;
+
+    const originalKeys = Array.from(this.mempoolMap.keys())
+
+
     await this.criticalSection(addr, async () => {
       const channel = await this.getChannel(addr);
 
@@ -213,13 +239,26 @@ export default class User implements ITransportListener  {
     
     });
   }
+
+  public async flushChannel(addr: string): Promise<void> {
+    return this.criticalSection(addr, async ()=> {
+      const channel = await this.getChannel(addr);
+      return await channel.flush();
+    })
+  }
   
   private async handleProxyMessage(message: IMessage): Promise<void> {
     const recipientTransport = this._transports.get(message.header.to);
     if (recipientTransport) {
       await recipientTransport.send(message);
+      this.logger.log('Proxy message ===>')
     } else {
-      throw new Error(`No transport found for recipient: ${message.header.to}`);
+      // return it back to the sender
+
+      const senderTransport = this._transports.get(message.header.from)!;
+      await senderTransport.send(message);
+      this.logger.error(`No transport found for recipient: ${message.header.to}`)
+      //throw new Error();
     }
   }
 
@@ -227,8 +266,8 @@ export default class User implements ITransportListener  {
     let channel = this._channels.get(userId);
     if (!channel) {
       channel = new Channel(new ChannelContext(this, userId));
-      await channel.load();
       this._channels.set(userId, channel);
+      await channel.load();
     }
     return channel;
   }
@@ -242,6 +281,7 @@ export default class User implements ITransportListener  {
     const transport = new Transport({
         id: data.address,
         receiver: this,
+        logger: this.logger,
         connectionData: data,
         userId: this.thisUserAddress
     });
@@ -260,7 +300,7 @@ export default class User implements ITransportListener  {
       this.logger.error(`Transport not found for ${addr}`);
       return;
     }
-
+    this.logger.info(`Send to ${this.toTag(addr)}`, message);
     return transport.send(message);
   }
 
@@ -284,6 +324,26 @@ export default class User implements ITransportListener  {
         await Promise.all(ENV.hubDataList.map(opt => this.addHub(opt)));
       }    
       this.broadcastProfile();
+    }
+
+
+  }
+  async periodicFlush(interval: number = 2000) {
+    while (true) {
+      // Flush all channels with non-empty mempools
+      const flushPromises = Array.from(this.mempoolMap.keys())
+        .filter(key => this.mempoolMap.get(key)!.length > 0)
+        .map(key => this.flushChannel(key));
+
+      // Wait for all flush operations to complete
+      await Promise.all(flushPromises);
+
+      // Log the flush operation
+      if (flushPromises.length > 0)
+      this.logger.info(`Periodic flush completed for ${flushPromises.length} channels`);
+
+      // Wait for the specified interval before the next flush
+      await sleep(interval);
     }
   }
 
@@ -311,6 +371,7 @@ export default class User implements ITransportListener  {
       const transport = new Transport({
         id: userId,
         receiver: this,
+        logger: this.logger,
         ws: ws
       });
       this._transports.set(userId, transport);      
@@ -318,7 +379,7 @@ export default class User implements ITransportListener  {
   }
 
   public async stop() {
-    // disconnect all scokets
+    // disconnect all sockets
     for (const id of this._transports.keys()) {
       const transport = this._transports.get(id);
       if (transport) {
@@ -326,10 +387,10 @@ export default class User implements ITransportListener  {
       }
     }
 
-
     // Implementation for stopping the user
     // This might involve closing channels, saving state, etc.
   }
+  
   async renderAsciiUI(): Promise<string> {
     return AsciiUI.renderUser(this);
   }
@@ -343,13 +404,6 @@ export default class User implements ITransportListener  {
   }
 
 
-  async createChannel(peerAddress: string): Promise<Channel> {
-    const channel = new Channel(new ChannelContext(this, peerAddress));
-    await channel.load();
-    this._channels.set(peerAddress, channel);
-
-    return channel;
-  }
 
   async encryptMessage(recipientAddress: string, message: string): Promise<string> {
     const recipient = await this.getProfile(recipientAddress);
@@ -378,7 +432,7 @@ export default class User implements ITransportListener  {
     });
 
     for (let i=0; i<10; i++) {
-      await sleep(500);
+      await sleep(300);
       if (ENV.profiles[address]) {
         return ENV.profiles;
       }
@@ -427,7 +481,7 @@ export default class User implements ITransportListener  {
       outAddress: route.length > 0 ? route[0] : recipient
     })
 
-    console.log(`Creating onion encrypted payment ${secret} hash ${hashlock}: ${amount} from ${this.thisUserAddress} to ${recipient}`);
+    this.logger.info(`Creating onion encrypted payment ${secret} hash ${hashlock}: ${amount} from ${this.thisUserAddress} to ${recipient}`);
     const timelock = Math.floor(Date.now() / 1000) + 3600; // 1 hour timelock
 
     let encryptedPackage = await this.encryptForRecipient(recipient, {
@@ -458,7 +512,7 @@ export default class User implements ITransportListener  {
 
   public async encryptForRecipient(recipient: string, data: any): Promise<string> {
     const recipientProfile = await this.getProfile(recipient);
-    console.log('Retrieved profile', recipientProfile)
+    this.logger.log('Retrieved profile', recipientProfile)
     const encoded = encode(data);
     const encrypted = await encrypt(recipientProfile.publicKey, Buffer.from(encoded));
     return encrypted.toString('hex');
@@ -470,18 +524,18 @@ export default class User implements ITransportListener  {
   }
 
   public async processAddPayment(channel: Channel, storedSubcontract: StoredSubcontract, isSender: boolean): Promise<void> {
-    try {
+   // try {
       const payment = storedSubcontract.originalTransition as Transition.AddPayment;
       const derivedDelta = channel.deriveDelta(payment.chainId, payment.tokenId, channel.isLeft);
-      console.log(`capacityin${channel.isLeft} ${derivedDelta.inCapacity} channel ${channel.channelId}`, 
+      this.logger.debug(`capacityin${channel.isLeft} ${derivedDelta.inCapacity} channel ${channel.channelId}`, 
         channel.getDelta(payment.chainId, payment.tokenId), derivedDelta);
       if (derivedDelta.inCapacity < payment.amount) {
-        throw new Error(`Insufficient capacity ${derivedDelta.inCapacity} for payment ${payment.amount}  ${channel.channelId}`);
+        throw new Error(`fatal Insufficient capacity ${derivedDelta.inCapacity} for payment ${payment.amount}  ${channel.channelId}`);
       }
 
-
+      this.logger.debug(`Decrypting package ${payment.encryptedPackage}`)
       const decryptedPackage = await this.decryptPackage(payment.encryptedPackage);
-      console.log(`Processing payment in ${this.thisUserAddress}: ${payment.amount}`);
+      this.logger.debug(`Processing payment in ${this.thisUserAddress}: ${payment.amount}`);
 
       let hashlockData = this.hashlockMap.get(payment.hashlock);
       if (isSender) {
@@ -494,13 +548,12 @@ export default class User implements ITransportListener  {
             outAddress: channel.otherUserAddress
           }); 
         }      
-        console.log("now hashlock 123",this.hashlockMap.get(payment.hashlock))
       } else {
         if (hashlockData) {
           hashlockData.inTransitionId=storedSubcontract.transitionId;
           hashlockData.inAddress=channel.otherUserAddress
         
-          console.log('circulating hashlock', payment.hashlock, hashlockData)
+          this.logger.log('circulating hashlock', payment.hashlock, hashlockData)
 
         }else {
           this.hashlockMap.set(payment.hashlock, {
@@ -513,13 +566,14 @@ export default class User implements ITransportListener  {
       //this.hashlockMap.set(payment.hashlock, hashlock);  
 
       if (decryptedPackage.finalRecipient === this.thisUserAddress) {
-        // Final recipient
+        this.logger.info("Final recipient");
         await this.processSettlePayment(channel, storedSubcontract, decryptedPackage.secret);
       } else {
         // Intermediate node
         const fee = this.calculateFee(payment.amount);
         const forwardAmount = payment.amount - fee;
         const nextChannel = await this.getChannel(decryptedPackage.nextHop);
+        //todo cancel if no capacity
         const forwardPayment = new Transition.AddPayment(
           payment.chainId,
           payment.tokenId,
@@ -528,13 +582,13 @@ export default class User implements ITransportListener  {
           payment.timelock,
           decryptedPackage.encryptedPackage
         );
-
-        await this.forwardPayment(nextChannel, forwardPayment);
+        await this.addToMempool(decryptedPackage.nextHop, forwardPayment, true);
       }
-    } catch (error: any) {
+    //} catch (error: any) {
+     // console.log('fatal',error)
       //await this.cancelPayment(channel, payment, error.message);
-      throw new Error(error);
-    }
+     // throw new Error(error);
+    //}
   }
 
   public async processSettlePayment(channel: Channel, storedSubcontract: StoredSubcontract, secret: string): Promise<void> {
@@ -542,22 +596,17 @@ export default class User implements ITransportListener  {
     if (paymentInfo) {
       if (paymentInfo.inTransitionId && paymentInfo.inAddress) {
         paymentInfo.secret = secret;
-        console.log('Settling payment to previous hop', paymentInfo)
-        const inChannel = await this.getChannel(paymentInfo.inAddress);
-
+        this.logger.debug('Settling payment to previous hop', paymentInfo)
         // should we double check payment?
-
-        const settleTransition = new Transition.SettlePayment(
+        this.addToMempool(paymentInfo.inAddress, new Transition.SettlePayment(
           paymentInfo.inTransitionId,
-          secret
-        );
-        await inChannel.push(settleTransition);
-        await inChannel.flush();
+          paymentInfo.secret
+        ), true);
       } else {
-        if (paymentInfo.secret) {
-          console.log(`Payment is now settled ${channel.channelId}`, paymentInfo)
+        if (paymentInfo.secret == secret) {
+          this.logger.info(`Payment is now settled ${channel.channelId}`, paymentInfo)
         } else {
-          throw new Error('fatal No such paymentinfo or secret');
+          throw new Error('fatal No such paymentinfo or bad secret');
         }
       }
     } else {
@@ -568,25 +617,6 @@ export default class User implements ITransportListener  {
   public calculateFee(amount: bigint): bigint {
     const FEE_RATE = 0.001; // 0.1% fee
     return amount * BigInt(Math.floor(FEE_RATE * 10000)) / 10000n;
-  }
-
-  public async forwardPayment(channel: Channel, payment: Transition.AddPayment): Promise<void> {
-    await channel.push(payment);
-    await channel.flush();
-    return
-
-
-    const FORWARD_TIMEOUT = 20000;
-    const timeout = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Payment forwarding timeout')), FORWARD_TIMEOUT)
-    );
-
-    try {
-      await Promise.race([this.waitForPaymentSettlement(channel, payment.hashlock), timeout]);
-    } catch (error: any) {
-      //await this.cancelPayment(channel, payment, error.message);
-      throw error;
-    }
   }
 
   public async waitForPaymentSettlement(channel: Channel, hashlock: string): Promise<void> {
@@ -672,14 +702,13 @@ export default class User implements ITransportListener  {
       const [job, resolve, reject] = this.sectionQueue[key].shift()!;
       const start = performance.now();
       resolve(await job());
-      console.log('rezolv')
-      /*
+/*
 
       try {
         const result = await Promise.race([
           job(),
           new Promise((_, reject) => setTimeout(() => {
-            console.log('timeout ', job, key)
+            console.log('fataltimeout ', job, key)
             reject(new Error('Job timeout'))
           }, 20000))
         ]);
@@ -689,9 +718,9 @@ export default class User implements ITransportListener  {
         reject(error);
         //reject(error)
         //resolve(Promise.reject(error));
-      }*/
-
-      this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
+      }
+*/
+      //this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
     }
 
     delete this.sectionQueue[key];

@@ -1,3 +1,4 @@
+// creating unified output.txt of current source files, to be used as context for LLMs.
 const fs = require('fs');
 const path = require('path');
 
