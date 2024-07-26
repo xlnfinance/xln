@@ -425,7 +425,7 @@ export default class Channel {
     }
     await this.storage.put(historicalBlock);
     
-    //await this.save();
+    await this.save();
 
     this.logger.logState(this.channelId, this.state);
     this.logger.info(`Sending flush back ${this.channelId}`)
@@ -648,7 +648,7 @@ export default class Channel {
       process.exit(1);
     }
 
-    //this.save();
+    await this.save();
 
     if (Buffer.compare(identical, encode(this.state)) != 0) {
       this.logger.log('fatal4 not identical', decode(identical), this.state);

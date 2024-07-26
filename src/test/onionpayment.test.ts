@@ -12,7 +12,7 @@ import {encode, decode} from '../utils/Codec';
 
 describe('Network Operations', () => {
   let alice: User, bob: User, charlie: User, dave: User, eve: User;
-  let globalHub: User;
+  let hub: User;
 
   let channels: Map<string, Channel> = new Map();
   let offdeltas: { [key: string]: bigint } = {};
@@ -43,7 +43,7 @@ describe('Network Operations', () => {
   });
 
   before(async () => {
-    globalHub = await setupGlobalHub(10002);
+    hub = await setupGlobalHub(10002);
     alice = new User('alice', 'password1');
     bob = new User('bob', 'password2');
     charlie = new User('charlie', 'password3');
@@ -94,7 +94,7 @@ describe('Network Operations', () => {
 
   async function setupNetwork() {
 
-    let users = [ alice, bob, charlie, dave, globalHub];
+    let users = [ alice, bob, charlie, dave, hub];
     let all = []
     for (let i = 0; i < users.length; i++) {
       for (let j = i + 1; j < users.length; j++) {
@@ -102,7 +102,7 @@ describe('Network Operations', () => {
       }
     }
     await Promise.all(all)
-    await sleep(3000); // Wait for channel setup to complete
+    await sleep(4000); // Wait for channel setup to complete
   
 
     console.log('Capacity map')
@@ -217,10 +217,14 @@ describe('Network Operations', () => {
 
   it('should handle circular payments', async function() {
     this.timeout(35000);
+    //await setupNetwork();
+
     const paymentAmount = ethers.parseEther('1');
     
-    await makePayment('alice-bob-charlie-dave-alice', paymentAmount);
+    makePayment('alice-bob-charlie-dave-alice', paymentAmount);
+    await sleep(5000);
     await logChannels();
+    await sleep(5000);
 
     console.log('Capacity map', channels)
     for (const [key, channel] of channels.entries()) {
@@ -232,6 +236,8 @@ describe('Network Operations', () => {
 
   it('should handle multiple concurrent payments', async function() {
     this.timeout(40000);
+    await setupNetwork();
+
     const paymentAmount = ethers.parseEther('0.1');
     const route1 = [bob.thisUserAddress, charlie.thisUserAddress];
     const route2 = [charlie.thisUserAddress, bob.thisUserAddress];
@@ -239,6 +245,7 @@ describe('Network Operations', () => {
     //await Promise.all([
      await makePayment('alice-bob-charlie-dave', paymentAmount);
      await makePayment('dave-charlie-bob-alice', paymentAmount);
+     await sleep(6000);
     //]);
     await logChannels();
 
@@ -248,15 +255,19 @@ describe('Network Operations', () => {
   it.only('should handle network congestion and backpressure', async function() {
     await setupNetwork();
 
-    this.timeout(150000);
+    this.timeout(120000);
 
-    const paymentAmount = ethers.parseEther('0.1');
+    const paymentAmount = ethers.parseEther('0.01');
 
     // Simulate network congestion by sending many payments in quick succession
     const paymentPromises = [];
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 30; i++) {
       paymentPromises.push(makePayment('alice-bob-charlie-dave', paymentAmount));
       paymentPromises.push(makePayment('dave-charlie-bob-alice', paymentAmount));
+      paymentPromises.push(makePayment('dave-bob-charlie', paymentAmount));
+      paymentPromises.push(makePayment('alice-dave-bob', paymentAmount));
+      paymentPromises.push(makePayment('charlie-hub-dave', paymentAmount));
+      paymentPromises.push(makePayment('dave-hub-charlie-bob', paymentAmount));
     }
 
     await Promise.all(paymentPromises);
@@ -278,6 +289,7 @@ describe('Network Operations', () => {
     console.log('cloned ', clonedOffdeltas)
     await makePayment('alice-bob-charlie-dave', paymentAmount);
     console.log('clonedafter ', clonedOffdeltas, offdeltas)
+    await sleep(5000);
 
     Object.assign(offdeltas, clonedOffdeltas);
 

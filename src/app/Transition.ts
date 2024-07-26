@@ -112,7 +112,7 @@ export namespace Transition {
         }
       }
       if (payment === undefined || paymentIndex === undefined) {
-        channel.logger.logState(channel.otherUserAddress, state);
+        console.log(channel.otherUserAddress, state, this, block);
         console.log('fatal no payment '+dryRun+stringify(state))
         throw new Error('No such payment')
         return;
@@ -134,8 +134,8 @@ export namespace Transition {
         channel.logger.info('Payment subcontract settled '+this.secret)
       }
 
-      if (!dryRun && block.isLeft != channel.isLeft) {
-        await channel.ctx.user.processSettlePayment(channel, subcontract, this.secret);
+      if (!dryRun) {
+        await channel.ctx.user.processSettlePayment(channel, subcontract, this.secret, block.isLeft == channel.isLeft);
         
       }
 
