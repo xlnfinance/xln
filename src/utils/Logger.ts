@@ -90,7 +90,7 @@ class Logger {
 
       let lines = Math.floor(event.event.length / Logger.columnWidth);
       if (lines > 50) lines = 50;
-      for (let shift = 0; shift <= lines+1 * Logger.columnWidth; shift += Logger.columnWidth){
+      for (let shift = 0; shift <= (lines+2) * Logger.columnWidth; shift += Logger.columnWidth){
 
         const line = users.map((_, index) => {
           let body;

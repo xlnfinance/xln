@@ -65,6 +65,7 @@ export default class User implements ITransportListener  {
   public logger: Logger;
 
   public encryptionKey: PrivateKey;
+  public feesCollected: bigint = 0n;
 
   
   public hashlockMap: Map<string, {
@@ -132,6 +133,9 @@ export default class User implements ITransportListener  {
     const encodedProfile = encode(profile).toString('hex');    
     // Assuming the first hub in the list is the coordinator
     const coordinatorHub = ENV.hubDataList[0];
+    if (coordinatorHub.address === this.thisUserAddress) {
+      return console.log('no self broadcast')
+    }
     await this.send(coordinatorHub.address, {
       header: {
         from: this.thisUserAddress,
@@ -300,9 +304,9 @@ export default class User implements ITransportListener  {
       const channel = await this.getChannel(addr);
       const identical = encode(channel.state)
 
-      this.logger.debug(`${this.toTag(addr)}, blockId: ${channel.state.blockId}`);
+      //this.logger.debug(`${this.toTag(addr)}, blockId: ${channel.state.blockId}`);
       await channel.flush();
-      this.logger.debug(`${this.toTag(addr)}, fin blockId: ${channel.state.blockId}`);
+      //this.logger.debug(`${this.toTag(addr)}, fin blockId: ${channel.state.blockId}`);
       if (Buffer.compare(identical, encode(channel.state)) != 0) {
         console.log(decode(identical), channel.state);
         throw new Error(`fatal 2Channel state changed during flush ${addr}`);
@@ -472,6 +476,9 @@ export default class User implements ITransportListener  {
 
 
   async encryptMessage(recipientAddress: string, message: string): Promise<string> {
+    if (recipientAddress == this.thisUserAddress) {
+      throw new Error('fatal Cannot send message to self');
+    }
     const recipient = await this.getProfile(recipientAddress);
     return encrypt(recipient.publicKey, Buffer.from(message)).toString('hex');
   }
@@ -551,7 +558,7 @@ export default class User implements ITransportListener  {
       console.log("Setting promise resolve", Date.now() )
       const timeout = setTimeout(()=>{
         console.log("Timeout for payment ", amount, route)
-        return reject('Timeout')
+        return reject('PaymentTimeout')
       }, 60000);
         //secret: secret,
 
@@ -566,7 +573,7 @@ export default class User implements ITransportListener  {
       });
     });
 
-    this.logger.info(`Creating onion payment ${routeTag} ${hashlock} (${secret}): ${amount}`);
+    this.logger.info(`onion ${routeTag} ${hashlock}: ${amount}`);
     const timelock = Math.floor(Date.now() / 1000) + 3600; // 1 hour timelock
 
     // final peel of the onion
@@ -670,7 +677,7 @@ export default class User implements ITransportListener  {
 
       if (decryptedPackage.finalRecipient === this.thisUserAddress) {
         this.logger.info("horay Final recipient ");
-        await this.processSettlePayment(channel, storedSubcontract, decryptedPackage.secret);
+        await this.processSettlePayment(channel, storedSubcontract, decryptedPackage.secret, false);
       } else {
         // Intermediate node
         const fee = this.calculateFee(payment.amount);
@@ -696,18 +703,30 @@ export default class User implements ITransportListener  {
     //}
   }
 
-  public async processSettlePayment(channel: Channel, storedSubcontract: StoredSubcontract, secret: string): Promise<void> {
+  public async processSettlePayment(channel: Channel, storedSubcontract: StoredSubcontract, secret: string, isSender: boolean): Promise<void> {
     const paymentInfo = this.hashlockMap.get((storedSubcontract.originalTransition as Transition.AddPayment).hashlock);
     if (paymentInfo) {
+      if (isSender) {
+        this.feesCollected += this.calculateFee((storedSubcontract.originalTransition as Transition.AddPayment).amount);
+        // hub finalized their fee
+
+        return
+      }
+
+
       if (paymentInfo.inTransitionId && paymentInfo.inAddress) {
-        paymentInfo.secret = secret;
-        this.logger.debug('Settling payment to previous hop', paymentInfo)
-        // should we double check payment?
-        await this.addToMempool(paymentInfo.inAddress, new Transition.SettlePayment(
-          paymentInfo.inTransitionId,
-          paymentInfo.secret
-        ));
-        this.addToFlushable(paymentInfo.inAddress);
+        if (paymentInfo.secret) {
+          console.log("We already know secret, circular payment")
+        } else {
+          paymentInfo.secret = secret;
+          this.logger.debug('Settling payment to previous hop', paymentInfo)
+          // should we double check payment?
+          await this.addToMempool(paymentInfo.inAddress, new Transition.SettlePayment(
+            paymentInfo.inTransitionId,
+            paymentInfo.secret
+          ));
+          this.addToFlushable(paymentInfo.inAddress);  
+        }
       } else {
         //f (paymentInfo.secret == secret) {
         paymentInfo.secret = secret;
@@ -716,7 +735,7 @@ export default class User implements ITransportListener  {
             this.logger.info('reddsolve payment callback', paymentInfo)
             paymentInfo.resolve({success: true, paymentInfo});
           } else {
-            this.logger.info('no callback', paymentInfo)
+            this.logger.info('no callback fatal', paymentInfo)
           }
         //} else {
         //  throw new Error('fatal No such paymentinfo or bad secret');

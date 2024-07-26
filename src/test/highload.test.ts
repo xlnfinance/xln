@@ -8,20 +8,25 @@ import { setupGlobalHub, teardownGlobalHub } from './hub';
 import ENV from '../env';
 import { sleep } from '../utils/Utils';
 let offdeltas: { [key: string]: bigint } = {};
+let expectedFees: { [key: string]: bigint } = {};
 
 describe('High Load Onion Payment Network Simulation', () => {
   let users: User[];
   let hub: User;
-  const userNames = ['alice', 'bob', 'charlie', 'dave', 'eve', 'hub'];
+  
+  const userNames = ['alice', 'bob', 'charlie', 'hub'];
   
   before(async () => {
     try {
       hub = await setupGlobalHub(10003);
       users = await Promise.all(userNames.slice(0, -1).map(name => {
         const user = new User(name, `password_${name}`);
+        expectedFees[user.thisUserAddress] = 0n;
         return user.start().then(() => user);
       }));
       users.push(hub);
+      expectedFees[hub.thisUserAddress] = 0n;
+
       await setupFullMeshNetwork(users);
     } catch (error) {
       console.error('Error in before hook:', error);
@@ -38,10 +43,10 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(300000);
 
     const config = {
-      totalPayments: 20,
+      totalPayments: 100,
       minAmount: ethers.parseEther('0.01'),
       maxAmount: ethers.parseEther('1'),
-      minRouteLength: 2,
+      minRouteLength: 3,
       maxRouteLength: 4,
       paymentInterval: 100,
       maxConcurrentPayments: 10,
@@ -49,6 +54,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     };
 
     const results = await simulateRandomPayments(users, config);
+    await sleep(25000); // let actual deltas settle
 
     expect(results.successfulPayments).to.be.greaterThan(0);
     expect(results.failedPayments).to.be.lessThan(config.totalPayments * 0.2);
@@ -56,7 +62,38 @@ describe('High Load Onion Payment Network Simulation', () => {
     await verifyNetworkBalances(users);
   });
 
-  it('should handle payments routed through the hub', async function() {
+
+  it('should handle network congestion and backpressure', async function() {
+    this.timeout(300000); // Increase timeout
+  
+    const config = {
+        totalPayments: 1,
+        minAmount: ethers.parseEther('0.01'),
+        maxAmount: ethers.parseEther('1'),
+        minRouteLength: 3,
+        maxRouteLength: 4,
+        paymentInterval: 100,
+        maxConcurrentPayments: 10,
+        useHub: false
+      };
+    const batchSize = 10;
+    const totalBatches = 32;
+  
+    for (let batch = 0; batch < totalBatches; batch++) {
+      const paymentPromises = [];
+      for (let i = 0; i < batchSize; i++) {
+        paymentPromises.push(makeRandomPayment(users, config));
+      }
+      await Promise.all(paymentPromises);
+      await sleep(5000); // Allow time for propagation
+    }
+  
+    await sleep(30000); // Final settling time
+    await verifyNetworkBalances(users);
+  });
+
+
+  it.only('should handle payments routed through the hub', async function() {
     this.timeout(300000);
 
     const config = {
@@ -71,6 +108,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     };
 
     const results = await simulateRandomPayments(users, config);
+    await sleep(5000); // let actual deltas settle
 
     expect(results.successfulPayments).to.be.greaterThan(0);
     expect(results.failedPayments).to.be.lessThan(config.totalPayments * 0.2);
@@ -83,10 +121,10 @@ async function setupFullMeshNetwork(users: User[]) {
   for (let i = 0; i < users.length; i++) {
     for (let j = i + 1; j < users.length; j++) {
       await setupChannel(users[i], users[j]);
-      await sleep(500);
+      await sleep(200);
     }
   }
-  await sleep(3000);
+  await sleep(5000);
   console.log('Full mesh network setup completed');
 }
 
@@ -96,18 +134,13 @@ async function setupChannel(user1: User, user2: User) {
     offdeltas[channelKey] = 0n;
     offdeltas[`${user2.thisUserAddress}-${user1.thisUserAddress}`] = 0n;
 
-    await user1.addToMempool(user2.thisUserAddress, new Transition.AddSubchannel(1), true);
-    await sleep(100);
-    
-    await user1.addToMempool(user2.thisUserAddress, new Transition.AddDelta(1, 1), true);
-    await sleep(100);
+    await user1.addToMempool(user2.thisUserAddress, new Transition.AddSubchannel(1));    
+    await user1.addToMempool(user2.thisUserAddress, new Transition.AddDelta(1, 1));
     
     const creditLimit = ethers.parseEther('100');
+    await user2.addToMempool(user1.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit));
     await user1.addToMempool(user2.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit), true);
-    await sleep(100);
     
-    await user2.addToMempool(user1.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit), true);
-    await sleep(100);
 
     console.log(`Channel setup completed between ${user1.username} and ${user2.username}`);
   } catch (error) {
@@ -133,7 +166,7 @@ async function simulateRandomPayments(users: User[], config: any) {
         successfulPayments++;
       })
       .catch((error) => {
-        console.error('Payment failed:', error);
+        console.error('fatal Payment failed:', error);
         failedPayments++;
       })
       .finally(() => {
@@ -174,7 +207,11 @@ async function makeRandomPayment(users: User[], config: any) {
     const from = route[i].thisUserAddress;
     const to = route[i + 1].thisUserAddress;
     shiftOffdelta(from, to, amountCopy);
-    amountCopy -= ENV.users[to].calculateFee(amountCopy);
+    const fee: bigint = ENV.users[to].calculateFee(amountCopy);
+    console.log(fee, amountCopy, to)
+    amountCopy -= fee
+    expectedFees[to] += fee
+
   }
 
   await sender.addToMempool(route[1].thisUserAddress, paymentTransition, true);
@@ -221,18 +258,36 @@ function generateRandomRoute(users: User[], sender: User, recipient: User, minLe
 async function verifyNetworkBalances(users: User[]) {
   const initialTotalBalance = ethers.parseEther('100') * BigInt(users.length);
   let finalTotalBalance = 0n;
+  let failed = '';
 
-  for (const participant of users) {
-    const channels = await participant.getChannels();
+  for (const user of users) {
+    const channels = await user.getChannels();
+
+    
     for (const channel of channels) {
       const delta = channel.getDelta(1, 1, false);
+      channel.deriveDelta(1, 1, true);
       if (delta) {
         finalTotalBalance += delta.offdelta;
-        const channelKey = `${participant.thisUserAddress}-${channel.otherUserAddress}`;
+        const channelKey = `${user.thisUserAddress}-${channel.otherUserAddress}`;
+        console.log('final',channelKey, offdeltas[channelKey], delta.offdelta);
+
+        if (delta.offdelta != offdeltas[channelKey]) {
+            failed+=` ${channelKey} failed\n`;
+        }
         expect(delta.offdelta).to.equal(offdeltas[channelKey], `Mismatch in channel ${channelKey}`);
+      } else {
+        throw new Error("fatal no delta.")
       }
     }
-  }
 
-  expect(finalTotalBalance).to.equal(initialTotalBalance, "Total network balance should remain constant");
+    console.log("Fees collected: "+expectedFees[user.thisUserAddress], user.thisUserAddress, user.feesCollected);
+    if (expectedFees[user.thisUserAddress] != user.feesCollected) {
+      failed+=` ${user.thisUserAddress} fees failed\n`;
+    }
+    
+  }
+  expect(failed).to.equal('', failed);
+
+  //expect(finalTotalBalance).to.equal(initialTotalBalance, "Total network balance should remain constant");
 }

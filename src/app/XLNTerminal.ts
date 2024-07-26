@@ -8,6 +8,7 @@ import { Transition } from './Transition';
 import { ethers } from 'ethers';
 
 import colors from './colors';
+import ENV from '../env';
 
 
 const LOGO = [
@@ -27,7 +28,7 @@ export class XLNTerminal {
   private commandHistory: string[] = [];
   private historyIndex: number = 0;
 
-  constructor(private users: Map<string, User>) {
+  constructor(public users: any) {
     this.rl = 0
     //setTimeout(() => {
       this.rl = createInterface({
@@ -152,18 +153,20 @@ export class XLNTerminal {
     }
     const newUser = new User(username, password);
     await newUser.start();
-    this.users.set(newUser.thisUserAddress, newUser);
+    this.users[newUser.thisUserAddress] = newUser;
     console.log(colors.green(`Created new user ${username} with address: ${newUser.thisUserAddress}`));
   }
 
   private async loginUser(username: string) {
-    const user = Array.from(this.users.values()).find(u => u.username === username);
-    if (user) {
-      this.currentUser = user;
-      console.log(colors.green(`Logged in as ${username}`));
-    } else {
-      console.log(colors.red(`User ${username} not found`));
+    for (const [address, user] of Object.entries(this.users)) {
+      if ((user as any).username === username) {
+        this.currentUser = user as any;
+        console.log(colors.green(`Logged in as ${username}`));
+        return;
+      }
     }
+    console.log(colors.red(`User ${username} not found`));
+  
   }
 
   private logoutUser() {
@@ -177,9 +180,9 @@ export class XLNTerminal {
   }
   private async listUsers() {
     console.log(colors.yellow('\nRegistered Users:'));
-    this.users.forEach((user, address) => {
-      console.log(colors.green(`  ${user.username} (${address})`));
-    });
+    for (const [address, user] of Object.entries((this.users))) {
+      console.log(colors.green(`  ${(user as any).username} (${address})`));
+    }
   }
   private async listChannels() {
     if (!this.currentUser) {
@@ -241,7 +244,8 @@ export class XLNTerminal {
 
   private async showNetworkTopology() {
     console.log(colors.yellow('\nNetwork Topology:'));
-    for (const [address, user] of this.users) {
+    for (let [address, u] of Object.entries(this.users)) {
+      let user = u as any;
       console.log(colors.green(`  ${user.username} (${address.slice(0, 6)})`));
       const channels = await user.getChannels();
       for (const channel of channels) {
@@ -263,7 +267,8 @@ export class XLNTerminal {
         paymentAmount,
         hops.concat(destination)
       );
-      await completionPromise();
+      //await completionPromise;
+
       await this.currentUser.addToMempool(hops[0], paymentTransition, true);
       console.log(colors.green(`Onion routed payment of ${amount} ETH sent to ${destination}`));
     } catch (error) {
