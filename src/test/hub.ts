@@ -15,7 +15,7 @@ export async function setupGlobalHub(port: number) {
   
   ENV.hubAddress = globalHub.thisUserAddress;
   ENV.hubDataList = [{
-    name: 'TestHub',
+    name: globalHub.username,
     host: '127.0.0.1',
     port: port,
     address: globalHub.thisUserAddress,

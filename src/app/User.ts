@@ -103,6 +103,8 @@ export default class User implements ITransportListener  {
   constructor(public username: string, public password: string) {    
     this.storageContext = new StorageContext();
     const seed = ethers.keccak256(ethers.toUtf8Bytes(username + password));
+    this.username = username;
+
     this.signer = new ethers.Wallet(seed);
     this.encryptionKey = new PrivateKey(Buffer.from(seed.slice('0x'.length), 'hex'));
 
@@ -113,11 +115,6 @@ export default class User implements ITransportListener  {
     this.logger.log(`new User() constructed ${this.thisUserAddress} ${this.encryptionKey.publicKey.toHex()} ${this.encryptionKey.secret.toString('hex')}`);
 
     ENV.users[this.thisUserAddress] = this;
-
-    //this.periodicFlush();
-  }
-
-  async broadcastProfile() {
     const profile = {
       name: this.username,
       address: this.thisUserAddress,
@@ -127,6 +124,11 @@ export default class User implements ITransportListener  {
     this.logger.log("Broadcasting profile", profile)
     ENV.profiles[profile.address] = profile;
 
+    //this.periodicFlush();
+  }
+
+  async broadcastProfile() {
+    const profile = ENV.profiles[this.thisUserAddress];
     const encodedProfile = encode(profile).toString('hex');    
     // Assuming the first hub in the list is the coordinator
     const coordinatorHub = ENV.hubDataList[0];
@@ -175,6 +177,7 @@ export default class User implements ITransportListener  {
         await this.handleGetProfile(message);
       } else if (message.header.from == this.thisUserAddress) {
         this.logger.error("Proxy send failed")
+        
         //await this.handleProxyMessage(message);
       } else if (this.getHub() && message.header.to !== this.thisUserAddress) {
         await this.handleProxyMessage(message);
@@ -195,6 +198,8 @@ export default class User implements ITransportListener  {
   }
 
   toTag(addr: string = this.thisUserAddress): string {
+    
+    
     return ENV.profiles[addr].name+" "+addr.substring(2,6) ;
   }
   
@@ -293,9 +298,17 @@ export default class User implements ITransportListener  {
   public async flushChannel(addr: string): Promise<void> {
     return this.criticalSection(addr, "flushChannel", async ()=> {
       const channel = await this.getChannel(addr);
-      console.log('startflush'+addr)
+      const identical = encode(channel.state)
+
+      this.logger.debug(`${this.toTag(addr)}, blockId: ${channel.state.blockId}`);
       await channel.flush();
-      console.log('endflush'+addr)
+      this.logger.debug(`${this.toTag(addr)}, fin blockId: ${channel.state.blockId}`);
+      if (Buffer.compare(identical, encode(channel.state)) != 0) {
+        console.log(decode(identical), channel.state);
+        throw new Error(`fatal 2Channel state changed during flush ${addr}`);
+        
+      }
+        
       return 
     })
   }
@@ -376,8 +389,8 @@ export default class User implements ITransportListener  {
       if (ENV.hubDataList && ENV.hubDataList.length > 0) {
         await Promise.all(ENV.hubDataList.map(opt => this.addHub(opt)));
       }    
-      this.broadcastProfile();
     }
+    this.broadcastProfile();
 
 
   }
@@ -537,16 +550,16 @@ export default class User implements ITransportListener  {
     const completionPromise = new Promise((resolve, reject) => {
       console.log("Setting promise resolve", Date.now() )
       const timeout = setTimeout(()=>{
-        console.log("Timeout for payment")
-        
-      }, 15000);
+        console.log("Timeout for payment ", amount, route)
+        return reject('Timeout')
+      }, 60000);
         //secret: secret,
 
       this.hashlockMap.set(hashlock, {
         outAddress: route.length > 0 ? route[0] : recipient,
         resolve: (...args)=>{
-          
-          console.log('rezolvv ',clearTimeout(timeout), Date.now(), args);
+          clearTimeout(timeout)
+          console.log('rezolvv ', Date.now(), args);
           resolve(...args)
         },
         reject: reject
@@ -622,13 +635,19 @@ export default class User implements ITransportListener  {
     // try {
       const derivedDelta = channel.deriveDelta(payment.chainId, payment.tokenId, channel.isLeft);
       this.logger.debug(`capacityin${channel.isLeft} ${derivedDelta.inCapacity} channel ${channel.channelId}`, 
-        channel.getDelta(payment.chainId, payment.tokenId), derivedDelta);
+        channel.getDelta(payment.chainId, payment.tokenId, false), derivedDelta);
       if (derivedDelta.inCapacity < payment.amount) {
         throw new Error(`fatal Insufficient capacity ${derivedDelta.inCapacity} for payment ${payment.amount}  ${channel.channelId}`);
       }
 
       this.logger.debug(`Decrypting package ${payment.encryptedPackage}`)
-      const decryptedPackage = await this.decryptPackage(payment.encryptedPackage);
+      let decryptedPackage;
+      try{
+        decryptedPackage = await this.decryptPackage(payment.encryptedPackage);
+      } catch (e: any) {
+        console.log('fatal decrypt', e, payment,  this.encryptionKey.secret.toString('hex'))
+        throw(e);
+      }
       this.logger.debug(`Processing payment in ${this.thisUserAddress}: ${payment.amount}`);
 
     
@@ -768,113 +787,89 @@ export default class User implements ITransportListener  {
   async verifyMessage(message: string, signature: string, senderAddress: string): Promise<boolean> {
     return ethersVerifyMessage(message, signature) === senderAddress;
   }
+/**
+ * https://en.wikipedia.org/wiki/Critical_section
+ * Executes a job in a critical section, ensuring mutual exclusion.
+ * @param key - The unique identifier for the critical section.
+ * @param description - A description of the job for logging purposes.
+ * @param job - The asynchronous job to be executed.
+ * @returns A promise that resolves with the result of the job.
+ */
+async criticalSection<T>(key: string, description: string, job: Job<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const queueItem: QueueItem<T> = [job, description, resolve, reject];
 
-  /**
-   * https://en.wikipedia.org/wiki/Critical_section
-   * Executes a job in a critical section, ensuring mutual exclusion.
-   * @param key - The unique identifier for the critical section.
-   * @param job - The asynchronous job to be executed.
-   * @returns A promise that resolves with the result of the job.
-   */
-  async criticalSection<T>(key: string, description: string, job: Job<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const queueItem: QueueItem<T> = [job, description, resolve, reject];
+    if (!this.sectionQueue[key]) {
+      this.sectionQueue[key] = [];
+    }
 
+    const queueLength = this.sectionQueue[key].push(queueItem);
 
-      if (!this.sectionQueue[key]) {
-        this.sectionQueue[key] = [];
-      }
-      //.catch(reject)
-      
-      if (this.sectionQueue[key].length >= 50) {
-        this.logger.error(`Queue overflow for: ${key} ${description}`);
-        // Instead of exiting, we'll add the job to the queue and log a warning
-        this.logger.log(`Adding job to overflowed queue: ${key} ${description}`);
-        process.exit(1);
-      } else {
-        this.sectionQueue[key].push(queueItem);
-        setImmediate(() => this.processQueue(key).catch(reject));
-      }
-      
-    });
-  }
-  public perfs: Record<string, Array<number>> = {};
+    if (queueLength > 10000) {
+      this.logger.error(`Queue overflow for: ${key} ${description}`);
+      process.exit(1)
+      reject(new Error(`Queue overflow for: ${key} ${description}`));
+      return;
+    }
 
-  private async processQueue(key: string): Promise<void> {
-    while (this.sectionQueue[key] && this.sectionQueue[key].length > 0) {
-      const [job, description, resolve, reject] = this.sectionQueue[key].shift() as any;
-      const start = performance.now();
-  
-      try {
-        const result = await Promise.race([
-          job(),
-          new Promise((_, rejectTimeout) => setTimeout(() => {
-            rejectTimeout(new Error(`Timeout: ${key}:${description}`));
-          }, 20000))
-        ]);
-        resolve(result);
-        //this.sectionQueue[key].shift(); // Remove the job only after successful completion
-      } catch (error: any) {
-        
-        this.logger.error(`Error in critical section ${key}: ${description}`);
-        console.log(error);
-
-        reject(error);
-        //this.sectionQueue[key].shift(); // Remove the failed job
-      }
-      const perfKey = `${key}:${description}`;
-      if (!this.perfs[perfKey]) {
-        this.perfs[perfKey] = [];
-      }
-      this.perfs[perfKey].push(performance.now() - start);
-      Object.keys(this.perfs).forEach(key => {
-        const values = this.perfs[key];
-        console.log('perf val ',values)
-        if (values.length > 0) {
-          const sum = values.reduce((acc, val) => acc + val, 0);
-          const avg = sum / values.length;
-          let queueKey = key.split(':')[0]
-          console.log(`perf ${this.toTag(queueKey)} ${key} Total ${values.length} Now ${this.sectionQueue[queueKey].length} avg ${avg}`);
-        }
+    if (queueLength === 1) {
+      // If this is the first item, start processing the queue
+      this.processQueue(key).catch(error => {
+        console.log(key, error)
+        this.logger.error(`Error processing queue ${key}: ${error}`);
       });
-
-      //this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
     }
-  
-    // Only delete the queue if it's empty
-    if (this.sectionQueue[key] && this.sectionQueue[key].length === 0) {
-      delete this.sectionQueue[key];
+  });
+}
+public perfs: Record<string, Array<number>> = {};
+
+private async processQueue(key: string): Promise<void> {
+  while (this.sectionQueue[key] && this.sectionQueue[key].length > 0) {
+    const [job, description, resolve, reject] = this.sectionQueue[key][0];
+    const start = performance.now();
+
+    try {
+      const result = await Promise.race([
+        job(),
+        new Promise((_, rejectTimeout) => setTimeout(() => {
+          reject(new Error(`Timeout: ${key}:${description}`));
+        }, 30000))
+      ]);
+
+      resolve(result);
+    } catch (error: any) {
+      this.logger.error(`Error in critical section ${key}: ${description}`, error);
+      reject(error);
+    } finally {
+      this.sectionQueue[key].shift(); // Remove the job after completion or failure
+      this.updatePerformanceMetrics(key, description, performance.now() - start);
     }
   }
 
-  private async processQueue2(key: string): Promise<void> {
-    while (this.sectionQueue[key] && this.sectionQueue[key].length > 0) {
-      const [job, description, resolve, reject] = this.sectionQueue[key].shift()!;
-      const start = performance.now();
-      //resolve(await job());
-
-
-      try {
-        const result = await Promise.race([
-          job(),
-          new Promise((_, reject2) => setTimeout(() => {
-            console.log(`Fataltimeout ${key}:${description}`, job)
-            reject(new Error(`fataltimeout ${key}:${description}`))
-          }, 20000))
-        ]);
-        resolve(result);
-      } catch (error: any) {
-        this.logger.error(`Error in critical criticalSection ${key}: ${description}`, error);
-        reject(error);
-        //resolve(Promise.reject(error));
-      }
-      //this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
-    }
-
+  // Remove the queue if it's empty
+  if (this.sectionQueue[key] && this.sectionQueue[key].length === 0) {
     delete this.sectionQueue[key];
   }
+}
 
-  
+private updatePerformanceMetrics(key: string, description: string, duration: number): void {
+  const perfKey = `${key}:${description}`;
+  if (!this.perfs[perfKey]) {
+    this.perfs[perfKey] = [];
+  }
+  this.perfs[perfKey].push(duration);
+
+  // Limit the size of the performance array to prevent memory issues
+  if (this.perfs[perfKey].length > 100) {
+    this.perfs[perfKey].shift();
+  }
+
+  const values = this.perfs[perfKey];
+  const avg = values.reduce((acc, val) => acc + val, 0) / values.length;
+  const queueKey = key.split(':')[0];
+
+  this.logger.debug(`Performance ${this.toTag(ENV.nameToAddress[queueKey])} ${perfKey} Total: ${values.length}, Queue: ${this.sectionQueue[queueKey]?.length || 0}, Avg: ${avg.toFixed(2)}ms`);
+}
 
 
 

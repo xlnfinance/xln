@@ -11,7 +11,9 @@ let shouldContinue = true;
 import {encode, decode} from '../utils/Codec';
 
 describe('Network Operations', () => {
-  let alice: User, bob: User, charlie: User, dave: User;
+  let alice: User, bob: User, charlie: User, dave: User, eve: User;
+  let globalHub: User;
+
   let channels: Map<string, Channel> = new Map();
   let offdeltas: { [key: string]: bigint } = {};
 
@@ -41,12 +43,13 @@ describe('Network Operations', () => {
   });
 
   before(async () => {
-    await setupGlobalHub(10002);
+    globalHub = await setupGlobalHub(10002);
     alice = new User('alice', 'password1');
     bob = new User('bob', 'password2');
     charlie = new User('charlie', 'password3');
     dave = new User('dave', 'password4');
-    await Promise.all([alice.start(), bob.start(), charlie.start(), dave.start()]);
+    eve = new User('eve', 'password5');
+    await Promise.all([alice.start(), bob.start(), charlie.start(), dave.start(), eve.start()]);
 
   });
 
@@ -86,19 +89,26 @@ describe('Network Operations', () => {
 
     await extendCredit(user2, user1, creditLimit);
 
-    console.log(`Channel setup: ${channel.channelId}, Initial offdelta: ${channel.getDelta(1, 1)?.offdelta}`);
+    console.log(`Channel setup: ${channel.channelId}, Initial offdelta: ${channel.getDelta(1, 1, false)?.offdelta}`);
   }
 
   async function setupNetwork() {
-    await setupChannel(alice, bob);
-    await setupChannel(bob, charlie);
-    await setupChannel(charlie, dave);
-    await setupChannel(dave, alice);
+
+    let users = [ alice, bob, charlie, dave, globalHub];
+    let all = []
+    for (let i = 0; i < users.length; i++) {
+      for (let j = i + 1; j < users.length; j++) {
+        all.push(setupChannel(users[i], users[j]))
+      }
+    }
+    await Promise.all(all)
+    await sleep(3000); // Wait for channel setup to complete
+  
 
     console.log('Capacity map')
     for (const [key, channel] of channels.entries()) {
       const d = channel.deriveDelta(1, 1, channel.isLeft);
-      console.log(`Channeldelta ${channel.channelId} - out ${d.outCapacity} in ${d.inCapacity} `);
+      console.log(`delta ${channel.channelId} - out ${d.outCapacity} in ${d.inCapacity} `);
     }
 
     console.log('Current ENV', ENV)
@@ -111,7 +121,7 @@ describe('Network Operations', () => {
       const channel = channels.get(key);
       if (!channel) throw new Error(`Channel not found: ${key}`);
      //await channel.load()
-      const delta = channel.getDelta(1, 1);
+      const delta = channel.getDelta(1, 1, false);
       if (!delta) throw new Error(`Delta not found for channel: ${key}`);
       console.log(`Channel ${key} - Expected: ${expectedOffdelta}, Actual: ${delta.offdelta}`);
       expect(delta.offdelta).to.equal(expectedOffdelta, `Mismatch in channel ${key}, sent: ${channel.data.sentTransitions}`);
@@ -123,7 +133,7 @@ describe('Network Operations', () => {
     console.log(Array.from(channels.keys()))
     for (const [key, channel] of channels.entries()) {
       //await channel.load()
-      const delta = channel.getDelta(1, 1);
+      const delta = channel.getDelta(1, 1, false);
       console.log(delta);
       console.log(`Channel ${key} state after payment - offdelta: ${delta?.offdelta}`);
     }
@@ -244,7 +254,7 @@ describe('Network Operations', () => {
 
     // Simulate network congestion by sending many payments in quick succession
     const paymentPromises = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 80; i++) {
       paymentPromises.push(makePayment('alice-bob-charlie-dave', paymentAmount));
       paymentPromises.push(makePayment('dave-charlie-bob-alice', paymentAmount));
     }

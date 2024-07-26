@@ -17,11 +17,11 @@ export default interface IChannel {
 
   receive(message: FlushMessage): Promise<void>;
 
-  getSubchannelProofs(): any;
+  getSubchannelProofs(dryRun: boolean): any;
 
-  getSubchannel(chainId: number): Subchannel | undefined;
+  getSubchannel(chainId: number, dryRun: boolean): Subchannel | undefined;
 
-  getDelta(chainId: number, tokenId: number): Delta | undefined;
+  getDelta(chainId: number, tokenId: number, dryRun: boolean): Delta | undefined;
 
   addSubchannel(chainId: number): Subchannel;
 

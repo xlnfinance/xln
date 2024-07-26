@@ -5,7 +5,7 @@ import {stringify} from '../app/Channel'
 import ENV from '../env';
 // Logger.ts
 function shortenLongWords(input: string) {
-  return input.replace(/\b[a-zA-Z0-9]{35,}\b/g, match => match.slice(0, 35) + '...');
+  return input.replace(/\b[a-zA-Z0-9]{60,}\b/g, match => match.slice(0, 60) + '...');
 }
 // Logger.ts
 
@@ -89,8 +89,8 @@ class Logger {
       };
 
       let lines = Math.floor(event.event.length / Logger.columnWidth);
-      if (lines > 20) lines = 20;
-      for (let shift = 0; shift <= lines * Logger.columnWidth; shift += Logger.columnWidth){
+      if (lines > 50) lines = 50;
+      for (let shift = 0; shift <= lines+1 * Logger.columnWidth; shift += Logger.columnWidth){
 
         const line = users.map((_, index) => {
           let body;

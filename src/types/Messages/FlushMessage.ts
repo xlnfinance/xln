@@ -16,6 +16,7 @@ export default class FlushMessage extends IBody implements IFlushMessage {
     public newSignatures?: string[],
     public block?: Block,
     public debugState?: string,
+    public counter: number = 0 
   ) {
     super(BodyTypes.kFlushMessage);
   }
