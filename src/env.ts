@@ -19,7 +19,8 @@ const ENV = {
   hubDataList: [] as HubData[],
 
   db: {} as any,
-  users: new Map() as Map<string, User>,
+  users: {} as any,
+  nameToAddress: {} as any,
 
   profiles: {} as any,
   erc20Address:'0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0',

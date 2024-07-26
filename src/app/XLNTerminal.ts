@@ -257,13 +257,13 @@ export class XLNTerminal {
     }
     try {
       const paymentAmount = ethers.parseEther(amount);
-      const paymentTransition = await this.currentUser.createOnionEncryptedPayment(
-        destination,
+      const {paymentTransition, completionPromise} = await this.currentUser.createOnionEncryptedPayment(
+        1,
+        1,
         paymentAmount,
-        1,
-        1,
-        hops
+        hops.concat(destination)
       );
+      await completionPromise();
       await this.currentUser.addToMempool(hops[0], paymentTransition, true);
       console.log(colors.green(`Onion routed payment of ${amount} ETH sent to ${destination}`));
     } catch (error) {

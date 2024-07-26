@@ -9,4 +9,7 @@ export default interface ChannelData {
   pendingBlock: Block | null;
   pendingSignatures: Array<string>;
   rollbacks: number;
+
+  sendCounter: number;
+  receiveCounter: number;
 }

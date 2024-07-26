@@ -7,7 +7,7 @@ import ITransportMessageReceiver from '../types/ITransportListener';
 import { decode, encode } from '../utils/Codec';
 
 export default class Transport implements ITransport {
-  private _ws!: WebSocket; // Use definite assignment assertion
+  public _ws!: WebSocket; // Use definite assignment assertion
   private _receiver?: ITransportMessageReceiver;
   private _id: string;
   private _isServer: boolean;
@@ -60,7 +60,7 @@ export default class Transport implements ITransport {
         //this.logger.info(`Handle message ${this._messageNumber}: ${encode(msg)}`);
         await this._receiver.onReceive(this, msg);
       } else {
-        this.logger.warn(`No message receiver set for transport ${this._id}`);
+        this.logger.log(`No message receiver set for transport ${this._id}`);
       }
     };
 

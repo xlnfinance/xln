@@ -119,7 +119,10 @@ export default class Channel {
       rollbacks: 0,
       sentTransitions: 0,
       pendingBlock: null,
-      pendingSignatures: []
+      pendingSignatures: [],
+
+      sendCounter: 0,
+      receiveCounter: 0
     };
   }
 
@@ -140,16 +143,45 @@ export default class Channel {
   
 
   private async handlePendingBlock(message: FlushMessage): Promise<boolean> {
-    if (message.blockId == this.state.blockId + 1) {
+    if (message.blockId == this.state.blockId) {
+      if (this.data.isLeft) {
+        this.data.rollbacks++;
+        this.logger.info("Rollbackon as Left: "+this.data.rollbacks)
+        return false; // we ignore right's block
+      } else {
+        if (this.data.rollbacks == 0) {
+          this.data.sentTransitions = 0;
+          this.data.pendingBlock = null;
+          //this.data.pendingSignatures = [];
+          this.data.rollbacks++;
+          this.logger.info("Rollbackon as Right: "+this.data.rollbacks)
+          //this.logger.error("flushed after rollback")
+          return true; // we *continue* with left's block, like our block never existed
+        } else {
+          this.logger.info("fatal Right rollbacks once: "+this.data.rollbacks)
+          process.exit(1)
+          return false; // we ignore right's block
+        }
+      }
+    } else if (message.blockId == this.state.blockId + 1) {
+      // they sign on our pending block
+      if (this.data.rollbacks>0) {
+        // they built block on top of ours 
+        this.data.rollbacks--
+        this.logger.log("Rollbackoff "+this.data.rollbacks)
+      }
+
+      if (message.pendingSignatures.length == 0) {
+        this.logger.error('fatal: Invalid pending signatures length')
+        throw new Error('Invalid pending signatures length');
+      }
       const pendingBlock: Block = this.data.pendingBlock!;
       const previousState = decode(encode(this.state));
 
       // dryRun: true to only change .state and check if sigs are valid
       await this.applyBlock(pendingBlock, true); // <--- dryRun until signature verification
+      const identical = encode(this.state)
 
-      if (message.pendingSignatures.length == 0) {
-        throw new Error('Invalid pending signatures length');
-      }
       let debugState: any;
       // verify signatures after the block is applied
       if (message.debugState) {
@@ -157,13 +189,26 @@ export default class Channel {
       }
 
       if (!await this.verifySignatures(message.pendingSignatures)) {
-        this.state = previousState;
-        throw new Error('Invalid verify pending block signature');
+        this.logger.log('fatal verifysigpending', stringify(debugState), message, stringify(this.state), this.data.pendingBlock);
+
+        //this.state = previousState;
+        process.exit(1)
+        throw new Error('fatal Invalid verify pending block signature');
         return false;
       }
+      this.state = previousState;
+      await this.applyBlock(pendingBlock, false); // <--- now apply as block creator
+      if (Buffer.compare(identical, encode(this.state)) != 0) {
+        this.logger.log('fatal not! identical', decode(identical), this.state);
+        process.exit(1);
+      }
 
-
-      const historicalBlock = { state: this.state, block: pendingBlock, leftSignatures: message.pendingSignatures, rightSignatures: this.data.pendingSignatures };
+      const historicalBlock = { 
+        state: this.state, 
+        block: pendingBlock, 
+        leftSignatures: message.pendingSignatures, 
+        rightSignatures: this.data.pendingSignatures 
+      };
       if (this.data.isLeft) {
         [historicalBlock.leftSignatures, historicalBlock.rightSignatures] = [historicalBlock.rightSignatures, historicalBlock.leftSignatures];
       }
@@ -174,8 +219,10 @@ export default class Channel {
       if (mempool === undefined) {
         mempool = [];
       }
+      this.logger.log('mempol before', mempool)
       mempool.splice(0, this.data.sentTransitions);
-      this.logger.info("Clear mempool ",mempool);
+      this.logger.info("Clear finalized transitions from mempool ",mempool);
+      this.logger.log('mempol now', mempool)
 
       this.data.sentTransitions = 0;
       this.data.pendingBlock = null;
@@ -187,25 +234,9 @@ export default class Channel {
       return true;
 
 
-    } else if (message.blockId == this.state.blockId) {
-      if (this.data.isLeft) {
-        this.logger.warn("no rollback as left");
-        //throw new Error('left doesnt rollback');
-        return false;
-      } else {
-        this.logger.warn("rollback as Right")
-        this.data.sentTransitions = 0;
-        this.data.pendingBlock = null;
-        this.logger.error("Rollback");
-        this.data.rollbacks++;
-        await this.save();
-        return false;
-      }
-    } else {
-      throw new Error('fatal unexpected');
-    }
-    await this.save();
-
+    } 
+    this.logger.error('fatal unexpected handle pending block');
+  
     return false;
   }
 
@@ -251,8 +282,7 @@ export default class Channel {
   async verifySignatures(sigs: string[]): Promise<boolean> {
     const globalSig = sigs.pop() as string;
     if (!(await this.ctx.user.verifyMessage(keccak256(encode(this.state)), globalSig, this.otherUserAddress))) {
-
-      throw new Error('Invalid verify global signature');
+      this.logger.log('Invalid verify global signature');
       return false
     }
     // verify each subchannel proof
@@ -264,7 +294,7 @@ export default class Channel {
 
     for (let i = 0; i < proofs.proofhash.length; i++) {
       if (!(await this.ctx.user.verifyMessage(proofs.proofhash[i], sigs[i], this.otherUserAddress))) {
-        this.logger.warn('invalid proofs',sigs, proofs)
+        this.logger.log('invalid proofs',sigs, proofs)
         throw new Error('Invalid verify subchannel signature');
         return false;
         //throw new Error('Invalid verify subchannel proof signature '+i);
@@ -282,36 +312,65 @@ export default class Channel {
     }
 
 
-    this.logger.log(`Receive ${this.channelId}`, message);
+    let debugState: any;
+    // verify signatures after the block is applied
+    if (message.debugState) {
+      debugState = decode(Buffer.from(message.debugState, 'hex'));
+    }
 
+    this.logger.log(`Receive#${message.counter} ${this.channelId} `, message);
     if (this.data.pendingBlock) {
-      if (!await this.handlePendingBlock(message)) {
-        // don't throw, rollback is normal
-        //throw new Error("Invalid handle pending block");
+      if (await this.handlePendingBlock(message)) {
+        this.logger.log('pending block handled, continue');
+        //return;
+      } else {
+        this.logger.log('rollback as left! or error, halt');
         return;
       }
+    }
+
+    if (message.blockId != this.state.blockId) {
+
+
+      this.logger.log(`fatal blockId mismatch #${message.counter} ${this.channelId}`)
+      console.log(stringify(debugState), message, stringify(this.state), this.data.pendingBlock);
+
+
+      process.exit(1)
+      return
     }
     
 
     if (!message.block) {
-      const mempool = this.ctx.user.mempoolMap.get(this.thisUserAddress)!;
+      this.logger.log('no msg block ',message);
+
+      const mempool = this.ctx.user.mempoolMap.get(this.otherUserAddress)!;
       if (mempool && mempool.length > 0) {
-        await this.flush()
+        this.logger.log('memopl ',mempool,this.state);
+
+        await this.ctx.user.addToFlushable(this.otherUserAddress) // todo dont flush inside section
       } else {
         await this.save();
       }
       return;
     }
 
+    this.logger.log('verifying block');
 
     const block: Block = message.block!;
+    if (block.isLeft == this.isLeft) {
+      this.logger.log('fatal impersonation attempt');
+      return
+    }
+
 
     if (block.previousStateHash != keccak256(encode(this.state))) {
-      this.logger.log(decode(Buffer.from(message.debugState as any,'hex')), this.state);
-      throw new Error('Invalid previousStateHash: ' + block.previousStateHash);
+      this.logger.log('fatal prevhashstate', stringify(debugState), block, stringify(this.state), this.data.pendingBlock);
+      throw new Error(`Invalid previousStateHash: ${this.ctx.user.toTag()} ${block.previousStateHash} ${debugState.blockId} vs ${this.state.blockId}`);
     }
 
     if (block.previousBlockHash != this.state.previousBlockHash) {
+      this.logger.log('fatal prevhashblock', debugState, this.state);
       throw new Error('Invalid previousBlockHash');
     }
 
@@ -319,9 +378,9 @@ export default class Channel {
       throw new Error('Invalid isLeft');
     }
 
-    const stateBeforeDryRun = structuredClone(this.state);
+    const stateBeforeDryRun = decode(encode(this.state));
     await this.applyBlock(block, true);
-    this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
+    //this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
     
     // verify signatures after the block is applied
@@ -330,6 +389,7 @@ export default class Channel {
     }
 
     if (!await this.verifySignatures(message.newSignatures)) {
+      this.logger.log('fatal verifysig', stringify(debugState), block, stringify(this.state), this.data.pendingBlock);
       throw new Error('Invalid verify new block signature');
     }
 
@@ -353,7 +413,8 @@ export default class Channel {
 
     this.logger.logState(this.channelId, this.state);
     this.logger.info(`Sending flush back ${this.channelId}`)
-    await this.flush();
+
+    return this.ctx.user.addToFlushable(this.otherUserAddress);
   }
 
 
@@ -478,7 +539,7 @@ export default class Channel {
   
   async flush(): Promise<void> {
     if (this.data.sentTransitions > 0) {
-      this.logger.log("Already flushing ", this.data.isLeft, this.data.sentTransitions);
+      this.logger.log(`Already flushing ${this.channelId} blockid ${this.state.blockId}`);
       return;
     }
     const message: IMessage = {
@@ -517,7 +578,8 @@ export default class Channel {
       };
 
       //this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
-      await this.applyBlock(block, true); // <--- only dryRun in flush()
+      //this.logger.log(123, this.state)
+      await this.applyBlock(block, true); // <--- only dryRun
       //this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
 
       //this.logger.log("block", block, this.data.pendingBlock);
@@ -528,19 +590,20 @@ export default class Channel {
 
       // signed after block is applied
       body.newSignatures = (await this.getSubchannelProofs()).sigs;
+      let expectedLength = this.state.subchannels.length + 1;
       this.data.pendingSignatures = body.newSignatures
-
-      if (body.newSignatures.length != this.state.subchannels.length + 1) {
-        throw new Error('fatal: Invalid pending signatures length');
-      }
       // revert state to previous
       this.state = previousState; // <--- revert state
       body.block = block;
 
+      if (body.newSignatures.length != expectedLength) {
+        throw new Error('fatal: Invalid pending signatures length');
+      }
+
     } 
 
     this.logger.info(
-      `channel send message from ${this.thisUserAddress} to ${this.otherUserAddress} with block ${message.body.block}`,
+      `Flush ${this.channelId} with block ${!!message.body.block}`,
     );
 
     await this.save();
@@ -548,7 +611,7 @@ export default class Channel {
 
     //this.logger.log("Sending flush ", this.otherUserAddress, message, message);
   
-
+    message.body.counter = ++this.data.sendCounter;
     await this.ctx.user.send(this.otherUserAddress, message);
   }
 
@@ -664,10 +727,14 @@ export default class Channel {
     this.state.blockId++;
     this.state.timestamp = block.timestamp;
     this.state.previousBlockHash = keccak256(encode(block));
+
     for (let i = 0; i < block.transitions.length; i++) {
       await this.applyTransition(block, block.transitions[i], dryRun);
     }
-    this.logger.info(`applyBlockEnd`);
+    if (!dryRun) {
+      this.logger.log(`applyblock ${this.channelId} ${this.state.blockId} ${this.state.previousBlockHash}`);
+    }
+
   }
  
 
@@ -680,10 +747,12 @@ export default class Channel {
     //  this.logger.error(`Invalid transition data: ${error.message}`);
     //  return;
     //}
-
-    this.logger.debug(`Applying transition: ${transition.type}`+this.thisUserAddress, stringify(transition));
+     if (!dryRun){
+      this.logger.debug(`applyTr ${transition.type}`+this.thisUserAddress, stringify(transition));
+     }
+    
     //try{
-      await transition.apply(this, block, dryRun);
+    await transition.apply(this, block, dryRun);
    // } catch(e){
      // this.logger.log(e);
      // this.logger.debug('fatal in applytransiton', e);
@@ -719,7 +788,7 @@ export default class Channel {
 
   async receiveMessage(encryptedMessage: string): Promise<void> {
     const decryptedMessage = await this.ctx.user.decryptMessage(this.otherUserAddress, encryptedMessage);
-    //console.log(`Received message in channel ${this.getId()}: ${decryptedMessage}`);
+    this.logger.log(`Decrypted ${this.getId()}: ${decryptedMessage}`);
   }
 
   getBalance(): bigint { 

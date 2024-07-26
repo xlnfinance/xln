@@ -42,7 +42,7 @@ import { StoredSubcontract } from '../types/ChannelState';
 
 
 type Job<T> = () => Promise<T>;
-type QueueItem<T> = [Job<T>, (value: T | PromiseLike<T>) => void, (value: T | PromiseLike<T>) => void];
+type QueueItem<T> = [Job<T>, string, (value: T | PromiseLike<T>) => void, (value: T | PromiseLike<T>) => void];
 
 
 
@@ -72,6 +72,8 @@ export default class User implements ITransportListener  {
     outAddress?: string
     inTransitionId?: number,
     outTransitionId?: number,
+    resolve?: (data: any) => void,
+    reject?: (data: any) => void,
     secret?: string,
   }> = new Map();
 
@@ -105,10 +107,12 @@ export default class User implements ITransportListener  {
     this.encryptionKey = new PrivateKey(Buffer.from(seed.slice('0x'.length), 'hex'));
 
     this.thisUserAddress = this.signer.address;
+    ENV.nameToAddress[username] = this.thisUserAddress;
+
     this.logger = new Logger(username);
     this.logger.log(`new User() constructed ${this.thisUserAddress} ${this.encryptionKey.publicKey.toHex()} ${this.encryptionKey.secret.toString('hex')}`);
 
-    ENV.users.set(this.thisUserAddress, this);
+    ENV.users[this.thisUserAddress] = this;
 
     //this.periodicFlush();
   }
@@ -143,7 +147,7 @@ export default class User implements ITransportListener  {
   onClose(transport: ITransport, id: string): void {
     this._transports.delete(id);
     /*
-    this.criticalSection(id, async () => {
+    this.criticalSection(id, "onclose", async () => {
       if (this._channels.get(id)) {
         await this._channels.get(id)?.save();
         console.log("Freeing up channel slot "+id)
@@ -180,7 +184,7 @@ export default class User implements ITransportListener  {
         this.logger.error('Unhandled message type', message.body);
       }
      } catch (error) {
-      console.log(error)
+      console.log('fatal onreceive', error)
       this.logger.error(`Fatal onreceive ${encode(error)}`, );
       throw(error)
       //process.exit(0)
@@ -217,6 +221,10 @@ export default class User implements ITransportListener  {
       });
     }
   }
+  public flushable: string[]  = [];
+  public addToFlushable(addr: string) {
+    this.flushable.push(addr)
+  }
 
   private async handleFlushMessage(transport: ITransport, message: IMessage & { body: FlushMessage }): Promise<void> {
     const addr = message.header.from;
@@ -224,34 +232,79 @@ export default class User implements ITransportListener  {
     const originalKeys = Array.from(this.mempoolMap.keys())
 
 
-    await this.criticalSection(addr, async () => {
+    await this.criticalSection(addr, "handleFlushMessage", async () => {
       const channel = await this.getChannel(addr);
+
+      if (message.body.counter != ++channel.data.receiveCounter) {
+        console.log(`fatal counter mismatch ${message.body.counter} ${channel.data.receiveCounter}`);
+        return;
+      }
 
       if (channel.getState().blockId === 0) {
         this.logger.info(`Channel ${addr} is not initialized yet`);
       } 
+      
+      /*
+      if (channel.data.pendingBlock) {
+        if (channel.isLeft) {
+          // Left user should ignore the incoming flush if they have a pending block
+          this.logger.log(`Left user ignoring incoming flush due to pending block`);
+          return;
+        } else {
+          // Right user should reset and process the incoming block
+          channel.data.sentTransitions = 0;
+          channel.data.pendingBlock = null;
+          channel.data.pendingSignatures = [];
+          this.logger.info(`Right user resetting due to concurrent flush`);
+        }
+      }*/
 
       //try {
         await channel.receive(message.body);
+        
       //} catch (e) {
        // this.logger.error('Error processing block message', e);
       //}
     
     });
+    await this.flushAll();
+  }
+
+  public async flushAll() {
+    if (this.flushable.length == 0) {
+      console.log('nothing flushable')
+      return
+    }
+    try {
+      const uniqueFlushable = [...new Set(this.flushable)];
+      this.flushable = [];
+      this.logger.log("flushable",uniqueFlushable)
+      await Promise.all(uniqueFlushable.map(addr => this.flushChannel(addr)));
+
+    } catch (e) {
+      console.log(e)
+      this.logger.error('fatal flushAll: ', e);
+      throw(e);
+      process.exit(1 )
+    }
+    
   }
 
   public async flushChannel(addr: string): Promise<void> {
-    return this.criticalSection(addr, async ()=> {
+    return this.criticalSection(addr, "flushChannel", async ()=> {
       const channel = await this.getChannel(addr);
-      return await channel.flush();
+      console.log('startflush'+addr)
+      await channel.flush();
+      console.log('endflush'+addr)
+      return 
     })
   }
   
   private async handleProxyMessage(message: IMessage): Promise<void> {
     const recipientTransport = this._transports.get(message.header.to);
-    if (recipientTransport) {
+    if (recipientTransport ) {
+      console.log(`Proxy message ${this.toTag(message.header.from)}===>${this.toTag(message.header.to)}`+recipientTransport._ws.readyState)
       await recipientTransport.send(message);
-      this.logger.log('Proxy message ===>')
     } else {
       // return it back to the sender
 
@@ -472,26 +525,47 @@ export default class User implements ITransportListener  {
 
 
 
-  public async createOnionEncryptedPayment(recipient: string, amount: bigint, chainId: number, tokenId: number, route: string[]): Promise<Transition.AddPayment> {
+  public async createOnionEncryptedPayment(chainId: number, tokenId: number, amount: bigint, route: string[]): Promise<{ paymentTransition: Transition.AddPayment, completionPromise: Promise<any> }> {
     const secret = crypto.getRandomValues(Buffer.alloc(32)).toString('hex');
     const hashlock = ethers.keccak256(ethers.toUtf8Bytes(secret));
+    if (route.length === 0) {
+      throw new Error('fatal No route provided');
+    }
+    const routeTag = ([this.thisUserAddress].concat(route)).map(this.toTag).join('->');
+    const recipient = route.pop() as string;
 
-    this.hashlockMap.set(hashlock, {
-      secret: secret,
-      outAddress: route.length > 0 ? route[0] : recipient
-    })
+    const completionPromise = new Promise((resolve, reject) => {
+      console.log("Setting promise resolve", Date.now() )
+      const timeout = setTimeout(()=>{
+        console.log("Timeout for payment")
+        
+      }, 15000);
+        //secret: secret,
 
-    this.logger.info(`Creating onion encrypted payment ${secret} hash ${hashlock}: ${amount} from ${this.thisUserAddress} to ${recipient}`);
+      this.hashlockMap.set(hashlock, {
+        outAddress: route.length > 0 ? route[0] : recipient,
+        resolve: (...args)=>{
+          
+          console.log('rezolvv ',clearTimeout(timeout), Date.now(), args);
+          resolve(...args)
+        },
+        reject: reject
+      });
+    });
+
+    this.logger.info(`Creating onion payment ${routeTag} ${hashlock} (${secret}): ${amount}`);
     const timelock = Math.floor(Date.now() / 1000) + 3600; // 1 hour timelock
 
+    // final peel of the onion
     let encryptedPackage = await this.encryptForRecipient(recipient, {
       amount,
       tokenId,
       secret,
       finalRecipient: recipient
     });
-
+    // wrapping in onion layers, if it's not direct peer
     for (let i = route.length - 1; i >= 0; i--) {
+      console.log("Encrypted for "+route[i]);
       encryptedPackage = await this.encryptForRecipient(route[i], {
         amount,
         tokenId,
@@ -499,8 +573,7 @@ export default class User implements ITransportListener  {
         encryptedPackage
       });
     }
-
-    return new Transition.AddPayment(
+    const paymentTransition = new Transition.AddPayment(
       chainId,
       tokenId,
       amount,
@@ -508,6 +581,8 @@ export default class User implements ITransportListener  {
       timelock,
       encryptedPackage
     );
+    return { paymentTransition, completionPromise };
+
   }
 
   public async encryptForRecipient(recipient: string, data: any): Promise<string> {
@@ -524,8 +599,27 @@ export default class User implements ITransportListener  {
   }
 
   public async processAddPayment(channel: Channel, storedSubcontract: StoredSubcontract, isSender: boolean): Promise<void> {
-   // try {
-      const payment = storedSubcontract.originalTransition as Transition.AddPayment;
+    const payment = storedSubcontract.originalTransition as Transition.AddPayment;
+    let hashlockData = this.hashlockMap.get(payment.hashlock);
+
+    if (isSender) {
+      if (hashlockData) {
+        hashlockData.outTransitionId=storedSubcontract.transitionId;
+        if (hashlockData.outAddress != channel.otherUserAddress) {
+          console.log(`fatal outAddress mismatch ${hashlockData.outAddress} ${channel.otherUserAddress}`)
+        }
+        //hashlockData.outAddress=channel.otherUserAddress            
+      } else {
+        this.hashlockMap.set(payment.hashlock, {
+          outTransitionId: storedSubcontract.transitionId,
+          outAddress: channel.otherUserAddress
+        }); 
+      }  
+      return;    
+    }
+    // the rest isReceiver
+  
+    // try {
       const derivedDelta = channel.deriveDelta(payment.chainId, payment.tokenId, channel.isLeft);
       this.logger.debug(`capacityin${channel.isLeft} ${derivedDelta.inCapacity} channel ${channel.channelId}`, 
         channel.getDelta(payment.chainId, payment.tokenId), derivedDelta);
@@ -537,36 +631,26 @@ export default class User implements ITransportListener  {
       const decryptedPackage = await this.decryptPackage(payment.encryptedPackage);
       this.logger.debug(`Processing payment in ${this.thisUserAddress}: ${payment.amount}`);
 
-      let hashlockData = this.hashlockMap.get(payment.hashlock);
-      if (isSender) {
-        if (hashlockData) {
-          hashlockData.outTransitionId=storedSubcontract.transitionId;
-          hashlockData.outAddress=channel.otherUserAddress            
-        } else {
-          this.hashlockMap.set(payment.hashlock, {
-            outTransitionId: storedSubcontract.transitionId,
-            outAddress: channel.otherUserAddress
-          }); 
-        }      
-      } else {
-        if (hashlockData) {
-          hashlockData.inTransitionId=storedSubcontract.transitionId;
-          hashlockData.inAddress=channel.otherUserAddress
-        
-          this.logger.log('circulating hashlock', payment.hashlock, hashlockData)
+    
+      if (hashlockData) {
+        hashlockData.inTransitionId=storedSubcontract.transitionId;
+        hashlockData.inAddress=channel.otherUserAddress
+      
+        this.logger.log('circulating hashlock', payment.hashlock, hashlockData)
 
-        }else {
-          this.hashlockMap.set(payment.hashlock, {
-            inTransitionId: storedSubcontract.transitionId,
-            inAddress: channel.otherUserAddress
-          }); 
-
+      }else {
+        hashlockData = {
+          inTransitionId: storedSubcontract.transitionId,
+          inAddress: channel.otherUserAddress
         }
+        
+        this.hashlockMap.set(payment.hashlock, hashlockData); 
       }
+    
       //this.hashlockMap.set(payment.hashlock, hashlock);  
 
       if (decryptedPackage.finalRecipient === this.thisUserAddress) {
-        this.logger.info("Final recipient");
+        this.logger.info("horay Final recipient ");
         await this.processSettlePayment(channel, storedSubcontract, decryptedPackage.secret);
       } else {
         // Intermediate node
@@ -582,7 +666,9 @@ export default class User implements ITransportListener  {
           payment.timelock,
           decryptedPackage.encryptedPackage
         );
-        await this.addToMempool(decryptedPackage.nextHop, forwardPayment, true);
+        hashlockData.outAddress = decryptedPackage.nextHop
+        await this.addToMempool(decryptedPackage.nextHop, forwardPayment);
+        await this.addToFlushable(decryptedPackage.nextHop);
       }
     //} catch (error: any) {
      // console.log('fatal',error)
@@ -598,16 +684,24 @@ export default class User implements ITransportListener  {
         paymentInfo.secret = secret;
         this.logger.debug('Settling payment to previous hop', paymentInfo)
         // should we double check payment?
-        this.addToMempool(paymentInfo.inAddress, new Transition.SettlePayment(
+        await this.addToMempool(paymentInfo.inAddress, new Transition.SettlePayment(
           paymentInfo.inTransitionId,
           paymentInfo.secret
-        ), true);
+        ));
+        this.addToFlushable(paymentInfo.inAddress);
       } else {
-        if (paymentInfo.secret == secret) {
+        //f (paymentInfo.secret == secret) {
+        paymentInfo.secret = secret;
           this.logger.info(`Payment is now settled ${channel.channelId}`, paymentInfo)
-        } else {
-          throw new Error('fatal No such paymentinfo or bad secret');
-        }
+          if (paymentInfo.resolve) {
+            this.logger.info('reddsolve payment callback', paymentInfo)
+            paymentInfo.resolve({success: true, paymentInfo});
+          } else {
+            this.logger.info('no callback', paymentInfo)
+          }
+        //} else {
+        //  throw new Error('fatal No such paymentinfo or bad secret');
+        //}
       }
     } else {
       throw new Error('fatal No such paymentinfo');
@@ -682,44 +776,98 @@ export default class User implements ITransportListener  {
    * @param job - The asynchronous job to be executed.
    * @returns A promise that resolves with the result of the job.
    */
-  async criticalSection<T>(key: string, job: Job<T>): Promise<T> {
+  async criticalSection<T>(key: string, description: string, job: Job<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
-      if (this.sectionQueue[key]) {
-        if (this.sectionQueue[key].length >= 10) {
-          reject(new Error(`Queue overflow for: ${key}`));
-        } else {
-          this.sectionQueue[key].push([job, resolve, reject]);
-        }
-      } else {
-        this.sectionQueue[key] = [[job, resolve, reject]];
-        this.processQueue(key).catch(reject);
+      const queueItem: QueueItem<T> = [job, description, resolve, reject];
+
+
+      if (!this.sectionQueue[key]) {
+        this.sectionQueue[key] = [];
       }
+      //.catch(reject)
+      
+      if (this.sectionQueue[key].length >= 50) {
+        this.logger.error(`Queue overflow for: ${key} ${description}`);
+        // Instead of exiting, we'll add the job to the queue and log a warning
+        this.logger.log(`Adding job to overflowed queue: ${key} ${description}`);
+        process.exit(1);
+      } else {
+        this.sectionQueue[key].push(queueItem);
+        setImmediate(() => this.processQueue(key).catch(reject));
+      }
+      
     });
   }
+  public perfs: Record<string, Array<number>> = {};
 
   private async processQueue(key: string): Promise<void> {
-    while (this.sectionQueue[key]?.length > 0) {
-      const [job, resolve, reject] = this.sectionQueue[key].shift()!;
+    while (this.sectionQueue[key] && this.sectionQueue[key].length > 0) {
+      const [job, description, resolve, reject] = this.sectionQueue[key].shift() as any;
       const start = performance.now();
-      resolve(await job());
-/*
+  
+      try {
+        const result = await Promise.race([
+          job(),
+          new Promise((_, rejectTimeout) => setTimeout(() => {
+            rejectTimeout(new Error(`Timeout: ${key}:${description}`));
+          }, 20000))
+        ]);
+        resolve(result);
+        //this.sectionQueue[key].shift(); // Remove the job only after successful completion
+      } catch (error: any) {
+        
+        this.logger.error(`Error in critical section ${key}: ${description}`);
+        console.log(error);
+
+        reject(error);
+        //this.sectionQueue[key].shift(); // Remove the failed job
+      }
+      const perfKey = `${key}:${description}`;
+      if (!this.perfs[perfKey]) {
+        this.perfs[perfKey] = [];
+      }
+      this.perfs[perfKey].push(performance.now() - start);
+      Object.keys(this.perfs).forEach(key => {
+        const values = this.perfs[key];
+        console.log('perf val ',values)
+        if (values.length > 0) {
+          const sum = values.reduce((acc, val) => acc + val, 0);
+          const avg = sum / values.length;
+          let queueKey = key.split(':')[0]
+          console.log(`perf ${this.toTag(queueKey)} ${key} Total ${values.length} Now ${this.sectionQueue[queueKey].length} avg ${avg}`);
+        }
+      });
+
+      //this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
+    }
+  
+    // Only delete the queue if it's empty
+    if (this.sectionQueue[key] && this.sectionQueue[key].length === 0) {
+      delete this.sectionQueue[key];
+    }
+  }
+
+  private async processQueue2(key: string): Promise<void> {
+    while (this.sectionQueue[key] && this.sectionQueue[key].length > 0) {
+      const [job, description, resolve, reject] = this.sectionQueue[key].shift()!;
+      const start = performance.now();
+      //resolve(await job());
+
 
       try {
         const result = await Promise.race([
           job(),
-          new Promise((_, reject) => setTimeout(() => {
-            console.log('fataltimeout ', job, key)
-            reject(new Error('Job timeout'))
+          new Promise((_, reject2) => setTimeout(() => {
+            console.log(`Fataltimeout ${key}:${description}`, job)
+            reject(new Error(`fataltimeout ${key}:${description}`))
           }, 20000))
         ]);
         resolve(result);
       } catch (error: any) {
-        this.logger.error(`Error in critical criticalSection ${key}:`, error);
+        this.logger.error(`Error in critical criticalSection ${key}: ${description}`, error);
         reject(error);
-        //reject(error)
         //resolve(Promise.reject(error));
       }
-*/
       //this.logger.debug(`Section ${key} took ${performance.now() - start} ms`);
     }
 
