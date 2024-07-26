@@ -2,9 +2,10 @@
 
 import colors from '../app/colors';
 import {stringify} from '../app/Channel'
+import ENV from '../env';
 // Logger.ts
 function shortenLongWords(input: string) {
-  return input.replace(/\b[a-zA-Z0-9]{20,}\b/g, match => match.slice(0, 8) + '...');
+  return input.replace(/\b[a-zA-Z0-9]{35,}\b/g, match => match.slice(0, 35) + '...');
 }
 // Logger.ts
 
@@ -12,7 +13,7 @@ function shortenLongWords(input: string) {
 class Logger {
   private static idCounter: number = 0;
   public static _loggers: Logger[] = [];
-  private static timeline: {time: number, user: string, level: string, event: string}[] = [];
+  private static timeline: {time: number, user: string, level: string, event: string, objs: any}[] = [];
   private static states: {[key: string]: any} = {};
   private static paused: boolean = false;
   private static stepMode: boolean = false;
@@ -36,9 +37,9 @@ class Logger {
     this.color = this.getColorForId(this.id);
     Logger._loggers.push(this);
 
-    if (!Logger.renderInterval) {
-      Logger.renderInterval = setInterval(() => this.renderTimeline(), 1000);
-    }
+    //if (!Logger.renderInterval) {
+    //  Logger.renderInterval = setInterval(() => this.renderTimeline(), 1000);
+    //}
   }
 
   private getColorForId(id: number): (text: string) => string {
@@ -49,16 +50,30 @@ class Logger {
   private formatMessage(level: string, ...args: any[]): string {
     const timestamp = new Date().toISOString();
     const shortAddress = this.userAddress;
-    const message = args.map(arg => typeof arg === 'object' ? stringify(arg) : arg).join(' ');
+    let objs = []
+    let message = ''
+    for (let i = 0; i < args.length; i++) {
+      if (typeof args[i] === 'object') {
+        objs.push(stringify(args[i]));
+      } else {
+        message += args[i] + ' ';
+      }
+    }
+
+
+    
     const shortEvent = shortenLongWords(message.replace(/(\n)/gm, '')); //shortenLongWords(message.replace(/\s{10,}|(\r\n|\n|\r)/gm, ''))
-    Logger.timeline.push({time: Date.now(), user: shortAddress, level, event: shortEvent});
+    Logger.timeline.push({time: Date.now(), user: shortAddress, level, event: shortEvent, objs: objs});
 
 
-    return `${shortAddress} | ${level.padEnd(5)} | ${timestamp} | ${message}`;
+    this.renderTimeline()
+    return 'errorerrorlog'
   }
 
   private renderTimeline() {
     //console.clear();
+
+
     const users = Logger._loggers.map(logger => logger.userAddress);
     const header = users.map(user => user.padEnd(Logger.columnWidth)).join(' ');
     console.log(header);
@@ -66,13 +81,15 @@ class Logger {
 
     const events: string[][] = users.map(() => []);
     Logger.timeline.forEach(event => {
+      //if ([ENV.nameToAddress['charlie'], ENV.nameToAddress['bob']].indexOf(event.user) == -1) return
+
       if (event.level === 'STATE') {
-        console.log(event.event);
+        console.log(shortenLongWords(event.event));
         return;
       };
 
       let lines = Math.floor(event.event.length / Logger.columnWidth);
-      if (lines > 3) lines = 3;
+      if (lines > 20) lines = 20;
       for (let shift = 0; shift <= lines * Logger.columnWidth; shift += Logger.columnWidth){
 
         const line = users.map((_, index) => {
@@ -91,8 +108,11 @@ class Logger {
         const m = event.level ? event.level.toLocaleLowerCase() : 'log';
         (console as any)[m](line);
       }
-      console.log();
-      console.log();
+
+      event.objs.map((obj: any) => {
+        console.log(shortenLongWords(obj));
+      })
+
     });
 
     Logger.timeline = [];
@@ -110,13 +130,13 @@ class Logger {
 
   error(...args: any[]): void {
     const message = this.formatMessage('ERROR', ...args);
-    console.error(this.color(message));
+    //console.error(this.color(message));
   }
 
-  warn(...args: any[]): void {
-    const message = this.formatMessage('WARN', ...args);
+  //warn(...args: any[]): void {
+   // const message = this.formatMessage('WARN', ...args);
     //console.warn(this.color(message));
-  }
+  //}
 
   debug(...args: any[]): void {
     const message = this.formatMessage('DEBUG', ...args);
@@ -129,14 +149,18 @@ class Logger {
 
     let str = ''
     stateDiff.forEach(part => {
+      if (part.added) str += part.added ? part.value : '';
+      /*
       const color = part.added ? '\x1b[32m' : // Green for added
                     part.removed ? '\x1b[31m' : // Red for removed
                     '\x1b[0m'; // Reset for unchanged
                     
-      if (color != '\x1b[0m') str+=(color + part.value + '\x1b[0m');
+      if (color != '\x1b[0m') str+=(color + part.value + '\x1b[0m');*/
     });
-    Logger.timeline.push({time: Date.now(), user: this.userAddress, level: 'STATE', event: `State diff ${addr}:\n${str}`});
+    Logger.timeline.push({time: Date.now(), user: this.userAddress, level: 'STATE', event: `State diff ${addr}:\n${str}`, objs: []});
     Logger.states[addr] = state;
+
+    this.renderTimeline()
     //console.log(str); // For newline at the end
   }
 

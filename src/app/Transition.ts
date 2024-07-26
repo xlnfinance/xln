@@ -43,6 +43,18 @@ export namespace Transition {
     ) {}
   
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
+      const delta = channel.getDelta(this.chainId, this.tokenId);
+      if (!delta) {
+        channel.logger.log('Delta not found for payment');
+        throw new Error('Delta not found for payment');
+      }
+      const derived = channel.deriveDelta(this.chainId, this.tokenId, block.isLeft);
+      if (derived.outCapacity < this.amount) {
+        channel.logger.log('fatal no capacity');
+        throw new Error('fatal no capacity');
+      }
+
+
       const storedSubcontract = {
         originalTransition: this,
         timestamp: block.timestamp,
@@ -52,7 +64,7 @@ export namespace Transition {
       } as StoredSubcontract;
       channel.state.subcontracts.push(storedSubcontract);
 
-      if (!dryRun && block.isLeft != channel.isLeft) {
+      if (!dryRun) {
         await channel.ctx.user.processAddPayment(channel, storedSubcontract, block.isLeft === channel.isLeft);    
       }  
     }
@@ -64,13 +76,13 @@ export namespace Transition {
     readonly type = 'SettlePayment';
     constructor(
       public readonly transitionId: number,
-      public readonly secret: string
+      public readonly secret: string // todo, add extra json to pass back to user
     ) {}
 
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
       const hashlock = ethers.keccak256(ethers.toUtf8Bytes(this.secret))
-      channel.logger.log('applying secret, lock', this.secret, hashlock)
-     // use scId instead of hashlock
+
+      if (!dryRun) channel.logger.log(`applying secret, lock ${this.secret}${hashlock}`)
 
       let payment: AddPayment | undefined;
       let paymentIndex: number | undefined;
@@ -86,27 +98,29 @@ export namespace Transition {
         }
       }
       if (payment === undefined || paymentIndex === undefined) {
-        channel.logger.log(channel.state.subcontracts)
+        channel.logger.logState(channel.otherUserAddress, channel.state);
+        console.log('fatal no payment '+dryRun+stringify(channel.state))
         throw new Error('No such payment')
         return;
       }
       
       const delta = channel.getDelta(payment.chainId, payment.tokenId);
       if (!delta) {
-        throw new Error('Delta not found for payment');
+        throw new Error('fatal Delta not found for payment');
         return;
       }
       // other way around, because Settle is echoed back
       if (payment.hashlock === hashlock) {
-        channel.logger.log('outcome unlocked')
         delta.offdelta += !block.isLeft ? -payment.amount : payment.amount;        
       } else {
         channel.logger.log('fatal reason for fail '+this.secret);
       }
       channel.state.subcontracts.splice(paymentIndex, 1);
+      if (block.isLeft != channel.isLeft && !dryRun) {
+        channel.logger.info('Payment subcontract settled '+this.secret)
+      }
 
-
-      if (!dryRun) {
+      if (!dryRun && block.isLeft != channel.isLeft) {
         await channel.ctx.user.processSettlePayment(channel, subcontract, this.secret);
         
       }

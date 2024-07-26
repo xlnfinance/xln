@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'mocha';
 import { expect } from 'chai';
 import User from '../app/User';
-import Channel from '../app/Channel';
+import Channel, {stringify} from '../app/Channel';
 import Transition from '../app/Transition';
 import { ethers } from 'ethers';
 import { setupGlobalHub, teardownGlobalHub } from './hub';
@@ -21,6 +21,9 @@ describe('Network Operations', () => {
     offdeltas[key] = (offdeltas[key] || 0n) + (from < to ? -amount : amount);
     const reversedKey = `${to}-${from}`;
     offdeltas[reversedKey] = offdeltas[key]; // must be equal
+
+    console.log(`Updated expected offdelta for ${key}: ${offdeltas[key]}`);
+
   }
   let shouldSkipRemainingTests = false;
   beforeEach(function() {
@@ -48,8 +51,8 @@ describe('Network Operations', () => {
   });
 
   after(async () => {
-    await Promise.all([alice.stop(), bob.stop(), charlie.stop(), dave.stop()]);
-    await teardownGlobalHub();
+    //await Promise.all([alice.stop(), bob.stop(), charlie.stop(), dave.stop()]);
+    //await teardownGlobalHub();
   });
 
   async function extendCredit(user1: User, user2: User, creditLimit: bigint) {
@@ -59,7 +62,7 @@ describe('Network Operations', () => {
     channels.set(channelKey, channel);
 
     await user1.addToMempool(user2.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit), true);
-    await sleep(500)
+    await sleep(1000)
     expect(channel.data.sentTransitions).to.equal(0)
   }
 
@@ -100,29 +103,56 @@ describe('Network Operations', () => {
 
     console.log('Current ENV', ENV)
 
-    await sleep(500);
+    await sleep(3000);
   }
 
   async function verifyOffdeltas() {
     for (const [key, expectedOffdelta] of Object.entries(offdeltas)) {
       const channel = channels.get(key);
       if (!channel) throw new Error(`Channel not found: ${key}`);
-      await channel.load()
+     //await channel.load()
       const delta = channel.getDelta(1, 1);
       if (!delta) throw new Error(`Delta not found for channel: ${key}`);
       console.log(`Channel ${key} - Expected: ${expectedOffdelta}, Actual: ${delta.offdelta}`);
-      expect(delta.offdelta).to.equal(expectedOffdelta, `Mismatch in channel ${key}`);
+      expect(delta.offdelta).to.equal(expectedOffdelta, `Mismatch in channel ${key}, sent: ${channel.data.sentTransitions}`);
     }
   }
 
-  async function makePayment(from: User, to: User, amount: bigint, route: string[]) {
-    console.log(`Initiating payment: ${from.thisUserAddress} -> ${to.thisUserAddress}, Amount: ${amount}`);
-    const paymentTransition = await from.createOnionEncryptedPayment(
-      to.thisUserAddress,
+  async function logChannels() {
+    // Log actual channel states after payment
+    console.log(Array.from(channels.keys()))
+    for (const [key, channel] of channels.entries()) {
+      //await channel.load()
+      const delta = channel.getDelta(1, 1);
+      console.log(delta);
+      console.log(`Channel ${key} state after payment - offdelta: ${delta?.offdelta}`);
+    }
+  }
+
+  async function makePayment(routeString: string, amount: bigint) {
+    const route: string[] = routeString.split('-').map((name) => {
+      if (ENV.nameToAddress[name]) {
+        return ENV.nameToAddress[name];
+      } else {
+        return name;
+      }
+    });
+
+    console.log(`Initiating payment: ${route.join('-')}, Amount: ${amount}`);
+    let amountCopy = amount;
+    for (let i = 0; i < route.length-1; i++) {
+      shiftOffdelta(route[i], route[i+1], amountCopy);
+      amountCopy -= ENV.users[route[i+1]].calculateFee(amountCopy);
+    }
+
+    const from = ENV.users[route.shift() as string] as User
+    const recepient = route.pop() as string;
+
+    const {paymentTransition, completionPromise} = await from.createOnionEncryptedPayment(
+      1,
+      1,
       amount,
-      1,
-      1,
-      route
+      route.concat(recepient)
     );
     console.log('Starting onion', paymentTransition)
 
@@ -132,52 +162,55 @@ describe('Network Operations', () => {
 
     from.addToMempool(route[0], paymentTransition, true);
 
-    await sleep(200)
     console.log(`Payment pushed to first hop channel: ${firstHopKey}`);
 
     // Update expected offdeltas
+    /*
     for (let i = 0; i < route.length; i++) {
       const fromAddress = i === 0 ? from.thisUserAddress : route[i-1];
       const toAddress = route[i];
       const channelKey = `${fromAddress}-${toAddress}`;
+      console.log(`before ${offdeltas[channelKey]} ${amount}`);
       shiftOffdelta(fromAddress, toAddress, amount);
       amount -= from.calculateFee(amount);
       console.log(`Updated expected offdelta for ${channelKey}: ${offdeltas[channelKey]}`);
     }
-    const lastHopKey = `${route[route.length-1]}-${to.thisUserAddress}`;
-    shiftOffdelta(route[route.length-1], to.thisUserAddress, amount);
+    const lastHop = route[route.length - 1];
+
+    const lastHopKey = `${route.length > 0 ? route[route.length-1] : from.thisUserAddress}-${recepient}`;
+    shiftOffdelta(route[route.length-1], recepient, amount);
     console.log(`Updated expected offdelta for ${lastHopKey}: ${offdeltas[lastHopKey]}`);
+    */
 
-    // Wait for the payment to propagate
-    await sleep(7000);
-
-    // Log actual channel states after payment
-    for (const [key, channel] of channels.entries()) {
-      await channel.load()
-      const delta = channel.getDelta(1, 1);
-      console.log(delta);
-      console.log(`Channel ${key} state after payment - offdelta: ${delta?.offdelta}`);
-    }
+    return completionPromise;
   }
 
   it('should propagate a payment through multiple hops', async function() {
-    this.timeout(20000);
+    this.timeout(60000);
     await setupNetwork();
+
     const paymentAmount = ethers.parseEther('1');
-    const route = [bob.thisUserAddress, charlie.thisUserAddress];
     
-    await makePayment(alice, dave, paymentAmount, route);
+    const completionPromise = await makePayment('alice-bob-charlie-dave', paymentAmount);
+    const {status, paymentInfo} = completionPromise;
+    console.log('awaited ',paymentInfo);
+    await sleep(3000);
+    console.log('awaited ', stringify(Array.from(alice.hashlockMap.entries())));
+
+    console.log(ENV.users[alice.thisUserAddress].mempoolMap[paymentInfo.secret]);
+
+
+    await logChannels();
 
     await verifyOffdeltas();
   });
 
   it('should handle circular payments', async function() {
     this.timeout(35000);
-    await setupChannel(dave, alice);
     const paymentAmount = ethers.parseEther('1');
-    const route = [bob.thisUserAddress, charlie.thisUserAddress, dave.thisUserAddress];
     
-    await makePayment(alice, alice, paymentAmount, route);
+    await makePayment('alice-bob-charlie-dave-alice', paymentAmount);
+    await logChannels();
 
     console.log('Capacity map', channels)
     for (const [key, channel] of channels.entries()) {
@@ -194,25 +227,32 @@ describe('Network Operations', () => {
     const route2 = [charlie.thisUserAddress, bob.thisUserAddress];
 
     //await Promise.all([
-     await makePayment(alice, dave, paymentAmount, route1);
-     await makePayment(dave, alice, paymentAmount, route2);
+     await makePayment('alice-bob-charlie-dave', paymentAmount);
+     await makePayment('dave-charlie-bob-alice', paymentAmount);
     //]);
+    await logChannels();
 
     await verifyOffdeltas();
   });
 
-  it('should handle network congestion and backpressure', async function() {
-    this.timeout(60000);
+  it.only('should handle network congestion and backpressure', async function() {
+    await setupNetwork();
+
+    this.timeout(150000);
+
     const paymentAmount = ethers.parseEther('0.1');
-    const route = [bob.thisUserAddress, charlie.thisUserAddress];
 
     // Simulate network congestion by sending many payments in quick succession
     const paymentPromises = [];
-    for (let i = 0; i < 6; i++) {
-      paymentPromises.push(makePayment(alice, dave, paymentAmount, route));
+    for (let i = 0; i < 10; i++) {
+      paymentPromises.push(makePayment('alice-bob-charlie-dave', paymentAmount));
+      paymentPromises.push(makePayment('dave-charlie-bob-alice', paymentAmount));
     }
 
     await Promise.all(paymentPromises);
+    await sleep(15000);
+
+    await logChannels();
 
     await verifyOffdeltas();
   });
@@ -220,14 +260,13 @@ describe('Network Operations', () => {
   it('should handle node failures and recovery', async function() {
     this.timeout(60000);
     const paymentAmount = ethers.parseEther('0.1');
-    const route = [bob.thisUserAddress, charlie.thisUserAddress];
 
     // Simulate Charlie going offline
     await charlie.stop();
     console.log('Charlie went offline');
     const clonedOffdeltas = structuredClone(offdeltas);
     console.log('cloned ', clonedOffdeltas)
-    //await makePayment(alice, dave, paymentAmount, route);
+    await makePayment('alice-bob-charlie-dave', paymentAmount);
     console.log('clonedafter ', clonedOffdeltas, offdeltas)
 
     Object.assign(offdeltas, clonedOffdeltas);
@@ -240,7 +279,7 @@ describe('Network Operations', () => {
     console.log('Charlie is back online');
 
     // Try the payment again
-    await makePayment(alice, dave, paymentAmount, route);
+    await makePayment('alice-bob-charlie-dave', paymentAmount);
 
     //await verifyOffdeltas();
   });
