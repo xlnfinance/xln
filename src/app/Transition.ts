@@ -43,7 +43,15 @@ export namespace Transition {
     ) {}
   
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
-      const delta = channel.getDelta(this.chainId, this.tokenId);
+      let state;
+      if (dryRun) {
+        state = channel.dryRunState!;
+      } else {
+        state = channel.state;
+      }
+  
+  
+      const delta = channel.getDelta(this.chainId, this.tokenId, dryRun);
       if (!delta) {
         channel.logger.log('Delta not found for payment');
         throw new Error('Delta not found for payment');
@@ -59,10 +67,10 @@ export namespace Transition {
         originalTransition: this,
         timestamp: block.timestamp,
         isLeft: block.isLeft,
-        transitionId: channel.state.transitionId,
+        transitionId: state.transitionId,
         blockId: block.blockId
       } as StoredSubcontract;
-      channel.state.subcontracts.push(storedSubcontract);
+      state.subcontracts.push(storedSubcontract);
 
       if (!dryRun) {
         await channel.ctx.user.processAddPayment(channel, storedSubcontract, block.isLeft === channel.isLeft);    
@@ -81,6 +89,12 @@ export namespace Transition {
 
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
       const hashlock = ethers.keccak256(ethers.toUtf8Bytes(this.secret))
+      let state;
+      if (dryRun) {
+        state = channel.dryRunState!;
+      } else {
+        state = channel.state;
+      }
 
       if (!dryRun) channel.logger.log(`applying secret, lock ${this.secret}${hashlock}`)
 
@@ -88,9 +102,9 @@ export namespace Transition {
       let paymentIndex: number | undefined;
       let subcontract: any;
 
-      for (let i = 0; i < channel.state.subcontracts.length; i++) {
+      for (let i = 0; i < state.subcontracts.length; i++) {
         //instanceof AddPayment
-        subcontract = channel.state.subcontracts[i];
+        subcontract = state.subcontracts[i];
         if (subcontract && subcontract.transitionId === this.transitionId && subcontract.isLeft !== block.isLeft) {
           payment = subcontract.originalTransition;
           paymentIndex = i;
@@ -98,13 +112,13 @@ export namespace Transition {
         }
       }
       if (payment === undefined || paymentIndex === undefined) {
-        channel.logger.logState(channel.otherUserAddress, channel.state);
-        console.log('fatal no payment '+dryRun+stringify(channel.state))
+        channel.logger.logState(channel.otherUserAddress, state);
+        console.log('fatal no payment '+dryRun+stringify(state))
         throw new Error('No such payment')
         return;
       }
       
-      const delta = channel.getDelta(payment.chainId, payment.tokenId);
+      const delta = channel.getDelta(payment.chainId, payment.tokenId, dryRun);
       if (!delta) {
         throw new Error('fatal Delta not found for payment');
         return;
@@ -115,7 +129,7 @@ export namespace Transition {
       } else {
         channel.logger.log('fatal reason for fail '+this.secret);
       }
-      channel.state.subcontracts.splice(paymentIndex, 1);
+      state.subcontracts.splice(paymentIndex, 1);
       if (block.isLeft != channel.isLeft && !dryRun) {
         channel.logger.info('Payment subcontract settled '+this.secret)
       }
@@ -141,7 +155,7 @@ export namespace Transition {
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
       // Implementation for cancelling a payment
       // This might involve reverting the offdelta changes
-      const delta = channel.getDelta(this.chainId, this.tokenId);
+      const delta = channel.getDelta(this.chainId, this.tokenId, dryRun);
       if (delta) {
         delta.offdelta -= block.isLeft ? -this.amount : this.amount;
       }
@@ -170,6 +184,7 @@ export namespace Transition {
     ) {}
 
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
+      const state = channel.state;
       if (this.ownerIsLeft == !block.isLeft) {
         throw new Error('Incorrect0 owner for swap');
       }
@@ -177,11 +192,11 @@ export namespace Transition {
         originalTransition: this,
         timestamp: block.timestamp,
         isLeft: block.isLeft,
-        transitionId: channel.state.transitionId,
+        transitionId: state.transitionId,
         blockId: block.blockId
       } as StoredSubcontract;
 
-      channel.state.subcontracts.push(storedSubcontract);
+      state.subcontracts.push(storedSubcontract);
     }
   }
 
@@ -205,8 +220,8 @@ export namespace Transition {
           channel.state.subcontracts.splice(this.subcontractIndex, 1);
         } else {
           // Resolve the swap
-          const addDelta = channel.getDelta(this.chainId, swap.tokenId);
-          const subDelta = channel.getDelta(this.chainId, swap.subTokenId);
+          const addDelta = channel.getDelta(this.chainId, swap.tokenId, dryRun);
+          const subDelta = channel.getDelta(this.chainId, swap.subTokenId, dryRun);
           if (addDelta && subDelta) {
             const filledAddAmount = BigInt(Math.floor(Number(swap.addAmount) * this.fillingRatio));
             const filledSubAmount = BigInt(Math.floor(Number(swap.subAmount) * this.fillingRatio));
@@ -229,10 +244,17 @@ export namespace Transition {
     constructor(public readonly chainId: number) {}
   
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
+      let state;
+      if (dryRun) {
+        state = channel.dryRunState!;
+      } else {
+        state = channel.state;
+      }
+
       const chainId = this.chainId;
 
-      channel.logger.log('Current subchannels before adding:', stringify(channel.state.subchannels));
-      let subchannel = channel.getSubchannel(chainId);
+      channel.logger.log('Current subchannels before adding:', stringify(state.subchannels));
+      let subchannel = channel.getSubchannel(chainId, dryRun);
       if (subchannel) {
         channel.logger.log(`Subchannel ${chainId} already exists:`, stringify(subchannel));        
       }
@@ -246,9 +268,9 @@ export namespace Transition {
         proposedEvents: [],
         proposedEventsByLeft: false
       } as Subchannel;
-      channel.state.subchannels.push(subchannel);
-      channel.logger.log(`Added new subchannel ${chainId}:`, stringify(subchannel));
-      channel.logger.log('Current subchannels after adding:', stringify(channel.state.subchannels));
+      state.subchannels.push(subchannel);
+      channel.logger.log(`Added new subchannel ${chainId}:`, subchannel);
+      channel.logger.log('Current subchannels after adding: '+dryRun, state.subchannels);
   
   
 
@@ -263,7 +285,14 @@ export namespace Transition {
     ) {}
 
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
-      const subchannel = channel.getSubchannel(this.chainId);
+      let state;
+      if (dryRun) {
+        state = channel.dryRunState!;
+      } else {
+        state = channel.state;
+      }
+      const subchannel = state.subchannels.find(subchannel => subchannel.chainId === this.chainId);
+
       if (subchannel) {
         subchannel.deltas.push({
           tokenId: this.tokenId,
@@ -276,6 +305,7 @@ export namespace Transition {
           rightAllowence: 0n
         });
       } else {
+        console.log(dryRun, state);
         throw new Error('Subchannel not found for add Delta');
       }
     }
@@ -290,7 +320,7 @@ export namespace Transition {
     ) {}
  
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
-      const delta = channel.getDelta(this.chainId, this.tokenId);
+      const delta = channel.getDelta(this.chainId, this.tokenId, dryRun);
       const derived = channel.deriveDelta(this.chainId, this.tokenId, block.isLeft);
 
       channel.logger.log("Derived as ",block.isLeft, derived.outCapacity, this.amount)
@@ -315,7 +345,7 @@ export namespace Transition {
     ) {}
 
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
-      const delta = channel.getDelta(this.chainId, this.tokenId);
+      const delta = channel.getDelta(this.chainId, this.tokenId, dryRun);
       if (delta) {
 
         if (!block.isLeft) {
@@ -340,7 +370,7 @@ export namespace Transition {
     ) {}
   
     async apply(channel: Channel, block: Block, dryRun: boolean): Promise<void> {
-      const subchannel = channel.getSubchannel(this.chainId);
+      const subchannel = channel.getSubchannel(this.chainId, dryRun);
       if (!subchannel) return;
   
       if (subchannel.proposedEvents.length > 0) {
@@ -350,7 +380,7 @@ export namespace Transition {
           if (encode(subchannel.proposedEvents[0]) === encode(this)) {
             const event = subchannel.proposedEvents.shift();
             if (event) {
-              const delta = channel.getDelta(event.chainId, event.tokenId);
+              const delta = channel.getDelta(event.chainId, event.tokenId, dryRun);
               if (delta) {
                 delta.collateral = event.collateral;
                 delta.ondelta = event.ondelta;
