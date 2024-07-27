@@ -39,7 +39,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     await teardownGlobalHub();
   });
 
-  it.only('should handle random onion routed payments in a complex network scenario', async function() {
+  it('should handle random onion routed payments in a complex network scenario', async function() {
     this.timeout(300000);
 
     const config = {
@@ -93,7 +93,7 @@ describe('High Load Onion Payment Network Simulation', () => {
   });
 
 
-  it.only('should handle payments routed through the hub', async function() {
+  it('should handle payments routed through the hub', async function() {
     this.timeout(300000);
 
     const config = {
@@ -118,6 +118,7 @@ describe('High Load Onion Payment Network Simulation', () => {
 });
 
 async function setupFullMeshNetwork(users: User[]) {
+
   for (let i = 0; i < users.length; i++) {
     for (let j = i + 1; j < users.length; j++) {
       await setupChannel(users[i], users[j]);
