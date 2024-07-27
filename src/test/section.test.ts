@@ -5,9 +5,17 @@ import User from '../app/User';
 import { performance } from 'perf_hooks';
 import { setupGlobalHub } from './hub';
 import { sleep } from '../utils/Utils';
-import chaiAsPromised from 'chai-as-promised';
+//import chaiAsPromised from 'chai-as-promised';
 
-chai.use(chaiAsPromised);
+//chai.use(chaiAsPromised);
+
+let chaiAsPromised: any;
+
+before(async () => {
+  chaiAsPromised = await import('chai-as-promised');
+  const chai = require('chai');
+  chai.use(chaiAsPromised.default);
+});
 
 describe('Critical Section Tests', () => {
   let user: User, hub: User;
@@ -67,7 +75,7 @@ describe('Critical Section Tests', () => {
     expect(counter.value).to.equal(concurrentJobs);
   });
 
-  /*
+  
   it('should handle job timeouts', async () => {
     const timeoutPromise = user.criticalSection('timeout', 'timeout test', () => new Promise(resolve => setTimeout(resolve, 30000)));
     await expect(timeoutPromise).to.be.rejectedWith('Timeout: timeout:timeout test');
@@ -76,7 +84,7 @@ describe('Critical Section Tests', () => {
   it('should handle errors in jobs', async () => {
     const errorPromise = user.criticalSection('error', 'error test', () => Promise.reject(new Error('Test error')));
     await expect(errorPromise).to.be.rejectedWith('Test error');
-  });*/
+  });
 
   it('should handle queue overflow', async () => {
     const overflowJobs = 60;
@@ -87,7 +95,7 @@ describe('Critical Section Tests', () => {
       promises.push(user.criticalSection('overflow', 'overflow test', slowJob));
     }
 
-    //await expect(Promise.all(promises)).to.be.rejectedWith('Queue overflow');
+    await expect(Promise.all(promises)).to.be.rejectedWith('Queue overflow');
   });
 
   it('should maintain mutual exclusion under high load', async () => {
@@ -192,8 +200,8 @@ describe('Critical Section Tests', () => {
       }, 10);
     });
 
-    //await expect(user.criticalSection('cancellation', 'cancellable job', cancelableJob))
-    //  .to.be.rejectedWith('Job cancelled');
+    await expect(user.criticalSection('cancellation', 'cancellable job', cancelableJob))
+      .to.be.rejectedWith('Job cancelled');
 
     expect(jobRan).to.be.false;
   });

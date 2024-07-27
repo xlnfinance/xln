@@ -559,7 +559,7 @@ export default class User implements ITransportListener  {
       const timeout = setTimeout(()=>{
         console.log("Timeout for payment ", amount, route)
         return reject('PaymentTimeout')
-      }, 60000);
+      }, 20000);
         //secret: secret,
 
       this.hashlockMap.set(hashlock, {
@@ -851,8 +851,9 @@ private async processQueue(key: string): Promise<void> {
       const result = await Promise.race([
         job(),
         new Promise((_, rejectTimeout) => setTimeout(() => {
+          //rejectTimeout(new Error(`Timeout: ${key}:${description}`));
           reject(new Error(`Timeout: ${key}:${description}`));
-        }, 30000))
+        }, 10000))
       ]);
 
       resolve(result);

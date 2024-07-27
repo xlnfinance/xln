@@ -14,6 +14,10 @@
     "test:transition": "mocha -r ts-node/register src/test/transition.test.ts --timeout 10000 --exit",
     "test:section": "mocha -r ts-node/register src/test/section.test.ts --timeout 60000 --exit",
     "test:derive": "mocha -r ts-node/register src/test/derive.test.ts --timeout 10000 --exit",
+    "t2": "tsc && ts-node src/test/derive.test.ts",
+
+
+
     "build": "tsc",
     "watch": "tsc --watch",
     "env:build": "cd ./contracts && npx hardhat compile",

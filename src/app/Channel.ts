@@ -207,7 +207,7 @@ export default class Channel {
       
       await this.applyBlock(pendingBlock, false); // <--- now apply as block creator
       if (Buffer.compare(identical, encode(this.state)) != 0) {
-        this.logger.log('fatal not! identical', decode(identical), this.state);
+        this.logger.log('fatal not identical', decode(identical), this.state);
         process.exit(1);
       }
 
@@ -602,10 +602,6 @@ export default class Channel {
         transitions: transitions,
       };
 
-      if (Buffer.compare(identical, encode(this.state)) != 0) {
-        this.logger.log('fatal3 not identical', decode(identical), this.state);
-        process.exit(1);
-      }
       //this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
       //this.logger.log(123, this.state)
       await this.applyBlock(block, true); // <--- only dryRun
@@ -629,10 +625,6 @@ export default class Channel {
       //this.state = previousState; // <--- revert state
       body.block = block;
 
-      if (Buffer.compare(identical, encode(this.state)) != 0) {
-        this.logger.log('fatal not2 identical', decode(identical), this.state);
-        process.exit(1);
-      }
       if (body.newSignatures.length != expectedLength) {
         throw new Error('fatal: Invalid pending signatures length');
       }
@@ -643,22 +635,13 @@ export default class Channel {
       `Flush ${this.channelId} with block ${!!message.body.block}`,
     );
 
-    if (Buffer.compare(identical, encode(this.state)) != 0) {
-      this.logger.log('fatal5 not identical', decode(identical), this.state);
-      process.exit(1);
-    }
-
     await this.save();
 
-    if (Buffer.compare(identical, encode(this.state)) != 0) {
-      this.logger.log('fatal4 not identical', decode(identical), this.state);
-      process.exit(1);
-    }
     message.body.counter = ++this.data.sendCounter;
 
 
     if (Buffer.compare(identical, encode(this.state)) != 0) {
-      this.logger.log('fatal not identical', decode(identical), this.state);
+      this.logger.log('fatal not identical after flush', decode(identical), this.state);
       process.exit(1);
     }
 
@@ -755,14 +738,14 @@ export default class Channel {
 
 
 
-  public getDelta(chainId: number, tokenId: number, dryRun: boolean): Delta | undefined {
+  public getDelta(chainId: number, tokenId: number, dryRun: boolean = false): Delta | undefined {
     const subchannel = this.getSubchannel(chainId, dryRun);
     const delta = subchannel?.deltas.find(delta => delta.tokenId === tokenId);
 
     return delta;
   }
   
-  public getSubchannel(chainId: number, dryRun: boolean): Subchannel | undefined {
+  public getSubchannel(chainId: number, dryRun: boolean = false): Subchannel | undefined {
     //this.logger.log('Getting subchannel. Current subchannels:', stringify(this.state.subchannels));
     const subchannel = (dryRun ? this.dryRunState! : this.state).subchannels.find(subchannel => subchannel.chainId === chainId);
     //this.logger.log(`Getting subchannel ${chainId}:`, stringify(subchannel));
