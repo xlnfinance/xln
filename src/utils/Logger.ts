@@ -63,10 +63,12 @@ class Logger {
 
     
     const shortEvent = shortenLongWords(message.replace(/(\n)/gm, '')); //shortenLongWords(message.replace(/\s{10,}|(\r\n|\n|\r)/gm, ''))
+    let previousUser = Logger.timeline.length > 0 ? Logger.timeline[Logger.timeline.length - 1].user : '';
     Logger.timeline.push({time: Date.now(), user: shortAddress, level, event: shortEvent, objs: objs});
+    if (previousUser != shortAddress) {
+      this.renderTimeline()
+    }
 
-
-    this.renderTimeline()
     return 'errorerrorlog'
   }
 
@@ -89,8 +91,8 @@ class Logger {
       };
 
       let lines = Math.floor(event.event.length / Logger.columnWidth);
-      if (lines > 50) lines = 50;
-      for (let shift = 0; shift <= (lines+2) * Logger.columnWidth; shift += Logger.columnWidth){
+      if (lines > 20) lines = 20;
+      for (let shift = 0; shift <= (lines) * Logger.columnWidth; shift += Logger.columnWidth){
 
         const line = users.map((_, index) => {
           let body;
@@ -106,11 +108,11 @@ class Logger {
 
         }).join('|');
         const m = event.level ? event.level.toLocaleLowerCase() : 'log';
-        (console as any)[m](line);
+        //(console as any)[m](line);
       }
 
       event.objs.map((obj: any) => {
-        console.log(shortenLongWords(obj));
+        //console.log(shortenLongWords(obj));
       })
 
     });

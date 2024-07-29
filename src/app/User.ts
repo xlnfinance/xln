@@ -40,6 +40,7 @@ import { performance } from 'perf_hooks';
 import { sleep } from '../utils/Utils';
 import { StoredSubcontract } from '../types/ChannelState';
 
+import fs from 'fs';
 
 type Job<T> = () => Promise<T>;
 type QueueItem<T> = [Job<T>, string, (value: T | PromiseLike<T>) => void, (value: T | PromiseLike<T>) => void];
@@ -100,8 +101,11 @@ export default class User implements ITransportListener  {
 
   public profiles: Map<string, any> = new Map();
 
+  private incomingLog: fs.WriteStream;
+  private outgoingLog: fs.WriteStream;
+
+  constructor(public username: string, public password: string) {  
   
-  constructor(public username: string, public password: string) {    
     this.storageContext = new StorageContext();
     const seed = ethers.keccak256(ethers.toUtf8Bytes(username + password));
     this.username = username;
@@ -124,6 +128,9 @@ export default class User implements ITransportListener  {
     };
     this.logger.log("Broadcasting profile", profile)
     ENV.profiles[profile.address] = profile;
+
+    this.incomingLog = fs.createWriteStream(`logs/in_${this.thisUserAddress}.log`, { flags: 'a' });
+    this.outgoingLog = fs.createWriteStream(`logs/out_${this.thisUserAddress}.log`, { flags: 'a' });
 
     //this.periodicFlush();
   }
@@ -242,6 +249,8 @@ export default class User implements ITransportListener  {
 
 
     await this.criticalSection(addr, "handleFlushMessage", async () => {
+      this.incomingLog.write(encode([addr, message]));
+
       const channel = await this.getChannel(addr);
 
       if (message.body.counter != ++channel.data.receiveCounter) {
@@ -371,6 +380,9 @@ export default class User implements ITransportListener  {
       return;
     }
     this.logger.info(`Send to ${this.toTag(addr)}`, message);
+
+    this.outgoingLog.write(encode([addr, message]));
+
     return transport.send(message);
   }
 
@@ -559,7 +571,7 @@ export default class User implements ITransportListener  {
       const timeout = setTimeout(()=>{
         console.log("Timeout for payment ", amount, route)
         return reject('PaymentTimeout')
-      }, 20000);
+      }, 50000);
         //secret: secret,
 
       this.hashlockMap.set(hashlock, {
@@ -853,7 +865,7 @@ private async processQueue(key: string): Promise<void> {
         new Promise((_, rejectTimeout) => setTimeout(() => {
           //rejectTimeout(new Error(`Timeout: ${key}:${description}`));
           reject(new Error(`Timeout: ${key}:${description}`));
-        }, 10000))
+        }, 20000))
       ]);
 
       resolve(result);
@@ -880,7 +892,7 @@ private updatePerformanceMetrics(key: string, description: string, duration: num
   this.perfs[perfKey].push(duration);
 
   // Limit the size of the performance array to prevent memory issues
-  if (this.perfs[perfKey].length > 100) {
+  if (this.perfs[perfKey].length > 50000) {
     this.perfs[perfKey].shift();
   }
 

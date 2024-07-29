@@ -7,7 +7,7 @@
     "test:user": "rm -rf local-storage;mocha -r ts-node/register src/test/user.test.ts --timeout 10000 --exit",
     "test:channel": "rm -rf local-storage;mocha -r ts-node/register src/test/channel.test.ts --timeout 10000 --exit",
     "test:directpayment": "rm -rf local-storage;mocha -r ts-node/register src/test/directpayment.test.ts --timeout 30000 --exit",
-    "test:onionpayment": "rm -rf local-storage;mocha -r ts-node/register src/test/onionpayment.test.ts --timeout 20000 --exit",
+    "test:onionpayment": "rm -rf local-storage;mocha -r ts-node/register src/test/onionpayment.test.tts --timeout 20000 --exit",
     "test:high": "rm -rf local-storage;mocha -r ts-node/register src/test/highload.test.ts --timeout 80000 --exit",
     "test:swap": "rm -rf local-storage;mocha -r ts-node/register src/test/swap.test.ts --timeout 20000 --exit",
     "test:network": "rm -rf local-storage;mocha -r ts-node/register src/test/network.test.ts --timeout 10000 --exit",

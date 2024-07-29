@@ -49,7 +49,7 @@ enum MessageType {
   CooperativeDisputeProof,
   DisputeProof
 }
-const BLOCK_LIMIT = 5;
+const BLOCK_LIMIT = 20;
 
 interface SwapOrder {
   chainId: number;
@@ -760,6 +760,7 @@ export default class Channel {
     } else {
       state = this.state;
     }
+    const transitionPromises: Array<Promise<void>> = [];
 
     // save previous hash first before changing this.state
     state.previousStateHash = keccak256(encode(state));
@@ -769,11 +770,12 @@ export default class Channel {
     state.previousBlockHash = keccak256(encode(block));
 
     for (let i = 0; i < block.transitions.length; i++) {
-      await this.applyTransition(block, block.transitions[i], dryRun);
+      transitionPromises.push(this.applyTransition(block, block.transitions[i], dryRun));
     }
     if (!dryRun) {
       this.logger.log(`applyblock ${this.channelId} ${state.blockId} ${state.previousBlockHash}`);
     }
+    await Promise.all(transitionPromises);
 
   }
  
@@ -796,7 +798,7 @@ export default class Channel {
     //  return;
     //}
      //if (!dryRun){
-      this.logger.debug(`applyTr${dryRun} ${transition.type}`+this.thisUserAddress, stringify(transition));
+      //this.logger.debug(`applyTr${dryRun} ${transition.type}`+this.thisUserAddress, stringify(transition));
      //}
     
     //try{
@@ -806,7 +808,7 @@ export default class Channel {
      // this.logger.debug('fatal in applytransiton', e);
      // throw(e);
     //}
-    this.logger.log('State after applying transition:'+this.thisUserAddress, stringify(state));
+    //this.logger.log('State after applying transition:'+this.thisUserAddress, state);
     
   }
 

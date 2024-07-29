@@ -14,12 +14,16 @@ describe('High Load Onion Payment Network Simulation', () => {
   let users: User[];
   let hub: User;
   
-  const userNames = ['alice', 'bob', 'charlie', 'hub'];
+  const userNames = ["hub", 
+    "alice", "bob", "charlie", "dave", "eve", "frank", "grace", "henry", "isaac", "jack", "karen", 
+   // "larry", "mary", "nancy", "oscar", "paul", "quinn", "rachel", "sam", "tom", "ursula", "victor", 
+   // "wendy", "xavier", "yolanda", "zach"
+  ];
   
   before(async () => {
     try {
       hub = await setupGlobalHub(10003);
-      users = await Promise.all(userNames.slice(0, -1).map(name => {
+      users = await Promise.all(userNames.slice(1).map(name => {
         const user = new User(name, `password_${name}`);
         expectedFees[user.thisUserAddress] = 0n;
         return user.start().then(() => user);
@@ -43,7 +47,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(300000);
 
     const config = {
-      totalPayments: 100,
+      totalPayments: 10000,
       minAmount: ethers.parseEther('0.01'),
       maxAmount: ethers.parseEther('1'),
       minRouteLength: 3,
@@ -67,7 +71,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(300000); // Increase timeout
   
     const config = {
-        totalPayments: 1,
+        totalPayments: 2000,
         minAmount: ethers.parseEther('0.01'),
         maxAmount: ethers.parseEther('1'),
         minRouteLength: 3,
@@ -94,16 +98,16 @@ describe('High Load Onion Payment Network Simulation', () => {
 
 
   it('should handle payments routed through the hub', async function() {
-    this.timeout(300000);
+    this.timeout(600000);
 
     const config = {
-      totalPayments: 50,
-      minAmount: ethers.parseEther('0.01'),
-      maxAmount: ethers.parseEther('1'),
-      minRouteLength: 3,
-      maxRouteLength: 3,
-      paymentInterval: 100,
-      maxConcurrentPayments: 5,
+      totalPayments: 5000,
+      minAmount: ethers.parseEther('0.00001'),
+      maxAmount: ethers.parseEther('0.001'),
+      minRouteLength: 2,
+      maxRouteLength: 6,
+      paymentInterval: 10,
+      maxConcurrentPayments: 50,
       useHub: true
     };
 
@@ -122,7 +126,7 @@ async function setupFullMeshNetwork(users: User[]) {
   for (let i = 0; i < users.length; i++) {
     for (let j = i + 1; j < users.length; j++) {
       await setupChannel(users[i], users[j]);
-      await sleep(200);
+      //await sleep(100);
     }
   }
   await sleep(5000);
@@ -138,7 +142,7 @@ async function setupChannel(user1: User, user2: User) {
     await user1.addToMempool(user2.thisUserAddress, new Transition.AddSubchannel(1));    
     await user1.addToMempool(user2.thisUserAddress, new Transition.AddDelta(1, 1));
     
-    const creditLimit = ethers.parseEther('100');
+    const creditLimit = ethers.parseEther('1000');
     await user2.addToMempool(user1.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit));
     await user1.addToMempool(user2.thisUserAddress, new Transition.SetCreditLimit(1, 1, creditLimit), true);
     
@@ -192,8 +196,8 @@ async function makeRandomPayment(users: User[], config: any) {
   } while (sender === recipient);
 
   const amount = getRandomBigInt(config.minAmount, config.maxAmount);
-  const route = config.useHub 
-    ? [sender, hub, recipient]
+  const route = Math.random() < 0.8 //80 % use hub 
+    ? [sender, hub, recipient] 
     : generateRandomRoute(users, sender, recipient, config.minRouteLength, config.maxRouteLength);
 
   const { paymentTransition, completionPromise } = await sender.createOnionEncryptedPayment(

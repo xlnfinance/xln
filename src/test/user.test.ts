@@ -13,6 +13,7 @@ describe('User', () => {
   });
 
   after(async () => {
+    await user.stop();
     await teardownGlobalHub();
   });
 
