@@ -141,7 +141,7 @@ describe('Channel Tests', () => {
       await alice.addToMempool(aliceChannel.otherUserAddress, new Transition.AddSubchannel(2), true);
 
       await sleep(500);
-      console.log('Global hub transports:', globalHub._transports);
+      //console.log('Global hub transports:', globalHub._transports);
       expect(globalHub._transports.has(alice.thisUserAddress), 'Alice should be connected to the hub').to.be.true;
       expect(globalHub._transports.has(bob.thisUserAddress), 'Bob should be connected to the hub').to.be.true;
     } catch (error) {

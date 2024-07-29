@@ -58,7 +58,7 @@ export namespace Transition {
       }
       const derived = channel.deriveDelta(this.chainId, this.tokenId, block.isLeft);
       if (derived.outCapacity < this.amount) {
-        channel.logger.log('fatal no capacity');
+        channel.logger.log(`fatal no capacity ${derived.outCapacity} < ${this.amount}`);
         throw new Error('fatal no capacity');
       }
 

@@ -9,11 +9,7 @@ import ENV from '../env';
 import { sleep } from '../utils/Utils';
 let shouldContinue = true;
 import {encode, decode} from '../utils/Codec';
-
-(async () => {
-  const chaiAsPromised = await import('chai-as-promised');
-  chai.use(chaiAsPromised.default);
-})();
+let chaiAsPromised;
 
 describe('Network Operations', () => {
   let alice: User, bob: User, charlie: User, dave: User, eve: User;
@@ -34,6 +30,7 @@ describe('Network Operations', () => {
   }
   let shouldSkipRemainingTests = false;
   beforeEach(function() {
+    
     if (shouldSkipRemainingTests) {
       // Skip the test by throwing a special error recognized by Mocha
       this.skip();
@@ -48,6 +45,9 @@ describe('Network Operations', () => {
   });
 
   before(async () => {
+    chaiAsPromised = await import('chai-as-promised');
+    chai.use(chaiAsPromised.default);
+  
     hub = await setupGlobalHub(10002);
     alice = new User('alice', 'password1');
     bob = new User('bob', 'password2');
@@ -59,8 +59,8 @@ describe('Network Operations', () => {
   });
 
   after(async () => {
-    //await Promise.all([alice.stop(), bob.stop(), charlie.stop(), dave.stop()]);
-    //await teardownGlobalHub();
+    await Promise.all([alice.stop(), bob.stop(), charlie.stop(), dave.stop()]);
+    await teardownGlobalHub();
   });
 
   async function extendCredit(user1: User, user2: User, creditLimit: bigint) {
