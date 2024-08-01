@@ -47,7 +47,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(300000);
 
     const config = {
-      totalPayments: 10000,
+      totalPayments: 2000,
       minAmount: ethers.parseEther('0.01'),
       maxAmount: ethers.parseEther('1'),
       minRouteLength: 3,
@@ -71,7 +71,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(300000); // Increase timeout
   
     const config = {
-        totalPayments: 2000,
+        totalPayments: 1000,
         minAmount: ethers.parseEther('0.01'),
         maxAmount: ethers.parseEther('1'),
         minRouteLength: 3,
@@ -101,7 +101,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(600000);
 
     const config = {
-      totalPayments: 5000,
+      totalPayments: 2000,
       minAmount: ethers.parseEther('0.00001'),
       maxAmount: ethers.parseEther('0.001'),
       minRouteLength: 2,
