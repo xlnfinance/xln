@@ -350,6 +350,14 @@ export default class User implements ITransportListener  {
     }
     return channel;
   }
+
+  async becomeHub() {
+    this.logger.info("Become hub")
+    await this.stop();
+    await this.startHub();
+  } 
+
+
  
 
   async addHub(data: HubData) {
@@ -716,6 +724,7 @@ export default class User implements ITransportListener  {
   }
 
   public async processSettlePayment(channel: Channel, storedSubcontract: StoredSubcontract, secret: string, isSender: boolean): Promise<void> {
+    await sleep(1000);
     const paymentInfo = this.hashlockMap.get((storedSubcontract.originalTransition as Transition.AddPayment).hashlock);
     if (paymentInfo) {
       if (isSender) {
