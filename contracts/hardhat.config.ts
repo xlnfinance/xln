@@ -14,7 +14,23 @@ const config: HardhatUserConfig = {
   networks: {
     localhost: {
       allowUnlimitedContractSize: true
-    }
+    },
+    hardhat: {
+      chainId: 1337,
+    },
+    testnode1: {
+      url: "http://127.0.0.1:8545",
+      chainId: 1338,
+    },
+    testnode2: {
+      url: "http://127.0.0.1:8546",
+      chainId: 1339,
+    },
+    testnode3: {
+      url: "http://127.0.0.1:8547",
+      chainId: 1340,
+    },
+
   }
 };
 

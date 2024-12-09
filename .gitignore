@@ -3,5 +3,5 @@ node_modules
 dist
 local-storage
 .DS_Store
-logs
+logs/*
 *.txt

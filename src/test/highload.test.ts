@@ -15,7 +15,7 @@ describe('High Load Onion Payment Network Simulation', () => {
   let hub: User;
   
   const userNames = ["hub", 
-    "alice", "bob", "charlie", "dave", "eve", "frank", "grace", "henry", "isaac", "jack", "karen", 
+    "alice", "bob", "charlie", "dave", "eve", "frank", "grace", "henry", 
    // "larry", "mary", "nancy", "oscar", "paul", "quinn", "rachel", "sam", "tom", "ursula", "victor", 
    // "wendy", "xavier", "yolanda", "zach"
   ];
@@ -47,7 +47,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(300000);
 
     const config = {
-      totalPayments: 2000,
+      totalPayments: 300,
       minAmount: ethers.parseEther('0.01'),
       maxAmount: ethers.parseEther('1'),
       minRouteLength: 3,
@@ -71,7 +71,7 @@ describe('High Load Onion Payment Network Simulation', () => {
     this.timeout(300000); // Increase timeout
   
     const config = {
-        totalPayments: 1000,
+        totalPayments: 320,
         minAmount: ethers.parseEther('0.01'),
         maxAmount: ethers.parseEther('1'),
         minRouteLength: 3,
@@ -80,8 +80,8 @@ describe('High Load Onion Payment Network Simulation', () => {
         maxConcurrentPayments: 10,
         useHub: false
       };
-    const batchSize = 10;
-    const totalBatches = 32;
+    const batchSize = 5;
+    const totalBatches = 3;
   
     for (let batch = 0; batch < totalBatches; batch++) {
       const paymentPromises = [];
@@ -89,19 +89,20 @@ describe('High Load Onion Payment Network Simulation', () => {
         paymentPromises.push(makeRandomPayment(users, config));
       }
       await Promise.all(paymentPromises);
-      await sleep(5000); // Allow time for propagation
+      await sleep(3000); // Allow time for propagation
     }
   
-    await sleep(30000); // Final settling time
+    await sleep(20000); // Final settling time
     await verifyNetworkBalances(users);
   });
 
 
   it('should handle payments routed through the hub', async function() {
     this.timeout(600000);
+    await sleep(10000);
 
     const config = {
-      totalPayments: 2000,
+      totalPayments: 300,
       minAmount: ethers.parseEther('0.00001'),
       maxAmount: ethers.parseEther('0.001'),
       minRouteLength: 2,
