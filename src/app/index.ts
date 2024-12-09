@@ -7,7 +7,7 @@ import { sleep } from '../utils/Utils';
 import { setupGlobalHub } from '../test/hub';
 
 const userNames = [
-  "alice", "bob", "charlie" 
+  "alice", "bob", "charlie"
 ];
 
 async function initializeUsers(): Promise<{ [key: string]: User }> {

@@ -772,19 +772,6 @@ export default class User implements ITransportListener  {
     return amount * BigInt(Math.floor(FEE_RATE * 10000)) / 10000n;
   }
 
-  public async waitForPaymentSettlement(channel: Channel, hashlock: string): Promise<void> {
-    // Implementation depends on how you're notifying about payment settlements
-    // This is a placeholder
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(() => {
-        if (this.hashlockMap.get(hashlock)?.secret) {
-          clearInterval(checkInterval);
-          resolve();
-        }
-      }, 300);
-    });
-  }
-
 
   
 

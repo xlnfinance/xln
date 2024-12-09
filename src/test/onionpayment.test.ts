@@ -1,5 +1,5 @@
 import { describe, it, before, after } from 'mocha';
-import { expect } from 'chai';
+import chai, { expect } from 'chai';
 import User from '../app/User';
 import Channel, {stringify} from '../app/Channel';
 import Transition from '../app/Transition';
