@@ -2,6 +2,7 @@
 node_modules
 dist
 local-storage
+db
 .DS_Store
 logs/*
 *.txt
