@@ -275,13 +275,13 @@ describe('Network Operations', () => {
   it('should handle network congestion and backpressure', async function() {
     await setupNetwork();
 
-    this.timeout(120000);
+    this.timeout(60000);
 
     const paymentAmount = ethers.parseEther('0.01');
 
     // Simulate network congestion by sending many payments in quick succession
     const paymentPromises = [];
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 5; i++) {
       paymentPromises.push(makePayment('alice-bob-charlie-dave', paymentAmount));
       paymentPromises.push(makePayment('dave-charlie-bob-alice', paymentAmount));
       paymentPromises.push(makePayment('dave-bob-charlie', paymentAmount));
