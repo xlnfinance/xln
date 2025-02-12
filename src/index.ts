@@ -4,17 +4,23 @@ import * as repl from 'repl';
 
 import crypto from 'crypto';
 import { Level } from 'level';
+import rlp from 'rlp';
 
-const db = new Level<Buffer, Buffer>('./db', { keyEncoding: 'buffer', valueEncoding: 'buffer' });
 
-const ZERO = Buffer.alloc(1);
-const dag = new Map<Buffer, any>();
-const overlay = new Map<Buffer, any>();
+const env = {
+  stateDB: new Level<Buffer, Buffer>('./db', { keyEncoding: 'buffer', valueEncoding: 'buffer' }),
+  logDB: new Level<Buffer, Buffer>('./log', { keyEncoding: 'buffer', valueEncoding: 'buffer' }),
 
-// In-memory representation of the DAG
-const inMemoryDAG: Map<Buffer, Buffer> = new Map();
-let overlayChanges: Map<Buffer, Buffer> = new Map();
-let rootHash: Buffer | null = null;
+  map: new Map<Buffer, any>(),
+  unsavedSet: new Set<Buffer>(),
+
+  root: Buffer.alloc(0),
+
+  
+}
+
+
+
 
 // Utility function to calculate hash of data
 function hash(data: Buffer): Buffer {
@@ -24,7 +30,7 @@ function hash(data: Buffer): Buffer {
 // Preload entire DAG into memory
 async function preloadDAG() {
     for await (const [key, value] of db.iterator()) {
-        inMemoryDAG.set(Buffer.from(key), Buffer.from(value));
+        env.map.set(Buffer.from(key), Buffer.from(value));
     }
     console.log(`Preloaded ${inMemoryDAG.size} nodes into memory.`);
 }
@@ -149,8 +155,16 @@ async function main() {
 }
 
 main().catch((err) => {
-    console.error('Error:', err);
-    process.exit(1);
+  let replServer = repl.start({
+    prompt: '> ',
+    useColors: true,
+    ignoreUndefined: true
+  })
+
+  Object.assign(replServer.context, env)
+
+  console.error('Error:', err);
+  process.exit(1);
 });
 
 /*
