@@ -3,8 +3,8 @@ import { randomBytes, createHash } from 'crypto';
 import { encode, decode } from 'rlp';
 import WebSocket from 'ws';
 import repl from 'repl';
-import type { EntityInput } from './types';
-import { validateTx, SignedTx } from './validation';
+import { EntityInput, EntityRoot, EntityBlock, EntityStorage, encodeEntityRoot, decodeEntityRoot, executeEntityBlock, flushEntity, executeEntityTx, decodeTxArg } from './entity';
+
 // Ensure that your tsconfig.json has "esModuleInterop": true.
 
 // DBs for log and mutable state
@@ -15,45 +15,26 @@ const entityLogDb = new Level<Buffer, Buffer>('./db/entitylog', { keyEncoding: '
 // Use hex for Map/Set keys, Buffers for DB/RLP
 const ENC = 'hex' as const;
 let blockNumber = 0;
-let mempool = new Map<string, Map<string, EntityInput[]>>();  // signerId -> entityId -> inputs
+let serverPool = new Map<string, Map<string, EntityInput[]>>();  // signerId -> entityId -> inputs
 
-type StateValue = Buffer | EntityRoot | ServerRoot | SignerRoot;
+// Types
+export type ServerRoot = {
+  blockHeight: number;
+  merkleRoot: Buffer;
+  timestamp: number;
+  signers: Map<string, Buffer>;  // signerId -> signerHash
+};
+
+export type SignerInput = Map<string, EntityInput[]>;
+export type ServerInput = Map<string, SignerInput>;     // signerId -> entityId -> inputs
+type StateValue = ServerRoot | SignerRoot | EntityRoot | Buffer;
+
+
+
+
 const stateMap = new Map<string, StateValue>();
 const unsavedKeys = new Set<string>();
 
-// Top level routing
-type ServerInput = Map<string, SignerInput>     // signerId -> inputs
-type SignerInput = Map<string, EntityInput[]>   // entityId -> inputs
- 
-// Channel inputs
-type ChannelInput = 
-  | { type: 'AddChannelTx', tx: Buffer }
-  | { type: 'Consensus',
-      signature: Buffer,
-      blockNumber: number,
-      consensusBlock?: Buffer,
-      counterpartySig?: Buffer
-    }
- 
-// Machine root state types (private/internal)
-type ServerRoot = {
-  blockHeight: number;
-  timestamp: number;
-  signers: Map<string, Buffer>; // signerId -> hash
-}
-
-type EntityRoot = {
-  status: 'idle' | 'precommit' | 'commit'
-  mempool: Map<string, Buffer>  // TxHash -> RLP encoded tx
-  nonce: number
-  value: number
-  blockHeight: number
-  latestHash?: string
-  consensusData?: Buffer
-  signers?: Set<string>        // Authorized signers for this entity
-  finalBlock?: EntityBlock
-  consensusBlock?: EntityBlock
-}
 
 // Block types (public/committed) 
 type ServerBlock = {
@@ -63,14 +44,6 @@ type ServerBlock = {
   merkleRoot: Buffer
 }
 
-type EntityBlock = {
-  blockNumber: number
-  stateRoot: Buffer
-  channelRoot: Buffer
-  channelMap: Map<string, Buffer>
-  inbox: Buffer[]
-  validatorSet?: Buffer[]
-}
 
 // Load all entries from LevelDB into an in-memory Map.
 async function loadAllEntries(): Promise<void> {
@@ -202,85 +175,84 @@ export const rlpToMap = (rlpData: Buffer): Map<string, Map<string, EntityInput[]
 function receive(signerId: string, entityId: string, input: EntityInput) {
   console.log(`Received input for ${short(signerId)}/${short(entityId)}:`, input);
   
-  // Add tx to mempool
-  let signerInputs = mempool.get(signerId);
+  if (!isValidTx(input)) {
+    throw new Error('Invalid transaction');
+  }
+  
+  // Add tx to serverPool
+  let signerInputs = serverPool.get(signerId);
   if (!signerInputs) {
     signerInputs = new Map();
-    mempool.set(signerId, signerInputs);
+    serverPool.set(signerId, signerInputs);
   }
   
   let entityInputs = signerInputs.get(entityId) || [];
   entityInputs.push(input);
   signerInputs.set(entityId, entityInputs);
   
-  printMempool();
+  printServerPool();
 }
 
 // Process inputs every tick
-async function processMempoolTick() {
-  if (mempool.size === 0) return;
+async function processMempoolTick() {  
+  // Skip if serverPool empty
+  if (serverPool.size === 0) return;
+
+  console.log(`\nProcessing serverPool at block ${blockNumber}`);
+
+  // Create block from current serverPool
+  const blockData = encodeServerInput(serverPool);
+  const blockHash = createHash('sha256').update(blockData).digest();
   
-  // Get server root state
-  const serverRoot = stateMap.get('') as ServerRoot;
-  
-  console.log(`Processing mempool at block ${serverRoot.blockHeight}`);
-  
-  // Save current mempool and create new empty one
-  const serverInput = mempool;
-  mempool = new Map();
-  
-  // Apply using the previous mempool
-  await applyServerInput(serverInput, serverRoot);
-  
-  // Calculate server hash for verification
-  const serverHash = calculateServerHash(serverInput);
-  
-  // Store block in log with both input and resulting hash
+  // Store block
   const blockKey = Buffer.alloc(4);
-  blockKey.writeUInt32BE(serverRoot.blockHeight);
-  await logDb.put(blockKey, encode([
-    mapToRLP(serverInput),
-    serverHash
-  ]));
+  blockKey.writeUInt32BE(blockNumber + 1);
+  await logDb.put(blockKey, blockData);
   
-  console.log(`Created block ${serverRoot.blockHeight} (hash: ${serverHash.toString('hex').slice(0,8)})`);
+  console.log(`Created block ${blockNumber + 1} (hash: ${blockHash.toString('hex').slice(0,8)})`);
+  blockNumber++;
+
+  // Apply inputs and flush states
+  const serverRoot = stateMap.get('') as ServerRoot || {
+    blockHeight: blockNumber,
+    merkleRoot: Buffer.from([]),
+    timestamp: Date.now(),
+    signers: new Map()
+  };
+  applyServerInput(serverPool, serverRoot);
+
+  // Create new serverPool
+  serverPool = new Map();
+
+  // Save changes to disk
+  await flushChanges();
 }
 
 async function replayLog(): Promise<void> {
-  // Get existing server root from state DB or create new
   const serverRoot = stateMap.get('') as ServerRoot || {
     blockHeight: 0,
+    merkleRoot: Buffer.from([]),
     timestamp: Date.now(),
     signers: new Map()
   };
   
-  // Create start key from last processed block
   const startKey = Buffer.alloc(4);
   startKey.writeUInt32BE(serverRoot.blockHeight);
   
-  // Get blocks and their data in one pass
-  const blocks = [];
-  for await (const [key, value] of logDb.iterator({ 
+  console.log(`\nReplaying blocks from ${serverRoot.blockHeight}`);
+  
+  // Process blocks in order directly from iterator
+  for await (const [_, blockData] of logDb.iterator({ 
     gt: startKey,
     keys: true,
     values: true
   })) {
-    blocks.push([key.readUInt32BE(0), value]);
-  }
-  
-  // Sort by block number
-  blocks.sort(([a], [b]) => Number(a) - Number(b));
-  
-  console.log(`\nReplaying blocks ${serverRoot.blockHeight} -> ${serverRoot.blockHeight + blocks.length}`);
-  
-  // Replay each block
-  for (const [_, blockData] of blocks) {
     const serverInput = rlpToMap(blockData as Buffer);
     applyServerInput(serverInput, serverRoot);
   }
-  stateMap.set('', serverRoot);
   
-  console.log(`\nReplayed ${blocks.length} blocks`);
+  stateMap.set('', serverRoot);
+  console.log(`\nReplayed to block ${serverRoot.blockHeight}`);
 }
 
 function applyServerInput(input: ServerInput, serverRoot: ServerRoot) {
@@ -294,14 +266,18 @@ function applyServerInput(input: ServerInput, serverRoot: ServerRoot) {
         state = applyEntityInput(state, input);
       }
       
+      // Flush entity state after applying inputs
+      state = flushEntity(state, inputs);
       stateMap.set(entityKey, state);
     }
   }
   
-  updateMerkleTree();
+  // Calculate new merkle root after processing
+  const merkleRoot = calculateMerkleRoot(input);
   
-  // Update block height after processing
+  // Update server root with new block height and merkle root
   serverRoot.blockHeight++;
+  serverRoot.merkleRoot = merkleRoot;
   stateMap.set('', serverRoot);
 }
 
@@ -323,31 +299,36 @@ function executeInput(state: EntityRoot, input: EntityInput): EntityRoot {
       if (!isValidTx(input)) {
         throw new Error('Invalid AddEntityTx input');
       }
-      const decoded = decode(input.tx) as unknown as Buffer[];
-      const cmdStr = Buffer.from(decoded[0]).toString();
-      const args = decoded.slice(1).map(buf => decodeTxArg(buf));
-      
-      // Execute tx inside entity VM
-      return executeEntityTx(state, cmdStr, args);
+      if (input.tx) {
+        const decoded = decode(input.tx) as unknown as Buffer[];
+        const cmdStr = Buffer.from(decoded[0]).toString();
+        const args = decoded.slice(1).map(buf => decodeTxArg(buf));
+        
+        // Execute tx inside entity VM
+        const newStorage = executeEntityTx(state.finalBlock?.storage || { value: 0 }, cmdStr, args);
+        return {
+          ...state,
+          finalBlock: {
+            ...(state.finalBlock || { blockNumber: 0, channelRoot: Buffer.from([]), channelMap: new Map(), inbox: [] }),
+            storage: newStorage
+          }
+        };
+      }
       
     case 'Flush':
       // Create new block from mempool
       const block: EntityBlock = {
         blockNumber: (state.finalBlock?.blockNumber || 0) + 1,
-        stateRoot: hash(encode([...state.mempool.values()])),
+        storage: { value: 0 },  // Initialize empty storage
         channelRoot: hash(encode([])),
         channelMap: new Map(),
-        inbox: [...state.mempool.values()]
+        inbox: [...state.entityPool.values()]
       };
 
       return {
-        status: 'commit',
+        status: 'commit' as const,
         finalBlock: block,
-        mempool: new Map(),
-        nonce: state.nonce,
-        value: state.value,
-        blockHeight: state.blockHeight + 1,
-        latestHash: computeStateHash(state)
+        entityPool: new Map()
       };
 
     case 'Consensus':
@@ -360,10 +341,10 @@ function executeInput(state: EntityRoot, input: EntityInput): EntityRoot {
 }
 
 // RLP encoding/decoding helpers
-const encodeEntityBlock = (block: EntityBlock): Buffer => 
+export const encodeEntityBlock = (block: EntityBlock): Buffer => 
   encode([
     block.blockNumber,
-    block.stateRoot,
+    encode(Object.entries(block.storage)),
     block.channelRoot,
     encode(Array.from(block.channelMap.entries())),
     block.inbox,
@@ -372,11 +353,17 @@ const encodeEntityBlock = (block: EntityBlock): Buffer =>
 
 const decodeEntityBlock = (data: Buffer): EntityBlock => {
   const decoded = decode(data) as unknown as [number, Buffer, Buffer, Buffer, Buffer[], Buffer[]];
-  const [blockNumber, stateRoot, channelRoot, channelMapRlp, inbox, validatorSet] = decoded;
+  const [blockNumber, storageRlp, channelRoot, channelMapRlp, inbox, validatorSet] = decoded;
+  
+  const storageMap = new Map(decode(storageRlp) as unknown as [string, any][]);
+  const storage: EntityStorage = {
+    value: storageMap.get('value') || 0,
+    ...Object.fromEntries(storageMap)
+  };
   
   return {
     blockNumber,
-    stateRoot,
+    storage,
     channelRoot,
     channelMap: new Map(decode(channelMapRlp) as unknown as [string, Buffer][]),
     inbox,
@@ -384,36 +371,12 @@ const decodeEntityBlock = (data: Buffer): EntityBlock => {
   };
 };
 
-function encodeEntityRoot(state: EntityRoot): Buffer {
-  return encode([
-    state.status,
-    state.value || 0,
-    state.nonce || 0,
-    state.blockHeight || 0,
-    Array.from(state.signers || []),
-    Array.from(state.mempool.entries())
-  ]);
-}
 
 function computeStateHash(state: EntityRoot): string {
   const encoded = encodeEntityRoot(state);
   return createHash('sha256').update(encoded).digest().toString('hex');
 }
 
-const decodeEntityRoot = (data: Buffer): EntityRoot => {
-  const decoded = decode(data) as unknown as [Buffer, Buffer | null, Buffer | null, Buffer, Buffer | null, Buffer | null];
-  const [status, finalBlockRlp, consensusBlockRlp, mempoolRlp, nonceRlp, valueRlp] = decoded;
-  
-  return {
-    status: Buffer.from(status).toString() as 'idle' | 'precommit' | 'commit',
-    finalBlock: finalBlockRlp ? decodeEntityBlock(finalBlockRlp) : undefined,
-    consensusBlock: consensusBlockRlp ? decodeEntityBlock(consensusBlockRlp) : undefined,
-    mempool: new Map(decode(mempoolRlp) as unknown as [string, Buffer][]),
-    nonce: nonceRlp ? parseInt(Buffer.from(nonceRlp).toString()) : 0,
-    value: valueRlp ? parseInt(Buffer.from(valueRlp).toString()) : 0,
-    blockHeight: 0
-  };
-};
 
 // Separate immediate application from mempool
 function applyEntityInput(state: EntityRoot, input: EntityInput): EntityRoot {
@@ -423,7 +386,7 @@ function applyEntityInput(state: EntityRoot, input: EntityInput): EntityRoot {
       const txHash = hash(encode(Object.values(input))).toString(ENC);
       return {
         ...state,
-        mempool: new Map(state.mempool).set(txHash, encode(Object.values(input)))
+        entityPool: new Map(state.entityPool).set(txHash, encode(Object.values(input)))
       };
       
     case 'Consensus':
@@ -435,45 +398,7 @@ function applyEntityInput(state: EntityRoot, input: EntityInput): EntityRoot {
   }
 }
 
-// Entity layer - handles tx execution and block creation
-function executeEntityBlock(state: EntityRoot, inputs: EntityInput[]): EntityRoot {
-  // Process all inputs in block
-  let newState = {...state};
-  
-  for (const input of inputs) {
-    if (input.type === 'AddEntityTx') {
-      const decoded = decode(input.tx) as unknown as Buffer[];
-      const cmdStr = Buffer.from(decoded[0]).toString();
-      const args = decoded.slice(1).map(buf => decodeTxArg(buf));
-      
-      // Execute tx inside entity VM
-      newState = executeEntityTx(newState, cmdStr, args);
-    }
-  }
-  
-  return {
-    ...newState,
-    blockHeight: (state.blockHeight || 0) + 1,
-    latestHash: computeStateHash(newState)
-  };
-}
 
-// Entity flush creates new block
-function flushEntity(state: EntityRoot): EntityRoot {
-  const inputs = Array.from(state.mempool.values()).map(buf => {
-    const [type, tx] = decode(buf) as unknown as [Buffer, Buffer];
-    return { type: Buffer.from(type).toString(), tx } as EntityInput;
-  });
-  
-  // Execute block with inputs
-  const newState = executeEntityBlock(state, inputs);
-  
-  return {
-    ...newState,
-    status: 'commit',
-    mempool: new Map()  // Clear mempool after execution
-  };
-}
 
 // Start WebSocket server
 const wss = new WebSocket.Server({ port: 8080 });
@@ -488,14 +413,14 @@ wss.on('connection', ws => {
 const r = repl.start('> ');
 Object.assign(r.context, {
   receive,
-  mempool,
+  serverPool,
   blockNumber,
   stateMap,
   unsavedKeys,
   logDb,
   stateDb,
   flushChanges,
-  calculateServerHash
+  calculateMerkleRoot
 });
 
 // Self-test
@@ -512,105 +437,87 @@ async function main() {
   
   await replayLog();
   // Start processing loop
-  setInterval(processMempoolTick, 100);
+  setInterval(processMempoolTick, 250);
 
-  // Create entity
+  // Create entity and send test transactions
   console.log('Creating entity...');
   await receive(signerId, entityId, {
     type: 'AddEntityTx',
     tx: Buffer.from(encode(['Create']))
   });
   
-  // Send increments with delays to allow multiple block creation
   for (let i = 0; i < 20; i++) {
     console.log(`Sending increment ${i}...`);
     await receive(signerId, entityId, {
       type: 'AddEntityTx',
       tx: Buffer.from(encode(['Increment', Math.floor(Math.random() * 100)]))
     });
-    await new Promise(r => setTimeout(r, 350));
+    await new Promise(r => setTimeout(r, 50));
   }
 
-  // Final flush
-  console.log('\nFlushing state...');
-  flushEntityState(signerId, entityId);
-  await new Promise(r => setTimeout(r, 200));  // Wait for flush
-
-  await flushChanges();
   console.log('Test complete');
-
-  console.log('\nFinal state:');
-  console.log('StateMap:', stateMap);
-  console.log('Blocks in log:', await logDb.keys().all());
 }
 
 main().catch(console.error);
 
-// Calculate server hash from all signer inputs
-function calculateServerHash(input: ServerInput): Buffer {
+// Calculate merkle root from all signer inputs
+function calculateMerkleRoot(input: ServerInput): Buffer {
+  // Sort signers by ID for deterministic ordering
   const entries = Array.from(input.entries()).sort((a, b) => 
     Buffer.from(a[0], ENC).compare(Buffer.from(b[0], ENC))
   );
   
+  // Calculate signer-level hashes
   const signerHashes = entries.map(([signerId, entityInputs]) => {
+    // Sort entities by ID within each signer
     const entityEntries = Array.from(entityInputs.entries()).sort((a, b) =>
       Buffer.from(a[0], ENC).compare(Buffer.from(b[0], ENC))
     );
     
+    // Calculate entity-level hashes
     const entityHashes = entityEntries.map(([entityId, inputs]) => {
+      // RLP encode all inputs for this entity
       const rlp = Buffer.from(encode(inputs.map(i => encode(Object.values(i)))));
       return createHash('sha256').update(rlp).digest();
     });
     
+    // Combine entity hashes into signer hash
     return createHash('sha256').update(Buffer.from(encode(entityHashes))).digest();
   });
   
+  // Combine all signer hashes into root
   return createHash('sha256').update(Buffer.from(encode(signerHashes))).digest();
 }
 
 // Save current state to mutable DB
 async function saveMutableState() {
-  // Server root: hash of all signer roots
-  const signerRoots = new Map();
-  for (const [signerId, entityInputs] of mempool.entries()) {
-    const signerRoot = calculateServerHash(new Map([[signerId, entityInputs]]));
-    signerRoots.set(signerId, signerRoot);
-  }
-  const serverRoot = Buffer.from(encode(Array.from(signerRoots.entries())));
-  await stateDb.put(Buffer.from([]), serverRoot);
+  const serverRoot = getOrCreateServerRoot();
   
-  // Save each signer and entity state
-  for (const [signerId, entityInputs] of mempool.entries()) {
-    const signerKey = Buffer.from(signerId, ENC);
-    const entityRoots = new Map();
-    
+  // Save server root with merkle root
+  await stateDb.put(Buffer.from([]), encode([
+    serverRoot.blockHeight,
+    serverRoot.merkleRoot,
+    serverRoot.timestamp
+  ]));
+  
+  // Save individual entity states
+  for (const [signerId, entityInputs] of serverPool.entries()) {
     for (const [entityId, inputs] of entityInputs.entries()) {
-      const entityKey = Buffer.concat([signerKey, Buffer.from(entityId, ENC)]);
-      const rlp = Buffer.from(encode(inputs.map(i => encode(Object.values(i)))));
-      const entityRoot = createHash('sha256').update(rlp).digest();
-      await stateDb.put(entityKey, entityRoot);
-      entityRoots.set(entityId, entityRoot);
-    }
-    
-    const signerRoot = Buffer.from(encode(Array.from(entityRoots.entries())));
-    await stateDb.put(signerKey, signerRoot);
-  }
-}
-
-function printMap(map: Map<any, any>, indent = '') {
-  for (const [k, v] of map.entries()) {
-    if (v instanceof Map) {
-      console.log(indent + k.slice(0,8) + ':');
-      printMap(v, indent + '  ');
-    } else {
-      console.log(indent + k.slice(0,8) + ':', v);
+      const entityKey = Buffer.concat([
+        Buffer.from(signerId, ENC),
+        Buffer.from(entityId, ENC)
+      ]);
+      const state = stateMap.get(key(signerId, entityId));
+      if (state && isEntityRoot(state)) {
+        await stateDb.put(entityKey, encodeEntityRoot(state));
+      }
     }
   }
 }
 
-function printMempool() {
-  console.log('Mempool:');
-  for (const [signerId, entityInputs] of mempool.entries()) {
+function printServerPool() {
+  console.log('ServerPool:');
+  for (const [signerId, entityInputs] of serverPool.entries()) {
     console.log(`  Signer ${signerId.slice(0,8)}:`);
     for (const [entityId, inputs] of entityInputs.entries()) {
       console.log(`    Entity ${entityId.slice(0,8)}: ${inputs.length} inputs`);
@@ -621,192 +528,82 @@ function printMempool() {
 
 // RLP encoding/decoding helpers
 const encodeServerInput = (input: ServerInput): Buffer => {
-  const encoded = Array.from(input.entries()).map(([k, v]) => [
-    Buffer.from(k, ENC),
-    Array.from(v.entries()).map(([ek, ev]) => [
-      Buffer.from(ek, ENC),
-      ev.map(i => encode(Object.values(i)))
-    ])
-  ]);
-  return encode(encoded);
+  console.log('\nEncoding server input:', input);
+  const encoded = Buffer.from(encode(Array.from(input.entries()).map(([k, v]) => {
+    return [
+      Buffer.from(k, ENC),
+      Array.from((v).entries()).map(([ek, ev]) => [
+        Buffer.from(ek, ENC),
+        ev.map(i => encode(Object.values(i)))
+      ])
+    ]
+  })));
+  return encoded;
 };
 
-const decodeServerInput = (data: Buffer): ServerInput => {
-  const decoded = decode(data) as unknown as Array<[Buffer, Array<[Buffer, Buffer[]]>]>;
-  return new Map(
-    decoded.map(([k, v]) => [
-      Buffer.from(k).toString(ENC),
-      new Map(
-        v.map(([ek, ev]) => [
-          Buffer.from(ek).toString(ENC),
-          ev.map(i => {
-            const [type, tx] = decode(i) as unknown as [Buffer, Buffer];
-            return { 
-              type: Buffer.from(type).toString(), 
-              tx 
-            } as EntityInput;
-          })
-        ])
-      )
-    ])
-  );
+const decodeServerInput = (rlpData: Buffer): ServerInput => {
+  const decoded = decode(rlpData) as unknown as Buffer[][];
+  return new Map(decoded.map(([k, v]) => {
+    const signerId = Buffer.from(k).toString(ENC);
+    const entityMap = new Map((v as unknown as Buffer[][]).map(([ek, ev]) => {
+      const entityId = Buffer.from(ek).toString(ENC);
+      const inputs = (ev as unknown as Buffer[]).map(buf => {
+        const decoded = decode(buf) as unknown as Buffer[];
+        return { type: Buffer.from(decoded[0]).toString(), tx: decoded[1] } as EntityInput;
+      });
+      return [entityId, inputs];
+    }));
+    return [signerId, entityMap];
+  }));
 };
 
-function executeBlock(state: EntityRoot, inputs: EntityInput[]): EntityRoot {
-  // Process all inputs
-  const newState = inputs.reduce((state, input) => {
-    return executeInput(state, input);
-  }, state);
-
-  // Update block metadata
-  return {
-    ...newState,
-    blockHeight: (state.blockHeight || 0) + 1,
-    latestHash: computeStateHash(newState)
-  };
-}
 
 function getEntityInputs(signerId: string, entityId: string): EntityInput[] {
-  return mempool.get(signerId)?.get(entityId) || [];
+  return serverPool.get(signerId)?.get(entityId) || [];
 }
 
 function clearEntityInputs(signerId: string, entityId: string) {
-  mempool.get(signerId)?.delete(entityId);
-}
-
-function executeEntityTx(state: EntityRoot, cmd: string, args: (string | number)[]): EntityRoot {
-  switch(cmd) {
-    case 'Create':
-      return {
-        ...state,
-        nonce: (state.nonce || 0) + 1,
-        value: 0
-      };
-      
-    case 'Increment':
-      const increment = Number(args[0]) || 0;
-      return {
-        ...state,
-        nonce: (state.nonce || 0) + 1,
-        value: (state.value || 0) + increment
-      };
-      
-    default:
-      throw new Error(`Unknown command: ${cmd}`);
-  }
+  serverPool.get(signerId)?.delete(entityId);
 }
 
 function getOrCreateEntityRoot(entityKey: string): EntityRoot {
-  const stored = stateMap.get(entityKey);
-  if (!stored) {
-    return {
-      status: 'idle',
-      mempool: new Map(),
-      nonce: 0,
-      value: 0,
-      blockHeight: 0
-    };
-  }
-  return (stored && !Buffer.isBuffer(stored)) ? stored as EntityRoot : decodeEntityRoot(stored);
-}
+  const existingState = stateMap.get(entityKey) as EntityRoot;
+  if (existingState) return existingState;
 
-function updateMerkleTree() {
-  // Create signer roots from entity states
-  for (const [signerId, entityInputs] of mempool.entries()) {
-    const entityRoots = new Map();
-    
-    for (const [entityId, _] of entityInputs.entries()) {
-      const entityKey = key(signerId, entityId);
-      const state = stateMap.get(entityKey) as EntityRoot;
-      entityRoots.set(entityId, computeStateHash(state));
+  // Initialize new entity state
+  return {
+    status: 'idle' as const,
+    entityPool: new Map(),
+    finalBlock: {
+      blockNumber: 0,
+      storage: { value: 0 },
+      channelRoot: Buffer.from([]),
+      channelMap: new Map(),
+      inbox: [],
+      validatorSet: []
     }
-    
-    // Store signer state as hash
-    stateMap.set(signerId, createHash('sha256')
-      .update(encode(Array.from(entityRoots.entries())))
-      .digest());
-  }
-  
-  // Create server root with timestamp and blockNumber
-  const signerHashes = Array.from(mempool.keys())
-    .map(signerId => stateMap.get(signerId))
-    .filter((hash): hash is Buffer => Buffer.isBuffer(hash));
-    
-  const serverRoot = encode([
-    Date.now(),
-    blockNumber,
-    signerHashes
-  ]);
-    
-  stateMap.set('', createHash('sha256')
-    .update(serverRoot)
-    .digest());
+  };
 }
 
-function decodeTxArg(buf: Buffer): string | number {
-  // Special case: RLP empty value (0x80) -> number 0
-  if (buf.length === 1 && buf[0] === 0x80) return 0;
-  // Single byte -> number
-  if (buf.length === 1) return buf[0];
-  // Empty string -> 0
-  if (buf.length === 0) return 0;
-  // Multiple bytes -> string
-  return Buffer.from(buf).toString();
-}
-
-// Only clear mempool entries after flush
-function flushEntityState(signerId: string, entityId: string) {
-  const entityKey = key(signerId, entityId);
-  const state = stateMap.get(entityKey) as EntityRoot;
+function getOrCreateServerRoot(): ServerRoot {
+  const existing = stateMap.get('') as ServerRoot;
+  if (existing) return existing;
   
-  // Get inputs before they're cleared
-  const inputs = Array.from(state.mempool.values()).map(buf => {
-    const [type, tx] = decode(buf) as unknown as [Buffer, Buffer];
-    return { type: Buffer.from(type).toString(), tx } as EntityInput;
-  });
-  
-  // Execute block with mempool inputs
-  const newState = flushEntity(state);
-  
-  // Store block with inputs and new state hash
-  storeBlock(entityKey, inputs, newState.latestHash || computeStateHash(newState));
-  
-  // Clear this entity's inputs
-  mempool.get(signerId)?.delete(entityId);
-  if (mempool.get(signerId)?.size === 0) {
-    mempool.delete(signerId);
-  }
-  
-  stateMap.set(entityKey, newState);
-}
-
-async function storeBlock(entityKey: string, inputs: EntityInput[], hash: Buffer | string) {
-  const hashBuf = typeof hash === 'string' ? Buffer.from(hash, 'hex') : hash;
-  
-  // Create 4-byte block number buffer
-  const blockNumBuf = Buffer.alloc(4);
-  blockNumBuf.writeUInt32BE(blockNumber);
-  
-  console.log(`\nStoring block ${blockNumber} (${hashBuf.toString('hex').slice(0,8)}) for ${entityKey}`);
-  console.log('Block inputs:', inputs);
-  
-  await logDb.put(blockNumBuf, encode([
-    encode(inputs.map(i => encode(Object.values(i)))),
-    hashBuf
-  ]));
-  
-  blockNumber++;
+  return {
+    blockHeight: 0,
+    merkleRoot: Buffer.from([]),
+    timestamp: Date.now(),
+    signers: new Map()
+  };
 }
 
 function executeConsensus(state: EntityRoot, input: EntityInput): EntityRoot {
   if (input.type !== 'Consensus') throw new Error('Invalid input type');
   
-  // Verify signatures, update consensus state
   return {
     ...state,
     status: 'precommit',
-    consensusBlock: input.consensusBlock ? decodeEntityBlock(input.consensusBlock) : undefined,
-    blockHeight: (state.blockHeight || 0) + 1
+    consensusBlock: input.consensusBlock ? decodeEntityBlock(input.consensusBlock) : undefined
   };
 }
 
@@ -840,9 +637,10 @@ function isValidTx(input: EntityInput): input is { type: 'AddEntityTx', tx: Buff
 }
 
 function decodeServerRoot(data: Buffer): ServerRoot {
-  const [blockHeight, timestamp, signerEntries] = decode(data) as unknown as [number, number, [string, Buffer][]];
+  const [blockHeight, merkleRoot, timestamp, signerEntries] = decode(data) as unknown as [number, Buffer, number, [string, Buffer][]];
   return {
     blockHeight,
+    merkleRoot,
     timestamp,
     signers: new Map(signerEntries)
   };
@@ -851,22 +649,30 @@ function decodeServerRoot(data: Buffer): ServerRoot {
 function encodeServerRoot(root: ServerRoot): Buffer {
   return encode([
     root.blockHeight,
+    root.merkleRoot,
     root.timestamp,
     Array.from(root.signers.entries())
   ]);
 }
 
-type SignerRoot = {
-  entities: Map<string, Buffer>; // entityId -> hash
+// Add type
+export type SignerRoot = {
+  entities: Map<string, Buffer>  // entityId -> entityHash
 }
 
-function decodeSignerRoot(data: Buffer): SignerRoot {
+// Add encoders
+export function encodeSignerRoot(root: SignerRoot): Buffer {
+  return encode(Array.from(root.entities.entries()));
+}
+
+export function decodeSignerRoot(data: Buffer): SignerRoot {
   const entityEntries = decode(data) as unknown as [string, Buffer][];
   return {
     entities: new Map(entityEntries)
   };
 }
 
-function encodeSignerRoot(root: SignerRoot): Buffer {
-  return encode(Array.from(root.entities.entries()));
+function isEntityRoot(state: StateValue): state is EntityRoot {
+  return 'status' in state && 'entityPool' in state;
 }
+
