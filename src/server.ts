@@ -18,6 +18,53 @@ let blockNumber = 0;
 let serverPool = new Map<string, Map<string, EntityInput[]>>();  // signerId -> entityId -> inputs
 
 // Types
+type StateValue = ServerRoot | EntityRoot | SignerRoot | Buffer;
+
+type ServerState = {
+  pool: ServerInput
+  block: number
+  data: Map<string, StateValue>
+  unsaved: Set<string>
+}
+
+// Add this after types
+let serverState: ServerState = createServerState();
+async function main() {
+  const signerId = randomBytes(32).toString(ENC);
+  const entityId = randomBytes(32).toString(ENC);
+  console.log('Test IDs:', {
+    signer: signerId.slice(0,8),
+    entity: entityId.slice(0,8)
+  });
+  
+  await loadAllEntries();
+  console.log(`Loaded ${serverState.data.size} entries from DB`);
+  
+  await replayLog(serverState);
+  // Start processing loop
+  setInterval(processMempoolTick, 250);
+
+  // Create entity and send test transactions
+  console.log('Creating entity...');
+  await receive(signerId, entityId, {
+    type: 'AddEntityTx',
+    tx: Buffer.from(encode(['Create']))
+  });
+  
+  for (let i = 0; i < 20; i++) {
+    console.log(`Sending increment ${i}...`);
+    await receive(signerId, entityId, {
+      type: 'AddEntityTx',
+      tx: Buffer.from(encode(['Increment', Math.floor(Math.random() * 100)]))
+    });
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  console.log('Test complete');
+}
+
+main().catch(console.error);
+
 export type ServerRoot = {
   blockHeight: number;
   merkleRoot: Buffer;
@@ -27,14 +74,63 @@ export type ServerRoot = {
 
 export type SignerInput = Map<string, EntityInput[]>;
 export type ServerInput = Map<string, SignerInput>;     // signerId -> entityId -> inputs
-type StateValue = ServerRoot | SignerRoot | EntityRoot | Buffer;
+type StoredValue = ServerRoot | EntityRoot | SignerRoot | Buffer;
 
+type ServerStateData = {
+  pool: ServerInput
+  block: number
+  data: Map<string, StoredValue>
+  unsaved: Set<string>
+}
 
+function createServerState(): ServerStateData {
+  return {
+    pool: new Map(),
+    block: 0,
+    data: new Map(),
+    unsaved: new Set()
+  }
+}
 
+type LevelDB = Level<Buffer, Buffer>
 
-const stateMap = new Map<string, StateValue>();
-const unsavedKeys = new Set<string>();
+async function loadState(db: LevelDB): Promise<ServerState> {
+  const state = createServerState()
+  
+  for await (const [key, value] of db.iterator()) {
+    state.data.set(key.toString(), decodeStateValue(value))
+  }
+  
+  return state
+}
 
+async function saveChanges(state: ServerState, db: LevelDB) {
+  if (state.unsaved.size === 0) return state
+
+  const ops: LevelBatchOp[] = Array.from(state.unsaved).map(key => ({
+    type: 'put',
+    key: Buffer.from(key),
+    value: encodeStateValue(state.data.get(key))
+  }))
+  
+  await db.batch(ops)
+  state.unsaved.clear()
+  
+  return state
+}
+
+function markAsUnsaved(state: ServerState, key: string) {
+  state.unsaved.add(key)
+  return state
+}
+
+// When modifying state, mark as unsaved
+function updateEntityState(state: ServerState, signerId: string, entityId: string, newValue: StoredValue) {
+  const key = `${signerId}/${entityId}`
+  state.data.set(key, newValue)
+  markAsUnsaved(state, key)
+  return state
+}
 
 // Block types (public/committed) 
 type ServerBlock = {
@@ -46,41 +142,42 @@ type ServerBlock = {
 
 
 // Load all entries from LevelDB into an in-memory Map.
-async function loadAllEntries(): Promise<void> {
+async function loadAllEntries(): Promise<ServerState> {
+  const state = createServerState()
+  
   for await (const [key, value] of stateDb.iterator()) {
-    const keyStr = key.toString(ENC);
-    
     if (key.length === 0) {
-      // Server root
-      stateMap.set('', decodeServerRoot(value));
+      state.data.set('', decodeServerRoot(value))
     } 
     else if (key.length === 32) {
       // Signer root
-      stateMap.set(keyStr, decodeSignerRoot(value));
+      state.data.set(Buffer.from(key).toString(ENC), decodeSignerRoot(value));
     }
-    else if (keyStr.includes('/')) {
+    else if (key.toString(ENC).includes('/')) {
       // Entity state (signerId/entityId format)
-      stateMap.set(keyStr, decodeEntityRoot(value));
+      state.data.set(key.toString(ENC), decodeEntityRoot(value));
     }
   }
+  
+  return state
 }
 
-function performRandomOps(): void {
-  const keys = Array.from(stateMap.keys());
+function performRandomOps(state: ServerState): void {
+  const keys = Array.from(state.data.keys());
   for (const key of keys) {
     if (Math.random() < 0.5) {
-      stateMap.set(key, randomBytes(16));
-      unsavedKeys.add(key);
+      state.data.set(key, randomBytes(16));
+      state.unsaved.add(key);
     }
     if (Math.random() < 0.1) {
-      stateMap.delete(key);
-      unsavedKeys.add(key);
+      state.data.delete(key);
+      state.unsaved.add(key);
     }
   }
   for (let i = 0; i < 10; i++) {
     const key = randomBytes(8).toString(ENC);
-    stateMap.set(key, randomBytes(16));
-    unsavedKeys.add(key);
+    state.data.set(key, randomBytes(16));
+    state.unsaved.add(key);
   }
 }
 
@@ -98,8 +195,8 @@ type LevelBatchOp = {
 async function flushChanges(): Promise<void> {
   const ops: LevelBatchOp[] = [];
   
-  for (const key of unsavedKeys) {
-    const value = stateMap.get(key);
+  for (const key of serverState.unsaved) {
+    const value = serverState.data.get(key);
     if (!value) {
       ops.push({ type: 'del', key: Buffer.from(key, ENC) });
       continue;
@@ -115,7 +212,7 @@ async function flushChanges(): Promise<void> {
   }
   
   await stateDb.batch(ops);
-  unsavedKeys.clear();
+  serverState.unsaved.clear();
 }
 
 // Helper for RLP encoding maps
@@ -213,7 +310,7 @@ async function processMempoolTick() {
   blockNumber++;
 
   // Apply inputs and flush states
-  const serverRoot = stateMap.get('') as ServerRoot || {
+  const serverRoot = serverState.data.get('') as ServerRoot || {
     blockHeight: blockNumber,
     merkleRoot: Buffer.from([]),
     timestamp: Date.now(),
@@ -228,8 +325,8 @@ async function processMempoolTick() {
   await flushChanges();
 }
 
-async function replayLog(): Promise<void> {
-  const serverRoot = stateMap.get('') as ServerRoot || {
+async function replayLog(state: ServerState): Promise<void> {
+  const serverRoot = state.data.get('') as ServerRoot || {
     blockHeight: 0,
     merkleRoot: Buffer.from([]),
     timestamp: Date.now(),
@@ -251,7 +348,7 @@ async function replayLog(): Promise<void> {
     applyServerInput(serverInput, serverRoot);
   }
   
-  stateMap.set('', serverRoot);
+  state.data.set('', serverRoot);
   console.log(`\nReplayed to block ${serverRoot.blockHeight}`);
 }
 
@@ -268,7 +365,7 @@ function applyServerInput(input: ServerInput, serverRoot: ServerRoot) {
       
       // Flush entity state after applying inputs
       state = flushEntity(state, inputs);
-      stateMap.set(entityKey, state);
+      serverState.data.set(entityKey, state);
     }
   }
   
@@ -278,7 +375,7 @@ function applyServerInput(input: ServerInput, serverRoot: ServerRoot) {
   // Update server root with new block height and merkle root
   serverRoot.blockHeight++;
   serverRoot.merkleRoot = merkleRoot;
-  stateMap.set('', serverRoot);
+  serverState.data.set('', serverRoot);
 }
 
 // Utility functions
@@ -415,50 +512,14 @@ Object.assign(r.context, {
   receive,
   serverPool,
   blockNumber,
-  stateMap,
-  unsavedKeys,
+  serverState,
   logDb,
   stateDb,
   flushChanges,
   calculateMerkleRoot
 });
 
-// Self-test
-async function main() {
-  const signerId = randomBytes(32).toString(ENC);
-  const entityId = randomBytes(32).toString(ENC);
-  console.log('Test IDs:', {
-    signer: signerId.slice(0,8),
-    entity: entityId.slice(0,8)
-  });
-  
-  await loadAllEntries();
-  console.log(`Loaded ${stateMap.size} entries from DB`);
-  
-  await replayLog();
-  // Start processing loop
-  setInterval(processMempoolTick, 250);
 
-  // Create entity and send test transactions
-  console.log('Creating entity...');
-  await receive(signerId, entityId, {
-    type: 'AddEntityTx',
-    tx: Buffer.from(encode(['Create']))
-  });
-  
-  for (let i = 0; i < 20; i++) {
-    console.log(`Sending increment ${i}...`);
-    await receive(signerId, entityId, {
-      type: 'AddEntityTx',
-      tx: Buffer.from(encode(['Increment', Math.floor(Math.random() * 100)]))
-    });
-    await new Promise(r => setTimeout(r, 50));
-  }
-
-  console.log('Test complete');
-}
-
-main().catch(console.error);
 
 // Calculate merkle root from all signer inputs
 function calculateMerkleRoot(input: ServerInput): Buffer {
@@ -507,7 +568,7 @@ async function saveMutableState() {
         Buffer.from(signerId, ENC),
         Buffer.from(entityId, ENC)
       ]);
-      const state = stateMap.get(key(signerId, entityId));
+      const state = serverState.data.get(key(signerId, entityId));
       if (state && isEntityRoot(state)) {
         await stateDb.put(entityKey, encodeEntityRoot(state));
       }
@@ -567,7 +628,7 @@ function clearEntityInputs(signerId: string, entityId: string) {
 }
 
 function getOrCreateEntityRoot(entityKey: string): EntityRoot {
-  const existingState = stateMap.get(entityKey) as EntityRoot;
+  const existingState = serverState.data.get(entityKey) as EntityRoot;
   if (existingState) return existingState;
 
   // Initialize new entity state
@@ -586,7 +647,7 @@ function getOrCreateEntityRoot(entityKey: string): EntityRoot {
 }
 
 function getOrCreateServerRoot(): ServerRoot {
-  const existing = stateMap.get('') as ServerRoot;
+  const existing = serverState.data.get('') as ServerRoot;
   if (existing) return existing;
   
   return {
@@ -672,7 +733,28 @@ export function decodeSignerRoot(data: Buffer): SignerRoot {
   };
 }
 
-function isEntityRoot(state: StateValue): state is EntityRoot {
+function isEntityRoot(state: StoredValue): state is EntityRoot {
   return 'status' in state && 'entityPool' in state;
+}
+
+function isSignerRoot(value: StateValue): value is SignerRoot {
+  return 'entities' in value && !('blockHeight' in value)
+}
+
+function decodeStateValue(value: Buffer): StoredValue {
+  // Decode based on value format - could be ServerRoot, EntityRoot, etc
+  try {
+    return decode(value) as StoredValue
+  } catch (e) {
+    return value // If not RLP encoded, return raw buffer
+  }
+}
+
+function encodeStateValue(value: StoredValue | undefined): Buffer {
+  if (!value) return Buffer.from([])
+  if (Buffer.isBuffer(value)) return value
+  if (isEntityRoot(value)) return encodeEntityRoot(value)
+  if (isSignerRoot(value)) return encodeSignerRoot(value)
+  return encodeServerRoot(value) // Now must be ServerRoot
 }
 
