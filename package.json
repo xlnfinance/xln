@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "rm -rf local-storage;mocha -r ts-node/register 'src/test/**/*.ts' --timeout 30000 --exit",
+    "test": "NODE_OPTIONS=\"--loader ts-node/esm\" npx mocha src/test/merkle.test.ts --timeout 60000 --exit",
+    "test:all": "NODE_OPTIONS=\"--loader ts-node/esm\" mocha 'src/test/**/*.ts' --timeout 30000 --exit",
+    "test:merkle": "NODE_OPTIONS=\"--loader ts-node/esm\" npx mocha src/test/merkle.test.ts --timeout 60000 --exit",
     "test:user": "rm -rf local-storage;mocha -r ts-node/register src/test/user.test.ts --timeout 10000 --exit",
     "test:channel": "rm -rf local-storage;mocha -r ts-node/register src/test/channel.test.ts --timeout 10000 --exit",
     "test:directpayment": "rm -rf local-storage;mocha -r ts-node/register src/test/directpayment.test.ts --timeout 30000 --exit",
@@ -41,13 +43,14 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",
     "hardhat": "^2.22.5",
-    "mocha": "^10.7.0",
+    "mocha": "^10.8.2",
     "prettier": "^3.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.0.0-beta2",
+    "@types/mocha": "^10.0.10",
     "blessed": "^0.1.81",
     "blessed-contrib": "^4.11.0",
     "buffer": "^6.0.3",
@@ -66,5 +69,6 @@
     "pino-pretty": "^11.2.1",
     "ws": "^8.17.0",
     "xlnfinance-contracts": "file:contracts"
-  }
+  },
+  "type": "module"
 }
