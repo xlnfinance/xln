@@ -1,11 +1,11 @@
 import { Buffer } from 'buffer';
 import { encode, decode } from 'rlp';
 import { createHash } from 'crypto';
-import { EntityRoot, EntityBlock, EntityStorage } from './entity';
-import { StorageType } from './storage/merkle';
-import { Subchannel, ProposedEventData } from './types/Subchannel';
-import { StoredSubcontract } from './types/Subcontract';
-import * as Transition from './app/Transition';
+import { EntityRoot, EntityBlock, EntityStorage } from './entity.js';
+import { StorageType } from './storage/merkle.js';
+import { Subchannel, ProposedEventData } from './types/Subchannel.js';
+import { StoredSubcontract } from './types/Subcontract.js';
+import * as Transition from './app/Transition.js';
 
 export type ChannelInput = 
   | { type: 'AddChannelTx', tx: Buffer }
@@ -24,12 +24,12 @@ export type ChannelRoot = {
 }
 
 export function encodeChannelRoot(root: ChannelRoot): Buffer {
-  return encode([
+  return Buffer.from(encode([
     root.status,
     root.finalBlock || Buffer.from([]),
     root.consensusBlock || Buffer.from([]),
     Array.from(root.mempool.entries())
-  ]);
+  ]));
 }
 
 export function decodeChannelRoot(data: Buffer): ChannelRoot {
@@ -50,7 +50,7 @@ export type ChannelState = {
   channelKey: string
   previousBlockHash: string
   previousStateHash: string
-  blockId: number
+  channelNonce: number
   timestamp: number
   transitionId: number
   subchannels: Subchannel[]
@@ -76,7 +76,7 @@ export function createChannelState(left: string, right: string): ChannelState {
     channelKey,
     previousBlockHash: '0x0',
     previousStateHash: '0x0',
-    blockId: 0,
+    channelNonce: 0,
     timestamp: 0,
     transitionId: 0,
     subchannels: [],
@@ -110,7 +110,7 @@ export function toEntityState(state: ChannelState, data: ChannelData): EntityRoo
 // Create entity block from channel state
 function createEntityBlock(state: ChannelState): EntityBlock {
   return {
-    blockNumber: state.blockId,
+    blockNumber: state.channelNonce,
     storage: { value: 0 },
     channelRoot: Buffer.from(state.channelKey.slice(2), 'hex'),
     channelMap: new Map([
@@ -143,7 +143,7 @@ function createChannelKey(left: string, right: string): string {
 }
 
 function encodeChannelState(state: ChannelState): Buffer {
-  return encode([
+  return Buffer.from(encode([
     state.left,
     state.right,
     state.previousBlockHash,
@@ -191,7 +191,7 @@ function encodeChannelState(state: ChannelState): Buffer {
       c.rightWithdraw.toString(),
       c.status
     ]))
-  ]);
+  ]));
 }
 
 function decodeChannelState(data: Buffer): ChannelState {
@@ -339,7 +339,7 @@ function decodeChannelState(data: Buffer): ChannelState {
     channelKey: createChannelKey(left, right),
     previousBlockHash,
     previousStateHash,
-    blockId: 0, // This will be set from the entity block
+    channelNonce: transitionId,
     timestamp,
     transitionId,
     subchannels,
@@ -352,14 +352,14 @@ export function encodeForMerkleStore(state: ChannelState): Map<StorageType, Buff
   const channelMap = new Map<string, Buffer>();
   channelMap.set(state.channelKey, encodeChannelState(state));
 
-  return new Map([
-    [StorageType.CURRENT_BLOCK, encode([
-      state.blockId,
+  return new Map<StorageType, Buffer>([
+    [StorageType.CURRENT_BLOCK, Buffer.from(encode([
+      state.channelNonce,
       encode([['value', encode([0])]]),
       Buffer.from(state.channelKey.slice(2), 'hex'),
       encode(Array.from(channelMap.entries())),
       encode([]),
       encode([])
-    ])]
+    ]))]
   ]);
 } 

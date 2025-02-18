@@ -1,10 +1,10 @@
 import {Level} from 'level';
 import { randomBytes, createHash } from 'crypto';
 import { encode, decode } from 'rlp';
-import WebSocket from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import repl from 'repl';
-import { EntityInput, EntityRoot, EntityBlock, EntityStorage, encodeEntityRoot, decodeEntityRoot, executeEntityBlock, flushEntity, executeEntityTx, decodeTxArg } from './entity';
-import { createMerkleStore, StorageType } from './storage/merkle'
+import { EntityInput, EntityRoot, EntityBlock, EntityStorage, encodeEntityRoot, decodeEntityRoot, executeEntityBlock, flushEntity, executeEntityTx, decodeTxArg } from './entity.js';
+import { createMerkleStore, StorageType } from './storage/merkle.js'
 import debug from 'debug';
 
 // Enable all debug namespaces
@@ -74,35 +74,8 @@ async function main() {
     process.exit(1);
   });
 
-  // Create test entity
-  const signerId = randomBytes(32).toString(ENC);
-  const entityId = randomBytes(32).toString(ENC);
-  
-  log.state('Test IDs:', {
-    signer: signerId.slice(0,8),
-    entity: entityId.slice(0,8)
-  });
-  
-  // Send test transactions
-  try {
-    state = await receive(state, signerId, entityId, {
-    type: 'AddEntityTx',
-    tx: Buffer.from(encode(['Create']))
-  });
-  
-  for (let i = 0; i < 20; i++) {
-      state = await receive(state, signerId, entityId, {
-      type: 'AddEntityTx',
-      tx: Buffer.from(encode(['Increment', Math.floor(Math.random() * 100)]))
-    });
-    await new Promise(r => setTimeout(r, 50));
-    }
-  } catch (error) {
-    log.error('Test transactions failed:', error);
-    throw error;
-  }
-
-  log.state('Test complete');
+  // Call runSelfTest in main
+  await runSelfTest(state);
 }
 
 // Main loop function that processes the mempool periodically
@@ -179,27 +152,7 @@ async function saveMutableState(state: ServerState): Promise<ServerState> {
   log.state('Saving state to database');
   
   try {
-    const root = state.merkleStore.getMerkleRoot();
-    
-    // Save server root with merkle root using Buffer.from()
-    await stateDb.put(Buffer.from([]), Buffer.from(encode([
-      state.block,
-      root,
-      Date.now()
-    ])));
-    
-    // Save individual entity states
-    for (const key of state.unsaved) {
-      const [signerId, entityId] = key.split('/');
-      const node = state.merkleStore.debug.getEntityNode(signerId, entityId);
-      if (node?.value) {
-        await stateDb.put(Buffer.from(key, 'hex'), Buffer.from(encode(Array.from(node.value.entries()))));
-      }
-    }
-    
-    return updateState(state, {
-      unsaved: new Set() // Clear unsaved after successful save
-    });
+    return await saveChanges(state, stateDb);
   } catch (error) {
     if (error instanceof Error) {
       log.error('Failed to save state:', error.message);
@@ -210,7 +163,7 @@ async function saveMutableState(state: ServerState): Promise<ServerState> {
 }
 
 // Start server
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   const debugMode = process.argv.includes('-d');
   
   main().then(() => {
@@ -294,7 +247,8 @@ export {
   loadAllEntries,
   saveMutableState,
   replayLog,
-  printState
+  printState,
+  runSelfTest
 };
 
 export type ServerRoot = {
@@ -315,7 +269,8 @@ function createServerState(): ServerState {
     pool: new Map(),
     block: 0,
     merkleStore: createMerkleStore(),
-    unsaved: new Set()
+    unsaved: new Set(),
+    merkleRoot: undefined
   };
 }
 
@@ -334,22 +289,34 @@ function updateState(state: ServerState, updates: Partial<ServerState>): ServerS
 type LevelDB = Level<Buffer, Buffer>
 
 async function loadState(db: LevelDB): Promise<ServerState> {
-  let state = createServerState();
+  log.state('Loading state from database');
   
+  let state = createServerState();
+  const batch = new Map<string, Buffer>();
+  
+  // Load all entries into memory first
   for await (const [key, value] of db.iterator()) {
-    const keyStr = key.toString('hex');
-    if (keyStr === '') {
-      // Server root
-      const decoded = decode(value) as unknown;
-      if (!Array.isArray(decoded) || decoded.length !== 3) {
-        throw new Error('Invalid server root format');
-      }
-      const [blockHeight, merkleRoot, timestamp] = decoded as [number, Buffer, number];
-      state = updateState(state, { block: blockHeight });
-    } else if (keyStr.includes('/')) {
-      // Entity state
-      const [signerId, entityId] = keyStr.split('/');
-      const decoded = decode(value) as unknown;
+    batch.set(key.toString('hex'), value);
+  }
+  
+  // Process server root first
+  const rootValue = batch.get('');
+  if (rootValue) {
+    const decoded = decode(rootValue as Buffer) as unknown;
+    if (!Array.isArray(decoded) || decoded.length !== 3) {
+      throw new Error('Invalid server root format');
+    }
+    const [blockHeight, merkleRoot, timestamp] = decoded as [number, Buffer, number];
+    state = updateState(state, { block: blockHeight });
+  }
+
+  // Process all entity states with nibble routing
+  for (const [key, value] of batch.entries()) {
+    if (!key.includes('/')) continue; // Skip non-entity entries
+    
+    const [signerId, entityId] = key.split('/');
+    try {
+      const decoded = decode(value as Buffer) as unknown;
       if (!Array.isArray(decoded)) {
         throw new Error('Invalid entity state format');
       }
@@ -362,11 +329,15 @@ async function loadState(db: LevelDB): Promise<ServerState> {
         continue;
       }
 
+      // Update entity state with nibble routing
       state.merkleStore.updateEntityState(signerId, entityId, {
         status: 'idle',
         entityPool: new Map(),
         finalBlock: decodeEntityBlock(blockData)
       });
+    } catch (error) {
+      log.error('Failed to load entity state:', { key, error: error instanceof Error ? error.message : String(error) });
+      throw error;
     }
   }
   
@@ -387,20 +358,20 @@ type LevelBatchDelOp = {
 
 type LevelBatchOp = LevelBatchPutOp | LevelBatchDelOp;
 
-// Update saveChanges function
+// Update saveChanges function to use batch operations
 async function saveChanges(state: ServerState, db: LevelDB): Promise<ServerState> {
   if (state.unsaved.size === 0) return state;
 
-  const ops: LevelBatchPutOp[] = [];
+  const ops: LevelBatchOp[] = [];
   
-  // Save server root with merkle root
+  // Save server root with merkle root in batch
   ops.push({
     type: 'put',
     key: Buffer.from([]),
     value: Buffer.from(encode([state.block, state.merkleStore.getMerkleRoot(), Date.now()]))
   });
   
-  // Save individual entity states
+  // Save all entity states in batch
   for (const key of state.unsaved) {
     const [signerId, entityId] = key.split('/');
     const node = state.merkleStore.debug.getEntityNode(signerId, entityId);
@@ -413,6 +384,7 @@ async function saveChanges(state: ServerState, db: LevelDB): Promise<ServerState
     }
   }
   
+  // Execute batch operation
   await db.batch(ops);
   return updateState(state, { unsaved: new Set() });
 }
@@ -888,7 +860,7 @@ function applyEntityInput(state: EntityRoot, input: EntityInput): EntityRoot {
 
 
 // Start WebSocket server
-const wss = new WebSocket.Server({ port: 8080 });
+const wss = new WebSocketServer({ port: 8080 });
 wss.on('connection', ws => {
   let currentState = createServerState();
   
@@ -1155,5 +1127,49 @@ function printState(state: ServerState) {
     }
   }
   console.log('\nUnsaved:', Array.from(state.unsaved));
+}
+
+async function runSelfTest(state: ServerState) {
+  // Create test entity
+  const signerId = randomBytes(32).toString(ENC);
+  const entityId = randomBytes(32).toString(ENC);
+  
+  log.state('Test IDs:', {
+    signer: signerId.slice(0,8),
+    entity: entityId.slice(0,8)
+  });
+  
+  // Send test transactions
+  try {
+    state = await receive(state, signerId, entityId, {
+      type: 'AddEntityTx',
+      tx: Buffer.from(encode(['Create']))
+    });
+    
+    for (let i = 0; i < 20; i++) {
+      state = await receive(state, signerId, entityId, {
+        type: 'AddEntityTx',
+        tx: Buffer.from(encode(['Increment', Math.floor(Math.random() * 100)]))
+      });
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    // Process mempool to increment block number
+    if (state.pool.size > 0) {
+      state = await processMempoolTick(state);
+      state = await saveMutableState(state);
+    }
+
+    // Update merkle root after all transactions
+    const merkleRoot = state.merkleStore.getMerkleRoot();
+    state = updateState(state, { merkleRoot });
+    
+  } catch (error) {
+    log.error('Test transactions failed:', error);
+    throw error;
+  }
+
+  log.state('Test complete');
+  return state;
 }
 

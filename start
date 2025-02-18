@@ -1,1 +1,1 @@
- 
+ NODE_OPTIONS="--loader ts-node/esm" npx mocha src/test/server.test.ts --timeout 60000 --exit
