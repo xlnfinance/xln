@@ -1,9 +1,9 @@
 import { expect } from 'chai';
-import { Transition } from '../app/Transition';
-import ChannelState from '../types/ChannelState';
-import { Subchannel, Delta } from '../types/Subchannel';
-import Channel from '../app/Channel';
-import User from '../app/User';
+import { Transition } from '../app/Transition.js';
+import ChannelState from '../types/ChannelState.js';
+import { Subchannel, Delta } from '../types/Subchannel.js';
+import Channel from '../app/Channel.js';
+import User from '../app/User.js';
 
 describe('Transition Unit Tests', function() {
   let mockState: ChannelState;

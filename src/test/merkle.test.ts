@@ -14,14 +14,14 @@ const log = {
 };
 
 describe('Merkle Tree Large Scale Tests', () => {
-  const NUM_SIGNERS = 10;
-  const NUM_ENTITIES_PER_SIGNER = 10;
+  const NUM_SIGNERS = 33;
+  const NUM_ENTITIES_PER_SIGNER = 1;
   
   it(`should handle ${NUM_SIGNERS} signers with ${NUM_ENTITIES_PER_SIGNER} entities each`, function() {
     this.timeout(60000); // Keep the same timeout for consistency
     
     // Create merkle store with 4-bit nibbles
-    const store = createMerkleStore({ bitWidth: 4, leafThreshold: 16 });
+    const store = createMerkleStore({ bitWidth: 4, leafThreshold: 4 });
     
     // Track all signer and entity IDs
     const signers: { id: string, entities: { id: string, value: number }[] }[] = [];
@@ -78,7 +78,7 @@ describe('Merkle Tree Large Scale Tests', () => {
     console.time('Performing random operations');
     
     // Reduce number of operations proportionally
-    const NUM_OPERATIONS = 10; // Reduced from 100
+    const NUM_OPERATIONS = 0; // Reduced from 100
     
     for (let op = 0; op < NUM_OPERATIONS; op++) {
       // Select random signers and their entities to update

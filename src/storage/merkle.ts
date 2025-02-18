@@ -46,8 +46,28 @@ function createNode(): MerkleNode {
   };
 }
 
+let logSequence = 0;
+
+function getNextSequence(): string {
+  return `#${(++logSequence).toString().padStart(4, '0')}`;
+}
+
 function getChunk(path: string, offset: number, config: TreeConfig): number {
   const bits = config.bitWidth;
+  // For 4-bit chunks, we want to process one hex char at a time
+  if (bits === 4) {
+    // Take the first hex character at this offset
+    const hexChar = path[offset];
+    const chunk = parseInt(hexChar, 16);
+    
+    // Only log when offset is 0 (new path) to reduce spam
+    if (offset === 0) {
+      log.path(`Processing path ${formatHex(path.slice(0, 8))}... chunk: 0x${chunk.toString(16)} ${getNextSequence()}`);
+    }
+    return chunk;
+  }
+  
+  // For other bit widths, use the original byte-based logic
   const bytesNeeded = Math.ceil(bits / 8);
   const buffer = Buffer.from(path.slice(offset * 2, offset * 2 + bytesNeeded * 2), 'hex');
   
@@ -61,32 +81,34 @@ function getChunk(path: string, offset: number, config: TreeConfig): number {
 
   // Only log when offset is 0 (new path) to reduce spam
   if (offset === 0) {
-    log.path(`Processing path ${formatHex(path.slice(0, 8))}...`);
+    log.path(`Processing path ${formatHex(path.slice(0, 8))}... chunk: 0x${chunk.toString(16)} ${getNextSequence()}`);
   }
   return chunk;
 }
 
 function splitNode(node: MerkleNode, config: TreeConfig): void {
-  if (node.values.size <= config.leafThreshold || node.children) {
-    return;
-  }
-
-  log.split(`Splitting leaf with ${node.values.size} values`);
-  node.children = new Map();
-  
-  for (const [path, value] of node.values) {
-    const chunk = getChunk(path, 0, config);
-    let child = node.children.get(chunk);
-    if (!child) {
-      child = createNode();
-      node.children.set(chunk, child);
+  if (node.values.size >= config.leafThreshold && !node.children) {
+    log.split(`Splitting leaf with ${node.values.size} values ${getNextSequence()}`);
+    node.children = new Map();
+    
+    for (const [path, value] of node.values) {
+      const chunk = getChunk(path, 0, config);
+      let child = node.children.get(chunk);
+      if (!child) {
+        child = createNode();
+        node.children.set(chunk, child);
+        log.split(`Created new child for chunk 0x${chunk.toString(16)} ${getNextSequence()}`);
+      }
+      // Always slice one character for 4-bit chunks, otherwise use bitWidth/4
+      const sliceLen = config.bitWidth === 4 ? 1 : Math.ceil(config.bitWidth / 4);
+      const newPath = path.slice(sliceLen);
+      child.values.set(newPath, value);
     }
-    child.values.set(path.slice(config.bitWidth / 4), value);
-  }
 
-  const childCount = node.children.size;
-  node.values.clear();
-  log.split(`Split complete: ${childCount} branches`);
+    const childCount = node.children.size;
+    node.values.clear();
+    log.split(`Split complete: ${childCount} branches ${getNextSequence()}`);
+  }
 }
 
 function getNodeValue(node: MerkleNode, path: string, config: TreeConfig): NodeValue | undefined {
@@ -94,10 +116,12 @@ function getNodeValue(node: MerkleNode, path: string, config: TreeConfig): NodeV
     const chunk = getChunk(path, 0, config);
     const child = node.children.get(chunk);
     if (!child) {
-      log.node(`No child found for chunk ${chunk}`);
+      log.node(`No child found for chunk ${chunk} ${getNextSequence()}`);
       return undefined;
     }
-    return getNodeValue(child, path.slice(config.bitWidth / 4), config);
+    // Always slice one character for 4-bit chunks, otherwise use bitWidth/4
+    const sliceLen = config.bitWidth === 4 ? 1 : Math.ceil(config.bitWidth / 4);
+    return getNodeValue(child, path.slice(sliceLen), config);
   }
   return node.values.get(path);
 }
@@ -111,12 +135,14 @@ function setNodeValue(node: MerkleNode, path: string, value: NodeValue, config: 
     if (!child) {
       child = createNode();
       node.children.set(chunk, child);
-      log.node(`New branch at chunk ${chunk}`);
+      log.node(`New branch at chunk ${chunk} ${getNextSequence()}`);
     }
-    setNodeValue(child, path.slice(config.bitWidth / 4), value, config);
+    // Always slice one character for 4-bit chunks, otherwise use bitWidth/4
+    const sliceLen = config.bitWidth === 4 ? 1 : Math.ceil(config.bitWidth / 4);
+    setNodeValue(child, path.slice(sliceLen), value, config);
   } else {
     node.values.set(path, value);
-    log.node(`Updated leaf: ${formatHex(path.slice(0, 8))}...`);
+    log.node(`Updated leaf: ${formatHex(path.slice(0, 8))}... ${getNextSequence()}`);
     splitNode(node, config);
   }
 }
@@ -153,7 +179,7 @@ function hashNode(node: MerkleNode): Hash {
   }
 
   node.hash = hasher.digest();
-  log.hash(`${node.children ? 'Branch' : 'Leaf'} hash: ${node.hash.toString('hex').slice(0, 8)}`);
+  log.hash(`${node.children ? 'Branch' : 'Leaf'} hash: ${node.hash.toString('hex').slice(0, 8)} ${getNextSequence()}`);
   return node.hash;
 }
 
@@ -165,49 +191,88 @@ function formatHex(hex: string, groupSize: number = 4): string {
 }
 
 // Helper to visualize tree structure with improved formatting
-function visualizeTree(node: MerkleNode, prefix: string = '', isLast: boolean = true, showDetails: boolean = true): string {
+function visualizeTree(node: MerkleNode, prefix: string = '', isLast: boolean = true, showDetails: boolean = true, parentPath: string = '', depth: number = 0): string {
   let result = prefix;
   
-  // Add branch visualization
-  result += isLast ? '└─' : '├─';
+  // Add branch visualization with thicker lines for root
+  if (depth === 0) {
+    result += '╔═';
+  } else {
+    result += isLast ? '└─' : '├─';
+  }
   
-  // Add node info
+  // Add node info with color coding
   if (node.children) {
     const hashHex = node.hash?.toString('hex')?.slice(0, 8) || '';
     const hash = formatHex(hashHex);
     const childCount = node.children.size;
-    result += `[Branch ${hash}] (${childCount} children)\n`;
+    const childNibbles = Array.from(node.children.keys())
+      .map(k => k.toString(16))
+      .sort()
+      .join(',');
     
-    // Recursively add children
+    // Count total descendants
+    let totalDescendants = 0;
+    const countDescendants = (n: MerkleNode) => {
+      if (n.children) {
+        totalDescendants += n.children.size;
+        for (const child of n.children.values()) {
+          countDescendants(child);
+        }
+      }
+    };
+    countDescendants(node);
+    
+    result += `\x1b[36m[Branch ${hash}]\x1b[0m \x1b[33m(${childCount} direct, ${totalDescendants} total)\x1b[0m\n`;
+    if (childCount > 0) {
+      result += `${prefix}${isLast ? ' ' : '│'}  \x1b[90m↳ Nibbles: ${childNibbles}\x1b[0m\n`;
+    }
+    
+    // Recursively add children with improved connecting lines
     const children = Array.from(node.children.entries()).sort(([a], [b]) => a - b);
     children.forEach(([chunk, child], index) => {
       const newPrefix = prefix + (isLast ? '   ' : '│  ');
       const isLastChild = index === children.length - 1;
-      result += visualizeTree(child, newPrefix, isLastChild, showDetails);
+      const newParentPath = parentPath + chunk.toString(16);
+      result += visualizeTree(child, newPrefix, isLastChild, showDetails, newParentPath, depth + 1);
     });
   } else {
-    // Leaf node - show values
+    // Leaf node - show values with improved formatting
     const hashHex = node.hash?.toString('hex')?.slice(0, 8) || '';
     const hash = formatHex(hashHex);
     const valueCount = node.values.size;
-    result += `[Leaf ${hash}] (${valueCount} values)\n`;
+    // Show current path nibbles in front of leaf
+    const currentPath = formatHex(parentPath);
+    result += `\x1b[90m${currentPath}\x1b[0m \x1b[32m[Leaf ${hash}]\x1b[0m \x1b[33m(${valueCount} values)\x1b[0m\n`;
     
     // Show value details if requested and there are values
     if (showDetails && valueCount > 0) {
       const newPrefix = prefix + (isLast ? '   ' : '│  ');
       const values = Array.from(node.values.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .slice(0, 3); // Show only first 3 values
+        .sort(([a], [b]) => a.localeCompare(b));
       
       values.forEach(([path, value], index) => {
-        const isLastValue = index === values.length - 1 && valueCount <= 3;
-        const types = Array.from(value.keys()).map(k => StorageType[k] || k).join(', ');
-        result += `${newPrefix}${isLastValue ? '└─' : '├─'}${formatHex(path.slice(0, 8))}... (${types})\n`;
+        const isLastValue = index === values.length - 1;
+        const fullPath = parentPath + path;
+        // Format first 8 nibbles with dots between them
+        const formattedPath = formatHex(fullPath.slice(0, 8));
+        result += `${newPrefix}${isLastValue ? '└─' : '├─'}\x1b[90m${formattedPath}\x1b[0m\n`;
+        
+        // Add indentation for value details
+        const valuePrefix = newPrefix + (isLastValue ? '   ' : '│  ');
+        
+        // Show all storage types and their values with improved formatting, excluding CURRENT_BLOCK
+        const sortedTypes = Array.from(value.entries())
+          .filter(([type]) => type !== StorageType.CURRENT_BLOCK)
+          .sort(([a], [b]) => Number(a) - Number(b));
+        
+        sortedTypes.forEach(([type, data], typeIndex) => {
+          const isLastType = typeIndex === sortedTypes.length - 1;
+          const typeName = StorageType[type] || type;
+          const shortData = data.toString('hex').slice(0, 16) + (data.length > 16 ? '...' : '');
+          result += `${valuePrefix}${isLastType ? '└─' : '├─'}\x1b[35m${typeName}\x1b[0m: \x1b[33m${shortData}\x1b[0m\n`;
+        });
       });
- 
-      if (valueCount > 3) {
-        result += `${newPrefix}└─... and ${valueCount - 3} more values\n`;
-      }
     }
   }
   
@@ -232,7 +297,7 @@ export function createMerkleStore(config: TreeConfig = { bitWidth: 4, leafThresh
   }
   
   const rootNode = createNode();
-  log.tree('Created tree with config:', config);
+  log.tree(`Created tree with config: ${JSON.stringify(config)} ${getNextSequence()}`);
 
   return {
     updateEntityState: (signerId: string, entityId: string, state: EntityRoot) => {
@@ -274,13 +339,14 @@ export function createMerkleStore(config: TreeConfig = { bitWidth: 4, leafThresh
           Old Hash: ${oldHash?.toString('hex').slice(0,8) || 'none'}
           New Hash: ${newHash.toString('hex').slice(0,8)}
           Types: ${Array.from(entityValue.keys()).map(k => StorageType[k]).join(', ')}
+          ${getNextSequence()}
         `);
       }
     },
 
     getMerkleRoot: () => {
       const merkleRoot = hashNode(rootNode);
-      log.tree('Generated merkle root:', merkleRoot.toString('hex'));
+      log.tree(`Generated merkle root: ${merkleRoot.toString('hex')} ${getNextSequence()}`);
       return merkleRoot;
     },
 

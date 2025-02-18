@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "NODE_OPTIONS=\"--loader ts-node/esm\" npx mocha src/test/merkle.test.ts --timeout 60000 --exit",
+    "test": "NODE_OPTIONS=\"--loader ts-node/esm\" npx mocha src/test/**/*.ts --timeout 60000 --exit",
     "test:all": "NODE_OPTIONS=\"--loader ts-node/esm\" mocha 'src/test/**/*.ts' --timeout 30000 --exit",
     "test:merkle": "NODE_OPTIONS=\"--loader ts-node/esm\" npx mocha src/test/merkle.test.ts --timeout 60000 --exit",
     "test:user": "rm -rf local-storage;mocha -r ts-node/register src/test/user.test.ts --timeout 10000 --exit",
