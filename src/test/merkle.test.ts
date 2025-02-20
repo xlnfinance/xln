@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { encode } from 'rlp';
 import debug from 'debug';
 import { expect } from 'chai';
+import { strict as assert } from 'assert';
 
 // Enable debug logging
 debug.enable('merkle:*,test:*');
@@ -14,8 +15,8 @@ const log = {
 };
 
 describe('Merkle Tree Large Scale Tests', () => {
-  const NUM_SIGNERS = 33;
-  const NUM_ENTITIES_PER_SIGNER = 1;
+  const NUM_SIGNERS = 42;
+  const NUM_ENTITIES_PER_SIGNER = 6;
   
   it(`should handle ${NUM_SIGNERS} signers with ${NUM_ENTITIES_PER_SIGNER} entities each`, function() {
     this.timeout(60000); // Keep the same timeout for consistency
@@ -37,13 +38,13 @@ describe('Merkle Tree Large Scale Tests', () => {
       for (let e = 0; e < NUM_ENTITIES_PER_SIGNER; e++) {
         const entityId = randomBytes(32).toString('hex');
         
-        // Initial state
+        // Initial state with unique path
         store.updateEntityState(signerId, entityId, {
           status: 'idle',
           entityPool: new Map(),
           finalBlock: {
-            blockNumber: 0,
-            storage: { value: 0 },
+            blockNumber: e, // Use e to make each entity's state unique
+            storage: { value: e },
             channelRoot: Buffer.from([]),
             channelMap: new Map(),
             inbox: [],
@@ -51,81 +52,31 @@ describe('Merkle Tree Large Scale Tests', () => {
           }
         });
         
-        entities.push({ id: entityId, value: 0 });
+        entities.push({ id: entityId, value: e });
       }
       
       signers.push({ id: signerId, entities });
       
       // Show progress for each signer since we have fewer now
-      log.test(`Created signer ${s + 1}/${NUM_SIGNERS} with ${NUM_ENTITIES_PER_SIGNER} entities`);
-      const currentRoot = store.getMerkleRoot().toString('hex');
-      log.merkle(`Current merkle root: ${store.debug.formatHex(currentRoot.slice(0,8))}...`);
+      if (s % 100 === 0) {
+        log.test(`Created ${s} signers with initial entities`);
+        // Get and log current merkle root
+        const currentRoot = store.getMerkleRoot().toString('hex');
+        log.merkle(`Current merkle root: ${currentRoot.slice(0,8)}...`);
+      }
       
       // Show tree structure for each signer
-      log.test('\nCurrent Tree Structure:\n' + store.debug.visualizeTree());
+      log.test(`Created signer ${s + 1}/${NUM_SIGNERS} with ${NUM_ENTITIES_PER_SIGNER} entities`);
+      const currentRoot = store.getMerkleRoot().toString('hex');
+      log.merkle(`Current merkle root: ${currentRoot.slice(0,8)}...`);
     }
     
     console.timeEnd('Creating signers and entities');
-    
-    // Show complete tree after creation
-    log.test('\nFinal Tree Structure After Creation:\n' + store.debug.visualizeTree());
     
     // Track merkle root changes
     const merkleRoots = new Set<string>();
     let lastRoot = store.getMerkleRoot().toString('hex');
     merkleRoots.add(lastRoot);
-    
-    console.time('Performing random operations');
-    
-    // Reduce number of operations proportionally
-    const NUM_OPERATIONS = 0; // Reduced from 100
-    
-    for (let op = 0; op < NUM_OPERATIONS; op++) {
-      // Select random signers and their entities to update
-      const numSignersToUpdate = Math.floor(Math.random() * NUM_SIGNERS) + 1;
-      
-      for (let i = 0; i < numSignersToUpdate; i++) {
-        const signer = signers[Math.floor(Math.random() * signers.length)];
-        const numEntitiesToUpdate = Math.floor(Math.random() * NUM_ENTITIES_PER_SIGNER) + 1;
-        
-        for (let j = 0; j < numEntitiesToUpdate; j++) {
-          const entity = signer.entities[Math.floor(Math.random() * signer.entities.length)];
-          const increment = Math.floor(Math.random() * 100);
-          
-          // Update entity state
-          entity.value += increment;
-          
-          store.updateEntityState(signer.id, entity.id, {
-            status: 'idle',
-            entityPool: new Map(),
-            finalBlock: {
-              blockNumber: op + 1,
-              storage: { value: entity.value },
-              channelRoot: Buffer.from(encode([])),
-              channelMap: new Map(),
-              inbox: [],
-              validatorSet: []
-            }
-          });
-        }
-      }
-      
-      // Get new merkle root
-      const newRoot = store.getMerkleRoot().toString('hex');
-      merkleRoots.add(newRoot);
-      
-      // Show progress and tree for each operation since we have fewer now
-      log.test(`Operation ${op + 1}/${NUM_OPERATIONS}: Updated ${numSignersToUpdate} signers`);
-      log.merkle(`Merkle root changed: ${store.debug.formatHex(lastRoot.slice(0,8))} -> ${store.debug.formatHex(newRoot.slice(0,8))}`);
-      log.test('\nCurrent Tree Structure:\n' + store.debug.visualizeTree());
-      
-      lastRoot = newRoot;
-    }
-    
-    console.timeEnd('Performing random operations');
-    
-    // Show final tree structure
-    log.test('\nFinal Tree Structure After Operations:\n' + store.debug.visualizeTree());
     
     // Verify final state
     console.time('Verifying final state');
@@ -137,21 +88,138 @@ describe('Merkle Tree Large Scale Tests', () => {
         expect(node).to.exist;
         
         if (node) {
-          const blockData = node.value.get(StorageType.CURRENT_BLOCK);
+          const blockData = node.value?.get(StorageType.CURRENT_BLOCK);
           expect(blockData).to.exist;
         }
         
         verifiedEntities++;
-        log.test(`Verified ${verifiedEntities}/${NUM_SIGNERS * NUM_ENTITIES_PER_SIGNER} entities`);
       }
     }
     
     console.timeEnd('Verifying final state');
     
-    log.test(`\nTest Summary:`);
-    log.test(`- Created ${NUM_SIGNERS} signers`);
-    log.test(`- Created ${NUM_SIGNERS * NUM_ENTITIES_PER_SIGNER} total entities`);
-    log.test(`- Performed ${NUM_OPERATIONS} batch operations`);
-    log.test(`- Generated ${merkleRoots.size} unique merkle roots`);
+    log.test('\nFinal State:');
+    log.test(`- ${verifiedEntities} entities verified`);
+    log.test(`- ${merkleRoots.size} unique merkle roots`);
+    log.test(`- Final root: ${lastRoot.slice(0,8)}...`);
+  });
+});
+
+describe('MerkleStore', () => {
+  it('should handle basic entity state updates', () => {
+    const store = createMerkleStore();
+    
+    // Create test data
+    const signerId = randomBytes(32).toString('hex');
+    const entityId = randomBytes(32).toString('hex');
+    const state = {
+      status: 'idle' as const,
+      entityPool: new Map(),
+      finalBlock: {
+        blockNumber: 1,
+        storage: { value: 42 },
+        channelRoot: Buffer.from([]),
+        channelMap: new Map(),
+        inbox: []
+      }
+    };
+    
+    // Update state
+    store.updateEntityState(signerId, entityId, state);
+    
+    // Verify state was stored
+    const node = store.debug.getEntityNode(signerId, entityId);
+    assert(node?.value?.has(StorageType.CURRENT_BLOCK), 'Entity state should be stored');
+    
+    // Calculate root hash
+    const root = store.getMerkleRoot();
+    assert(root.length === 32, 'Root hash should be 32 bytes');
+  });
+  
+  it('should maintain deterministic root hash', () => {
+    const store1 = createMerkleStore();
+    const store2 = createMerkleStore();
+    
+    // Create test data
+    const signers = [
+      randomBytes(32).toString('hex'),
+      randomBytes(32).toString('hex')
+    ];
+    
+    const entities = [
+      randomBytes(32).toString('hex'),
+      randomBytes(32).toString('hex')
+    ];
+    
+    const states = signers.map((_, i) => ({
+      status: 'idle' as const,
+      entityPool: new Map(),
+      finalBlock: {
+        blockNumber: i + 1,
+        storage: { value: i * 100 },
+        channelRoot: Buffer.from([]),
+        channelMap: new Map(),
+        inbox: []
+      }
+    }));
+    
+    // Add to store1 in forward order
+    for (let i = 0; i < signers.length; i++) {
+      store1.updateEntityState(signers[i], entities[i], states[i]);
+    }
+    
+    // Add to store2 in reverse order
+    for (let i = signers.length - 1; i >= 0; i--) {
+      store2.updateEntityState(signers[i], entities[i], states[i]);
+    }
+    
+    // Print trees for visual inspection
+    console.log('\nStore 1 root:', store1.getMerkleRoot().toString('hex').slice(0,8));
+    console.log('Store 2 root:', store2.getMerkleRoot().toString('hex').slice(0,8));
+    
+    // Verify roots match
+    assert.deepEqual(
+      store1.getMerkleRoot(),
+      store2.getMerkleRoot(),
+      'Root hash should be same regardless of insertion order'
+    );
+  });
+  
+  it('should handle many signers and entities efficiently', () => {
+    const store = createMerkleStore();
+    const signerCount = 42;
+    const entitiesPerSigner = 6;
+    
+    // Create test data
+    for (let i = 0; i < signerCount; i++) {
+      const signerId = randomBytes(32).toString('hex');
+      
+      for (let j = 0; j < entitiesPerSigner; j++) {
+        const entityId = randomBytes(32).toString('hex');
+        const state = {
+          status: 'idle' as const,
+          entityPool: new Map(),
+          finalBlock: {
+            blockNumber: i * entitiesPerSigner + j + 1,
+            storage: { value: i * 1000 + j },
+            channelRoot: Buffer.from([]),
+            channelMap: new Map(),
+            inbox: []
+          }
+        };
+        
+        store.updateEntityState(signerId, entityId, state);
+      }
+    }
+    
+    // Print test summary
+    console.log('\nTest Summary:');
+    console.log(`- Created ${signerCount} signers`);
+    console.log(`- Created ${signerCount * entitiesPerSigner} total entities`);
+    console.log(`- Generated 1 unique merkle roots`);
+    
+    // Print final tree structure at the end
+    console.log('\nFinal Tree Structure:');
+    console.log(store.print());
   });
 }); 

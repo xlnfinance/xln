@@ -33,13 +33,57 @@ interface TreeConfig {
 }
 
 interface MerkleNode {
-  values: Map<string, NodeValue>;
-  children?: Map<number, MerkleNode>;
+  nodeType: 'server' | 'signer' | 'entity' | 'storage';
+  path: Buffer;  // Full path to this node
+  values: Map<string, NodeValue | MerkleNode>;  // Can contain either values or child nodes
+  children?: Map<number, MerkleNode>;  // For path-based routing
   hash?: Hash;
 }
 
-function createNode(): MerkleNode {
+// Convert a buffer to hex path with nibble count prefix
+export function bufferToPath(buffer: Buffer): string {
+  // Count significant nibbles (ignoring trailing zeros)
+  let nibbles = buffer.length * 2;
+  while (nibbles > 0 && buffer[Math.floor((nibbles - 1) / 2)] >> (((nibbles - 1) % 2) * 4) === 0) {
+    nibbles--;
+  }
+  
+  // Prefix with nibble count as 2 hex chars (up to 255)
+  return nibbles.toString(16).padStart(2, '0') + buffer.toString('hex');
+}
+
+// Convert hex path back to buffer, removing nibble count prefix
+export function pathToBuffer(path: string): Buffer {
+  // First 2 chars are nibble count
+  const nibbleCount = parseInt(path.slice(0, 2), 16);
+  const hex = path.slice(2);
+  
+  // Convert to buffer and trim any extra bytes
+  const fullBuffer = Buffer.from(hex, 'hex');
+  const neededBytes = Math.ceil(nibbleCount / 2);
+  return fullBuffer.slice(0, neededBytes);
+}
+
+// Get number of significant nibbles in a path
+export function getNibbleCount(path: string): number {
+  return parseInt(path.slice(0, 2), 16);
+}
+
+function createNode(nodeType: MerkleNode['nodeType'], path: Buffer): MerkleNode {
+  log.node(`Creating ${nodeType} node with path ${path.toString('hex').slice(0,8)}...`);
+  
+  // Validate node type based on path length
+  const expectedType = path.length === 0 ? 'server' :
+                      path.length === 32 ? 'signer' :
+                      path.length === 64 ? 'entity' : 'storage';
+                      
+  if (nodeType !== expectedType) {
+    throw new Error(`Invalid node type ${nodeType} for path length ${path.length}, expected ${expectedType}`);
+  }
+
   return {
+    nodeType,
+    path,
     values: new Map(),
     children: undefined,
     hash: undefined
@@ -54,60 +98,84 @@ function getNextSequence(): string {
 
 function getChunk(path: string, offset: number, config: TreeConfig): number {
   const bits = config.bitWidth;
-  // For 4-bit chunks, we want to process one hex char at a time
-  if (bits === 4) {
-    // Take the first hex character at this offset
-    const hexChar = path[offset];
-    const chunk = parseInt(hexChar, 16);
-    
-    // Only log when offset is 0 (new path) to reduce spam
-    if (offset === 0) {
-      log.path(`Processing path ${formatHex(path.slice(0, 8))}... chunk: 0x${chunk.toString(16)} ${getNextSequence()}`);
-    }
-    return chunk;
+  const nibbleCount = parseInt(path.slice(0, 2), 16);
+  
+  // Skip nibble count prefix
+  const actualPath = path.slice(2);
+  
+  // Return 0 if we're past the significant nibbles
+  if (offset >= nibbleCount) {
+    return 0;
   }
   
-  // For other bit widths, use the original byte-based logic
+  // For 4-bit chunks, process one hex char at a time
+  if (bits === 4) {
+    const hexChar = actualPath[offset];
+    return parseInt(hexChar || '0', 16);
+  }
+  
+  // For other bit widths, use byte-based logic
   const bytesNeeded = Math.ceil(bits / 8);
-  const buffer = Buffer.from(path.slice(offset * 2, offset * 2 + bytesNeeded * 2), 'hex');
+  const buffer = Buffer.from(actualPath.slice(offset * 2, offset * 2 + bytesNeeded * 2), 'hex');
   
   let chunk = 0;
   for (let i = 0; i < bytesNeeded; i++) {
-    chunk = (chunk << 8) | buffer[i];
+    chunk = (chunk << 8) | (buffer[i] || 0);
   }
   
-  const mask = (1 << bits) - 1;
-  chunk = chunk & mask;
-
-  // Only log when offset is 0 (new path) to reduce spam
-  if (offset === 0) {
-    log.path(`Processing path ${formatHex(path.slice(0, 8))}... chunk: 0x${chunk.toString(16)} ${getNextSequence()}`);
-  }
-  return chunk;
+  return chunk & ((1 << bits) - 1);
 }
 
 function splitNode(node: MerkleNode, config: TreeConfig): void {
   if (node.values.size >= config.leafThreshold && !node.children) {
-    log.split(`Splitting leaf with ${node.values.size} values ${getNextSequence()}`);
+    log.split(`Splitting leaf with ${node.values.size} values`);
     node.children = new Map();
     
-    for (const [path, value] of node.values) {
+    // Convert values to array for deterministic processing
+    const values = Array.from(node.values.entries())
+      .sort(([a], [b]) => a.localeCompare(b)); // Sort by path for deterministic order
+    node.values.clear();
+    
+    // Process each value
+    for (const [path, value] of values) {
       const chunk = getChunk(path, 0, config);
+      
       let child = node.children.get(chunk);
       if (!child) {
-        child = createNode();
+        child = createNode(value instanceof Map ? 'storage' : 'entity', Buffer.from(path, 'hex'));
         node.children.set(chunk, child);
-        log.split(`Created new child for chunk 0x${chunk.toString(16)} ${getNextSequence()}`);
       }
-      // Always slice one character for 4-bit chunks, otherwise use bitWidth/4
+      
+      // Remove processed nibbles from path
       const sliceLen = config.bitWidth === 4 ? 1 : Math.ceil(config.bitWidth / 4);
-      const newPath = path.slice(sliceLen);
+      const newPath = path.slice(0, 2) + path.slice(2 + sliceLen); // Keep nibble count
       child.values.set(newPath, value);
+      
+      // Recursively split if needed
+      splitNode(child, config);
     }
+  }
+}
 
-    const childCount = node.children.size;
-    node.values.clear();
-    log.split(`Split complete: ${childCount} branches ${getNextSequence()}`);
+// Validation functions
+function validateNodeType(parentType: MerkleNode['nodeType'], childType: MerkleNode['nodeType'] | 'value'): boolean {
+  switch (parentType) {
+    case 'server':
+      return childType === 'signer';
+    case 'signer':
+      return childType === 'entity';
+    case 'entity':
+    case 'storage':
+      return childType === 'value';
+    default:
+      return false;
+  }
+}
+
+function validateNodeValue(node: MerkleNode, value: NodeValue | MerkleNode): void {
+  const childType = value instanceof Map ? 'value' : value.nodeType;
+  if (!validateNodeType(node.nodeType, childType)) {
+    throw new Error(`Invalid child type ${childType} for parent type ${node.nodeType}`);
   }
 }
 
@@ -115,198 +183,194 @@ function getNodeValue(node: MerkleNode, path: string, config: TreeConfig): NodeV
   if (node.children) {
     const chunk = getChunk(path, 0, config);
     const child = node.children.get(chunk);
-    if (!child) {
-      log.node(`No child found for chunk ${chunk} ${getNextSequence()}`);
-      return undefined;
-    }
-    // Always slice one character for 4-bit chunks, otherwise use bitWidth/4
+    if (!child) return undefined;
+    
+    // Remove processed nibbles from path
     const sliceLen = config.bitWidth === 4 ? 1 : Math.ceil(config.bitWidth / 4);
-    return getNodeValue(child, path.slice(sliceLen), config);
+    const result = getNodeValue(child, path.slice(0, 2) + path.slice(2 + sliceLen), config);
+    
+    // Only return if it's a valid NodeValue
+    return result instanceof Map ? result : undefined;
   }
-  return node.values.get(path);
+  
+  const value = node.values.get(path);
+  return value instanceof Map ? value : undefined;
 }
 
 function setNodeValue(node: MerkleNode, path: string, value: NodeValue, config: TreeConfig): void {
-  node.hash = undefined;
-
+  node.hash = undefined; // Invalidate cached hash
+  
   if (node.children) {
     const chunk = getChunk(path, 0, config);
     let child = node.children.get(chunk);
     if (!child) {
-      child = createNode();
+      // Create appropriate node type based on parent
+      const childType = node.nodeType === 'server' ? 'signer' : 
+                       node.nodeType === 'signer' ? 'entity' : 'storage';
+      child = createNode(childType, Buffer.from(path, 'hex'));
       node.children.set(chunk, child);
-      log.node(`New branch at chunk ${chunk} ${getNextSequence()}`);
     }
-    // Always slice one character for 4-bit chunks, otherwise use bitWidth/4
+    
+    // Remove processed nibbles from path
     const sliceLen = config.bitWidth === 4 ? 1 : Math.ceil(config.bitWidth / 4);
-    setNodeValue(child, path.slice(sliceLen), value, config);
+    setNodeValue(child, path.slice(0, 2) + path.slice(2 + sliceLen), value, config);
   } else {
+    // Validate before setting
+    validateNodeValue(node, value);
     node.values.set(path, value);
-    log.node(`Updated leaf: ${formatHex(path.slice(0, 8))}... ${getNextSequence()}`);
     splitNode(node, config);
   }
 }
 
 function hashNode(node: MerkleNode): Hash {
-  if (node.hash) {
-    return node.hash;
-  }
-
+  if (node.hash) return node.hash;
+  
   const hasher = createHash('sha256');
-
+  
   if (node.children) {
+    // Branch node - hash sorted children
     const sortedChildren = Array.from(node.children.entries())
       .sort(([a], [b]) => a - b);
-    
+      
     for (const [chunk, child] of sortedChildren) {
       hasher.update(Buffer.from([chunk]));
       hasher.update(hashNode(child));
     }
   } else {
+    // Leaf node - hash sorted values
     const sortedValues = Array.from(node.values.entries())
       .sort(([a], [b]) => a.localeCompare(b));
-    
-    for (const [path, value] of sortedValues) {
-      hasher.update(Buffer.from(path, 'hex'));
-      const sortedEntries = Array.from(value.entries())
-        .sort(([a], [b]) => Number(a) - Number(b));
       
-      for (const [type, data] of sortedEntries) {
-        hasher.update(Buffer.from([Number(type)]));
-        hasher.update(data);
+    for (const [path, value] of sortedValues) {
+      hasher.update(node.path);
+      
+      if (value instanceof Map) {
+        // Storage node - hash sorted entries
+        const sortedEntries = Array.from(value.entries())
+          .sort(([a], [b]) => Number(a) - Number(b));
+          
+        for (const [type, data] of sortedEntries) {
+          hasher.update(Buffer.from([Number(type)]));
+          hasher.update(data);
+        }
+      } else {
+        // Entity/Signer node - hash child node
+        hasher.update(hashNode(value));
       }
     }
   }
-
+  
   node.hash = hasher.digest();
-  log.hash(`${node.children ? 'Branch' : 'Leaf'} hash: ${node.hash.toString('hex').slice(0, 8)} ${getNextSequence()}`);
   return node.hash;
 }
 
-// Helper to format hex strings with nibble grouping
-function formatHex(hex: string, groupSize: number = 4): string {
-  if (!hex) return 'no_hash';
-  const groups = hex.match(new RegExp(`.{1,${groupSize}}`, 'g')) || [];
-  return groups.join('.');
+function isLeaf(node: MerkleNode): boolean {
+  return node && !node.children && node.values !== undefined;
 }
 
-// Helper to visualize tree structure with improved formatting
-function visualizeTree(node: MerkleNode, prefix: string = '', isLast: boolean = true, showDetails: boolean = true, parentPath: string = '', depth: number = 0): string {
-  let result = prefix;
+function formatTree(node: MerkleNode | null, prefix: string = ''): string {
+  if (!node) return '';
+  //console.log(node)
+  const pathDisplay = node.path.toString('hex').slice(0, 8);
   
-  // Add branch visualization with thicker lines for root
-  if (depth === 0) {
-    result += '╔═';
-  } else {
-    result += isLast ? '└─' : '├─';
-  }
-  
-  // Add node info with color coding
+  // Show node type and validate hierarchy
+  let result = `${prefix}[${pathDisplay}][${node.nodeType}]`;
+  const hash = node.hash?.toString('hex').slice(0, 8) || 'no_hash';
+  result += `[${node.children ? 'Branch' : 'Leaf'} ${hash}]`;
+
   if (node.children) {
-    const hashHex = node.hash?.toString('hex')?.slice(0, 8) || '';
-    const hash = formatHex(hashHex);
-    const childCount = node.children.size;
-    const childNibbles = Array.from(node.children.keys())
-      .map(k => k.toString(16))
-      .sort()
-      .join(',');
+    const childKeys = Array.from(node.children.keys()).sort((a, b) => a - b);
+    result += ` (${childKeys.length} children)\n`;
+    result += `${prefix}  ↳ Nibbles: ${childKeys.map(k => k.toString(16)).join(',')}\n`;
     
-    // Count total descendants
-    let totalDescendants = 0;
-    const countDescendants = (n: MerkleNode) => {
-      if (n.children) {
-        totalDescendants += n.children.size;
-        for (const child of n.children.values()) {
-          countDescendants(child);
+    // Validate and show children
+    for (const key of childKeys) {
+      const child = node.children.get(key);
+      if (child) {
+        // Validate child type matches parent
+        const expectedType = node.nodeType === 'server' ? 'signer' :
+                           node.nodeType === 'signer' ? 'entity' : 'storage';
+        if (child.nodeType !== expectedType) {
+          result += `${prefix}  ⚠️  Invalid child type ${child.nodeType} for parent ${node.nodeType}\n`;
         }
+        result += formatTree(child, prefix + '  ');
       }
-    };
-    countDescendants(node);
-    
-    result += `\x1b[36m[Branch ${hash}]\x1b[0m \x1b[33m(${childCount} direct, ${totalDescendants} total)\x1b[0m\n`;
-    if (childCount > 0) {
-      result += `${prefix}${isLast ? ' ' : '│'}  \x1b[90m↳ Nibbles: ${childNibbles}\x1b[0m\n`;
     }
-    
-    // Recursively add children with improved connecting lines
-    const children = Array.from(node.children.entries()).sort(([a], [b]) => a - b);
-    children.forEach(([chunk, child], index) => {
-      const newPrefix = prefix + (isLast ? '   ' : '│  ');
-      const isLastChild = index === children.length - 1;
-      const newParentPath = parentPath + chunk.toString(16);
-      result += visualizeTree(child, newPrefix, isLastChild, showDetails, newParentPath, depth + 1);
-    });
   } else {
-    // Leaf node - show values with improved formatting
-    const hashHex = node.hash?.toString('hex')?.slice(0, 8) || '';
-    const hash = formatHex(hashHex);
-    const valueCount = node.values.size;
-    // Show current path nibbles in front of leaf
-    const currentPath = formatHex(parentPath);
-    result += `\x1b[90m${currentPath}\x1b[0m \x1b[32m[Leaf ${hash}]\x1b[0m \x1b[33m(${valueCount} values)\x1b[0m\n`;
+    const entries = Array.from(node.values.entries())
+      .sort(([a], [b]) => a.localeCompare(b));
     
-    // Show value details if requested and there are values
-    if (showDetails && valueCount > 0) {
-      const newPrefix = prefix + (isLast ? '   ' : '│  ');
-      const values = Array.from(node.values.entries())
-        .sort(([a], [b]) => a.localeCompare(b));
-      
-      values.forEach(([path, value], index) => {
-        const isLastValue = index === values.length - 1;
-        const fullPath = parentPath + path;
-        // Format first 8 nibbles with dots between them
-        const formattedPath = formatHex(fullPath.slice(0, 8));
-        result += `${newPrefix}${isLastValue ? '└─' : '├─'}\x1b[90m${formattedPath}\x1b[0m\n`;
-        
-        // Add indentation for value details
-        const valuePrefix = newPrefix + (isLastValue ? '   ' : '│  ');
-        
-        // Show all storage types and their values with improved formatting, excluding CURRENT_BLOCK
-        const sortedTypes = Array.from(value.entries())
-          .filter(([type]) => type !== StorageType.CURRENT_BLOCK)
-          .sort(([a], [b]) => Number(a) - Number(b));
-        
-        sortedTypes.forEach(([type, data], typeIndex) => {
-          const isLastType = typeIndex === sortedTypes.length - 1;
-          const typeName = StorageType[type] || type;
-          const shortData = data.toString('hex').slice(0, 16) + (data.length > 16 ? '...' : '');
-          result += `${valuePrefix}${isLastType ? '└─' : '├─'}\x1b[35m${typeName}\x1b[0m: \x1b[33m${shortData}\x1b[0m\n`;
-        });
-      });
+    result += ` (${entries.length} values)\n`;
+    for (const [key, value] of entries) {
+      const shortKey = key.slice(0, 16);
+      if (value instanceof Map) {
+        // Storage value - format as key-value pairs
+        if (node.nodeType !== 'entity' && node.nodeType !== 'storage') {
+          result += `${prefix}  ⚠️  Invalid storage value in ${node.nodeType} node\n`;
+        }
+        const valueObj = Object.fromEntries(Array.from(value.entries())
+          .map(([k, v]) => [StorageType[k], v?.toString('hex').slice(0, 8)]));
+        result += `${prefix}  ├─${shortKey}... ${JSON.stringify(valueObj)}\n`;
+      } else {
+        // Node value - validate and format recursively
+        if (!validateNodeType(node.nodeType, value.nodeType)) {
+          result += `${prefix}  ⚠️  Invalid value type ${value.nodeType} in ${node.nodeType} node\n`;
+        }
+        result += formatTree(value, prefix + '  ');
+      }
     }
   }
-  
+
   return result;
 }
 
-interface MerkleStoreDebug {
-  getEntityNode: (signerId: string, entityId: string) => { 
-    value: NodeValue; 
-    hash: Buffer; 
-  } | undefined;
-  visualizeTree: () => string;
-  formatHex: (hex: string, groupSize?: number) => string;
+function formatValue(value: NodeValue): string {
+  const entries = Array.from(value.entries())
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([type, data]) => `${StorageType[type]}=${data.slice(0,8).toString('hex')}`);
+  return `{${entries.join(', ')}}`;
 }
 
+function getNodePrefix(path: string): string {
+  switch(path.length) {
+    case 0: return '[Server]';
+    case 1: return '[Signer]';
+    case 2: return '[Entity]';
+    case 3: return '[Channel]';
+    default: return '[Node]';
+  }
+}
+
+// Create a new merkle store
 export function createMerkleStore(config: TreeConfig = { bitWidth: 4, leafThreshold: 16 }) {
-  if (config.bitWidth < 1 || config.bitWidth > 16) {
-    throw new Error('Bit width must be between 1 and 16');
-  }
-  if (config.leafThreshold < 1 || config.leafThreshold > 1024) {
-    throw new Error('Leaf threshold must be between 1 and 1024');
-  }
+  const root = createNode('server', Buffer.from([]));
   
-  const rootNode = createNode();
-  log.tree(`Created tree with config: ${JSON.stringify(config)} ${getNextSequence()}`);
-
   return {
-    updateEntityState: (signerId: string, entityId: string, state: EntityRoot) => {
-      const path = signerId + entityId;
-      const oldValue = getNodeValue(rootNode, path, config);
-      const oldHash = oldValue ? createHash('sha256').update(Buffer.from(encode(Array.from(oldValue.entries())))).digest() : undefined;
-
-      // Create entity value map with storage types
-      const entityValue = new Map<StorageType, Buffer>();
+    updateEntityState(signerId: string, entityId: string, state: EntityRoot) {
+      log.tree(`Updating entity state: signer=${signerId.slice(0,8)}... entity=${entityId.slice(0,8)}...`);
+      
+      // Convert IDs to buffers
+      const signerBuf = Buffer.from(signerId, 'hex');
+      const entityBuf = Buffer.concat([signerBuf, Buffer.from(entityId, 'hex')]);
+      
+      // Get or create signer node
+      let signerNode = root.values.get(signerId) as MerkleNode;
+      if (!signerNode) {
+        signerNode = createNode('signer', signerBuf);
+        validateNodeValue(root, signerNode);
+        root.values.set(signerId, signerNode);
+      }
+      
+      // Get or create entity node
+      let entityNode = signerNode.values.get(entityId) as MerkleNode;
+      if (!entityNode) {
+        entityNode = createNode('entity', entityBuf);
+        validateNodeValue(signerNode, entityNode);
+        signerNode.values.set(entityId, entityNode);
+      }
+      
+      // Convert entity state to storage value
+      const value = new Map<StorageType, Buffer>();
       if (state.finalBlock) {
         const blockData = encode([
           state.finalBlock.blockNumber,
@@ -316,53 +380,42 @@ export function createMerkleStore(config: TreeConfig = { bitWidth: 4, leafThresh
           state.finalBlock.inbox,
           state.finalBlock.validatorSet || []
         ]);
-        entityValue.set(StorageType.CURRENT_BLOCK, Buffer.from(blockData));
+        value.set(StorageType.CURRENT_BLOCK, Buffer.from(blockData));
+        log.tree(`Set block ${state.finalBlock.blockNumber} for entity ${entityId.slice(0,8)}...`);
       }
-      if (state.consensusBlock) {
-        const blockData = encode([
-          state.consensusBlock.blockNumber,
-          encode(Object.entries(state.consensusBlock.storage)),
-          state.consensusBlock.channelRoot,
-          encode(Array.from(state.consensusBlock.channelMap.entries())),
-          state.consensusBlock.inbox,
-          state.consensusBlock.validatorSet || []
-        ]);
-        entityValue.set(StorageType.CONSENSUS_BLOCK, Buffer.from(blockData));
-      }
-
-      setNodeValue(rootNode, path, entityValue, config);
-      const newHash = createHash('sha256').update(Buffer.from(encode(Array.from(entityValue.entries())))).digest();
-
-      if (!oldHash || !newHash.equals(oldHash)) {
-        log.tree(`Entity state updated:
-          Path: ${signerId.slice(0,8)}/${entityId.slice(0,8)}
-          Old Hash: ${oldHash?.toString('hex').slice(0,8) || 'none'}
-          New Hash: ${newHash.toString('hex').slice(0,8)}
-          Types: ${Array.from(entityValue.keys()).map(k => StorageType[k]).join(', ')}
-          ${getNextSequence()}
-        `);
-      }
-    },
-
-    getMerkleRoot: () => {
-      const merkleRoot = hashNode(rootNode);
-      log.tree(`Generated merkle root: ${merkleRoot.toString('hex')} ${getNextSequence()}`);
-      return merkleRoot;
-    },
-
-    debug: {
-      getEntityNode: (signerId: string, entityId: string) => {
-        const path = signerId + entityId;
-        const value = getNodeValue(rootNode, path, config);
-        if (!value) return undefined;
-        return {
-          value,
-          hash: createHash('sha256').update(Buffer.from(encode(Array.from(value.entries())))).digest()
-        };
-      },
       
-      visualizeTree: () => visualizeTree(rootNode),
-      formatHex: (hex: string, groupSize?: number) => formatHex(hex, groupSize)
-    } as MerkleStoreDebug
+      // Set the storage value
+      validateNodeValue(entityNode, value);
+      entityNode.values = new Map([['storage', value]]);
+      
+      // Invalidate hashes up the tree
+      entityNode.hash = undefined;
+      signerNode.hash = undefined;
+      root.hash = undefined;
+    },
+    
+    debug: {
+      getEntityNode(signerId: string, entityId: string) {
+        const signerNode = root.values.get(signerId) as MerkleNode;
+        if (!signerNode) return null;
+        
+        const entityNode = signerNode.values.get(entityId) as MerkleNode;
+        if (!entityNode) return null;
+        
+        const storageValue = entityNode.values.get('storage') as NodeValue;
+        return {
+          value: storageValue,
+          hash: hashNode(entityNode)
+        };
+      }
+    },
+    
+    getMerkleRoot(): Buffer {
+      return hashNode(root);
+    },
+    
+    print(): string {
+      return formatTree(root);
+    }
   };
 } 

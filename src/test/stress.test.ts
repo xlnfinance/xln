@@ -78,7 +78,10 @@ describe('Merkle Tree Stress Tests', () => {
     for (const signer of signers) {
       for (const entity of signer.entities) {
         const node = store.debug.getEntityNode(signer.id, entity.id);
-        if (!node?.value.get(StorageType.CURRENT_BLOCK)) {
+        if (!node) {
+          throw new Error(`Entity node not found: ${signer.id.slice(0,8)}/${entity.id.slice(0,8)}`);
+        }
+        if (!node.value?.get(StorageType.CURRENT_BLOCK)) {
           throw new Error(`Entity state not found: ${signer.id.slice(0,8)}/${entity.id.slice(0,8)}`);
         }
       }
