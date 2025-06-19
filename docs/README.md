@@ -55,3 +55,16 @@ XLN Finance is a blockchain-based financial system built with TypeScript and Nod
 - Unit tests with reduced demo data
 - Merkle tree visualization
 - State verification 
+
+
+
+1. Chancellor on brink of second bailout for banks 
+
+Replication is All You Need
+
+2. 
+
+JEA trilayer
+
+
+

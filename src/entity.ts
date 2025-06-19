@@ -1,12 +1,10 @@
 import { Buffer } from 'buffer';
 import { encode, decode } from 'rlp';
 import { createHash } from 'crypto';
-import { ChannelInput } from './channel';
-
 // Types
 export type EntityInput =
   | { type: 'AddEntityTx', tx: Buffer }
-  | { type: 'AddChannelInput', channelId: string, input: ChannelInput }
+
   | { type: 'Flush' }
   | { type: 'Sync', blocks: Buffer[], signature: Buffer }
   | { type: 'Consensus', 
