@@ -139,28 +139,3 @@ export function executeEntityBlock(state: EntityRoot): EntityRoot {
     finalBlock: currentState
   };
 }
-
-export function flushEntity(state: EntityRoot, inputs: EntityInput[]): EntityRoot {
-  const newState = {
-    ...state,
-    entityPool: new Map(inputs.map((input, i) => [
-      `tx${i}`, 
-      input.type === 'AddEntityTx' ? input.tx : Buffer.from(encode(Object.values(input)))
-    ]))
-  };
-  
-  const executedState = executeEntityBlock(newState);
-  
-  return {
-    ...executedState,
-    status: 'commit' as const,
-    entityPool: new Map()
-  };
-}
-
-export function decodeTxArg(buf: Buffer): string | number {
-  if (buf.length === 1 && buf[0] === 0x80) return 0;
-  if (buf.length === 1) return buf[0];
-  if (buf.length === 0) return 0;
-  return Buffer.from(buf).toString();
-} 

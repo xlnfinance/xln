@@ -1,14 +1,13 @@
 import {Level} from 'level';
 import { randomBytes, createHash } from 'crypto';
 import { encode, decode } from 'rlp';
-import { WebSocket, WebSocketServer } from 'ws';
+//import { WebSocket, WebSocketServer } from 'ws';
 import repl from 'repl';
-import { EntityInput, EntityRoot, EntityBlock, EntityStorage, encodeEntityRoot, decodeEntityRoot, executeEntityBlock, flushEntity, executeEntityTx, decodeTxArg } from './entity.js';
 
 import debug from 'debug';
 
 // Enable all debug namespaces
-debug.enable('state:*,tx:*,block:*,error:*,diff:*,merkle:*');
+debug.enable('state:*,tx:*,block:*,error:*,diff:*');
 
 // Ensure that your tsconfig.json has "esModuleInterop": true.
 
@@ -35,15 +34,9 @@ const log = {
   tx: debug('tx:🟡'),
   block: debug('block:🟢'),
   error: debug('error:🔴'),
-  diff: debug('diff:🟣'),
-  merkle: debug('merkle:⚪')
+  diff: debug('diff:🟣')
 };
 
-// Core types with readonly to enforce immutability
-type ServerState = {
-  pool: ServerInput
-  block: number
-}
 
 // Add this after types
 let serverState: ServerState = createServerState();
@@ -94,22 +87,6 @@ async function startProcessing(initialState: ServerState): Promise<never> {
   }
 }
   
-
-
-// Save state to database
-async function saveMutableState(state: ServerState): Promise<ServerState> {
-  log.state('Saving state to database');
-  
-  try {
-    return await saveChanges(state, serverStateDb);
-  } catch (error) {
-    if (error instanceof Error) {
-      log.error('Failed to save state:', error.message);
-      throw new Error(`Failed to save state: ${error.message}`);
-    }
-    throw error;
-  }
-}
 
 // Start server
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -186,24 +163,12 @@ export {
   ServerState,
   createServerState,
   processInput,
-  createInitialEntityRoot,
   processMempoolTick,
   receive,
-  saveMutableState,
-  replayLog,
   runSelfTest
 };
 
-export type ServerRoot = {
-  blockHeight: number;
-  merkleRoot: Buffer;
-  timestamp: number;
-  signers: Map<string, Buffer>;  // signerId -> signerHash
-};
 
-export type SignerInput = Map<string, EntityInput[]>;
-export type ServerInput = Map<string, SignerInput>;     // signerId -> entityId -> inputs
-type StoredValue = ServerRoot | EntityRoot | SignerRoot | Buffer;
 
 // Pure function to create initial state
 function createServerState(): ServerState {
@@ -216,73 +181,30 @@ function createServerState(): ServerState {
 }
 
 async function loadServerState(serverStateDb: LevelDB): Promise<ServerState> {
-  log.state('Loading state from database');
+  log.state('1.Loading state from database');
   
-  let state = createServerState();
-  const batch = new Map<string, Buffer>();
+  const bufferMap = new Map<string, Buffer>();
+  const sealMap = new Map<string, Buffer>();
   
   // Load all entries into memory first
   for await (const [key, value] of serverStateDb.iterator()) {
-    batch.set(key.toString('hex'), value);
+    const keyStr = key.toString(ENC);
+    bufferMap.set(keyStr, value);
+    sealMap.set(keyStr, hash(value));
   }
-  
+  log.state('2. Decode starting from the root');
+
   // Process server root first
-  const rootValue = batch.get('');
+  const rootValue = bufferMap.get('');
   if (rootValue) {
-    const decoded = decode(rootValue as Buffer) as unknown;
-    if (!Array.isArray(decoded) || decoded.length !== 3) {
-      throw new Error('Invalid server root format');
-    }
-    const [blockHeight, merkleRoot, timestamp] = decoded as [number, Buffer, number];
+    return decodeServerState(rootValue);
+  } else {
+    log.state('2. No root found');
+    return createServerState();
   }
    
-  
-  return state;
 }
-
-// Update LevelBatchOp type to match Level's expectations
-type LevelBatchPutOp = {
-  type: 'put';
-  key: Buffer;
-  value: Buffer;
-};
-
-type LevelBatchDelOp = {
-  type: 'del';
-  key: Buffer;
-};
-
-type LevelBatchOp = LevelBatchPutOp | LevelBatchDelOp;
-
-// Update saveChanges function to use batch operations
-async function saveChanges(state: ServerState, db: LevelDB): Promise<ServerState> {
-  if (state.unsaved.size === 0) return state;
-
-  const ops: LevelBatchOp[] = [];
-  
-  // Save server root with merkle root in batch
-  ops.push({
-    type: 'put',
-    key: Buffer.from([]),
-    value: Buffer.from(encode([state.block, state.merkleStore.getMerkleRoot(), Date.now()]))
-  });
-  
-  // Save all entity states in batch
-  for (const key of state.unsaved) {
-    const [signerId, entityId] = key.split('/');
-    const node = state.merkleStore.debug.getEntityNode(signerId, entityId);
-    if (node?.value) {
-      ops.push({
-        type: 'put',
-        key: Buffer.from(key, 'hex'),
-        value: Buffer.from(encode(Array.from(node.value.entries())))
-      });
-    }
-  }
-  
-  // Execute batch operation
-  await db.batch(ops);
-}
+ 
 
 // Update flushChanges function
 async function flushChanges(state: ServerState): Promise<void> {
@@ -312,11 +234,9 @@ async function flushChanges(state: ServerState): Promise<void> {
 }
 
 // Block types (public/committed) 
-type ServerBlock = {
-  blockNumber: number
+type ServerState = {
+  height: number
   timestamp: number
-  entities: Map<string, EntityBlock>  // Direct mapping to entity blocks
-  merkleRoot: Buffer
 }
 
 
@@ -365,6 +285,7 @@ export const rlpToMap = (rlpData: Buffer): Map<string, Map<string, EntityInput[]
     return [signerId, entityMap];
   }));
 };
+
 
 
 // Process input and update state
@@ -469,170 +390,7 @@ async function receive(state: ServerState, signerId: string, entityId: string, i
   return newState;
 }
 
-// Update replayLog to show progress
-async function replayLog(state: ServerState): Promise<ServerState> {
-  log.state('Replaying log from block:', state.block);
-  
-  let newState = state;
-  const startKey = Buffer.alloc(4);
-  startKey.writeUInt32BE(state.block);
-  
-  try {
-    let blockCount = 0;
-    const startTime = Date.now();
-  
-  // Process blocks in order directly from iterator
-  for await (const [_, blockData] of serverBlocksDb.iterator({ 
-    gt: startKey,
-    keys: true,
-    values: true
-  })) {
-    const serverInput = rlpToMap(blockData as Buffer);
-      newState = applyServerInput(serverInput, newState);
-      blockCount++;
-    }
-    
-    const duration = Date.now() - startTime;
-    log.state(`Replay complete:
-      Blocks: ${blockCount}
-      Duration: ${duration}ms
-      Final Block: ${newState.block}
-    `);
 
-    return newState;
-  } catch (error) {
-    log.error('Failed to replay log:', error instanceof Error ? error.message : String(error));
-    throw error;
-  }
-}
-
-
-// Entity execution
-function executeInput(state: EntityRoot, input: EntityInput): EntityRoot {
-  log.tx('Executing:', {
-    type: input.type,
-    data: input.type === 'AddEntityTx' ? `${input.tx.slice(0,4)}...` : undefined
-  });
-
-  switch(input.type) {
-    case 'AddEntityTx':
-      if (input.tx) {
-        const decoded = decode(input.tx) as unknown as Buffer[];
-        const cmdStr = Buffer.from(decoded[0]).toString();
-        const args = decoded.slice(1).map(buf => decodeTxArg(buf));
-        
-        log.tx('Command:', cmdStr, 'Args:', args);
-        
-        // Execute tx inside entity VM
-        const newStorage = executeEntityTx(state.finalBlock?.storage || { value: 0 }, cmdStr, args);
-        return {
-          ...state,
-          finalBlock: {
-            ...(state.finalBlock || { blockNumber: 0, channelRoot: Buffer.from([]), channelMap: new Map(), inbox: [] }),
-            storage: newStorage
-          }
-        };
-      }
-      
-    case 'Flush':
-      // Create new block from mempool
-      const block: EntityBlock = {
-        blockNumber: (state.finalBlock?.blockNumber || 0) + 1,
-        storage: { value: 0 },  // Initialize empty storage
-        channelRoot: Buffer.from(encode([])),
-        channelMap: new Map(),
-        inbox: [...state.entityPool.values()]
-      };
-
-      return {
-        status: 'commit' as const,
-        finalBlock: block,
-        entityPool: new Map()
-      };
-
-    case 'Consensus':
-      // Apply consensus immediately
-      return executeConsensus(state, input);
-      
-    default:
-      throw new Error(`Unknown input type: ${input.type}`);
-  }
-}
-
-// RLP encoding/decoding helpers
-export const encodeEntityBlock = (block: EntityBlock): Buffer => 
-  Buffer.from(encode([
-    block.blockNumber,
-    encode(Object.entries(block.storage)),
-    block.channelRoot,
-    encode(Array.from(block.channelMap.entries())),
-    block.inbox,
-    block.validatorSet || []
-  ]));
-
-const decodeEntityBlock = (data: Buffer): EntityBlock => {
-  const decoded = decode(data) as unknown as [number, Buffer, Buffer, Buffer, Buffer[], Buffer[]];
-  const [blockNumber, storageRlp, channelRoot, channelMapRlp, inbox, validatorSet] = decoded;
-  
-  const storageMap = new Map(decode(storageRlp) as unknown as [string, any][]);
-  const storage: EntityStorage = {
-    value: storageMap.get('value') || 0,
-    ...Object.fromEntries(storageMap)
-  };
-  
-  return {
-    blockNumber,
-    storage,
-    channelRoot,
-    channelMap: new Map(decode(channelMapRlp) as unknown as [string, Buffer][]),
-    inbox,
-    validatorSet: validatorSet.length > 0 ? validatorSet : undefined
-  };
-};
-
-
-// Separate immediate application from mempool
-function applyEntityInput(state: EntityRoot, input: EntityInput): EntityRoot {
-  switch(input.type) {
-    case 'AddEntityTx':
-      // Add to mempool only
-      const txHash = hash(Buffer.from(encode(Object.values(input)))).toString(ENC);
-      return {
-        ...state,
-        entityPool: new Map(state.entityPool).set(txHash, Buffer.from(encode(Object.values(input))))
-      };
-      
-    case 'Consensus':
-      // Apply consensus immediately
-      //return executeConsensus(state, input);
-      return state;
-      
-    default:
-      throw new Error(`Unknown input type: ${input.type}`);
-  }
-}
-
-
-
-// Start WebSocket server
-const wss = new WebSocketServer({ port: 8080 });
-wss.on('connection', ws => {
-  let currentState = createServerState();
-  
-  ws.on('message', async (msg) => {
-    try {
-    const { signerId, entityId, input } = JSON.parse(msg.toString());
-      currentState = await receive(currentState, signerId, entityId, input);
-      ws.send(JSON.stringify({ success: true }));
-    } catch (error) {
-      ws.send(JSON.stringify({ 
-        error: error instanceof Error ? error.message : String(error) 
-      }));
-    }
-  });
-});
-
-// Start REPL with full context
 const r = repl.start('> ');
 Object.assign(r.context, {
   receive,
@@ -717,7 +475,6 @@ async function runSelfTest(state: ServerState) {
     // Process mempool to increment block number
     if (state.pool.size > 0) {
       state = await processMempoolTick(state);
-      state = await saveMutableState(state);
     }
 
 
