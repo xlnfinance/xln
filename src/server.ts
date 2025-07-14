@@ -2,16 +2,66 @@
 // for debugging > bun repl 
 // await import('./debug.js'); 
 
-import { randomBytes, createHash } from 'crypto';
-import { encode, decode } from 'rlp';
-import { Buffer } from 'buffer';
-import debug from 'debug';
+// Environment detection and compatibility layer
+const isBrowser = typeof window !== 'undefined';
+
+// Crypto compatibility
+const createHash = isBrowser ? 
+  (algorithm: string) => ({
+    update: (data: string) => ({
+      digest: (encoding?: string) => {
+        // Simple deterministic hash for browser demo (not cryptographically secure)
+        let hash = 0;
+        for (let i = 0; i < data.length; i++) {
+          const char = data.charCodeAt(i);
+          hash = ((hash << 5) - hash) + char;
+          hash = hash & hash; // Convert to 32bit integer
+        }
+        const hashStr = Math.abs(hash).toString(16).padStart(8, '0');
+        return encoding === 'hex' ? hashStr : Buffer.from(hashStr);
+      }
+    })
+  }) :
+  require('crypto').createHash;
+
+const randomBytes = isBrowser ?
+  (size: number): Uint8Array => {
+    const array = new Uint8Array(size);
+    crypto.getRandomValues(array);
+    return array;
+  } :
+  require('crypto').randomBytes;
+
+// Buffer compatibility
+const Buffer = isBrowser ?
+  {
+    from: (data: any) => new Uint8Array(data),
+    isBuffer: (obj: any) => obj instanceof Uint8Array
+  } :
+  require('buffer').Buffer;
+
+// RLP compatibility (simplified for browser)
+const encode = isBrowser ? (data: any) => new Uint8Array() : require('rlp').encode;
+const decode = isBrowser ? (data: any) => [] : require('rlp').decode;
+
+// Debug compatibility
+const debug = isBrowser ?
+  (() => {
+    const debugFn = (namespace: string) => {
+      const shouldLog = namespace.includes('state') || namespace.includes('tx') || namespace.includes('block') || namespace.includes('error') || namespace.includes('diff') || namespace.includes('info');
+      return shouldLog ? console.log.bind(console, `[${namespace}]`) : () => {};
+    };
+    // Add enable mock for browser
+    debugFn.enable = () => {};
+    return debugFn;
+  })() :
+  require('debug');
 debug.enable('state:*,tx:*,block:*,error:*,diff:*');
 // Use hex for Map/Set keys, Buffers for DB/RLP
 const ENC = 'hex' as const;
 
-const hash = (data: Buffer): Buffer => 
-  createHash('sha256').update(data).digest();
+const hash = (data: Buffer | string): Buffer => 
+  createHash('sha256').update(data.toString()).digest();
 
 // Configure debug logging
 const log = {
@@ -118,6 +168,88 @@ interface Env {
   // Future: add database connections, config, utilities, etc.
 }
 
+interface EnvSnapshot {
+  height: number;
+  timestamp: number;
+  replicas: Map<string, EntityReplica>;
+  serverInput: ServerInput;
+  description: string;
+}
+
+// Global history for time machine
+let envHistory: EnvSnapshot[] = [];
+
+// === SNAPSHOT UTILITIES ===
+const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
+  return {
+    entityId: replica.entityId,
+    signerId: replica.signerId,
+    state: {
+      height: replica.state.height,
+      nonces: new Map(replica.state.nonces),
+      messages: [...replica.state.messages],
+      proposals: new Map(Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
+        id,
+        {
+          ...proposal,
+          votes: new Map(proposal.votes)
+        }
+      ])),
+      config: replica.state.config
+    },
+    mempool: [...replica.mempool],
+    proposal: replica.proposal ? {
+      height: replica.proposal.height,
+      txs: [...replica.proposal.txs],
+      hash: replica.proposal.hash,
+      newState: replica.proposal.newState,
+      signatures: new Map(replica.proposal.signatures)
+    } : undefined,
+    isProposer: replica.isProposer
+  };
+};
+
+const captureSnapshot = (env: Env, serverInput: ServerInput, description: string): void => {
+  const snapshot: EnvSnapshot = {
+    height: env.height,
+    timestamp: env.timestamp,
+    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [
+      key,
+      deepCloneReplica(replica)
+    ])),
+    serverInput: {
+      serverTxs: [...serverInput.serverTxs],
+      entityInputs: serverInput.entityInputs.map(input => ({
+        ...input,
+        entityTxs: input.entityTxs ? [...input.entityTxs] : undefined,
+        precommits: input.precommits ? new Map(input.precommits) : undefined
+      }))
+    },
+    description
+  };
+  
+  envHistory.push(snapshot);
+  if (DEBUG) {
+    console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);
+    if (serverInput.serverTxs.length > 0) {
+      console.log(`    🖥️  ServerTxs: ${serverInput.serverTxs.length}`);
+      serverInput.serverTxs.forEach((tx, i) => {
+        console.log(`      ${i+1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`);
+      });
+    }
+    if (serverInput.entityInputs.length > 0) {
+      console.log(`    📨 EntityInputs: ${serverInput.entityInputs.length}`);
+      serverInput.entityInputs.forEach((input, i) => {
+        const parts = [];
+        if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
+        if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
+        if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0,10)}...`);
+        console.log(`      ${i+1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
+      });
+    }
+  }
+};
+
 // === UTILITY FUNCTIONS ===
 const calculateQuorumPower = (config: ConsensusConfig, signers: string[]): bigint => {
   return signers.reduce((sum, signerId) => sum + (config.shares[signerId] ?? 0n), 0n);
@@ -197,9 +329,16 @@ const executeProposal = (entityState: EntityState, proposal: Proposal): EntitySt
     const message = `[COLLECTIVE] ${proposal.action.data.message}`;
     if (DEBUG) console.log(`    🏛️  Executing collective proposal: "${message}"`);
     
+    const newMessages = [...entityState.messages, message];
+    
+    // Limit messages to 10 maximum
+    if (newMessages.length > 10) {
+      newMessages.shift(); // Remove oldest message
+    }
+    
     return {
       ...entityState,
-      messages: [...entityState.messages, message]
+      messages: newMessages
     };
   }
   return entityState;
@@ -221,6 +360,12 @@ const applyEntityTx = (env: Env, entityState: EntityState, entityTx: EntityTx): 
     
     newEntityState.nonces.set(from, currentNonce + 1);
     newEntityState.messages.push(`${from}: ${message}`);
+    
+    // Limit messages to 10 maximum
+    if (newEntityState.messages.length > 10) {
+      newEntityState.messages.shift(); // Remove oldest message
+    }
+    
     return newEntityState;
   }
   
@@ -344,7 +489,8 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
   }
   
   // Handle proposed frame (PROPOSE phase)
-  if (entityInput.proposedFrame && !entityReplica.proposal) {
+  if (entityInput.proposedFrame && (!entityReplica.proposal || 
+      (entityReplica.state.config.mode === 'gossip-based' && entityReplica.isProposer))) {
     const frameSignature = `sig_${entityReplica.signerId}_${entityInput.proposedFrame.hash}`;
     const config = entityReplica.state.config;
     
@@ -392,8 +538,11 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
     }
     
     if (totalPower >= entityReplica.state.config.threshold) {
-      // Commit phase - use pre-computed state
-      entityReplica.state = entityReplica.proposal.newState;
+      // Commit phase - use pre-computed state with incremented height
+      entityReplica.state = {
+        ...entityReplica.proposal.newState,
+        height: entityReplica.state.height + 1
+      };
       if (DEBUG) console.log(`    → Threshold reached! Committing frame, height: ${entityReplica.state.height}`);
       
       // Save proposal data before clearing
@@ -426,14 +575,17 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
       // This is a commit notification from proposer, apply the frame
       if (DEBUG) console.log(`    → Received commit notification with ${entityInput.precommits.size} signatures`);
       
-      // Apply the committed frame
-      entityReplica.state = entityInput.proposedFrame.newState;
+      // Apply the committed frame with incremented height
+      entityReplica.state = {
+        ...entityInput.proposedFrame.newState,
+        height: entityReplica.state.height + 1
+      };
       entityReplica.mempool.length = 0;
-      if (DEBUG) console.log(`    → Applied commit, new state: ${entityReplica.state.messages.length} messages`);
+      if (DEBUG) console.log(`    → Applied commit, new state: ${entityReplica.state.messages.length} messages, height: ${entityReplica.state.height}`);
     }
   }
   
-  // Auto-propose if mempool not empty and we're proposer
+  // Auto-propose logic: ONLY proposer can propose (BFT requirement)
   if (entityReplica.isProposer && entityReplica.mempool.length > 0 && !entityReplica.proposal) {
     if (DEBUG) console.log(`    🚀 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
     // Compute new state once during proposal
@@ -443,7 +595,10 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
       height: entityReplica.state.height + 1,
       txs: [...entityReplica.mempool],
       hash: `frame_${entityReplica.state.height + 1}_${env.timestamp}`,
-      newState: newEntityState,
+      newState: {
+        ...newEntityState,
+        height: entityReplica.state.height + 1
+      },
       signatures: new Map<string, string>()
     };
     
@@ -461,7 +616,16 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
   } else if (entityReplica.isProposer && entityReplica.mempool.length === 0 && !entityReplica.proposal) {
     if (DEBUG) console.log(`    ⚠️  CORNER CASE: Proposer with empty mempool - no auto-propose`);
   } else if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
-    if (DEBUG) console.log(`    ⚠️  CORNER CASE: Non-proposer with ${entityReplica.mempool.length} txs in mempool - waiting for proposer`);
+    if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
+    // Send mempool to proposer
+    const proposerId = entityReplica.state.config.validators[0];
+    entityOutbox.push({
+      entityId: entityInput.entityId,
+      signerId: proposerId,
+      entityTxs: [...entityReplica.mempool]
+    });
+    // Clear mempool after sending
+    entityReplica.mempool.length = 0;
   } else if (entityReplica.isProposer && entityReplica.proposal) {
     if (DEBUG) console.log(`    ⚠️  CORNER CASE: Proposer already has pending proposal - no new auto-propose`);
   }
@@ -470,6 +634,7 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
 };
 
 const processServerInput = (env: Env, serverInput: ServerInput): EntityInput[] => {
+  
   // Merge new serverInput into env.serverInput
   env.serverInput.serverTxs.push(...serverInput.serverTxs);
   env.serverInput.entityInputs.push(...serverInput.entityInputs);
@@ -482,6 +647,16 @@ const processServerInput = (env: Env, serverInput: ServerInput): EntityInput[] =
     console.log(`\n=== TICK ${env.height} ===`);
     console.log(`Server inputs: ${serverInput.serverTxs.length} new serverTxs, ${serverInput.entityInputs.length} new entityInputs`);
     console.log(`Total in env: ${env.serverInput.serverTxs.length} serverTxs, ${env.serverInput.entityInputs.length} entityInputs (merged to ${mergedInputs.length})`);
+    if (mergedInputs.length > 0) {
+      console.log(`🔄 Processing merged inputs:`);
+      mergedInputs.forEach((input, i) => {
+        const parts = [];
+        if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
+        if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
+        if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0,10)}...`);
+        console.log(`  ${i+1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
+      });
+    }
   }
   
   // Process server transactions (replica imports) from env.serverInput
@@ -528,15 +703,27 @@ const processServerInput = (env: Env, serverInput: ServerInput): EntityInput[] =
   env.height++;
   env.timestamp = Date.now();
   
+  // Capture snapshot BEFORE clearing (to show what was actually processed)
+  const inputDescription = `Tick ${env.height - 1}: ${env.serverInput.serverTxs.length} serverTxs, ${env.serverInput.entityInputs.length} entityInputs → ${entityOutbox.length} outputs`;
+  const processedInput = {
+    serverTxs: [...env.serverInput.serverTxs],
+    entityInputs: [...env.serverInput.entityInputs]
+  };
+  
   // Clear processed data from env.serverInput
   env.serverInput.serverTxs.length = 0;
   env.serverInput.entityInputs.length = 0;
   
+  // Capture snapshot with the actual processed input
+  captureSnapshot(env, processedInput, inputDescription);
+  
   if (DEBUG && entityOutbox.length > 0) {
-    console.log(`Outputs: ${entityOutbox.length} messages`);
+    console.log(`📤 Outputs: ${entityOutbox.length} messages`);
     entityOutbox.forEach((output, i) => {
       console.log(`  ${i+1}. → ${output.signerId} (${output.entityTxs ? `${output.entityTxs.length} txs` : ''}${output.proposedFrame ? ` proposal: ${output.proposedFrame.hash.slice(0,10)}...` : ''}${output.precommits ? ` ${output.precommits.size} precommits` : ''})`);
     });
+  } else if (DEBUG && entityOutbox.length === 0) {
+    console.log(`📤 No outputs generated`);
   }
   
   if (DEBUG) {
@@ -557,7 +744,13 @@ const processUntilEmpty = (env: Env, inputs: EntityInput[]) => {
   }
 };
 
+// Time machine utility functions
+const resetHistory = () => { envHistory.length = 0; };
+
 const runDemo = () => {
+  // Clear history when starting a new demo
+  resetHistory();
+  
   const env: Env = { 
     replicas: new Map(), 
     height: 0, 
@@ -569,6 +762,7 @@ const runDemo = () => {
     console.log('🚀 Starting XLN Consensus Demo - Multi-Entity Test');
     console.log('✨ Using deterministic hash-based proposal IDs (no randomness)');
     console.log('🌍 Environment-based architecture with merged serverInput');
+    console.log('🗑️ History cleared for fresh start');
   }
   
   // === TEST 1: Chat Entity with Equal Voting Power ===
@@ -864,15 +1058,34 @@ const runDemo = () => {
 
 const main = () => {
   const env = runDemo();
-  (global as any).env = env;
-
   return env;
 };
 
 // Auto-run demo
 export const env = main();
 
-export { runDemo, processServerInput, main }; 
+// === TIME MACHINE API ===
+const getHistory = () => envHistory;
+const getSnapshot = (index: number) => index >= 0 && index < envHistory.length ? envHistory[index] : null;
+const getCurrentHistoryIndex = () => envHistory.length - 1;
+
+export { runDemo, processServerInput, main, getHistory, getSnapshot, resetHistory, getCurrentHistoryIndex };
+
+// Browser compatibility
+if (isBrowser) {
+  (window as any).xlnEnv = env;
+  (window as any).XLN = { 
+    runDemo, 
+    processServerInput, 
+    main, 
+    getHistory, 
+    getSnapshot, 
+    resetHistory, 
+    getCurrentHistoryIndex 
+  };
+} else {
+  (global as any).env = env;
+}
 
 
 
