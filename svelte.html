@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XLN Consensus Visual Debug – Svelte</title>
+    <!-- Keep original styling untouched for 100 % visual parity -->
+    <link rel="stylesheet" href="index.html" onload="this.remove()" /> <!-- dummy preload so CSS is identical after inline copy below -->
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+            overflow-x: hidden;
+            padding-bottom: 70px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Mount point for Svelte app -->
+    <div id="app"></div>
+
+    <!-- =========================  SVELTE  ========================= -->
+    <!-- 1.  Import standalone compiler & runtime -->
+    <script type="module">
+        import { compile } from 'https://cdn.jsdelivr.net/npm/svelte@3.59.1/compiler.mjs';
+
+        // Helper that compiles <script type="text/svelte" id="App"> at run-time
+        async function boot(componentId, target) {
+            const source = document.getElementById(componentId).textContent.trim();
+            const { js } = compile(source, {
+                format: 'iife',  // no imports → one self-executing func
+                name: componentId,
+                css: true,
+            });
+            const Component = (new Function(`${js.code}; return ${componentId};`))();
+            new Component({ target });
+        }
+
+        // -------------------------------------------------------------------
+        //  XLN ENGINE – identical load sequence to index.html
+        // -------------------------------------------------------------------
+        import * as XLN from './dist/server.js';
+        window.XLN = XLN;              // make available for console debugging
+        window.xlnEnv = null;
+
+        // Boot Svelte once engine is ready so stores get initialised with env
+        (async () => {
+            await boot('App', document.getElementById('app'));
+        })();
+    </script>
+
+    <!-- =========================  MAIN SVELTE COMPONENT  ========================= -->
+    <script id="App" type="text/svelte">
+        <script>
+            // Minimal runtime dependencies only – no stores / classes authored by us
+            import { onMount } from 'svelte';
+
+            // --------- Local reactive state ---------
+            let xlnEnv = null;
+            let currentTimeIndex = -1;         // –1 ⇒ live, ≥0 ⇒ historical
+            let entityFilter = 'all';
+            let lastModified = null;           // for auto-reload polling
+
+            // UI form state
+            let action = 'chat';
+            let inputMsg = '';
+            let proposalText = '';
+            let voteChoice = 'yes';
+            let proposalSelect = '';
+            let replicaKey = '';
+
+            // Entity Formation form state
+            let newEntity = '';
+            let validators = [{ name: 'alice', weight: 1 }, { name: 'bob', weight: 1 }, { name: 'carol', weight: 1 }];
+            let threshold = 2;
+
+            // Convenience derived helpers
+            const totalWeight = () => validators.reduce((s, v) => s + Number(v.weight||0), 0);
+
+            // -------------------------------------------------------------
+            //  XLN initialisation + live tick rendering
+            // -------------------------------------------------------------
+            onMount(async () => {
+                xlnEnv = await XLN.main();
+                window.xlnEnv = xlnEnv;
+                // default replica select
+                replicaKey = [...xlnEnv.replicas.keys()][0];
+            });
+
+            // Auto-reload (10 s HEAD request – identical to original impl)
+            let reloadTimer;
+            onMount(() => {
+                reloadTimer = setInterval(async () => {
+                    try {
+                        const res = await fetch('./dist/server.js', { method: 'HEAD' });
+                        const mod = res.headers.get('last-modified');
+                        if (lastModified && mod !== lastModified) {
+                            document.getElementById('reloadIndicator').classList.add('show');
+                            setTimeout(() => location.reload(), 500);
+                        }
+                        lastModified = mod;
+                    } catch {}
+                }, 10000);
+                return () => clearInterval(reloadTimer);
+            });
+
+            // -------------------------------------------------------------
+            //  Reactive helpers for derived data – evaluated by Svelte
+            // -------------------------------------------------------------
+            $: entityTypes = xlnEnv ? [...new Set([...xlnEnv.replicas.keys()].map(k=>k.split(':')[0]))] : [];
+            $: replicasToShow = (() => {
+                if (!xlnEnv) return [];
+                let reps;
+                let snapshot;
+                if (currentTimeIndex>=0) {
+                    snapshot = XLN.getSnapshot(currentTimeIndex);
+                    reps = snapshot ? snapshot.replicas : xlnEnv.replicas;
+                } else reps = xlnEnv.replicas;
+                const arr = [];
+                reps.forEach((rep, key)=>{
+                    if (entityFilter==='all' || rep.entityId===entityFilter) arr.push([key, rep]);
+                });
+                return arr;
+            })();
+
+            // Time-machine slider metadata (mirrors original logic)
+            $: history = XLN.getHistory();
+            $: maxIdx = Math.max(0, history.length-2);
+            $: sliderMax = maxIdx+1;
+            $: sliderVal = currentTimeIndex===-1 ? sliderMax : currentTimeIndex;
+            $: progressPct = sliderMax>0 ? (sliderVal/sliderMax*100) : 0;
+
+            // -------------------------------------------------------------
+            //  Event handlers (executeAction, formation, time nav etc.)
+            // -------------------------------------------------------------
+            function executeAction() {
+                if (!xlnEnv) return;
+                currentTimeIndex = -1;   // go live for any action
+                const replica = xlnEnv.replicas.get(replicaKey);
+                if (!replica) return alert('Select replica');
+                let entityTx;
+                if (action==='chat') {
+                    if (!inputMsg.trim()) return alert('enter message');
+                    entityTx = { type:'chat', data:{ from: replica.signerId, message: inputMsg.trim() } };
+                    inputMsg='';
+                }
+                if (action==='propose') {
+                    if (!proposalText.trim()) return alert('enter proposal');
+                    entityTx = { type:'propose', data:{ action:{ type:'collective_message', data:{ message: proposalText.trim() } }, proposer: replica.signerId } };
+                    proposalText='';
+                }
+                if (action==='vote') {
+                    if (!proposalSelect) return alert('no proposal');
+                    entityTx = { type:'vote', data:{ proposalId: proposalSelect, voter: replica.signerId, choice: voteChoice } };
+                }
+                let outs = XLN.processServerInput(xlnEnv,{ serverTxs:[], entityInputs:[{ entityId: replica.entityId, signerId: replica.signerId, entityTxs:[entityTx] }] });
+                while(outs.length) outs = XLN.processServerInput(xlnEnv,{ serverTxs:[], entityInputs: outs });
+            }
+
+            function addValidator() { validators = [...validators, {name:'', weight:1}]; }
+            function removeValidator(i) { if (validators.length>1) validators = validators.filter((_,idx)=>idx!==i); }
+            function createEntity() {
+                if (!newEntity.trim()) return alert('name?');
+                if (/[^a-zA-Z0-9_-]/.test(newEntity)) return alert('invalid chars');
+                if (XLN && [...xlnEnv.replicas.keys()].some(k=>k.startsWith(newEntity+':'))) return alert('exists');
+                const dup = validators.map(v=>v.name).filter((v,i,a)=>a.indexOf(v)!==i);
+                if (dup.length) return alert('duplicate '+dup[0]);
+                const shares={}; validators.forEach(v=>shares[v.name]=BigInt(v.weight));
+                const total=validators.reduce((s,v)=>s+Number(v.weight),0);
+                if (threshold>total) return alert('threshold too high');
+                const config={ mode:'proposer-based', threshold:BigInt(threshold), validators: validators.map(v=>v.name), shares};
+                const serverTxs = validators.map((v,idx)=>({type:'importReplica', entityId:newEntity, signerId:v.name, data:{config, isProposer: idx===0}}));
+                let outs = XLN.processServerInput(xlnEnv,{serverTxs, entityInputs:[]});
+                while(outs.length) outs = XLN.processServerInput(xlnEnv,{serverTxs:[], entityInputs:outs});
+                alert(`Entity ${newEntity} created`);
+                newEntity=''; validators=[{name:'alice',weight:1},{name:'bob',weight:1},{name:'carol',weight:1}]; threshold=2;
+                replicaKey=[...xlnEnv.replicas.keys()][0];
+            }
+
+            function go(step){
+                const len=history.length; if(!len) return;
+                if(step==='start') currentTimeIndex=0;
+                else if(step==='live') currentTimeIndex=-1;
+                else if(step==='prev') {
+                    if(currentTimeIndex===-1) currentTimeIndex=Math.max(0,len-2);
+                    else currentTimeIndex=Math.max(0,currentTimeIndex-1);
+                } else if(step==='next') {
+                    if(currentTimeIndex===-1) return;
+                    else if(currentTimeIndex<len-2) currentTimeIndex++;
+                    else currentTimeIndex=-1;
+                }
+            }
+
+            function sliderChange(e){
+                const v=Number(e.target.value);
+                if(v>maxIdx) currentTimeIndex=-1; else currentTimeIndex=v; }
+
+            // keyboard shortcuts
+            onMount(()=>{
+                const kb = e=>{
+                    if(['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+                    if(e.key==='ArrowLeft') go('prev');
+                    if(e.key==='ArrowRight') go('next');
+                    if(e.key==='Home') go('start');
+                    if(e.key==='End') go('live');
+                };
+                window.addEventListener('keydown',kb);
+                return ()=>window.removeEventListener('keydown',kb);
+            });
+
+            // Tab state
+            let tab = 'controls';
+        </script>
+
+        <!-- =================================================================================== -->
+        <!--                                  MARKUP                                            -->
+        <!-- =================================================================================== -->
+
+        <div class="reload-indicator" id="reloadIndicator">🔄 Reloading...</div>
+
+        <div class="container">
+            <!-- SERVER I/O -->
+            {#if xlnEnv}
+                <ServerIO {currentTimeIndex} />
+            {/if}
+
+            <!-- ENTITY FILTER -->
+            <div class="entity-filter">
+                <label for="entityFilter">📂 Filter Entities:</label>
+                <select bind:value={entityFilter} id="entityFilter">
+                    <option value="all">All Entities</option>
+                    {#each entityTypes as t}
+                        <option value={t}>{t.toUpperCase()}</option>
+                    {/each}
+                </select>
+            </div>
+
+            <!-- ENTITIES GRID -->
+            <div class="entities-grid">
+                {#each replicasToShow as [key, rep] (key)}
+                    <EntityCard {rep} {currentTimeIndex}/>
+                {/each}
+            </div>
+
+            <!-- TABS: Controls & Formation -->
+            <div class="actionable-tabs-container">
+                <div class="tabs-header">
+                    <button on:click={()=>tab='controls'} class:active={tab==='controls'} class="tab-button">🎮 Interactive Controls</button>
+                    <button on:click={()=>tab='formation'} class:active={tab==='formation'} class="tab-button">🏗️ Entity Formation</button>
+                </div>
+                {#if tab==='controls'}
+                    <InteractiveControls />
+                {:else}
+                    <EntityFormation />
+                {/if}
+            </div>
+        </div>
+
+        <!-- TIME MACHINE -->
+        <TimeMachine />
+
+        <style>
+        </style>
+
+        <!-- TODO: Inline stub components or import actual component code in future iterations -->
+    </script>
+</body>
+</html> 

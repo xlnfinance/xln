@@ -32,17 +32,36 @@ const randomBytes = isBrowser ?
   } :
   require('crypto').randomBytes;
 
-// Buffer compatibility
-const Buffer = isBrowser ?
-  {
-    from: (data: any) => new Uint8Array(data),
-    isBuffer: (obj: any) => obj instanceof Uint8Array
-  } :
-  require('buffer').Buffer;
+// A more robust Buffer polyfill for the browser.
+let Buffer: any;
+if (isBrowser) {
+  // This polyfill provides the 'from' and 'toString' methods needed by our snapshot coder.
+  Buffer = {
+    from: (data: any, encoding: string = 'utf8') => {
+      if (typeof data === 'string') {
+        return new TextEncoder().encode(data);
+      }
+      return new Uint8Array(data);
+    },
+    // The 'decode' part is handled by TextDecoder in the browser.
+    // We don't need a full Buffer implementation, just what the coder uses.
+  };
+
+  // Polyfill for buffer.toString() which the decoder uses.
+  // We attach the decoding logic to the Uint8Array prototype.
+  (Uint8Array.prototype as any).toString = function(encoding: string = 'utf8') {
+    return new TextDecoder().decode(this);
+  };
+
+  // Make our minimal Buffer object global for other scripts.
+  (window as any).Buffer = Buffer; 
+} else {
+  // We're in Node.js, just use the real Buffer.
+  Buffer = require('buffer').Buffer;
+}
 
 // RLP compatibility (simplified for browser)
-const encode = isBrowser ? (data: any) => new Uint8Array() : require('rlp').encode;
-const decode = isBrowser ? (data: any) => [] : require('rlp').decode;
+
 
 // Debug compatibility
 const debug = isBrowser ?
@@ -74,6 +93,23 @@ const log = {
 };
 
 
+
+// This code works in both Node.js and the browser
+import { Level } from 'level';
+import { encode, decode } from './snapshot-coder.js';
+
+// --- Database Setup ---
+const db: Level<Buffer, Buffer> = new Level('xln-snapshots', { valueEncoding: 'buffer', keyEncoding: 'binary' });
+
+// Function to clear the database and reset in-memory history
+const clearDatabase = async () => {
+  console.log('Clearing database and resetting history...');
+  await db.clear();
+  resetHistory(); // a function you already have
+  console.log('Database cleared.');
+  // After calling this, you might need to restart the process or reload the page
+  // to re-initialize the environment from a clean state.
+};
 
 
 
@@ -245,6 +281,17 @@ const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: Enti
   };
   
   envHistory.push(snapshot);
+
+  // --- PERSISTENCE ---
+  // Save the newly created snapshot to the database.
+  db.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot)).catch(err => {
+    console.error(`🔥 Failed to save snapshot ${snapshot.height} to LevelDB`, err);
+  });
+  // Also save the latest height to make it easy to find on startup.
+  db.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString())).catch(err => {
+    console.error('🔥 Failed to save latest_height to LevelDB', err);
+  });
+  
   if (DEBUG) {
     console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);
     if (serverInput.serverTxs.length > 0) {
@@ -621,19 +668,22 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
     // Proposer creates new timestamp for this frame
     const newTimestamp = env.timestamp;
     
+    const frameHash = `frame_${entityReplica.state.height + 1}_${newTimestamp}`;
+    const selfSignature = `sig_${entityReplica.signerId}_${frameHash}`;
+
     entityReplica.proposal = {
       height: entityReplica.state.height + 1,
       txs: [...entityReplica.mempool],
-      hash: `frame_${entityReplica.state.height + 1}_${newTimestamp}`,
+      hash: frameHash,
       newState: {
         ...newEntityState,
         height: entityReplica.state.height + 1,
         timestamp: newTimestamp // Set new deterministic timestamp in proposed state
       },
-      signatures: new Map<string, string>()
+      signatures: new Map<string, string>([[entityReplica.signerId, selfSignature]]) // Proposer signs immediately
     };
     
-    if (DEBUG) console.log(`    → Auto-proposing frame ${entityReplica.proposal.hash} with ${entityReplica.proposal.txs.length} txs`);
+    if (DEBUG) console.log(`    → Auto-proposing frame ${entityReplica.proposal.hash} with ${entityReplica.proposal.txs.length} txs and self-signature.`);
     
     // Send proposal to all validators (except self)
     entityReplica.state.config.validators.forEach(validatorId => {
@@ -779,18 +829,9 @@ const processUntilEmpty = (env: Env, inputs: EntityInput[]) => {
 };
 
 // Time machine utility functions
-const resetHistory = () => { envHistory.length = 0; };
+const resetHistory = () => envHistory.length = 0;
 
-const runDemo = () => {
-  // Clear history when starting a new demo
-  resetHistory();
-  
-  const env: Env = { 
-    replicas: new Map(), 
-    height: 0, 
-    timestamp: Date.now(),
-    serverInput: { serverTxs: [], entityInputs: [] }
-  };
+const runDemo = (env: Env): Env => {
   
   if (DEBUG) {
     console.log('🚀 Starting XLN Consensus Demo - Multi-Entity Test');
@@ -1090,35 +1131,87 @@ const runDemo = () => {
   return env;
 };
 
-const main = () => {
-  const env = runDemo();
+// This is the new, robust main function that replaces the old one.
+const main = async () => {
+  let env: Env | null = null;
+
+  try {
+    const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
+    const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
+
+    const promises = [];
+    for (let i = 0; i <= latestHeight; i++) {
+      promises.push(db.get(Buffer.from(`snapshot:${i}`)));
+    }
+
+    const results = await Promise.allSettled(promises);
+
+    const loadedSnapshots: EnvSnapshot[] = [];
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        try {
+          loadedSnapshots.push(decode(result.value));
+        } catch (e) {
+          console.warn('Failed to decode a snapshot, skipping.', e);
+        }
+      }
+    }
+
+    envHistory = loadedSnapshots;
+
+    if (envHistory.length > 0) {
+      const latestSnapshot = envHistory[envHistory.length - 1];
+      env = {
+        replicas: latestSnapshot.replicas,
+        height: latestSnapshot.height,
+        timestamp: latestSnapshot.timestamp,
+        serverInput: latestSnapshot.serverInput,
+      };
+      console.log(`✅ History restored. Server is at height ${env.height} with ${envHistory.length} snapshots.`);
+    }
+
+  } catch (error: any) {
+    if (error.code !== 'LEVEL_NOT_FOUND') {
+      console.error('An unexpected error occurred while loading state from LevelDB:', error);
+      // We don't re-throw here, so we can fall through to creating a new env.
+    }
+  }
+
+  // If env is still null (e.g., DB is empty or latest_height is missing), it's a fresh start.
+  if (!env) {
+    console.log('No saved state found, creating a new environment.');
+    env = {
+      replicas: new Map(),
+      height: 0,
+      timestamp: Date.now(),
+      serverInput: { serverTxs: [], entityInputs: [] }
+    };
+  }
+
   return env;
 };
-
-// Auto-run demo
-export const env = main();
 
 // === TIME MACHINE API ===
 const getHistory = () => envHistory;
 const getSnapshot = (index: number) => index >= 0 && index < envHistory.length ? envHistory[index] : null;
 const getCurrentHistoryIndex = () => envHistory.length - 1;
 
-export { runDemo, processServerInput, main, getHistory, getSnapshot, resetHistory, getCurrentHistoryIndex };
+export { runDemo, processServerInput, main, getHistory, getSnapshot, resetHistory, getCurrentHistoryIndex, clearDatabase };
 
-// Browser compatibility
-if (isBrowser) {
-  (window as any).xlnEnv = env;
-  (window as any).XLN = { 
-    runDemo, 
-    processServerInput, 
-    main, 
-    getHistory, 
-    getSnapshot, 
-    resetHistory, 
-    getCurrentHistoryIndex 
-  };
-} else {
-  (global as any).env = env;
+// The browser-specific auto-execution logic has been removed.
+// The consuming application (e.g., index.html) is now responsible for calling main().
+
+// --- Node.js auto-execution for local testing ---
+// This part will only run when the script is executed directly in Node.js.
+if (!isBrowser) {
+  main().then(env => {
+    if (env) {
+      console.log('✅ Node.js environment initialized. Running demo for local testing...');
+      runDemo(env);
+    }
+  }).catch(error => {
+    console.error('❌ An error occurred during Node.js auto-execution:', error);
+  });
 }
 
 
