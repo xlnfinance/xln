@@ -119,7 +119,7 @@ interface Proposal {
   action: ProposalAction;
   votes: Map<string, 'yes' | 'no'>;
   status: 'pending' | 'executed' | 'rejected';
-  created: number; // timestamp
+  created: number; // entity timestamp when proposal was created (deterministic)
 }
 
 interface ProposalAction {
@@ -137,6 +137,7 @@ interface EntityTx {
 // === STATE ===
 interface EntityState {
   height: number;
+  timestamp: number;
   nonces: Map<string, number>;
   messages: string[];
   proposals: Map<string, Proposal>;
@@ -157,6 +158,7 @@ interface EntityReplica {
   state: EntityState;
   mempool: EntityTx[];
   proposal?: ProposedEntityFrame;
+  lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   isProposer: boolean;
 }
 
@@ -173,6 +175,7 @@ interface EnvSnapshot {
   timestamp: number;
   replicas: Map<string, EntityReplica>;
   serverInput: ServerInput;
+  serverOutputs: EntityInput[];
   description: string;
 }
 
@@ -186,6 +189,7 @@ const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
     signerId: replica.signerId,
     state: {
       height: replica.state.height,
+      timestamp: replica.state.timestamp,
       nonces: new Map(replica.state.nonces),
       messages: [...replica.state.messages],
       proposals: new Map(Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
@@ -205,11 +209,18 @@ const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
       newState: replica.proposal.newState,
       signatures: new Map(replica.proposal.signatures)
     } : undefined,
+    lockedFrame: replica.lockedFrame ? {
+      height: replica.lockedFrame.height,
+      txs: [...replica.lockedFrame.txs],
+      hash: replica.lockedFrame.hash,
+      newState: replica.lockedFrame.newState,
+      signatures: new Map(replica.lockedFrame.signatures)
+    } : undefined,
     isProposer: replica.isProposer
   };
 };
 
-const captureSnapshot = (env: Env, serverInput: ServerInput, description: string): void => {
+const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: EntityInput[], description: string): void => {
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
@@ -225,6 +236,11 @@ const captureSnapshot = (env: Env, serverInput: ServerInput, description: string
         precommits: input.precommits ? new Map(input.precommits) : undefined
       }))
     },
+    serverOutputs: serverOutputs.map(output => ({
+      ...output,
+      entityTxs: output.entityTxs ? [...output.entityTxs] : undefined,
+      precommits: output.precommits ? new Map(output.precommits) : undefined
+    })),
     description
   };
   
@@ -311,13 +327,13 @@ const mergeEntityInputs = (entityInputs: EntityInput[]): EntityInput[] => {
 };
 
 // === PROPOSAL SYSTEM ===
-const generateProposalId = (action: ProposalAction, proposer: string, env: Env): string => {
-  // Create deterministic hash from proposal data
+const generateProposalId = (action: ProposalAction, proposer: string, entityState: EntityState): string => {
+  // Create deterministic hash from proposal data using entity timestamp
   const proposalData = JSON.stringify({
     type: action.type,
     data: action.data,
     proposer,
-    timestamp: env.timestamp
+    timestamp: entityState.timestamp // Deterministic across all validators
   });
   
   const hash = createHash('sha256').update(proposalData).digest('hex');
@@ -371,7 +387,7 @@ const applyEntityTx = (env: Env, entityState: EntityState, entityTx: EntityTx): 
   
   if (entityTx.type === 'propose') {
     const { action, proposer } = entityTx.data;
-    const proposalId = generateProposalId(action, proposer, env);
+    const proposalId = generateProposalId(action, proposer, entityState);
     
     if (DEBUG) console.log(`    📝 Creating proposal ${proposalId} by ${proposer}: ${action.data.message}`);
     
@@ -381,7 +397,7 @@ const applyEntityTx = (env: Env, entityState: EntityState, entityTx: EntityTx): 
       action,
       votes: new Map([[proposer, 'yes']]), // Proposer auto-votes yes
       status: 'pending',
-      created: env.timestamp
+      created: entityState.timestamp // Use deterministic entity timestamp
     };
     
     // Check if proposer has enough voting power to execute immediately
@@ -503,6 +519,7 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
         height: entityReplica.state.height + 1
       };
       entityReplica.mempool.length = 0;
+      entityReplica.lockedFrame = undefined; // Release lock after commit
       if (DEBUG) console.log(`    → Applied commit, new state: ${entityReplica.state.messages.length} messages, height: ${entityReplica.state.height}`);
       
       // Return early - commit notifications don't trigger further processing
@@ -515,6 +532,10 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
       (entityReplica.state.config.mode === 'gossip-based' && entityReplica.isProposer))) {
     const frameSignature = `sig_${entityReplica.signerId}_${entityInput.proposedFrame.hash}`;
     const config = entityReplica.state.config;
+    
+    // Lock to this frame (CometBFT style)
+    entityReplica.lockedFrame = entityInput.proposedFrame;
+    if (DEBUG) console.log(`    → Validator locked to frame ${entityInput.proposedFrame.hash.slice(0,10)}...`);
     
     if (config.mode === 'gossip-based') {
       // Send precommit to all validators
@@ -574,6 +595,7 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
       // Clear state (mutable)
       entityReplica.mempool.length = 0;
       entityReplica.proposal = undefined;
+      entityReplica.lockedFrame = undefined; // Release lock after commit
       
       // Notify all validators
       entityReplica.state.config.validators.forEach(validatorId => {
@@ -596,27 +618,33 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
     // Compute new state once during proposal
     const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
     
+    // Proposer creates new timestamp for this frame
+    const newTimestamp = env.timestamp;
+    
     entityReplica.proposal = {
       height: entityReplica.state.height + 1,
       txs: [...entityReplica.mempool],
-      hash: `frame_${entityReplica.state.height + 1}_${env.timestamp}`,
+      hash: `frame_${entityReplica.state.height + 1}_${newTimestamp}`,
       newState: {
         ...newEntityState,
-        height: entityReplica.state.height + 1
+        height: entityReplica.state.height + 1,
+        timestamp: newTimestamp // Set new deterministic timestamp in proposed state
       },
       signatures: new Map<string, string>()
     };
     
     if (DEBUG) console.log(`    → Auto-proposing frame ${entityReplica.proposal.hash} with ${entityReplica.proposal.txs.length} txs`);
     
-    // Send proposal to all validators
+    // Send proposal to all validators (except self)
     entityReplica.state.config.validators.forEach(validatorId => {
-      entityOutbox.push({
-        entityId: entityInput.entityId,
-        signerId: validatorId,
-        proposedFrame: entityReplica.proposal!,
-        entityTxs: entityReplica.proposal!.txs
-      });
+      if (validatorId !== entityReplica.signerId) {
+        entityOutbox.push({
+          entityId: entityInput.entityId,
+          signerId: validatorId,
+          proposedFrame: entityReplica.proposal!
+          // Note: Don't send entityTxs separately - they're already in proposedFrame.txs
+        });
+      }
     });
   } else if (entityReplica.isProposer && entityReplica.mempool.length === 0 && !entityReplica.proposal) {
     if (DEBUG) console.log(`    ⚠️  CORNER CASE: Proposer with empty mempool - no auto-propose`);
@@ -675,6 +703,7 @@ const processServerInput = (env: Env, serverInput: ServerInput): EntityInput[] =
         signerId: serverTx.signerId,
         state: {
           height: 0,
+          timestamp: env.timestamp,
           nonces: new Map(),
           messages: [],
           proposals: new Map(),
@@ -719,8 +748,8 @@ const processServerInput = (env: Env, serverInput: ServerInput): EntityInput[] =
   env.serverInput.serverTxs.length = 0;
   env.serverInput.entityInputs.length = 0;
   
-  // Capture snapshot with the actual processed input
-  captureSnapshot(env, processedInput, inputDescription);
+  // Capture snapshot with the actual processed input and outputs
+  captureSnapshot(env, processedInput, entityOutbox, inputDescription);
   
   if (DEBUG && entityOutbox.length > 0) {
     console.log(`📤 Outputs: ${entityOutbox.length} messages`);
