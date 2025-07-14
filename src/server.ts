@@ -488,7 +488,29 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
     if (DEBUG) console.log(`    ⚠️  CORNER CASE: Empty transaction array received - no mempool changes`);
   }
   
-  // Handle proposed frame (PROPOSE phase)
+  // Handle commit notifications FIRST (when receiving finalized frame from proposer)
+  if (entityInput.precommits?.size && entityInput.proposedFrame && !entityReplica.proposal) {
+    const signers = Array.from(entityInput.precommits.keys());
+    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
+    
+    if (totalPower >= entityReplica.state.config.threshold) {
+      // This is a commit notification from proposer, apply the frame
+      if (DEBUG) console.log(`    → Received commit notification with ${entityInput.precommits.size} signatures`);
+      
+      // Apply the committed frame with incremented height
+      entityReplica.state = {
+        ...entityInput.proposedFrame.newState,
+        height: entityReplica.state.height + 1
+      };
+      entityReplica.mempool.length = 0;
+      if (DEBUG) console.log(`    → Applied commit, new state: ${entityReplica.state.messages.length} messages, height: ${entityReplica.state.height}`);
+      
+      // Return early - commit notifications don't trigger further processing
+      return entityOutbox;
+    }
+  }
+  
+  // Handle proposed frame (PROPOSE phase) - only if not a commit notification
   if (entityInput.proposedFrame && (!entityReplica.proposal || 
       (entityReplica.state.config.mode === 'gossip-based' && entityReplica.isProposer))) {
     const frameSignature = `sig_${entityReplica.signerId}_${entityInput.proposedFrame.hash}`;
@@ -566,24 +588,7 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
     }
   }
   
-  // Handle commit notifications (when receiving finalized frame from proposer)
-  if (entityInput.precommits?.size && entityInput.proposedFrame && !entityReplica.proposal) {
-    const signers = Array.from(entityInput.precommits.keys());
-    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
-    
-    if (totalPower >= entityReplica.state.config.threshold) {
-      // This is a commit notification from proposer, apply the frame
-      if (DEBUG) console.log(`    → Received commit notification with ${entityInput.precommits.size} signatures`);
-      
-      // Apply the committed frame with incremented height
-      entityReplica.state = {
-        ...entityInput.proposedFrame.newState,
-        height: entityReplica.state.height + 1
-      };
-      entityReplica.mempool.length = 0;
-      if (DEBUG) console.log(`    → Applied commit, new state: ${entityReplica.state.messages.length} messages, height: ${entityReplica.state.height}`);
-    }
-  }
+  // Commit notifications are now handled at the top of the function
   
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
   if (entityReplica.isProposer && entityReplica.mempool.length > 0 && !entityReplica.proposal) {
