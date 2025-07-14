@@ -1,0 +1,1826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XLN Sonnet Wallet - Modern Self-Contained Edition</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html {
+            overflow-x: hidden;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+            overflow-x: hidden;
+            padding-bottom: 70px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status-bar {
+            background: rgba(255,255,255,0.1);
+            padding: 10px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            color: white;
+            font-family: monospace;
+            backdrop-filter: blur(10px);
+        }
+
+        .entity-filter {
+            background: rgba(255,255,255,0.9);
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .entity-filter label {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .entity-filter select {
+            padding: 5px 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            background: white;
+        }
+
+        .entities-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 15px;
+            margin-bottom: 30px;
+        }
+
+        .entity-card {
+            background: white;
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+            width: 100%;
+        }
+
+        .entity-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .entity-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        .entity-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #2c3e50;
+            text-transform: uppercase;
+        }
+
+        .entity-mode {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: bold;
+            color: white;
+        }
+
+        .mode-proposer-based {
+            background: #3498db;
+        }
+
+        .mode-gossip-based {
+            background: #9b59b6;
+        }
+
+        .threshold-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 8px;
+            margin-top: 10px;
+            font-size: 0.85em;
+        }
+
+        .power-bar {
+            width: 100%;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .power-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            transition: width 0.3s ease;
+        }
+
+        .replica-stats {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+
+        .messages-section {
+            margin-top: 15px;
+            max-height: 280px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            background: #f8f9fa;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+            font-size: 0.85em;
+        }
+
+        .message {
+            margin: 5px 0;
+            padding: 8px;
+            font-size: 0.85em;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            background: #fff;
+            line-height: 1.4;
+        }
+
+        .message.collective {
+            background: #e3f2fd;
+            padding: 5px;
+            border-radius: 5px;
+            font-weight: bold;
+            color: #1565c0;
+        }
+
+        .server-io-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .server-column {
+            background: rgba(255,255,255,0.95);
+            border: 2px solid #007bff;
+            border-radius: 10px;
+            padding: 15px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85em;
+        }
+
+        .server-column-header {
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .server-section {
+            margin-bottom: 20px;
+        }
+
+        .server-section h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .input-item {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+            font-size: 0.85em;
+            line-height: 1.4;
+        }
+
+        .no-inputs {
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        .actionable-tabs-container {
+            background: rgba(255,255,255,0.95);
+            border: 2px solid #007bff;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .tabs-header {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .tab-button {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: 15px 20px;
+            font-size: 1em;
+            font-weight: 600;
+            color: #6c757d;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab-button:hover {
+            background: rgba(0, 123, 255, 0.1);
+            color: #007bff;
+        }
+
+        .tab-button.active {
+            background: white;
+            color: #007bff;
+            border-bottom: 3px solid #007bff;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .control-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group label {
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #34495e;
+        }
+
+        .control-group select,
+        .control-group input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #545b62;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #1e7e34;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+
+        .btn-small {
+            padding: 6px 10px;
+            font-size: 12px;
+            min-width: auto;
+        }
+
+        .simple-formation-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .formation-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .formation-group label {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 0.9em;
+        }
+
+        .formation-group input, .formation-group select {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            transition: border-color 0.3s ease;
+        }
+
+        .formation-group input:focus, .formation-group select:focus {
+            outline: none;
+            border-color: #28a745;
+        }
+
+        .validators-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .validators-section h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .validator-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+
+        .validator-name {
+            flex: 2;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .validator-weight {
+            flex: 1;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .threshold-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .threshold-section label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        #thresholdSlider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+            margin-bottom: 10px;
+        }
+
+        .time-machine {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(15, 15, 15, 0.96);
+            backdrop-filter: blur(20px);
+            padding: 12px 20px;
+            border-top: 1px solid #007bff;
+            z-index: 1000;
+            box-shadow: 0 -2px 15px rgba(0,0,0,0.4);
+        }
+
+        .time-machine-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 15px;
+        }
+
+        .time-info-compact {
+            display: flex;
+            align-items: center;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.75em;
+            color: #aaa;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .time-info-compact.current {
+            color: #00ff88;
+            font-weight: bold;
+        }
+
+        .time-nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .time-utility-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .time-btn-compact {
+            background: #2a2a2a;
+            color: white;
+            border: 1px solid #444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75em;
+            transition: all 0.15s ease;
+            min-width: 28px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .time-btn-compact:hover {
+            background: #007bff;
+            border-color: #007bff;
+            transform: translateY(-1px);
+        }
+
+        .time-btn-compact.live {
+            background: #00ff88;
+            color: #000;
+            border-color: #00ff88;
+            font-weight: bold;
+            padding: 4px 10px;
+            min-width: 45px;
+        }
+
+        .time-btn-mini {
+            background: #333;
+            color: #aaa;
+            border: 1px solid #555;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.7em;
+            transition: all 0.15s ease;
+            min-width: 22px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .time-btn-mini:hover {
+            background: #555;
+            color: white;
+        }
+
+        .time-btn-mini.warning {
+            background: #ffc107;
+            color: #212529;
+            border-color: #ffc107;
+        }
+
+        .time-slider-container {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            --progress: 0%;
+        }
+
+        .time-slider {
+            width: 100%;
+            height: 4px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, 
+                #007bff 0%, 
+                #00ff88 var(--progress), 
+                #333 var(--progress), 
+                #555 100%);
+            outline: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+            transition: background 0.1s ease;
+        }
+
+        .time-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #007bff, #0056b3);
+            cursor: pointer;
+            box-shadow: 0 1px 4px rgba(0,123,255,0.4);
+            transition: all 0.2s ease;
+        }
+
+        .reload-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 1000;
+        }
+
+        .reload-indicator.show {
+            opacity: 1;
+        }
+
+        .debug-log {
+            background: rgba(0,0,0,0.8);
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 0.8em;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="reload-indicator" id="reloadIndicator">🔄 Reloading...</div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🧠 XLN Sonnet Wallet</h1>
+            <div class="status-bar" id="statusBar">❌ Disconnected</div>
+        </div>
+
+        <div class="server-io-container" id="serverIOContainer" style="display: none;">
+            <div class="server-column">
+                <div class="server-column-header">
+                    📨 Server Input (What's happening this tick)
+                    <span id="serverInputStatus"></span>
+                </div>
+                
+                <div class="server-section">
+                    <h4>🖥️ Server Transactions</h4>
+                    <div id="serverTxsList"></div>
+                </div>
+                
+                <div class="server-section">
+                    <h4>🔄 Entity Inputs</h4>
+                    <div id="entityInputsList"></div>
+                </div>
+            </div>
+            
+            <div class="server-column">
+                <div class="server-column-header">
+                    📤 Server Output (What's being sent and where)
+                    <span id="serverOutputStatus"></span>
+                </div>
+                
+                <div class="server-section">
+                    <h4>🚀 Entity Outputs</h4>
+                    <div id="entityOutputsList"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="entity-filter">
+            <label for="entityFilter">📂 Filter Entities:</label>
+            <select id="entityFilter">
+                <option value="all">All Entities</option>
+            </select>
+        </div>
+
+        <div class="entities-grid" id="entitiesGrid">
+            <!-- Entity cards will be populated here -->
+        </div>
+
+        <div class="actionable-tabs-container">
+            <div class="tabs-header">
+                <button class="tab-button active" onclick="switchTab('controls')" id="controlsTab">
+                    🎮 Interactive Controls
+                </button>
+                <button class="tab-button" onclick="switchTab('formation')" id="formationTab">
+                    🏗️ Entity Formation
+                </button>
+            </div>
+            
+            <div id="controlsTabContent" class="tab-content active">
+                <div class="control-panel">
+                    <div class="control-group">
+                        <label>📍 Select Replica:</label>
+                        <select id="replicaSelect"></select>
+                    </div>
+                    <div class="control-group">
+                        <label>⚡ Select Action:</label>
+                        <select id="actionSelect">
+                            <option value="chat">💬 Chat Message</option>
+                            <option value="propose">📝 Create Proposal</option>
+                            <option value="vote">🗳️ Vote on Proposal</option>
+                        </select>
+                    </div>
+                    <div class="control-group" id="inputGroup">
+                        <label id="inputLabel">💬 Message:</label>
+                        <input type="text" id="inputField" placeholder="Enter your message...">
+                    </div>
+                    <div class="control-group" id="proposalGroup" style="display: none;">
+                        <label>📝 Proposal:</label>
+                        <input type="text" id="proposalField" placeholder="Enter proposal text...">
+                    </div>
+                    <div class="control-group" id="voteGroup" style="display: none;">
+                        <label>🗳️ Vote on Proposal:</label>
+                        <select id="proposalSelect"></select>
+                        <select id="voteChoice">
+                            <option value="yes">✅ Yes</option>
+                            <option value="no">❌ No</option>
+                        </select>
+                    </div>
+                    <div class="button-group">
+                        <button class="btn btn-primary" onclick="executeAction()">🚀 Execute Action</button>
+                        <button class="btn btn-secondary" onclick="refreshView()">🔄 Refresh View</button>
+                        <button class="btn btn-secondary" onclick="simulateChat()">🎯 Simulate Chat</button>
+                        <button class="btn btn-secondary" onclick="simulateStress()">💪 Stress Test</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="formationTabContent" class="tab-content">
+                <div class="simple-formation-panel">
+                    <div class="formation-group">
+                        <label for="entityNameInput">🏷️ Entity Name:</label>
+                        <input type="text" id="entityNameInput" placeholder="e.g., trading, chat, governance">
+                    </div>
+                    
+                    <div class="validators-section">
+                        <h4>👥 Validators:</h4>
+                        <div id="validatorsList">
+                            <div class="validator-row">
+                                <input type="text" class="validator-name" placeholder="alice" value="alice">
+                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                            </div>
+                            <div class="validator-row">
+                                <input type="text" class="validator-name" placeholder="bob" value="bob">
+                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                            </div>
+                            <div class="validator-row">
+                                <input type="text" class="validator-name" placeholder="carol" value="carol">
+                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary" onclick="addValidatorRow()">➕ Add New Validator</button>
+                    </div>
+                    
+                    <div class="threshold-section">
+                        <label for="thresholdSlider">🎯 Threshold: <span id="thresholdValue">2</span></label>
+                        <input type="range" id="thresholdSlider" min="1" max="10" value="2" oninput="updateThreshold()">
+                        <div class="threshold-info">
+                            <span>Total Weight: <span id="totalWeight">3</span></span>
+                        </div>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button class="btn btn-primary" onclick="createSimpleEntity()">🚀 Create Entity</button>
+                        <button class="btn btn-secondary" onclick="clearSimpleForm()">🗑️ Clear Form</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="debug-log" id="debugLog" style="display: none;">
+            <strong>📊 Debug Log:</strong><br>
+            <div id="debugLogContent"></div>
+        </div>
+    </div>
+
+    <!-- Fixed Time Machine Bar -->
+    <div class="time-machine">
+        <div class="time-machine-main">
+            <div class="time-info-compact" id="timeInfo">
+                <span>⏰ No history yet</span>
+            </div>
+            <div class="time-nav-controls">
+                <button class="time-btn-compact" onclick="stepBackward()" title="Step Back (← arrow)">⏪</button>
+                <button class="time-btn-compact" onclick="stepForward()" title="Step Forward (→ arrow)">⏩</button>
+                <button class="time-btn-compact live" onclick="goToHistoryEnd()" title="Go to Current (End key)">⚡ LIVE</button>
+            </div>
+            <div class="time-utility-controls">
+                <button class="time-btn-mini" onclick="goToHistoryStart()" title="Go to Start (Home key)">⏮️</button>
+                <button class="time-btn-mini warning" onclick="resetTimeMachine()" title="Clear History">🗑️</button>
+            </div>
+        </div>
+        <div class="time-slider-container">
+            <input type="range" id="timeSlider" class="time-slider" min="0" max="0" value="0" disabled>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import XLN module
+        import * as XLN from './dist/server.js';
+
+        // App State - Functional approach with immutable state
+        const state = {
+            xlnEnv: null,
+            currentTimeIndex: -1,
+            lastModified: null,
+            logs: [],
+            selectedEntity: 'all',
+            selectedReplica: '',
+            selectedAction: 'chat'
+        };
+
+        // Logging system with functional approach
+        const addLog = (message, type = 'info') => {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = { timestamp, message, type };
+            state.logs = [...state.logs.slice(-99), logEntry]; // Keep last 100 logs
+            
+            console.log(`[${timestamp}] ${message}`);
+            updateDebugLog();
+        };
+
+        const updateDebugLog = () => {
+            const debugLog = document.getElementById('debugLog');
+            const debugLogContent = document.getElementById('debugLogContent');
+            
+            if (state.logs.length > 0) {
+                debugLog.style.display = 'block';
+                debugLogContent.textContent = state.logs.slice(-10)
+                    .map(log => `[${log.timestamp}] ${log.message}`)
+                    .join('\n');
+            } else {
+                debugLog.style.display = 'none';
+            }
+        };
+
+        // Auto-reload detection
+        const checkForChanges = async () => {
+            try {
+                const response = await fetch('./dist/server.js', { method: 'HEAD' });
+                const modified = response.headers.get('last-modified');
+                
+                if (state.lastModified && modified !== state.lastModified) {
+                    const indicator = document.getElementById('reloadIndicator');
+                    indicator.classList.add('show');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 500);
+                }
+                state.lastModified = modified;
+            } catch (error) {
+                addLog('Auto-reload check failed: ' + error.message, 'error');
+            }
+        };
+
+        // Initialize XLN environment
+        const initializeEnvironment = async () => {
+            try {
+                state.xlnEnv = await XLN.main();
+                window.xlnEnv = state.xlnEnv;
+                updateStatusBar();
+                addLog('🎯 XLN Environment loaded successfully', 'success');
+                renderAll();
+                return true;
+            } catch (error) {
+                addLog('❌ Failed to load XLN environment: ' + error.message, 'error');
+                updateStatusBar();
+                return false;
+            }
+        };
+
+        // UI Update Functions - Pure functions that don't mutate state
+        const updateStatusBar = () => {
+            const statusBar = document.getElementById('statusBar');
+            if (state.xlnEnv) {
+                const entityCount = new Set(Array.from(state.xlnEnv.replicas.keys()).map(key => key.split(':')[0])).size;
+                statusBar.textContent = `✅ Connected | Height: ${state.xlnEnv.height} | Entities: ${entityCount}`;
+            } else {
+                statusBar.textContent = '❌ Disconnected';
+            }
+        };
+
+        const getFilteredReplicas = () => {
+            if (!state.xlnEnv) return new Map();
+            
+            let replicasToShow, snapshot;
+            let isHistorical = false;
+            
+            if (state.currentTimeIndex >= 0) {
+                snapshot = XLN.getSnapshot(state.currentTimeIndex);
+                if (snapshot) {
+                    replicasToShow = snapshot.replicas;
+                    isHistorical = true;
+                }
+            }
+            
+            if (!replicasToShow) {
+                replicasToShow = state.xlnEnv.replicas;
+                state.currentTimeIndex = -1;
+            }
+            
+            const filtered = new Map();
+            replicasToShow.forEach((replica, key) => {
+                if (state.selectedEntity === 'all' || replica.entityId === state.selectedEntity) {
+                    filtered.set(key, { ...replica, isHistorical });
+                }
+            });
+            
+            return filtered;
+        };
+
+        const renderEntityFilter = () => {
+            if (!state.xlnEnv) return;
+            
+            const entityFilter = document.getElementById('entityFilter');
+            const currentValue = entityFilter.value;
+            
+            const entityTypes = [...new Set(Array.from(state.xlnEnv.replicas.keys()).map(key => key.split(':')[0]))];
+            
+            entityFilter.innerHTML = '<option value="all">All Entities</option>';
+            entityTypes.forEach(entityType => {
+                const option = document.createElement('option');
+                option.value = entityType;
+                option.textContent = entityType.toUpperCase();
+                if (entityType === currentValue) option.selected = true;
+                entityFilter.appendChild(option);
+            });
+            
+            state.selectedEntity = entityFilter.value;
+        };
+
+        const renderServerData = () => {
+            const container = document.getElementById('serverIOContainer');
+            const serverTxsList = document.getElementById('serverTxsList');
+            const entityInputsList = document.getElementById('entityInputsList');
+            const entityOutputsList = document.getElementById('entityOutputsList');
+            const serverInputStatus = document.getElementById('serverInputStatus');
+            const serverOutputStatus = document.getElementById('serverOutputStatus');
+            
+            let serverInput, serverOutputs;
+            let isHistorical = false;
+            
+            if (state.currentTimeIndex >= 0) {
+                const snapshot = XLN.getSnapshot(state.currentTimeIndex);
+                if (snapshot) {
+                    serverInput = snapshot.serverInput;
+                    serverOutputs = snapshot.serverOutputs || [];
+                    isHistorical = true;
+                }
+            }
+            
+            if (!serverInput) {
+                const history = XLN.getHistory();
+                if (history.length > 0) {
+                    serverInput = history[history.length - 1].serverInput;
+                    serverOutputs = history[history.length - 1].serverOutputs || [];
+                }
+            }
+            
+            // Show container if we have data
+            container.style.display = (serverInput || serverOutputs?.length) ? 'grid' : 'none';
+            
+            // Update status indicators
+            const statusText = isHistorical ? ' 🕰️ Historical' : ' ⚡ Current';
+            serverInputStatus.textContent = statusText;
+            serverOutputStatus.textContent = statusText;
+            
+            // Render server transactions
+            serverTxsList.innerHTML = serverInput?.serverTxs.length ? 
+                serverInput.serverTxs.map(tx => `
+                    <div class="input-item">
+                        <strong>🖥️ ${tx.type}</strong>: ${tx.entityId}:${tx.signerId}
+                        ${tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
+                        ${tx.data.config ? `
+                            <br>⚙️ <strong>Config:</strong>
+                            <br>  • Mode: ${tx.data.config.mode}
+                            <br>  • Threshold: ${tx.data.config.threshold}
+                            <br>  • Validators: [${tx.data.config.validators.join(', ')}]
+                            <br>  • Voting Shares:
+                            ${Object.entries(tx.data.config.shares).map(([validator, shares]) => 
+                                `<br>    ${validator}: ${shares} shares`
+                            ).join('')}
+                        ` : ''}
+                    </div>
+                `).join('') : 
+                '<div class="no-inputs">No server transactions</div>';
+            
+            // Render entity inputs
+            entityInputsList.innerHTML = serverInput?.entityInputs.length ?
+                serverInput.entityInputs.map(input => `
+                    <div class="input-item">
+                        <strong>${input.entityId}:${input.signerId}</strong>
+                        ${input.entityTxs?.length ? `
+                            <br>📝 <strong>${input.entityTxs.length} transactions:</strong>
+                            ${input.entityTxs.map((tx, i) => {
+                                if (tx.type === 'chat') {
+                                    return `<br>  ${i+1}. 💬 Chat: "${tx.data.message}" (from: ${tx.data.from})`;
+                                } else if (tx.type === 'propose') {
+                                    return `<br>  ${i+1}. 📝 Propose: "${tx.data.action.data.message}" (by: ${tx.data.proposer})`;
+                                } else if (tx.type === 'vote') {
+                                    return `<br>  ${i+1}. 🗳️ Vote: ${tx.data.choice} on ${tx.data.proposalId.slice(0,12)}... (by: ${tx.data.voter})`;
+                                }
+                                return `<br>  ${i+1}. ${tx.type}`;
+                            }).join('')}
+                        ` : ''}
+                        ${input.proposedFrame ? `
+                            <br>${input.precommits?.size > 0 ? "📋 <strong>Commit Notification:</strong>" : "🎯 <strong>Proposed Frame:</strong>"}
+                            <br>  • Hash: ${input.proposedFrame.hash}
+                            <br>  • Height: ${input.proposedFrame.height}
+                            <br>  • Transactions: ${input.proposedFrame.txs.length}
+                            <br>  • Signatures: ${input.proposedFrame.signatures.size}
+                        ` : ''}
+                        ${input.precommits?.size > 0 ? `
+                            <br>✅ <strong>${input.precommits.size} precommits from:</strong>
+                            ${Array.from(input.precommits.entries()).map(([signerId, signature]) => 
+                                `<br>  • ${signerId}: ${signature.slice(0,16)}...`
+                            ).join('')}
+                        ` : ''}
+                    </div>
+                `).join('') :
+                '<div class="no-inputs">No entity inputs</div>';
+            
+            // Render entity outputs
+            entityOutputsList.innerHTML = serverOutputs?.length ?
+                serverOutputs.map((output, index) => `
+                    <div class="input-item">
+                        <strong>📤 ${index + 1}. → ${output.signerId}</strong>
+                        ${output.entityTxs?.length ? `
+                            <br>📝 <strong>${output.entityTxs.length} transactions:</strong>
+                            ${output.entityTxs.map((tx, i) => {
+                                if (tx.type === 'chat') {
+                                    return `<br>  ${i+1}. 💬 Chat: "${tx.data.message}" (from: ${tx.data.from})`;
+                                } else if (tx.type === 'propose') {
+                                    return `<br>  ${i+1}. 📝 Propose: "${tx.data.action.data.message}" (by: ${tx.data.proposer})`;
+                                } else if (tx.type === 'vote') {
+                                    return `<br>  ${i+1}. 🗳️ Vote: ${tx.data.choice} on ${tx.data.proposalId.slice(0,12)}... (by: ${tx.data.voter})`;
+                                }
+                                return `<br>  ${i+1}. ${tx.type}`;
+                            }).join('')}
+                        ` : ''}
+                        ${output.proposedFrame ? `
+                            <br>${output.precommits?.size > 0 ? "📋 <strong>Commit Notification:</strong>" : "🎯 <strong>Proposed Frame:</strong>"}
+                            <br>  • Hash: ${output.proposedFrame.hash}
+                            <br>  • Height: ${output.proposedFrame.height}
+                            <br>  • Transactions: ${output.proposedFrame.txs.length}
+                            <br>  • Signatures: ${output.proposedFrame.signatures.size}
+                        ` : ''}
+                        ${output.precommits?.size > 0 ? `
+                            <br>✅ <strong>${output.precommits.size} precommits:</strong>
+                            ${Array.from(output.precommits.entries()).map(([signerId, signature]) => 
+                                `<br>  • ${signerId}: ${signature.slice(0,16)}...`
+                            ).join('')}
+                        ` : ''}
+                    </div>
+                `).join('') :
+                '<div class="no-inputs">No entity outputs</div>';
+        };
+
+        const renderEntities = () => {
+            const entitiesGrid = document.getElementById('entitiesGrid');
+            const filteredReplicas = getFilteredReplicas();
+            
+            entitiesGrid.innerHTML = Array.from(filteredReplicas.entries()).map(([key, replica]) => {
+                const config = replica.state.config;
+                const modeClass = config.mode === 'proposer-based' ? 'mode-proposer-based' : 'mode-gossip-based';
+                const totalShares = Object.values(config.shares).reduce((sum, val) => sum + val, BigInt(0));
+                const thresholdPercent = ((Number(config.threshold) / Number(totalShares)) * 100).toFixed(1);
+                const shares = config.shares[replica.signerId] || BigInt(0);
+                const sharePercent = ((Number(shares) / Number(totalShares)) * 100).toFixed(1);
+                
+                return `
+                    <div class="entity-card">
+                        <div class="entity-header">
+                            <div class="entity-title">${replica.entityId}:${replica.signerId} ${replica.isHistorical ? '🕰️' : ''}</div>
+                            <div class="entity-mode ${modeClass}">${config.mode}</div>
+                        </div>
+                        
+                        <div class="threshold-info">
+                            <strong>Role:</strong> ${replica.isProposer ? '👑 Proposer' : '✅ Validator'}<br>
+                            <strong>Voting Power:</strong> ${shares} / ${totalShares} shares (${sharePercent}%)<br>
+                            <strong>Consensus Threshold:</strong> ${config.threshold} / ${totalShares} shares (${thresholdPercent}%)
+                            <div class="power-bar">
+                                <div class="power-fill" style="width: ${thresholdPercent}%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="replica-stats">
+                            <strong>📊 Replica State:</strong><br>
+                            <strong>📏 Frame Height: ${replica.state.height}</strong><br>
+                            <strong>📝 Mempool: ${replica.mempool.length} txs</strong>
+                            ${replica.mempool.length > 0 ? `<br>  ${replica.mempool.map((tx, i) => {
+                                if (tx.type === 'chat') return `${i+1}. 💬 "${tx.data.message}" (${tx.data.from})`;
+                                if (tx.type === 'propose') return `${i+1}. 📝 "${tx.data.action.data.message}" (${tx.data.proposer})`;
+                                if (tx.type === 'vote') return `${i+1}. 🗳️ ${tx.data.choice} on ${tx.data.proposalId.slice(0,8)}... (${tx.data.voter})`;
+                                return `${i+1}. ${tx.type}`;
+                            }).join('<br>  ')}` : ''}<br>
+                            <strong>💬 Messages: ${replica.state.messages.length}</strong><br>
+                            <strong>🗳️ Proposals: ${replica.state.proposals.size}</strong><br>
+                            <strong>🔢 Nonces:</strong> ${replica.state.nonces.size > 0 ? 
+                                Array.from(replica.state.nonces.entries()).map(([user, nonce]) => `${user}:${nonce}`).join(', ') : 
+                                'none'}<br>
+                            ${replica.proposal ? `<strong style="color: #28a745;">📝 Currently Proposing:</strong><br>
+                              • Height: ${replica.proposal.height}<br>
+                              • Hash: ${replica.proposal.hash}<br>
+                              • Txs: ${replica.proposal.txs.length}<br>
+                              • Signatures: ${replica.proposal.signatures.size}/${replica.state.config.validators.length}` : ''}
+                            ${replica.lockedFrame ? `<strong style="color: #ffc107;">🔒 Locked Frame (Precommitted):</strong><br>
+                              • Height: ${replica.lockedFrame.height}<br>
+                              • Hash: ${replica.lockedFrame.hash}<br>
+                              • Txs: ${replica.lockedFrame.txs.length}` : ''}
+                        </div>
+                        
+                        <div class="messages-section">
+                            <strong>📨 ${replica.signerId}'s Message Feed:</strong>
+                            ${replica.state.messages.length > 0 ? 
+                                replica.state.messages.map(msg => `
+                                    <div class="message ${msg.includes('[COLLECTIVE]') ? 'collective' : ''}">
+                                        ${msg}
+                                    </div>
+                                `).join('') : 
+                                '<div class="message">No messages yet</div>'
+                            }
+                        </div>
+                        
+                        ${replica.state.proposals.size > 0 ? `
+                            <div class="messages-section">
+                                <strong>🗳️ ${replica.signerId}'s Proposals:</strong>
+                                ${Array.from(replica.state.proposals.values()).map(proposal => {
+                                    const yesVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'yes').map(([voter, _]) => voter);
+                                    const noVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'no').map(([voter, _]) => voter);
+                                    
+                                    return `<div class="message">
+                                        <strong>ID:</strong> ${proposal.id}<br>
+                                        <strong>Proposer:</strong> ${proposal.proposer}<br>
+                                        <strong>Status:</strong> ${proposal.status}<br>
+                                        <strong>Action:</strong> ${proposal.action.data.message}<br>
+                                        <strong>Votes (${proposal.votes.size} total):</strong><br>
+                                        ${yesVoters.length > 0 ? `  ✅ YES (${yesVoters.length}): ${yesVoters.join(', ')}<br>` : ''}
+                                        ${noVoters.length > 0 ? `  ❌ NO (${noVoters.length}): ${noVoters.join(', ')}<br>` : ''}
+                                        ${yesVoters.length === 0 && noVoters.length === 0 ? '  (No votes yet)<br>' : ''}
+                                        <small>Created: ${new Date(proposal.created).toLocaleTimeString()}</small>
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        };
+
+        const renderReplicaSelect = () => {
+            if (!state.xlnEnv) return;
+            
+            const replicaSelect = document.getElementById('replicaSelect');
+            const currentValue = replicaSelect.value;
+            
+            replicaSelect.innerHTML = '<option value="">Choose a replica...</option>';
+            
+            for (const [key, replica] of state.xlnEnv.replicas) {
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = `${replica.entityId}:${replica.signerId} ${replica.isProposer ? '(👑 Proposer)' : '(✅ Validator)'}`;
+                if (key === currentValue) option.selected = true;
+                replicaSelect.appendChild(option);
+            }
+            
+            state.selectedReplica = replicaSelect.value;
+        };
+
+        const renderProposalSelect = () => {
+            if (!state.xlnEnv || !state.selectedReplica) return;
+            
+            const proposalSelect = document.getElementById('proposalSelect');
+            const replica = state.xlnEnv.replicas.get(state.selectedReplica);
+            
+            proposalSelect.innerHTML = '<option value="">Choose a proposal...</option>';
+            
+            if (replica && replica.state.proposals.size > 0) {
+                replica.state.proposals.forEach((proposal, proposalId) => {
+                    if (proposal.status === 'pending') {
+                        const option = document.createElement('option');
+                        option.value = proposalId;
+                        option.textContent = `${proposal.action.data.message} (by ${proposal.proposer})`;
+                        proposalSelect.appendChild(option);
+                    }
+                });
+            }
+            
+            if (proposalSelect.options.length === 1) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No pending proposals';
+                proposalSelect.appendChild(option);
+            }
+        };
+
+        const updateTimeMachine = () => {
+            const history = XLN.getHistory();
+            const timeSlider = document.getElementById('timeSlider');
+            const timeInfo = document.getElementById('timeInfo');
+            const sliderContainer = document.querySelector('.time-slider-container');
+            
+            if (history.length === 0) {
+                timeSlider.disabled = true;
+                timeSlider.max = 0;
+                timeInfo.innerHTML = '<span>⏰ No history yet</span>';
+                timeInfo.className = 'time-info-compact';
+                sliderContainer.style.setProperty('--progress', '0%');
+                return;
+            }
+            
+            timeSlider.disabled = false;
+            const maxMeaningfulIndex = Math.max(0, history.length - 2);
+            timeSlider.max = maxMeaningfulIndex + 1;
+            
+            let sliderValue, progressPercent;
+            
+            if (state.currentTimeIndex === -1) {
+                sliderValue = maxMeaningfulIndex + 1;
+                progressPercent = 100;
+                timeInfo.innerHTML = `
+                    <span>⏰ LIVE</span>
+                    <span>Height: ${state.xlnEnv?.height || 0}</span>
+                    <span>${history.length} snapshots</span>
+                `;
+                timeInfo.className = 'time-info-compact current';
+            } else {
+                sliderValue = state.currentTimeIndex;
+                const sliderMax = maxMeaningfulIndex + 1;
+                progressPercent = sliderMax > 0 ? (state.currentTimeIndex / sliderMax) * 100 : 0;
+                const snapshot = history[state.currentTimeIndex];
+                timeInfo.innerHTML = `
+                    <span>📸 ${state.currentTimeIndex + 1}/${history.length}</span>
+                    <span>Height: ${snapshot?.height || 0}</span>
+                    <span>${snapshot?.description || 'Unknown'}</span>
+                `;
+                timeInfo.className = 'time-info-compact';
+            }
+            
+            timeSlider.value = sliderValue;
+            sliderContainer.style.setProperty('--progress', `${progressPercent}%`);
+        };
+
+        // Main render function - orchestrates all UI updates
+        const renderAll = () => {
+            updateStatusBar();
+            renderEntityFilter();
+            renderServerData();
+            renderEntities();
+            renderReplicaSelect();
+            renderProposalSelect();
+            updateTimeMachine();
+        };
+
+        // Action Functions - Pure functions that handle user interactions
+        const executeAction = () => {
+            if (!state.xlnEnv) {
+                alert('XLN Environment not initialized');
+                return;
+            }
+            
+            state.currentTimeIndex = -1;
+            
+            const replica = state.xlnEnv.replicas.get(state.selectedReplica);
+            if (!replica) {
+                alert('Please select a valid replica');
+                return;
+            }
+            
+            let entityTx;
+            
+            if (state.selectedAction === 'chat') {
+                const message = document.getElementById('inputField').value.trim();
+                if (!message) {
+                    alert('Please enter a message');
+                    return;
+                }
+                
+                entityTx = {
+                    type: 'chat',
+                    data: { from: replica.signerId, message }
+                };
+                
+                document.getElementById('inputField').value = '';
+            } else if (state.selectedAction === 'propose') {
+                const proposalText = document.getElementById('proposalField').value.trim();
+                if (!proposalText) {
+                    alert('Please enter a proposal');
+                    return;
+                }
+                
+                entityTx = {
+                    type: 'propose',
+                    data: {
+                        action: { type: 'collective_message', data: { message: proposalText } },
+                        proposer: replica.signerId
+                    }
+                };
+                
+                document.getElementById('proposalField').value = '';
+            } else if (state.selectedAction === 'vote') {
+                const proposalId = document.getElementById('proposalSelect').value;
+                const voteChoice = document.getElementById('voteChoice').value;
+                
+                if (!proposalId) {
+                    alert('No proposal selected or no pending proposals');
+                    return;
+                }
+                
+                entityTx = {
+                    type: 'vote',
+                    data: {
+                        proposalId,
+                        voter: replica.signerId,
+                        choice: voteChoice
+                    }
+                };
+            }
+            
+            // Process transaction
+            let outputs = XLN.processServerInput(state.xlnEnv, {
+                serverTxs: [],
+                entityInputs: [{
+                    entityId: replica.entityId,
+                    signerId: replica.signerId,
+                    entityTxs: [entityTx]
+                }]
+            });
+            
+            // Process outputs until empty
+            while (outputs.length > 0) {
+                const newOutputs = XLN.processServerInput(state.xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: outputs
+                });
+                outputs.splice(0, outputs.length, ...newOutputs);
+            }
+            
+            addLog(`✅ Executed ${state.selectedAction} action for ${replica.entityId}:${replica.signerId}`, 'success');
+            renderAll();
+        };
+
+        const createSimpleEntity = () => {
+            if (!state.xlnEnv) return;
+            
+            state.currentTimeIndex = -1;
+            
+            const entityName = document.getElementById('entityNameInput').value.trim();
+            const threshold = parseInt(document.getElementById('thresholdSlider').value);
+            
+            if (!entityName) {
+                alert('Please enter an entity name');
+                return;
+            }
+            
+            if (!/^[a-zA-Z0-9_-]+$/.test(entityName)) {
+                alert('Entity name can only contain letters, numbers, underscores, and hyphens');
+                return;
+            }
+            
+            const existingEntity = Array.from(state.xlnEnv.replicas.keys()).find(key => key.startsWith(entityName + ':'));
+            if (existingEntity) {
+                alert(`Entity "${entityName}" already exists`);
+                return;
+            }
+            
+            const validatorRows = document.querySelectorAll('.validator-row');
+            const validators = [];
+            const shares = {};
+            
+            for (const row of validatorRows) {
+                const nameInput = row.querySelector('.validator-name');
+                const weightInput = row.querySelector('.validator-weight');
+                
+                const validatorName = nameInput.value.trim();
+                const weight = parseInt(weightInput.value) || 0;
+                
+                if (!validatorName) {
+                    alert('Please enter a name for all validators');
+                    return;
+                }
+                
+                if (!/^[a-zA-Z0-9_-]+$/.test(validatorName)) {
+                    alert(`Validator name "${validatorName}" can only contain letters, numbers, underscores, and hyphens`);
+                    return;
+                }
+                
+                if (weight < 1) {
+                    alert(`Validator "${validatorName}" must have a weight of at least 1`);
+                    return;
+                }
+                
+                if (validators.includes(validatorName)) {
+                    alert(`Validator name "${validatorName}" is duplicated`);
+                    return;
+                }
+                
+                validators.push(validatorName);
+                shares[validatorName] = BigInt(weight);
+            }
+            
+            if (validators.length === 0) {
+                alert('Please add at least one validator');
+                return;
+            }
+            
+            const totalShares = Object.values(shares).reduce((sum, val) => sum + val, BigInt(0));
+            if (BigInt(threshold) > totalShares) {
+                alert(`Threshold ${threshold} is higher than total weight ${totalShares}`);
+                return;
+            }
+            
+            const config = {
+                mode: 'proposer-based',
+                threshold: BigInt(threshold),
+                validators: validators,
+                shares: shares
+            };
+            
+            const serverTxs = validators.map((signerId, index) => ({
+                type: 'importReplica',
+                entityId: entityName,
+                signerId: signerId,
+                data: {
+                    config: config,
+                    isProposer: index === 0
+                }
+            }));
+            
+            let outputs = XLN.processServerInput(state.xlnEnv, {
+                serverTxs: serverTxs,
+                entityInputs: []
+            });
+            
+            while (outputs.length > 0) {
+                const newOutputs = XLN.processServerInput(state.xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: outputs
+                });
+                outputs.splice(0, outputs.length, ...newOutputs);
+            }
+            
+            addLog(`✅ Entity "${entityName}" created successfully! Validators: ${validators.join(', ')}, Threshold: ${threshold}/${totalShares}`, 'success');
+            
+            clearSimpleForm();
+            renderAll();
+        };
+
+        const simulateChat = () => {
+            if (!state.xlnEnv) return;
+            
+            state.currentTimeIndex = -1;
+            
+            const entities = ['chat', 'trading', 'governance'];
+            const users = ['alice', 'bob', 'carol', 'david', 'eve'];
+            const messages = [
+                'Hello everyone!',
+                'How is the consensus working?',
+                'This is a test message',
+                'Great to see multi-entity support',
+                'Byzantine fault tolerance rocks!'
+            ];
+            
+            const entityId = entities[Math.floor(Math.random() * entities.length)];
+            const from = users[Math.floor(Math.random() * users.length)];
+            const message = messages[Math.floor(Math.random() * messages.length)];
+            
+            let outputs = XLN.processServerInput(state.xlnEnv, {
+                serverTxs: [],
+                entityInputs: [{
+                    entityId,
+                    signerId: 'alice',
+                    entityTxs: [{
+                        type: 'chat',
+                        data: { from, message }
+                    }]
+                }]
+            });
+            
+            while (outputs.length > 0) {
+                const newOutputs = XLN.processServerInput(state.xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: outputs
+                });
+                outputs.splice(0, outputs.length, ...newOutputs);
+            }
+            
+            addLog(`🎯 Simulated chat: ${from} → ${entityId}: "${message}"`, 'info');
+            renderAll();
+        };
+
+        const simulateStress = () => {
+            if (!state.xlnEnv) return;
+            
+            state.currentTimeIndex = -1;
+            
+            const entities = ['chat', 'trading', 'governance'];
+            const users = ['alice', 'bob', 'carol', 'david', 'eve'];
+            const txCount = 5 + Math.floor(Math.random() * 10);
+            
+            const entityInputs = entities.map(entityId => ({
+                entityId,
+                signerId: 'alice',
+                entityTxs: Array.from({ length: txCount }, (_, i) => ({
+                    type: 'chat',
+                    data: {
+                        from: users[i % users.length],
+                        message: `Stress test message ${i + 1} for ${entityId}`
+                    }
+                }))
+            }));
+            
+            let outputs = XLN.processServerInput(state.xlnEnv, {
+                serverTxs: [],
+                entityInputs
+            });
+            
+            while (outputs.length > 0) {
+                const newOutputs = XLN.processServerInput(state.xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: outputs
+                });
+                outputs.splice(0, outputs.length, ...newOutputs);
+            }
+            
+            addLog(`💪 Stress test completed: ${txCount} txs per entity across ${entities.length} entities`, 'info');
+            renderAll();
+        };
+
+        // UI Event Handlers
+        const switchTab = (tabName) => {
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            const targetContent = document.getElementById(tabName + 'TabContent');
+            const targetButton = document.getElementById(tabName + 'Tab');
+            
+            if (targetContent && targetButton) {
+                targetContent.classList.add('active');
+                targetButton.classList.add('active');
+            }
+        };
+
+        const updateActionUI = () => {
+            const action = document.getElementById('actionSelect').value;
+            state.selectedAction = action;
+            
+            const inputGroup = document.getElementById('inputGroup');
+            const proposalGroup = document.getElementById('proposalGroup');
+            const voteGroup = document.getElementById('voteGroup');
+            const inputLabel = document.getElementById('inputLabel');
+            const inputField = document.getElementById('inputField');
+            
+            inputGroup.style.display = 'none';
+            proposalGroup.style.display = 'none';
+            voteGroup.style.display = 'none';
+            
+            if (action === 'chat') {
+                inputGroup.style.display = 'flex';
+                inputLabel.textContent = '💬 Message:';
+                inputField.placeholder = 'Enter your message...';
+            } else if (action === 'propose') {
+                proposalGroup.style.display = 'flex';
+            } else if (action === 'vote') {
+                voteGroup.style.display = 'flex';
+                renderProposalSelect();
+            }
+        };
+
+        const addValidatorRow = () => {
+            const validatorsList = document.getElementById('validatorsList');
+            const newRow = document.createElement('div');
+            newRow.className = 'validator-row';
+            newRow.innerHTML = `
+                <input type="text" class="validator-name" placeholder="validator name">
+                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+            `;
+            validatorsList.appendChild(newRow);
+            updateTotalWeight();
+        };
+
+        const removeValidator = (button) => {
+            const row = button.parentElement;
+            const validatorsList = document.getElementById('validatorsList');
+            if (validatorsList.children.length > 1) {
+                row.remove();
+                updateTotalWeight();
+            } else {
+                alert('Must have at least one validator');
+            }
+        };
+
+        const updateTotalWeight = () => {
+            const weightInputs = document.querySelectorAll('.validator-weight');
+            let totalWeight = 0;
+            weightInputs.forEach(input => {
+                const weight = parseInt(input.value) || 0;
+                totalWeight += weight;
+            });
+            document.getElementById('totalWeight').textContent = totalWeight;
+            
+            const thresholdSlider = document.getElementById('thresholdSlider');
+            thresholdSlider.max = totalWeight;
+            
+            const currentThreshold = parseInt(thresholdSlider.value);
+            if (currentThreshold > totalWeight) {
+                thresholdSlider.value = totalWeight;
+                updateThreshold();
+            }
+        };
+
+        const updateThreshold = () => {
+            const thresholdSlider = document.getElementById('thresholdSlider');
+            const thresholdValue = document.getElementById('thresholdValue');
+            thresholdValue.textContent = thresholdSlider.value;
+        };
+
+        const clearSimpleForm = () => {
+            document.getElementById('entityNameInput').value = '';
+            
+            const validatorsList = document.getElementById('validatorsList');
+            validatorsList.innerHTML = `
+                <div class="validator-row">
+                    <input type="text" class="validator-name" placeholder="alice" value="alice">
+                    <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                    <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                </div>
+                <div class="validator-row">
+                    <input type="text" class="validator-name" placeholder="bob" value="bob">
+                    <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                    <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                </div>
+                <div class="validator-row">
+                    <input type="text" class="validator-name" placeholder="carol" value="carol">
+                    <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                    <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                </div>
+            `;
+            
+            document.getElementById('thresholdSlider').value = '2';
+            updateTotalWeight();
+            updateThreshold();
+        };
+
+        // Time Machine Functions
+        const stepBackward = () => {
+            const history = XLN.getHistory();
+            if (history.length === 0) return;
+            
+            if (state.currentTimeIndex === -1) {
+                state.currentTimeIndex = Math.max(0, history.length - 2);
+            } else {
+                state.currentTimeIndex = Math.max(0, state.currentTimeIndex - 1);
+            }
+            renderAll();
+        };
+
+        const stepForward = () => {
+            const history = XLN.getHistory();
+            if (history.length === 0) return;
+            
+            if (state.currentTimeIndex === -1) {
+                return;
+            } else if (state.currentTimeIndex < history.length - 2) {
+                state.currentTimeIndex++;
+            } else {
+                state.currentTimeIndex = -1;
+            }
+            renderAll();
+        };
+
+        const goToHistoryEnd = () => {
+            state.currentTimeIndex = -1;
+            renderAll();
+        };
+
+        const goToHistoryStart = () => {
+            const history = XLN.getHistory();
+            if (history.length > 0) {
+                state.currentTimeIndex = 0;
+                renderAll();
+            }
+        };
+
+        const resetTimeMachine = () => {
+            XLN.resetHistory();
+            state.currentTimeIndex = -1;
+            renderAll();
+        };
+
+        const refreshView = () => {
+            renderAll();
+        };
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            // Entity filter change
+            document.getElementById('entityFilter').addEventListener('change', (e) => {
+                state.selectedEntity = e.target.value;
+                renderAll();
+            });
+            
+            // Replica select change
+            document.getElementById('replicaSelect').addEventListener('change', (e) => {
+                state.selectedReplica = e.target.value;
+                renderProposalSelect();
+            });
+            
+            // Action select change
+            document.getElementById('actionSelect').addEventListener('change', updateActionUI);
+            
+            // Time slider change
+            document.getElementById('timeSlider').addEventListener('input', (e) => {
+                const history = XLN.getHistory();
+                const sliderValue = parseInt(e.target.value);
+                const maxMeaningfulIndex = Math.max(0, history.length - 2);
+                const sliderContainer = document.querySelector('.time-slider-container');
+                
+                if (sliderValue > maxMeaningfulIndex) {
+                    state.currentTimeIndex = -1;
+                    sliderContainer.style.setProperty('--progress', '100%');
+                } else {
+                    state.currentTimeIndex = sliderValue;
+                    const sliderMax = maxMeaningfulIndex + 1;
+                    const progressPercent = sliderMax > 0 ? (sliderValue / sliderMax) * 100 : 0;
+                    sliderContainer.style.setProperty('--progress', `${progressPercent}%`);
+                }
+                
+                renderAll();
+            });
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                
+                switch(e.key) {
+                    case 'ArrowLeft':
+                        e.preventDefault();
+                        stepBackward();
+                        break;
+                    case 'ArrowRight':
+                        e.preventDefault();
+                        stepForward();
+                        break;
+                    case 'Home':
+                        e.preventDefault();
+                        goToHistoryStart();
+                        break;
+                    case 'End':
+                        e.preventDefault();
+                        goToHistoryEnd();
+                        break;
+                }
+            });
+            
+            // Initialize form state
+            updateTotalWeight();
+            updateActionUI();
+        });
+
+        // Make functions globally available
+        window.switchTab = switchTab;
+        window.executeAction = executeAction;
+        window.createSimpleEntity = createSimpleEntity;
+        window.simulateChat = simulateChat;
+        window.simulateStress = simulateStress;
+        window.addValidatorRow = addValidatorRow;
+        window.removeValidator = removeValidator;
+        window.updateTotalWeight = updateTotalWeight;
+        window.updateThreshold = updateThreshold;
+        window.clearSimpleForm = clearSimpleForm;
+        window.stepBackward = stepBackward;
+        window.stepForward = stepForward;
+        window.goToHistoryEnd = goToHistoryEnd;
+        window.goToHistoryStart = goToHistoryStart;
+        window.resetTimeMachine = resetTimeMachine;
+        window.refreshView = refreshView;
+
+        // Start auto-reload checking and initialize
+        setInterval(checkForChanges, 10000);
+        
+        initializeEnvironment().then(success => {
+            if (success) {
+                addLog('🎉 Sonnet Wallet initialized successfully!', 'success');
+            }
+        });
+    </script>
+</body>
+</html>

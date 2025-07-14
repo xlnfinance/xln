@@ -467,13 +467,13 @@
         }
 
         .btn {
-            padding: 10px 20px;
+            padding: 8px 15px;
             border: none;
-            border-radius: 8px;
+            border-radius: 5px;
             cursor: pointer;
+            font-size: 14px;
             font-weight: bold;
-            transition: all 0.3s ease;
-            font-size: 0.9em;
+            transition: background-color 0.3s ease;
         }
 
         .btn-primary {
@@ -481,9 +481,13 @@
             color: white;
         }
 
-        .btn-primary:hover {
-            background: #0056b3;
-            transform: translateY(-2px);
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+            margin-left: auto; /* Pushes the button to the right */
+        }
+        .btn-secondary:hover {
+            background-color: #5a6268;
         }
 
         .btn-success {
@@ -915,6 +919,12 @@
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
+
+        .entity-filter .actions {
+            margin-left: auto;
+            display: flex;
+            gap: 10px;
+        }
     </style>
 </head>
 <body>
@@ -956,10 +966,12 @@
         </div>
 
         <div class="entity-filter">
-            <label for="entityFilter">📂 Filter Entities:</label>
-            <select id="entityFilter">
-                <option value="all">All Entities</option>
-            </select>
+            <label for="entitySelector">Display Entity:</label>
+            <select id="entitySelector"></select>
+            <div class="actions">
+                <button id="runDemoBtn" class="btn btn-primary">Run Demo</button>
+                <button id="clearDbBtn" class="btn btn-secondary">Clear Database</button>
+            </div>
         </div>
 
         <div class="entities-grid" id="entitiesGrid">
@@ -1145,7 +1157,7 @@
         function populateEntityFilter() {
             if (!xlnEnv) return;
             
-            const entityFilter = document.getElementById('entityFilter');
+            const entityFilter = document.getElementById('entitySelector');
             const currentValue = entityFilter.value;
             
             // Get unique entity types
@@ -1171,7 +1183,7 @@
             if (!xlnEnv) return;
             
             const entitiesGrid = document.getElementById('entitiesGrid');
-            const entityFilter = document.getElementById('entityFilter');
+            const entityFilter = document.getElementById('entitySelector');
             const selectedEntity = entityFilter.value;
             
             // Clear existing content
@@ -1547,7 +1559,7 @@
             }
             
             timeSlider.disabled = false;
-            const maxMeaningfulIndex = Math.max(0, history.length - 2);
+            const maxMeaningfulIndex = Math.max(0, history.length - 1);
             timeSlider.max = maxMeaningfulIndex + 1; // +1 to include live position
             
             let sliderValue, progressPercent;
@@ -2201,7 +2213,7 @@
             
             if (currentTimeIndex === -1) {
                 // Currently at live, go to most recent meaningful snapshot (skip latest duplicate)
-                currentTimeIndex = Math.max(0, history.length - 2);
+                currentTimeIndex = Math.max(0, history.length - 1);
             } else {
                 // Go one step back, but not below 0
                 currentTimeIndex = Math.max(0, currentTimeIndex - 1);
@@ -2216,7 +2228,7 @@
             if (currentTimeIndex === -1) {
                 // Already at live, can't go further
                 return;
-            } else if (currentTimeIndex < history.length - 2) {
+            } else if (currentTimeIndex < history.length - 1) {
                 // Normal forward step
                 currentTimeIndex++;
             } else {
@@ -2263,7 +2275,7 @@
             timeSlider.addEventListener('input', (e) => {
                 const history = XLN.getHistory();
                 const sliderValue = parseInt(e.target.value);
-                const maxMeaningfulIndex = Math.max(0, history.length - 2);
+                const maxMeaningfulIndex = Math.max(0, history.length - 1);
                 const sliderContainer = document.querySelector('.time-slider-container');
                 
                 if (sliderValue > maxMeaningfulIndex) {
@@ -2312,7 +2324,7 @@
 
         // Add entity filter event listener
         document.addEventListener('DOMContentLoaded', () => {
-            const entityFilter = document.getElementById('entityFilter');
+            const entityFilter = document.getElementById('entitySelector');
             entityFilter.addEventListener('change', () => {
                 renderEntities();
             });
@@ -2320,6 +2332,71 @@
 
         // Initialize on load
         initializeEnvironment();
+
+        document.getElementById('clearDbBtn').addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear the entire database? This cannot be undone.')) {
+                if (window.XLN && typeof window.XLN.clearDatabase === 'function') {
+                    window.XLN.clearDatabase().then(() => {
+                        console.log('Database cleared, reloading page.');
+                        location.reload();
+                    });
+                } else {
+                    console.error('clearDatabase function not found on XLN object.');
+                }
+            }
+        });
+
+        document.getElementById('runDemoBtn').addEventListener('click', async () => {
+            if (window.XLN && typeof window.XLN.runDemo === 'function' && xlnEnv) {
+                console.log('Running demo...');
+                window.XLN.runDemo(xlnEnv);
+                console.log('Demo finished.');
+                // The UI will update automatically via its existing render interval.
+            } else {
+                console.error('Could not run demo. XLN.runDemo function or environment not found.');
+            }
+        });
+
+        // --- Main Application Entry Point ---
+        async function main() {
+            try {
+                // 1. Wait for the environment to load from the database
+                xlnEnv = await XLN.main();
+                console.log('🎯 XLN Environment loaded:', xlnEnv);
+                console.log('💡 Access via: window.xlnEnv');
+
+                // 2. Perform initial UI setup and render
+                setupActionHandlers();
+                updateTotalWeight();
+                renderEntities(); // First render with loaded data
+                populateReplicaSelect();
+
+                // Add event listeners that depend on initial state
+                document.getElementById('entitySelector').addEventListener('change', renderEntities);
+                document.getElementById('timeSlider').addEventListener('input', (e) => {
+                    const history = XLN.getHistory();
+                    const sliderValue = parseInt(e.target.value);
+                    const maxIndex = Math.max(0, history.length - 1);
+                    
+                    if (sliderValue > maxIndex) {
+                        currentTimeIndex = -1; // Live
+                    } else {
+                        currentTimeIndex = sliderValue;
+                    }
+                    renderEntities();
+                });
+
+                // 3. Start the continuous render loop for live updates
+                setInterval(renderEntities, 1000);
+
+            } catch (error) {
+                console.error('Failed to initialize XLN environment:', error);
+                // Optionally update some status element on the page
+            }
+        }
+
+        // Run the main function when the document is ready
+        document.addEventListener('DOMContentLoaded', main);
     </script>
 </body>
 </html> 

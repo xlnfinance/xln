@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XLN Consensus Visual Debug – Svelte Gemini</title>
+    <style>
+        /* All CSS from index.html copied here for visual parity */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html {
+            overflow-x: hidden;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+            overflow-x: hidden;
+            padding-bottom: 80px; /* Space for time machine */
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status-bar {
+            background: rgba(255,255,255,0.1);
+            padding: 10px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            color: white;
+            font-family: monospace;
+            backdrop-filter: blur(10px);
+        }
+
+        .entity-filter {
+            background: rgba(255,255,255,0.9);
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .entity-filter label {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .entity-filter select {
+            padding: 5px 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            background: white;
+        }
+
+        .entity-filter select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .entities-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .entity-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .entity-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+        }
+
+        .entity-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        .entity-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .entity-role {
+            font-size: 1.2em;
+        }
+
+        .replica-info {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .info-box {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .info-box h4 {
+            margin: 0 0 10px 0;
+            font-size: 0.95em;
+            color: #495057;
+        }
+        
+        .mempool-tx {
+            font-family: monospace;
+            font-size: 0.8em;
+            background: #e9ecef;
+            padding: 5px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+        
+        .message-feed {
+            max-height: 150px;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+        
+        .message {
+            font-size: 0.9em;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .message:last-child {
+            border-bottom: none;
+        }
+
+        .proposal-card {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+
+        .proposal-header {
+            font-weight: bold;
+        }
+
+        .proposal-votes {
+            font-size: 0.85em;
+            margin-top: 8px;
+        }
+        
+        .power-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .power-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            transition: width 0.3s ease;
+        }
+        
+        .actionable-tabs-container {
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .tabs-header {
+            display: flex;
+            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 20px;
+        }
+
+        .tab-button {
+            padding: 10px 20px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #6c757d;
+            position: relative;
+            transition: color 0.3s ease;
+        }
+
+        .tab-button.active {
+            color: #007bff;
+        }
+
+        .tab-button::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: #007bff;
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .tab-button.active::after {
+            transform: scaleX(1);
+        }
+
+        .control-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .control-group label {
+            font-weight: bold;
+            color: #34495e;
+        }
+
+        .control-group select,
+        .control-group input,
+        .control-group textarea {
+            padding: 10px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            width: 100%;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            font-size: 1em;
+        }
+        
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
+        
+        .simple-formation-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .validators-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .validators-section h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .validator-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+
+        .validator-name, .validator-weight {
+            flex: 1;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .btn-small-danger {
+            background-color: #dc3545;
+            color: white;
+            padding: 6px 10px;
+            font-size: 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .btn-secondary {
+             background: #6c757d;
+             color: white;
+        }
+
+        .threshold-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        #thresholdValue, #totalWeight {
+            font-weight: bold;
+        }
+        
+        .server-io-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .io-column {
+            background: rgba(0,0,0,0.7);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 0.85em;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .io-column h3 {
+            margin: 0 0 15px 0;
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+        }
+
+        .io-item {
+            padding: 8px;
+            border-bottom: 1px solid #444;
+        }
+        
+        .time-machine {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(15, 15, 15, 0.96);
+            backdrop-filter: blur(20px);
+            padding: 12px 20px;
+            border-top: 1px solid #007bff;
+            z-index: 1000;
+            box-shadow: 0 -2px 15px rgba(0,0,0,0.4);
+            color: white;
+        }
+
+        .time-machine-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 15px;
+        }
+        
+        .time-info-compact {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9em;
+        }
+        
+        .time-nav-controls {
+            display: flex; gap: 5px;
+        }
+        
+        .time-btn-compact {
+            background: #2a2a2a;
+            color: white;
+            border: 1px solid #444;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .time-slider {
+            width: 100%;
+            --progress: 0%;
+            background: linear-gradient(90deg, #007bff 0%, #00ff88 var(--progress), #333 var(--progress), #555 100%);
+        }
+        
+        .reload-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            z-index: 1001;
+        }
+
+        .reload-indicator.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+
+    <script type="module">
+        import { compile } from 'https://cdn.jsdelivr.net/npm/svelte@3.59.1/compiler.mjs';
+
+        async function boot(componentId, target) {
+            const template = document.getElementById(componentId);
+            if (!template) {
+                console.error('Component template not found!');
+                return;
+            }
+            const source = template.innerHTML.trim();
+            const { js } = compile(source, {
+                format: 'iife',
+                name: 'App', // Hardcode name for simplicity
+                css: false, // CSS is global in this file
+            });
+            const Component = (new Function(`${js.code}; return App;`))();
+            new Component({ target });
+        }
+
+        import * as XLN from './dist/server.js';
+        window.XLN = XLN;
+        window.xlnEnv = null;
+
+        (async () => {
+            // Wait for the DOM to be fully loaded
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => boot('svelte-app-template', document.getElementById('app')));
+            } else {
+                boot('svelte-app-template', document.getElementById('app'));
+            }
+        })();
+    </script>
+    
+    <template id="svelte-app-template">
+        <script>
+            import { onMount, tick } from 'svelte';
+
+            // --------- Core State ---------
+            let xlnEnv = null;
+            let currentTimeIndex = -1;
+            let entityFilter = 'all';
+            let lastModified = null;
+            let tab = 'controls';
+
+            // --------- Form State ---------
+            let action = 'chat';
+            let replicaKey = '';
+            let inputMsg = '';
+            let proposalText = '';
+            let voteChoice = 'yes';
+            let proposalSelect = '';
+            
+            // --------- Entity Formation State ---------
+            let newEntityName = '';
+            let validators = [{ name: 'alice', weight: 1 }, { name: 'bob', weight: 1 }, { name: 'carol', weight: 1 }];
+            let threshold = 2;
+
+            // --------- Derived State (Reactive) ---------
+            $: history = xlnEnv ? XLN.getHistory() : [];
+            $: maxIdx = Math.max(0, history.length - 2);
+            $: sliderMax = maxIdx + 1;
+            $: sliderVal = currentTimeIndex === -1 ? sliderMax : currentTimeIndex;
+            $: progressPct = sliderMax > 0 ? (sliderVal / sliderMax * 100) : 0;
+            
+            $: totalWeight = validators.reduce((sum, v) => sum + Number(v.weight || 0), 0);
+
+            $: entityTypes = xlnEnv ? [...new Set([...xlnEnv.replicas.keys()].map(k => k.split(':')[0]))] : [];
+
+            $: currentReplicas = (() => {
+                if (!xlnEnv) return new Map();
+                if (currentTimeIndex >= 0) {
+                    const snapshot = XLN.getSnapshot(currentTimeIndex);
+                    return snapshot ? snapshot.replicas : new Map();
+                }
+                return xlnEnv.replicas;
+            })();
+            
+            $: replicasToShow = (() => {
+                const arr = [];
+                currentReplicas.forEach((rep, key) => {
+                    if (entityFilter === 'all' || rep.entityId === entityFilter) {
+                        arr.push([key, rep]);
+                    }
+                });
+                return arr;
+            })();
+
+            $: currentServerInput = (() => {
+                if (!xlnEnv) return null;
+                 if (currentTimeIndex >= 0) {
+                    const snapshot = XLN.getSnapshot(currentTimeIndex);
+                    return snapshot ? snapshot.serverInput : null;
+                }
+                const hist = XLN.getHistory();
+                return hist.length > 0 ? hist[hist.length-1].serverInput : null;
+            })();
+            
+            $: currentServerOutputs = (() => {
+                if (!xlnEnv) return [];
+                 if (currentTimeIndex >= 0) {
+                    const snapshot = XLN.getSnapshot(currentTimeIndex);
+                    return snapshot ? snapshot.serverOutputs : [];
+                }
+                const hist = XLN.getHistory();
+                return hist.length > 0 ? hist[hist.length-1].serverOutputs : [];
+            })();
+
+
+            // --------- Lifecycle ---------
+            onMount(async () => {
+                xlnEnv = await XLN.main();
+                window.xlnEnv = xlnEnv;
+                if (xlnEnv.replicas.size > 0) {
+                    replicaKey = [...xlnEnv.replicas.keys()][0];
+                }
+                await tick(); // ensure UI updates
+                xlnEnv = xlnEnv; // trigger reactivity
+                
+                // Auto-reload check
+                const response = await fetch('./dist/server.js', { method: 'HEAD' });
+                lastModified = response.headers.get('last-modified');
+                setInterval(checkForChanges, 5000);
+
+                // Keyboard shortcuts for time machine
+                window.addEventListener('keydown', handleKeydown);
+            });
+            
+            // --------- Methods ---------
+            async function checkForChanges() {
+                try {
+                    const res = await fetch('./dist/server.js', { method: 'HEAD' });
+                    const mod = res.headers.get('last-modified');
+                    if (lastModified && mod !== lastModified) {
+                        document.getElementById('reloadIndicator').classList.add('show');
+                        setTimeout(() => location.reload(), 500);
+                    }
+                } catch {}
+            }
+
+            function handleKeydown(e) {
+                if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+                if (e.key === 'ArrowLeft') go('prev');
+                if (e.key === 'ArrowRight') go('next');
+                if (e.key === 'Home') go('start');
+                if (e.key === 'End') go('live');
+            }
+
+            function executeAction() {
+                if (!xlnEnv) return;
+                currentTimeIndex = -1;
+                const replica = xlnEnv.replicas.get(replicaKey);
+                if (!replica) { alert('Select a replica first.'); return; }
+
+                let entityTx;
+                if (action === 'chat') {
+                    if (!inputMsg.trim()) return;
+                    entityTx = { type: 'chat', data: { from: replica.signerId, message: inputMsg.trim() } };
+                    inputMsg = '';
+                } else if (action === 'propose') {
+                    if (!proposalText.trim()) return;
+                    entityTx = { type: 'propose', data: { action: { type: 'collective_message', data: { message: proposalText.trim() } }, proposer: replica.signerId } };
+                    proposalText = '';
+                } else if (action === 'vote') {
+                    if (!proposalSelect) { alert('No proposal selected to vote on.'); return; }
+                    entityTx = { type: 'vote', data: { proposalId: proposalSelect, voter: replica.signerId, choice: voteChoice } };
+                }
+
+                let outputs = XLN.processServerInput(xlnEnv, { serverTxs: [], entityInputs: [{ entityId: replica.entityId, signerId: replica.signerId, entityTxs: [entityTx] }] });
+                while(outputs.length > 0) {
+                    outputs = XLN.processServerInput(xlnEnv, { serverTxs: [], entityInputs: outputs });
+                }
+                xlnEnv = xlnEnv; // Trigger svelte update
+            }
+
+            function createEntity() {
+                if (!newEntityName.trim()) { alert('Entity name cannot be empty.'); return; }
+                if (/[^a-zA-Z0-9_-]/.test(newEntityName)) { alert('Entity name has invalid characters.'); return; }
+                if ([...xlnEnv.replicas.keys()].some(k => k.startsWith(newEntityName + ':'))) { alert('Entity name already exists.'); return; }
+                
+                const validatorNames = validators.map(v => v.name);
+                if (new Set(validatorNames).size !== validatorNames.length) { alert('Duplicate validator names are not allowed.'); return; }
+                if (threshold > totalWeight) { alert('Threshold cannot be greater than total weight.'); return; }
+
+                const shares = {};
+                validators.forEach(v => { shares[v.name] = BigInt(v.weight); });
+                
+                const config = { mode: 'proposer-based', threshold: BigInt(threshold), validators: validatorNames, shares };
+                const serverTxs = validators.map((v, idx) => ({ type: 'importReplica', entityId: newEntityName, signerId: v.name, data: { config, isProposer: idx === 0 } }));
+                
+                let outputs = XLN.processServerInput(xlnEnv, { serverTxs, entityInputs: [] });
+                while(outputs.length > 0) {
+                    outputs = XLN.processServerInput(xlnEnv, { serverTxs: [], entityInputs: outputs });
+                }
+                
+                alert(`Entity ${newEntityName} created successfully!`);
+                tab = 'controls'; // Switch back to controls
+                xlnEnv = xlnEnv; // Trigger svelte update
+            }
+            
+            function addValidator() { validators = [...validators, { name: '', weight: 1 }]; }
+            function removeValidator(index) { if (validators.length > 1) validators = validators.filter((_, i) => i !== index); }
+
+            function go(step) {
+                if (!history.length) return;
+                if (step === 'start') currentTimeIndex = 0;
+                else if (step === 'live') currentTimeIndex = -1;
+                else if (step === 'prev') {
+                    if (currentTimeIndex === -1) currentTimeIndex = Math.max(0, history.length - 2);
+                    else currentTimeIndex = Math.max(0, currentTimeIndex - 1);
+                } else if (step === 'next') {
+                    if (currentTimeIndex === -1) return;
+                    if (currentTimeIndex < history.length - 2) currentTimeIndex++;
+                    else currentTimeIndex = -1;
+                }
+            }
+
+            function onSliderChange(e) {
+                const val = Number(e.target.value);
+                currentTimeIndex = val > maxIdx ? -1 : val;
+            }
+
+            function getVotingPowerPercentage(rep) {
+                const totalShares = Object.values(rep.state.config.shares).reduce((s, v) => s + v, BigInt(0));
+                if (totalShares === BigInt(0)) return '0.00';
+                const replicaShares = rep.state.config.shares[rep.signerId] || BigInt(0);
+                const percentage = (Number(replicaShares) * 100) / Number(totalShares);
+                return percentage.toFixed(2);
+            }
+
+            function getProposalProgressPercentage(proposal, rep) {
+                const validatorCount = rep.state.config.validators.length;
+                if (validatorCount === 0) return '0.00';
+                const voteCount = proposal.votes.size;
+                const percentage = (voteCount * 100) / validatorCount;
+                return percentage.toFixed(2);
+            }
+
+        </script>
+
+        <div class="reload-indicator" id="reloadIndicator">🔄 Reloading...</div>
+
+        <main class="container">
+            <header class="header">
+                <h1>XLN Svelte Wallet</h1>
+            </header>
+            
+            {#if xlnEnv}
+                <div class="server-io-grid">
+                    <div class="io-column">
+                        <h3>Server Input {#if currentTimeIndex >= 0}🕰️{:else}⚡️{/if}</h3>
+                        <pre>{JSON.stringify(currentServerInput, (k,v) => typeof v === 'bigint' ? v.toString() : v, 2)}</pre>
+                    </div>
+                    <div class="io-column">
+                        <h3>Server Output {#if currentTimeIndex >= 0}🕰️{:else}⚡️{/if}</h3>
+                        <pre>{JSON.stringify(currentServerOutputs, (k,v) => typeof v === 'bigint' ? v.toString() : v, 2)}</pre>
+                    </div>
+                </div>
+
+                <div class="entity-filter">
+                    <label for="entityFilter">📂 Filter Entities:</label>
+                    <select bind:value={entityFilter} id="entityFilter">
+                        <option value="all">All Entities</option>
+                        {#each entityTypes as t}
+                            <option value={t}>{t.toUpperCase()}</option>
+                        {/each}
+                    </select>
+                </div>
+
+                <div class="actionable-tabs-container">
+                    <div class="tabs-header">
+                        <button on:click={() => tab = 'controls'} class:active={tab === 'controls'} class="tab-button">🎮 Interactive Controls</button>
+                        <button on:click={() => tab = 'formation'} class:active={tab === 'formation'} class="tab-button">✨ Entity Formation</button>
+                    </div>
+
+                    {#if tab === 'controls'}
+                        <div class="control-panel">
+                            <div class="control-group">
+                                <label for="replicaSelect">👤 Select Replica</label>
+                                <select id="replicaSelect" bind:value={replicaKey}>
+                                    {#each [...xlnEnv.replicas.keys()] as key}
+                                        <option value={key}>{key}</option>
+                                    {/each}
+                                </select>
+                            </div>
+                            <div class="control-group">
+                                <label for="actionSelect">⚡ Select Action</label>
+                                <select id="actionSelect" bind:value={action}>
+                                    <option value="chat">💬 Chat</option>
+                                    <option value="propose">💡 Propose</option>
+                                    <option value="vote">🗳️ Vote</option>
+                                </select>
+                            </div>
+
+                            {#if action === 'chat'}
+                                <div class="control-group">
+                                    <label for="chatInput">Message</label>
+                                    <input id="chatInput" type="text" placeholder="Enter message..." bind:value={inputMsg} on:keydown={e => e.key === 'Enter' && executeAction()}>
+                                </div>
+                            {/if}
+                            {#if action === 'propose'}
+                                <div class="control-group">
+                                    <label for="proposeInput">Proposal</label>
+                                    <textarea id="proposeInput" placeholder="Describe the proposal..." bind:value={proposalText}></textarea>
+                                </div>
+                            {/if}
+                            {#if action === 'vote'}
+                                <div class="control-group">
+                                    <label for="proposalSelect">Select Proposal</label>
+                                     <select id="proposalSelect" bind:value={proposalSelect}>
+                                        <option value="" disabled>-- Select a proposal --</option>
+                                        {#each replicasToShow as [key, rep]}
+                                            {#each [...rep.state.proposals.values()] as p}
+                                                <option value={p.id}>{`${p.id.slice(0, 8)}...: ${p.action.data.message}`}</option>
+                                            {/each}
+                                        {/each}
+                                    </select>
+                                </div>
+                                <div class="control-group">
+                                    <label for="voteChoice">Your Vote</label>
+                                    <select id="voteChoice" bind:value={voteChoice}>
+                                        <option value="yes">✅ Yes</option>
+                                        <option value="no">❌ No</option>
+                                    </select>
+                                </div>
+                            {/if}
+                            
+                            <div class="control-group" style="justify-content: flex-end;">
+                                 <button class="btn btn-primary" on:click={executeAction}>🚀 Execute</button>
+                            </div>
+                        </div>
+                    {:else if tab === 'formation'}
+                        <div class="simple-formation-panel">
+                            <div class="control-group">
+                                <label for="entityNameInput">🏷️ Entity Name:</label>
+                                <input type="text" id="entityNameInput" placeholder="e.g., trading_channel" bind:value={newEntityName}>
+                            </div>
+                            
+                            <div class="validators-section">
+                                <h4>👥 Validators & Weights</h4>
+                                {#each validators as v, i}
+                                <div class="validator-row">
+                                    <input type="text" class="validator-name" placeholder="validator name" bind:value={v.name}>
+                                    <input type="number" class="validator-weight" placeholder="weight" bind:value={v.weight} min="1">
+                                    <button class="btn-small-danger" on:click={() => removeValidator(i)}>❌</button>
+                                </div>
+                                {/each}
+                                <button class="btn btn-secondary" on:click={addValidator} style="margin-top: 10px;">➕ Add Validator</button>
+                            </div>
+                            
+                            <div class="threshold-section">
+                                <label for="thresholdSlider">🎯 Threshold: <span id="thresholdValue">{threshold}</span> / <span id="totalWeight">{totalWeight}</span></label>
+                                <input type="range" id="thresholdSlider" bind:value={threshold} min="1" max={totalWeight}>
+                            </div>
+                            
+                            <button class="btn btn-primary" on:click={createEntity}>✨ Create Entity</button>
+                        </div>
+                    {/if}
+                </div>
+
+
+                <div class="entities-grid">
+                    {#each replicasToShow as [key, rep] (key)}
+                        <div class="entity-card">
+                            <div class="entity-header">
+                                <span class="entity-title">{rep.entityId}</span>
+                                <span class="entity-role">{rep.isProposer ? '👑' : '✔️'}</span>
+                            </div>
+                            <div class="replica-info">
+                                <strong>Signer:</strong> {rep.signerId} | <strong>Nonce:</strong> {rep.state.nonce}
+                            </div>
+
+                            <div class="info-grid">
+                                <div class="info-box">
+                                    <h4>📥 Mempool ({rep.state.mempool.length})</h4>
+                                    {#each rep.state.mempool as tx}
+                                        <div class="mempool-tx">{tx.type}</div>
+                                    {/each}
+                                </div>
+                                <div class="info-box">
+                                    <h4>Voting Power</h4>
+                                    <div class="power-bar">
+                                         <div class="power-fill" style="width: {getVotingPowerPercentage(rep)}%"></div>
+                                    </div>
+                                </div>
+                                 <div class="info-box" style="grid-column: 1 / -1;">
+                                     <h4>📢 Message Feed</h4>
+                                     <div class="message-feed">
+                                         {#each rep.state.messages as msg}
+                                             <div class="message"><strong>{msg.from}:</strong> {msg.message}</div>
+                                         {/each}
+                                     </div>
+                                 </div>
+                                  <div class="info-box" style="grid-column: 1 / -1;">
+                                     <h4>🗳️ Active Proposals</h4>
+                                     {#each [...rep.state.proposals.values()] as proposal}
+                                         <div class="proposal-card">
+                                             <div class="proposal-header">
+                                                 {proposal.action.data.message}
+                                             </div>
+                                             <div class="proposal-votes">
+                                                 Voted: {proposal.votes.size} / {rep.state.config.validators.length}
+                                             </div>
+                                             <div class="power-bar">
+                                                 <div class="power-fill" style="width: {getProposalProgressPercentage(proposal, rep)}%"></div>
+                                             </div>
+                                         </div>
+                                     {:else}
+                                        <p>No active proposals.</p>
+                                     {/each}
+                                 </div>
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+
+            {:else}
+                <p>Loading XLN Environment...</p>
+            {/if}
+        </main>
+
+        <div class="time-machine">
+            <div class="time-machine-main">
+                <div class="time-info-compact">
+                    {#if currentTimeIndex === -1}
+                        <span>⚡️ LIVE</span>
+                    {:else}
+                        <span>🕰️ Viewing Snapshot {currentTimeIndex + 1} / {history.length}</span>
+                    {/if}
+                </div>
+                <div class="time-nav-controls">
+                    <button class="time-btn-compact" on:click={() => go('start')} title="Go to Start (Home)">⏮</button>
+                    <button class="time-btn-compact" on:click={() => go('prev')} title="Step Back (←)">⏪</button>
+                    <button class="time-btn-compact" on:click={() => go('next')} title="Step Forward (→)">⏩</button>
+                    <button class="time-btn-compact" on:click={() => go('live')} title="Go Live (End)">LIVE</button>
+                </div>
+            </div>
+            <input type="range" class="time-slider" min="0" max={sliderMax} value={sliderVal} on:input={onSliderChange} style="--progress: {progressPct}%" />
+        </div>
+
+    </template>
+</body>
+</html> 
