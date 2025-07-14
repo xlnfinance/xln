@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XLN Sonnet Wallet - Modern Self-Contained Edition</title>
+    <title>XLN Sonnet Wallet - Svelte Edition</title>
+    <script src="https://unpkg.com/svelte@4/dist/svelte.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -365,16 +366,6 @@
             transform: translateY(-2px);
         }
 
-        .btn-success {
-            background: #28a745;
-            color: white;
-        }
-
-        .btn-success:hover {
-            background: #1e7e34;
-            transform: translateY(-2px);
-        }
-
         .btn-danger {
             background: #dc3545;
             color: white;
@@ -472,7 +463,7 @@
             color: #495057;
         }
 
-        #thresholdSlider {
+        .threshold-slider {
             width: 100%;
             height: 6px;
             border-radius: 3px;
@@ -592,18 +583,13 @@
             position: relative;
             width: 100%;
             max-width: 100%;
-            --progress: 0%;
         }
 
         .time-slider {
             width: 100%;
             height: 4px;
             border-radius: 2px;
-            background: linear-gradient(90deg, 
-                #007bff 0%, 
-                #00ff88 var(--progress), 
-                #333 var(--progress), 
-                #555 100%);
+            background: #333;
             outline: none;
             -webkit-appearance: none;
             cursor: pointer;
@@ -655,1171 +641,1033 @@
     </style>
 </head>
 <body>
-    <div class="reload-indicator" id="reloadIndicator">🔄 Reloading...</div>
-    
-    <div class="container">
-        <div class="header">
-            <h1>🧠 XLN Sonnet Wallet</h1>
-            <div class="status-bar" id="statusBar">❌ Disconnected</div>
-        </div>
+    <div id="app"></div>
 
-        <div class="server-io-container" id="serverIOContainer" style="display: none;">
-            <div class="server-column">
-                <div class="server-column-header">
-                    📨 Server Input (What's happening this tick)
-                    <span id="serverInputStatus"></span>
-                </div>
-                
-                <div class="server-section">
-                    <h4>🖥️ Server Transactions</h4>
-                    <div id="serverTxsList"></div>
-                </div>
-                
-                <div class="server-section">
-                    <h4>🔄 Entity Inputs</h4>
-                    <div id="entityInputsList"></div>
-                </div>
-            </div>
-            
-            <div class="server-column">
-                <div class="server-column-header">
-                    📤 Server Output (What's being sent and where)
-                    <span id="serverOutputStatus"></span>
-                </div>
-                
-                <div class="server-section">
-                    <h4>🚀 Entity Outputs</h4>
-                    <div id="entityOutputsList"></div>
-                </div>
-            </div>
-        </div>
+    <script>
+        // Main Svelte App Component
+        const { createComponent } = Svelte;
 
-        <div class="entity-filter">
-            <label for="entityFilter">📂 Filter Entities:</label>
-            <select id="entityFilter">
-                <option value="all">All Entities</option>
-            </select>
-        </div>
-
-        <div class="entities-grid" id="entitiesGrid">
-            <!-- Entity cards will be populated here -->
-        </div>
-
-        <div class="actionable-tabs-container">
-            <div class="tabs-header">
-                <button class="tab-button active" onclick="switchTab('controls')" id="controlsTab">
-                    🎮 Interactive Controls
-                </button>
-                <button class="tab-button" onclick="switchTab('formation')" id="formationTab">
-                    🏗️ Entity Formation
-                </button>
-            </div>
-            
-            <div id="controlsTabContent" class="tab-content active">
-                <div class="control-panel">
-                    <div class="control-group">
-                        <label>📍 Select Replica:</label>
-                        <select id="replicaSelect"></select>
-                    </div>
-                    <div class="control-group">
-                        <label>⚡ Select Action:</label>
-                        <select id="actionSelect">
-                            <option value="chat">💬 Chat Message</option>
-                            <option value="propose">📝 Create Proposal</option>
-                            <option value="vote">🗳️ Vote on Proposal</option>
-                        </select>
-                    </div>
-                    <div class="control-group" id="inputGroup">
-                        <label id="inputLabel">💬 Message:</label>
-                        <input type="text" id="inputField" placeholder="Enter your message...">
-                    </div>
-                    <div class="control-group" id="proposalGroup" style="display: none;">
-                        <label>📝 Proposal:</label>
-                        <input type="text" id="proposalField" placeholder="Enter proposal text...">
-                    </div>
-                    <div class="control-group" id="voteGroup" style="display: none;">
-                        <label>🗳️ Vote on Proposal:</label>
-                        <select id="proposalSelect"></select>
-                        <select id="voteChoice">
-                            <option value="yes">✅ Yes</option>
-                            <option value="no">❌ No</option>
-                        </select>
-                    </div>
-                    <div class="button-group">
-                        <button class="btn btn-primary" onclick="executeAction()">🚀 Execute Action</button>
-                        <button class="btn btn-secondary" onclick="refreshView()">🔄 Refresh View</button>
-                        <button class="btn btn-secondary" onclick="simulateChat()">🎯 Simulate Chat</button>
-                        <button class="btn btn-secondary" onclick="simulateStress()">💪 Stress Test</button>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="formationTabContent" class="tab-content">
-                <div class="simple-formation-panel">
-                    <div class="formation-group">
-                        <label for="entityNameInput">🏷️ Entity Name:</label>
-                        <input type="text" id="entityNameInput" placeholder="e.g., trading, chat, governance">
-                    </div>
-                    
-                    <div class="validators-section">
-                        <h4>👥 Validators:</h4>
-                        <div id="validatorsList">
-                            <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="alice" value="alice">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
-                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
-                            </div>
-                            <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="bob" value="bob">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
-                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
-                            </div>
-                            <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="carol" value="carol">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
-                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
-                            </div>
-                        </div>
-                        <button class="btn btn-secondary" onclick="addValidatorRow()">➕ Add New Validator</button>
-                    </div>
-                    
-                    <div class="threshold-section">
-                        <label for="thresholdSlider">🎯 Threshold: <span id="thresholdValue">2</span></label>
-                        <input type="range" id="thresholdSlider" min="1" max="10" value="2" oninput="updateThreshold()">
-                        <div class="threshold-info">
-                            <span>Total Weight: <span id="totalWeight">3</span></span>
-                        </div>
-                    </div>
-                    
-                    <div class="button-group">
-                        <button class="btn btn-primary" onclick="createSimpleEntity()">🚀 Create Entity</button>
-                        <button class="btn btn-secondary" onclick="clearSimpleForm()">🗑️ Clear Form</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="debug-log" id="debugLog" style="display: none;">
-            <strong>📊 Debug Log:</strong><br>
-            <div id="debugLogContent"></div>
-        </div>
-    </div>
-
-    <!-- Fixed Time Machine Bar -->
-    <div class="time-machine">
-        <div class="time-machine-main">
-            <div class="time-info-compact" id="timeInfo">
-                <span>⏰ No history yet</span>
-            </div>
-            <div class="time-nav-controls">
-                <button class="time-btn-compact" onclick="stepBackward()" title="Step Back (← arrow)">⏪</button>
-                <button class="time-btn-compact" onclick="stepForward()" title="Step Forward (→ arrow)">⏩</button>
-                <button class="time-btn-compact live" onclick="goToHistoryEnd()" title="Go to Current (End key)">⚡ LIVE</button>
-            </div>
-            <div class="time-utility-controls">
-                <button class="time-btn-mini" onclick="goToHistoryStart()" title="Go to Start (Home key)">⏮️</button>
-                <button class="time-btn-mini warning" onclick="resetTimeMachine()" title="Clear History">🗑️</button>
-            </div>
-        </div>
-        <div class="time-slider-container">
-            <input type="range" id="timeSlider" class="time-slider" min="0" max="0" value="0" disabled>
-        </div>
-    </div>
-
-    <script type="module">
         // Import XLN module
-        import * as XLN from './dist/server.js';
+        let XLN;
 
-        // App State - Functional approach with immutable state
-        const state = {
-            xlnEnv: null,
-            currentTimeIndex: -1,
-            lastModified: null,
-            logs: [],
-            selectedEntity: 'all',
-            selectedReplica: '',
-            selectedAction: 'chat'
-        };
+        // Component definition using Svelte's reactive approach
+        const App = createComponent(($$self, $$props, $$invalidate) => {
+            // Reactive state variables
+            let xlnEnv = null;
+            let currentTimeIndex = -1;
+            let selectedEntity = 'all';
+            let selectedReplica = '';
+            let selectedAction = 'chat';
+            let activeTab = 'controls';
+            let inputMessage = '';
+            let proposalText = '';
+            let selectedProposal = '';
+            let voteChoice = 'yes';
+            let entityName = '';
+            let validators = [
+                { name: 'alice', weight: 1 },
+                { name: 'bob', weight: 1 },
+                { name: 'carol', weight: 1 }
+            ];
+            let threshold = 2;
+            let logs = [];
+            let lastModified = null;
 
-        // Logging system with functional approach
-        const addLog = (message, type = 'info') => {
-            const timestamp = new Date().toLocaleTimeString();
-            const logEntry = { timestamp, message, type };
-            state.logs = [...state.logs.slice(-99), logEntry]; // Keep last 100 logs
-            
-            console.log(`[${timestamp}] ${message}`);
-            updateDebugLog();
-        };
+            // Reactive computations
+            $: totalWeight = validators.reduce((sum, v) => sum + v.weight, 0);
+            $: filteredReplicas = getFilteredReplicas(xlnEnv, selectedEntity, currentTimeIndex);
+            $: entityOptions = getEntityOptions(xlnEnv);
+            $: replicaOptions = getReplicaOptions(xlnEnv);
+            $: proposalOptions = getProposalOptions(xlnEnv, selectedReplica);
+            $: serverData = getServerData(xlnEnv, currentTimeIndex);
+            $: timeMachineData = getTimeMachineData(currentTimeIndex);
+            $: statusText = getStatusText(xlnEnv, entityOptions);
 
-        const updateDebugLog = () => {
-            const debugLog = document.getElementById('debugLog');
-            const debugLogContent = document.getElementById('debugLogContent');
-            
-            if (state.logs.length > 0) {
-                debugLog.style.display = 'block';
-                debugLogContent.textContent = state.logs.slice(-10)
-                    .map(log => `[${log.timestamp}] ${log.message}`)
-                    .join('\n');
-            } else {
-                debugLog.style.display = 'none';
-            }
-        };
+            // Utility functions
+            const addLog = (message, type = 'info') => {
+                const timestamp = new Date().toLocaleTimeString();
+                logs = [...logs.slice(-99), { timestamp, message, type }];
+                console.log(`[${timestamp}] ${message}`);
+                $$invalidate('logs', logs);
+            };
 
-        // Auto-reload detection
-        const checkForChanges = async () => {
-            try {
-                const response = await fetch('./dist/server.js', { method: 'HEAD' });
-                const modified = response.headers.get('last-modified');
+            const getStatusText = (env, options) => {
+                if (env) {
+                    const entityCount = options.length - 1;
+                    return `✅ Connected | Height: ${env.height} | Entities: ${entityCount}`;
+                }
+                return '❌ Disconnected';
+            };
+
+            const getFilteredReplicas = (env, filter, timeIndex) => {
+                if (!env) return new Map();
                 
-                if (state.lastModified && modified !== state.lastModified) {
-                    const indicator = document.getElementById('reloadIndicator');
-                    indicator.classList.add('show');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 500);
-                }
-                state.lastModified = modified;
-            } catch (error) {
-                addLog('Auto-reload check failed: ' + error.message, 'error');
-            }
-        };
-
-        // Initialize XLN environment
-        const initializeEnvironment = async () => {
-            try {
-                state.xlnEnv = await XLN.main();
-                window.xlnEnv = state.xlnEnv;
-                updateStatusBar();
-                addLog('🎯 XLN Environment loaded successfully', 'success');
-                renderAll();
-                return true;
-            } catch (error) {
-                addLog('❌ Failed to load XLN environment: ' + error.message, 'error');
-                updateStatusBar();
-                return false;
-            }
-        };
-
-        // UI Update Functions - Pure functions that don't mutate state
-        const updateStatusBar = () => {
-            const statusBar = document.getElementById('statusBar');
-            if (state.xlnEnv) {
-                const entityCount = new Set(Array.from(state.xlnEnv.replicas.keys()).map(key => key.split(':')[0])).size;
-                statusBar.textContent = `✅ Connected | Height: ${state.xlnEnv.height} | Entities: ${entityCount}`;
-            } else {
-                statusBar.textContent = '❌ Disconnected';
-            }
-        };
-
-        const getFilteredReplicas = () => {
-            if (!state.xlnEnv) return new Map();
-            
-            let replicasToShow, snapshot;
-            let isHistorical = false;
-            
-            if (state.currentTimeIndex >= 0) {
-                snapshot = XLN.getSnapshot(state.currentTimeIndex);
-                if (snapshot) {
-                    replicasToShow = snapshot.replicas;
-                    isHistorical = true;
-                }
-            }
-            
-            if (!replicasToShow) {
-                replicasToShow = state.xlnEnv.replicas;
-                state.currentTimeIndex = -1;
-            }
-            
-            const filtered = new Map();
-            replicasToShow.forEach((replica, key) => {
-                if (state.selectedEntity === 'all' || replica.entityId === state.selectedEntity) {
-                    filtered.set(key, { ...replica, isHistorical });
-                }
-            });
-            
-            return filtered;
-        };
-
-        const renderEntityFilter = () => {
-            if (!state.xlnEnv) return;
-            
-            const entityFilter = document.getElementById('entityFilter');
-            const currentValue = entityFilter.value;
-            
-            const entityTypes = [...new Set(Array.from(state.xlnEnv.replicas.keys()).map(key => key.split(':')[0]))];
-            
-            entityFilter.innerHTML = '<option value="all">All Entities</option>';
-            entityTypes.forEach(entityType => {
-                const option = document.createElement('option');
-                option.value = entityType;
-                option.textContent = entityType.toUpperCase();
-                if (entityType === currentValue) option.selected = true;
-                entityFilter.appendChild(option);
-            });
-            
-            state.selectedEntity = entityFilter.value;
-        };
-
-        const renderServerData = () => {
-            const container = document.getElementById('serverIOContainer');
-            const serverTxsList = document.getElementById('serverTxsList');
-            const entityInputsList = document.getElementById('entityInputsList');
-            const entityOutputsList = document.getElementById('entityOutputsList');
-            const serverInputStatus = document.getElementById('serverInputStatus');
-            const serverOutputStatus = document.getElementById('serverOutputStatus');
-            
-            let serverInput, serverOutputs;
-            let isHistorical = false;
-            
-            if (state.currentTimeIndex >= 0) {
-                const snapshot = XLN.getSnapshot(state.currentTimeIndex);
-                if (snapshot) {
-                    serverInput = snapshot.serverInput;
-                    serverOutputs = snapshot.serverOutputs || [];
-                    isHistorical = true;
-                }
-            }
-            
-            if (!serverInput) {
-                const history = XLN.getHistory();
-                if (history.length > 0) {
-                    serverInput = history[history.length - 1].serverInput;
-                    serverOutputs = history[history.length - 1].serverOutputs || [];
-                }
-            }
-            
-            // Show container if we have data
-            container.style.display = (serverInput || serverOutputs?.length) ? 'grid' : 'none';
-            
-            // Update status indicators
-            const statusText = isHistorical ? ' 🕰️ Historical' : ' ⚡ Current';
-            serverInputStatus.textContent = statusText;
-            serverOutputStatus.textContent = statusText;
-            
-            // Render server transactions
-            serverTxsList.innerHTML = serverInput?.serverTxs.length ? 
-                serverInput.serverTxs.map(tx => `
-                    <div class="input-item">
-                        <strong>🖥️ ${tx.type}</strong>: ${tx.entityId}:${tx.signerId}
-                        ${tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
-                        ${tx.data.config ? `
-                            <br>⚙️ <strong>Config:</strong>
-                            <br>  • Mode: ${tx.data.config.mode}
-                            <br>  • Threshold: ${tx.data.config.threshold}
-                            <br>  • Validators: [${tx.data.config.validators.join(', ')}]
-                            <br>  • Voting Shares:
-                            ${Object.entries(tx.data.config.shares).map(([validator, shares]) => 
-                                `<br>    ${validator}: ${shares} shares`
-                            ).join('')}
-                        ` : ''}
-                    </div>
-                `).join('') : 
-                '<div class="no-inputs">No server transactions</div>';
-            
-            // Render entity inputs
-            entityInputsList.innerHTML = serverInput?.entityInputs.length ?
-                serverInput.entityInputs.map(input => `
-                    <div class="input-item">
-                        <strong>${input.entityId}:${input.signerId}</strong>
-                        ${input.entityTxs?.length ? `
-                            <br>📝 <strong>${input.entityTxs.length} transactions:</strong>
-                            ${input.entityTxs.map((tx, i) => {
-                                if (tx.type === 'chat') {
-                                    return `<br>  ${i+1}. 💬 Chat: "${tx.data.message}" (from: ${tx.data.from})`;
-                                } else if (tx.type === 'propose') {
-                                    return `<br>  ${i+1}. 📝 Propose: "${tx.data.action.data.message}" (by: ${tx.data.proposer})`;
-                                } else if (tx.type === 'vote') {
-                                    return `<br>  ${i+1}. 🗳️ Vote: ${tx.data.choice} on ${tx.data.proposalId.slice(0,12)}... (by: ${tx.data.voter})`;
-                                }
-                                return `<br>  ${i+1}. ${tx.type}`;
-                            }).join('')}
-                        ` : ''}
-                        ${input.proposedFrame ? `
-                            <br>${input.precommits?.size > 0 ? "📋 <strong>Commit Notification:</strong>" : "🎯 <strong>Proposed Frame:</strong>"}
-                            <br>  • Hash: ${input.proposedFrame.hash}
-                            <br>  • Height: ${input.proposedFrame.height}
-                            <br>  • Transactions: ${input.proposedFrame.txs.length}
-                            <br>  • Signatures: ${input.proposedFrame.signatures.size}
-                        ` : ''}
-                        ${input.precommits?.size > 0 ? `
-                            <br>✅ <strong>${input.precommits.size} precommits from:</strong>
-                            ${Array.from(input.precommits.entries()).map(([signerId, signature]) => 
-                                `<br>  • ${signerId}: ${signature.slice(0,16)}...`
-                            ).join('')}
-                        ` : ''}
-                    </div>
-                `).join('') :
-                '<div class="no-inputs">No entity inputs</div>';
-            
-            // Render entity outputs
-            entityOutputsList.innerHTML = serverOutputs?.length ?
-                serverOutputs.map((output, index) => `
-                    <div class="input-item">
-                        <strong>📤 ${index + 1}. → ${output.signerId}</strong>
-                        ${output.entityTxs?.length ? `
-                            <br>📝 <strong>${output.entityTxs.length} transactions:</strong>
-                            ${output.entityTxs.map((tx, i) => {
-                                if (tx.type === 'chat') {
-                                    return `<br>  ${i+1}. 💬 Chat: "${tx.data.message}" (from: ${tx.data.from})`;
-                                } else if (tx.type === 'propose') {
-                                    return `<br>  ${i+1}. 📝 Propose: "${tx.data.action.data.message}" (by: ${tx.data.proposer})`;
-                                } else if (tx.type === 'vote') {
-                                    return `<br>  ${i+1}. 🗳️ Vote: ${tx.data.choice} on ${tx.data.proposalId.slice(0,12)}... (by: ${tx.data.voter})`;
-                                }
-                                return `<br>  ${i+1}. ${tx.type}`;
-                            }).join('')}
-                        ` : ''}
-                        ${output.proposedFrame ? `
-                            <br>${output.precommits?.size > 0 ? "📋 <strong>Commit Notification:</strong>" : "🎯 <strong>Proposed Frame:</strong>"}
-                            <br>  • Hash: ${output.proposedFrame.hash}
-                            <br>  • Height: ${output.proposedFrame.height}
-                            <br>  • Transactions: ${output.proposedFrame.txs.length}
-                            <br>  • Signatures: ${output.proposedFrame.signatures.size}
-                        ` : ''}
-                        ${output.precommits?.size > 0 ? `
-                            <br>✅ <strong>${output.precommits.size} precommits:</strong>
-                            ${Array.from(output.precommits.entries()).map(([signerId, signature]) => 
-                                `<br>  • ${signerId}: ${signature.slice(0,16)}...`
-                            ).join('')}
-                        ` : ''}
-                    </div>
-                `).join('') :
-                '<div class="no-inputs">No entity outputs</div>';
-        };
-
-        const renderEntities = () => {
-            const entitiesGrid = document.getElementById('entitiesGrid');
-            const filteredReplicas = getFilteredReplicas();
-            
-            entitiesGrid.innerHTML = Array.from(filteredReplicas.entries()).map(([key, replica]) => {
-                const config = replica.state.config;
-                const modeClass = config.mode === 'proposer-based' ? 'mode-proposer-based' : 'mode-gossip-based';
-                const totalShares = Object.values(config.shares).reduce((sum, val) => sum + val, BigInt(0));
-                const thresholdPercent = ((Number(config.threshold) / Number(totalShares)) * 100).toFixed(1);
-                const shares = config.shares[replica.signerId] || BigInt(0);
-                const sharePercent = ((Number(shares) / Number(totalShares)) * 100).toFixed(1);
+                let replicasToShow, snapshot;
+                let isHistorical = false;
                 
-                return `
-                    <div class="entity-card">
-                        <div class="entity-header">
-                            <div class="entity-title">${replica.entityId}:${replica.signerId} ${replica.isHistorical ? '🕰️' : ''}</div>
-                            <div class="entity-mode ${modeClass}">${config.mode}</div>
-                        </div>
-                        
-                        <div class="threshold-info">
-                            <strong>Role:</strong> ${replica.isProposer ? '👑 Proposer' : '✅ Validator'}<br>
-                            <strong>Voting Power:</strong> ${shares} / ${totalShares} shares (${sharePercent}%)<br>
-                            <strong>Consensus Threshold:</strong> ${config.threshold} / ${totalShares} shares (${thresholdPercent}%)
-                            <div class="power-bar">
-                                <div class="power-fill" style="width: ${thresholdPercent}%"></div>
-                            </div>
-                        </div>
-                        
-                        <div class="replica-stats">
-                            <strong>📊 Replica State:</strong><br>
-                            <strong>📏 Frame Height: ${replica.state.height}</strong><br>
-                            <strong>📝 Mempool: ${replica.mempool.length} txs</strong>
-                            ${replica.mempool.length > 0 ? `<br>  ${replica.mempool.map((tx, i) => {
-                                if (tx.type === 'chat') return `${i+1}. 💬 "${tx.data.message}" (${tx.data.from})`;
-                                if (tx.type === 'propose') return `${i+1}. 📝 "${tx.data.action.data.message}" (${tx.data.proposer})`;
-                                if (tx.type === 'vote') return `${i+1}. 🗳️ ${tx.data.choice} on ${tx.data.proposalId.slice(0,8)}... (${tx.data.voter})`;
-                                return `${i+1}. ${tx.type}`;
-                            }).join('<br>  ')}` : ''}<br>
-                            <strong>💬 Messages: ${replica.state.messages.length}</strong><br>
-                            <strong>🗳️ Proposals: ${replica.state.proposals.size}</strong><br>
-                            <strong>🔢 Nonces:</strong> ${replica.state.nonces.size > 0 ? 
-                                Array.from(replica.state.nonces.entries()).map(([user, nonce]) => `${user}:${nonce}`).join(', ') : 
-                                'none'}<br>
-                            ${replica.proposal ? `<strong style="color: #28a745;">📝 Currently Proposing:</strong><br>
-                              • Height: ${replica.proposal.height}<br>
-                              • Hash: ${replica.proposal.hash}<br>
-                              • Txs: ${replica.proposal.txs.length}<br>
-                              • Signatures: ${replica.proposal.signatures.size}/${replica.state.config.validators.length}` : ''}
-                            ${replica.lockedFrame ? `<strong style="color: #ffc107;">🔒 Locked Frame (Precommitted):</strong><br>
-                              • Height: ${replica.lockedFrame.height}<br>
-                              • Hash: ${replica.lockedFrame.hash}<br>
-                              • Txs: ${replica.lockedFrame.txs.length}` : ''}
-                        </div>
-                        
-                        <div class="messages-section">
-                            <strong>📨 ${replica.signerId}'s Message Feed:</strong>
-                            ${replica.state.messages.length > 0 ? 
-                                replica.state.messages.map(msg => `
-                                    <div class="message ${msg.includes('[COLLECTIVE]') ? 'collective' : ''}">
-                                        ${msg}
-                                    </div>
-                                `).join('') : 
-                                '<div class="message">No messages yet</div>'
-                            }
-                        </div>
-                        
-                        ${replica.state.proposals.size > 0 ? `
-                            <div class="messages-section">
-                                <strong>🗳️ ${replica.signerId}'s Proposals:</strong>
-                                ${Array.from(replica.state.proposals.values()).map(proposal => {
-                                    const yesVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'yes').map(([voter, _]) => voter);
-                                    const noVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'no').map(([voter, _]) => voter);
-                                    
-                                    return `<div class="message">
-                                        <strong>ID:</strong> ${proposal.id}<br>
-                                        <strong>Proposer:</strong> ${proposal.proposer}<br>
-                                        <strong>Status:</strong> ${proposal.status}<br>
-                                        <strong>Action:</strong> ${proposal.action.data.message}<br>
-                                        <strong>Votes (${proposal.votes.size} total):</strong><br>
-                                        ${yesVoters.length > 0 ? `  ✅ YES (${yesVoters.length}): ${yesVoters.join(', ')}<br>` : ''}
-                                        ${noVoters.length > 0 ? `  ❌ NO (${noVoters.length}): ${noVoters.join(', ')}<br>` : ''}
-                                        ${yesVoters.length === 0 && noVoters.length === 0 ? '  (No votes yet)<br>' : ''}
-                                        <small>Created: ${new Date(proposal.created).toLocaleTimeString()}</small>
-                                    </div>`;
-                                }).join('')}
-                            </div>
-                        ` : ''}
-                    </div>
-                `;
-            }).join('');
-        };
+                if (timeIndex >= 0) {
+                    snapshot = XLN.getSnapshot(timeIndex);
+                    if (snapshot) {
+                        replicasToShow = snapshot.replicas;
+                        isHistorical = true;
+                    }
+                }
+                
+                if (!replicasToShow) {
+                    replicasToShow = env.replicas;
+                    currentTimeIndex = -1;
+                    $$invalidate('currentTimeIndex', currentTimeIndex);
+                }
+                
+                const filtered = new Map();
+                replicasToShow.forEach((replica, key) => {
+                    if (filter === 'all' || replica.entityId === filter) {
+                        filtered.set(key, { ...replica, isHistorical });
+                    }
+                });
+                
+                return filtered;
+            };
 
-        const renderReplicaSelect = () => {
-            if (!state.xlnEnv) return;
-            
-            const replicaSelect = document.getElementById('replicaSelect');
-            const currentValue = replicaSelect.value;
-            
-            replicaSelect.innerHTML = '<option value="">Choose a replica...</option>';
-            
-            for (const [key, replica] of state.xlnEnv.replicas) {
-                const option = document.createElement('option');
-                option.value = key;
-                option.textContent = `${replica.entityId}:${replica.signerId} ${replica.isProposer ? '(👑 Proposer)' : '(✅ Validator)'}`;
-                if (key === currentValue) option.selected = true;
-                replicaSelect.appendChild(option);
-            }
-            
-            state.selectedReplica = replicaSelect.value;
-        };
+            const getEntityOptions = (env) => {
+                if (!env) return [{ value: 'all', label: 'All Entities' }];
+                const entityTypes = [...new Set(Array.from(env.replicas.keys()).map(key => key.split(':')[0]))];
+                return [{ value: 'all', label: 'All Entities' }, ...entityTypes.map(type => ({ value: type, label: type.toUpperCase() }))];
+            };
 
-        const renderProposalSelect = () => {
-            if (!state.xlnEnv || !state.selectedReplica) return;
-            
-            const proposalSelect = document.getElementById('proposalSelect');
-            const replica = state.xlnEnv.replicas.get(state.selectedReplica);
-            
-            proposalSelect.innerHTML = '<option value="">Choose a proposal...</option>';
-            
-            if (replica && replica.state.proposals.size > 0) {
+            const getReplicaOptions = (env) => {
+                if (!env) return [];
+                return Array.from(env.replicas.entries()).map(([key, replica]) => ({
+                    value: key,
+                    label: `${replica.entityId}:${replica.signerId} ${replica.isProposer ? '(👑 Proposer)' : '(✅ Validator)'}`
+                }));
+            };
+
+            const getProposalOptions = (env, replicaKey) => {
+                if (!env || !replicaKey) return [];
+                const replica = env.replicas.get(replicaKey);
+                if (!replica || !replica.state.proposals.size) return [];
+                
+                const options = [];
                 replica.state.proposals.forEach((proposal, proposalId) => {
                     if (proposal.status === 'pending') {
-                        const option = document.createElement('option');
-                        option.value = proposalId;
-                        option.textContent = `${proposal.action.data.message} (by ${proposal.proposer})`;
-                        proposalSelect.appendChild(option);
+                        options.push({
+                            value: proposalId,
+                            label: `${proposal.action.data.message} (by ${proposal.proposer})`
+                        });
                     }
                 });
-            }
-            
-            if (proposalSelect.options.length === 1) {
-                const option = document.createElement('option');
-                option.value = '';
-                option.textContent = 'No pending proposals';
-                proposalSelect.appendChild(option);
-            }
-        };
-
-        const updateTimeMachine = () => {
-            const history = XLN.getHistory();
-            const timeSlider = document.getElementById('timeSlider');
-            const timeInfo = document.getElementById('timeInfo');
-            const sliderContainer = document.querySelector('.time-slider-container');
-            
-            if (history.length === 0) {
-                timeSlider.disabled = true;
-                timeSlider.max = 0;
-                timeInfo.innerHTML = '<span>⏰ No history yet</span>';
-                timeInfo.className = 'time-info-compact';
-                sliderContainer.style.setProperty('--progress', '0%');
-                return;
-            }
-            
-            timeSlider.disabled = false;
-            const maxMeaningfulIndex = Math.max(0, history.length - 2);
-            timeSlider.max = maxMeaningfulIndex + 1;
-            
-            let sliderValue, progressPercent;
-            
-            if (state.currentTimeIndex === -1) {
-                sliderValue = maxMeaningfulIndex + 1;
-                progressPercent = 100;
-                timeInfo.innerHTML = `
-                    <span>⏰ LIVE</span>
-                    <span>Height: ${state.xlnEnv?.height || 0}</span>
-                    <span>${history.length} snapshots</span>
-                `;
-                timeInfo.className = 'time-info-compact current';
-            } else {
-                sliderValue = state.currentTimeIndex;
-                const sliderMax = maxMeaningfulIndex + 1;
-                progressPercent = sliderMax > 0 ? (state.currentTimeIndex / sliderMax) * 100 : 0;
-                const snapshot = history[state.currentTimeIndex];
-                timeInfo.innerHTML = `
-                    <span>📸 ${state.currentTimeIndex + 1}/${history.length}</span>
-                    <span>Height: ${snapshot?.height || 0}</span>
-                    <span>${snapshot?.description || 'Unknown'}</span>
-                `;
-                timeInfo.className = 'time-info-compact';
-            }
-            
-            timeSlider.value = sliderValue;
-            sliderContainer.style.setProperty('--progress', `${progressPercent}%`);
-        };
-
-        // Main render function - orchestrates all UI updates
-        const renderAll = () => {
-            updateStatusBar();
-            renderEntityFilter();
-            renderServerData();
-            renderEntities();
-            renderReplicaSelect();
-            renderProposalSelect();
-            updateTimeMachine();
-        };
-
-        // Action Functions - Pure functions that handle user interactions
-        const executeAction = () => {
-            if (!state.xlnEnv) {
-                alert('XLN Environment not initialized');
-                return;
-            }
-            
-            state.currentTimeIndex = -1;
-            
-            const replica = state.xlnEnv.replicas.get(state.selectedReplica);
-            if (!replica) {
-                alert('Please select a valid replica');
-                return;
-            }
-            
-            let entityTx;
-            
-            if (state.selectedAction === 'chat') {
-                const message = document.getElementById('inputField').value.trim();
-                if (!message) {
-                    alert('Please enter a message');
-                    return;
-                }
                 
-                entityTx = {
-                    type: 'chat',
-                    data: { from: replica.signerId, message }
-                };
-                
-                document.getElementById('inputField').value = '';
-            } else if (state.selectedAction === 'propose') {
-                const proposalText = document.getElementById('proposalField').value.trim();
-                if (!proposalText) {
-                    alert('Please enter a proposal');
-                    return;
-                }
-                
-                entityTx = {
-                    type: 'propose',
-                    data: {
-                        action: { type: 'collective_message', data: { message: proposalText } },
-                        proposer: replica.signerId
-                    }
-                };
-                
-                document.getElementById('proposalField').value = '';
-            } else if (state.selectedAction === 'vote') {
-                const proposalId = document.getElementById('proposalSelect').value;
-                const voteChoice = document.getElementById('voteChoice').value;
-                
-                if (!proposalId) {
-                    alert('No proposal selected or no pending proposals');
-                    return;
-                }
-                
-                entityTx = {
-                    type: 'vote',
-                    data: {
-                        proposalId,
-                        voter: replica.signerId,
-                        choice: voteChoice
-                    }
-                };
-            }
-            
-            // Process transaction
-            let outputs = XLN.processServerInput(state.xlnEnv, {
-                serverTxs: [],
-                entityInputs: [{
-                    entityId: replica.entityId,
-                    signerId: replica.signerId,
-                    entityTxs: [entityTx]
-                }]
-            });
-            
-            // Process outputs until empty
-            while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(state.xlnEnv, {
-                    serverTxs: [],
-                    entityInputs: outputs
-                });
-                outputs.splice(0, outputs.length, ...newOutputs);
-            }
-            
-            addLog(`✅ Executed ${state.selectedAction} action for ${replica.entityId}:${replica.signerId}`, 'success');
-            renderAll();
-        };
-
-        const createSimpleEntity = () => {
-            if (!state.xlnEnv) return;
-            
-            state.currentTimeIndex = -1;
-            
-            const entityName = document.getElementById('entityNameInput').value.trim();
-            const threshold = parseInt(document.getElementById('thresholdSlider').value);
-            
-            if (!entityName) {
-                alert('Please enter an entity name');
-                return;
-            }
-            
-            if (!/^[a-zA-Z0-9_-]+$/.test(entityName)) {
-                alert('Entity name can only contain letters, numbers, underscores, and hyphens');
-                return;
-            }
-            
-            const existingEntity = Array.from(state.xlnEnv.replicas.keys()).find(key => key.startsWith(entityName + ':'));
-            if (existingEntity) {
-                alert(`Entity "${entityName}" already exists`);
-                return;
-            }
-            
-            const validatorRows = document.querySelectorAll('.validator-row');
-            const validators = [];
-            const shares = {};
-            
-            for (const row of validatorRows) {
-                const nameInput = row.querySelector('.validator-name');
-                const weightInput = row.querySelector('.validator-weight');
-                
-                const validatorName = nameInput.value.trim();
-                const weight = parseInt(weightInput.value) || 0;
-                
-                if (!validatorName) {
-                    alert('Please enter a name for all validators');
-                    return;
-                }
-                
-                if (!/^[a-zA-Z0-9_-]+$/.test(validatorName)) {
-                    alert(`Validator name "${validatorName}" can only contain letters, numbers, underscores, and hyphens`);
-                    return;
-                }
-                
-                if (weight < 1) {
-                    alert(`Validator "${validatorName}" must have a weight of at least 1`);
-                    return;
-                }
-                
-                if (validators.includes(validatorName)) {
-                    alert(`Validator name "${validatorName}" is duplicated`);
-                    return;
-                }
-                
-                validators.push(validatorName);
-                shares[validatorName] = BigInt(weight);
-            }
-            
-            if (validators.length === 0) {
-                alert('Please add at least one validator');
-                return;
-            }
-            
-            const totalShares = Object.values(shares).reduce((sum, val) => sum + val, BigInt(0));
-            if (BigInt(threshold) > totalShares) {
-                alert(`Threshold ${threshold} is higher than total weight ${totalShares}`);
-                return;
-            }
-            
-            const config = {
-                mode: 'proposer-based',
-                threshold: BigInt(threshold),
-                validators: validators,
-                shares: shares
+                return options.length ? options : [{ value: '', label: 'No pending proposals' }];
             };
-            
-            const serverTxs = validators.map((signerId, index) => ({
-                type: 'importReplica',
-                entityId: entityName,
-                signerId: signerId,
-                data: {
-                    config: config,
-                    isProposer: index === 0
-                }
-            }));
-            
-            let outputs = XLN.processServerInput(state.xlnEnv, {
-                serverTxs: serverTxs,
-                entityInputs: []
-            });
-            
-            while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(state.xlnEnv, {
-                    serverTxs: [],
-                    entityInputs: outputs
-                });
-                outputs.splice(0, outputs.length, ...newOutputs);
-            }
-            
-            addLog(`✅ Entity "${entityName}" created successfully! Validators: ${validators.join(', ')}, Threshold: ${threshold}/${totalShares}`, 'success');
-            
-            clearSimpleForm();
-            renderAll();
-        };
 
-        const simulateChat = () => {
-            if (!state.xlnEnv) return;
-            
-            state.currentTimeIndex = -1;
-            
-            const entities = ['chat', 'trading', 'governance'];
-            const users = ['alice', 'bob', 'carol', 'david', 'eve'];
-            const messages = [
-                'Hello everyone!',
-                'How is the consensus working?',
-                'This is a test message',
-                'Great to see multi-entity support',
-                'Byzantine fault tolerance rocks!'
-            ];
-            
-            const entityId = entities[Math.floor(Math.random() * entities.length)];
-            const from = users[Math.floor(Math.random() * users.length)];
-            const message = messages[Math.floor(Math.random() * messages.length)];
-            
-            let outputs = XLN.processServerInput(state.xlnEnv, {
-                serverTxs: [],
-                entityInputs: [{
+            const getServerData = (env, timeIndex) => {
+                if (!env) return null;
+                
+                let serverInput, serverOutputs;
+                let isHistorical = false;
+                
+                if (timeIndex >= 0) {
+                    const snapshot = XLN.getSnapshot(timeIndex);
+                    if (snapshot) {
+                        serverInput = snapshot.serverInput;
+                        serverOutputs = snapshot.serverOutputs || [];
+                        isHistorical = true;
+                    }
+                }
+                
+                if (!serverInput) {
+                    const history = XLN.getHistory();
+                    if (history.length > 0) {
+                        serverInput = history[history.length - 1].serverInput;
+                        serverOutputs = history[history.length - 1].serverOutputs || [];
+                    }
+                }
+                
+                return { serverInput, serverOutputs, isHistorical };
+            };
+
+            const getTimeMachineData = (timeIndex) => {
+                const history = XLN.getHistory();
+                
+                if (history.length === 0) {
+                    return {
+                        disabled: true,
+                        max: 0,
+                        value: 0,
+                        info: '⏰ No history yet',
+                        isCurrent: false,
+                        progress: 0
+                    };
+                }
+                
+                const maxMeaningfulIndex = Math.max(0, history.length - 2);
+                let sliderValue, progressPercent, info, isCurrent;
+                
+                if (timeIndex === -1) {
+                    sliderValue = maxMeaningfulIndex + 1;
+                    progressPercent = 100;
+                    info = `⏰ LIVE | Height: ${xlnEnv?.height || 0} | ${history.length} snapshots`;
+                    isCurrent = true;
+                } else {
+                    sliderValue = timeIndex;
+                    const sliderMax = maxMeaningfulIndex + 1;
+                    progressPercent = sliderMax > 0 ? (timeIndex / sliderMax) * 100 : 0;
+                    const snapshot = history[timeIndex];
+                    info = `📸 ${timeIndex + 1}/${history.length} | Height: ${snapshot?.height || 0} | ${snapshot?.description || 'Unknown'}`;
+                    isCurrent = false;
+                }
+                
+                return {
+                    disabled: false,
+                    max: maxMeaningfulIndex + 1,
+                    value: sliderValue,
+                    info,
+                    isCurrent,
+                    progress: progressPercent
+                };
+            };
+
+            // Event handlers
+            const switchTab = (tabName) => {
+                activeTab = tabName;
+                $$invalidate('activeTab', activeTab);
+            };
+
+            const executeAction = () => {
+                if (!xlnEnv) {
+                    alert('XLN Environment not initialized');
+                    return;
+                }
+                
+                currentTimeIndex = -1;
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+                
+                const replica = xlnEnv.replicas.get(selectedReplica);
+                if (!replica) {
+                    alert('Please select a valid replica');
+                    return;
+                }
+                
+                let entityTx;
+                
+                if (selectedAction === 'chat') {
+                    if (!inputMessage.trim()) {
+                        alert('Please enter a message');
+                        return;
+                    }
+                    
+                    entityTx = {
+                        type: 'chat',
+                        data: { from: replica.signerId, message: inputMessage.trim() }
+                    };
+                    
+                    inputMessage = '';
+                    $$invalidate('inputMessage', inputMessage);
+                } else if (selectedAction === 'propose') {
+                    if (!proposalText.trim()) {
+                        alert('Please enter a proposal');
+                        return;
+                    }
+                    
+                    entityTx = {
+                        type: 'propose',
+                        data: {
+                            action: { type: 'collective_message', data: { message: proposalText.trim() } },
+                            proposer: replica.signerId
+                        }
+                    };
+                    
+                    proposalText = '';
+                    $$invalidate('proposalText', proposalText);
+                } else if (selectedAction === 'vote') {
+                    if (!selectedProposal) {
+                        alert('No proposal selected or no pending proposals');
+                        return;
+                    }
+                    
+                    entityTx = {
+                        type: 'vote',
+                        data: {
+                            proposalId: selectedProposal,
+                            voter: replica.signerId,
+                            choice: voteChoice
+                        }
+                    };
+                }
+                
+                // Process transaction
+                let outputs = XLN.processServerInput(xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: [{
+                        entityId: replica.entityId,
+                        signerId: replica.signerId,
+                        entityTxs: [entityTx]
+                    }]
+                });
+                
+                // Process outputs until empty
+                while (outputs.length > 0) {
+                    const newOutputs = XLN.processServerInput(xlnEnv, {
+                        serverTxs: [],
+                        entityInputs: outputs
+                    });
+                    outputs.splice(0, outputs.length, ...newOutputs);
+                }
+                
+                addLog(`✅ Executed ${selectedAction} action for ${replica.entityId}:${replica.signerId}`, 'success');
+                
+                // Trigger reactivity
+                $$invalidate('xlnEnv', xlnEnv);
+            };
+
+            const createEntity = () => {
+                if (!xlnEnv) return;
+                
+                currentTimeIndex = -1;
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+                
+                if (!entityName.trim()) {
+                    alert('Please enter an entity name');
+                    return;
+                }
+                
+                if (!/^[a-zA-Z0-9_-]+$/.test(entityName)) {
+                    alert('Entity name can only contain letters, numbers, underscores, and hyphens');
+                    return;
+                }
+                
+                const existingEntity = Array.from(xlnEnv.replicas.keys()).find(key => key.startsWith(entityName + ':'));
+                if (existingEntity) {
+                    alert(`Entity "${entityName}" already exists`);
+                    return;
+                }
+                
+                // Validate validators
+                for (const validator of validators) {
+                    if (!validator.name.trim()) {
+                        alert('Please enter a name for all validators');
+                        return;
+                    }
+                    if (!/^[a-zA-Z0-9_-]+$/.test(validator.name)) {
+                        alert(`Validator name "${validator.name}" can only contain letters, numbers, underscores, and hyphens`);
+                        return;
+                    }
+                    if (validator.weight < 1) {
+                        alert(`Validator "${validator.name}" must have a weight of at least 1`);
+                        return;
+                    }
+                }
+                
+                // Check for duplicate validator names
+                const names = validators.map(v => v.name);
+                if (new Set(names).size !== names.length) {
+                    alert('Validator names must be unique');
+                    return;
+                }
+                
+                if (threshold > totalWeight) {
+                    alert(`Threshold ${threshold} is higher than total weight ${totalWeight}`);
+                    return;
+                }
+                
+                // Create consensus config
+                const config = {
+                    mode: 'proposer-based',
+                    threshold: BigInt(threshold),
+                    validators: validators.map(v => v.name),
+                    shares: validators.reduce((acc, v) => {
+                        acc[v.name] = BigInt(v.weight);
+                        return acc;
+                    }, {})
+                };
+                
+                // Create server transactions for all validators
+                const serverTxs = validators.map((validator, index) => ({
+                    type: 'importReplica',
+                    entityId: entityName,
+                    signerId: validator.name,
+                    data: {
+                        config: config,
+                        isProposer: index === 0
+                    }
+                }));
+                
+                // Process the server transactions
+                let outputs = XLN.processServerInput(xlnEnv, {
+                    serverTxs: serverTxs,
+                    entityInputs: []
+                });
+                
+                // Process outputs until empty
+                while (outputs.length > 0) {
+                    const newOutputs = XLN.processServerInput(xlnEnv, {
+                        serverTxs: [],
+                        entityInputs: outputs
+                    });
+                    outputs.splice(0, outputs.length, ...newOutputs);
+                }
+                
+                addLog(`✅ Entity "${entityName}" created successfully! Validators: ${validators.map(v => v.name).join(', ')}, Threshold: ${threshold}/${totalWeight}`, 'success');
+                
+                // Clear form
+                entityName = '';
+                validators = [
+                    { name: 'alice', weight: 1 },
+                    { name: 'bob', weight: 1 },
+                    { name: 'carol', weight: 1 }
+                ];
+                threshold = 2;
+                
+                $$invalidate('entityName', entityName);
+                $$invalidate('validators', validators);
+                $$invalidate('threshold', threshold);
+                $$invalidate('xlnEnv', xlnEnv);
+            };
+
+            const addValidator = () => {
+                validators = [...validators, { name: '', weight: 1 }];
+                $$invalidate('validators', validators);
+            };
+
+            const removeValidator = (index) => {
+                if (validators.length > 1) {
+                    validators = validators.filter((_, i) => i !== index);
+                    $$invalidate('validators', validators);
+                } else {
+                    alert('Must have at least one validator');
+                }
+            };
+
+            const simulateChat = () => {
+                if (!xlnEnv) return;
+                
+                currentTimeIndex = -1;
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+                
+                const entities = ['chat', 'trading', 'governance'];
+                const users = ['alice', 'bob', 'carol', 'david', 'eve'];
+                const messages = [
+                    'Hello everyone!',
+                    'How is the consensus working?',
+                    'This is a test message',
+                    'Great to see multi-entity support',
+                    'Byzantine fault tolerance rocks!'
+                ];
+                
+                const entityId = entities[Math.floor(Math.random() * entities.length)];
+                const from = users[Math.floor(Math.random() * users.length)];
+                const message = messages[Math.floor(Math.random() * messages.length)];
+                
+                let outputs = XLN.processServerInput(xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: [{
+                        entityId,
+                        signerId: 'alice',
+                        entityTxs: [{
+                            type: 'chat',
+                            data: { from, message }
+                        }]
+                    }]
+                });
+                
+                while (outputs.length > 0) {
+                    const newOutputs = XLN.processServerInput(xlnEnv, {
+                        serverTxs: [],
+                        entityInputs: outputs
+                    });
+                    outputs.splice(0, outputs.length, ...newOutputs);
+                }
+                
+                addLog(`🎯 Simulated chat: ${from} → ${entityId}: "${message}"`, 'info');
+                $$invalidate('xlnEnv', xlnEnv);
+            };
+
+            const simulateStress = () => {
+                if (!xlnEnv) return;
+                
+                currentTimeIndex = -1;
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+                
+                const entities = ['chat', 'trading', 'governance'];
+                const users = ['alice', 'bob', 'carol', 'david', 'eve'];
+                const txCount = 5 + Math.floor(Math.random() * 10);
+                
+                const entityInputs = entities.map(entityId => ({
                     entityId,
                     signerId: 'alice',
-                    entityTxs: [{
+                    entityTxs: Array.from({ length: txCount }, (_, i) => ({
                         type: 'chat',
-                        data: { from, message }
-                    }]
-                }]
-            });
-            
-            while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(state.xlnEnv, {
+                        data: {
+                            from: users[i % users.length],
+                            message: `Stress test message ${i + 1} for ${entityId}`
+                        }
+                    }))
+                }));
+                
+                let outputs = XLN.processServerInput(xlnEnv, {
                     serverTxs: [],
-                    entityInputs: outputs
+                    entityInputs
                 });
-                outputs.splice(0, outputs.length, ...newOutputs);
-            }
-            
-            addLog(`🎯 Simulated chat: ${from} → ${entityId}: "${message}"`, 'info');
-            renderAll();
-        };
+                
+                while (outputs.length > 0) {
+                    const newOutputs = XLN.processServerInput(xlnEnv, {
+                        serverTxs: [],
+                        entityInputs: outputs
+                    });
+                    outputs.splice(0, outputs.length, ...newOutputs);
+                }
+                
+                addLog(`💪 Stress test completed: ${txCount} txs per entity across ${entities.length} entities`, 'info');
+                $$invalidate('xlnEnv', xlnEnv);
+            };
 
-        const simulateStress = () => {
-            if (!state.xlnEnv) return;
-            
-            state.currentTimeIndex = -1;
-            
-            const entities = ['chat', 'trading', 'governance'];
-            const users = ['alice', 'bob', 'carol', 'david', 'eve'];
-            const txCount = 5 + Math.floor(Math.random() * 10);
-            
-            const entityInputs = entities.map(entityId => ({
-                entityId,
-                signerId: 'alice',
-                entityTxs: Array.from({ length: txCount }, (_, i) => ({
-                    type: 'chat',
-                    data: {
-                        from: users[i % users.length],
-                        message: `Stress test message ${i + 1} for ${entityId}`
-                    }
-                }))
-            }));
-            
-            let outputs = XLN.processServerInput(state.xlnEnv, {
-                serverTxs: [],
-                entityInputs
-            });
-            
-            while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(state.xlnEnv, {
-                    serverTxs: [],
-                    entityInputs: outputs
-                });
-                outputs.splice(0, outputs.length, ...newOutputs);
-            }
-            
-            addLog(`💪 Stress test completed: ${txCount} txs per entity across ${entities.length} entities`, 'info');
-            renderAll();
-        };
-
-        // UI Event Handlers
-        const switchTab = (tabName) => {
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            
-            document.querySelectorAll('.tab-button').forEach(button => {
-                button.classList.remove('active');
-            });
-            
-            const targetContent = document.getElementById(tabName + 'TabContent');
-            const targetButton = document.getElementById(tabName + 'Tab');
-            
-            if (targetContent && targetButton) {
-                targetContent.classList.add('active');
-                targetButton.classList.add('active');
-            }
-        };
-
-        const updateActionUI = () => {
-            const action = document.getElementById('actionSelect').value;
-            state.selectedAction = action;
-            
-            const inputGroup = document.getElementById('inputGroup');
-            const proposalGroup = document.getElementById('proposalGroup');
-            const voteGroup = document.getElementById('voteGroup');
-            const inputLabel = document.getElementById('inputLabel');
-            const inputField = document.getElementById('inputField');
-            
-            inputGroup.style.display = 'none';
-            proposalGroup.style.display = 'none';
-            voteGroup.style.display = 'none';
-            
-            if (action === 'chat') {
-                inputGroup.style.display = 'flex';
-                inputLabel.textContent = '💬 Message:';
-                inputField.placeholder = 'Enter your message...';
-            } else if (action === 'propose') {
-                proposalGroup.style.display = 'flex';
-            } else if (action === 'vote') {
-                voteGroup.style.display = 'flex';
-                renderProposalSelect();
-            }
-        };
-
-        const addValidatorRow = () => {
-            const validatorsList = document.getElementById('validatorsList');
-            const newRow = document.createElement('div');
-            newRow.className = 'validator-row';
-            newRow.innerHTML = `
-                <input type="text" class="validator-name" placeholder="validator name">
-                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
-                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
-            `;
-            validatorsList.appendChild(newRow);
-            updateTotalWeight();
-        };
-
-        const removeValidator = (button) => {
-            const row = button.parentElement;
-            const validatorsList = document.getElementById('validatorsList');
-            if (validatorsList.children.length > 1) {
-                row.remove();
-                updateTotalWeight();
-            } else {
-                alert('Must have at least one validator');
-            }
-        };
-
-        const updateTotalWeight = () => {
-            const weightInputs = document.querySelectorAll('.validator-weight');
-            let totalWeight = 0;
-            weightInputs.forEach(input => {
-                const weight = parseInt(input.value) || 0;
-                totalWeight += weight;
-            });
-            document.getElementById('totalWeight').textContent = totalWeight;
-            
-            const thresholdSlider = document.getElementById('thresholdSlider');
-            thresholdSlider.max = totalWeight;
-            
-            const currentThreshold = parseInt(thresholdSlider.value);
-            if (currentThreshold > totalWeight) {
-                thresholdSlider.value = totalWeight;
-                updateThreshold();
-            }
-        };
-
-        const updateThreshold = () => {
-            const thresholdSlider = document.getElementById('thresholdSlider');
-            const thresholdValue = document.getElementById('thresholdValue');
-            thresholdValue.textContent = thresholdSlider.value;
-        };
-
-        const clearSimpleForm = () => {
-            document.getElementById('entityNameInput').value = '';
-            
-            const validatorsList = document.getElementById('validatorsList');
-            validatorsList.innerHTML = `
-                <div class="validator-row">
-                    <input type="text" class="validator-name" placeholder="alice" value="alice">
-                    <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
-                    <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
-                </div>
-                <div class="validator-row">
-                    <input type="text" class="validator-name" placeholder="bob" value="bob">
-                    <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
-                    <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
-                </div>
-                <div class="validator-row">
-                    <input type="text" class="validator-name" placeholder="carol" value="carol">
-                    <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
-                    <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
-                </div>
-            `;
-            
-            document.getElementById('thresholdSlider').value = '2';
-            updateTotalWeight();
-            updateThreshold();
-        };
-
-        // Time Machine Functions
-        const stepBackward = () => {
-            const history = XLN.getHistory();
-            if (history.length === 0) return;
-            
-            if (state.currentTimeIndex === -1) {
-                state.currentTimeIndex = Math.max(0, history.length - 2);
-            } else {
-                state.currentTimeIndex = Math.max(0, state.currentTimeIndex - 1);
-            }
-            renderAll();
-        };
-
-        const stepForward = () => {
-            const history = XLN.getHistory();
-            if (history.length === 0) return;
-            
-            if (state.currentTimeIndex === -1) {
-                return;
-            } else if (state.currentTimeIndex < history.length - 2) {
-                state.currentTimeIndex++;
-            } else {
-                state.currentTimeIndex = -1;
-            }
-            renderAll();
-        };
-
-        const goToHistoryEnd = () => {
-            state.currentTimeIndex = -1;
-            renderAll();
-        };
-
-        const goToHistoryStart = () => {
-            const history = XLN.getHistory();
-            if (history.length > 0) {
-                state.currentTimeIndex = 0;
-                renderAll();
-            }
-        };
-
-        const resetTimeMachine = () => {
-            XLN.resetHistory();
-            state.currentTimeIndex = -1;
-            renderAll();
-        };
-
-        const refreshView = () => {
-            renderAll();
-        };
-
-        // Event Listeners
-        document.addEventListener('DOMContentLoaded', () => {
-            // Entity filter change
-            document.getElementById('entityFilter').addEventListener('change', (e) => {
-                state.selectedEntity = e.target.value;
-                renderAll();
-            });
-            
-            // Replica select change
-            document.getElementById('replicaSelect').addEventListener('change', (e) => {
-                state.selectedReplica = e.target.value;
-                renderProposalSelect();
-            });
-            
-            // Action select change
-            document.getElementById('actionSelect').addEventListener('change', updateActionUI);
-            
-            // Time slider change
-            document.getElementById('timeSlider').addEventListener('input', (e) => {
+            // Time machine functions
+            const stepBackward = () => {
                 const history = XLN.getHistory();
-                const sliderValue = parseInt(e.target.value);
-                const maxMeaningfulIndex = Math.max(0, history.length - 2);
-                const sliderContainer = document.querySelector('.time-slider-container');
+                if (history.length === 0) return;
                 
-                if (sliderValue > maxMeaningfulIndex) {
-                    state.currentTimeIndex = -1;
-                    sliderContainer.style.setProperty('--progress', '100%');
+                if (currentTimeIndex === -1) {
+                    currentTimeIndex = Math.max(0, history.length - 2);
                 } else {
-                    state.currentTimeIndex = sliderValue;
-                    const sliderMax = maxMeaningfulIndex + 1;
-                    const progressPercent = sliderMax > 0 ? (sliderValue / sliderMax) * 100 : 0;
-                    sliderContainer.style.setProperty('--progress', `${progressPercent}%`);
+                    currentTimeIndex = Math.max(0, currentTimeIndex - 1);
                 }
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+            };
+
+            const stepForward = () => {
+                const history = XLN.getHistory();
+                if (history.length === 0) return;
                 
-                renderAll();
-            });
-            
-            // Keyboard shortcuts
-            document.addEventListener('keydown', (e) => {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                
-                switch(e.key) {
-                    case 'ArrowLeft':
-                        e.preventDefault();
-                        stepBackward();
-                        break;
-                    case 'ArrowRight':
-                        e.preventDefault();
-                        stepForward();
-                        break;
-                    case 'Home':
-                        e.preventDefault();
-                        goToHistoryStart();
-                        break;
-                    case 'End':
-                        e.preventDefault();
-                        goToHistoryEnd();
-                        break;
+                if (currentTimeIndex === -1) {
+                    return;
+                } else if (currentTimeIndex < history.length - 2) {
+                    currentTimeIndex++;
+                } else {
+                    currentTimeIndex = -1;
+                }
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+            };
+
+            const goToLive = () => {
+                currentTimeIndex = -1;
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+            };
+
+            const goToStart = () => {
+                const history = XLN.getHistory();
+                if (history.length > 0) {
+                    currentTimeIndex = 0;
+                    $$invalidate('currentTimeIndex', currentTimeIndex);
+                }
+            };
+
+            const resetHistory = () => {
+                XLN.resetHistory();
+                currentTimeIndex = -1;
+                $$invalidate('currentTimeIndex', currentTimeIndex);
+            };
+
+            // Initialize XLN environment
+            const initializeEnvironment = async () => {
+                try {
+                    // Try to import XLN module
+                    try {
+                        XLN = await import('./dist/server.js');
+                        addLog('✅ XLN module imported successfully', 'success');
+                    } catch (error) {
+                        addLog('❌ Failed to import XLN module: ' + error.message, 'error');
+                        // Create a mock XLN for development
+                        XLN = {
+                            main: async () => ({ replicas: new Map(), height: 0, timestamp: Date.now() }),
+                            processServerInput: () => [],
+                            getHistory: () => [],
+                            getSnapshot: () => null,
+                            resetHistory: () => {}
+                        };
+                    }
+                    
+                    xlnEnv = await XLN.main();
+                    window.xlnEnv = xlnEnv;
+                    addLog('🎯 XLN Environment loaded successfully', 'success');
+                    $$invalidate('xlnEnv', xlnEnv);
+                    return true;
+                } catch (error) {
+                    addLog('❌ Failed to load XLN environment: ' + error.message, 'error');
+                    return false;
+                }
+            };
+
+            // Initialize on component mount
+            initializeEnvironment().then(success => {
+                if (success) {
+                    addLog('🎉 Svelte Sonnet Wallet initialized successfully!', 'success');
                 }
             });
-            
-            // Initialize form state
-            updateTotalWeight();
-            updateActionUI();
+
+            // Auto-reload functionality
+            const checkForChanges = async () => {
+                try {
+                    const response = await fetch('./dist/server.js', { method: 'HEAD' });
+                    const modified = response.headers.get('last-modified');
+                    
+                    if (lastModified && modified !== lastModified) {
+                        addLog('🔄 Module updated, reloading...', 'info');
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 500);
+                    }
+                    lastModified = modified;
+                } catch (error) {
+                    // Silent fail for auto-reload
+                }
+            };
+
+            setInterval(checkForChanges, 10000);
+
+            // Render function
+            return {
+                c() {
+                    return `
+                        <div class="reload-indicator" class:show={false}>🔄 Reloading...</div>
+                        
+                        <div class="container">
+                            <div class="header">
+                                <h1>🧠 XLN Sonnet Wallet</h1>
+                                <div class="status-bar">${statusText}</div>
+                            </div>
+
+                            ${serverData && (serverData.serverInput || serverData.serverOutputs?.length) ? `
+                                <div class="server-io-container">
+                                    <div class="server-column">
+                                        <div class="server-column-header">
+                                            📨 Server Input (What's happening this tick)
+                                            <span style="font-weight: normal; color: #6c757d; font-size: 0.85em;">
+                                                ${serverData.isHistorical ? ' 🕰️ Historical' : ' ⚡ Current'}
+                                            </span>
+                                        </div>
+                                        
+                                        <div class="server-section">
+                                            <h4>🖥️ Server Transactions</h4>
+                                            <div>
+                                                ${serverData.serverInput?.serverTxs.length ? 
+                                                    serverData.serverInput.serverTxs.map(tx => `
+                                                        <div class="input-item">
+                                                            <strong>🖥️ ${tx.type}</strong>: ${tx.entityId}:${tx.signerId}
+                                                            ${tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
+                                                            ${tx.data.config ? `
+                                                                <br>⚙️ <strong>Config:</strong>
+                                                                <br>  • Mode: ${tx.data.config.mode}
+                                                                <br>  • Threshold: ${tx.data.config.threshold}
+                                                                <br>  • Validators: [${tx.data.config.validators.join(', ')}]
+                                                                <br>  • Voting Shares:
+                                                                ${Object.entries(tx.data.config.shares).map(([validator, shares]) => 
+                                                                    `<br>    ${validator}: ${shares} shares`
+                                                                ).join('')}
+                                                            ` : ''}
+                                                        </div>
+                                                    `).join('') : 
+                                                    '<div class="no-inputs">No server transactions</div>'
+                                                }
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="server-section">
+                                            <h4>🔄 Entity Inputs</h4>
+                                            <div>
+                                                ${serverData.serverInput?.entityInputs.length ? 
+                                                    serverData.serverInput.entityInputs.map(input => `
+                                                        <div class="input-item">
+                                                            <strong>${input.entityId}:${input.signerId}</strong>
+                                                            ${input.entityTxs?.length ? `
+                                                                <br>📝 <strong>${input.entityTxs.length} transactions:</strong>
+                                                                ${input.entityTxs.map((tx, i) => {
+                                                                    if (tx.type === 'chat') {
+                                                                        return `<br>  ${i+1}. 💬 Chat: "${tx.data.message}" (from: ${tx.data.from})`;
+                                                                    } else if (tx.type === 'propose') {
+                                                                        return `<br>  ${i+1}. 📝 Propose: "${tx.data.action.data.message}" (by: ${tx.data.proposer})`;
+                                                                    } else if (tx.type === 'vote') {
+                                                                        return `<br>  ${i+1}. 🗳️ Vote: ${tx.data.choice} on ${tx.data.proposalId.slice(0,12)}... (by: ${tx.data.voter})`;
+                                                                    }
+                                                                    return `<br>  ${i+1}. ${tx.type}`;
+                                                                }).join('')}
+                                                            ` : ''}
+                                                            ${input.proposedFrame ? `
+                                                                <br>${input.precommits?.size > 0 ? "📋 <strong>Commit Notification:</strong>" : "🎯 <strong>Proposed Frame:</strong>"}
+                                                                <br>  • Hash: ${input.proposedFrame.hash}
+                                                                <br>  • Height: ${input.proposedFrame.height}
+                                                                <br>  • Transactions: ${input.proposedFrame.txs.length}
+                                                                <br>  • Signatures: ${input.proposedFrame.signatures.size}
+                                                            ` : ''}
+                                                            ${input.precommits?.size > 0 ? `
+                                                                <br>✅ <strong>${input.precommits.size} precommits from:</strong>
+                                                                ${Array.from(input.precommits.entries()).map(([signerId, signature]) => 
+                                                                    `<br>  • ${signerId}: ${signature.slice(0,16)}...`
+                                                                ).join('')}
+                                                            ` : ''}
+                                                        </div>
+                                                    `).join('') :
+                                                    '<div class="no-inputs">No entity inputs</div>'
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="server-column">
+                                        <div class="server-column-header">
+                                            📤 Server Output (What's being sent and where)
+                                            <span style="font-weight: normal; color: #6c757d; font-size: 0.85em;">
+                                                ${serverData.isHistorical ? ' 🕰️ Historical' : ' ⚡ Current'}
+                                            </span>
+                                        </div>
+                                        
+                                        <div class="server-section">
+                                            <h4>🚀 Entity Outputs</h4>
+                                            <div>
+                                                ${serverData.serverOutputs?.length ? 
+                                                    serverData.serverOutputs.map((output, index) => `
+                                                        <div class="input-item">
+                                                            <strong>📤 ${index + 1}. → ${output.signerId}</strong>
+                                                            ${output.entityTxs?.length ? `
+                                                                <br>📝 <strong>${output.entityTxs.length} transactions:</strong>
+                                                                ${output.entityTxs.map((tx, i) => {
+                                                                    if (tx.type === 'chat') {
+                                                                        return `<br>  ${i+1}. 💬 Chat: "${tx.data.message}" (from: ${tx.data.from})`;
+                                                                    } else if (tx.type === 'propose') {
+                                                                        return `<br>  ${i+1}. 📝 Propose: "${tx.data.action.data.message}" (by: ${tx.data.proposer})`;
+                                                                    } else if (tx.type === 'vote') {
+                                                                        return `<br>  ${i+1}. 🗳️ Vote: ${tx.data.choice} on ${tx.data.proposalId.slice(0,12)}... (by: ${tx.data.voter})`;
+                                                                    }
+                                                                    return `<br>  ${i+1}. ${tx.type}`;
+                                                                }).join('')}
+                                                            ` : ''}
+                                                            ${output.proposedFrame ? `
+                                                                <br>${output.precommits?.size > 0 ? "📋 <strong>Commit Notification:</strong>" : "🎯 <strong>Proposed Frame:</strong>"}
+                                                                <br>  • Hash: ${output.proposedFrame.hash}
+                                                                <br>  • Height: ${output.proposedFrame.height}
+                                                                <br>  • Transactions: ${output.proposedFrame.txs.length}
+                                                                <br>  • Signatures: ${output.proposedFrame.signatures.size}
+                                                            ` : ''}
+                                                            ${output.precommits?.size > 0 ? `
+                                                                <br>✅ <strong>${output.precommits.size} precommits:</strong>
+                                                                ${Array.from(output.precommits.entries()).map(([signerId, signature]) => 
+                                                                    `<br>  • ${signerId}: ${signature.slice(0,16)}...`
+                                                                ).join('')}
+                                                            ` : ''}
+                                                        </div>
+                                                    `).join('') : 
+                                                    '<div class="no-inputs">No entity outputs</div>'
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : ''}
+
+                            <div class="entity-filter">
+                                <label for="entityFilter">📂 Filter Entities:</label>
+                                <select bind:value={selectedEntity}>
+                                    ${entityOptions.map(option => 
+                                        `<option value="${option.value}"${selectedEntity === option.value ? ' selected' : ''}>${option.label}</option>`
+                                    ).join('')}
+                                </select>
+                            </div>
+
+                            <div class="entities-grid">
+                                ${Array.from(filteredReplicas.entries()).map(([key, replica]) => {
+                                    const config = replica.state.config;
+                                    const modeClass = config.mode === 'proposer-based' ? 'mode-proposer-based' : 'mode-gossip-based';
+                                    const totalShares = Object.values(config.shares).reduce((sum, val) => sum + val, BigInt(0));
+                                    const thresholdPercent = ((Number(config.threshold) / Number(totalShares)) * 100).toFixed(1);
+                                    const shares = config.shares[replica.signerId] || BigInt(0);
+                                    const sharePercent = ((Number(shares) / Number(totalShares)) * 100).toFixed(1);
+                                    
+                                    return `
+                                        <div class="entity-card">
+                                            <div class="entity-header">
+                                                <div class="entity-title">${replica.entityId}:${replica.signerId} ${replica.isHistorical ? '🕰️' : ''}</div>
+                                                <div class="entity-mode ${modeClass}">${config.mode}</div>
+                                            </div>
+                                            
+                                            <div class="threshold-info">
+                                                <strong>Role:</strong> ${replica.isProposer ? '👑 Proposer' : '✅ Validator'}<br>
+                                                <strong>Voting Power:</strong> ${shares} / ${totalShares} shares (${sharePercent}%)<br>
+                                                <strong>Consensus Threshold:</strong> ${config.threshold} / ${totalShares} shares (${thresholdPercent}%)
+                                                <div class="power-bar">
+                                                    <div class="power-fill" style="width: ${thresholdPercent}%"></div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="replica-stats">
+                                                <strong>📊 Replica State:</strong><br>
+                                                <strong>📏 Frame Height: ${replica.state.height}</strong><br>
+                                                <strong>📝 Mempool: ${replica.mempool.length} txs</strong>
+                                                ${replica.mempool.length > 0 ? `<br>  ${replica.mempool.map((tx, i) => {
+                                                    if (tx.type === 'chat') return `${i+1}. 💬 "${tx.data.message}" (${tx.data.from})`;
+                                                    if (tx.type === 'propose') return `${i+1}. 📝 "${tx.data.action.data.message}" (${tx.data.proposer})`;
+                                                    if (tx.type === 'vote') return `${i+1}. 🗳️ ${tx.data.choice} on ${tx.data.proposalId.slice(0,8)}... (${tx.data.voter})`;
+                                                    return `${i+1}. ${tx.type}`;
+                                                }).join('<br>  ')}` : ''}<br>
+                                                <strong>💬 Messages: ${replica.state.messages.length}</strong><br>
+                                                <strong>🗳️ Proposals: ${replica.state.proposals.size}</strong><br>
+                                                <strong>🔢 Nonces:</strong> ${replica.state.nonces.size > 0 ? 
+                                                    Array.from(replica.state.nonces.entries()).map(([user, nonce]) => `${user}:${nonce}`).join(', ') : 
+                                                    'none'}<br>
+                                                ${replica.proposal ? `<strong style="color: #28a745;">📝 Currently Proposing:</strong><br>
+                                                  • Height: ${replica.proposal.height}<br>
+                                                  • Hash: ${replica.proposal.hash}<br>
+                                                  • Txs: ${replica.proposal.txs.length}<br>
+                                                  • Signatures: ${replica.proposal.signatures.size}/${replica.state.config.validators.length}` : ''}
+                                                ${replica.lockedFrame ? `<strong style="color: #ffc107;">🔒 Locked Frame (Precommitted):</strong><br>
+                                                  • Height: ${replica.lockedFrame.height}<br>
+                                                  • Hash: ${replica.lockedFrame.hash}<br>
+                                                  • Txs: ${replica.lockedFrame.txs.length}` : ''}
+                                            </div>
+                                            
+                                            <div class="messages-section">
+                                                <strong>📨 ${replica.signerId}'s Message Feed:</strong>
+                                                ${replica.state.messages.length > 0 ? 
+                                                    replica.state.messages.map(msg => `
+                                                        <div class="message ${msg.includes('[COLLECTIVE]') ? 'collective' : ''}">
+                                                            ${msg}
+                                                        </div>
+                                                    `).join('') : 
+                                                    '<div class="message">No messages yet</div>'
+                                                }
+                                            </div>
+                                            
+                                            ${replica.state.proposals.size > 0 ? `
+                                                <div class="messages-section">
+                                                    <strong>🗳️ ${replica.signerId}'s Proposals:</strong>
+                                                    ${Array.from(replica.state.proposals.values()).map(proposal => {
+                                                        const yesVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'yes').map(([voter, _]) => voter);
+                                                        const noVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'no').map(([voter, _]) => voter);
+                                                        
+                                                        return `<div class="message">
+                                                            <strong>ID:</strong> ${proposal.id}<br>
+                                                            <strong>Proposer:</strong> ${proposal.proposer}<br>
+                                                            <strong>Status:</strong> ${proposal.status}<br>
+                                                            <strong>Action:</strong> ${proposal.action.data.message}<br>
+                                                            <strong>Votes (${proposal.votes.size} total):</strong><br>
+                                                            ${yesVoters.length > 0 ? `  ✅ YES (${yesVoters.length}): ${yesVoters.join(', ')}<br>` : ''}
+                                                            ${noVoters.length > 0 ? `  ❌ NO (${noVoters.length}): ${noVoters.join(', ')}<br>` : ''}
+                                                            ${yesVoters.length === 0 && noVoters.length === 0 ? '  (No votes yet)<br>' : ''}
+                                                            <small>Created: ${new Date(proposal.created).toLocaleTimeString()}</small>
+                                                        </div>`;
+                                                    }).join('')}
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+
+                            <div class="actionable-tabs-container">
+                                <div class="tabs-header">
+                                    <button class="tab-button ${activeTab === 'controls' ? 'active' : ''}" on:click={() => switchTab('controls')}>
+                                        🎮 Interactive Controls
+                                    </button>
+                                    <button class="tab-button ${activeTab === 'formation' ? 'active' : ''}" on:click={() => switchTab('formation')}>
+                                        🏗️ Entity Formation
+                                    </button>
+                                </div>
+                                
+                                <div class="tab-content ${activeTab === 'controls' ? 'active' : ''}">
+                                    <div class="control-panel">
+                                        <div class="control-group">
+                                            <label>📍 Select Replica:</label>
+                                            <select bind:value={selectedReplica}>
+                                                <option value="">Choose a replica...</option>
+                                                ${replicaOptions.map(option => 
+                                                    `<option value="${option.value}"${selectedReplica === option.value ? ' selected' : ''}>${option.label}</option>`
+                                                ).join('')}
+                                            </select>
+                                        </div>
+                                        <div class="control-group">
+                                            <label>⚡ Select Action:</label>
+                                            <select bind:value={selectedAction}>
+                                                <option value="chat"${selectedAction === 'chat' ? ' selected' : ''}>💬 Chat Message</option>
+                                                <option value="propose"${selectedAction === 'propose' ? ' selected' : ''}>📝 Create Proposal</option>
+                                                <option value="vote"${selectedAction === 'vote' ? ' selected' : ''}>🗳️ Vote on Proposal</option>
+                                            </select>
+                                        </div>
+                                        ${selectedAction === 'chat' ? `
+                                            <div class="control-group">
+                                                <label>💬 Message:</label>
+                                                <input type="text" bind:value={inputMessage} placeholder="Enter your message..." />
+                                            </div>
+                                        ` : ''}
+                                        ${selectedAction === 'propose' ? `
+                                            <div class="control-group">
+                                                <label>📝 Proposal:</label>
+                                                <input type="text" bind:value={proposalText} placeholder="Enter proposal text..." />
+                                            </div>
+                                        ` : ''}
+                                        ${selectedAction === 'vote' ? `
+                                            <div class="control-group">
+                                                <label>🗳️ Vote on Proposal:</label>
+                                                <select bind:value={selectedProposal}>
+                                                    <option value="">Choose a proposal...</option>
+                                                    ${proposalOptions.map(option => 
+                                                        `<option value="${option.value}"${selectedProposal === option.value ? ' selected' : ''}>${option.label}</option>`
+                                                    ).join('')}
+                                                </select>
+                                                <select bind:value={voteChoice}>
+                                                    <option value="yes"${voteChoice === 'yes' ? ' selected' : ''}>✅ Yes</option>
+                                                    <option value="no"${voteChoice === 'no' ? ' selected' : ''}>❌ No</option>
+                                                </select>
+                                            </div>
+                                        ` : ''}
+                                        <div class="button-group">
+                                            <button class="btn btn-primary" on:click={executeAction}>🚀 Execute Action</button>
+                                            <button class="btn btn-secondary" on:click={() => $$invalidate('xlnEnv', xlnEnv)}>🔄 Refresh View</button>
+                                            <button class="btn btn-secondary" on:click={simulateChat}>🎯 Simulate Chat</button>
+                                            <button class="btn btn-secondary" on:click={simulateStress}>💪 Stress Test</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="tab-content ${activeTab === 'formation' ? 'active' : ''}">
+                                    <div class="simple-formation-panel">
+                                        <div class="formation-group">
+                                            <label>🏷️ Entity Name:</label>
+                                            <input type="text" bind:value={entityName} placeholder="e.g., trading, chat, governance" />
+                                        </div>
+                                        
+                                        <div class="validators-section">
+                                            <h4>👥 Validators:</h4>
+                                            <div>
+                                                ${validators.map((validator, index) => `
+                                                    <div class="validator-row">
+                                                        <input type="text" class="validator-name" bind:value={validators[${index}].name} placeholder="validator name" />
+                                                        <input type="number" class="validator-weight" bind:value={validators[${index}].weight} placeholder="1" min="1" />
+                                                        <button class="btn btn-danger btn-small" on:click={() => removeValidator(${index})}>❌</button>
+                                                    </div>
+                                                `).join('')}
+                                            </div>
+                                            <button class="btn btn-secondary" on:click={addValidator}>➕ Add New Validator</button>
+                                        </div>
+                                        
+                                        <div class="threshold-section">
+                                            <label>🎯 Threshold: <span>${threshold}</span></label>
+                                            <input type="range" class="threshold-slider" bind:value={threshold} min="1" max="${totalWeight}" />
+                                            <div class="threshold-info">
+                                                <span>Total Weight: <span>${totalWeight}</span></span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="button-group">
+                                            <button class="btn btn-primary" on:click={createEntity}>🚀 Create Entity</button>
+                                            <button class="btn btn-secondary" on:click={() => {
+                                                entityName = '';
+                                                validators = [
+                                                    { name: 'alice', weight: 1 },
+                                                    { name: 'bob', weight: 1 },
+                                                    { name: 'carol', weight: 1 }
+                                                ];
+                                                threshold = 2;
+                                                $$invalidate('entityName', entityName);
+                                                $$invalidate('validators', validators);
+                                                $$invalidate('threshold', threshold);
+                                            }}>🗑️ Clear Form</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            ${logs.length > 0 ? `
+                                <div class="debug-log">
+                                    <strong>📊 Debug Log:</strong><br>
+                                    ${logs.slice(-10).map(log => 
+                                        `[${log.timestamp}] ${log.message}`
+                                    ).join('\\n')}
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <!-- Time Machine -->
+                        <div class="time-machine">
+                            <div class="time-machine-main">
+                                <div class="time-info-compact ${timeMachineData.isCurrent ? 'current' : ''}">
+                                    <span>${timeMachineData.info}</span>
+                                </div>
+                                <div class="time-nav-controls">
+                                    <button class="time-btn-compact" on:click={stepBackward} title="Step Back (← arrow)">⏪</button>
+                                    <button class="time-btn-compact" on:click={stepForward} title="Step Forward (→ arrow)">⏩</button>
+                                    <button class="time-btn-compact live" on:click={goToLive} title="Go to Current (End key)">⚡ LIVE</button>
+                                </div>
+                                <div class="time-utility-controls">
+                                    <button class="time-btn-mini" on:click={goToStart} title="Go to Start (Home key)">⏮️</button>
+                                    <button class="time-btn-mini warning" on:click={resetHistory} title="Clear History">🗑️</button>
+                                </div>
+                            </div>
+                            <div class="time-slider-container">
+                                <input type="range" class="time-slider" 
+                                       min="0" max="${timeMachineData.max}" 
+                                       bind:value={timeMachineData.value} 
+                                       ${timeMachineData.disabled ? 'disabled' : ''}
+                                       on:input={(e) => {
+                                           const history = XLN.getHistory();
+                                           const sliderValue = parseInt(e.target.value);
+                                           const maxMeaningfulIndex = Math.max(0, history.length - 2);
+                                           
+                                           if (sliderValue > maxMeaningfulIndex) {
+                                               currentTimeIndex = -1;
+                                           } else {
+                                               currentTimeIndex = sliderValue;
+                                           }
+                                           $$invalidate('currentTimeIndex', currentTimeIndex);
+                                       }} />
+                            </div>
+                        </div>
+                    `;
+                },
+                
+                m(target) {
+                    target.innerHTML = this.c();
+                    
+                    // Set up event listeners for keyboard shortcuts
+                    document.addEventListener('keydown', (e) => {
+                        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                        
+                        switch(e.key) {
+                            case 'ArrowLeft':
+                                e.preventDefault();
+                                stepBackward();
+                                break;
+                            case 'ArrowRight':
+                                e.preventDefault();
+                                stepForward();
+                                break;
+                            case 'Home':
+                                e.preventDefault();
+                                goToStart();
+                                break;
+                            case 'End':
+                                e.preventDefault();
+                                goToLive();
+                                break;
+                        }
+                    });
+                },
+                
+                p() {
+                    // Update DOM on state changes
+                    const target = document.getElementById('app');
+                    if (target) {
+                        target.innerHTML = this.c();
+                    }
+                },
+                
+                d() {
+                    // Cleanup
+                }
+            };
         });
 
-        // Make functions globally available
-        window.switchTab = switchTab;
-        window.executeAction = executeAction;
-        window.createSimpleEntity = createSimpleEntity;
-        window.simulateChat = simulateChat;
-        window.simulateStress = simulateStress;
-        window.addValidatorRow = addValidatorRow;
-        window.removeValidator = removeValidator;
-        window.updateTotalWeight = updateTotalWeight;
-        window.updateThreshold = updateThreshold;
-        window.clearSimpleForm = clearSimpleForm;
-        window.stepBackward = stepBackward;
-        window.stepForward = stepForward;
-        window.goToHistoryEnd = goToHistoryEnd;
-        window.goToHistoryStart = goToHistoryStart;
-        window.resetTimeMachine = resetTimeMachine;
-        window.refreshView = refreshView;
-
-        // Start auto-reload checking and initialize
-        setInterval(checkForChanges, 10000);
-        
-        initializeEnvironment().then(success => {
-            if (success) {
-                addLog('🎉 Sonnet Wallet initialized successfully!', 'success');
-            }
+        // Initialize the Svelte app
+        const app = new App({
+            target: document.getElementById('app')
         });
     </script>
 </body>
