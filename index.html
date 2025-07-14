@@ -580,26 +580,134 @@
             bottom: 0;
             left: 0;
             right: 0;
-            background: rgba(20, 20, 20, 0.95);
-            backdrop-filter: blur(15px);
-            padding: 20px;
-            border-top: 2px solid #007bff;
+            background: rgba(15, 15, 15, 0.96);
+            backdrop-filter: blur(20px);
+            padding: 12px 20px;
+            border-top: 1px solid #007bff;
             z-index: 1000;
-            box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
+            box-shadow: 0 -2px 15px rgba(0,0,0,0.4);
+        }
+
+        .time-machine-main {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 15px;
+        }
+
+        .time-info-compact {
+            display: flex;
+            align-items: center;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.75em;
+            color: #aaa;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .time-info-compact.current {
+            color: #00ff88;
+            font-weight: bold;
+        }
+
+        .time-nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .time-utility-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .time-btn-compact {
+            background: #2a2a2a;
+            color: white;
+            border: 1px solid #444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75em;
+            transition: all 0.15s ease;
+            min-width: 28px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .time-btn-compact:hover {
+            background: #007bff;
+            border-color: #007bff;
+            transform: translateY(-1px);
+        }
+
+        .time-btn-compact.primary {
+            background: #007bff;
+            border-color: #007bff;
+        }
+
+        .time-btn-compact.live {
+            background: #00ff88;
+            color: #000;
+            border-color: #00ff88;
+            font-weight: bold;
+            padding: 4px 10px;
+            min-width: 45px;
+        }
+
+        .time-btn-compact.live:hover {
+            background: #00cc6a;
+            border-color: #00cc6a;
+        }
+
+        .time-btn-mini {
+            background: #333;
+            color: #aaa;
+            border: 1px solid #555;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.7em;
+            transition: all 0.15s ease;
+            min-width: 22px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .time-btn-mini:hover {
+            background: #555;
+            color: white;
+        }
+
+        .time-btn-mini.warning {
+            background: #ffc107;
+            color: #212529;
+            border-color: #ffc107;
+        }
+
+        .time-btn-mini.warning:hover {
+            background: #e0a800;
+            border-color: #e0a800;
         }
 
         .time-slider-container {
             position: relative;
-            margin: 10px 0;
             width: 100%;
             max-width: 100%;
         }
 
         .time-slider {
             width: 100%;
-            height: 6px;
-            border-radius: 3px;
-            background: linear-gradient(90deg, #333 0%, #666 100%);
+            height: 4px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, #333 0%, #555 100%);
             outline: none;
             -webkit-appearance: none;
             cursor: pointer;
@@ -608,45 +716,28 @@
         .time-slider::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
-            width: 18px;
-            height: 18px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             background: linear-gradient(45deg, #007bff, #0056b3);
             cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0,123,255,0.4);
+            box-shadow: 0 1px 4px rgba(0,123,255,0.4);
             transition: all 0.2s ease;
         }
 
         .time-slider::-webkit-slider-thumb:hover {
-            transform: scale(1.2);
-            box-shadow: 0 4px 12px rgba(0,123,255,0.6);
+            transform: scale(1.1);
+            box-shadow: 0 2px 8px rgba(0,123,255,0.6);
         }
 
         .time-slider::-moz-range-thumb {
-            width: 18px;
-            height: 18px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             background: linear-gradient(45deg, #007bff, #0056b3);
             cursor: pointer;
             border: none;
-            box-shadow: 0 2px 8px rgba(0,123,255,0.4);
-        }
-
-        .time-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.85em;
-            color: #ccc;
-            margin-bottom: 8px;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .time-info.current {
-            color: #00ff88;
-            font-weight: bold;
+            box-shadow: 0 1px 4px rgba(0,123,255,0.4);
         }
 
         .server-input-section {
@@ -720,61 +811,19 @@
             font-style: italic;
         }
 
-        .time-controls {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 8px;
-            margin-top: 8px;
-            flex-wrap: wrap;
-        }
-
-        .time-btn {
-            background: #333;
-            color: white;
-            border: 1px solid #555;
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.8em;
-            transition: all 0.2s ease;
-            min-width: 40px;
-        }
-
-        .time-btn:hover {
-            background: #007bff;
-            border-color: #007bff;
-            transform: translateY(-1px);
-        }
-
-        .time-btn:active {
-            transform: translateY(0);
-        }
-
-        .time-btn.primary {
-            background: #007bff;
-            border-color: #007bff;
-        }
-
-        .time-btn.warning {
-            background: #ffc107;
-            color: #212529;
-            border-color: #ffc107;
-        }
-
         .time-progress-bar {
             position: absolute;
             top: 0;
             left: 0;
-            height: 6px;
+            height: 4px;
             background: linear-gradient(90deg, #007bff, #00ff88);
-            border-radius: 3px;
+            border-radius: 2px;
             transition: width 0.3s ease;
             pointer-events: none;
         }
 
         body {
-            padding-bottom: 120px; /* Make room for fixed time machine */
+            padding-bottom: 70px; /* Make room for compact time machine */
         }
     </style>
 </head>
@@ -902,21 +951,25 @@
 
     <!-- Fixed Time Machine Bar -->
     <div class="time-machine">
-        <div class="time-info" id="timeInfo">
-            <span>⏰ No history yet</span>
-            <span></span>
-            <span></span>
+        <div class="time-machine-main">
+            <div class="time-info-compact" id="timeInfo">
+                <span>⏰ No history yet</span>
+                <span></span>
+                <span></span>
+            </div>
+            <div class="time-nav-controls">
+                <button class="time-btn-compact" onclick="stepBackward()" title="Step Back (← arrow)">⏪</button>
+                <button class="time-btn-compact primary" onclick="stepForward()" title="Step Forward (→ arrow)">⏩</button>
+                <button class="time-btn-compact live" onclick="goToHistoryEnd()" title="Go to Current (End key)">⚡ LIVE</button>
+            </div>
+            <div class="time-utility-controls">
+                <button class="time-btn-mini" onclick="goToHistoryStart()" title="Go to Start (Home key)">⏮️</button>
+                <button class="time-btn-mini warning" onclick="resetTimeMachine()" title="Clear History">🗑️</button>
+            </div>
         </div>
         <div class="time-slider-container">
             <div class="time-progress-bar" id="timeProgressBar"></div>
             <input type="range" id="timeSlider" class="time-slider" min="0" max="0" value="0" disabled>
-        </div>
-        <div class="time-controls">
-            <button class="time-btn" onclick="goToHistoryStart()" title="Go to Start (Home key)">⏮️</button>
-            <button class="time-btn" onclick="stepBackward()" title="Step Back (← arrow)">⏪</button>
-            <button class="time-btn" onclick="stepForward()" title="Step Forward (→ arrow)">⏩</button>
-            <button class="time-btn primary" onclick="goToHistoryEnd()" title="Go to Current (End key)">⏭️</button>
-            <button class="time-btn warning" onclick="resetTimeMachine()" title="Clear History">🗑️</button>
         </div>
     </div>
 
@@ -1184,12 +1237,12 @@
                 serverTxsList.innerHTML = '<div class="no-inputs">No server transactions</div>';
             }
             
-            // Merge entity inputs before displaying (same logic as server)
-            const mergedInputs = mergeEntityInputsForDisplay(serverInput.entityInputs);
+            // Show individual entity inputs (unmerged) to see all validators
+            const individualInputs = serverInput.entityInputs || [];
             
-            // Render entity inputs (merged)
-            if (mergedInputs.length > 0) {
-                entityInputsList.innerHTML = mergedInputs.map(input => {
+            // Render entity inputs (individual)
+            if (individualInputs.length > 0) {
+                entityInputsList.innerHTML = individualInputs.map(input => {
                     let details = `<div class="input-item">
                         <strong>${input.entityId}:${input.signerId}</strong>`;
                     
@@ -1282,7 +1335,7 @@
                 timeSlider.disabled = true;
                 timeSlider.max = 0;
                 timeInfo.innerHTML = '<span>⏰ No history yet</span><span></span><span></span>';
-                timeInfo.className = 'time-info';
+                timeInfo.className = 'time-info-compact';
                 progressBar.style.width = '0%';
                 return;
             }
@@ -1301,7 +1354,7 @@
                     <span>Height: ${xlnEnv.height}</span>
                     <span>${history.length} snapshots</span>
                 `;
-                timeInfo.className = 'time-info current';
+                timeInfo.className = 'time-info-compact current';
             } else {
                 // Historical time
                 sliderValue = currentTimeIndex;
@@ -1312,7 +1365,7 @@
                     <span>Height: ${snapshot.height}</span>
                     <span>${snapshot.description}</span>
                 `;
-                timeInfo.className = 'time-info';
+                timeInfo.className = 'time-info-compact';
             }
             
             timeSlider.value = sliderValue;
