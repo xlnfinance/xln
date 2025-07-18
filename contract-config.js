@@ -1,12 +1,12 @@
 // Auto-generated contract configuration
-// Generated on: Fri Jul 18 17:04:18 MSK 2025
+// Generated on: Fri 18 Jul 2025 17:37:42 MSK
 export const CONTRACT_CONFIG = {
   networks: {
     "8545": {
       name: "Ethereum",
       rpc: "http://localhost:8545",
       chainId: 1337,
-      entityProvider: "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1"
+      entityProvider: "0x3Aa5ebB10DC797CAC828524e59A333d0A371443c"
     },
     "8546": {
       name: "Polygon", 
@@ -21,8 +21,8 @@ export const CONTRACT_CONFIG = {
       entityProvider: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
     }
   },
-  deployedAt: 1752847458,
-  version: "eb99799"
+  deployedAt: 1752849462,
+  version: "9655da3"
 };
 
 // Helper function to get contract address by port
