@@ -4,7 +4,7 @@
       "name": "Ethereum",
       "rpc": "http://localhost:8545",
       "chainId": 1337,
-      "entityProvider": "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1"
+      "entityProvider": "0x3Aa5ebB10DC797CAC828524e59A333d0A371443c"
     },
     "8546": {
       "name": "Polygon", 

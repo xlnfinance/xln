@@ -447,8 +447,10 @@ const resolveEntityIdentifier = async (identifier: string): Promise<{entityId: s
 
 // === ETHEREUM INTEGRATION ===
 import { ethers } from 'ethers';
+import * as fs from 'fs';
+import * as path from 'path';
 
-const ENTITY_PROVIDER_ADDRESS = '0x9A676e781A523b5d0C0e43731313A708CB607508';
+// Load contract configuration directly in jurisdiction generation
 const ENTITY_PROVIDER_ABI = [
   "function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)",
   "function assignName(string memory name, uint256 entityNumber) external",
@@ -457,12 +459,20 @@ const ENTITY_PROVIDER_ABI = [
   "function nameToNumber(string memory name) external view returns (uint256)",
   "function numberToName(uint256 entityNumber) external view returns (string memory)",
   "function nextNumber() external view returns (uint256)",
-  "event NumberedEntityRegistered(uint256 indexed entityNumber, bytes32 indexed boardHash)",
+  "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
   "event NameAssigned(string indexed name, uint256 indexed entityNumber)",
   "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)"
 ];
 
-const connectToEthereum = async (rpcUrl: string = 'http://localhost:8545', contractAddress: string = ENTITY_PROVIDER_ADDRESS) => {
+const connectToEthereum = async (rpcUrl: string = 'http://localhost:8545', contractAddress?: string) => {
+  // Get contract address from configuration if not provided
+  const port = rpcUrl.split(':').pop() || '8545';
+  const finalContractAddress = contractAddress || await getContractAddress(port);
+  
+  if (!finalContractAddress) {
+    throw new Error(`No contract address found for network port ${port}`);
+  }
+  
   try {
     // Connect to specified RPC node
     const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -471,7 +481,7 @@ const connectToEthereum = async (rpcUrl: string = 'http://localhost:8545', contr
     const signer = await provider.getSigner(0);
     
     // Create contract instance
-    const entityProvider = new ethers.Contract(contractAddress, ENTITY_PROVIDER_ABI, signer);
+    const entityProvider = new ethers.Contract(finalContractAddress, ENTITY_PROVIDER_ABI, signer);
     
     return { provider, signer, entityProvider };
   } catch (error) {
@@ -508,18 +518,19 @@ const registerNumberedEntityOnChain = async (config: ConsensusConfig, name: stri
     const event = receipt.logs.find((log: any) => {
       try {
         const parsed = entityProvider.interface.parseLog(log);
-        return parsed?.name === 'NumberedEntityRegistered';
+        return parsed?.name === 'EntityRegistered';
       } catch {
         return false;
       }
     });
     
     if (!event) {
-      throw new Error('NumberedEntityRegistered event not found in transaction logs');
+      throw new Error('EntityRegistered event not found in transaction logs');
     }
     
     const parsedEvent = entityProvider.interface.parseLog(event);
-    const entityNumber = Number(parsedEvent?.args[0]);
+    const entityId = parsedEvent?.args[0];
+    const entityNumber = Number(parsedEvent?.args[1]);
     
     if (DEBUG) console.log(`✅ Numbered entity registered!`);
     if (DEBUG) console.log(`   TX: ${tx.hash}`);
@@ -609,7 +620,7 @@ const getEntityInfoFromChain = async (entityId: string): Promise<{exists: boolea
 const getNextEntityNumber = async (port: string = '8545'): Promise<number> => {
   try {
     const rpcUrl = `http://localhost:${port}`;
-    const contractAddress = getContractAddress(port);
+    const contractAddress = await getContractAddress(port);
     const { entityProvider } = await connectToEthereum(rpcUrl, contractAddress);
     
     if (DEBUG) console.log(`🔍 Fetching next entity number from ${contractAddress} (port ${port})`);
@@ -626,7 +637,7 @@ const getNextEntityNumber = async (port: string = '8545'): Promise<number> => {
     // Try to check if contract exists by calling a simpler function
     try {
       const rpcUrl = `http://localhost:${port}`;
-      const contractAddress = getContractAddress(port);
+      const contractAddress = await getContractAddress(port);
       const { provider } = await connectToEthereum(rpcUrl, contractAddress);
       const code = await provider.getCode(contractAddress);
       if (code === '0x') {
@@ -868,23 +879,76 @@ const mergeEntityInputs = (entityInputs: EntityInput[]): EntityInput[] => {
 
 // === JURISDICTION MANAGEMENT ===
 
-// Default jurisdiction configurations
-const DEFAULT_JURISDICTIONS: Map<string, JurisdictionConfig> = new Map([
-  ['localhost', {
-    address: '0x1337',
-    name: 'Local Testnet',
-    entityProviderAddress: '0xEntityProvider',
-    depositoryAddress: '0xDepository',
-    chainId: 1337
-  }],
-  ['ethereum', {
-    address: '0xMainnet',
-    name: 'Ethereum Mainnet',
-    entityProviderAddress: '0xMainEntityProvider',
-    depositoryAddress: '0xMainDepository',
-    chainId: 1
-  }]
-]);
+// Load contract configuration and generate jurisdictions
+const generateJurisdictions = (): Map<string, JurisdictionConfig> => {
+  const jurisdictions = new Map<string, JurisdictionConfig>();
+  
+  // For browser, return empty map - jurisdictions will be populated dynamically
+  if (isBrowser) {
+    console.log('🌐 Browser detected - jurisdictions will be loaded dynamically');
+    return jurisdictions;
+  }
+  
+  // Node.js environment - load from file
+  let networks: any;
+  try {
+    const configPath = path.join(process.cwd(), 'contract-addresses.json');
+    const configData = fs.readFileSync(configPath, 'utf8');
+    const config = JSON.parse(configData);
+    console.log('✅ Loaded contract addresses from config file');
+    networks = config.networks;
+  } catch (error) {
+    console.error('❌ CRITICAL: Could not load contract-addresses.json');
+    console.error('   Please run: ./deploy-contracts.sh');
+    throw new Error('Contract addresses configuration file not found or invalid');
+  }
+  
+  if (networks['8545']) {
+    const network = networks['8545'];
+    if (!network.entityProvider) {
+      throw new Error('Missing entityProvider address for Ethereum network (8545)');
+    }
+    jurisdictions.set('ethereum', {
+      address: network.rpc,
+      name: network.name,
+      entityProviderAddress: network.entityProvider,
+      depositoryAddress: network.depository,
+      chainId: network.chainId
+    });
+  }
+  
+  if (networks['8546']) {
+    const network = networks['8546'];
+    if (!network.entityProvider) {
+      throw new Error('Missing entityProvider address for Polygon network (8546)');
+    }
+    jurisdictions.set('polygon', {
+      address: network.rpc,
+      name: network.name,
+      entityProviderAddress: network.entityProvider,
+      depositoryAddress: network.depository,
+      chainId: network.chainId
+    });
+  }
+  
+  if (networks['8547']) {
+    const network = networks['8547'];
+    if (!network.entityProvider) {
+      throw new Error('Missing entityProvider address for Arbitrum network (8547)');
+    }
+    jurisdictions.set('arbitrum', {
+      address: network.rpc,
+      name: network.name,
+      entityProviderAddress: network.entityProvider,
+      depositoryAddress: network.depository,
+      chainId: network.chainId
+    });
+  }
+  
+  return jurisdictions;
+};
+
+const DEFAULT_JURISDICTIONS = generateJurisdictions();
 
 const getAvailableJurisdictions = (): JurisdictionConfig[] => {
   return Array.from(DEFAULT_JURISDICTIONS.values());
@@ -1917,61 +1981,99 @@ export {
 // --- Node.js auto-execution for local testing ---
 // This part will only run when the script is executed directly in Node.js.
 if (!isBrowser) {
-  main().then(env => {
+  main().then(async env => {
     if (env) {
       console.log('✅ Node.js environment initialized. Running demo for local testing...');
       runDemo(env);
+      
+      // Add a small delay to ensure demo completes before verification
+      setTimeout(async () => {
+        await verifyJurisdictionRegistrations();
+      }, 2000);
     }
   }).catch(error => {
     console.error('❌ An error occurred during Node.js auto-execution:', error);
   });
 }
 
-// Load contract addresses from configuration file
-const loadContractAddresses = () => {
-  try {
-    if (!isBrowser) {
-      const fs = require('fs');
-      const path = require('path');
-      const configPath = path.join(process.cwd(), 'contract-addresses.json');
-      
-      if (fs.existsSync(configPath)) {
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        if (DEBUG) console.log('📋 Loaded contract addresses from config');
-        return config.networks;
+// Get contract address for specific network/port
+const getContractAddress = async (port: string): Promise<string> => {
+  let config: any;
+  
+  if (isBrowser) {
+    // Browser environment - fetch from server
+    try {
+      const response = await fetch('/contract-addresses.json');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
+      config = await response.json();
+    } catch (error) {
+      throw new Error(`Could not fetch contract address for port ${port} from server. Make sure server is running and contracts are deployed.`);
     }
-  } catch (error: any) {
-    if (DEBUG) console.warn('⚠️ Could not load contract addresses, using defaults:', error.message);
+  } else {
+    // Node.js environment - load from file
+    try {
+      const configPath = path.join(process.cwd(), 'contract-addresses.json');
+      const configData = fs.readFileSync(configPath, 'utf8');
+      config = JSON.parse(configData);
+    } catch (error) {
+      throw new Error(`Could not load contract address for port ${port}. Please run: ./deploy-contracts.sh`);
+    }
   }
   
-  // Return default configuration
-  return {
-    "8545": {
-      "name": "Ethereum",
-      "rpc": "http://localhost:8545",
-      "chainId": 31337,
-      "entityProvider": ENTITY_PROVIDER_ADDRESS
-    },
-    "8546": {
-      "name": "Polygon", 
-      "rpc": "http://localhost:8546",
-      "chainId": 31337,
-      "entityProvider": ENTITY_PROVIDER_ADDRESS
-    },
-    "8547": {
-      "name": "Arbitrum",
-      "rpc": "http://localhost:8547", 
-      "chainId": 31337,
-      "entityProvider": ENTITY_PROVIDER_ADDRESS
-    }
-  };
+  const address = config.networks[port]?.entityProvider;
+  if (!address) {
+    throw new Error(`No contract address found for network port ${port}. Please deploy contracts first.`);
+  }
+  return address;
 };
 
-// Get contract address for specific network/port
-const getContractAddress = (port: string): string => {
-  const networks = loadContractAddresses();
-  return networks[port]?.entityProvider || ENTITY_PROVIDER_ADDRESS;
+// === BLOCKCHAIN VERIFICATION ===
+const verifyJurisdictionRegistrations = async () => {
+  console.log('\n🔍 === JURISDICTION VERIFICATION ===');
+  console.log('📋 Verifying entity registrations across all jurisdictions...\n');
+  
+  const jurisdictions = Array.from(DEFAULT_JURISDICTIONS.values());
+  
+  for (const jurisdiction of jurisdictions) {
+    try {
+      console.log(`🏛️ ${jurisdiction.name}:`);
+      console.log(`   📡 RPC: ${jurisdiction.address}`);
+      console.log(`   📄 Contract: ${jurisdiction.entityProviderAddress}`);
+      
+      // Connect to this jurisdiction's network
+      const { entityProvider } = await connectToEthereum(jurisdiction.address, jurisdiction.entityProviderAddress);
+      
+      // Get next entity number (indicates how many are registered)
+      const nextNumber = await entityProvider.nextNumber();
+      const registeredCount = Number(nextNumber) - 1;
+      
+      console.log(`   📊 Registered Entities: ${registeredCount}`);
+      
+      // Read registered entities
+      if (registeredCount > 0) {
+        console.log(`   📝 Entity Details:`);
+        for (let i = 1; i <= registeredCount; i++) {
+          try {
+            const entityId = generateNumberedEntityId(i);
+            const entityInfo = await entityProvider.entities(entityId);
+            console.log(`      #${i}: ${entityId.slice(0, 10)}... (Block: ${entityInfo.registrationBlock})`);
+          } catch (error) {
+            console.log(`      #${i}: Error reading entity data`);
+          }
+        }
+      }
+      
+      console.log('');
+      
+    } catch (error) {
+      console.error(`   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
+      console.log('');
+    }
+  }
+  
+  console.log('✅ Jurisdiction verification complete!\n');
 };
 
 // === ENTITY MANAGEMENT ENDPOINTS ===
