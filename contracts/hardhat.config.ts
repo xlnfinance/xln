@@ -9,28 +9,32 @@ const config: HardhatUserConfig = {
         enabled: true,
         runs: 1000,
       },
+      viaIR: true, // Enable via-IR compilation for stack too deep issues
     },
   },
   networks: {
     localhost: {
+      url: "http://127.0.0.1:8545",
       allowUnlimitedContractSize: true
     },
     hardhat: {
       chainId: 1337,
     },
-    testnode1: {
+    ethereum: {
       url: "http://127.0.0.1:8545",
-      chainId: 1338,
+      chainId: 1337,
+      allowUnlimitedContractSize: true
     },
-    testnode2: {
+    polygon: {
       url: "http://127.0.0.1:8546",
-      chainId: 1339,
+      chainId: 1337,
+      allowUnlimitedContractSize: true
     },
-    testnode3: {
+    arbitrum: {
       url: "http://127.0.0.1:8547",
-      chainId: 1340,
+      chainId: 1337,
+      allowUnlimitedContractSize: true
     },
-
   }
 };
 

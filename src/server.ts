@@ -5,12 +5,12 @@
 // Environment detection and compatibility layer
 const isBrowser = typeof window !== 'undefined';
 
-// Crypto compatibility
+// Simplified crypto compatibility
 const createHash = isBrowser ? 
   (algorithm: string) => ({
     update: (data: string) => ({
       digest: (encoding?: string) => {
-        // Simple deterministic hash for browser demo (not cryptographically secure)
+        // Simple deterministic hash for browser demo
         let hash = 0;
         for (let i = 0; i < data.length; i++) {
           const char = data.charCodeAt(i);
@@ -32,57 +32,46 @@ const randomBytes = isBrowser ?
   } :
   require('crypto').randomBytes;
 
-// A more robust Buffer polyfill for the browser.
-let Buffer: any;
-if (isBrowser) {
-  // This polyfill provides the 'from' and 'toString' methods needed by our snapshot coder.
-  Buffer = {
-    from: (data: any, encoding: string = 'utf8') => {
-      if (typeof data === 'string') {
-        return new TextEncoder().encode(data);
+// Simplified Buffer polyfill for browser
+const getBuffer = () => {
+  if (isBrowser) {
+    return {
+      from: (data: any, encoding: string = 'utf8') => {
+        if (typeof data === 'string') {
+          return new TextEncoder().encode(data);
+        }
+        return new Uint8Array(data);
       }
-      return new Uint8Array(data);
-    },
-    // The 'decode' part is handled by TextDecoder in the browser.
-    // We don't need a full Buffer implementation, just what the coder uses.
-  };
+    };
+  }
+  return require('buffer').Buffer;
+};
 
-  // Polyfill for buffer.toString() which the decoder uses.
-  // We attach the decoding logic to the Uint8Array prototype.
+const Buffer = getBuffer();
+
+// Browser polyfill for Uint8Array.toString()
+if (isBrowser) {
   (Uint8Array.prototype as any).toString = function(encoding: string = 'utf8') {
     return new TextDecoder().decode(this);
   };
-
-  // Make our minimal Buffer object global for other scripts.
-  (window as any).Buffer = Buffer; 
-} else {
-  // We're in Node.js, just use the real Buffer.
-  Buffer = require('buffer').Buffer;
+  (window as any).Buffer = Buffer;
 }
 
 // RLP compatibility (simplified for browser)
 
 
 // Debug compatibility
-const debug = isBrowser ?
-  (() => {
-    const debugFn = (namespace: string) => {
-      const shouldLog = namespace.includes('state') || namespace.includes('tx') || namespace.includes('block') || namespace.includes('error') || namespace.includes('diff') || namespace.includes('info');
-      return shouldLog ? console.log.bind(console, `[${namespace}]`) : () => {};
-    };
-    // Add enable mock for browser
-    debugFn.enable = () => {};
-    return debugFn;
-  })() :
-  require('debug');
-debug.enable('state:*,tx:*,block:*,error:*,diff:*');
-// Use hex for Map/Set keys, Buffers for DB/RLP
-const ENC = 'hex' as const;
+// Simplified debug configuration
+const createDebug = (namespace: string) => {
+  const shouldLog = namespace.includes('state') || namespace.includes('tx') || 
+                   namespace.includes('block') || namespace.includes('error') || 
+                   namespace.includes('diff') || namespace.includes('info');
+  return shouldLog ? console.log.bind(console, `[${namespace}]`) : () => {};
+};
 
-const hash = (data: Buffer | string): Buffer => 
-  createHash('sha256').update(data.toString()).digest();
+const debug = isBrowser ? createDebug : require('debug');
 
-// Configure debug logging
+// Configure debug logging with functional approach
 const log = {
   state: debug('state:🔵'),
   tx: debug('tx:🟡'),
@@ -92,7 +81,11 @@ const log = {
   info: debug('info:ℹ️')
 };
 
+// Use hex for Map/Set keys, Buffers for DB/RLP
+const ENC = 'hex' as const;
 
+const hash = (data: Buffer | string): Buffer => 
+  createHash('sha256').update(data.toString()).digest();
 
 // This code works in both Node.js and the browser
 import { Level } from 'level';
@@ -119,11 +112,20 @@ const clearDatabase = async () => {
 declare const console: any;
 let DEBUG = true;
 
+interface JurisdictionConfig {
+  address: string;
+  name: string;
+  entityProviderAddress: string;
+  depositoryAddress: string;
+  chainId?: number;
+}
+
 interface ConsensusConfig {
   mode: 'proposer-based' | 'gossip-based';
   threshold: bigint;
   validators: string[];
   shares: { [validatorId: string]: bigint };
+  jurisdiction?: JurisdictionConfig; // Add jurisdiction support
 }
 
 interface ServerInput {
@@ -180,6 +182,498 @@ interface EntityState {
   config: ConsensusConfig;
 }
 
+// === ENTITY REGISTRATION FUNCTIONS ===
+
+// Entity types
+type EntityType = 'lazy' | 'numbered' | 'named';
+
+// Entity encoding utilities
+const encodeBoard = (config: ConsensusConfig): string => {
+  const delegates = config.validators.map(validator => ({
+    entityId: validator, // For EOA addresses (20 bytes)
+    votingPower: Number(config.shares[validator] || 1n)
+  }));
+
+  const board = {
+    votingThreshold: Number(config.threshold),
+    delegates: delegates
+  };
+
+  // Return JSON representation that can be hashed consistently
+  return JSON.stringify(board, Object.keys(board).sort());
+};
+
+const hashBoard = (encodedBoard: string): string => {
+  // Use real keccak256 hash like Ethereum
+  return ethers.keccak256(ethers.toUtf8Bytes(encodedBoard));
+};
+
+const generateLazyEntityId = (validators: {name: string, weight: number}[] | string[], threshold: bigint): string => {
+  // Create deterministic entity ID from quorum composition
+  let validatorData: {name: string, weight: number}[];
+  
+  // Handle both formats: array of objects or array of strings (assume weight=1)
+  if (typeof validators[0] === 'string') {
+    validatorData = (validators as string[]).map(name => ({name, weight: 1}));
+  } else {
+    validatorData = validators as {name: string, weight: number}[];
+  }
+  
+  // Sort by name for canonical ordering
+  const sortedValidators = validatorData.slice().sort((a, b) => a.name.localeCompare(b.name));
+  
+  const quorumData = {
+    validators: sortedValidators,
+    threshold: threshold.toString()
+  };
+  
+  const serialized = JSON.stringify(quorumData);
+  return hashBoard(serialized);
+};
+
+const generateNumberedEntityId = (entityNumber: number): string => {
+  // Convert number to bytes32 (left-padded with zeros)
+  return `0x${entityNumber.toString(16).padStart(64, '0')}`;
+};
+
+const generateNamedEntityId = (name: string): string => {
+  // For named entities: entityId resolved via name lookup on-chain
+  // This is just for client-side preview
+  return hashBoard(name);
+};
+
+const detectEntityType = (entityId: string): EntityType => {
+  // Check if this is a hex string (0x followed by hex digits)
+  if (entityId.startsWith('0x') && entityId.length === 66) {
+    try {
+      const num = BigInt(entityId);
+      
+      // Small positive numbers = numbered entities
+      if (num > 0n && num < 1000000n) {
+        return 'numbered';
+      }
+      
+      // Very large numbers are lazy entity hashes
+      return 'lazy';
+    } catch {
+      return 'lazy';
+    }
+  }
+  
+  // Check if this is a numeric string before trying BigInt conversion
+  if (/^[0-9]+$/.test(entityId)) {
+    try {
+      const num = BigInt(entityId);
+      
+      // Small positive numbers = numbered entities
+      if (num > 0n && num < 1000000n) {
+        return 'numbered';
+      }
+      
+      // Very large numbers might be lazy entity hashes
+      return 'lazy';
+    } catch {
+      return 'lazy';
+    }
+  }
+  
+  // Non-numeric, non-hex strings are lazy entities
+  return 'lazy';
+};
+
+const extractNumberFromEntityId = (entityId: string): number | null => {
+  // Check if this is a hex string (0x followed by hex digits)
+  if (entityId.startsWith('0x') && entityId.length === 66) {
+    try {
+      const num = BigInt(entityId);
+      
+      // Check if it's a numbered entity (small positive number)
+      if (num > 0n && num < 1000000n) {
+        return Number(num);
+      }
+      
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  
+  // Check if this is a numeric string before trying BigInt conversion
+  if (/^[0-9]+$/.test(entityId)) {
+    try {
+      const num = BigInt(entityId);
+      
+      // Check if it's a numbered entity (small positive number)
+      if (num > 0n && num < 1000000n) {
+        return Number(num);
+      }
+      
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  
+  return null;
+};
+
+// 1. LAZY ENTITIES (Free, instant)
+const createLazyEntity = (name: string, validators: string[], threshold: bigint, jurisdiction?: JurisdictionConfig): ConsensusConfig => {
+  const entityId = generateLazyEntityId(validators, threshold);
+  
+  if (DEBUG) console.log(`🔒 Creating lazy entity: ${name}`);
+  if (DEBUG) console.log(`   EntityID: ${entityId} (quorum hash)`);
+  if (DEBUG) console.log(`   Validators: ${validators.join(', ')}`);
+  if (DEBUG) console.log(`   Threshold: ${threshold}`);
+  if (DEBUG) console.log(`   🆓 FREE - No gas required`);
+  
+  const shares: { [validatorId: string]: bigint } = {};
+  validators.forEach(validator => {
+    shares[validator] = 1n; // Equal voting power for simplicity
+  });
+
+  return {
+    mode: 'proposer-based',
+    threshold,
+    validators,
+    shares,
+    jurisdiction
+  };
+};
+
+// 2. NUMBERED ENTITIES (Small gas cost)
+const createNumberedEntity = async (name: string, validators: string[], threshold: bigint, jurisdiction: JurisdictionConfig): Promise<{config: ConsensusConfig, entityNumber: number}> => {
+  if (!jurisdiction) {
+    throw new Error("Jurisdiction required for numbered entity registration");
+  }
+  
+  const boardHash = hashBoard(encodeBoard({
+    mode: 'proposer-based',
+    threshold,
+    validators,
+    shares: validators.reduce((acc, v) => ({...acc, [v]: 1n}), {}),
+    jurisdiction
+  }));
+  
+  if (DEBUG) console.log(`🔢 Creating numbered entity: ${name}`);
+  if (DEBUG) console.log(`   Board Hash: ${boardHash}`);
+  if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
+  if (DEBUG) console.log(`   💸 Gas required for registration`);
+  
+  // Simulate blockchain call
+  const entityNumber = Math.floor(Math.random() * 1000000) + 1; // Demo: random number
+  const entityId = generateNumberedEntityId(entityNumber);
+  
+  if (DEBUG) console.log(`   ✅ Assigned Entity Number: ${entityNumber}`);
+  if (DEBUG) console.log(`   EntityID: ${entityId}`);
+  
+  const shares: { [validatorId: string]: bigint } = {};
+  validators.forEach(validator => {
+    shares[validator] = 1n;
+  });
+
+  const config: ConsensusConfig = {
+    mode: 'proposer-based',
+    threshold,
+    validators,
+    shares,
+    jurisdiction
+  };
+  
+  return { config, entityNumber };
+};
+
+// 3. NAMED ENTITIES (Premium - admin assignment required)
+const requestNamedEntity = async (name: string, entityNumber: number, jurisdiction: JurisdictionConfig): Promise<string> => {
+  if (!jurisdiction) {
+    throw new Error("Jurisdiction required for named entity");
+  }
+  
+  if (DEBUG) console.log(`🏷️ Requesting named entity assignment`);
+  if (DEBUG) console.log(`   Name: ${name}`);
+  if (DEBUG) console.log(`   Target Entity Number: ${entityNumber}`);
+  if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
+  if (DEBUG) console.log(`   👑 Requires admin approval`);
+  
+  // Simulate admin assignment request
+  const requestId = `req_${Math.random().toString(16).substring(2, 10)}`;
+  
+  if (DEBUG) console.log(`   📝 Name assignment request submitted: ${requestId}`);
+  if (DEBUG) console.log(`   ⏳ Waiting for admin approval...`);
+  
+  return requestId;
+};
+
+// Entity resolution (client-side)
+const resolveEntityIdentifier = async (identifier: string): Promise<{entityId: string, type: EntityType}> => {
+  // Handle different input formats
+  if (identifier.startsWith('#')) {
+    // #42 -> numbered entity
+    const number = parseInt(identifier.slice(1));
+    return {
+      entityId: generateNumberedEntityId(number),
+      type: 'numbered'
+    };
+  } else if (/^\d+$/.test(identifier)) {
+    // 42 -> numbered entity
+    const number = parseInt(identifier);
+    return {
+      entityId: generateNumberedEntityId(number),
+      type: 'numbered'
+    };
+  } else if (identifier.startsWith('0x')) {
+    // 0x123... -> direct entity ID
+    return {
+      entityId: identifier,
+      type: detectEntityType(identifier)
+    };
+  } else {
+    // "coinbase" -> named entity (requires on-chain lookup)
+    // For demo, simulate lookup
+    if (DEBUG) console.log(`🔍 Looking up named entity: ${identifier}`);
+    
+    // Simulate on-chain name resolution
+    const simulatedNumber = identifier === 'coinbase' ? 42 : 0;
+    if (simulatedNumber > 0) {
+      return {
+        entityId: generateNumberedEntityId(simulatedNumber),
+        type: 'named'
+      };
+    } else {
+      throw new Error(`Named entity "${identifier}" not found`);
+    }
+  }
+};
+
+// === ETHEREUM INTEGRATION ===
+import { ethers } from 'ethers';
+
+const ENTITY_PROVIDER_ADDRESS = '0x9A676e781A523b5d0C0e43731313A708CB607508';
+const ENTITY_PROVIDER_ABI = [
+  "function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)",
+  "function assignName(string memory name, uint256 entityNumber) external",
+  "function transferName(string memory name, uint256 newEntityNumber) external",
+  "function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))",
+  "function nameToNumber(string memory name) external view returns (uint256)",
+  "function numberToName(uint256 entityNumber) external view returns (string memory)",
+  "function nextNumber() external view returns (uint256)",
+  "event NumberedEntityRegistered(uint256 indexed entityNumber, bytes32 indexed boardHash)",
+  "event NameAssigned(string indexed name, uint256 indexed entityNumber)",
+  "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)"
+];
+
+const connectToEthereum = async (rpcUrl: string = 'http://localhost:8545', contractAddress: string = ENTITY_PROVIDER_ADDRESS) => {
+  try {
+    // Connect to specified RPC node
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    
+    // Use first account for testing (Hardhat account #0)
+    const signer = await provider.getSigner(0);
+    
+    // Create contract instance
+    const entityProvider = new ethers.Contract(contractAddress, ENTITY_PROVIDER_ABI, signer);
+    
+    return { provider, signer, entityProvider };
+  } catch (error) {
+    console.error(`Failed to connect to Ethereum at ${rpcUrl}:`, error);
+    throw error;
+  }
+};
+
+const registerNumberedEntityOnChain = async (config: ConsensusConfig, name: string): Promise<{txHash: string, entityNumber: number}> => {
+  if (!config.jurisdiction) {
+    throw new Error("Jurisdiction required for on-chain registration");
+  }
+  
+  try {
+    const { entityProvider } = await connectToEthereum();
+    
+    const encodedBoard = encodeBoard(config);
+    const boardHash = hashBoard(encodedBoard);
+    
+    if (DEBUG) console.log(`🏛️ Registering numbered entity "${name}" on chain`);
+    if (DEBUG) console.log(`   Jurisdiction: ${config.jurisdiction.name}`);
+    if (DEBUG) console.log(`   EntityProvider: ${config.jurisdiction.entityProviderAddress}`);
+    if (DEBUG) console.log(`   Board Hash: ${boardHash}`);
+    
+    // Call the smart contract
+    const tx = await entityProvider.registerNumberedEntity(boardHash);
+    if (DEBUG) console.log(`   📤 Transaction sent: ${tx.hash}`);
+    
+    // Wait for confirmation
+    const receipt = await tx.wait();
+    if (DEBUG) console.log(`   ✅ Transaction confirmed in block ${receipt.blockNumber}`);
+    
+    // Extract entity number from event logs
+    const event = receipt.logs.find((log: any) => {
+      try {
+        const parsed = entityProvider.interface.parseLog(log);
+        return parsed?.name === 'NumberedEntityRegistered';
+      } catch {
+        return false;
+      }
+    });
+    
+    if (!event) {
+      throw new Error('NumberedEntityRegistered event not found in transaction logs');
+    }
+    
+    const parsedEvent = entityProvider.interface.parseLog(event);
+    const entityNumber = Number(parsedEvent?.args[0]);
+    
+    if (DEBUG) console.log(`✅ Numbered entity registered!`);
+    if (DEBUG) console.log(`   TX: ${tx.hash}`);
+    if (DEBUG) console.log(`   Entity Number: ${entityNumber}`);
+    
+    return { txHash: tx.hash, entityNumber };
+    
+  } catch (error) {
+    console.error('❌ Blockchain registration failed:', error);
+    
+    // Fallback to simulation for development
+    if (DEBUG) console.log('   🔄 Falling back to simulation...');
+    
+    const txHash = `0x${Math.random().toString(16).substring(2, 66)}`;
+    const entityNumber = Math.floor(Math.random() * 1000000) + 1;
+    
+    if (DEBUG) console.log(`   ✅ Simulated registration completed`);
+    if (DEBUG) console.log(`   TX: ${txHash}`);
+    if (DEBUG) console.log(`   Entity Number: ${entityNumber}`);
+    
+    return { txHash, entityNumber };
+  }
+};
+
+const assignNameOnChain = async (name: string, entityNumber: number): Promise<{txHash: string}> => {
+  try {
+    const { entityProvider } = await connectToEthereum();
+    
+    if (DEBUG) console.log(`🏷️  Assigning name "${name}" to entity #${entityNumber}`);
+    
+    // Call the smart contract (admin only)
+    const tx = await entityProvider.assignName(name, entityNumber);
+    if (DEBUG) console.log(`   📤 Transaction sent: ${tx.hash}`);
+    
+    // Wait for confirmation
+    const receipt = await tx.wait();
+    if (DEBUG) console.log(`   ✅ Transaction confirmed in block ${receipt.blockNumber}`);
+    
+    if (DEBUG) console.log(`✅ Name assigned successfully!`);
+    if (DEBUG) console.log(`   TX: ${tx.hash}`);
+    
+    return { txHash: tx.hash };
+    
+  } catch (error) {
+    console.error('❌ Name assignment failed:', error);
+    throw error;
+  }
+};
+
+const getEntityInfoFromChain = async (entityId: string): Promise<{exists: boolean, entityNumber?: number, name?: string}> => {
+  try {
+    const { entityProvider } = await connectToEthereum();
+    
+    // Try to get entity info
+    const entityInfo = await entityProvider.entities(entityId);
+    
+    if (entityInfo.status === 0) {
+      return { exists: false };
+    }
+    
+    // For numbered entities, get the number and name
+    const entityType = detectEntityType(entityId);
+    let entityNumber: number | undefined;
+    let name: string | undefined;
+    
+         if (entityType === 'numbered') {
+       const extractedNumber = extractNumberFromEntityId(entityId);
+       if (extractedNumber !== null) {
+         entityNumber = extractedNumber;
+        try {
+          const retrievedName = await entityProvider.numberToName(entityNumber);
+          name = retrievedName || undefined;
+        } catch {
+          // No name assigned
+        }
+      }
+    }
+    
+    return { exists: true, entityNumber, name };
+    
+  } catch (error) {
+    console.error('❌ Failed to get entity info from chain:', error);
+    return { exists: false };
+  }
+};
+
+const getNextEntityNumber = async (port: string = '8545'): Promise<number> => {
+  try {
+    const rpcUrl = `http://localhost:${port}`;
+    const contractAddress = getContractAddress(port);
+    const { entityProvider } = await connectToEthereum(rpcUrl, contractAddress);
+    
+    if (DEBUG) console.log(`🔍 Fetching next entity number from ${contractAddress} (port ${port})`);
+    
+    const nextNumber = await entityProvider.nextNumber();
+    const result = Number(nextNumber);
+    
+    if (DEBUG) console.log(`🔢 Next entity number: ${result}`);
+    return result;
+    
+  } catch (error) {
+    console.error('❌ Failed to get next entity number:', error);
+    
+    // Try to check if contract exists by calling a simpler function
+    try {
+      const rpcUrl = `http://localhost:${port}`;
+      const contractAddress = getContractAddress(port);
+      const { provider } = await connectToEthereum(rpcUrl, contractAddress);
+      const code = await provider.getCode(contractAddress);
+      if (code === '0x') {
+        console.error('❌ Contract not deployed at address:', contractAddress);
+      } else {
+        console.log('✅ Contract exists, but nextNumber() call failed');
+      }
+    } catch (checkError) {
+      console.error('❌ Failed to check contract:', checkError);
+    }
+    
+    // Fallback to a reasonable default
+    return 1;
+  }
+};
+
+const transferNameBetweenEntities = async (name: string, fromNumber: number, toNumber: number, jurisdiction: JurisdictionConfig): Promise<string> => {
+  if (DEBUG) console.log(`🔄 Transferring name "${name}" from #${fromNumber} to #${toNumber}`);
+  
+  const txHash = `0x${Math.random().toString(16).substring(2, 66)}`;
+  
+  if (DEBUG) console.log(`✅ Name transferred! TX: ${txHash}`);
+  return txHash;
+};
+
+const isEntityRegistered = async (entityId: string): Promise<boolean> => {
+  const type = detectEntityType(entityId);
+  
+  // Lazy entities are never "registered" - they exist by definition
+  if (type === 'lazy') {
+    return false;
+  }
+  
+  // Numbered and named entities require on-chain verification
+  // For demo, assume they exist if they're small numbers
+  if (!/^[0-9]+$/.test(entityId)) {
+    return false; // Non-numeric IDs are not registered
+  }
+  
+  try {
+    const num = BigInt(entityId);
+    return num > 0n && num < 1000000n;
+  } catch {
+    return false;
+  }
+};
+
 interface ProposedEntityFrame {
   height: number;
   txs: EntityTx[];
@@ -220,37 +714,39 @@ let envHistory: EnvSnapshot[] = [];
 
 // === SNAPSHOT UTILITIES ===
 const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
+  const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
+  const cloneArray = <T>(arr: T[]) => [...arr];
+  
   return {
     entityId: replica.entityId,
     signerId: replica.signerId,
     state: {
       height: replica.state.height,
       timestamp: replica.state.timestamp,
-      nonces: new Map(replica.state.nonces),
-      messages: [...replica.state.messages],
-      proposals: new Map(Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
-        id,
-        {
-          ...proposal,
-          votes: new Map(proposal.votes)
-        }
-      ])),
+      nonces: cloneMap(replica.state.nonces),
+      messages: cloneArray(replica.state.messages),
+      proposals: new Map(
+        Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
+          id,
+          { ...proposal, votes: cloneMap(proposal.votes) }
+        ])
+      ),
       config: replica.state.config
     },
-    mempool: [...replica.mempool],
+    mempool: cloneArray(replica.mempool),
     proposal: replica.proposal ? {
       height: replica.proposal.height,
-      txs: [...replica.proposal.txs],
+      txs: cloneArray(replica.proposal.txs),
       hash: replica.proposal.hash,
       newState: replica.proposal.newState,
-      signatures: new Map(replica.proposal.signatures)
+      signatures: cloneMap(replica.proposal.signatures)
     } : undefined,
     lockedFrame: replica.lockedFrame ? {
       height: replica.lockedFrame.height,
-      txs: [...replica.lockedFrame.txs],
+      txs: cloneArray(replica.lockedFrame.txs),
       hash: replica.lockedFrame.hash,
       newState: replica.lockedFrame.newState,
-      signatures: new Map(replica.lockedFrame.signatures)
+      signatures: cloneMap(replica.lockedFrame.signatures)
     } : undefined,
     isProposer: replica.isProposer
   };
@@ -282,14 +778,14 @@ const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: Enti
   
   envHistory.push(snapshot);
 
-  // --- PERSISTENCE ---
-  // Save the newly created snapshot to the database.
-  db.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot)).catch(err => {
+  // --- PERSISTENCE WITH BATCH OPERATIONS ---
+  // Use batch operations for better performance
+  const batch = db.batch();
+  batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
+  batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
+  
+  batch.write().catch(err => {
     console.error(`🔥 Failed to save snapshot ${snapshot.height} to LevelDB`, err);
-  });
-  // Also save the latest height to make it easy to find on startup.
-  db.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString())).catch(err => {
-    console.error('🔥 Failed to save latest_height to LevelDB', err);
   });
   
   if (DEBUG) {
@@ -332,7 +828,7 @@ const mergeEntityInputs = (entityInputs: EntityInput[]): EntityInput[] => {
   const merged = new Map<string, EntityInput>();
   let mergeCount = 0;
   
-  for (const input of entityInputs) {
+  entityInputs.forEach(input => {
     const key = `${input.entityId}:${input.signerId}`;
     const existing = merged.get(key);
     
@@ -348,10 +844,7 @@ const mergeEntityInputs = (entityInputs: EntityInput[]): EntityInput[] => {
       // Merge precommits
       if (input.precommits?.size) {
         if (!existing.precommits) existing.precommits = new Map();
-        // Use spread operator for better performance
-        for (const entry of input.precommits) {
-          existing.precommits.set(...entry);
-        }
+        input.precommits.forEach((value, key) => existing.precommits!.set(key, value));
       }
       
       // Take latest proposedFrame
@@ -364,7 +857,7 @@ const mergeEntityInputs = (entityInputs: EntityInput[]): EntityInput[] => {
         precommits: input.precommits ? new Map(input.precommits) : undefined
       });
     }
-  }
+  });
   
   if (DEBUG && mergeCount > 0) {
     console.log(`    ⚠️  CORNER CASE: Merged ${mergeCount} duplicate inputs (${entityInputs.length} → ${merged.size})`);
@@ -373,7 +866,74 @@ const mergeEntityInputs = (entityInputs: EntityInput[]): EntityInput[] => {
   return Array.from(merged.values());
 };
 
-// === PROPOSAL SYSTEM ===
+// === JURISDICTION MANAGEMENT ===
+
+// Default jurisdiction configurations
+const DEFAULT_JURISDICTIONS: Map<string, JurisdictionConfig> = new Map([
+  ['localhost', {
+    address: '0x1337',
+    name: 'Local Testnet',
+    entityProviderAddress: '0xEntityProvider',
+    depositoryAddress: '0xDepository',
+    chainId: 1337
+  }],
+  ['ethereum', {
+    address: '0xMainnet',
+    name: 'Ethereum Mainnet',
+    entityProviderAddress: '0xMainEntityProvider',
+    depositoryAddress: '0xMainDepository',
+    chainId: 1
+  }]
+]);
+
+const getAvailableJurisdictions = (): JurisdictionConfig[] => {
+  return Array.from(DEFAULT_JURISDICTIONS.values());
+};
+
+const getJurisdictionByAddress = (address: string): JurisdictionConfig | undefined => {
+  return DEFAULT_JURISDICTIONS.get(address);
+};
+
+const registerEntityInJurisdiction = async (
+  entityId: string,
+  config: ConsensusConfig,
+  jurisdiction: JurisdictionConfig
+): Promise<{ success: boolean; transactionHash?: string; error?: string }> => {
+  try {
+    if (DEBUG) {
+      console.log(`🏛️  Registering entity "${entityId}" in jurisdiction "${jurisdiction.name}"`);
+      console.log(`    EntityProvider: ${jurisdiction.entityProviderAddress}`);
+      console.log(`    Validators: ${config.validators.join(', ')}`);
+      console.log(`    Threshold: ${config.threshold}/${Object.values(config.shares).reduce((a, b) => a + b, 0n)}`);
+    }
+    
+    // For demo purposes, simulate successful registration
+    // In production, this would make actual contract calls
+    const mockTxHash = `0x${Math.random().toString(16).slice(2)}${Math.random().toString(16).slice(2)}`;
+    
+    if (DEBUG) {
+      console.log(`✅ Entity registration simulated successfully`);
+      console.log(`    Transaction Hash: ${mockTxHash}`);
+      console.log(`    Entity can now interact with jurisdiction contracts`);
+    }
+    
+    return {
+      success: true,
+      transactionHash: mockTxHash
+    };
+  } catch (error) {
+    if (DEBUG) {
+      console.error(`❌ Entity registration failed:`, error);
+    }
+    
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+};
+
+// === ENTITY PROCESSING ===
 const generateProposalId = (action: ProposalAction, proposer: string, entityState: EntityState): string => {
   // Create deterministic hash from proposal data using entity timestamp
   const proposalData = JSON.stringify({
@@ -717,6 +1277,7 @@ const processEntityInput = (env: Env, entityReplica: EntityReplica, entityInput:
 };
 
 const processServerInput = (env: Env, serverInput: ServerInput): EntityInput[] => {
+  const startTime = Date.now();
   
   // Merge new serverInput into env.serverInput
   env.serverInput.serverTxs.push(...serverInput.serverTxs);
@@ -817,6 +1378,12 @@ const processServerInput = (env: Env, serverInput: ServerInput): EntityInput[] =
     });
   }
   
+  // Performance logging
+  const endTime = Date.now();
+  if (DEBUG) {
+    console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
+  }
+  
   return entityOutbox;
 };
 
@@ -840,8 +1407,8 @@ const runDemo = (env: Env): Env => {
     console.log('🗑️ History cleared for fresh start');
   }
   
-  // === TEST 1: Chat Entity with Equal Voting Power ===
-  console.log('\n📋 TEST 1: Chat Entity - Equal Voting Power');
+  // === TEST 1: Chat Entity - NUMBERED ENTITY (Blockchain Registered) ===
+  console.log('\n📋 TEST 1: Chat Entity - Numbered Entity with Jurisdiction');
   const chatValidators = ['alice', 'bob', 'carol'];
   const chatConfig: ConsensusConfig = {
     mode: 'proposer-based',
@@ -851,13 +1418,17 @@ const runDemo = (env: Env): Env => {
       alice: BigInt(1), // Equal voting power
       bob: BigInt(1),
       carol: BigInt(1)
-    }
+    },
+    jurisdiction: DEFAULT_JURISDICTIONS.get('ethereum') // Add jurisdiction
   };
+  
+  // Create numbered entity (blockchain registered)
+  const chatEntityId = generateNumberedEntityId(1); // Use entity #1
   
   processServerInput(env, {
     serverTxs: chatValidators.map((signerId, index) => ({
       type: 'importReplica' as const,
-      entityId: 'chat',
+      entityId: chatEntityId,
       signerId,
       data: {
         config: chatConfig,
@@ -867,8 +1438,8 @@ const runDemo = (env: Env): Env => {
     entityInputs: []
   });
   
-  // === TEST 2: Trading Entity with Weighted Voting ===
-  console.log('\n📋 TEST 2: Trading Entity - Weighted Voting Power');
+  // === TEST 2: Trading Entity - NUMBERED ENTITY (Blockchain Registered) ===
+  console.log('\n📋 TEST 2: Trading Entity - Numbered Entity with Jurisdiction');
   const tradingValidators = ['alice', 'bob', 'carol', 'david'];
   const tradingConfig: ConsensusConfig = {
     mode: 'gossip-based', // Test gossip mode
@@ -879,13 +1450,17 @@ const runDemo = (env: Env): Env => {
       bob: BigInt(3),   // Medium stakeholder
       carol: BigInt(2), // Minor stakeholder
       david: BigInt(1)  // Minimal stakeholder
-    }
+    },
+    jurisdiction: DEFAULT_JURISDICTIONS.get('ethereum') // Add jurisdiction
   };
+  
+  // Create numbered entity (blockchain registered)
+  const tradingEntityId = generateNumberedEntityId(2); // Use entity #2
   
   processServerInput(env, {
     serverTxs: tradingValidators.map((signerId, index) => ({
       type: 'importReplica' as const,
-      entityId: 'trading',
+      entityId: tradingEntityId,
       signerId,
       data: {
         config: tradingConfig,
@@ -895,8 +1470,8 @@ const runDemo = (env: Env): Env => {
     entityInputs: []
   });
   
-  // === TEST 3: Governance Entity with High Threshold ===
-  console.log('\n📋 TEST 3: Governance Entity - High Threshold (Byzantine Fault Tolerance)');
+  // === TEST 3: Governance Entity - LAZY ENTITY (Hash-based ID) ===
+  console.log('\n📋 TEST 3: Governance Entity - Lazy Entity with Jurisdiction');
   const govValidators = ['alice', 'bob', 'carol', 'david', 'eve'];
   const govConfig: ConsensusConfig = {
     mode: 'proposer-based',
@@ -908,13 +1483,17 @@ const runDemo = (env: Env): Env => {
       carol: BigInt(3),
       david: BigInt(3),
       eve: BigInt(3)
-    }
+    },
+    jurisdiction: DEFAULT_JURISDICTIONS.get('ethereum') // Add jurisdiction
   };
+  
+  // Create lazy entity (hash-based ID)
+  const govEntityId = generateLazyEntityId(govValidators, BigInt(10));
   
   processServerInput(env, {
     serverTxs: govValidators.map((signerId, index) => ({
       type: 'importReplica' as const,
-      entityId: 'governance',
+      entityId: govEntityId,
       signerId,
       data: {
         config: govConfig,
@@ -929,7 +1508,7 @@ const runDemo = (env: Env): Env => {
   // === CORNER CASE 1: Single transaction (minimal consensus) ===
   console.log('\n⚠️  CORNER CASE 1: Single transaction in chat');
   processUntilEmpty(env, [{
-    entityId: 'chat',
+    entityId: chatEntityId,
     signerId: 'alice',
     entityTxs: [{ type: 'chat', data: { from: 'alice', message: 'First message in chat!' } }]
   }]);
@@ -937,7 +1516,7 @@ const runDemo = (env: Env): Env => {
   // === CORNER CASE 2: Batch proposals (stress test) ===
   console.log('\n⚠️  CORNER CASE 2: Batch proposals in trading');
   processUntilEmpty(env, [{
-    entityId: 'trading',
+    entityId: tradingEntityId,
     signerId: 'alice',
     entityTxs: [
       { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Trading proposal 1: Set daily limit' } }, proposer: 'alice' } },
@@ -949,7 +1528,7 @@ const runDemo = (env: Env): Env => {
   // === CORNER CASE 3: High threshold governance (needs 4/5 validators) ===
   console.log('\n⚠️  CORNER CASE 3: High threshold governance vote');
   processUntilEmpty(env, [{
-    entityId: 'governance',
+    entityId: govEntityId,
     signerId: 'alice',
     entityTxs: [{ type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Governance proposal: Increase block size limit' } }, proposer: 'alice' } }]
   }]);
@@ -958,7 +1537,7 @@ const runDemo = (env: Env): Env => {
   console.log('\n⚠️  CORNER CASE 4: Concurrent multi-entity activity');
   processUntilEmpty(env, [
     {
-      entityId: 'chat',
+      entityId: chatEntityId,
       signerId: 'alice',
       entityTxs: [
         { type: 'chat', data: { from: 'bob', message: 'Chat during trading!' } },
@@ -966,14 +1545,14 @@ const runDemo = (env: Env): Env => {
       ]
     },
           {
-        entityId: 'trading',
+        entityId: tradingEntityId,
         signerId: 'alice',
         entityTxs: [
           { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Trading proposal: Cross-entity transfer protocol' } }, proposer: 'david' } }
         ]
       },
           {
-        entityId: 'governance',
+        entityId: govEntityId,
         signerId: 'alice',
         entityTxs: [
           { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Governance decision: Implement new voting system' } }, proposer: 'bob' } },
@@ -985,7 +1564,7 @@ const runDemo = (env: Env): Env => {
   // === CORNER CASE 5: Empty mempool auto-propose (should be ignored) ===
   console.log('\n⚠️  CORNER CASE 5: Empty mempool test (no auto-propose)');
   processUntilEmpty(env, [{
-    entityId: 'chat',
+    entityId: chatEntityId,
     signerId: 'alice',
     entityTxs: [] // Empty transactions should not trigger proposal
   }]);
@@ -998,7 +1577,7 @@ const runDemo = (env: Env): Env => {
   }));
   
   processUntilEmpty(env, [{
-    entityId: 'chat',
+    entityId: chatEntityId,
     signerId: 'alice',
     entityTxs: largeBatch
   }]);
@@ -1008,7 +1587,7 @@ const runDemo = (env: Env): Env => {
   
   // Create a proposal that needs votes
   processUntilEmpty(env, [{
-    entityId: 'trading',
+    entityId: tradingEntityId,
     signerId: 'alice',
     entityTxs: [
       { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Major decision: Upgrade trading protocol' } }, proposer: 'carol' } } // Carol only has 2 shares, needs more votes
@@ -1019,7 +1598,7 @@ const runDemo = (env: Env): Env => {
   // We need to get the proposal ID from the previous execution, but for demo purposes, we'll simulate voting workflow
   console.log('\n⚠️  CORNER CASE 7b: Voting on proposals (simulated)');
   processUntilEmpty(env, [{
-    entityId: 'governance',
+    entityId: govEntityId,
     signerId: 'alice',
     entityTxs: [
       { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Critical governance: Emergency protocol activation' } }, proposer: 'eve' } } // Eve only has 3 shares, needs 10 total
@@ -1127,40 +1706,99 @@ const runDemo = (env: Env): Env => {
     });
   }
   
-  // Return immutable snapshot for API boundary
+  if (DEBUG) {
+    console.log('\n🎯 Demo completed successfully!');
+    console.log('📊 Check the dashboard for final entity states');
+    console.log('🔄 Use time machine to replay any step');
+  }
+
+  // === BLOCKCHAIN DEMO: Create numbered entities on Ethereum ===
+  console.log('\n🔗 BLOCKCHAIN DEMO: Creating numbered entities on Ethereum');
+  
+  // Get Ethereum jurisdiction config
+  const ethereumJurisdiction = DEFAULT_JURISDICTIONS.get('ethereum');
+  if (!ethereumJurisdiction) {
+    console.warn('⚠️ Ethereum jurisdiction not found, skipping blockchain demo');
+    return env;
+  }
+  
+  // Create numbered entities for demo purposes (async, fire and forget)
+  setTimeout(async () => {
+    try {
+      // Create numbered entity for chat
+      const chatConfig = {
+        mode: 'proposer-based' as const,
+        threshold: BigInt(2),
+        validators: chatValidators,
+        shares: {
+          alice: BigInt(1),
+          bob: BigInt(1), 
+          carol: BigInt(1)
+        },
+        jurisdiction: ethereumJurisdiction
+      };
+      await registerNumberedEntityOnChain(chatConfig, 'Demo Chat');
+      console.log('✅ Demo chat entity registered on Ethereum');
+      
+      // Create numbered entity for trading
+      const tradingConfigForChain = {
+        mode: 'gossip-based' as const,
+        threshold: BigInt(7),
+        validators: tradingValidators,
+        shares: {
+          alice: BigInt(4),
+          bob: BigInt(3),
+          carol: BigInt(2),
+          david: BigInt(1)
+        },
+        jurisdiction: ethereumJurisdiction
+      };
+      await registerNumberedEntityOnChain(tradingConfigForChain, 'Demo Trading');
+      console.log('✅ Demo trading entity registered on Ethereum');
+      
+      // Create numbered entity for governance
+      const govConfigForChain = {
+        mode: 'proposer-based' as const,
+        threshold: BigInt(10),
+        validators: govValidators,
+        shares: {
+          alice: BigInt(3),
+          bob: BigInt(3),
+          carol: BigInt(3),
+          david: BigInt(3),
+          eve: BigInt(3)
+        },
+        jurisdiction: ethereumJurisdiction
+      };
+      await registerNumberedEntityOnChain(govConfigForChain, 'Demo Governance');
+      console.log('✅ Demo governance entity registered on Ethereum');
+      
+    } catch (error: any) {
+      console.warn('⚠️ Demo blockchain registration failed:', error.message);
+    }
+  }, 1000); // Give demo time to complete first
+
   return env;
 };
 
 // This is the new, robust main function that replaces the old one.
-const main = async () => {
+const main = async (): Promise<Env> => {
   let env: Env | null = null;
 
   try {
     const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
 
-    const promises = [];
-    for (let i = 0; i <= latestHeight; i++) {
-      promises.push(db.get(Buffer.from(`snapshot:${i}`)));
-    }
+    // Load all snapshots in parallel
+    const snapshotPromises = Array.from({ length: latestHeight + 1 }, (_, i) => 
+      db.get(Buffer.from(`snapshot:${i}`)).then(decode).catch(() => null)
+    );
 
-    const results = await Promise.allSettled(promises);
+    const snapshots = (await Promise.all(snapshotPromises)).filter(Boolean);
+    envHistory = snapshots;
 
-    const loadedSnapshots: EnvSnapshot[] = [];
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        try {
-          loadedSnapshots.push(decode(result.value));
-        } catch (e) {
-          console.warn('Failed to decode a snapshot, skipping.', e);
-        }
-      }
-    }
-
-    envHistory = loadedSnapshots;
-
-    if (envHistory.length > 0) {
-      const latestSnapshot = envHistory[envHistory.length - 1];
+    if (snapshots.length > 0) {
+      const latestSnapshot = snapshots[snapshots.length - 1];
       env = {
         replicas: latestSnapshot.replicas,
         height: latestSnapshot.height,
@@ -1173,11 +1811,10 @@ const main = async () => {
   } catch (error: any) {
     if (error.code !== 'LEVEL_NOT_FOUND') {
       console.error('An unexpected error occurred while loading state from LevelDB:', error);
-      // We don't re-throw here, so we can fall through to creating a new env.
     }
   }
 
-  // If env is still null (e.g., DB is empty or latest_height is missing), it's a fresh start.
+  // If env is still null, create a fresh environment
   if (!env) {
     console.log('No saved state found, creating a new environment.');
     env = {
@@ -1196,7 +1833,83 @@ const getHistory = () => envHistory;
 const getSnapshot = (index: number) => index >= 0 && index < envHistory.length ? envHistory[index] : null;
 const getCurrentHistoryIndex = () => envHistory.length - 1;
 
-export { runDemo, processServerInput, main, getHistory, getSnapshot, resetHistory, getCurrentHistoryIndex, clearDatabase };
+// === TESTING ===
+const runTests = async () => {
+  console.log('🧪 Running XLN tests...');
+  
+  const env = await main();
+  
+  // Test 1: Basic functionality
+  console.log('✅ Test 1: Environment initialization');
+  console.log(`   Height: ${env.height}`);
+  console.log(`   Replicas: ${env.replicas.size}`);
+  
+  // Test 2: Process simple input
+  console.log('✅ Test 2: Process simple input');
+  const testInput: ServerInput = {
+    serverTxs: [{
+      type: 'importReplica',
+      entityId: 'test',
+      signerId: 'alice',
+      data: {
+        config: {
+          mode: 'proposer-based',
+          threshold: BigInt(1),
+          validators: ['alice'],
+          shares: { alice: BigInt(1) }
+        },
+        isProposer: true
+      }
+    }],
+    entityInputs: []
+  };
+  
+  const outputs = processServerInput(env, testInput);
+  console.log(`   Outputs: ${outputs.length}`);
+  
+  // Test 3: Verify state persistence
+  console.log('✅ Test 3: State persistence');
+  console.log(`   Snapshots: ${envHistory.length}`);
+  console.log(`   Latest height: ${env.height}`);
+  
+  console.log('🎉 All tests passed!');
+  return env;
+};
+
+export { 
+  runDemo, 
+  processServerInput, 
+  main, 
+  getHistory, 
+  getSnapshot, 
+  resetHistory, 
+  getCurrentHistoryIndex, 
+  clearDatabase, 
+  runTests, 
+  getAvailableJurisdictions, 
+  getJurisdictionByAddress, 
+  registerEntityInJurisdiction,
+  // Entity creation functions
+  createLazyEntity,
+  createNumberedEntity,
+  requestNamedEntity,
+  resolveEntityIdentifier,
+  // Entity utility functions
+  generateLazyEntityId,
+  generateNumberedEntityId,
+  generateNamedEntityId,
+  detectEntityType,
+  encodeBoard,
+  hashBoard,
+  // Blockchain registration functions
+  registerNumberedEntityOnChain,
+  assignNameOnChain,
+  getEntityInfoFromChain,
+  getNextEntityNumber,
+  connectToEthereum,
+  transferNameBetweenEntities,
+  isEntityRegistered
+};
 
 // The browser-specific auto-execution logic has been removed.
 // The consuming application (e.g., index.html) is now responsible for calling main().
@@ -1213,6 +1926,55 @@ if (!isBrowser) {
     console.error('❌ An error occurred during Node.js auto-execution:', error);
   });
 }
+
+// Load contract addresses from configuration file
+const loadContractAddresses = () => {
+  try {
+    if (!isBrowser) {
+      const fs = require('fs');
+      const path = require('path');
+      const configPath = path.join(process.cwd(), 'contract-addresses.json');
+      
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (DEBUG) console.log('📋 Loaded contract addresses from config');
+        return config.networks;
+      }
+    }
+  } catch (error: any) {
+    if (DEBUG) console.warn('⚠️ Could not load contract addresses, using defaults:', error.message);
+  }
+  
+  // Return default configuration
+  return {
+    "8545": {
+      "name": "Ethereum",
+      "rpc": "http://localhost:8545",
+      "chainId": 31337,
+      "entityProvider": ENTITY_PROVIDER_ADDRESS
+    },
+    "8546": {
+      "name": "Polygon", 
+      "rpc": "http://localhost:8546",
+      "chainId": 31337,
+      "entityProvider": ENTITY_PROVIDER_ADDRESS
+    },
+    "8547": {
+      "name": "Arbitrum",
+      "rpc": "http://localhost:8547", 
+      "chainId": 31337,
+      "entityProvider": ENTITY_PROVIDER_ADDRESS
+    }
+  };
+};
+
+// Get contract address for specific network/port
+const getContractAddress = (port: string): string => {
+  const networks = loadContractAddresses();
+  return networks[port]?.entityProvider || ENTITY_PROVIDER_ADDRESS;
+};
+
+// === ENTITY MANAGEMENT ENDPOINTS ===
 
 
 

@@ -6,13 +6,7 @@ const sha256 = (data: Buffer): Buffer => createHash('sha256').update(data).diges
 
 // We use a single Packr instance configured to handle BigInts.
 const packr = new Packr({
-  structures: [
-    [
-      BigInt,
-      (value: BigInt) => value.toString(),
-      (str: string) => BigInt(str),
-    ],
-  ],
+  structures: [[BigInt, (value: bigint) => value.toString(), (str: string) => BigInt(str)]],
 });
 
 /**
@@ -26,7 +20,7 @@ function deterministicDeepSort(obj: any): any {
   if (obj instanceof Map) {
     const entries = Array.from(obj.entries());
     // Sort entries by key to ensure deterministic output.
-    entries.sort((a, b) => a[0] < b[0] ? -1 : 1);
+    entries.sort((a, b) => (a[0] < b[0] ? -1 : 1));
     // Recursively process values in case they contain Maps.
     return entries.map(([k, v]) => [k, deterministicDeepSort(v)]);
   }
@@ -53,7 +47,7 @@ function deterministicDeepSort(obj: any): any {
 function reconstructMaps(obj: any): any {
   if (Array.isArray(obj)) {
     // Check if it's a key-value pair array that should be a Map
-    const isMapArray = obj.every(item => Array.isArray(item) && item.length === 2);
+    const isMapArray = obj.every((item) => Array.isArray(item) && item.length === 2);
     if (isMapArray) {
       return new Map(obj.map(([k, v]) => [k, reconstructMaps(v)]));
     }
@@ -69,7 +63,6 @@ function reconstructMaps(obj: any): any {
   return obj;
 }
 
-
 // Define the structure of the environment object for type safety
 interface XLNEnv {
   height: number;
@@ -82,9 +75,9 @@ interface XLNEnv {
 // Define the structure of the persisted tuple for clarity
 type SnapshotTuple = [
   number, // height
-  any,    // serverInput (assuming this is what you meant by inputs/outputs)
+  any, // serverInput (assuming this is what you meant by inputs/outputs)
   Buffer, // hashOfSerializedReplicas
-  any     // deterministically sorted replicas
+  any, // deterministically sorted replicas
 ];
 
 /**
@@ -95,7 +88,7 @@ type SnapshotTuple = [
 export function encodeState(state: XLNEnv): Buffer {
   // 1. Create a deterministically sorted version of the replicas map.
   const sortedReplicas = deterministicDeepSort(state.replicas);
-  
+
   // 2. Serialize and hash the sorted replicas to create a deterministic hash.
   const serializedReplicas = packr.pack(sortedReplicas);
   const hashOfReplicas = sha256(serializedReplicas);
@@ -105,7 +98,7 @@ export function encodeState(state: XLNEnv): Buffer {
     state.height,
     // Assuming serverInput contains the relevant inputs/outputs for the snapshot
     // If inputs/outputs are separate, they should be passed in and included here.
-    deterministicDeepSort(state.serverInput), 
+    deterministicDeepSort(state.serverInput),
     hashOfReplicas,
     sortedReplicas,
   ];
@@ -137,7 +130,7 @@ export function decodeState(buffer: Buffer): XLNEnv {
 
   // Reconstruct the original object, converting sorted arrays back to Maps.
   const replicas = reconstructMaps(sortedReplicas);
-  
+
   const state: Partial<XLNEnv> = {
     height,
     serverInput: reconstructMaps(serverInput),
@@ -148,4 +141,4 @@ export function decodeState(buffer: Buffer): XLNEnv {
   // state.timestamp = ... // timestamp might be the time of restore, or stored separately.
 
   return state as XLNEnv;
-} 
+}

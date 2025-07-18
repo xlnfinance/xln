@@ -4,12 +4,10 @@ import "./Token.sol";
 
 contract EntityProvider { 
   struct Entity {
-
-    address tokenAddress;
-    string name;
-
     bytes32 currentBoardHash;
     bytes32 proposedAuthenticatorHash;
+    uint256 registrationBlock;
+    bool exists;
   }
 
   struct Delegate {
@@ -22,228 +20,264 @@ contract EntityProvider {
     Delegate[] delegates;
   }
 
-  Entity[] public entities;
-
-  mapping (bytes32 => Entity) public entityMap;
+  // Core entity storage - single mapping for all entities
+  mapping(bytes32 => Entity) public entities;
+  
+  // Sequential numbering for registered entities
+  uint256 public nextNumber = 1;
+  
+  // Name system (decoupled from entity IDs)
+  mapping(string => uint256) public nameToNumber;  // "coinbase" => 42
+  mapping(uint256 => string) public numberToName;  // 42 => "coinbase"
+  mapping(string => bool) public reservedNames;    // Admin-controlled names
+  
+  // Admin controls
+  address public admin;
+  mapping(address => uint8) public nameQuota;      // User name allowances
+  
+  // Legacy support
   mapping (uint => uint) public activateAtBlock;
 
+  // Events
+  event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash);
+  event NameAssigned(string indexed name, uint256 indexed entityNumber);
+  event NameTransferred(string indexed name, uint256 indexed fromNumber, uint256 indexed toNumber);
+  event BoardProposed(bytes32 indexed entityId, bytes32 proposedBoardHash);
+  event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
 
-/**
-   * @notice Verifies the entity signed _hash, 
-     returns uint16: 0 when invalid, or ratio of Yes to Yes+No.
+  constructor() {
+    admin = msg.sender;
+    // Reserve some premium names
+    reservedNames["coinbase"] = true;
+    reservedNames["ethereum"] = true;
+    reservedNames["bitcoin"] = true;
+    reservedNames["uniswap"] = true;
+  }
+
+  modifier onlyAdmin() {
+    require(msg.sender == admin, "Only admin");
+    _;
+  }
+
+  /**
+   * @notice Register a new numbered entity (anyone can call)
+   * @param boardHash Initial board/quorum hash
+   * @return entityNumber The assigned entity number
+   */
+  function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber) {
+    entityNumber = nextNumber++;
+    bytes32 entityId = bytes32(entityNumber);
+    
+    entities[entityId] = Entity({
+      currentBoardHash: boardHash,
+      proposedAuthenticatorHash: bytes32(0),
+      registrationBlock: block.number,
+      exists: true
+    });
+    
+    emit EntityRegistered(entityId, entityNumber, boardHash);
+    return entityNumber;
+  }
+
+  /**
+   * @notice Admin assigns a name to an existing numbered entity
+   * @param name The name to assign (e.g., "coinbase")
+   * @param entityNumber The entity number to assign the name to
+   */
+  function assignName(string memory name, uint256 entityNumber) external onlyAdmin {
+    require(bytes(name).length > 0 && bytes(name).length <= 32, "Invalid name length");
+    require(entities[bytes32(entityNumber)].exists, "Entity doesn't exist");
+    require(nameToNumber[name] == 0, "Name already assigned");
+    
+    // If entity already has a name, clear it
+    string memory oldName = numberToName[entityNumber];
+    if (bytes(oldName).length > 0) {
+      delete nameToNumber[oldName];
+    }
+    
+    nameToNumber[name] = entityNumber;
+    numberToName[entityNumber] = name;
+    
+    emit NameAssigned(name, entityNumber);
+  }
+
+  /**
+   * @notice Transfer a name from one entity to another (admin only for now)
+   * @param name The name to transfer
+   * @param newEntityNumber The target entity number
+   */
+  function transferName(string memory name, uint256 newEntityNumber) external onlyAdmin {
+    require(nameToNumber[name] != 0, "Name not assigned");
+    require(entities[bytes32(newEntityNumber)].exists, "Target entity doesn't exist");
+    
+    uint256 oldEntityNumber = nameToNumber[name];
+    
+    // Clear old mapping
+    delete numberToName[oldEntityNumber];
+    
+    // Set new mapping
+    nameToNumber[name] = newEntityNumber;
+    numberToName[newEntityNumber] = name;
+    
+    emit NameTransferred(name, oldEntityNumber, newEntityNumber);
+  }
+
+  /**
+   * @notice Propose a new board for an entity
+   * @param entityId The entity ID (bytes32 format)
+   * @param newBoardHash Hash of the new proposed board
+   */
+  function proposeBoard(bytes32 entityId, bytes32 newBoardHash) external {
+    require(entities[entityId].exists, "Entity doesn't exist");
+    
+    entities[entityId].proposedAuthenticatorHash = newBoardHash;
+    emit BoardProposed(entityId, newBoardHash);
+  }
+
+  /**
+   * @notice Activate a previously proposed board
+   * @param entityId The entity ID
+   */
+  function activateBoard(bytes32 entityId) external {
+    require(entities[entityId].exists, "Entity doesn't exist");
+    require(entities[entityId].proposedAuthenticatorHash != bytes32(0), "No proposed board");
+    
+    entities[entityId].currentBoardHash = entities[entityId].proposedAuthenticatorHash;
+    entities[entityId].proposedAuthenticatorHash = bytes32(0);
+    
+    // Legacy support
+    if (uint256(entityId) < 1000000) {
+      activateAtBlock[uint256(entityId)] = block.number;
+    }
+    
+    emit BoardActivated(entityId, entities[entityId].currentBoardHash);
+  }
+
+  /**
+   * @notice Verify entity signature (simplified version)
+   * @param _hash The hash that was signed
+   * @param entityId The entity ID (lazy hash, numbered, or resolved from name)
+   * @param encodedBoard The board data
+   * @param encodedSignature The signatures
+   * @return votingResult Success ratio (0 = invalid)
    */
   function isValidSignature(
     bytes32 _hash,
-    bytes calldata entityParams,
-    bytes calldata encodedEntityBoard,
-    bytes calldata encodedSignature,
-    bytes32[] calldata entityStack
+    bytes32 entityId,
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
   ) external view returns (uint16) {
-
-    bytes32 boardHash = keccak256(encodedEntityBoard);
-
-    if (boardHash == bytes32(entityParams)) {
-      // uses static board
+    bytes32 boardHash = keccak256(encodedBoard);
+    
+    if (entities[entityId].exists) {
+      // REGISTERED ENTITY: use on-chain board
+      require(boardHash == entities[entityId].currentBoardHash, "Board hash mismatch");
     } else {
-      // uses dynamic board
-      require(boardHash == entities[uint(bytes32(entityParams))].currentBoardHash);
+      // LAZY ENTITY: entityId must equal boardHash
+      require(entityId == boardHash, "Lazy entity: ID must equal board hash");
     }
-
-    Board memory board = abi.decode(encodedEntityBoard, (Board));
-    bytes[] memory signatures = abi.decode(encodedSignature, (bytes[]));
-
-
-    uint16 voteYes = 0;
-    uint16 voteNo = 0;
-
-    for (uint i = 0; i < board.delegates.length; i += 1) {
-      Delegate memory delegate = board.delegates[i];
-
-      if (delegate.entityId.length == 20) {
-        // EOA address
-        address addr = address(uint160(uint256(bytes32(delegate.entityId))));
-
-        /*if (addr == recoverSigner(_hash, signatures[i])) {
-          voteYes += delegate.votingPower;
-        } else {
-          voteNo += delegate.votingPower;
-        }*/
-
-      } else {
-        // if entityId already exists in stack - recursive, add it to voteYes
-        bool recursive = false;
-        bytes32 delegateHash = keccak256(delegate.entityId);
-
-        for (uint i2 = 0; i2 < entityStack.length; i2 += 1) {
-          if (entityStack[i2] == delegateHash) {
-            recursive = true;
-            break;
-          }
-        }
-
-        if (recursive) {
-          voteYes += delegate.votingPower;
-          continue;
-        }
-
-
-        (address externalEntityProvider, bytes memory externalEntityId) = abi.decode(delegate.entityId, (address, bytes));
-
-        // decode nested signatures
-        (bytes memory nestedBoard, bytes memory nestedSignature) = abi.decode(signatures[i], (bytes, bytes) );
-
-        /*
-
-        if (EntityProvider(externalEntityProvider).isValidSignature(
-          _hash,
-          externalEntityId,
-          nestedBoard,
-          nestedSignature,
-          entityStack
-        ) > uint16(0)) {
-          voteYes += delegate.votingPower;
-        } else {
-          voteNo += delegate.votingPower;
-        }*/
-        // 
-
-      }
-      // check if address is in board
-    }
-
-    uint16 votingResult = voteYes / (voteYes + voteNo);
-    if (votingResult < board.votingThreshold) {
-      return 0;
-    } else {
-      return votingResult;
-    }
-
+    
+    return _verifyBoard(_hash, encodedBoard, encodedSignature);
   }
 
-  function proposeBoard(bytes memory entityId, bytes calldata proposedAuthenticator, bytes[] calldata tokenHolders, bytes[] calldata signatures) public {
-    for (uint i = 0; i < tokenHolders.length; i += 1) {
-
-      /* check depositary
-      require(
-        Token(bytesToAddress(tokenHolders[i])).balanceOf(bytesToAddress(entityId)) > 0,
-        "EntityProvider#proposeBoard: token holder does not own any tokens"
-      );
-      require(
-        Token(bytesToAddress(tokenHolders[i])).isValidSignature(
-          keccak256(proposedAuthenticator),
-          signatures[i]
-        ),
-        "EntityProvider#proposeBoard: token holder did not sign the proposed board"
-      );
-      */
-    }
-
-
-    entities[uint(bytes32(entityId))].proposedAuthenticatorHash = keccak256(proposedAuthenticator);
-
-
-  }
-
-  function activateAuthenticator(bytes calldata entityId) public {
-    uint id = uint(bytes32(entityId));
-    activateAtBlock[id] = block.number;
-    entities[id].currentBoardHash = entities[id].proposedAuthenticatorHash;
-  }
-
-  function bytesToAddress(bytes memory bys) private pure returns (address addr) {
-      assembly {
-        addr := mload(add(bys,20))
-      } 
-  }
- /**
-   * @notice Recover the signer of hash, assuming it's an EOA account
-   * @dev Only for EthSign signatures
-   * @param _hash       Hash of message that was signed
-   * @param _signature  Signature encoded as (bytes32 r, bytes32 s, uint8 v)
+  /**
+   * @notice Simplified board verification
    */
-   function recoverSigner(
+  function _verifyBoard(
     bytes32 _hash,
-    bytes memory _signature
-) internal pure returns (address signer) {
-    require(_signature.length == 65, "SignatureValidator#recoverSigner: invalid signature length");
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
+  ) internal pure returns (uint16) {
+    Board memory board = abi.decode(encodedBoard, (Board));
+    bytes[] memory signatures = abi.decode(encodedSignature, (bytes[]));
+    
+    uint16 voteYes = 0;
+    uint16 totalVotes = 0;
+    
+    for (uint i = 0; i < board.delegates.length && i < signatures.length; i++) {
+      Delegate memory delegate = board.delegates[i];
+      
+      if (delegate.entityId.length == 20) {
+        // Simple EOA verification
+        address signer = address(uint160(uint256(bytes32(delegate.entityId))));
+        if (signer == _recoverSigner(_hash, signatures[i])) {
+          voteYes += delegate.votingPower;
+        }
+        totalVotes += delegate.votingPower;
+      }
+      // Note: Nested entity verification removed for simplicity
+    }
+    
+    if (totalVotes == 0) return 0;
+    if (voteYes < board.votingThreshold) return 0;
+    
+    return (voteYes * 100) / totalVotes;
+  }
 
-    // Extracting v, r, and s from the signature
-    uint8 v = uint8(_signature[64]);
+  /**
+   * @notice Recover signer from signature
+   */
+  function _recoverSigner(bytes32 _hash, bytes memory _signature) internal pure returns (address) {
+    if (_signature.length != 65) return address(0);
+    
     bytes32 r;
     bytes32 s;
-
-    // Assembly code to extract r and s
-    assembly {
-        // Load the first 32 bytes of the _signature array, skip the first 32 bytes
-        r := mload(add(_signature, 32))
-        // Load the next 32 bytes of the _signature array
-        s := mload(add(_signature, 64))
-    }
-
-    // Check the signature recovery id (v) and adjust for Ethereum chain id
-    if (v < 27) {
-        v += 27;
-    }
-
-    require(v == 27 || v == 28, "SignatureValidator#recoverSigner: invalid signature 'v' value");
-
-    // Perform ECDSA signature recovering
-    signer = ecrecover(_hash, v, r, s);
-    require(signer != address(0), "SignatureValidator#recoverSigner: INVALID_SIGNER");
-
-    return signer;
-  }
-   /*
-  function recoverSigner(
-    bytes32 _hash,
-    bytes memory _signature
-  ) internal pure returns (address signer) {
-    require(_signature.length == 65, "SignatureValidator#recoverSigner: invalid signature length");
-
-    // Variables are not scoped in Solidity.
-    uint8 v = uint8(_signature[64]);
-    //bytes32 r = _signature.readBytes32(0);
-    //bytes32 s = _signature.readBytes32(32);
-
-    // Assembly code to extract r and s
-    assembly {
-        // Load the first 32 bytes of the _signature array, skip the first 32 bytes
-        r := mload(add(_signature, 32))
-        // Load the next 32 bytes of the _signature array
-        s := mload(add(_signature, 64))
-    }
-
-    // EIP-2 still allows signature malleability for ecrecover(). Remove this possibility and make the signature
-    // unique. Appendix F in the Ethereum Yellow paper (https://ethereum.github.io/yellowpaper/paper.pdf), defines
-    // the valid range for s in (281): 0 < s < secp256k1n ÷ 2 + 1, and for v in (282): v ∈ {27, 28}. Most
-    // signatures from current libraries generate a unique signature with an s-value in the lower half order.
-    //
-    // If your library generates malleable signatures, such as s-values in the upper range, calculate a new s-value
-    // with 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 - s1 and flip v from 27 to 28 or
-    // vice versa. If your library also generates signatures with 0/1 for v instead 27/28, add 27 to v to accept
-    // these malleable signatures as well.
-    //
-    // Source OpenZeppelin
-    // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/cryptography/ECDSA.sol
-
-    if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
-      revert("SignatureValidator#recoverSigner: invalid signature 's' value");
-    }
-
-    if (v != 27 && v != 28) {
-      revert("SignatureValidator#recoverSigner: invalid signature 'v' value");
-    }
-
-    // Recover ECDSA signer
-    signer = ecrecover(_hash, v, r, s);
+    uint8 v;
     
-    // Prevent signer from being 0x0
-    require(
-      signer != address(0x0),
-      "SignatureValidator#recoverSigner: INVALID_SIGNER"
-    );
+    assembly {
+      r := mload(add(_signature, 32))
+      s := mload(add(_signature, 64))
+      v := byte(0, mload(add(_signature, 96)))
+    }
+    
+    if (v < 27) v += 27;
+    if (v != 27 && v != 28) return address(0);
+    
+    return ecrecover(_hash, v, r, s);
+  }
 
-    return signer;
-  }*/
+  // Utility functions
+  function resolveEntityId(string memory identifier) external view returns (bytes32) {
+    // Try to resolve as name first
+    uint256 number = nameToNumber[identifier];
+    if (number > 0) {
+      return bytes32(number);
+    }
+    
+    // Try to parse as number
+    // Note: This would need a string-to-uint parser in practice
+    return bytes32(0);
+  }
 
+  function getEntityInfo(bytes32 entityId) external view returns (
+    bool exists,
+    bytes32 currentBoardHash,
+    bytes32 proposedBoardHash,
+    uint256 registrationBlock,
+    string memory name
+  ) {
+    Entity memory entity = entities[entityId];
+    exists = entity.exists;
+    currentBoardHash = entity.currentBoardHash;
+    proposedBoardHash = entity.proposedAuthenticatorHash;
+    registrationBlock = entity.registrationBlock;
+    
+    // Get name if it's a numbered entity
+    if (uint256(entityId) > 0 && uint256(entityId) < nextNumber) {
+      name = numberToName[uint256(entityId)];
+    }
+  }
+
+  // Admin functions
+  function setReservedName(string memory name, bool reserved) external onlyAdmin {
+    reservedNames[name] = reserved;
+  }
+
+  function setNameQuota(address user, uint8 quota) external onlyAdmin {
+    nameQuota[user] = quota;
+  }
+
+  function changeAdmin(address newAdmin) external onlyAdmin {
+    admin = newAdmin;
+  }
 }
