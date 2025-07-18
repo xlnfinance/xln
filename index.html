@@ -140,6 +140,127 @@
             gap: 20px;
         }
 
+        /* Jurisdictions Tab Styles */
+        .jurisdictions-panel {
+            padding: 20px;
+        }
+
+        .jurisdiction-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .jurisdiction-card {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .jurisdiction-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .jurisdiction-header h4 {
+            margin: 0;
+            color: #2c3e50;
+        }
+
+        .connection-status {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .connection-status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .connection-status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .connection-status.checking {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .jurisdiction-details {
+            margin-bottom: 15px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid #f1f3f4;
+            font-size: 13px;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-row span:first-child {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .detail-row span:last-child {
+            color: #6c757d;
+            text-align: right;
+        }
+
+        .entities-section {
+            margin-top: 15px;
+        }
+
+        .entities-section h5 {
+            margin: 0 0 10px 0;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        .entities-list {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 10px;
+            min-height: 60px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .entity-item {
+            padding: 4px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .entity-item:last-child {
+            border-bottom: none;
+        }
+
+        .jurisdiction-actions {
+            text-align: center;
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .jurisdiction-actions .btn {
+            margin: 0 10px;
+        }
+
         .validators-section {
             background: #f8f9fa;
             padding: 15px;
@@ -986,6 +1107,9 @@
                 <button class="tab-button" onclick="switchTab('formation')" id="formationTab">
                     🏗️ Entity Formation
                 </button>
+                <button class="tab-button" onclick="switchTab('jurisdictions')" id="jurisdictionsTab">
+                    🏛️ Jurisdictions
+                </button>
             </div>
             
             <div id="controlsTabContent" class="tab-content active">
@@ -1029,26 +1153,62 @@
             <div id="formationTabContent" class="tab-content">
                 <div class="simple-formation-panel">
                     <div class="formation-group">
+                        <label for="jurisdictionSelect">🏛️ Jurisdiction:</label>
+                        <select id="jurisdictionSelect" onchange="onJurisdictionChange()">
+                            <option value="8545" selected>Ethereum Mainnet (Port 8545)</option>
+                            <option value="8546">Polygon Network (Port 8546)</option>
+                            <option value="8547">Arbitrum One (Port 8547)</option>
+                        </select>
+                        <div class="jurisdiction-info" id="jurisdictionInfo" style="display: block; padding: 10px; background: #e8f5e8; border-left: 4px solid #4caf50; margin: 10px 0; border-radius: 4px;">
+                            <small><strong>📡 Network:</strong> <span id="networkName">Ethereum Mainnet</span><br>
+                            <strong>🔗 RPC Port:</strong> <span id="rpcPort">8545</span><br>
+                            <strong>📝 Contract:</strong> <span id="contractAddress">Loading...</span></small>
+                        </div>
+                    </div>
+
+                    <div class="formation-group">
+                        <label for="entityTypeSelect">🆔 Entity Type:</label>
+                        <select id="entityTypeSelect" onchange="onEntityTypeChange()">
+                            <option value="lazy">🔒 Lazy Entity (Free - ID = Quorum Hash)</option>
+                            <option value="numbered">🔢 Numbered Entity (Gas Required - Sequential ID)</option>
+                            <option value="named">🏷️ Named Entity (Premium Gas + Admin Approval)</option>
+                        </select>
+                        <div class="entity-type-info" id="entityTypeInfo">
+                            <small class="text-muted">
+                                <strong>🔒 Lazy:</strong> Free to create, entityId = hash(validators), works immediately.<br>
+                                <strong>🔢 Numbered:</strong> Small gas cost, get sequential number like #42, on-chain registered.<br>
+                                <strong>🏷️ Named:</strong> Premium gas + admin approval, get custom name like "coinbase".
+                            </small>
+                        </div>
+                        <div class="next-number-info" id="nextNumberInfo" style="display: none; padding: 10px; background: #e8f5e8; border-left: 4px solid #4caf50; margin: 10px 0; border-radius: 4px;">
+                            <small><strong>🔢 Next Available Number:</strong> <span id="nextNumberDisplay">Loading...</span></small>
+                        </div>
+                    </div>
+                    
+                    <div class="formation-group">
                         <label for="entityNameInput">🏷️ Entity Name:</label>
-                        <input type="text" id="entityNameInput" placeholder="e.g., trading, chat, governance">
+                        <input type="text" id="entityNameInput" placeholder="e.g., trading, chat, governance" value="ACME" oninput="updateExpectedEntityId()">
+                        <small class="text-muted" id="entityNameHint">
+                            Display name for your entity (not used for ID generation in lazy mode)
+                        </small>
                     </div>
                     
                     <div class="validators-section">
                         <h4>👥 Validators:</h4>
                         <div id="validatorsList">
                             <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="alice" value="alice">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                                <input type="text" class="validator-name" placeholder="alice" value="alice" oninput="updateExpectedEntityId()">
+                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight(); updateExpectedEntityId()">
                                 <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
                             </div>
                             <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="bob" value="bob">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                                <input type="text" class="validator-name" placeholder="bob" value="bob" oninput="updateExpectedEntityId()">
+                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight(); updateExpectedEntityId()">
                                 <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
                             </div>
                             <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="carol" value="carol">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                                <input type="text" class="validator-name" placeholder="carol" value="carol" oninput="updateExpectedEntityId()">
+                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight(); updateExpectedEntityId()">
                                 <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
                             </div>
                         </div>
@@ -1063,9 +1223,158 @@
                         </div>
                     </div>
                     
+                    <!-- Quorum Hash Display - Right below threshold -->
+                    <div class="quorum-hash-section" style="padding: 12px; background: #e9ecef; border: 2px solid #6c757d; border-radius: 8px; margin: 10px 0;">
+                        <label style="font-weight: bold; color: #495057;">🔒 Quorum Hash:</label>
+                        <div id="quorumHash" style="font-family: monospace; font-size: 12px; padding: 6px; background: white; border: 1px solid #ced4da; border-radius: 4px; color: #495057; word-break: break-all; margin-top: 5px;">
+                            Configure validators and threshold to see quorum hash
+                        </div>
+                        <small class="text-muted" style="display: block; margin-top: 3px; font-size: 11px;">
+                            Hash of validator configuration (used as entity ID for lazy entities)
+                        </small>
+                    </div>
+                    
                     <div class="button-group">
                         <button class="btn btn-primary" onclick="createSimpleEntity()">🚀 Create Entity</button>
                         <button class="btn btn-secondary" onclick="clearSimpleForm()">🗑️ Clear Form</button>
+                    </div>
+                    
+                    <!-- Expected Entity ID Display - Below buttons -->
+                    <div class="expected-id-section" style="padding: 12px; background: #f8f9fa; border: 2px solid #dee2e6; border-radius: 8px; margin: 10px 0;">
+                        <label style="font-weight: bold; color: #495057;">🆔 Expected Entity ID:</label>
+                        <div id="expectedEntityId" style="font-family: monospace; font-size: 12px; padding: 6px; background: white; border: 1px solid #ced4da; border-radius: 4px; color: #495057; margin-top: 5px;">
+                            Click to preview entity ID
+                        </div>
+                        <small class="text-muted" style="display: block; margin-top: 3px; font-size: 11px;">
+                            Preview updates automatically as you change settings
+                        </small>
+                </div>
+            </div>
+        </div>
+
+            <!-- Jurisdictions Tab Content -->
+            <div id="jurisdictionsTabContent" class="tab-content">
+                <div class="jurisdictions-panel">
+                    <h3>🏛️ Blockchain Jurisdictions Status</h3>
+                    <div class="jurisdiction-grid">
+                        <!-- Ethereum Mainnet -->
+                        <div class="jurisdiction-card" id="jurisdiction-8545">
+                            <div class="jurisdiction-header">
+                                <h4>🔷 Ethereum Mainnet</h4>
+                                <span class="connection-status" id="status-8545">🔄 Checking...</span>
+                            </div>
+                            <div class="jurisdiction-details">
+                                <div class="detail-row">
+                                    <span>📡 RPC Port:</span>
+                                    <span>8545</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>🔗 Chain ID:</span>
+                                    <span id="chainId-8545">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>📊 Block Number:</span>
+                                    <span id="blockNumber-8545">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>⏰ Last Update:</span>
+                                    <span id="lastUpdate-8545">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>📝 Contract:</span>
+                                    <span id="contract-8545" style="font-family: monospace; font-size: 11px;">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>🔢 Next Entity #:</span>
+                                    <span id="nextNumber-8545">-</span>
+                                </div>
+                            </div>
+                            <div class="entities-section">
+                                <h5>📋 Registered Entities:</h5>
+                                <div id="entities-8545" class="entities-list">Loading...</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Polygon Network -->
+                        <div class="jurisdiction-card" id="jurisdiction-8546">
+                            <div class="jurisdiction-header">
+                                <h4>🟣 Polygon Network</h4>
+                                <span class="connection-status" id="status-8546">🔄 Checking...</span>
+                            </div>
+                            <div class="jurisdiction-details">
+                                <div class="detail-row">
+                                    <span>📡 RPC Port:</span>
+                                    <span>8546</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>🔗 Chain ID:</span>
+                                    <span id="chainId-8546">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>📊 Block Number:</span>
+                                    <span id="blockNumber-8546">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>⏰ Last Update:</span>
+                                    <span id="lastUpdate-8546">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>📝 Contract:</span>
+                                    <span id="contract-8546" style="font-family: monospace; font-size: 11px;">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>🔢 Next Entity #:</span>
+                                    <span id="nextNumber-8546">-</span>
+                                </div>
+                            </div>
+                            <div class="entities-section">
+                                <h5>📋 Registered Entities:</h5>
+                                <div id="entities-8546" class="entities-list">Loading...</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Arbitrum One -->
+                        <div class="jurisdiction-card" id="jurisdiction-8547">
+                            <div class="jurisdiction-header">
+                                <h4>🔵 Arbitrum One</h4>
+                                <span class="connection-status" id="status-8547">🔄 Checking...</span>
+                            </div>
+                            <div class="jurisdiction-details">
+                                <div class="detail-row">
+                                    <span>📡 RPC Port:</span>
+                                    <span>8547</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>🔗 Chain ID:</span>
+                                    <span id="chainId-8547">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>📊 Block Number:</span>
+                                    <span id="blockNumber-8547">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>⏰ Last Update:</span>
+                                    <span id="lastUpdate-8547">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>📝 Contract:</span>
+                                    <span id="contract-8547" style="font-family: monospace; font-size: 11px;">-</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span>🔢 Next Entity #:</span>
+                                    <span id="nextNumber-8547">-</span>
+                                </div>
+                            </div>
+                            <div class="entities-section">
+                                <h5>📋 Registered Entities:</h5>
+                                <div id="entities-8547" class="entities-list">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="jurisdiction-actions">
+                        <button class="btn btn-primary" onclick="refreshAllJurisdictions()">🔄 Refresh All</button>
+                        <button class="btn btn-secondary" onclick="deployContracts()">🚀 Deploy Contracts</button>
                     </div>
                 </div>
             </div>
@@ -1100,6 +1409,50 @@
 
     <script type="module">
         import * as XLN from './dist/server.js';
+        
+        // Import dynamic contract configuration
+        let CONTRACT_CONFIG = null;
+        let contractConfigLoadTime = 0;
+
+        // Load contract configuration dynamically
+        async function loadContractConfig() {
+            try {
+                // Import the auto-generated contract config
+                const configModule = await import('./contract-config.js?' + Date.now());
+                CONTRACT_CONFIG = configModule.CONTRACT_CONFIG;
+                contractConfigLoadTime = Date.now();
+                
+                console.log('📋 Loaded fresh contract configuration:', CONTRACT_CONFIG);
+                return true;
+            } catch (error) {
+                console.warn('⚠️ Could not load contract-config.js, using fallback addresses:', error);
+                
+                // Fallback to default configuration
+                CONTRACT_CONFIG = {
+                    networks: {
+                        "8545": {
+                            name: "Ethereum",
+                            rpc: "http://localhost:8545",
+                            chainId: 1337,
+                            entityProvider: "0x9A676e781A523b5d0C0e43731313A708CB607508"
+                        },
+                        "8546": {
+                            name: "Polygon", 
+                            rpc: "http://localhost:8546",
+                            chainId: 1337,
+                            entityProvider: "0x9A676e781A523b5d0C0e43731313A708CB607508"
+                        },
+                        "8547": {
+                            name: "Arbitrum",
+                            rpc: "http://localhost:8547", 
+                            chainId: 1337,
+                            entityProvider: "0x9A676e781A523b5d0C0e43731313A708CB607508"
+                        }
+                    }
+                };
+                return false;
+            }
+        }
 
         // Global state
         let xlnEnv = null;
@@ -1128,9 +1481,33 @@
                 console.log('Auto-reload check failed:', error);
             }
         }
+        
+        // Check for contract config changes
+        async function checkContractConfigChanges() {
+            try {
+                // Try to load fresh config and compare timestamps
+                const configModule = await import('./contract-config.js?' + Date.now());
+                const freshConfig = configModule.CONTRACT_CONFIG;
+                
+                if (CONTRACT_CONFIG && freshConfig.deployedAt > CONTRACT_CONFIG.deployedAt) {
+                    console.log('🔄 New contract deployment detected, refreshing...');
+                    
+                    const indicator = document.getElementById('reloadIndicator');
+                    indicator.classList.add('show');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                }
+            } catch (error) {
+                // Config file might not exist yet, ignore silently
+            }
+        }
 
         // Start auto-reload checking (every 10 seconds - much less frequent)
         setInterval(checkForChanges, 10000);
+        
+        // Check for contract config changes every 5 seconds (more frequent for deployments)
+        setInterval(checkContractConfigChanges, 5000);
 
         // Initialize environment
         async function initializeEnvironment() {
@@ -1259,8 +1636,54 @@
                 
                 entityCard.innerHTML = `
                     <div class="entity-header">
-                        <div class="entity-title">${replica.entityId}:${replica.signerId} ${isHistorical ? '🕰️' : ''}</div>
+                        <div class="entity-title">${(() => {
+                            // Check if this is a numbered entity (pure number)
+                            const isNumberedEntity = /^[0-9]+$/.test(replica.entityId);
+                            
+                            if (isNumberedEntity) {
+                                const num = BigInt(replica.entityId);
+                                if (num > 0n && num < 1000000n) {
+                                    // For numbered entities, show the number nicely
+                                    return `#${num}:${replica.signerId}`;
+                                }
+                            }
+                            
+                            if (replica.entityId.length > 10) {
+                                // For long IDs (lazy), show first few chars
+                                return `${replica.entityId.slice(0, 8)}...:${replica.signerId}`;
+                            } else {
+                                // For short names/legacy
+                                return `${replica.entityId}:${replica.signerId}`;
+                            }
+                        })()} ${isHistorical ? '🕰️' : ''}</div>
                         <div class="entity-mode ${modeClass}">${config.mode}</div>
+                    </div>
+                    
+                    <div class="entity-identity" style="padding: 10px; background: #f8f9fa; border-radius: 4px; margin: 10px 0; font-family: monospace; font-size: 0.9em;">
+                        <strong>🆔 Entity Identity:</strong><br>
+                        <strong>ID:</strong> <span style="word-break: break-all; color: #495057;">${replica.entityId}</span><br>
+                        <strong>Type:</strong> ${(() => {
+                            if (typeof XLN !== 'undefined' && XLN.detectEntityType) {
+                                const type = XLN.detectEntityType(replica.entityId);
+                                if (type === 'lazy') return '🔒 Lazy Entity (Free, ID = Quorum Hash)';
+                                if (type === 'numbered') return '🔢 Numbered Entity (On-chain Registered)';
+                                if (type === 'named') return '🏷️ Named Entity (Premium)';
+                            }
+                            return '🔄 Legacy Entity';
+                        })()}<br>
+                        ${(() => {
+                            // Check if this is a numbered entity (pure number)
+                            const isNumberedEntity = /^[0-9]+$/.test(replica.entityId);
+                            if (isNumberedEntity) {
+                                const num = BigInt(replica.entityId);
+                                if (num > 0n && num < 1000000n) {
+                                    return `<strong>Entity Number:</strong> #${num}<br>`;
+                                }
+                            }
+                            return '';
+                        })()}
+                        <strong>Validators:</strong> ${config.validators.join(', ')}<br>
+                        <strong>Threshold:</strong> ${config.threshold}/${config.validators.length}
                     </div>
                     
                     <div class="threshold-info">
@@ -1271,6 +1694,23 @@
                             <div class="power-fill" style="width: ${thresholdPercent}%"></div>
                         </div>
                     </div>
+                    
+                    ${config.jurisdiction ? `
+                        <div class="jurisdiction-info" style="padding: 10px; background: #e3f2fd; border-left: 4px solid #2196f3; margin: 10px 0; border-radius: 4px;">
+                            <strong>🏛️ Jurisdiction:</strong> ${config.jurisdiction.name}<br>
+                            <small>
+                                <strong>Address:</strong> ${config.jurisdiction.address}<br>
+                                <strong>Entity Provider:</strong> ${config.jurisdiction.entityProviderAddress}<br>
+                                <strong>Depository:</strong> ${config.jurisdiction.depositoryAddress}
+                                ${config.jurisdiction.chainId ? `<br><strong>Chain ID:</strong> ${config.jurisdiction.chainId}` : ''}
+                            </small>
+                        </div>
+                    ` : `
+                        <div class="jurisdiction-info" style="padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; margin: 10px 0; border-radius: 4px;">
+                            <strong>⚠️ No Jurisdiction:</strong> Entity missing jurisdiction registration<br>
+                            <small>All entities must be registered under a jurisdiction for legal compliance</small>
+                        </div>
+                    `}
                     
                     <div class="replica-stats" style="padding: 15px; background: #f8f9fa; border-radius: 5px; margin: 10px 0; font-family: monospace; font-size: 0.85em;">
                         <strong>📊 Replica State:</strong><br>
@@ -2017,16 +2457,205 @@
             const thresholdSlider = document.getElementById('thresholdSlider');
             const thresholdValue = document.getElementById('thresholdValue');
             thresholdValue.textContent = thresholdSlider.value;
+            // Update entity ID preview when threshold changes
+            updateExpectedEntityId();
         };
 
-        window.createSimpleEntity = () => {
+        // Jurisdiction management functions
+        function populateJurisdictions() {
+            // Jurisdiction configurations will be set via onJurisdictionChange
+            console.log(`📋 Multiple jurisdiction support enabled`);
+        }
+
+        function onJurisdictionChange() {
+            const jurisdictionSelect = document.getElementById('jurisdictionSelect');
+            const jurisdictionInfo = document.getElementById('jurisdictionInfo');
+            const selectedPort = jurisdictionSelect.value;
+            
+            if (selectedPort && CONTRACT_CONFIG) {
+                const jurisdiction = CONTRACT_CONFIG.networks[selectedPort];
+                if (jurisdiction) {
+                    // Show jurisdiction details
+                    document.getElementById('networkName').textContent = jurisdiction.name;
+                    document.getElementById('rpcPort').textContent = selectedPort;
+                    document.getElementById('contractAddress').textContent = jurisdiction.entityProvider;
+                    jurisdictionInfo.style.display = 'block';
+                    
+                    console.log(`🏛️  Selected jurisdiction: ${jurisdiction.name} on port ${selectedPort}`);
+                    console.log(`📝 Contract address: ${jurisdiction.entityProvider}`);
+                }
+            } else if (selectedPort) {
+                // Show loading state if config not loaded yet
+                document.getElementById('networkName').textContent = 'Loading...';
+                document.getElementById('rpcPort').textContent = selectedPort;
+                document.getElementById('contractAddress').textContent = 'Loading contract address...';
+                jurisdictionInfo.style.display = 'block';
+                console.log(`🏛️  Selected port ${selectedPort}, waiting for config...`);
+            } else {
+                // Hide jurisdiction details
+                jurisdictionInfo.style.display = 'none';
+                console.log(`🏛️  No jurisdiction selected`);
+            }
+        }
+
+        function getJurisdictionByPort(port) {
+            if (!CONTRACT_CONFIG) {
+                console.warn('Contract config not loaded yet');
+                return null;
+            }
+            return CONTRACT_CONFIG.networks[port];
+        }
+
+        // Make functions global
+        window.populateJurisdictions = populateJurisdictions;
+        window.onJurisdictionChange = onJurisdictionChange;
+        window.getJurisdictionByPort = getJurisdictionByPort;
+
+        // Update expected entity ID preview
+        window.updateExpectedEntityId = async () => {
+            const expectedEntityIdDiv = document.getElementById('expectedEntityId');
+            const quorumHashDiv = document.getElementById('quorumHash');
+            if (!expectedEntityIdDiv) return;
+            
+            try {
+                const entityType = document.getElementById('entityTypeSelect')?.value || 'lazy';
+                const entityName = document.getElementById('entityNameInput')?.value || 'ACME';
+                
+                // Get validator data
+                const validators = [];
+                const validatorRows = document.querySelectorAll('.validator-row');
+                validatorRows.forEach(row => {
+                    const name = row.querySelector('.validator-name')?.value?.trim();
+                    const weight = parseInt(row.querySelector('.validator-weight')?.value) || 1;
+                    if (name) {
+                        validators.push({ name, weight });
+                    }
+                });
+                
+                if (validators.length === 0) {
+                    expectedEntityIdDiv.textContent = 'Add validators to see entity ID preview';
+                    if (quorumHashDiv) {
+                        quorumHashDiv.textContent = 'Configure validators and threshold to see quorum hash';
+                    }
+                    return;
+                }
+                
+                // Always calculate and display quorum hash
+                const threshold = BigInt(document.getElementById('thresholdValue')?.textContent || '2');
+                console.log('Threshold value from DOM:', document.getElementById('thresholdValue')?.textContent, 'Parsed as BigInt:', threshold);
+                console.log('Validators:', validators);
+                const quorumHash = XLN.generateLazyEntityId(validators, threshold);
+                if (quorumHashDiv) {
+                    quorumHashDiv.textContent = quorumHash;
+                }
+                
+                let expectedId = '';
+                
+                if (entityType === 'lazy') {
+                    // For lazy entities, use the same quorum hash
+                    expectedId = quorumHash;
+                } else if (entityType === 'numbered') {
+                    // For numbered entities, show just the number
+                    try {
+                        const nextNumber = await XLN.getNextEntityNumber();
+                        expectedId = `#${nextNumber}`;
+                    } catch (error) {
+                        expectedId = `#XX (blockchain disconnected)`;
+                    }
+                } else if (entityType === 'named') {
+                    // For named entities, show just the name
+                    expectedId = entityName;
+                }
+                
+                expectedEntityIdDiv.textContent = expectedId;
+                
+            } catch (error) {
+                expectedEntityIdDiv.textContent = 'Error generating preview';
+                console.error('Error updating entity ID preview:', error);
+            }
+        };
+
+        // Entity type selection handler
+        window.onEntityTypeChange = async () => {
+            const entityTypeSelect = document.getElementById('entityTypeSelect');
+            const entityType = entityTypeSelect.value;
+            const entityNameInput = document.getElementById('entityNameInput');
+            const entityNameHint = document.getElementById('entityNameHint');
+            const jurisdictionSelect = document.getElementById('jurisdictionSelect');
+            const nextNumberInfo = document.getElementById('nextNumberInfo');
+            const nextNumberDisplay = document.getElementById('nextNumberDisplay');
+            
+            // Add null checks
+            if (!entityTypeSelect || !entityNameInput || !entityNameHint || !jurisdictionSelect) {
+                console.error('Required form elements not found');
+                return;
+            }
+            
+            if (entityType === 'lazy') {
+                entityNameInput.placeholder = 'e.g., MyTradingBot, ChatGroup';
+                entityNameHint.textContent = '🔒 Display name only - ID will be hash(validators). Free and instant!';
+                if (nextNumberInfo) nextNumberInfo.style.display = 'none';
+                
+            } else if (entityType === 'numbered') {
+                entityNameInput.placeholder = 'e.g., TradingEntity, MyDAO';
+                entityNameHint.textContent = '🔢 Display name - you\'ll get a sequential number like #42. Requires gas.';
+                
+                // Show and fetch next number
+                if (nextNumberInfo && nextNumberDisplay) {
+                    nextNumberInfo.style.display = 'block';
+                    nextNumberDisplay.textContent = 'Loading...';
+                    try {
+                        const nextNumber = await XLN.getNextEntityNumber();
+                        nextNumberDisplay.textContent = `#${nextNumber}`;
+                    } catch (error) {
+                        nextNumberDisplay.textContent = 'Error loading';
+                        console.error('Failed to fetch next entity number:', error);
+                    }
+                }
+                
+            } else if (entityType === 'named') {
+                entityNameInput.placeholder = 'e.g., coinbase, uniswap, mycompany';
+                entityNameHint.textContent = '🏷️ Custom name that becomes your identity. Requires gas + admin approval.';
+                
+                // Show and fetch next number (named entities also get a number first)
+                if (nextNumberInfo && nextNumberDisplay) {
+                    nextNumberInfo.style.display = 'block';
+                    nextNumberDisplay.textContent = 'Loading...';
+                    try {
+                        const nextNumber = await XLN.getNextEntityNumber();
+                        nextNumberDisplay.textContent = `#${nextNumber} (then named)`;
+                    } catch (error) {
+                        nextNumberDisplay.textContent = 'Error loading';
+                        console.error('Failed to fetch next entity number:', error);
+                    }
+                }
+            }
+            
+            // Update entity ID preview
+            updateExpectedEntityId();
+        };
+
+        window.createSimpleEntity = async () => {
             if (!xlnEnv) return;
             
             // Always go to current time when creating entities
             currentTimeIndex = -1;
             
+            const entityTypeSelect = document.getElementById('entityTypeSelect');
+            const entityType = entityTypeSelect.value;
             const entityName = document.getElementById('entityNameInput').value.trim();
-            const threshold = parseInt(document.getElementById('thresholdSlider').value);
+            const thresholdElement = document.getElementById('thresholdSlider');
+            const thresholdValue = thresholdElement ? thresholdElement.value : '';
+            const threshold = parseInt(thresholdValue);
+            const jurisdictionSelect = document.getElementById('jurisdictionSelect');
+            const selectedJurisdiction = jurisdictionSelect.value;
+            
+            console.log(`Form values: entityType="${entityType}", entityName="${entityName}", thresholdValue="${thresholdValue}", threshold=${threshold}`);
+            
+            if (isNaN(threshold)) {
+                alert(`Invalid threshold value: "${thresholdValue}". Please check the threshold slider.`);
+                return;
+            }
             
             // Validation
             if (!entityName) {
@@ -2034,78 +2663,142 @@
                 return;
             }
             
-            if (!/^[a-zA-Z0-9_-]+$/.test(entityName)) {
-                alert('Entity name can only contain letters, numbers, underscores, and hyphens');
+            // Require jurisdiction selection
+            if (!selectedJurisdiction) {
+                alert('Please select a jurisdiction to continue');
                 return;
             }
             
-            // Check if entity already exists
-            const existingEntity = Array.from(xlnEnv.replicas.keys()).find(key => key.startsWith(entityName + ':'));
-            if (existingEntity) {
-                alert(`Entity "${entityName}" already exists`);
+            // Name validation for named entities
+            if (entityType === 'named') {
+                if (!/^[a-zA-Z0-9_-]+$/.test(entityName)) {
+                    alert('Named entity names can only contain letters, numbers, underscores, and hyphens');
                 return;
+                }
+                if (entityName.length < 3 || entityName.length > 32) {
+                    alert('Named entity names must be between 3 and 32 characters');
+                    return;
+                }
             }
             
             // Collect validators and weights
             const validatorRows = document.querySelectorAll('.validator-row');
             const validators = [];
             const shares = {};
+            let totalShares = 0;
             
-            for (const row of validatorRows) {
+            validatorRows.forEach((row, index) => {
                 const nameInput = row.querySelector('.validator-name');
                 const weightInput = row.querySelector('.validator-weight');
                 
-                const validatorName = nameInput.value.trim();
-                const weight = parseInt(weightInput.value) || 0;
-                
-                if (!validatorName) {
-                    alert('Please enter a name for all validators');
-                    return;
+                if (nameInput && weightInput) {
+                    const name = nameInput.value.trim();
+                    const weight = parseInt(weightInput.value.trim()) || 1;
+                    
+                    if (name && weight > 0) {
+                        validators.push(name);
+                        shares[name] = BigInt(weight);
+                        totalShares += weight;
+                    }
                 }
-                
-                if (!/^[a-zA-Z0-9_-]+$/.test(validatorName)) {
-                    alert(`Validator name "${validatorName}" can only contain letters, numbers, underscores, and hyphens`);
-                    return;
-                }
-                
-                if (weight < 1) {
-                    alert(`Validator "${validatorName}" must have a weight of at least 1`);
-                    return;
-                }
-                
-                if (validators.includes(validatorName)) {
-                    alert(`Validator name "${validatorName}" is duplicated`);
-                    return;
-                }
-                
-                validators.push(validatorName);
-                shares[validatorName] = BigInt(weight);
-            }
+            });
             
+            // Validation
             if (validators.length === 0) {
                 alert('Please add at least one validator');
+                    return;
+                }
+                
+            if (threshold > totalShares) {
+                alert(`Threshold (${threshold}) cannot be greater than total weight (${totalShares})`);
+                    return;
+                }
+                
+            // Check for duplicate validator names
+            const uniqueValidators = new Set(validators);
+            if (uniqueValidators.size !== validators.length) {
+                alert('Validator names must be unique');
+                    return;
+                }
+                
+            let jurisdictionConfig = window.getJurisdictionByPort(selectedJurisdiction);
+            if (!jurisdictionConfig) {
+                alert('Invalid jurisdiction selected');
                 return;
             }
             
-            // Calculate total shares and validate threshold
-            const totalShares = Object.values(shares).reduce((sum, val) => sum + val, BigInt(0));
-            if (BigInt(threshold) > totalShares) {
-                alert(`Threshold ${threshold} is higher than total weight ${totalShares}`);
+            console.log(`🏛️ Creating ${entityType} entity: ${entityName}`);
+            if (jurisdictionConfig) console.log(`   Jurisdiction: ${jurisdictionConfig.name}`);
+            console.log(`   Validators: ${validators.join(', ')}`);
+            console.log(`   Threshold: ${threshold}/${totalShares}`);
+            
+            let config;
+            let entityId;
+            let entityNumber;
+            
+            console.log(`Creating ${entityType} entity: ${entityName}`);
+            
+            try {
+                // Create entity using new 3-tier system
+                if (entityType === 'lazy') {
+                    config = XLN.createLazyEntity(entityName, validators, BigInt(threshold), jurisdictionConfig);
+                    entityId = XLN.generateLazyEntityId(validators, BigInt(threshold));
+                    console.log(`🔒 Lazy Entity ID: ${entityId}`);
+                    
+                } else if (entityType === 'numbered') {
+                    const result = await XLN.createNumberedEntity(entityName, validators, BigInt(threshold), jurisdictionConfig);
+                    config = result.config;
+                    entityNumber = result.entityNumber;
+                    entityId = XLN.generateNumberedEntityId(entityNumber);
+                    console.log(`🔢 Numbered Entity: #${entityNumber}`);
+                    console.log(`🆔 Entity ID: ${entityId}`);
+                    
+                    // Simulate blockchain registration
+                    try {
+                        const regResult = await XLN.registerNumberedEntityOnChain(config, entityName);
+                        console.log(`✅ Entity registered on-chain: ${regResult.txHash}`);
+                        alert(`Numbered entity #${regResult.entityNumber} created successfully!\nTransaction: ${regResult.txHash.slice(0, 10)}...`);
+                    } catch (error) {
+                        console.error('❌ Registration failed:', error);
+                        alert(`Registration failed: ${error.message}`);
                 return;
             }
             
-            // Create consensus config (default to proposer-based for simplicity)
-            const config = {
-                mode: 'proposer-based',
-                threshold: BigInt(threshold),
-                validators: validators,
-                shares: shares
-            };
+                } else if (entityType === 'named') {
+                    // First create a numbered entity
+                    const result = await XLN.createNumberedEntity(entityName, validators, BigInt(threshold), jurisdictionConfig);
+                    config = result.config;
+                    entityNumber = result.entityNumber;
+                    entityId = XLN.generateNumberedEntityId(entityNumber);
+                    
+                    // Register the numbered entity first
+                    const regResult = await XLN.registerNumberedEntityOnChain(config, entityName);
+                    console.log(`🔢 Created numbered entity #${regResult.entityNumber} for name assignment`);
+                    
+                    // Request name assignment from admin
+                    try {
+                        const requestId = await XLN.requestNamedEntity(entityName, regResult.entityNumber, jurisdictionConfig);
+                        console.log(`🏷️ Name assignment requested: ${requestId}`);
+                        alert(`Named entity request submitted!\n\nEntity Number: #${regResult.entityNumber}\nName: "${entityName}"\nRequest ID: ${requestId}\n\nYour entity is functional now. Admin will assign the name later.`);
+                    } catch (error) {
+                        console.error('❌ Name request failed:', error);
+                        alert(`Name request failed: ${error.message}\n\nYour numbered entity #${regResult.entityNumber} is still functional.`);
+                    }
+                }
+                
+                // Check if entity already exists with this ID
+                const existingEntity = Array.from(xlnEnv.replicas.keys()).find(key => 
+                    key.startsWith(entityId + ':') || key.startsWith(entityName + ':')
+                );
+                if (existingEntity) {
+                    alert(`Entity with this configuration already exists: ${existingEntity}`);
+                return;
+            }
             
-            // Create server transactions for all validators
+                // Create server transactions for all validators using the generated entityId
             const serverTxs = validators.map((signerId, index) => ({
                 type: 'importReplica',
-                entityId: entityName,
+                    entityId: entityId, // Use the generated entity ID
                 signerId: signerId,
                 data: {
                     config: config,
@@ -2114,7 +2807,7 @@
             }));
             
             // Process the server transactions
-            const outputs = XLN.processServerInput(xlnEnv, {
+                let outputs = XLN.processServerInput(xlnEnv, {
                 serverTxs: serverTxs,
                 entityInputs: []
             });
@@ -2128,17 +2821,40 @@
                 outputs.splice(0, outputs.length, ...newOutputs);
             }
             
-            // Success feedback
-            alert(`✅ Entity "${entityName}" created successfully!\\n\\nValidators: ${validators.join(', ')}\\nThreshold: ${threshold}/${totalShares}`);
+                // Perform jurisdiction registration if selected
+                if (jurisdictionConfig) {
+                    console.log(`🏛️  Entity "${entityName}" configured with jurisdiction "${jurisdictionConfig.name}"`);
+                    console.log(`    EntityProvider: ${jurisdictionConfig.entityProviderAddress}`);
+                    console.log(`    Depository: ${jurisdictionConfig.depositoryAddress}`);
+                    console.log(`    Chain ID: ${jurisdictionConfig.chainId}`);
+                    console.log(`    📝 Note: Full blockchain registration will be implemented in next iteration`);
+                }
+                
+                // Success feedback - only for lazy entities (numbered/named have specific alerts)
+                if (entityType === 'lazy') {
+                    const jurisdictionMessage = jurisdictionConfig 
+                        ? `\n🏛️ Jurisdiction: ${jurisdictionConfig.name}` 
+                        : '\n⚠️ Warning: No jurisdiction selected';
+                    
+                    alert(`✅ Entity "${entityName}" created successfully!${jurisdictionMessage}\n\nValidators: ${validators.join(', ')}\nThreshold: ${threshold}/${totalShares}`);
+                }
             
             // Clear form and refresh view
             clearSimpleForm();
             renderEntities();
             populateReplicaSelect();
+            } catch (error) {
+                console.error('Failed to create entity:', error);
+                alert(`Failed to create entity: ${error.message}`);
+            }
         };
 
         window.clearSimpleForm = () => {
             document.getElementById('entityNameInput').value = '';
+            
+            // Reset jurisdiction selection
+            document.getElementById('jurisdictionSelect').value = '';
+            document.getElementById('jurisdictionInfo').style.display = 'none';
             
             // Reset to default 3 validators
             const validatorsList = document.getElementById('validatorsList');
@@ -2184,6 +2900,289 @@
             if (targetContent && targetButton) {
                 targetContent.classList.add('active');
                 targetButton.classList.add('active');
+                
+                // If switching to jurisdictions tab, refresh data
+                if (tabName === 'jurisdictions') {
+                    refreshAllJurisdictions();
+                }
+            }
+        };
+
+        // Jurisdictions functions
+        window.refreshAllJurisdictions = async () => {
+            const ports = [8545, 8546, 8547];
+            const networks = ['Ethereum', 'Polygon', 'Arbitrum'];
+            
+            for (let i = 0; i < ports.length; i++) {
+                await refreshJurisdictionData(ports[i], networks[i]);
+            }
+        };
+
+        const refreshJurisdictionData = async (port, networkName) => {
+            try {
+                const statusElement = document.getElementById(`status-${port}`);
+                statusElement.textContent = '🔄 Checking...';
+                statusElement.className = 'connection-status checking';
+                
+                // Test blockchain connection
+                const response = await fetch(`http://localhost:${port}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'eth_blockNumber',
+                        params: [],
+                        id: 1
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Network unavailable');
+                
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+                
+                const blockNumber = parseInt(data.result, 16);
+                
+                // Update UI with success
+                statusElement.textContent = '✅ Connected';
+                statusElement.className = 'connection-status connected';
+                
+                // Update details
+                document.getElementById(`chainId-${port}`).textContent = `31337`;
+                document.getElementById(`blockNumber-${port}`).textContent = blockNumber;
+                document.getElementById(`lastUpdate-${port}`).textContent = new Date().toLocaleTimeString();
+                
+                // Get contract address and next number
+                try {
+                    const rpcUrl = `http://localhost:${port}`;
+                    
+                    // Get contract address from dynamic config
+                    const contractAddress = CONTRACT_CONFIG?.networks[port]?.entityProvider;
+                    if (!contractAddress) {
+                        throw new Error('Contract address not available');
+                    }
+                    
+                    // Check if contract is deployed by testing getCode
+                    const codeResponse = await fetch(rpcUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            jsonrpc: '2.0',
+                            method: 'eth_getCode',
+                            params: [contractAddress, 'latest'],
+                            id: 2
+                        })
+                    });
+                    
+                    const codeData = await codeResponse.json();
+                    const isDeployed = codeData.result && codeData.result !== '0x';
+                    
+                    if (isDeployed) {
+                        // Contract is deployed
+                        document.getElementById(`contract-${port}`).textContent = contractAddress;
+                        
+                        // Get next entity number using the connectToEthereum method
+                        if (port === 8545) {
+                            // For port 8545, we can use the existing function
+                            const nextNumber = await XLN.getNextEntityNumber();
+                            document.getElementById(`nextNumber-${port}`).textContent = `#${nextNumber}`;
+                        } else {
+                            // For other ports, call the contract directly via RPC
+                            const nextNumberResponse = await fetch(rpcUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    jsonrpc: '2.0',
+                                    method: 'eth_call',
+                                    params: [{
+                                        to: contractAddress,
+                                        data: '0x848202fe' // nextNumber() function selector
+                                    }, 'latest'],
+                                    id: 3
+                                })
+                            });
+                            
+                            const nextNumberData = await nextNumberResponse.json();
+                            if (nextNumberData.result) {
+                                const nextNumber = parseInt(nextNumberData.result, 16);
+                                document.getElementById(`nextNumber-${port}`).textContent = `#${nextNumber}`;
+                            } else {
+                                document.getElementById(`nextNumber-${port}`).textContent = 'Error';
+                            }
+                        }
+                        
+                        // Get registered entities
+                        await refreshEntitiesList(port);
+                        
+                    } else {
+                        // Contract not deployed
+                        document.getElementById(`contract-${port}`).textContent = 'Not deployed';
+                        document.getElementById(`nextNumber-${port}`).textContent = 'N/A';
+                        document.getElementById(`entities-${port}`).textContent = 'Contract not deployed';
+                    }
+                    
+                } catch (contractError) {
+                    document.getElementById(`contract-${port}`).textContent = 'Error checking';
+                    document.getElementById(`nextNumber-${port}`).textContent = 'N/A';
+                    document.getElementById(`entities-${port}`).textContent = `Error: ${contractError.message}`;
+                }
+                
+            } catch (error) {
+                // Update UI with error
+                const statusElement = document.getElementById(`status-${port}`);
+                statusElement.textContent = '❌ Disconnected';
+                statusElement.className = 'connection-status disconnected';
+                
+                document.getElementById(`chainId-${port}`).textContent = '-';
+                document.getElementById(`blockNumber-${port}`).textContent = '-';
+                document.getElementById(`lastUpdate-${port}`).textContent = 'Failed';
+                document.getElementById(`contract-${port}`).textContent = '-';
+                document.getElementById(`nextNumber-${port}`).textContent = '-';
+                document.getElementById(`entities-${port}`).textContent = `Error: ${error.message}`;
+            }
+        };
+
+        const refreshEntitiesList = async (port) => {
+            try {
+                const entitiesDiv = document.getElementById(`entities-${port}`);
+                entitiesDiv.textContent = 'Loading entities...';
+                
+                            const rpcUrl = `http://localhost:${port}`;
+            const contractAddress = CONTRACT_CONFIG?.networks[port]?.entityProvider;
+            
+            if (!contractAddress) {
+                entitiesDiv.textContent = 'Contract address not available';
+                return;
+            }
+                
+                // Get next number to know how many numbered entities exist
+                const nextNumberResponse = await fetch(rpcUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        method: 'eth_call',
+                        params: [{
+                            to: contractAddress,
+                            data: '0x848202fe' // nextNumber() function selector
+                        }, 'latest'],
+                        id: 1
+                    })
+                });
+                
+                const nextNumberData = await nextNumberResponse.json();
+                if (!nextNumberData.result) {
+                    throw new Error('Failed to get next number');
+                }
+                
+                const nextNumber = parseInt(nextNumberData.result, 16);
+                const entities = [];
+                
+                // Query numbered entities from 1 to nextNumber-1
+                for (let i = 1; i < nextNumber; i++) {
+                    try {
+                        // Check if entity exists by calling entities(bytes32)
+                        // Convert number to bytes32 (pad to 32 bytes)
+                        const entityIdBytes32 = '0x' + i.toString(16).padStart(64, '0');
+                        
+                        const entityResponse = await fetch(rpcUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                jsonrpc: '2.0',
+                                method: 'eth_call',
+                                params: [{
+                                    to: contractAddress,
+                                    data: '0xe5b338fd' + entityIdBytes32.slice(2) // entities(bytes32) function selector + entityId
+                                }, 'latest'],
+                                id: i + 10
+                            })
+                        });
+                        
+                        const entityData = await entityResponse.json();
+                        if (entityData.result && entityData.result !== '0x') {
+                            // Parse the result (boardHash, status, activationTime)
+                            const result = entityData.result;
+                            if (result.length >= 66) { // Has actual data
+                                // Extract boardHash (first 32 bytes after the initial offset)
+                                const boardHash = '0x' + result.slice(2, 66);
+                                
+                                // Try to get entity name
+                                const nameResponse = await fetch(rpcUrl, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        jsonrpc: '2.0',
+                                        method: 'eth_call',
+                                        params: [{
+                                            to: contractAddress,
+                                            data: '0x1ed3d440' + i.toString(16).padStart(64, '0') // numberToName(uint256) function selector + number
+                                        }, 'latest'],
+                                        id: i + 100
+                                    })
+                                });
+                                
+                                const nameData = await nameResponse.json();
+                                let name = '';
+                                if (nameData.result && nameData.result !== '0x') {
+                                    // Decode string from result
+                                    try {
+                                        const hex = nameData.result.slice(2);
+                                        if (hex.length > 64) {
+                                            const length = parseInt(hex.slice(64, 128), 16);
+                                            if (length > 0) {
+                                                const nameHex = hex.slice(128, 128 + length * 2);
+                                                name = new TextDecoder().decode(new Uint8Array(nameHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16))));
+                                            }
+                                        }
+                                    } catch (e) {
+                                        // Failed to decode name, leave empty
+                                    }
+                                }
+                                
+                                entities.push({
+                                    id: `#${i}`,
+                                    name: name || `Entity ${i}`,
+                                    type: 'Numbered',
+                                    boardHash: boardHash
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        // Skip invalid entities
+                        console.warn(`Failed to query entity ${i}:`, e);
+                    }
+                }
+                
+                // Display the entities
+                if (entities.length === 0) {
+                    entitiesDiv.innerHTML = `
+                        <div class="entity-item">No entities registered yet</div>
+                        <div style="margin-top: 10px; font-size: 11px; color: #6c757d;">
+                            Create entities to see them listed here
+                        </div>
+                    `;
+                } else {
+                    entitiesDiv.innerHTML = entities.map(entity => `
+                        <div class="entity-item">
+                            <strong>${entity.id}</strong>: ${entity.name}
+                            <div style="font-size: 11px; color: #6c757d; margin-top: 2px;">
+                                Quorum: ${entity.boardHash ? entity.boardHash.slice(0, 10) + '...' : 'N/A'}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+                
+            } catch (error) {
+                document.getElementById(`entities-${port}`).textContent = `Error loading entities: ${error.message}`;
+            }
+        };
+
+        window.deployContracts = async () => {
+            try {
+                alert('Contract deployment feature coming soon! For now, use: cd contracts && npx hardhat ignition deploy ignition/modules/Depository.ts --network localhost');
+            } catch (error) {
+                alert(`Deployment error: ${error.message}`);
             }
         };
 
@@ -2360,14 +3359,22 @@
         // --- Main Application Entry Point ---
         async function main() {
             try {
-                // 1. Wait for the environment to load from the database
+                // 1. Load contract configuration first
+                console.log('📋 Loading contract configuration...');
+                await loadContractConfig();
+                
+                // 2. Wait for the environment to load from the database
                 xlnEnv = await XLN.main();
                 console.log('🎯 XLN Environment loaded:', xlnEnv);
                 console.log('💡 Access via: window.xlnEnv');
 
-                // 2. Perform initial UI setup and render
+                // 3. Perform initial UI setup and render
                 setupActionHandlers();
                 updateTotalWeight();
+                populateJurisdictions(); // Populate available jurisdictions
+                window.onEntityTypeChange(); // Initialize entity type display
+        window.onJurisdictionChange(); // Initialize jurisdiction with Ethereum default
+        setTimeout(() => window.updateExpectedEntityId(), 100); // Initialize entity ID preview
                 renderEntities(); // First render with loaded data
                 populateReplicaSelect();
 

@@ -1,6 +1,6 @@
 
 node_modules
-
+xln-snapshots
 local-storage
 db
 .DS_Store
@@ -15,3 +15,5 @@ node_modules/
 .env.local
 .env.*.local
 bun.lockb
+# Local database files
+xln-snapshots/
