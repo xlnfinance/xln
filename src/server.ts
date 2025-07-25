@@ -92,7 +92,12 @@ import { Level } from 'level';
 import { encode, decode } from './snapshot-coder.js';
 
 // --- Database Setup ---
-const db: Level<Buffer, Buffer> = new Level('xln-snapshots', { valueEncoding: 'buffer', keyEncoding: 'binary' });
+// In browser: LevelDB uses IndexedDB with persistent storage
+// In Node.js: Uses filesystem with relative path to prevent permission issues
+const db: Level<Buffer, Buffer> = new Level('db', { 
+  valueEncoding: 'buffer', 
+  keyEncoding: 'binary'
+});
 
 // Function to clear the database and reset in-memory history
 const clearDatabase = async () => {
@@ -459,9 +464,16 @@ const ENTITY_PROVIDER_ABI = [
   "function nameToNumber(string memory name) external view returns (uint256)",
   "function numberToName(uint256 entityNumber) external view returns (string memory)",
   "function nextNumber() external view returns (uint256)",
+  // Governance functions (governance is auto-setup on entity registration)
+  "function getTokenIds(uint256 entityNumber) external pure returns (uint256 controlTokenId, uint256 dividendTokenId)",
+  "function getGovernanceInfo(uint256 entityNumber) external view returns (uint256 controlTokenId, uint256 dividendTokenId, uint256 controlSupply, uint256 dividendSupply, bool hasActiveProposal, bytes32 articlesHash)",
+  "function balanceOf(address account, uint256 id) external view returns (uint256)",
+  "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external",
+  // Events
   "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
   "event NameAssigned(string indexed name, uint256 indexed entityNumber)",
-  "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)"
+  "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)",
+  "event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)"
 ];
 
 const connectToEthereum = async (rpcUrl: string = 'http://localhost:8545', contractAddress?: string) => {
@@ -490,6 +502,8 @@ const connectToEthereum = async (rpcUrl: string = 'http://localhost:8545', contr
   }
 };
 
+// Note: setupGovernance is no longer needed - governance is automatically created on entity registration
+
 const registerNumberedEntityOnChain = async (config: ConsensusConfig, name: string): Promise<{txHash: string, entityNumber: number}> => {
   if (!config.jurisdiction) {
     throw new Error("Jurisdiction required for on-chain registration");
@@ -506,6 +520,14 @@ const registerNumberedEntityOnChain = async (config: ConsensusConfig, name: stri
     if (DEBUG) console.log(`   EntityProvider: ${config.jurisdiction.entityProviderAddress}`);
     if (DEBUG) console.log(`   Board Hash: ${boardHash}`);
     
+    // Test connection by calling nextNumber()
+    try {
+      const nextNumber = await entityProvider.nextNumber();
+      if (DEBUG) console.log(`   📊 Next entity number will be: ${nextNumber}`);
+    } catch (error) {
+      throw new Error(`Failed to call nextNumber(): ${error}`);
+    }
+    
     // Call the smart contract
     const tx = await entityProvider.registerNumberedEntity(boardHash);
     if (DEBUG) console.log(`   📤 Transaction sent: ${tx.hash}`);
@@ -513,6 +535,24 @@ const registerNumberedEntityOnChain = async (config: ConsensusConfig, name: stri
     // Wait for confirmation
     const receipt = await tx.wait();
     if (DEBUG) console.log(`   ✅ Transaction confirmed in block ${receipt.blockNumber}`);
+    
+    // Check if transaction reverted
+    if (receipt.status === 0) {
+      throw new Error(`Transaction reverted! Hash: ${tx.hash}`);
+    }
+    
+    // Debug: log all events in receipt
+    if (DEBUG) {
+      console.log(`   📋 Receipt logs count: ${receipt.logs.length}`);
+      receipt.logs.forEach((log: any, i: number) => {
+        try {
+          const parsed = entityProvider.interface.parseLog(log);
+          console.log(`   📝 Log ${i}: ${parsed?.name} - ${JSON.stringify(parsed?.args)}`);
+        } catch {
+          console.log(`   📝 Log ${i}: Unable to parse log - ${log.topics?.[0]}`);
+        }
+      });
+    }
     
     // Extract entity number from event logs
     const event = receipt.logs.find((log: any) => {
@@ -540,18 +580,7 @@ const registerNumberedEntityOnChain = async (config: ConsensusConfig, name: stri
     
   } catch (error) {
     console.error('❌ Blockchain registration failed:', error);
-    
-    // Fallback to simulation for development
-    if (DEBUG) console.log('   🔄 Falling back to simulation...');
-    
-    const txHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-    const entityNumber = Math.floor(Math.random() * 1000000) + 1;
-    
-    if (DEBUG) console.log(`   ✅ Simulated registration completed`);
-    if (DEBUG) console.log(`   TX: ${txHash}`);
-    if (DEBUG) console.log(`   Entity Number: ${entityNumber}`);
-    
-    return { txHash, entityNumber };
+    throw error;
   }
 };
 
@@ -568,6 +597,11 @@ const assignNameOnChain = async (name: string, entityNumber: number): Promise<{t
     // Wait for confirmation
     const receipt = await tx.wait();
     if (DEBUG) console.log(`   ✅ Transaction confirmed in block ${receipt.blockNumber}`);
+    
+    // Check if transaction reverted
+    if (receipt.status === 0) {
+      throw new Error(`Transaction reverted! Hash: ${tx.hash}`);
+    }
     
     if (DEBUG) console.log(`✅ Name assigned successfully!`);
     if (DEBUG) console.log(`   TX: ${tx.hash}`);
@@ -633,34 +667,15 @@ const getNextEntityNumber = async (port: string = '8545'): Promise<number> => {
     
   } catch (error) {
     console.error('❌ Failed to get next entity number:', error);
-    
-    // Try to check if contract exists by calling a simpler function
-    try {
-      const rpcUrl = `http://localhost:${port}`;
-      const contractAddress = await getContractAddress(port);
-      const { provider } = await connectToEthereum(rpcUrl, contractAddress);
-      const code = await provider.getCode(contractAddress);
-      if (code === '0x') {
-        console.error('❌ Contract not deployed at address:', contractAddress);
-      } else {
-        console.log('✅ Contract exists, but nextNumber() call failed');
-      }
-    } catch (checkError) {
-      console.error('❌ Failed to check contract:', checkError);
-    }
-    
-    // Fallback to a reasonable default
-    return 1;
+    throw error;
   }
 };
 
 const transferNameBetweenEntities = async (name: string, fromNumber: number, toNumber: number, jurisdiction: JurisdictionConfig): Promise<string> => {
   if (DEBUG) console.log(`🔄 Transferring name "${name}" from #${fromNumber} to #${toNumber}`);
   
-  const txHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-  
-  if (DEBUG) console.log(`✅ Name transferred! TX: ${txHash}`);
-  return txHash;
+  // TODO: Implement real blockchain name transfer
+  throw new Error('Name transfer not implemented - requires blockchain integration');
 };
 
 const isEntityRegistered = async (entityId: string): Promise<boolean> => {
@@ -795,9 +810,7 @@ const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: Enti
   batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
   batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
   
-  batch.write().catch(err => {
-    console.error(`🔥 Failed to save snapshot ${snapshot.height} to LevelDB`, err);
-  });
+  batch.write();
   
   if (DEBUG) {
     console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);
@@ -880,82 +893,61 @@ const mergeEntityInputs = (entityInputs: EntityInput[]): EntityInput[] => {
 // === JURISDICTION MANAGEMENT ===
 
 // Load contract configuration and generate jurisdictions
-const generateJurisdictions = (): Map<string, JurisdictionConfig> => {
+const generateJurisdictions = async (): Promise<Map<string, JurisdictionConfig>> => {
   const jurisdictions = new Map<string, JurisdictionConfig>();
   
-  // For browser, return empty map - jurisdictions will be populated dynamically
-  if (isBrowser) {
-    console.log('🌐 Browser detected - jurisdictions will be loaded dynamically');
-    return jurisdictions;
-  }
+  let config: any;
   
-  // Node.js environment - load from file
-  let networks: any;
-  try {
-    const configPath = path.join(process.cwd(), 'contract-addresses.json');
+  if (!isBrowser) {
+    // Node.js environment - read file directly
+    const configPath = path.join(process.cwd(), 'jurisdictions.json');
     const configData = fs.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(configData);
-    console.log('✅ Loaded contract addresses from config file');
-    networks = config.networks;
-  } catch (error) {
-    console.error('❌ CRITICAL: Could not load contract-addresses.json');
-    console.error('   Please run: ./deploy-contracts.sh');
-    throw new Error('Contract addresses configuration file not found or invalid');
+    config = JSON.parse(configData);
+    console.log('✅ Loaded jurisdictions from config file');
+  } else {
+    // Browser environment - fetch from server
+    const response = await fetch('/jurisdictions.json');
+    if (!response.ok) {
+      throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+    }
+    config = await response.json();
+    console.log('✅ Loaded jurisdictions from server');
   }
   
-  if (networks['8545']) {
-    const network = networks['8545'];
-    if (!network.entityProvider) {
-      throw new Error('Missing entityProvider address for Ethereum network (8545)');
-    }
-    jurisdictions.set('ethereum', {
-      address: network.rpc,
-      name: network.name,
-      entityProviderAddress: network.entityProvider,
-      depositoryAddress: network.depository,
-      chainId: network.chainId
-    });
-  }
+  const jurisdictionData = config.jurisdictions;
   
-  if (networks['8546']) {
-    const network = networks['8546'];
-    if (!network.entityProvider) {
-      throw new Error('Missing entityProvider address for Polygon network (8546)');
-    }
-    jurisdictions.set('polygon', {
-      address: network.rpc,
-      name: network.name,
-      entityProviderAddress: network.entityProvider,
-      depositoryAddress: network.depository,
-      chainId: network.chainId
-    });
-  }
-  
-  if (networks['8547']) {
-    const network = networks['8547'];
-    if (!network.entityProvider) {
-      throw new Error('Missing entityProvider address for Arbitrum network (8547)');
-    }
-    jurisdictions.set('arbitrum', {
-      address: network.rpc,
-      name: network.name,
-      entityProviderAddress: network.entityProvider,
-      depositoryAddress: network.depository,
-      chainId: network.chainId
+  // Build jurisdictions from loaded config
+  for (const [key, data] of Object.entries(jurisdictionData)) {
+    const jData = data as any;
+    jurisdictions.set(key, {
+      address: jData.rpc,
+      name: jData.name,
+      entityProviderAddress: jData.contracts.entityProvider,
+      depositoryAddress: jData.contracts.depository,
+      chainId: jData.chainId
     });
   }
   
   return jurisdictions;
 };
 
-const DEFAULT_JURISDICTIONS = generateJurisdictions();
+let DEFAULT_JURISDICTIONS: Map<string, JurisdictionConfig> | null = null;
 
-const getAvailableJurisdictions = (): JurisdictionConfig[] => {
-  return Array.from(DEFAULT_JURISDICTIONS.values());
+const getJurisdictions = async (): Promise<Map<string, JurisdictionConfig>> => {
+  if (!DEFAULT_JURISDICTIONS) {
+    DEFAULT_JURISDICTIONS = await generateJurisdictions();
+  }
+  return DEFAULT_JURISDICTIONS;
 };
 
-const getJurisdictionByAddress = (address: string): JurisdictionConfig | undefined => {
-  return DEFAULT_JURISDICTIONS.get(address);
+const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]> => {
+  const jurisdictions = await getJurisdictions();
+  return Array.from(jurisdictions.values());
+};
+
+const getJurisdictionByAddress = async (address: string): Promise<JurisdictionConfig | undefined> => {
+  const jurisdictions = await getJurisdictions();
+  return jurisdictions.get(address);
 };
 
 const registerEntityInJurisdiction = async (
@@ -1462,13 +1454,18 @@ const processUntilEmpty = (env: Env, inputs: EntityInput[]) => {
 // Time machine utility functions
 const resetHistory = () => envHistory.length = 0;
 
-const runDemo = (env: Env): Env => {
+const runDemo = async (env: Env): Promise<Env> => {
   
   if (DEBUG) {
     console.log('🚀 Starting XLN Consensus Demo - Multi-Entity Test');
     console.log('✨ Using deterministic hash-based proposal IDs (no randomness)');
     console.log('🌍 Environment-based architecture with merged serverInput');
     console.log('🗑️ History cleared for fresh start');
+  }
+  
+  const ethereumJurisdiction = await getJurisdictionByAddress('ethereum');
+  if (!ethereumJurisdiction) {
+    throw new Error('❌ Ethereum jurisdiction not found');
   }
   
   // === TEST 1: Chat Entity - NUMBERED ENTITY (Blockchain Registered) ===
@@ -1483,7 +1480,7 @@ const runDemo = (env: Env): Env => {
       bob: BigInt(1),
       carol: BigInt(1)
     },
-    jurisdiction: DEFAULT_JURISDICTIONS.get('ethereum') // Add jurisdiction
+    jurisdiction: ethereumJurisdiction // Add jurisdiction
   };
   
   // Create numbered entity (blockchain registered)
@@ -1502,24 +1499,29 @@ const runDemo = (env: Env): Env => {
     entityInputs: []
   });
   
-  // === TEST 2: Trading Entity - NUMBERED ENTITY (Blockchain Registered) ===
+  // === TEST 2: Trading Entity - NUMBERED ENTITY (Weighted Voting) ===
   console.log('\n📋 TEST 2: Trading Entity - Numbered Entity with Jurisdiction');
   const tradingValidators = ['alice', 'bob', 'carol', 'david'];
   const tradingConfig: ConsensusConfig = {
-    mode: 'gossip-based', // Test gossip mode
-    threshold: BigInt(7), // Need 7 out of 10 total shares
+    mode: 'gossip-based',
+    threshold: BigInt(7), // Need 7 out of 10 weighted shares
     validators: tradingValidators,
     shares: {
-      alice: BigInt(4), // Major stakeholder
-      bob: BigInt(3),   // Medium stakeholder
-      carol: BigInt(2), // Minor stakeholder
-      david: BigInt(1)  // Minimal stakeholder
+      alice: BigInt(4), // Weighted voting power
+      bob: BigInt(3),
+      carol: BigInt(2),
+      david: BigInt(1)
     },
-    jurisdiction: DEFAULT_JURISDICTIONS.get('ethereum') // Add jurisdiction
+    jurisdiction: ethereumJurisdiction // Add jurisdiction
   };
   
   // Create numbered entity (blockchain registered)
   const tradingEntityId = generateNumberedEntityId(2); // Use entity #2
+  
+  // Note: Governance is now automatically created when entity #2 is registered on-chain
+  console.log(`✅ Entity #2 governance automatically created with fixed supply`);
+  console.log(`📋 Fixed supply: 1 quadrillion control & dividend tokens (held by entity)`);
+  console.log(`🔄 Distribution: Use reserveToReserve() to manually distribute tokens`);
   
   processServerInput(env, {
     serverTxs: tradingValidators.map((signerId, index) => ({
@@ -1534,7 +1536,7 @@ const runDemo = (env: Env): Env => {
     entityInputs: []
   });
   
-  // === TEST 3: Governance Entity - LAZY ENTITY (Hash-based ID) ===
+  // === TEST 3: Governance Entity - LAZY ENTITY (Higher Threshold) ===
   console.log('\n📋 TEST 3: Governance Entity - Lazy Entity with Jurisdiction');
   const govValidators = ['alice', 'bob', 'carol', 'david', 'eve'];
   const govConfig: ConsensusConfig = {
@@ -1548,12 +1550,12 @@ const runDemo = (env: Env): Env => {
       david: BigInt(3),
       eve: BigInt(3)
     },
-    jurisdiction: DEFAULT_JURISDICTIONS.get('ethereum') // Add jurisdiction
+    jurisdiction: ethereumJurisdiction
   };
   
   // Create lazy entity (hash-based ID)
   const govEntityId = generateLazyEntityId(govValidators, BigInt(10));
-  
+
   processServerInput(env, {
     serverTxs: govValidators.map((signerId, index) => ({
       type: 'importReplica' as const,
@@ -1616,7 +1618,7 @@ const runDemo = (env: Env): Env => {
         ]
       },
           {
-        entityId: govEntityId,
+        entityId: govConfig.entityId,
         signerId: 'alice',
         entityTxs: [
           { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Governance decision: Implement new voting system' } }, proposer: 'bob' } },
@@ -1662,7 +1664,7 @@ const runDemo = (env: Env): Env => {
   // We need to get the proposal ID from the previous execution, but for demo purposes, we'll simulate voting workflow
   console.log('\n⚠️  CORNER CASE 7b: Voting on proposals (simulated)');
   processUntilEmpty(env, [{
-    entityId: govEntityId,
+    entityId: govConfig.entityId,
     signerId: 'alice',
     entityTxs: [
       { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Critical governance: Emergency protocol activation' } }, proposer: 'eve' } } // Eve only has 3 shares, needs 10 total
@@ -1780,10 +1782,9 @@ const runDemo = (env: Env): Env => {
   console.log('\n🔗 BLOCKCHAIN DEMO: Creating numbered entities on Ethereum');
   
   // Get Ethereum jurisdiction config
-  const ethereumJurisdiction = DEFAULT_JURISDICTIONS.get('ethereum');
-  if (!ethereumJurisdiction) {
-    console.warn('⚠️ Ethereum jurisdiction not found, skipping blockchain demo');
-    return env;
+  const ethJurisdiction = await getJurisdictionByAddress('ethereum');
+  if (!ethJurisdiction) {
+    throw new Error('❌ Ethereum jurisdiction not found - deployment failed');
   }
   
   // Create numbered entities for demo purposes (async, fire and forget)
@@ -1799,7 +1800,7 @@ const runDemo = (env: Env): Env => {
           bob: BigInt(1), 
           carol: BigInt(1)
         },
-        jurisdiction: ethereumJurisdiction
+        jurisdiction: ethJurisdiction
       };
       await registerNumberedEntityOnChain(chatConfig, 'Demo Chat');
       console.log('✅ Demo chat entity registered on Ethereum');
@@ -1815,7 +1816,7 @@ const runDemo = (env: Env): Env => {
           carol: BigInt(2),
           david: BigInt(1)
         },
-        jurisdiction: ethereumJurisdiction
+        jurisdiction: ethJurisdiction
       };
       await registerNumberedEntityOnChain(tradingConfigForChain, 'Demo Trading');
       console.log('✅ Demo trading entity registered on Ethereum');
@@ -1832,13 +1833,14 @@ const runDemo = (env: Env): Env => {
           david: BigInt(3),
           eve: BigInt(3)
         },
-        jurisdiction: ethereumJurisdiction
+        jurisdiction: ethJurisdiction
       };
       await registerNumberedEntityOnChain(govConfigForChain, 'Demo Governance');
       console.log('✅ Demo governance entity registered on Ethereum');
       
     } catch (error: any) {
-      console.warn('⚠️ Demo blockchain registration failed:', error.message);
+      console.error('❌ Demo blockchain registration failed:', error.message);
+      throw error;
     }
   }, 1000); // Give demo time to complete first
 
@@ -1847,18 +1849,50 @@ const runDemo = (env: Env): Env => {
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
-  let env: Env | null = null;
+  // First, create default environment
+  let env: Env = {
+    replicas: new Map(),
+    height: 0,
+    timestamp: Date.now(),
+    serverInput: { serverTxs: [], entityInputs: [] }
+  };
 
+  // Then try to load saved state if available
   try {
+    if (isBrowser) {
+      console.log('🌐 Browser environment: Attempting to load snapshots from IndexedDB...');
+    } else {
+      console.log('🖥️ Node.js environment: Attempting to load snapshots from filesystem...');
+    }
+
     const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
+    
+    console.log(`📊 Found latest height: ${latestHeight}, loading ${latestHeight + 1} snapshots...`);
 
-    // Load all snapshots in parallel
-    const snapshotPromises = Array.from({ length: latestHeight + 1 }, (_, i) => 
-      db.get(Buffer.from(`snapshot:${i}`)).then(decode).catch(() => null)
-    );
-
-    const snapshots = (await Promise.all(snapshotPromises)).filter(Boolean);
+    // Load snapshots starting from 1 (height 0 is initial state, no snapshot saved)
+    console.log(`📥 Loading snapshots: 1 to ${latestHeight}...`);
+    const snapshots = [];
+    
+    // Start from 1 since height 0 is initial state with no snapshot
+    for (let i = 1; i <= latestHeight; i++) {
+      try {
+        const buffer = await db.get(Buffer.from(`snapshot:${i}`));
+        const snapshot = decode(buffer);
+        snapshots.push(snapshot);
+        console.log(`📦 Snapshot ${i}: loaded ${buffer.length} bytes`);
+      } catch (error) {
+        console.error(`❌ Failed to load snapshot ${i}:`, error);
+        console.warn(`⚠️ Snapshot ${i} missing, continuing with available data...`);
+      }
+    }
+    
+    if (snapshots.length === 0) {
+      console.log(`📦 No snapshots found (latestHeight: ${latestHeight}), using fresh environment`);
+      throw new Error('LEVEL_NOT_FOUND');
+    }
+    
+    console.log(`📊 Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
     envHistory = snapshots;
 
     if (snapshots.length > 0) {
@@ -1870,24 +1904,35 @@ const main = async (): Promise<Env> => {
         serverInput: latestSnapshot.serverInput,
       };
       console.log(`✅ History restored. Server is at height ${env.height} with ${envHistory.length} snapshots.`);
+      console.log(`📈 Snapshot details:`, {
+        height: env.height,
+        replicaCount: env.replicas.size,
+        timestamp: new Date(env.timestamp).toISOString(),
+        serverInputs: env.serverInput.entityInputs.length
+      });
     }
 
   } catch (error: any) {
-    if (error.code !== 'LEVEL_NOT_FOUND') {
-      console.error('An unexpected error occurred while loading state from LevelDB:', error);
+    if (error.code === 'LEVEL_NOT_FOUND') {
+      console.log('📦 No saved state found, using fresh environment');
+      if (isBrowser) {
+        console.log('💡 Browser: This is normal for first-time use. Database will be created automatically.');
+      } else {
+        console.log('💡 Node.js: No existing snapshots in ./db/xln-snapshots directory.');
+      }
+    } else {
+      console.error('❌ Failed to load state from LevelDB:', error);
+      console.error('🔍 Error details:', {
+        code: error.code,
+        message: error.message,
+        isBrowser,
+        dbLocation: isBrowser ? 'IndexedDB: xln-persistent-db' : './db/xln-snapshots'
+      });
+      throw error;
     }
   }
 
-  // If env is still null, create a fresh environment
-  if (!env) {
-    console.log('No saved state found, creating a new environment.');
-    env = {
-      replicas: new Map(),
-      height: 0,
-      timestamp: Date.now(),
-      serverInput: { serverTxs: [], entityInputs: [] }
-    };
-  }
+
 
   return env;
 };
@@ -1953,6 +1998,7 @@ export {
   getAvailableJurisdictions, 
   getJurisdictionByAddress, 
   registerEntityInJurisdiction,
+
   // Entity creation functions
   createLazyEntity,
   createNumberedEntity,
@@ -1984,7 +2030,7 @@ if (!isBrowser) {
   main().then(async env => {
     if (env) {
       console.log('✅ Node.js environment initialized. Running demo for local testing...');
-      runDemo(env);
+      await runDemo(env);
       
       // Add a small delay to ensure demo completes before verification
       setTimeout(async () => {
@@ -2003,7 +2049,7 @@ const getContractAddress = async (port: string): Promise<string> => {
   if (isBrowser) {
     // Browser environment - fetch from server
     try {
-      const response = await fetch('/contract-addresses.json');
+      const response = await fetch('/jurisdictions.json');
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -2014,7 +2060,7 @@ const getContractAddress = async (port: string): Promise<string> => {
   } else {
     // Node.js environment - load from file
     try {
-      const configPath = path.join(process.cwd(), 'contract-addresses.json');
+      const configPath = path.join(process.cwd(), 'jurisdictions.json');
       const configData = fs.readFileSync(configPath, 'utf8');
       config = JSON.parse(configData);
     } catch (error) {
@@ -2022,7 +2068,15 @@ const getContractAddress = async (port: string): Promise<string> => {
     }
   }
   
-  const address = config.networks[port]?.entityProvider;
+  // Find jurisdiction by port number
+  let address: string | undefined;
+  for (const [key, jurisdiction] of Object.entries(config.jurisdictions)) {
+    if ((jurisdiction as any).rpc?.includes(`:${port}`)) {
+      address = (jurisdiction as any).contracts?.entityProvider;
+      break;
+    }
+  }
+  
   if (!address) {
     throw new Error(`No contract address found for network port ${port}. Please deploy contracts first.`);
   }

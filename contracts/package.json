@@ -1,9 +1,32 @@
 {
-  "name": "hardhat-project",
+  "name": "xln-contracts",
+  "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "compile": "bunx hardhat compile",
+    "test": "bunx hardhat test",
+    "deploy": "bunx hardhat ignition deploy ignition/modules/Depository.cjs --network ethereum",
+    "console": "bunx hardhat console",
+    "node": "bunx hardhat node"
+  },
   "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "^0.15.5",
+    "@nomicfoundation/hardhat-ignition-ethers": "^0.15.5",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.11",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.5"
+    "@nomicfoundation/hardhat-verify": "^2.0.9",
+    "@typechain/ethers-v6": "^0.5.1",
+    "@typechain/hardhat": "^9.1.0",
+    "@types/chai": "^4.3.16",
+    "@types/mocha": ">=9.1.0",
+    "chai": "^4.3.10",
+    "ethers": "^6.13.2",
+    "hardhat": "^2.22.6",
+    "hardhat-gas-reporter": "^1.0.10",
+    "solidity-coverage": "^0.8.12",
+    "ts-node": ">=8.0.0",
+    "typechain": "^8.3.2",
+    "typescript": ">=4.5.0"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.2"

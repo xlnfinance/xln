@@ -2,6 +2,7 @@ pragma solidity ^0.8.24;
 
 import "./Token.sol";
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "./ECDSA.sol";
 
 contract EntityProvider is ERC1155 { 
   struct Entity {
@@ -49,8 +50,7 @@ contract EntityProvider is ERC1155 {
   mapping(uint256 => string) public numberToName;  // 42 => "coinbase"
   mapping(string => bool) public reservedNames;    // Admin-controlled names
   
-  // Admin controls
-  address public admin;
+  // Foundation controls (no centralized admin)
   mapping(address => uint8) public nameQuota;      // User name allowances
   
   // Legacy support
@@ -61,6 +61,10 @@ contract EntityProvider is ERC1155 {
   mapping(bytes32 => uint256) public totalControlSupply;      // entityId => total control tokens
   mapping(bytes32 => uint256) public totalDividendSupply;     // entityId => total dividend tokens
   
+  // Fixed token supplies for all entities (immutable and fair)
+  uint256 public constant TOTAL_CONTROL_SUPPLY = 1e15;   // 1 quadrillion (max granularity)
+  uint256 public constant TOTAL_DIVIDEND_SUPPLY = 1e15;  // 1 quadrillion (max granularity)
+
   // Foundation entity (always #1)
   uint256 public constant FOUNDATION_ENTITY = 1;
 
@@ -76,14 +80,13 @@ contract EntityProvider is ERC1155 {
   event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
 
   constructor() ERC1155("https://xln.com/entity/{id}.json") {
-    admin = msg.sender;
     // Reserve some premium names
     reservedNames["coinbase"] = true;
     reservedNames["ethereum"] = true;
     reservedNames["bitcoin"] = true;
     reservedNames["uniswap"] = true;
     
-    // Create foundation entity #1
+    // Create foundation entity #1 with governance
     bytes32 foundationQuorum = keccak256("FOUNDATION_INITIAL_QUORUM");
     bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
     
@@ -92,19 +95,39 @@ contract EntityProvider is ERC1155 {
       proposedAuthenticatorHash: bytes32(0),
       registrationBlock: block.number,
       exists: true,
-      articlesHash: bytes32(0)
+      articlesHash: keccak256(abi.encode(EntityArticles({
+        controlDelay: 1000,
+        dividendDelay: 3000,
+        foundationDelay: 0, // Foundation can't replace itself
+        controlThreshold: 51
+      })))
     });
+    
+    // Setup governance for foundation entity
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(FOUNDATION_ENTITY);
+    address foundationAddress = address(uint160(uint256(foundationId)));
+    
+    _mint(foundationAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(foundationAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+    
+    totalControlSupply[foundationId] = TOTAL_CONTROL_SUPPLY;
+    totalDividendSupply[foundationId] = TOTAL_DIVIDEND_SUPPLY;
+    
+    emit GovernanceEnabled(foundationId, controlTokenId, dividendTokenId);
     
     nextNumber = 2; // Foundation takes #1, next entity will be #2
   }
 
-  modifier onlyAdmin() {
-    require(msg.sender == admin, "Only admin");
+  modifier onlyFoundation() {
+    // Only foundation entity (via its governance tokens) can call admin functions
+    bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
+    (uint256 controlTokenId,) = getTokenIds(FOUNDATION_ENTITY);
+    require(balanceOf(msg.sender, controlTokenId) > 0, "Only foundation token holders");
     _;
   }
 
   /**
-   * @notice Register a new numbered entity (anyone can call)
+   * @notice Register a new numbered entity with automatic governance setup
    * @param boardHash Initial board/quorum hash
    * @return entityNumber The assigned entity number
    */
@@ -112,24 +135,44 @@ contract EntityProvider is ERC1155 {
     entityNumber = nextNumber++;
     bytes32 entityId = bytes32(entityNumber);
     
+    // Create entity with default governance articles
+    EntityArticles memory defaultArticles = EntityArticles({
+      controlDelay: 1000,     // Default 1000 blocks for control
+      dividendDelay: 3000,    // Default 3000 blocks for dividend  
+      foundationDelay: 10000, // Default 10000 blocks for foundation
+      controlThreshold: 51    // Default 51% threshold
+    });
+    
     entities[entityId] = Entity({
       currentBoardHash: boardHash,
       proposedAuthenticatorHash: bytes32(0),
       registrationBlock: block.number,
       exists: true,
-      articlesHash: bytes32(0)  // Default no governance config
+      articlesHash: keccak256(abi.encode(defaultArticles))
     });
     
+    // Automatically setup governance with fixed supply
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+    address entityAddress = address(uint160(uint256(entityId)));
+    
+    _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+    
+    totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
+    totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+    
     emit EntityRegistered(entityId, entityNumber, boardHash);
+    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
+    
     return entityNumber;
   }
 
   /**
-   * @notice Admin assigns a name to an existing numbered entity
+   * @notice Foundation assigns a name to an existing numbered entity
    * @param name The name to assign (e.g., "coinbase")
    * @param entityNumber The entity number to assign the name to
    */
-  function assignName(string memory name, uint256 entityNumber) external onlyAdmin {
+  function assignName(string memory name, uint256 entityNumber) external onlyFoundation {
     require(bytes(name).length > 0 && bytes(name).length <= 32, "Invalid name length");
     require(entities[bytes32(entityNumber)].exists, "Entity doesn't exist");
     require(nameToNumber[name] == 0, "Name already assigned");
@@ -147,11 +190,11 @@ contract EntityProvider is ERC1155 {
   }
 
   /**
-   * @notice Transfer a name from one entity to another (admin only for now)
+   * @notice Transfer a name from one entity to another (foundation only)
    * @param name The name to transfer
    * @param newEntityNumber The target entity number
    */
-  function transferName(string memory name, uint256 newEntityNumber) external onlyAdmin {
+  function transferName(string memory name, uint256 newEntityNumber) external onlyFoundation {
     require(nameToNumber[name] != 0, "Name not assigned");
     require(entities[bytes32(newEntityNumber)].exists, "Target entity doesn't exist");
     
@@ -226,7 +269,42 @@ contract EntityProvider is ERC1155 {
   }
 
   /**
-   * @notice Simplified board verification
+   * @notice Recover entity ID from hanko signature (improved version of isValidSignature)
+   * @param encodedBoard The entity's board data
+   * @param encodedSignature The entity's signatures  
+   * @param hash The hash that was signed
+   * @return entityId The entity ID that signed this hash (0 if invalid)
+   */
+  function recoverEntity(
+    bytes calldata encodedBoard, 
+    bytes calldata encodedSignature, 
+    bytes32 hash
+  ) public view returns (uint256 entityId) {
+    bytes32 boardHash = keccak256(encodedBoard);
+    
+    // First try to find registered entity with this board hash
+    for (uint256 i = 1; i < nextNumber; i++) {
+      bytes32 candidateEntityId = bytes32(i);
+      if (entities[candidateEntityId].exists && entities[candidateEntityId].currentBoardHash == boardHash) {
+        // Verify signature for this registered entity
+        uint16 boardResult = _verifyBoard(hash, encodedBoard, encodedSignature);
+        if (boardResult > 0) {
+          return i; // Return entity number
+        }
+      }
+    }
+    
+    // If no registered entity found, try as lazy entity
+    uint16 lazyResult = _verifyBoard(hash, encodedBoard, encodedSignature);
+    if (lazyResult > 0) {
+      return uint256(boardHash); // Return board hash as entity ID for lazy entities
+    }
+    
+    return 0; // Invalid signature
+  }
+
+  /**
+   * @notice Simplified board verification (calldata version)
    */
   function _verifyBoard(
     bytes32 _hash,
@@ -258,6 +336,8 @@ contract EntityProvider is ERC1155 {
     
     return (voteYes * 100) / totalVotes;
   }
+
+
 
   /**
    * @notice Recover signer from signature
@@ -314,16 +394,12 @@ contract EntityProvider is ERC1155 {
   }
 
   // Admin functions
-  function setReservedName(string memory name, bool reserved) external onlyAdmin {
+  function setReservedName(string memory name, bool reserved) external onlyFoundation {
     reservedNames[name] = reserved;
   }
 
-  function setNameQuota(address user, uint8 quota) external onlyAdmin {
+  function setNameQuota(address user, uint8 quota) external onlyFoundation {
     nameQuota[user] = quota;
-  }
-
-  function changeAdmin(address newAdmin) external onlyAdmin {
-    admin = newAdmin;
   }
 
   // === GOVERNANCE FUNCTIONS ===
@@ -348,53 +424,9 @@ contract EntityProvider is ERC1155 {
     return tokenId & 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
   }
 
-  /**
-   * @notice Setup governance for an entity (auto-called on registration)
-   * @param entityNumber The entity number
-   * @param initialHolders Array of initial token holders
-   * @param controlAmounts Array of control token amounts
-   * @param dividendAmounts Array of dividend token amounts  
-   * @param articles Governance configuration
-   */
-  function setupGovernance(
-    uint256 entityNumber,
-    address[] memory initialHolders,
-    uint256[] memory controlAmounts,
-    uint256[] memory dividendAmounts,
-    EntityArticles memory articles
-  ) external {
-    bytes32 entityId = bytes32(entityNumber);
-    require(entities[entityId].exists, "Entity doesn't exist");
-    require(entities[entityId].articlesHash == bytes32(0), "Governance already setup");
-    
-    // Validate arrays
-    require(initialHolders.length == controlAmounts.length, "Mismatched control arrays");
-    require(initialHolders.length == dividendAmounts.length, "Mismatched dividend arrays");
-    
-    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
-    
-    uint256 totalControl = 0;
-    uint256 totalDividend = 0;
-    
-    // Mint tokens to initial holders
-    for (uint i = 0; i < initialHolders.length; i++) {
-      if (controlAmounts[i] > 0) {
-        _mint(initialHolders[i], controlTokenId, controlAmounts[i], "");
-        totalControl += controlAmounts[i];
-      }
-      if (dividendAmounts[i] > 0) {
-        _mint(initialHolders[i], dividendTokenId, dividendAmounts[i], "");
-        totalDividend += dividendAmounts[i];
-      }
-    }
-    
-    // Store governance config
-    entities[entityId].articlesHash = keccak256(abi.encode(articles));
-    totalControlSupply[entityId] = totalControl;
-    totalDividendSupply[entityId] = totalDividend;
-    
-    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
-  }
+
+
+
 
   /**
    * @notice Propose quorum replacement
@@ -602,4 +634,80 @@ contract EntityProvider is ERC1155 {
       }
     }
   }
+
+  /**
+   * @notice Foundation can create entity with custom governance articles
+   * @param boardHash Initial board/quorum hash
+   * @param articles Custom governance configuration
+   * @return entityNumber The assigned entity number
+   */
+  function foundationRegisterEntity(
+    bytes32 boardHash,
+    EntityArticles memory articles
+  ) external onlyFoundation returns (uint256 entityNumber) {
+    entityNumber = nextNumber++;
+    bytes32 entityId = bytes32(entityNumber);
+    
+    entities[entityId] = Entity({
+      currentBoardHash: boardHash,
+      proposedAuthenticatorHash: bytes32(0),
+      registrationBlock: block.number,
+      exists: true,
+      articlesHash: keccak256(abi.encode(articles))
+    });
+    
+    // Automatically setup governance with fixed supply
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+    address entityAddress = address(uint160(uint256(entityId)));
+    
+    _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+    
+    totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
+    totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+    
+    emit EntityRegistered(entityId, entityNumber, boardHash);
+    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
+    
+    return entityNumber;
+  }
+
+  // === ENTITY SIGNATURE RECOVERY ===
+
+  /**
+   * @notice Transfer tokens from entity using hanko signature authorization
+   * @param entityNumber The entity number
+   * @param to Recipient address  
+   * @param tokenId Token ID (control or dividend)
+   * @param amount Amount to transfer
+   * @param encodedBoard Entity's board data
+   * @param encodedSignature Entity's signatures authorizing this transfer
+   */
+  function entityTransferTokens(
+    uint256 entityNumber,
+    address to,
+    uint256 tokenId,
+    uint256 amount,
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
+  ) external {
+    // Create transfer hash
+    bytes32 transferHash = keccak256(abi.encodePacked(
+      "ENTITY_TRANSFER",
+      entityNumber,
+      to,
+      tokenId,
+      amount,
+      block.timestamp
+    ));
+    
+    // Verify entity signature
+    uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, transferHash);
+    require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    
+    // Execute transfer
+    address entityAddress = address(uint160(uint256(bytes32(entityNumber))));
+    _safeTransferFrom(entityAddress, to, tokenId, amount, "");
+  }
+
 }

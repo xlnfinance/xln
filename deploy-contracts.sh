@@ -43,40 +43,66 @@ deploy_to_network() {
     
     cd contracts
     
-    # Deploy EntityProvider using simple hardhat script
-    echo "   🔧 Running deployment script..."
-    local deploy_output=$(npx hardhat run scripts/deploy-entity-provider.js \
+    # Deploy both EntityProvider and Depository
+    echo "   🔧 Deploying EntityProvider..."
+    local entityprovider_output=$(bunx hardhat run scripts/deploy-entity-provider.cjs \
                          --network "$network_config" 2>&1)
     
-    local deploy_status=$?
-    echo "$deploy_output" > "../logs/deploy-$port.log"
+    local entityprovider_status=$?
+    echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log"
     
-    if [ $deploy_status -eq 0 ] && echo "$deploy_output" | grep -q "DEPLOYED_ADDRESS="; then
-        # Extract contract address from deployment output
-        local contract_address=$(echo "$deploy_output" | grep "DEPLOYED_ADDRESS=" | cut -d'=' -f2)
-        
-        if [ -n "$contract_address" ]; then
-            echo "   ✅ $network_name: $contract_address"
-            
-            # Save address to file for reference
-            echo "$contract_address" > "../deployments/entityprovider-$port.addr"
-            
-            # Store in variable for later use
-            case $port in
-                8545) CONTRACT_8545="$contract_address" ;;
-                8546) CONTRACT_8546="$contract_address" ;;
-                8547) CONTRACT_8547="$contract_address" ;;
-            esac
-        else
-            echo "   ⚠️  Deployed successfully but couldn't extract address"
-            echo "   📋 Full output saved to logs/deploy-$port.log"
-        fi
+    if [ $entityprovider_status -eq 0 ] && echo "$entityprovider_output" | grep -q "DEPLOYED_ADDRESS="; then
+        # Extract EntityProvider address
+        local entityprovider_address=$(echo "$entityprovider_output" | grep "DEPLOYED_ADDRESS=" | cut -d'=' -f2)
+        echo "   ✅ EntityProvider: $entityprovider_address"
+        echo "$entityprovider_address" > "../deployments/entityprovider-$port.addr"
     else
-        echo "   ❌ Deployment failed (exit code: $deploy_status)"
-        echo "   📋 Check logs/deploy-$port.log for details"
+        echo "   ❌ EntityProvider deployment failed"
+        echo "$entityprovider_output"
         cd ..
         return 1
     fi
+    
+    echo "   🔧 Deploying Depository..."
+    local depository_output=$(echo "y" | bunx hardhat ignition deploy ignition/modules/Depository.cjs \
+                         --network "$network_config" 2>&1)
+    
+    local depository_status=$?
+    echo "$depository_output" > "../logs/deploy-depository-$port.log"
+    
+    if [ $depository_status -eq 0 ]; then
+        # Extract final address from Hardhat Ignition output (last line with 0x address)
+        local depository_address=$(echo "$depository_output" | grep -o '0x[a-fA-F0-9]\{40\}' | tail -1)
+        if [ -n "$depository_address" ]; then
+            echo "   ✅ Depository: $depository_address"
+            echo "$depository_address" > "../deployments/depository-$port.addr"
+        else
+            echo "   ❌ Could not extract Depository address"
+            return 1
+        fi
+    else
+        echo "   ❌ Depository deployment failed"
+        echo "$depository_output"
+        return 1
+    fi
+    
+    # Store both addresses in variables for later use
+    case $port in
+        8545) 
+            CONTRACT_8545_EP="$entityprovider_address"
+            CONTRACT_8545_DEP="$depository_address"
+            ;;
+        8546) 
+            CONTRACT_8546_EP="$entityprovider_address"
+            CONTRACT_8546_DEP="$depository_address"
+            ;;
+        8547) 
+            CONTRACT_8547_EP="$entityprovider_address"
+            CONTRACT_8547_DEP="$depository_address"
+            ;;
+    esac
+    
+    echo "   ✅ $network_name deployment complete"
     
     cd ..
     return 0
@@ -105,87 +131,80 @@ if [ $success_count -gt 0 ]; then
     echo ""
     echo "📍 Contract Addresses:"
     
-    if [ -n "$CONTRACT_8545" ]; then
-        echo "   $NETWORK_8545 (port 8545): $CONTRACT_8545"
+    if [ -n "$CONTRACT_8545_EP" ]; then
+        echo "   $NETWORK_8545 (port 8545):"
+        echo "     EntityProvider: $CONTRACT_8545_EP"
+        echo "     Depository: $CONTRACT_8545_DEP"
     fi
-    if [ -n "$CONTRACT_8546" ]; then
-        echo "   $NETWORK_8546 (port 8546): $CONTRACT_8546"
+    if [ -n "$CONTRACT_8546_EP" ]; then
+        echo "   $NETWORK_8546 (port 8546):"
+        echo "     EntityProvider: $CONTRACT_8546_EP"
+        echo "     Depository: $CONTRACT_8546_DEP"
     fi
-    if [ -n "$CONTRACT_8547" ]; then
-        echo "   $NETWORK_8547 (port 8547): $CONTRACT_8547"
+    if [ -n "$CONTRACT_8547_EP" ]; then
+        echo "   $NETWORK_8547 (port 8547):"
+        echo "     EntityProvider: $CONTRACT_8547_EP"
+        echo "     Depository: $CONTRACT_8547_DEP"
     fi
     
     # Update server configuration
     echo ""
-    echo "🔧 Creating contract configuration..."
+    echo "🔧 Creating unified jurisdiction configuration..."
     
-    # Create a contract addresses file that server can read
-    cat > contract-addresses.json << EOF
+    # Create unified jurisdictions.json with actual deployed addresses
+    cat > jurisdictions.json << EOF
 {
-  "networks": {
-    "8545": {
+  "version": "1.0.0",
+  "lastUpdated": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "jurisdictions": {
+    "ethereum": {
       "name": "Ethereum",
+      "chainId": 1337,
       "rpc": "http://localhost:8545",
-      "chainId": 1337,
-      "entityProvider": "${CONTRACT_8545:-"0x9A676e781A523b5d0C0e43731313A708CB607508"}"
+      "contracts": {
+        "entityProvider": "${CONTRACT_8545_EP:-"NOT_DEPLOYED"}",
+        "depository": "${CONTRACT_8545_DEP:-"NOT_DEPLOYED"}"
+      },
+      "explorer": "http://localhost:8545",
+      "currency": "ETH",
+      "status": "${CONTRACT_8545_EP:+active}"
     },
-    "8546": {
-      "name": "Polygon", 
-      "rpc": "http://localhost:8546",
+    "polygon": {
+      "name": "Polygon",
       "chainId": 1337,
-      "entityProvider": "${CONTRACT_8546:-"0x9A676e781A523b5d0C0e43731313A708CB607508"}"
+      "rpc": "http://localhost:8546", 
+      "contracts": {
+        "entityProvider": "${CONTRACT_8546_EP:-"NOT_DEPLOYED"}",
+        "depository": "${CONTRACT_8546_DEP:-"NOT_DEPLOYED"}"
+      },
+      "explorer": "http://localhost:8546",
+      "currency": "MATIC",
+      "status": "${CONTRACT_8546_EP:+active}"
     },
-    "8547": {
+    "arbitrum": {
       "name": "Arbitrum",
-      "rpc": "http://localhost:8547", 
       "chainId": 1337,
-      "entityProvider": "${CONTRACT_8547:-"0x9A676e781A523b5d0C0e43731313A708CB607508"}"
+      "rpc": "http://localhost:8547",
+      "contracts": {
+        "entityProvider": "${CONTRACT_8547_EP:-"NOT_DEPLOYED"}",
+        "depository": "${CONTRACT_8547_DEP:-"NOT_DEPLOYED"}"
+      },
+      "explorer": "http://localhost:8547",
+      "currency": "ETH",
+      "status": "${CONTRACT_8547_EP:+active}"
     }
+  },
+  "defaults": {
+    "timeout": 30000,
+    "retryAttempts": 3,
+    "gasLimit": 1000000
   }
 }
 EOF
 
-    # Create a browser-compatible JavaScript config file
-    cat > contract-config.js << EOF
-// Auto-generated contract configuration
-// Generated on: $(date)
-export const CONTRACT_CONFIG = {
-  networks: {
-    "8545": {
-      name: "Ethereum",
-      rpc: "http://localhost:8545",
-      chainId: 1337,
-      entityProvider: "${CONTRACT_8545:-"0x9A676e781A523b5d0C0e43731313A708CB607508"}"
-    },
-    "8546": {
-      name: "Polygon", 
-      rpc: "http://localhost:8546",
-      chainId: 1337,
-      entityProvider: "${CONTRACT_8546:-"0x9A676e781A523b5d0C0e43731313A708CB607508"}"
-    },
-    "8547": {
-      name: "Arbitrum",
-      rpc: "http://localhost:8547", 
-      chainId: 1337,
-      entityProvider: "${CONTRACT_8547:-"0x9A676e781A523b5d0C0e43731313A708CB607508"}"
-    }
-  },
-  deployedAt: $(date +%s),
-  version: "$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
-};
 
-// Helper function to get contract address by port
-export const getContractAddress = (port) => {
-  return CONTRACT_CONFIG.networks[port]?.entityProvider;
-};
 
-// Helper function to get network config by port
-export const getNetworkConfig = (port) => {
-  return CONTRACT_CONFIG.networks[port];
-};
-EOF
-    
-    echo "   ✅ Contract addresses saved to contract-addresses.json"
+    echo "   ✅ Unified jurisdictions configuration saved"
     echo ""
     echo "🎯 Deployment complete!"
     echo "📋 Next: Restart server to use new contracts"

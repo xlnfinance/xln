@@ -24,6 +24,10 @@ interface IERC721 {
 // IERC1155 already imported from EntityProvider.sol
 contract Depository is Console {
 
+  // Multi-provider support
+  mapping(address => bool) public approvedEntityProviders;
+  address[] public entityProvidersList;
+  
   mapping (address entity => mapping (uint tokenId => uint)) public _reserves;
 
   mapping (bytes channelKey => ChannelInfo) public _channels;
@@ -60,6 +64,53 @@ contract Depository is Console {
 
 
   bytes32[] public _tokens;
+
+  // === MULTI-PROVIDER MANAGEMENT ===
+  
+  event EntityProviderAdded(address indexed provider);
+  event EntityProviderRemoved(address indexed provider);
+  
+  modifier onlyApprovedProvider(address provider) {
+    require(approvedEntityProviders[provider], "Provider not approved");
+    _;
+  }
+  
+  /**
+   * @notice Add an EntityProvider to approved list
+   * @param provider EntityProvider contract address
+   */
+  function addEntityProvider(address provider) external {
+    require(!approvedEntityProviders[provider], "Already approved");
+    approvedEntityProviders[provider] = true;
+    entityProvidersList.push(provider);
+    emit EntityProviderAdded(provider);
+  }
+  
+  /**
+   * @notice Remove an EntityProvider from approved list  
+   * @param provider EntityProvider contract address
+   */
+  function removeEntityProvider(address provider) external {
+    require(approvedEntityProviders[provider], "Not approved");
+    approvedEntityProviders[provider] = false;
+    
+    // Remove from list
+    for (uint i = 0; i < entityProvidersList.length; i++) {
+      if (entityProvidersList[i] == provider) {
+        entityProvidersList[i] = entityProvidersList[entityProvidersList.length - 1];
+        entityProvidersList.pop();
+        break;
+      }
+    }
+    emit EntityProviderRemoved(provider);
+  }
+  
+  /**
+   * @notice Get all approved EntityProviders
+   */
+  function getApprovedProviders() external view returns (address[] memory) {
+    return entityProvidersList;
+  }
 
   constructor() {
     _tokens.push(bytes32(0));
@@ -108,34 +159,37 @@ contract Depository is Console {
   }
 
 
-  /*
-  function processBatch(bytes calldata encodedBatch, bytes calldata encodedEntity) public returns (bool completeSuccess) {
-    address entityAddress = msg.sender;
-    if (encodedEntity.length > 0) {
-      (address entityProviderAddress, 
-      uint entityId, 
-      bytes memory entitySignature) = abi.decode(encodedEntity, (address, uint, bytes));
-
-      log("Entity", entityProviderAddress);
-      require(EntityProvider(entityProviderAddress).isValidSignature(
-        keccak256(encodedBatch),
-        entityId,
-        entitySignature,
-        bytes[]) > 0);
-
-      bytes memory fullEntity = abi.encode(entityProviderAddress, entityId);
-
-      entityAddress = address(keccak256(bytes32(fullEntity)));
-
-
-    } else {
-      log("No entity, fallback to msg.sender");
-      
-    }
-
+  /**
+   * @notice Process batch with entity signature authorization
+   * @param encodedBatch The batch data
+   * @param entityProvider EntityProvider contract address
+   * @param entityNumber Entity number  
+   * @param encodedBoard Entity board data
+   * @param encodedSignature Entity signatures
+   */
+  function processBatchAsEntity(
+    bytes calldata encodedBatch,
+    address entityProvider,
+    uint256 entityNumber,
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
+  ) external onlyApprovedProvider(entityProvider) returns (bool completeSuccess) {
+    
+    // Verify entity signature
+    uint256 recoveredEntity = EntityProvider(entityProvider).recoverEntity(
+      encodedBoard,
+      encodedSignature,
+      keccak256(encodedBatch)
+    );
+    
+    require(recoveredEntity == entityNumber, "Invalid entity signature");
+    
+    // Calculate entity address
+    bytes32 entityId = bytes32(entityNumber);
+    address entityAddress = address(uint160(uint256(entityId)));
+    
     return _processBatch(entityAddress, abi.decode(encodedBatch, (Batch)));
   }
-  */
 
   function processBatch(Batch calldata batch) public returns (bool completeSuccess) {
     return _processBatch(msg.sender, batch);

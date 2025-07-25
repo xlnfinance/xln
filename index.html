@@ -1410,49 +1410,7 @@
     <script type="module">
         import * as XLN from './dist/server.js';
         
-        // Import dynamic contract configuration
-        let CONTRACT_CONFIG = null;
-        let contractConfigLoadTime = 0;
-
-        // Load contract configuration dynamically
-        async function loadContractConfig() {
-            try {
-                // Import the auto-generated contract config
-                const configModule = await import('./contract-config.js?' + Date.now());
-                CONTRACT_CONFIG = configModule.CONTRACT_CONFIG;
-                contractConfigLoadTime = Date.now();
-                
-                console.log('📋 Loaded fresh contract configuration:', CONTRACT_CONFIG);
-                return true;
-            } catch (error) {
-                console.warn('⚠️ Could not load contract-config.js, using fallback addresses:', error);
-                
-                // Fallback to default configuration
-                CONTRACT_CONFIG = {
-                    networks: {
-                        "8545": {
-                            name: "Ethereum",
-                            rpc: "http://localhost:8545",
-                            chainId: 1337,
-                            entityProvider: "0x9A676e781A523b5d0C0e43731313A708CB607508"
-                        },
-                        "8546": {
-                            name: "Polygon", 
-                            rpc: "http://localhost:8546",
-                            chainId: 1337,
-                            entityProvider: "0x9A676e781A523b5d0C0e43731313A708CB607508"
-                        },
-                        "8547": {
-                            name: "Arbitrum",
-                            rpc: "http://localhost:8547", 
-                            chainId: 1337,
-                            entityProvider: "0x9A676e781A523b5d0C0e43731313A708CB607508"
-                        }
-                    }
-                };
-                return false;
-            }
-        }
+        // Use server.js functions directly - no legacy compatibility layer needed
 
         // Global state
         let xlnEnv = null;
@@ -1482,32 +1440,10 @@
             }
         }
         
-        // Check for contract config changes
-        async function checkContractConfigChanges() {
-            try {
-                // Try to load fresh config and compare timestamps
-                const configModule = await import('./contract-config.js?' + Date.now());
-                const freshConfig = configModule.CONTRACT_CONFIG;
-                
-                if (CONTRACT_CONFIG && freshConfig.deployedAt > CONTRACT_CONFIG.deployedAt) {
-                    console.log('🔄 New contract deployment detected, refreshing...');
-                    
-                    const indicator = document.getElementById('reloadIndicator');
-                    indicator.classList.add('show');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1000);
-                }
-            } catch (error) {
-                // Config file might not exist yet, ignore silently
-            }
-        }
+
 
         // Start auto-reload checking (every 10 seconds - much less frequent)
         setInterval(checkForChanges, 10000);
-        
-        // Check for contract config changes every 5 seconds (more frequent for deployments)
-        setInterval(checkContractConfigChanges, 5000);
 
         // Initialize environment
         async function initializeEnvironment() {
@@ -2467,30 +2403,50 @@
             console.log(`📋 Multiple jurisdiction support enabled`);
         }
 
-        function onJurisdictionChange() {
+        async function onJurisdictionChange() {
             const jurisdictionSelect = document.getElementById('jurisdictionSelect');
             const jurisdictionInfo = document.getElementById('jurisdictionInfo');
             const selectedPort = jurisdictionSelect.value;
             
-            if (selectedPort && CONTRACT_CONFIG) {
-                const jurisdiction = CONTRACT_CONFIG.networks[selectedPort];
-                if (jurisdiction) {
-                    // Show jurisdiction details
-                    document.getElementById('networkName').textContent = jurisdiction.name;
-                    document.getElementById('rpcPort').textContent = selectedPort;
-                    document.getElementById('contractAddress').textContent = jurisdiction.entityProvider;
-                    jurisdictionInfo.style.display = 'block';
+            if (selectedPort) {
+                try {
+                    // Use server.js function to get jurisdictions
+                    const jurisdictions = await XLN.getAvailableJurisdictions();
                     
-                    console.log(`🏛️  Selected jurisdiction: ${jurisdiction.name} on port ${selectedPort}`);
-                    console.log(`📝 Contract address: ${jurisdiction.entityProvider}`);
+                    // Find jurisdiction by port
+                    let jurisdiction = null;
+                    for (const [key, jur] of Object.entries(jurisdictions)) {
+                        if (jur.address.includes(`:${selectedPort}`)) {
+                            jurisdiction = jur;
+                            break;
+                        }
+                    }
+                    
+                    if (jurisdiction) {
+                        // Show jurisdiction details
+                        document.getElementById('networkName').textContent = jurisdiction.name;
+                        document.getElementById('rpcPort').textContent = selectedPort;
+                        document.getElementById('contractAddress').textContent = jurisdiction.entityProviderAddress;
+                        jurisdictionInfo.style.display = 'block';
+                        
+                        console.log(`🏛️  Selected jurisdiction: ${jurisdiction.name} on port ${selectedPort}`);
+                        console.log(`📝 Contract address: ${jurisdiction.entityProviderAddress}`);
+                    } else {
+                        // Show error state
+                        document.getElementById('networkName').textContent = 'Jurisdiction not found';
+                        document.getElementById('rpcPort').textContent = selectedPort;
+                        document.getElementById('contractAddress').textContent = 'Not deployed';
+                        jurisdictionInfo.style.display = 'block';
+                        console.log(`❌ No jurisdiction found for port ${selectedPort}`);
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to load jurisdictions:', error);
+                    // Show loading state
+                    document.getElementById('networkName').textContent = 'Loading...';
+                    document.getElementById('rpcPort').textContent = selectedPort;
+                    document.getElementById('contractAddress').textContent = 'Loading contract address...';
+                    jurisdictionInfo.style.display = 'block';
                 }
-            } else if (selectedPort) {
-                // Show loading state if config not loaded yet
-                document.getElementById('networkName').textContent = 'Loading...';
-                document.getElementById('rpcPort').textContent = selectedPort;
-                document.getElementById('contractAddress').textContent = 'Loading contract address...';
-                jurisdictionInfo.style.display = 'block';
-                console.log(`🏛️  Selected port ${selectedPort}, waiting for config...`);
             } else {
                 // Hide jurisdiction details
                 jurisdictionInfo.style.display = 'none';
@@ -2498,12 +2454,27 @@
             }
         }
 
-        function getJurisdictionByPort(port) {
-            if (!CONTRACT_CONFIG) {
-                console.warn('Contract config not loaded yet');
+        async function getJurisdictionByPort(port) {
+            try {
+                const jurisdictions = await XLN.getAvailableJurisdictions();
+                
+                // Find jurisdiction by port
+                for (const [key, jurisdiction] of Object.entries(jurisdictions)) {
+                    if (jurisdiction.address.includes(`:${port}`)) {
+                        return {
+                            name: jurisdiction.name,
+                            rpc: jurisdiction.address,
+                            chainId: jurisdiction.chainId,
+                            entityProvider: jurisdiction.entityProviderAddress,
+                            depository: jurisdiction.depositoryAddress
+                        };
+                    }
+                }
+                return null;
+            } catch (error) {
+                console.error('Failed to load jurisdictions:', error);
                 return null;
             }
-            return CONTRACT_CONFIG.networks[port];
         }
 
         // Make functions global
@@ -2721,7 +2692,7 @@
                     return;
                 }
                 
-            let jurisdictionConfig = window.getJurisdictionByPort(selectedJurisdiction);
+            let jurisdictionConfig = await window.getJurisdictionByPort(selectedJurisdiction);
             if (!jurisdictionConfig) {
                 alert('Invalid jurisdiction selected');
                 return;
@@ -2956,11 +2927,12 @@
                 try {
                     const rpcUrl = `http://localhost:${port}`;
                     
-                    // Get contract address from dynamic config
-                    const contractAddress = CONTRACT_CONFIG?.networks[port]?.entityProvider;
-                    if (!contractAddress) {
+                    // Get contract address from server.js
+                    const jurisdictionConfig = await getJurisdictionByPort(port);
+                    if (!jurisdictionConfig?.entityProvider) {
                         throw new Error('Contract address not available');
                     }
+                    const contractAddress = jurisdictionConfig.entityProvider;
                     
                     // Check if contract is deployed by testing getCode
                     const codeResponse = await fetch(rpcUrl, {
@@ -3048,12 +3020,14 @@
                 entitiesDiv.textContent = 'Loading entities...';
                 
                             const rpcUrl = `http://localhost:${port}`;
-            const contractAddress = CONTRACT_CONFIG?.networks[port]?.entityProvider;
             
-            if (!contractAddress) {
+            // Get contract address from server.js
+            const jurisdictionConfig = await getJurisdictionByPort(port);
+            if (!jurisdictionConfig?.entityProvider) {
                 entitiesDiv.textContent = 'Contract address not available';
                 return;
             }
+            const contractAddress = jurisdictionConfig.entityProvider;
                 
                 // Get next number to know how many numbered entities exist
                 const nextNumberResponse = await fetch(rpcUrl, {
@@ -3329,8 +3303,7 @@
             });
         });
 
-        // Initialize on load
-        initializeEnvironment();
+        // Initialization handled by DOMContentLoaded main() function
 
         document.getElementById('clearDbBtn').addEventListener('click', () => {
             if (confirm('Are you sure you want to clear the entire database? This cannot be undone.')) {
@@ -3359,11 +3332,7 @@
         // --- Main Application Entry Point ---
         async function main() {
             try {
-                // 1. Load contract configuration first
-                console.log('📋 Loading contract configuration...');
-                await loadContractConfig();
-                
-                // 2. Wait for the environment to load from the database
+                // Wait for the environment to load from the database
                 xlnEnv = await XLN.main();
                 console.log('🎯 XLN Environment loaded:', xlnEnv);
                 console.log('💡 Access via: window.xlnEnv');
