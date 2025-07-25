@@ -26,7 +26,10 @@ npm run demo            # Points to governance documentation
 npm run docs:governance # Same as above
 ```
 
-📖 **Comprehensive governance documentation:** [`docs/governance-architecture.md`](docs/governance-architecture.md)
+📖 **Governance Documentation:**
+- [`docs/governance-architecture.md`](docs/governance-architecture.md) - Complete governance system overview
+- [`docs/foundation-governance.md`](docs/foundation-governance.md) - Foundation-based access control
+- [`docs/fixed-supply-analysis.md`](docs/fixed-supply-analysis.md) - Fixed token supply benefits
 
 ### Development
 ```bash

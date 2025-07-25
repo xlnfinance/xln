@@ -11,23 +11,18 @@ The XLN system now features a robust contract deployment and browser synchroniza
 │  Deploy Script  │ ─► │  Config Files    │ ─► │  Browser/Server │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                              │
-                    ┌────────┼────────┐
-                    │                 │
-        contract-addresses.json   contract-config.js
-           (Server Config)      (Browser Config)
+                             │
+                    jurisdictions.json
+                    (Unified Config)
 ```
 
 ## 📁 Generated Files
 
-### `contract-addresses.json` (Server)
-- JSON format for server-side Node.js consumption
-- Used by `loadContractAddresses()` function
-- Fallback to defaults if missing
-
-### `contract-config.js` (Browser) 
-- ES6 module for browser import
-- Auto-loaded by browser with cache-busting
-- Includes deployment timestamp for change detection
+### `jurisdictions.json` (Unified Config)
+- Single JSON file for both browser and server consumption
+- Contains all network configurations with contract addresses
+- Structured format with versioning and metadata
+- Auto-loaded by both Node.js and browser environments
 
 ## 🚀 Quick Commands
 
@@ -101,28 +96,26 @@ CONTRACT_CONFIG = {
 
 ## 📝 Config File Examples
 
-### Server Config (`contract-addresses.json`)
+### Unified Config (`jurisdictions.json`)
 ```json
 {
-  "networks": {
-    "8545": {
+  "version": "1.0.0",
+  "lastUpdated": "2024-01-15T10:30:00Z",
+  "jurisdictions": {
+    "ethereum": {
       "name": "Ethereum",
-      "rpc": "http://localhost:8545", 
       "chainId": 1337,
-      "entityProvider": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
+      "rpc": "http://localhost:8545",
+      "contracts": {
+        "entityProvider": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+        "depository": "0xb513E6E4b8f2a923D98304ec87F64353C4D5C854"
+      },
+      "explorer": "http://localhost:8545",
+      "currency": "ETH",
+      "status": "active"
     }
   }
-}
-```
-
-### Browser Config (`contract-config.js`)
-```javascript
-export const CONTRACT_CONFIG = {
-  networks: {
-    "8545": {
-      name: "Ethereum",
-      rpc: "http://localhost:8545",
-      chainId: 1337, 
+} 
       entityProvider: "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
     }
   },

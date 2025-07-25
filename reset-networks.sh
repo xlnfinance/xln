@@ -12,7 +12,7 @@ echo "2️⃣ Cleaning up old data..."
 rm -rf contracts/ignition/deployments/* 2>/dev/null || true
 rm -rf logs/*.log 2>/dev/null || true
 rm -rf deployments/*.addr 2>/dev/null || true
-rm -f contract-addresses.json 2>/dev/null || true
+
 rm -rf xln-snapshots 2>/dev/null || true
 echo "✅ Cleanup complete"
 
@@ -36,7 +36,7 @@ if [ $? -eq 0 ]; then
     echo "🎉 Network reset complete!"
     echo ""
     echo "✅ All networks are running with fresh contracts"
-    echo "📋 Contract addresses saved to contract-addresses.json"
+    echo "📋 Contract addresses saved to jurisdictions.json"
     echo ""
     echo "🚀 Next steps:"
     echo "   • Run: bun run src/server.ts"
