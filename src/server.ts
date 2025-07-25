@@ -2075,10 +2075,3 @@ const verifyJurisdictionRegistrations = async () => {
   
   console.log('✅ Jurisdiction verification complete!\n');
 };
-
-// === ENTITY MANAGEMENT ENDPOINTS ===
-
-
-
-
- 
