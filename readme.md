@@ -10,3 +10,27 @@ XLN is an advanced layer-2 scaling solution for blockchain networks, designed to
 4. **Subcontracts**: Support for complex financial instruments like swaps and options
 5. **Onion Routing**: Enhanced privacy for multi-hop payments
 6. **Entity System**: Flexible identity management and multi-signature control of channels
+7. **🏛️ Integrated Governance**: Meta/Alphabet-style tradable control and dividend tokens with ERC1155 efficiency
+
+## Quick Start
+
+### Run Tests
+```bash
+npm test                # Run smart contract tests
+npm run test:contracts  # Run contract tests specifically
+```
+
+### View Governance Documentation
+```bash
+npm run demo            # Points to governance documentation
+npm run docs:governance # Same as above
+```
+
+📖 **Comprehensive governance documentation:** [`docs/governance-architecture.md`](docs/governance-architecture.md)
+
+### Development
+```bash
+npm run env:build       # Compile smart contracts
+npm run env:run         # Start local hardhat network
+npm run env:deploy      # Deploy contracts
+```
