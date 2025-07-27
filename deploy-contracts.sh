@@ -3,7 +3,7 @@
 echo "📝 Deploying EntityProvider contracts to all networks..."
 
 # Create deployment log directory
-mkdir -p logs deployments
+mkdir -p logs
 
 # Network configurations (using simple variables instead of associative arrays)
 NETWORK_8545="Ethereum"
@@ -55,7 +55,6 @@ deploy_to_network() {
         # Extract EntityProvider address
         local entityprovider_address=$(echo "$entityprovider_output" | grep "DEPLOYED_ADDRESS=" | cut -d'=' -f2)
         echo "   ✅ EntityProvider: $entityprovider_address"
-        echo "$entityprovider_address" > "../deployments/entityprovider-$port.addr"
     else
         echo "   ❌ EntityProvider deployment failed"
         echo "$entityprovider_output"
@@ -75,7 +74,6 @@ deploy_to_network() {
         local depository_address=$(echo "$depository_output" | grep -o '0x[a-fA-F0-9]\{40\}' | tail -1)
         if [ -n "$depository_address" ]; then
             echo "   ✅ Depository: $depository_address"
-            echo "$depository_address" > "../deployments/depository-$port.addr"
         else
             echo "   ❌ Could not extract Depository address"
             return 1

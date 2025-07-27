@@ -901,7 +901,7 @@
                     }
                     
                     // Process transaction
-                    let outputs = XLN.processServerInput(xlnEnv, {
+                    let outputs = XLN.applyServerInput(xlnEnv, {
                         serverTxs: [],
                         entityInputs: [{
                             entityId: replica.entityId,
@@ -912,7 +912,7 @@
                     
                     // Process outputs until empty
                     while (outputs.length > 0) {
-                        const newOutputs = XLN.processServerInput(xlnEnv, {
+                        const newOutputs = XLN.applyServerInput(xlnEnv, {
                             serverTxs: [],
                             entityInputs: outputs
                         });
@@ -937,7 +937,7 @@
                             // Create a mock XLN for development
                             XLN = {
                                 main: async () => ({ replicas: new Map(), height: 0, timestamp: Date.now() }),
-                                processServerInput: () => [],
+                                applyServerInput: () => [],
                                 getHistory: () => [],
                                 getSnapshot: () => null,
                                 resetHistory: () => {}

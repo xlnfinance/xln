@@ -1399,7 +1399,6 @@
             </div>
             <div class="time-utility-controls">
                 <button class="time-btn-mini" onclick="goToHistoryStart()" title="Go to Start (Home key)">⏮️</button>
-                <button class="time-btn-mini warning" onclick="resetTimeMachine()" title="Clear History">🗑️</button>
             </div>
         </div>
         <div class="time-slider-container">
@@ -2110,7 +2109,7 @@
             }
             
             // Send transaction to the replica
-            let outputs = XLN.processServerInput(xlnEnv, {
+            let outputs = XLN.applyServerInput(xlnEnv, {
                 serverTxs: [],
                 entityInputs: [{
                     entityId: replica.entityId,
@@ -2121,7 +2120,7 @@
             
             // Process outputs until empty
             while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(xlnEnv, {
+                const newOutputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: [],
                     entityInputs: outputs
                 });
@@ -2161,7 +2160,7 @@
             const from = users[Math.floor(Math.random() * users.length)];
             const message = messages[Math.floor(Math.random() * messages.length)];
             
-            const outputs = XLN.processServerInput(xlnEnv, {
+            const outputs = XLN.applyServerInput(xlnEnv, {
                 serverTxs: [],
                 entityInputs: [{
                     entityId,
@@ -2175,7 +2174,7 @@
             
             // Process outputs
             while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(xlnEnv, {
+                const newOutputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: [],
                     entityInputs: outputs
                 });
@@ -2205,7 +2204,7 @@
             const proposer = proposers[Math.floor(Math.random() * proposers.length)];
             const message = proposals[Math.floor(Math.random() * proposals.length)];
             
-            const outputs = XLN.processServerInput(xlnEnv, {
+            const outputs = XLN.applyServerInput(xlnEnv, {
                 serverTxs: [],
                 entityInputs: [{
                     entityId,
@@ -2225,7 +2224,7 @@
             
             // Process outputs
             while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(xlnEnv, {
+                const newOutputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: [],
                     entityInputs: outputs
                 });
@@ -2267,7 +2266,7 @@
             const voter = voters[Math.floor(Math.random() * voters.length)];
             const choice = Math.random() > 0.3 ? 'yes' : 'no'; // 70% yes, 30% no
             
-            const outputs = XLN.processServerInput(xlnEnv, {
+            const outputs = XLN.applyServerInput(xlnEnv, {
                 serverTxs: [],
                 entityInputs: [{
                     entityId: target.entityId,
@@ -2285,7 +2284,7 @@
             
             // Process outputs
             while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(xlnEnv, {
+                const newOutputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: [],
                     entityInputs: outputs
                 });
@@ -2318,14 +2317,14 @@
                 }))
             }));
             
-            const outputs = XLN.processServerInput(xlnEnv, {
+            const outputs = XLN.applyServerInput(xlnEnv, {
                 serverTxs: [],
                 entityInputs
             });
             
             // Process outputs
             while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(xlnEnv, {
+                const newOutputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: [],
                     entityInputs: outputs
                 });
@@ -2778,14 +2777,14 @@
             }));
             
             // Process the server transactions
-                let outputs = XLN.processServerInput(xlnEnv, {
+                let outputs = XLN.applyServerInput(xlnEnv, {
                 serverTxs: serverTxs,
                 entityInputs: []
             });
             
             // Process outputs until empty
             while (outputs.length > 0) {
-                const newOutputs = XLN.processServerInput(xlnEnv, {
+                const newOutputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: [],
                     entityInputs: outputs
                 });
@@ -3171,12 +3170,6 @@
 
         window.goToHistoryEnd = () => {
             currentTimeIndex = -1; // Current time
-            renderEntities();
-        };
-
-        window.resetTimeMachine = () => {
-            XLN.resetHistory();
-            currentTimeIndex = -1;
             renderEntities();
         };
 

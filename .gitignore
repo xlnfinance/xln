@@ -1,19 +1,14 @@
 
 node_modules
-xln-snapshots
-local-storage
-db
 .DS_Store
 logs/*
 *.txt
 
-node_modules/
 #dist/ need for gh pages /server.js
 *.log
-.DS_Store
 .env
 .env.local
 .env.*.local
 bun.lockb
 # Local database files
-xln-snapshots/
+db/
