@@ -628,9 +628,9 @@
                     entityTx = { type: 'vote', data: { proposalId: proposalSelect, voter: replica.signerId, choice: voteChoice } };
                 }
 
-                let outputs = XLN.processServerInput(xlnEnv, { serverTxs: [], entityInputs: [{ entityId: replica.entityId, signerId: replica.signerId, entityTxs: [entityTx] }] });
+                let outputs = XLN.applyServerInput(xlnEnv, { serverTxs: [], entityInputs: [{ entityId: replica.entityId, signerId: replica.signerId, entityTxs: [entityTx] }] });
                 while(outputs.length > 0) {
-                    outputs = XLN.processServerInput(xlnEnv, { serverTxs: [], entityInputs: outputs });
+                    outputs = XLN.applyServerInput(xlnEnv, { serverTxs: [], entityInputs: outputs });
                 }
                 xlnEnv = xlnEnv; // Trigger svelte update
             }
@@ -650,9 +650,9 @@
                 const config = { mode: 'proposer-based', threshold: BigInt(threshold), validators: validatorNames, shares };
                 const serverTxs = validators.map((v, idx) => ({ type: 'importReplica', entityId: newEntityName, signerId: v.name, data: { config, isProposer: idx === 0 } }));
                 
-                let outputs = XLN.processServerInput(xlnEnv, { serverTxs, entityInputs: [] });
+                let outputs = XLN.applyServerInput(xlnEnv, { serverTxs, entityInputs: [] });
                 while(outputs.length > 0) {
-                    outputs = XLN.processServerInput(xlnEnv, { serverTxs: [], entityInputs: outputs });
+                    outputs = XLN.applyServerInput(xlnEnv, { serverTxs: [], entityInputs: outputs });
                 }
                 
                 alert(`Entity ${newEntityName} created successfully!`);

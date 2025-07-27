@@ -155,8 +155,8 @@
                     if (!proposalSelect) return alert('no proposal');
                     entityTx = { type:'vote', data:{ proposalId: proposalSelect, voter: replica.signerId, choice: voteChoice } };
                 }
-                let outs = XLN.processServerInput(xlnEnv,{ serverTxs:[], entityInputs:[{ entityId: replica.entityId, signerId: replica.signerId, entityTxs:[entityTx] }] });
-                while(outs.length) outs = XLN.processServerInput(xlnEnv,{ serverTxs:[], entityInputs: outs });
+                let outs = XLN.applyServerInput(xlnEnv,{ serverTxs:[], entityInputs:[{ entityId: replica.entityId, signerId: replica.signerId, entityTxs:[entityTx] }] });
+                while(outs.length) outs = XLN.applyServerInput(xlnEnv,{ serverTxs:[], entityInputs: outs });
             }
 
             function addValidator() { validators = [...validators, {name:'', weight:1}]; }
@@ -172,8 +172,8 @@
                 if (threshold>total) return alert('threshold too high');
                 const config={ mode:'proposer-based', threshold:BigInt(threshold), validators: validators.map(v=>v.name), shares};
                 const serverTxs = validators.map((v,idx)=>({type:'importReplica', entityId:newEntity, signerId:v.name, data:{config, isProposer: idx===0}}));
-                let outs = XLN.processServerInput(xlnEnv,{serverTxs, entityInputs:[]});
-                while(outs.length) outs = XLN.processServerInput(xlnEnv,{serverTxs:[], entityInputs:outs});
+                let outs = XLN.applyServerInput(xlnEnv,{serverTxs, entityInputs:[]});
+                while(outs.length) outs = XLN.applyServerInput(xlnEnv,{serverTxs:[], entityInputs:outs});
                 alert(`Entity ${newEntity} created`);
                 newEntity=''; validators=[{name:'alice',weight:1},{name:'bob',weight:1},{name:'carol',weight:1}]; threshold=2;
                 replicaKey=[...xlnEnv.replicas.keys()][0];

@@ -11,9 +11,8 @@ echo ""
 echo "2️⃣ Cleaning up old data..."
 rm -rf contracts/ignition/deployments/* 2>/dev/null || true
 rm -rf logs/*.log 2>/dev/null || true
-rm -rf deployments/*.addr 2>/dev/null || true
 
-rm -rf xln-snapshots 2>/dev/null || true
+rm -rf db 2>/dev/null || true
 echo "✅ Cleanup complete"
 
 # Start fresh networks  
