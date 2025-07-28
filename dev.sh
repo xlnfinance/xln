@@ -28,65 +28,37 @@ else
     echo "2️⃣ All networks are running ✅"
 fi
 
-# Check contract configuration
+# Check jurisdiction configuration
 echo ""
-echo "3️⃣ Checking contract configuration..."
-if [ -f "contract-config.js" ]; then
-    echo "   ✅ contract-config.js exists"
+echo "3️⃣ Checking jurisdiction configuration..."
+if [ -f "jurisdictions.json" ]; then
+    echo "   ✅ jurisdictions.json exists"
     
-    # Check if addresses look deployed (not all the same)
-    ethereum_addr=$(grep -A5 '"8545"' contract-config.js | grep entityProvider | cut -d'"' -f4)
-    polygon_addr=$(grep -A5 '"8546"' contract-config.js | grep entityProvider | cut -d'"' -f4)
+    # Check if contracts are deployed (get ethereum entityProvider address)
+    ethereum_addr=$(jq -r '.ethereum.contracts.entityProvider // .jurisdictions.ethereum.contracts.entityProvider // "null"' jurisdictions.json 2>/dev/null)
+    polygon_addr=$(jq -r '.polygon.contracts.entityProvider // .jurisdictions.polygon.contracts.entityProvider // "null"' jurisdictions.json 2>/dev/null)
     
-    if [ "$ethereum_addr" != "$polygon_addr" ]; then
+    # Check for placeholder/default Hardhat addresses
+    default_hardhat="0x5FbDB2315678afecb367f032d93F642f64180aa3"
+    
+    if [ "$ethereum_addr" = "$default_hardhat" ] || [ "$polygon_addr" = "$default_hardhat" ]; then
+        echo "   ⚠️  Using default Hardhat addresses (contracts not deployed)"
+        echo "   📄 Ethereum: $ethereum_addr"
+        echo "   📄 Polygon: $polygon_addr"
+        echo "   💡 Run './deploy-contracts.sh' to deploy proper contracts"
+    elif [ "$ethereum_addr" != "null" ] && [ "$ethereum_addr" != "$polygon_addr" ]; then
         echo "   ✅ Contracts appear to be individually deployed"
+        echo "   📄 Ethereum: $ethereum_addr"
+        echo "   📄 Polygon: $polygon_addr"
     else
-        echo "   ⚠️  Contracts might need redeployment (all same address)"
-        echo "   💡 Run './deploy-contracts.sh' to redeploy"
+        echo "   ⚠️  Contracts might need deployment or are using same address"
+        echo "   💡 Run './deploy-contracts.sh' to deploy"
     fi
 else
-    echo "   ❌ contract-config.js missing"
-    echo "   🔧 Creating fallback configuration..."
-    
-    # Create a basic fallback config
-    cat > contract-config.js << 'EOF'
-// Fallback contract configuration for development
-export const CONTRACT_CONFIG = {
-  networks: {
-    "8545": {
-      name: "Ethereum",
-      rpc: "http://localhost:8545",
-      chainId: 1337,
-      entityProvider: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-    },
-    "8546": {
-      name: "Polygon", 
-      rpc: "http://localhost:8546",
-      chainId: 1337,
-      entityProvider: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-    },
-    "8547": {
-      name: "Arbitrum",
-      rpc: "http://localhost:8547", 
-      chainId: 1337,
-      entityProvider: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
-    }
-  },
-  deployedAt: 0,
-  version: "fallback"
-};
-
-export const getContractAddress = (port) => {
-  return CONTRACT_CONFIG.networks[port]?.entityProvider;
-};
-
-export const getNetworkConfig = (port) => {
-  return CONTRACT_CONFIG.networks[port];
-};
-EOF
-    
-    echo "   ✅ Fallback config created"
-    echo "   💡 Run './deploy-contracts.sh' for fresh deployments"
+    echo "   ❌ jurisdictions.json missing"
+    echo "   ⚠️  Contracts must be deployed first!"
+    echo "   💡 Run './deploy-contracts.sh' to deploy and create jurisdictions.json"
+    echo "   🚫 Cannot run server without proper contract deployments"
 fi
 
 # Check server build

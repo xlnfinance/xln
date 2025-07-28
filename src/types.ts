@@ -112,3 +112,45 @@ export type EntityType = 'lazy' | 'numbered' | 'named';
 
 // Constants
 export const ENC = 'hex' as const; 
+
+// === HANKO BYTES SYSTEM (Final Design) ===
+export interface HankoBytes {
+  packedSignatures: Buffer;  // Optimized: rsrsrs...vvv format
+  noEntities: Buffer[];      // Entity IDs that failed to sign
+  claims: HankoClaim[];      // Verification claims from primitive to complex
+}
+
+export interface HankoClaim {
+  entityId: Buffer;          // Entity being verified
+  entityIndexes: number[];   // Indexes into noEntities + yesEntities array
+  weights: number[];         // Voting weights for each entity
+  threshold: number;         // Required voting power
+  expectedQuorumHash: Buffer; // Expected quorum hash for this entity
+}
+
+export interface HankoVerificationResult {
+  valid: boolean;
+  entityId: Buffer;
+  signedHash: Buffer;
+  yesEntities: Buffer[];
+  noEntities: Buffer[];
+  completionPercentage: number; // 0-100% completion
+  errors?: string[];
+}
+
+export interface HankoMergeResult {
+  merged: HankoBytes;
+  addedSignatures: number;
+  completionBefore: number;
+  completionAfter: number;
+  log: string[];
+}
+
+/**
+ * Context for hanko verification
+ */
+export interface HankoContext {
+  timestamp: number;
+  blockNumber?: number;
+  networkId?: number;
+} 

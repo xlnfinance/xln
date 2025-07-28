@@ -27,6 +27,9 @@ import {
 } from './evm.js';
 import { runDemo } from './rundemo.js';
 
+import { demoHankoBytes } from './demo-hanko.js';
+import { demoCompleteHanko } from './hanko-complete.js';
+
 // This code works in both Node.js and the browser
 import { Level } from 'level';
 import { encode, decode } from './snapshot-coder.js';
@@ -384,7 +387,11 @@ const main = async (): Promise<Env> => {
     }
   }
 
+  // Add hanko demo to the main execution
+  console.log('\n🖋️  Testing Complete Hanko Implementation...');
+  await demoCompleteHanko();
 
+  log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
 
   return env;
 };
