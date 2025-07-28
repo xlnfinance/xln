@@ -43816,8 +43816,8 @@ var main = async () => {
     }
   }
   console.log(`
-\uD83D\uDD8B️  Testing Final Hanko Implementation...`);
-  await demoFinalHanko();
+\uD83D\uDD8B️  Testing Complete Hanko Implementation...`);
+  await demoCompleteHanko();
   log.info(`\uD83C\uDFAF Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
   return env;
 };
