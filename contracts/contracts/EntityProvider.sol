@@ -488,7 +488,37 @@ contract EntityProvider is ERC1155 {
   }
 
   /**
-   * @notice Verify hanko signature with EntityProvider integration
+   * @notice Build and hash a board from actual signers and claim data
+   * @param actualSigners Array of recovered signer addresses
+   * @param claim The hanko claim with weights and threshold
+   * @return boardHash The keccak256 hash of the reconstructed board
+   */
+  function _buildQuorumHash(
+    address[] memory actualSigners,
+    HankoClaim memory claim
+  ) internal pure returns (bytes32 boardHash) {
+    require(actualSigners.length == claim.weights.length, "Signers/weights length mismatch");
+    
+    // Build Board struct from actual signers
+    Board memory reconstructedBoard = Board({
+      votingThreshold: uint16(claim.threshold),
+      delegates: new Delegate[](actualSigners.length)
+    });
+    
+    // Populate delegates with actual signers and their weights
+    for (uint256 i = 0; i < actualSigners.length; i++) {
+      reconstructedBoard.delegates[i] = Delegate({
+        entityId: abi.encodePacked(actualSigners[i]), // Convert address to bytes
+        votingPower: uint16(claim.weights[i])
+      });
+    }
+    
+    // Hash the reconstructed board (same as entity registration)
+    boardHash = keccak256(abi.encode(reconstructedBoard));
+  }
+
+  /**
+   * @notice Verify hanko signature with just-in-time quorum verification
    * @param hankoData ABI-encoded hanko bytes
    * @param hash The hash that was signed
    * @return entityId The verified entity (0 if invalid)
@@ -515,26 +545,44 @@ contract EntityProvider is ERC1155 {
       noEntities[i] = hanko.noEntities[i];
     }
     
-    // Step 1: Recover EOA signatures
+    // Step 1: Recover EOA signatures and collect actual signers
+    address[] memory actualSigners = new address[](signatureCount);
+    uint256 validSignerCount = 0;
+    
     for (uint256 i = 0; i < signatures.length; i++) {
       if (signatures[i].length == 65) {
         address signer = _recoverSigner(hash, signatures[i]);
         if (signer != address(0)) {
+          actualSigners[validSignerCount] = signer;
           yesEntities[yesCount] = bytes32(uint256(uint160(signer)));
           yesCount++;
+          validSignerCount++;
         }
       }
     }
     
-    // Step 2: Process claims with EntityProvider verification
+    // Resize actualSigners array to only include valid signers
+    address[] memory validSigners = new address[](validSignerCount);
+    for (uint256 i = 0; i < validSignerCount; i++) {
+      validSigners[i] = actualSigners[i];
+    }
+    
+    // Step 2: Process claims with REAL-TIME quorum verification
     for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
       HankoClaim memory claim = hanko.claims[claimIndex];
       
-      // IMPROVEMENT 1: Verify entity exists and quorum hash matches
+      // Verify entity exists
       require(entities[claim.entityId].exists, "Entity does not exist");
+      
+      // CRITICAL: Build quorum hash from actual signers and verify it matches
+      bytes32 reconstructedQuorumHash = _buildQuorumHash(validSigners, claim);
       require(
-        entities[claim.entityId].currentBoardHash == claim.expectedQuorumHash,
-        "Quorum hash mismatch"
+        entities[claim.entityId].currentBoardHash == reconstructedQuorumHash,
+        "Real-time quorum verification failed"
+      );
+      require(
+        reconstructedQuorumHash == claim.expectedQuorumHash,
+        "Expected quorum hash mismatch"
       );
       
       // Validate claim structure
@@ -545,7 +593,7 @@ contract EntityProvider is ERC1155 {
       
       uint256 totalVotingPower = 0;
       
-      // Calculate voting power
+      // Calculate voting power from actual signers
       for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
         uint256 entityIndex = claim.entityIndexes[i];
         
@@ -575,7 +623,7 @@ contract EntityProvider is ERC1155 {
       bytes32 targetEntity = hanko.claims[hanko.claims.length - 1].entityId;
       
       // Check if target entity is in yesEntities
-      for (uint256 i = signatures.length; i < yesCount; i++) {
+      for (uint256 i = validSignerCount; i < yesCount; i++) {
         if (yesEntities[i] == targetEntity) {
           return (targetEntity, true);
         }
