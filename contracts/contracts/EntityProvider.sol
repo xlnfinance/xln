@@ -398,6 +398,254 @@ contract EntityProvider is ERC1155 {
     reservedNames[name] = reserved;
   }
 
+  // === HANKO SIGNATURE VERIFICATION ===
+
+  struct HankoBytes {
+    bytes packedSignatures;    // Optimized: rsrsrs...vvv format
+    bytes32[] noEntities;      // Entity IDs that failed to sign
+    HankoClaim[] claims;       // Verification claims from primitive to complex
+  }
+
+  struct HankoClaim {
+    bytes32 entityId;          // Entity being verified
+    uint256[] entityIndexes;   // Indexes into noEntities + yesEntities array
+    uint256[] weights;         // Voting weights for each entity
+    uint256 threshold;         // Required voting power
+    bytes32 expectedQuorumHash; // Expected quorum hash for this entity
+  }
+  
+  // Events
+  event HankoVerified(bytes32 indexed entityId, bytes32 indexed hash);
+  event HankoClaimProcessed(bytes32 indexed entityId, bool success, uint256 votingPower);
+
+  /**
+   * @notice Detect signature count from packed signatures length
+   * @param packedSignatures Packed rsrsrs...vvv format
+   * @return signatureCount Number of signatures in the packed data
+   */
+  function _detectSignatureCount(bytes memory packedSignatures) internal pure returns (uint256 signatureCount) {
+    if (packedSignatures.length == 0) return 0;
+    
+    // Try different signature counts until we find the right one
+    // Formula: length = count * 64 + ceil(count / 8)
+    for (uint256 count = 1; count <= 16000; count++) {
+      uint256 expectedRSBytes = count * 64;
+      uint256 expectedVBytes = (count + 7) / 8; // Ceiling division
+      uint256 expectedTotal = expectedRSBytes + expectedVBytes;
+      
+      if (packedSignatures.length == expectedTotal) {
+        return count;
+      }
+      
+      // Early exit if we've exceeded possible length
+      if (expectedTotal > packedSignatures.length) {
+        break;
+      }
+    }
+    
+    revert("Invalid packed signature length - cannot detect count");
+  }
+
+  /**
+   * @notice Unpack signatures from packed format
+   * @param packedSignatures Packed rsrsrs...vvv format
+   * @return signatures Array of 65-byte signatures
+   */
+  function _unpackSignatures(
+    bytes memory packedSignatures
+  ) internal pure returns (bytes[] memory signatures) {
+    uint256 signatureCount = _detectSignatureCount(packedSignatures);
+    
+    if (signatureCount == 0) {
+      return new bytes[](0);
+    }
+    
+    uint256 expectedRSBytes = signatureCount * 64;
+    uint256 expectedVBytes = (signatureCount + 7) / 8; // Ceiling division
+    
+    signatures = new bytes[](signatureCount);
+    
+    for (uint256 i = 0; i < signatureCount; i++) {
+      // Extract R and S (64 bytes)
+      bytes memory rs = new bytes(64);
+      for (uint256 j = 0; j < 64; j++) {
+        rs[j] = packedSignatures[i * 64 + j];
+      }
+      
+      // Extract V bit
+      uint256 vByteIndex = expectedRSBytes + i / 8;
+      uint256 vBitIndex = i % 8;
+      uint8 vByte = uint8(packedSignatures[vByteIndex]);
+      uint8 v = ((vByte >> vBitIndex) & 1) == 0 ? 27 : 28;
+      
+      // Combine into 65-byte signature
+      signatures[i] = new bytes(65);
+      for (uint256 j = 0; j < 64; j++) {
+        signatures[i][j] = rs[j];
+      }
+      signatures[i][64] = bytes1(v);
+    }
+  }
+
+  /**
+   * @notice Verify hanko signature with EntityProvider integration
+   * @param hankoData ABI-encoded hanko bytes
+   * @param hash The hash that was signed
+   * @return entityId The verified entity (0 if invalid)
+   * @return success Whether verification succeeded
+   */
+  function verifyHankoSignature(
+    bytes calldata hankoData,
+    bytes32 hash
+  ) external view returns (bytes32 entityId, bool success) {
+    HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
+    
+    // Unpack signatures (with automatic count detection)
+    bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
+    uint256 signatureCount = signatures.length;
+    
+    // Pre-allocate arrays for gas efficiency
+    bytes32[] memory yesEntities = new bytes32[](signatureCount + hanko.claims.length);
+    bytes32[] memory noEntities = new bytes32[](hanko.noEntities.length + hanko.claims.length);
+    uint256 yesCount = 0;
+    uint256 noCount = hanko.noEntities.length;
+    
+    // Copy initial noEntities
+    for (uint256 i = 0; i < hanko.noEntities.length; i++) {
+      noEntities[i] = hanko.noEntities[i];
+    }
+    
+    // Step 1: Recover EOA signatures
+    for (uint256 i = 0; i < signatures.length; i++) {
+      if (signatures[i].length == 65) {
+        address signer = _recoverSigner(hash, signatures[i]);
+        if (signer != address(0)) {
+          yesEntities[yesCount] = bytes32(uint256(uint160(signer)));
+          yesCount++;
+        }
+      }
+    }
+    
+    // Step 2: Process claims with EntityProvider verification
+    for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
+      HankoClaim memory claim = hanko.claims[claimIndex];
+      
+      // IMPROVEMENT 1: Verify entity exists and quorum hash matches
+      require(entities[claim.entityId].exists, "Entity does not exist");
+      require(
+        entities[claim.entityId].currentBoardHash == claim.expectedQuorumHash,
+        "Quorum hash mismatch"
+      );
+      
+      // Validate claim structure
+      require(
+        claim.entityIndexes.length == claim.weights.length,
+        "Claim indexes/weights length mismatch"
+      );
+      
+      uint256 totalVotingPower = 0;
+      
+      // Calculate voting power
+      for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
+        uint256 entityIndex = claim.entityIndexes[i];
+        
+        if (entityIndex < noCount) {
+          // Entity failed to sign - contributes 0 voting power
+          continue;
+        } else {
+          // Entity successfully signed
+          uint256 yesIndex = entityIndex - noCount;
+          require(yesIndex < yesCount, "Invalid entity index");
+          totalVotingPower += claim.weights[i];
+        }
+      }
+      
+      // Check threshold and update entity sets
+      if (totalVotingPower >= claim.threshold) {
+        yesEntities[yesCount] = claim.entityId;
+        yesCount++;
+      } else {
+        noEntities[noCount] = claim.entityId;
+        noCount++;
+      }
+    }
+    
+    // Final verification: check if target entity succeeded
+    if (hanko.claims.length > 0) {
+      bytes32 targetEntity = hanko.claims[hanko.claims.length - 1].entityId;
+      
+      // Check if target entity is in yesEntities
+      for (uint256 i = signatures.length; i < yesCount; i++) {
+        if (yesEntities[i] == targetEntity) {
+          return (targetEntity, true);
+        }
+      }
+    }
+    
+    return (bytes32(0), false);
+  }
+
+  /**
+   * @notice Batch verify multiple hanko signatures
+   * @param hankoDataArray Array of ABI-encoded hanko bytes
+   * @param hashes Array of hashes that were signed
+   * @return entityIds Array of verified entity IDs
+   * @return results Array of success flags
+   */
+  function batchVerifyHankoSignatures(
+    bytes[] calldata hankoDataArray,
+    bytes32[] calldata hashes
+  ) external view returns (bytes32[] memory entityIds, bool[] memory results) {
+    require(hankoDataArray.length == hashes.length, "Array length mismatch");
+    
+    entityIds = new bytes32[](hankoDataArray.length);
+    results = new bool[](hankoDataArray.length);
+    
+    for (uint256 i = 0; i < hankoDataArray.length; i++) {
+      (entityIds[i], results[i]) = this.verifyHankoSignature(hankoDataArray[i], hashes[i]);
+    }
+  }
+
+  /**
+   * @notice Check basic hanko validity without full verification
+   * @param hankoData ABI-encoded hanko bytes
+   * @param hash The hash that was signed
+   * @return valid Whether hanko is basically valid (signatures recoverable)
+   */
+  function isValidHankoSignature(
+    bytes calldata hankoData,
+    bytes32 hash
+  ) external view returns (bool valid) {
+    HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
+    
+    // Simplified verification without state changes
+    bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
+    uint256 validSignatures = 0;
+    for (uint256 i = 0; i < signatures.length; i++) {
+      if (signatures[i].length == 65) {
+        address signer = _recoverSigner(hash, signatures[i]);
+        if (signer != address(0)) {
+          validSignatures++;
+        }
+        }
+    }
+    
+    // Check if all claims have valid entities and quorum hashes
+    for (uint256 i = 0; i < hanko.claims.length; i++) {
+      HankoClaim memory claim = hanko.claims[i];
+      if (!entities[claim.entityId].exists ||
+          entities[claim.entityId].currentBoardHash != claim.expectedQuorumHash) {
+        return false;
+      }
+    }
+    
+    if (hanko.claims.length > 0 && validSignatures > 0) {
+      return true;
+    }
+    
+    return false;
+  }
+
   function setNameQuota(address user, uint8 quota) external onlyFoundation {
     nameQuota[user] = quota;
   }

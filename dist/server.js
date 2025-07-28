@@ -43815,6 +43815,10 @@ var main = async () => {
       throw error;
     }
   }
+  console.log(`
+\uD83D\uDD8B️  Testing Final Hanko Implementation...`);
+  await demoFinalHanko();
+  log.info(`\uD83C\uDFAF Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
   return env;
 };
 var getHistory = () => envHistory;
