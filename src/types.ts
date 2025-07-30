@@ -115,9 +115,9 @@ export const ENC = 'hex' as const;
 
 // === HANKO BYTES SYSTEM (Final Design) ===
 export interface HankoBytes {
-  packedSignatures: Buffer;  // Optimized: rsrsrs...vvv format
-  noEntities: Buffer[];      // Entity IDs that failed to sign
-  claims: HankoClaim[];      // Verification claims from primitive to complex
+  placeholders: Buffer[];    // Entity IDs that failed to sign (index 0..N-1)
+  packedSignatures: Buffer;  // EOA signatures → yesEntities (index N..M-1)
+  claims: HankoClaim[];      // Entity claims to verify (index M..∞)
 }
 
 export interface HankoClaim {

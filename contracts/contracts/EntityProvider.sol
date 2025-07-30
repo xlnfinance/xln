@@ -401,9 +401,9 @@ contract EntityProvider is ERC1155 {
   // === HANKO SIGNATURE VERIFICATION ===
 
   struct HankoBytes {
-    bytes packedSignatures;    // Optimized: rsrsrs...vvv format
-    bytes32[] noEntities;      // Entity IDs that failed to sign
-    HankoClaim[] claims;       // Verification claims from primitive to complex
+    bytes32[] placeholders;    // Entity IDs that failed to sign (index 0..N-1)  
+    bytes packedSignatures;    // EOA signatures → yesEntities (index N..M-1)
+    HankoClaim[] claims;       // Entity claims to verify (index M..∞)
   }
 
   struct HankoClaim {
@@ -518,8 +518,8 @@ contract EntityProvider is ERC1155 {
   }
 
   /**
-   * @notice Verify hanko signature with just-in-time quorum verification
-   * @param hankoData ABI-encoded hanko bytes
+   * @notice Verify hanko signature with flashloan governance (optimistic verification)
+   * @param hankoData ABI-encoded hanko bytes  
    * @param hash The hash that was signed
    * @return entityId The verified entity (0 if invalid)
    * @return success Whether verification succeeded
@@ -534,18 +534,10 @@ contract EntityProvider is ERC1155 {
     bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
     uint256 signatureCount = signatures.length;
     
-    // Pre-allocate arrays for gas efficiency
-    bytes32[] memory yesEntities = new bytes32[](signatureCount + hanko.claims.length);
-    bytes32[] memory noEntities = new bytes32[](hanko.noEntities.length + hanko.claims.length);
-    uint256 yesCount = 0;
-    uint256 noCount = hanko.noEntities.length;
+    // Calculate total entities for bounds checking
+    uint256 totalEntities = hanko.placeholders.length + signatureCount + hanko.claims.length;
     
-    // Copy initial noEntities
-    for (uint256 i = 0; i < hanko.noEntities.length; i++) {
-      noEntities[i] = hanko.noEntities[i];
-    }
-    
-    // Step 1: Recover EOA signatures and collect actual signers
+    // Recover EOA signers for quorum hash building
     address[] memory actualSigners = new address[](signatureCount);
     uint256 validSignerCount = 0;
     
@@ -554,27 +546,27 @@ contract EntityProvider is ERC1155 {
         address signer = _recoverSigner(hash, signatures[i]);
         if (signer != address(0)) {
           actualSigners[validSignerCount] = signer;
-          yesEntities[yesCount] = bytes32(uint256(uint160(signer)));
-          yesCount++;
           validSignerCount++;
         }
       }
     }
     
-    // Resize actualSigners array to only include valid signers
+    // Resize to valid signers only
     address[] memory validSigners = new address[](validSignerCount);
     for (uint256 i = 0; i < validSignerCount; i++) {
       validSigners[i] = actualSigners[i];
     }
     
-    // Step 2: Process claims with REAL-TIME quorum verification
+    // FLASHLOAN GOVERNANCE: Verify claims one by one, assume unverified claims = YES
+    bool[] memory claimResults = new bool[](hanko.claims.length);
+    
     for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
       HankoClaim memory claim = hanko.claims[claimIndex];
       
       // Verify entity exists
       require(entities[claim.entityId].exists, "Entity does not exist");
       
-      // CRITICAL: Build quorum hash from actual signers and verify it matches
+      // Build quorum hash from actual signers and verify
       bytes32 reconstructedQuorumHash = _buildQuorumHash(validSigners, claim);
       require(
         entities[claim.entityId].currentBoardHash == reconstructedQuorumHash,
@@ -585,7 +577,7 @@ contract EntityProvider is ERC1155 {
         "Expected quorum hash mismatch"
       );
       
-      // Validate claim structure
+      // Validate structure
       require(
         claim.entityIndexes.length == claim.weights.length,
         "Claim indexes/weights length mismatch"
@@ -593,41 +585,42 @@ contract EntityProvider is ERC1155 {
       
       uint256 totalVotingPower = 0;
       
-      // Calculate voting power from actual signers
+      // Calculate voting power with flashloan assumptions
       for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
         uint256 entityIndex = claim.entityIndexes[i];
         
-        if (entityIndex < noCount) {
-          // Entity failed to sign - contributes 0 voting power
+        // Bounds check
+        require(entityIndex < totalEntities, "Entity index out of bounds");
+        
+        if (entityIndex < hanko.placeholders.length) {
+          // Placeholder (failed entity) - 0 voting power
           continue;
+        } else if (entityIndex < hanko.placeholders.length + signatureCount) {
+          // EOA signature - verified voting power
+          totalVotingPower += claim.weights[i];
         } else {
-          // Entity successfully signed
-          uint256 yesIndex = entityIndex - noCount;
-          require(yesIndex < yesCount, "Invalid entity index");
+          // Entity claim - ASSUME YES (flashloan governance)
+          uint256 referencedClaimIndex = entityIndex - hanko.placeholders.length - signatureCount;
+          // Don't check if it's actually verified yet - OPTIMISTIC ASSUMPTION!
           totalVotingPower += claim.weights[i];
         }
       }
       
-      // Check threshold and update entity sets
-      if (totalVotingPower >= claim.threshold) {
-        yesEntities[yesCount] = claim.entityId;
-        yesCount++;
-      } else {
-        noEntities[noCount] = claim.entityId;
-        noCount++;
+      // Store result
+      claimResults[claimIndex] = (totalVotingPower >= claim.threshold);
+    }
+    
+    // ATOMIC VERIFICATION: All claims must pass for hanko to succeed
+    for (uint256 i = 0; i < claimResults.length; i++) {
+      if (!claimResults[i]) {
+        return (bytes32(0), false); // Any failure = total failure
       }
     }
     
-    // Final verification: check if target entity succeeded
+    // All claims passed - return final entity
     if (hanko.claims.length > 0) {
       bytes32 targetEntity = hanko.claims[hanko.claims.length - 1].entityId;
-      
-      // Check if target entity is in yesEntities
-      for (uint256 i = validSignerCount; i < yesCount; i++) {
-        if (yesEntities[i] == targetEntity) {
-          return (targetEntity, true);
-        }
-      }
+      return (targetEntity, true);
     }
     
     return (bytes32(0), false);
@@ -1004,6 +997,92 @@ contract EntityProvider is ERC1155 {
     // Execute transfer
     address entityAddress = address(uint160(uint256(bytes32(entityNumber))));
     _safeTransferFrom(entityAddress, to, tokenId, amount, "");
+  }
+
+  /**
+   * @notice Verify quorum claims with pre-recovered signers (gas optimized)
+   * @param claims Array of hanko claims to verify
+   * @param yesEntities Array of entities that successfully signed
+   * @param noEntities Array of entities that failed to sign
+   * @return entityId The verified entity (0 if invalid)
+   * @return success Whether verification succeeded
+   */
+  function verifyQuorumClaims(
+    HankoClaim[] calldata claims,
+    bytes32[] calldata yesEntities,
+    bytes32[] calldata noEntities
+  ) external view returns (bytes32 entityId, bool success) {
+    
+    if (claims.length == 0) {
+      return (bytes32(0), false);
+    }
+    
+    // Extract actual signers from yesEntities (first part are EOA signers)
+    uint256 eoaSignerCount = yesEntities.length;
+    for (uint256 i = 0; i < claims.length; i++) {
+      eoaSignerCount = eoaSignerCount > claims[i].entityIndexes.length ? 
+        eoaSignerCount - claims[i].entityIndexes.length : 0;
+    }
+    
+    address[] memory actualSigners = new address[](eoaSignerCount);
+    for (uint256 i = 0; i < eoaSignerCount; i++) {
+      actualSigners[i] = address(uint160(uint256(yesEntities[i])));
+    }
+    
+    // Process claims with real-time quorum verification
+    uint256 yesCount = yesEntities.length;
+    uint256 noCount = noEntities.length;
+    
+    for (uint256 claimIndex = 0; claimIndex < claims.length; claimIndex++) {
+      HankoClaim memory claim = claims[claimIndex];
+      
+      // Verify entity exists
+      require(entities[claim.entityId].exists, "Entity does not exist");
+      
+      // CRITICAL: Build quorum hash from actual signers and verify it matches
+      bytes32 reconstructedQuorumHash = _buildQuorumHash(actualSigners, claim);
+      require(
+        entities[claim.entityId].currentBoardHash == reconstructedQuorumHash,
+        "Real-time quorum verification failed"
+      );
+      require(
+        reconstructedQuorumHash == claim.expectedQuorumHash,
+        "Expected quorum hash mismatch"
+      );
+      
+      // Validate claim structure  
+      require(
+        claim.entityIndexes.length == claim.weights.length,
+        "Claim indexes/weights length mismatch"
+      );
+      
+      uint256 totalVotingPower = 0;
+      
+      // Calculate voting power from actual signers
+      for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
+        uint256 entityIndex = claim.entityIndexes[i];
+        
+        if (entityIndex < noCount) {
+          // Entity failed to sign - contributes 0 voting power
+          continue;
+        } else {
+          // Entity successfully signed
+          uint256 yesIndex = entityIndex - noCount;
+          require(yesIndex < yesCount, "Invalid entity index");
+          totalVotingPower += claim.weights[i];
+        }
+      }
+      
+      // Check threshold - this claim either passes or fails
+      // (No need to update entity sets since they're pre-computed)
+      if (totalVotingPower < claim.threshold) {
+        return (bytes32(0), false);
+      }
+    }
+    
+    // If we got here, all claims passed
+    bytes32 targetEntity = claims[claims.length - 1].entityId;
+    return (targetEntity, true);
   }
 
 }

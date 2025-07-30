@@ -281,9 +281,9 @@ export const buildRealHanko = async (
   }));
   
   const hanko: HankoBytes = {
-    packedSignatures,
-    noEntities: config.noEntities,
-    claims
+    placeholders: config.noEntities,  // Failed entities (index 0..N-1)
+    packedSignatures,                 // EOA signatures (index N..M-1)  
+    claims                           // Entity claims (index M..∞)
   };
   
   console.log(`✅ Built REAL hanko with verifiable signatures`);
@@ -291,6 +291,86 @@ export const buildRealHanko = async (
   console.log(`   📊 Signature count: ${signatures.length} (detected from length)`);
   
   return hanko;
+};
+
+/**
+ * Recover hanko signatures and return processed entities (for gas optimization)
+ */
+export const recoverHankoEntities = async (hanko: HankoBytes, hash: Buffer): Promise<{
+  yesEntities: Buffer[];
+  noEntities: Buffer[];
+  claims: HankoClaim[];
+}> => {
+  console.log('🔍 Recovering hanko entities with flashloan governance...');
+  
+  // Step 1: Unpack and recover signatures
+  const signatures = unpackRealSignatures(hanko.packedSignatures);
+  const yesEntities: Buffer[] = [];
+  
+  for (let i = 0; i < signatures.length; i++) {
+    try {
+      // Use ethers to recover the signer address
+      const sig = signatures[i];
+      const r = ethers.hexlify(sig.slice(0, 32));
+      const s = ethers.hexlify(sig.slice(32, 64));
+      const v = sig[64];
+      
+      const recoveredAddress = ethers.recoverAddress(ethers.hexlify(hash), { r, s, v });
+      
+      // Convert address to bytes32 (same format as Solidity)
+      const addressAsBytes32 = Buffer.from(
+        ethers.zeroPadValue(recoveredAddress, 32).slice(2), 
+        'hex'
+      );
+      
+      yesEntities.push(addressAsBytes32);
+      console.log(`✅ Recovered signer ${i + 1}: ${recoveredAddress.slice(0,10)}...`);
+      
+    } catch (error) {
+      console.log(`❌ Failed to recover signature ${i + 1}: ${error}`);
+    }
+  }
+  
+  // Step 2: FLASHLOAN GOVERNANCE - optimistically assume all claims pass
+  for (let claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
+    const claim = hanko.claims[claimIndex];
+    
+    // Calculate voting power with flashloan assumptions
+    let totalVotingPower = 0;
+    const totalEntities = hanko.placeholders.length + signatures.length + hanko.claims.length;
+    
+    for (let i = 0; i < claim.entityIndexes.length; i++) {
+      const entityIndex = claim.entityIndexes[i];
+      
+      if (entityIndex < hanko.placeholders.length) {
+        // Placeholder (failed entity) - 0 voting power
+        continue;
+      } else if (entityIndex < hanko.placeholders.length + signatures.length) {
+        // EOA signature - verified voting power
+        totalVotingPower += claim.weights[i];
+      } else {
+        // Entity claim - ASSUME YES (flashloan governance)
+        totalVotingPower += claim.weights[i];
+      }
+    }
+    
+    // Check threshold
+    if (totalVotingPower >= claim.threshold) {
+      yesEntities.push(claim.entityId);
+      console.log(`✅ Claim ${claimIndex + 1} passed: ${totalVotingPower}/${claim.threshold} (flashloan)`);
+    } else {
+      console.log(`❌ Claim ${claimIndex + 1} failed: ${totalVotingPower}/${claim.threshold}`);
+      // Note: In flashloan governance, any failure means total failure
+    }
+  }
+  
+  console.log(`📊 Flashloan recovery complete: ${yesEntities.length} yes, ${hanko.placeholders.length} placeholders`);
+  
+  return {
+    yesEntities,
+    noEntities: hanko.placeholders,
+    claims: hanko.claims
+  };
 };
 
 // === FULL CYCLE TEST ===
@@ -334,12 +414,12 @@ export const testFullCycle = async (): Promise<void> => {
     console.log(`   Signature ${i + 1}: ${verified ? '✅' : '❌'} ${expectedAddr.slice(0,10)}...`);
   }
   
-  // Create ABI-encoded data for Solidity
+  // Create ABI-encoded data for Solidity (flashloan governance format)
   const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
-    ["tuple(bytes,bytes32[],tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])"],
+    ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])"],
     [[
+      hanko.placeholders,
       hanko.packedSignatures,
-      hanko.noEntities,
       hanko.claims.map(c => [
         c.entityId,
         c.entityIndexes,
