@@ -121,11 +121,11 @@ export interface HankoBytes {
 }
 
 export interface HankoClaim {
-  entityId: Buffer;          // Entity being verified
-  entityIndexes: number[];   // Indexes into noEntities + yesEntities array
-  weights: number[];         // Voting weights for each entity
-  threshold: number;         // Required voting power
-  expectedQuorumHash: Buffer; // Expected quorum hash for this entity
+  entityId: Buffer;
+  entityIndexes: number[];
+  weights: number[];
+  threshold: number;
+  expectedQuorumHash: Buffer;
 }
 
 export interface HankoVerificationResult {
