@@ -693,45 +693,7 @@ contract EntityProvider is ERC1155 {
     }
   }
 
-  /**
-   * @notice Check basic hanko validity without full verification
-   * @param hankoData ABI-encoded hanko bytes
-   * @param hash The hash that was signed
-   * @return valid Whether hanko is basically valid (signatures recoverable)
-   */
-  function isValidHankoSignature(
-    bytes calldata hankoData,
-    bytes32 hash
-  ) external view returns (bool valid) {
-    HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
-    
-    // Simplified verification without state changes
-    bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
-    uint256 validSignatures = 0;
-    for (uint256 i = 0; i < signatures.length; i++) {
-      if (signatures[i].length == 65) {
-        address signer = _recoverSigner(hash, signatures[i]);
-        if (signer != address(0)) {
-          validSignatures++;
-        }
-        }
-    }
-    
-    // Check if all claims have valid entities and quorum hashes
-    for (uint256 i = 0; i < hanko.claims.length; i++) {
-      HankoClaim memory claim = hanko.claims[i];
-      if (!entities[claim.entityId].exists ||
-          entities[claim.entityId].currentBoardHash != claim.expectedQuorumHash) {
-        return false;
-      }
-    }
-    
-    if (hanko.claims.length > 0 && validSignatures > 0) {
-      return true;
-    }
-    
-    return false;
-  }
+
 
   function setNameQuota(address user, uint8 quota) external onlyFoundation {
     nameQuota[user] = quota;
