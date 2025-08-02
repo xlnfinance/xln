@@ -171,11 +171,12 @@ contract Depository is Console {
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success);
   
   /**
-   * @notice Process batch with Hanko signature authorization (NEW: Flashloan Governance)
+   * @notice Process batch with Hanko signature authorization using on-chain cryptographic verification
+   * @dev SECURITY: All signatures are verified on-chain using ecrecover - no off-chain trust
    * @param encodedBatch The batch data
    * @param entityProvider EntityProvider contract address  
-   * @param hankoData ABI-encoded Hanko bytes with hierarchical signatures
-   * @param nonce Unique nonce for replay protection
+   * @param hankoData ABI-encoded Hanko bytes (placeholders, packedSignatures, claims)
+   * @param nonce EVM-style sequential nonce for replay protection
    */
   function processBatchWithHanko(
     bytes calldata encodedBatch,
@@ -217,92 +218,9 @@ contract Depository is Console {
     return completeSuccess;
   }
   
-  /**
-   * @notice Gas-optimized batch processing with pre-computed Hanko verification
-   * @dev Off-chain computes yesEntities/noEntities, on-chain just verifies quorum claims
-   * @param encodedBatch The batch data
-   * @param entityProvider EntityProvider contract address
-   * @param yesEntities Pre-verified entities that voted YES  
-   * @param noEntities Pre-verified entities that voted NO
-   * @param claims Array of Hanko claims to verify against pre-computed entities
-   * @param nonce Unique nonce for replay protection
-   */
-  function processBatchWithOptimizedHanko(
-    bytes calldata encodedBatch,
-    address entityProvider,
-    bytes32[] calldata yesEntities,
-    bytes32[] calldata noEntities, 
-    EntityProvider.HankoClaim[] calldata claims,
-    uint256 nonce
-  ) external onlyApprovedProvider(entityProvider) returns (bool completeSuccess) {
-    
-    // 🛡️ Domain separation
-    bytes32 domainSeparatedHash = keccak256(abi.encodePacked(
-      DOMAIN_SEPARATOR,
-      block.chainid,
-      address(this), 
-      encodedBatch,
-      nonce
-    ));
-    
-    // ⚡ Gas-optimized verification (signatures recovered off-chain)
-    // Note: verifyQuorumClaims doesn't verify hash - it only checks quorum structure
-    // Hash verification must be done by the calling application
-    (bytes32 entityId, bool hankoValid) = EntityProvider(entityProvider).verifyQuorumClaims(
-      claims,
-      yesEntities,
-      noEntities
-    );
-    
-    require(hankoValid, "Invalid optimized Hanko verification");
-    require(entityId != bytes32(0), "No entity recovered");
-    
-    // 🚀 Nonce management
-    address entityAddress = address(uint160(uint256(entityId)));
-    bytes32 claimsHash = keccak256(abi.encode(claims));
-    
-    require(nonce == entityNonces[entityAddress] + 1, "Invalid nonce (must be sequential)");
-    entityNonces[entityAddress] = nonce;
-    
-    // ⚡ Process batch
-    completeSuccess = _processBatch(entityAddress, abi.decode(encodedBatch, (Batch)));
-    
-    emit HankoBatchProcessed(entityId, claimsHash, nonce, completeSuccess);
-    
-    return completeSuccess;
-  }
 
-  /**
-   * @notice Legacy: Process batch with entity signature authorization (OLD METHOD)
-   * @param encodedBatch The batch data
-   * @param entityProvider EntityProvider contract address
-   * @param entityNumber Entity number  
-   * @param encodedBoard Entity board data
-   * @param encodedSignature Entity signatures
-   */
-  function processBatchAsEntity(
-    bytes calldata encodedBatch,
-    address entityProvider,
-    uint256 entityNumber,
-    bytes calldata encodedBoard,
-    bytes calldata encodedSignature
-  ) external onlyApprovedProvider(entityProvider) returns (bool completeSuccess) {
-    
-    // Verify entity signature
-    uint256 recoveredEntity = EntityProvider(entityProvider).recoverEntity(
-      encodedBoard,
-      encodedSignature,
-      keccak256(encodedBatch)
-    );
-    
-    require(recoveredEntity == entityNumber, "Invalid entity signature");
-    
-    // Calculate entity address
-    bytes32 entityId = bytes32(entityNumber);
-    address entityAddress = address(uint160(uint256(entityId)));
-    
-    return _processBatch(entityAddress, abi.decode(encodedBatch, (Batch)));
-  }
+
+
 
   function processBatch(Batch calldata batch) public returns (bool completeSuccess) {
     return _processBatch(msg.sender, batch);

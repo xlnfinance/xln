@@ -200,7 +200,7 @@ export const packRealSignatures = (signatures: Buffer[]): Buffer => {
 /**
  * Detect signature count from packed signatures length
  */
-const detectSignatureCount = (packedSignatures: Buffer): number => {
+export const detectSignatureCount = (packedSignatures: Buffer): number => {
   if (packedSignatures.length === 0) return 0;
   
   // Try different signature counts until we find the right one

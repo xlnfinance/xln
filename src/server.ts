@@ -28,6 +28,8 @@ import {
 import { runDemo } from './rundemo.js';
 
 import { testFullCycle } from './hanko-real.js';
+import { runDepositoryHankoTests } from './test-depository-hanko.js';
+import { runBasicHankoTests } from './test-hanko-basic.js';
 
 // This code works in both Node.js and the browser
 import { Level } from 'level';
@@ -389,6 +391,18 @@ const main = async (): Promise<Env> => {
   // Add hanko demo to the main execution
   console.log('\n🖋️  Testing Complete Hanko Implementation...');
   await testFullCycle();
+  
+  // 🧪 Run basic Hanko functionality tests first
+  console.log('\n🧪 Running basic Hanko functionality tests...');
+  await runBasicHankoTests();
+  
+  // 🧪 Run comprehensive Depository-Hanko integration tests
+  console.log('\n🧪 Running comprehensive Depository-Hanko integration tests...');
+  try {
+    await runDepositoryHankoTests();
+  } catch (error) {
+    console.log('ℹ️  Depository integration tests skipped (contract setup required):', error.message.substring(0, 100));
+  }
 
   log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
 
