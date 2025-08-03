@@ -2928,10 +2928,10 @@
                     
                     // Get contract address from server.js
                     const jurisdictionConfig = await getJurisdictionByPort(port);
-                    if (!jurisdictionConfig?.entityProvider) {
+                    if (!jurisdictionConfig?.entityProviderAddress) {
                         throw new Error('Contract address not available');
                     }
-                    const contractAddress = jurisdictionConfig.entityProvider;
+                    const contractAddress = jurisdictionConfig.entityProviderAddress;
                     
                     // Check if contract is deployed by testing getCode
                     const codeResponse = await fetch(rpcUrl, {
@@ -3022,11 +3022,11 @@
             
             // Get contract address from server.js
             const jurisdictionConfig = await getJurisdictionByPort(port);
-            if (!jurisdictionConfig?.entityProvider) {
+            if (!jurisdictionConfig?.entityProviderAddress) {
                 entitiesDiv.textContent = 'Contract address not available';
                 return;
             }
-            const contractAddress = jurisdictionConfig.entityProvider;
+            const contractAddress = jurisdictionConfig.entityProviderAddress;
                 
                 // Get next number to know how many numbered entities exist
                 const nextNumberResponse = await fetch(rpcUrl, {
