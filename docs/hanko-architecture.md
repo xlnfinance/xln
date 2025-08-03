@@ -82,17 +82,17 @@ function getCompletionPercentage(hanko: HankoBytes): number {
 
 ### **1. Unlimited Hierarchy**
 ```
-🏢 MegaCorp DAO (Board of Directors)
-├── 🏛️ Engineering Committee  
+🏢 MegaCorp DAO (3-of-5 Board)
+├── 🏛️ Engineering Committee (2-of-3)
 │   ├── 👤 Alice (CTO)
 │   ├── 👤 Bob (Lead Dev)  
 │   └── 🤖 CI/CD System
-├── 🏛️ Finance Committee
+├── 🏛️ Finance Committee (2-of-3)
 │   ├── 👤 Carol (CFO)
-│   └── 🏛️ Audit Sub-Committee
+│   └── 🏛️ Audit Sub-Committee (2-of-2)
 │       ├── 👤 Dave (Auditor)
 │       └── 👤 Eve (Compliance)
-└── 👤 Frank (CEO - emergency override)
+└── 👤 Frank (Board Member)
 ```
 
 ### **2. Gas Efficiency**
@@ -107,7 +107,8 @@ function getCompletionPercentage(hanko: HankoBytes): number {
 - **Future-proof**: Extensible for new signature schemes
 
 ### **4. Security**
-- **Live state verification**: Validates against actual EntityProvider governance
+- **Live state verification**: Validates against current EntityProvider governance
+- **Single source of truth**: One active board hash per entity (no dual power)
 - **Cryptographic integrity**: Each signature mathematically verified
 - **Replay protection**: Handled by consuming contracts (stateless design)
 
@@ -116,7 +117,7 @@ function getCompletionPercentage(hanko: HankoBytes): number {
 ### **DeFi Protocols**
 - **Treasury management**: DAO → Committee → Individual approval chains
 - **Risk parameters**: Multi-level approval for critical changes
-- **Emergency responses**: Hierarchical escalation procedures
+- **Protocol governance**: Hierarchical approval workflows
 
 ### **Enterprise Adoption**
 - **Corporate governance**: Board → Department → Individual workflows  
@@ -131,15 +132,9 @@ function getCompletionPercentage(hanko: HankoBytes): number {
 ## 📈 **Market Opportunity**
 
 ### **Technical Metrics**
-- **Gas savings**: 60-80% vs recursive verification
-- **Signature density**: ~98.6% efficiency vs naive encoding
-- **Verification speed**: O(n) vs O(n²) for nested calls
-
-### **Adoption Vectors**
-1. **Gnosis Safe integration**: Upgrade existing multisigs
-2. **DAO tooling**: Snapshot, Tally, governance platforms
-3. **DeFi protocols**: Compound, Aave, Uniswap governance
-4. **Enterprise wallets**: Fireblocks, Fordefi, institutional custody
+- **Gas efficiency**: Single call vs O(n) recursive verification
+- **Signature density**: 1.34% space savings vs naive encoding
+- **Verification complexity**: O(n) linear processing
 
 
 
