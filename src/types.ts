@@ -125,7 +125,6 @@ export interface HankoClaim {
   entityIndexes: number[];
   weights: number[];
   threshold: number;
-  expectedQuorumHash: Buffer;
 }
 
 export interface HankoVerificationResult {

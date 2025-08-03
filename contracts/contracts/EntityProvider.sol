@@ -428,10 +428,9 @@ contract EntityProvider is ERC1155 {
 
   struct HankoClaim {
     bytes32 entityId;          // Entity being verified
-    uint256[] entityIndexes;   // Indexes into noEntities + yesEntities array
-    uint256[] weights;         // Voting weights for each entity
+    uint256[] entityIndexes;   // Indexes into placeholders + yesEntities + claims arrays
+    uint256[] weights;         // Voting weights for each entity  
     uint256 threshold;         // Required voting power
-    bytes32 expectedQuorumHash; // Expected quorum hash for this entity
   }
   
   // Events
@@ -522,7 +521,7 @@ contract EntityProvider is ERC1155 {
    * @param claim The hanko claim with weights and threshold
    * @return boardHash The keccak256 hash of the reconstructed board
    */
-  function _buildQuorumHash(
+  function _buildBoardHash(
     address[] memory actualSigners,
     HankoClaim memory claim
   ) internal pure returns (bytes32 boardHash) {
@@ -612,15 +611,11 @@ contract EntityProvider is ERC1155 {
       // Verify entity exists
       require(entities[claim.entityId].exists, "Entity does not exist");
       
-      // Build quorum hash from actual signers and verify
-      bytes32 reconstructedQuorumHash = _buildQuorumHash(validSigners, claim);
+      // Build board hash from actual signers and verify against live state
+      bytes32 reconstructedBoardHash = _buildBoardHash(validSigners, claim);
       require(
-        entities[claim.entityId].currentBoardHash == reconstructedQuorumHash,
-        "Real-time quorum verification failed"
-      );
-      require(
-        reconstructedQuorumHash == claim.expectedQuorumHash,
-        "Expected quorum hash mismatch"
+        entities[claim.entityId].currentBoardHash == reconstructedBoardHash,
+        "Real-time board verification failed - governance changed"
       );
       
       // Validate structure
