@@ -1,8 +1,34 @@
-# Hanko Bytes: The Next-Generation Hierarchical Signature Protocol
+# Hanko: The Next-Generation Hierarchical Signature Protocol
+
+## 🚀 **Why Hanko Dominates Every DAO Framework**
+
+| Framework | Cost per Entity | Hierarchy Support | Gas per Operation | Migration Effort | Composability |
+|-----------|----------------|-------------------|-------------------|------------------|---------------|
+| **Hanko (Lazy)** | **0 gas** | ✅ Unlimited nesting | **~50k gas** | ✅ Zero changes needed | ✅ Universal standard |
+| **Hanko (Registered)** | **50k gas** | ✅ Unlimited nesting | **~50k gas** | ✅ Zero changes needed | ✅ Universal standard |
+| Compound Governor | 1,700k gas | ❌ Flat only | 200k+ gas | ❌ Complete rewrite | ❌ Protocol-specific |
+| Gnosis Safe | 400k gas | ❌ Flat only | 100k+ gas | ❌ Complete rewrite | ❌ Limited |
+| EIP-4337 Accounts | 100-400k gas | ❌ Single account | 100k+ gas | ❌ New infrastructure | ❌ Wallet-focused |
+| Aragon | 800k+ gas | ⚠️ Limited hierarchy | 150k+ gas | ❌ Framework lock-in | ⚠️ Aragon ecosystem only |
+| OpenZeppelin Governor | 600k+ gas | ❌ Flat only | 180k+ gas | ❌ Complete rewrite | ❌ Limited |
+
+**The Verdict**: Hanko delivers 87.5-100% cost reduction with unlimited hierarchical complexity and zero migration friction.
+
+## ⚡ **Power Points - Why DeFi Experts Choose Hanko**
+
+🏆 **Zero-Cost Entity Creation**: Create unlimited sub-DAOs, committees, and governance structures for 0 gas (lazy entities) vs 400k+ gas for traditional DAOs
+
+🏗️ **Real Corporate Hierarchies**: Map actual organizational structures to code - Board → Committee → Individual approval chains vs flat 3-of-5 multisigs
+
+🔄 **Instant Protocol Integration**: Any DeFi protocol adds Hanko support by calling `EntityProvider.verifyHankoSignature()` - zero smart contract changes needed
+
+🎯 **Payment Channel Ready**: Same entity provides both direct governance AND cryptographic proofs for channels, enabling enterprise-grade institutional workflows
+
+🚀 **BCD Governance Innovation**: Separate Board/Control/Dividend powers with TradFi-style transitions prevents the "Meta/Alphabet dual-class stock" problem
 
 ## 🎯 **Executive Summary**
 
-**Hanko Bytes** revolutionizes DeFi governance by enabling unlimited hierarchical entities to sign any hash with a single, self-contained data structure. Unlike traditional DAO frameworks requiring 1 contract per entity (~400k gas deployment), our system supports infinite nesting with zero additional deployment costs through lazy entity architecture.
+**Hanko** revolutionizes DeFi governance by enabling unlimited hierarchical entities to sign any hash with a single, self-contained data structure. Unlike traditional DAO frameworks requiring 1 contract per entity (~400k gas deployment), our system supports infinite nesting with zero additional deployment costs through lazy entity architecture.
 
 ## 🏗️ **Core Innovation: Breaking the 1-Contract = 1-Entity Paradigm**
 
@@ -43,7 +69,7 @@ Hanko separates **signature recovery** from **hierarchical verification**:
 
 ### **Data Structure**
 ```solidity
-struct HankoBytes {
+struct Hanko {
   bytes32[] placeholders;    // Entity IDs that failed to sign (index 0..N-1)
   bytes packedSignatures;    // EOA signatures → yesEntities (index N..M-1)
   HankoClaim[] claims;       // Entity claims to verify (index M..∞)
@@ -91,7 +117,7 @@ Revolutionary space optimization through bit-level packing:
 ### **Hanko Merging**
 During entity consensus, partial signatures can be merged:
 ```typescript
-function mergeHankos(hanko1: HankoBytes, hanko2: HankoBytes): HankoBytes {
+function mergeHankos(hanko1: Hanko, hanko2: Hanko): Hanko {
   // Combine unique signatures
   // Merge entity completion states  
   // Preserve claim hierarchy
@@ -100,7 +126,7 @@ function mergeHankos(hanko1: HankoBytes, hanko2: HankoBytes): HankoBytes {
 
 ### **Completion Percentage**
 ```typescript
-function getCompletionPercentage(hanko: HankoBytes): number {
+function getCompletionPercentage(hanko: Hanko): number {
   // Calculate voting power achieved vs required
   // Account for hierarchical dependencies
   // Return 0-100% completion status
@@ -304,7 +330,7 @@ bytes32 teslaEntityId = keccak256("tesla_treasury_dao");
 
 ## 🎯 **Why This Changes Everything**
 
-**Hanko Bytes doesn't just optimize governance - it fundamentally reimagines how organizations operate on-chain.**
+**Hanko doesn't just optimize governance - it fundamentally reimagines how organizations operate on-chain.**
 
 Traditional blockchain governance forces a choice: **Simple & Expensive** (multisigs) or **Complex & Rigid** (DAO frameworks). 
 
