@@ -386,21 +386,7 @@ contract EntityProvider is ERC1155 {
     }
   }
 
-  /**
-   * @notice Check if entity exists (registered or lazy with valid board)
-   * @param entityId The entity ID to check
-   * @param boardHash Optional board hash for lazy entity validation
-   * @return exists Whether entity exists
-   */
-  function _entityExists(bytes32 entityId, bytes32 boardHash) internal view returns (bool exists) {
-    if (entities[entityId].currentBoardHash != bytes32(0)) {
-      return true; // Registered entity
-    }
-    if (boardHash != bytes32(0) && entityId == boardHash) {
-      return true; // Valid lazy entity
-    }
-    return false;
-  }
+
 
   // Utility functions
   function resolveEntityId(string memory identifier) external view returns (bytes32) {

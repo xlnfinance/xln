@@ -83,13 +83,13 @@ function getCompletionPercentage(hanko: HankoBytes): number {
 ### **1. Unlimited Hierarchy**
 ```
 🏢 MegaCorp DAO (3-of-5 Board)
-├── 🏛️ Engineering Committee (2-of-3)
+├── 🏛️ Engineering Committee (2-of-3 Board)
 │   ├── 👤 Alice (CTO)
 │   ├── 👤 Bob (Lead Dev)  
 │   └── 🤖 CI/CD System
-├── 🏛️ Finance Committee (2-of-3)
+├── 🏛️ Finance Committee (2-of-3 Board)
 │   ├── 👤 Carol (CFO)
-│   └── 🏛️ Audit Sub-Committee (2-of-2)
+│   └── 🏛️ Audit Sub-Committee (2-of-2 Board)
 │       ├── 👤 Dave (Auditor)
 │       └── 👤 Eve (Compliance)
 └── 👤 Frank (Board Member)
@@ -111,6 +111,13 @@ function getCompletionPercentage(hanko: HankoBytes): number {
 - **Single source of truth**: One active board hash per entity (no dual power)
 - **Cryptographic integrity**: Each signature mathematically verified
 - **Replay protection**: Handled by consuming contracts (stateless design)
+
+### **5. Clean Board Design**
+- **Parallel arrays**: `bytes32[] entityIds` + `uint16[] votingPowers` for gas efficiency
+- **Type safety**: Fixed `bytes32` vs variable `bytes` eliminates parsing errors
+- **Lazy entities**: Auto-validation when `entityId == keccak256(board)` (no registration)
+- **TradFi transitions**: Embedded delays prevent channel proof expiration
+- **BCD governance**: Control > Board > Dividend priority hierarchy
 
 ## 🎯 **Use Cases**
 

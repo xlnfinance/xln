@@ -28,21 +28,21 @@
 - ✅ Экономия gas при обновлениях
 - ✅ Иммутабельные после создания
 
-## 📋 2. Priority System для замены кворума
+## 📋 2. BCD Priority System (Board-Control-Dividend)
 
-**Priority**: `CONTROL > QUORUM > DIVIDEND > FOUNDATION`
+**Priority**: `CONTROL > BOARD > DIVIDEND` 
 
-| Proposer   | Can Cancel                              |
-|------------|-----------------------------------------|
-| CONTROL    | QUORUM, DIVIDEND, FOUNDATION proposals  |
-| QUORUM     | DIVIDEND, FOUNDATION proposals          |  
-| DIVIDEND   | FOUNDATION proposals only               |
-| FOUNDATION | Cannot cancel anyone                    |
+| Proposer   | Can Override/Cancel                     | Delay Source                    |
+|------------|----------------------------------------|---------------------------------|
+| CONTROL    | BOARD, DIVIDEND proposals              | Board.controlChangeDelay        |
+| BOARD      | DIVIDEND proposals only                | Board.boardChangeDelay          |  
+| DIVIDEND   | Cannot cancel anyone                   | Board.dividendChangeDelay       |
 
-**Delays (configurable in articles):**
-- Control: X blocks
-- Dividend: X*3 blocks  
-- Foundation: X*10 blocks (0 = disabled)
+**TradFi-Style Transitions:**
+- ✅ Current board remains active during transition
+- ✅ Configurable delays prevent channel proof expiration  
+- ✅ No dual power - only one active board hash per entity
+- ❌ Foundation removed (too centralized for DeFi)
 
 ## 📋 3. Meta-Style Entity Creation
 
