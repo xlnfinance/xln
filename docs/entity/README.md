@@ -206,19 +206,32 @@ export { executeEntityTx, createEntityBlock };
 - Signature validation
 - State consistency checks
 
-# Validation System
+# Hanko Signature System
+
+## Hierarchical Signature Verification
+- **Hanko Bytes**: Self-contained signature system supporting unlimited hierarchy
+- **Flashloan Governance**: Optimistic verification of circular dependencies  
+- **Real-time Quorum Validation**: Live state verification against EntityProvider
+- **Gas Optimized**: Single verification call vs recursive nested verification
 
 ## Signature Types
-- EOA signatures (20 bytes)
-- Nested entity signatures
-- Board-based validation
-- Recursive DAO validation
+- **EOA signatures**: Standard secp256k1 signatures (65 bytes each)
+- **Nested entity signatures**: Via Hanko claims referencing other entities
+- **Packed format**: rsrsrs...vvv encoding for gas efficiency
+- **Board-based validation**: Threshold voting with configurable quorum
 
 ## Board Rules
-- Configurable thresholds
-- Delegate voting power
-- Stake-based validation
-- Timeout handling
+- **Configurable thresholds**: Required voting power per entity
+- **Delegate voting power**: Weighted signatures based on governance
+- **Real-time validation**: Current board hash verification
+- **Hierarchical composition**: Bottom-up claim processing
+
+## Integration Points
+- **EntityProvider.verifyHankoSignature()**: Core verification function
+- **Depository.processBatchWithHanko()**: Hanko-authorized batch processing
+- **Sequential nonces**: EVM-style replay protection per entity
+- **Domain separation**: EIP-712 style hash isolation
+
 Proposer                    Validators
    |                           |
    |-- Aggregate Mempool       |
