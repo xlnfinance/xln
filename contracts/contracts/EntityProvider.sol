@@ -6,21 +6,21 @@ import "./ECDSA.sol";
 
 contract EntityProvider is ERC1155 { 
   struct Entity {
-    bytes32 currentBoardHash;
-    bytes32 proposedAuthenticatorHash;
-    uint256 registrationBlock;
-    bool exists;
-    bytes32 articlesHash;  // Governance config hash
-  }
-
-  struct Delegate {
-    bytes entityId;
-    uint16 votingPower;
+    bytes32 currentBoardHash;    // 0x0 = lazy entity (entityId == boardHash)
+    bytes32 proposedBoardHash;   // Pending board transition
+    uint256 activateAtBlock;     // When proposed board becomes active
+    uint256 registrationBlock;   // When entity was registered (0 for lazy)
+    ProposerType proposerType;   // Who proposed the current transition
+    bytes32 articlesHash;        // Governance config hash
   }
 
   struct Board {
     uint16 votingThreshold;
-    Delegate[] delegates;
+    bytes32[] entityIds;        // Parallel arrays for efficiency
+    uint16[] votingPowers;      // Must match entityIds length
+    uint32 boardChangeDelay;    // Board → Board transitions (blocks)
+    uint32 controlChangeDelay;  // Control → Board transitions (blocks)  
+    uint32 dividendChangeDelay; // Dividend → Board transitions (blocks)
   }
 
   struct EntityArticles {
@@ -30,12 +30,13 @@ contract EntityProvider is ERC1155 {
     uint16 controlThreshold;  // % of control tokens needed for quorum replacement
   }
 
-  enum ProposerType { QUORUM, CONTROL, DIVIDEND, FOUNDATION }
+  enum ProposerType { BOARD, CONTROL, DIVIDEND }
 
-  struct QuorumProposal {
-    bytes32 proposedQuorum;
+  struct BoardProposal {
+    bytes32 proposedBoardHash;
     ProposerType proposerType;
     uint256 proposeBlock;
+    uint256 activateBlock;
     bool active;
   }
 
@@ -316,21 +317,25 @@ contract EntityProvider is ERC1155 {
     Board memory board = abi.decode(encodedBoard, (Board));
     bytes[] memory signatures = abi.decode(encodedSignature, (bytes[]));
     
+    require(board.entityIds.length == board.votingPowers.length, "Board arrays length mismatch");
+    
     uint16 voteYes = 0;
     uint16 totalVotes = 0;
     
-    for (uint i = 0; i < board.delegates.length && i < signatures.length; i++) {
-      Delegate memory delegate = board.delegates[i];
+    for (uint i = 0; i < board.entityIds.length && i < signatures.length; i++) {
+      bytes32 entityId = board.entityIds[i];
+      uint16 votingPower = board.votingPowers[i];
       
-      if (delegate.entityId.length == 20) {
+      // Check if this is an EOA (20 bytes when cast to address)
+      if (uint256(entityId) <= type(uint160).max) {
         // Simple EOA verification
-        address signer = address(uint160(uint256(bytes32(delegate.entityId))));
+        address signer = address(uint160(uint256(entityId)));
         if (signer == _recoverSigner(_hash, signatures[i])) {
-          voteYes += delegate.votingPower;
+          voteYes += votingPower;
         }
-        totalVotes += delegate.votingPower;
+        totalVotes += votingPower;
       }
-      // Note: Nested entity verification removed for simplicity
+      // Note: Nested entity verification handled by Hanko system
     }
     
     if (totalVotes == 0) return 0;
@@ -361,6 +366,40 @@ contract EntityProvider is ERC1155 {
     if (v != 27 && v != 28) return address(0);
     
     return ecrecover(_hash, v, r, s);
+  }
+
+  /**
+   * @notice Validate entity exists (registered or lazy)
+   * @param entityId The entity ID to validate
+   * @param boardHash The board hash for validation
+   * @return isLazy Whether this is a lazy entity
+   */
+  function _validateEntity(bytes32 entityId, bytes32 boardHash) internal view returns (bool isLazy) {
+    if (entities[entityId].currentBoardHash == bytes32(0)) {
+      // Lazy entity: entityId must equal boardHash
+      require(entityId == boardHash, "Lazy entity: ID must equal board hash");
+      return true;
+    } else {
+      // Registered entity: use stored boardHash
+      require(boardHash == entities[entityId].currentBoardHash, "Board hash mismatch");
+      return false;
+    }
+  }
+
+  /**
+   * @notice Check if entity exists (registered or lazy with valid board)
+   * @param entityId The entity ID to check
+   * @param boardHash Optional board hash for lazy entity validation
+   * @return exists Whether entity exists
+   */
+  function _entityExists(bytes32 entityId, bytes32 boardHash) internal view returns (bool exists) {
+    if (entities[entityId].currentBoardHash != bytes32(0)) {
+      return true; // Registered entity
+    }
+    if (boardHash != bytes32(0) && entityId == boardHash) {
+      return true; // Valid lazy entity
+    }
+    return false;
   }
 
   // Utility functions
@@ -527,19 +566,25 @@ contract EntityProvider is ERC1155 {
   ) internal pure returns (bytes32 boardHash) {
     require(actualSigners.length == claim.weights.length, "Signers/weights length mismatch");
     
-    // Build Board struct from actual signers
+    // Build parallel arrays for Board struct
+    bytes32[] memory entityIds = new bytes32[](actualSigners.length);
+    uint16[] memory votingPowers = new uint16[](actualSigners.length);
+    
+    // Populate arrays with actual signers and their weights
+    for (uint256 i = 0; i < actualSigners.length; i++) {
+      entityIds[i] = bytes32(uint256(uint160(actualSigners[i]))); // Convert address to bytes32
+      votingPowers[i] = uint16(claim.weights[i]);
+    }
+    
+    // Build Board struct with parallel arrays (transition delays set to 0 for compatibility)
     Board memory reconstructedBoard = Board({
       votingThreshold: uint16(claim.threshold),
-      delegates: new Delegate[](actualSigners.length)
+      entityIds: entityIds,
+      votingPowers: votingPowers,
+      boardChangeDelay: 0,      // Default delays for hanko verification
+      controlChangeDelay: 0,
+      dividendChangeDelay: 0
     });
-    
-    // Populate delegates with actual signers and their weights
-    for (uint256 i = 0; i < actualSigners.length; i++) {
-      reconstructedBoard.delegates[i] = Delegate({
-        entityId: abi.encodePacked(actualSigners[i]), // Convert address to bytes
-        votingPower: uint16(claim.weights[i])
-      });
-    }
     
     // Hash the reconstructed board (same as entity registration)
     boardHash = keccak256(abi.encode(reconstructedBoard));
@@ -608,15 +653,11 @@ contract EntityProvider is ERC1155 {
     for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
       HankoClaim memory claim = hanko.claims[claimIndex];
       
-      // Verify entity exists
-      require(entities[claim.entityId].exists, "Entity does not exist");
-      
-      // Build board hash from actual signers and verify against live state
+      // Build board hash from actual signers
       bytes32 reconstructedBoardHash = _buildBoardHash(validSigners, claim);
-      require(
-        entities[claim.entityId].currentBoardHash == reconstructedBoardHash,
-        "Real-time board verification failed - governance changed"
-      );
+      
+      // Validate entity exists (registered or lazy) and verify board hash
+      _validateEntity(claim.entityId, reconstructedBoardHash);
       
       // Validate structure
       require(
