@@ -211,20 +211,21 @@ export { executeEntityTx, createEntityBlock };
 ## Hierarchical Signature Verification
 - **Hanko Bytes**: Self-contained signature system supporting unlimited hierarchy
 - **Flashloan Governance**: Optimistic verification of circular dependencies  
-- **Real-time Quorum Validation**: Live state verification against EntityProvider
+- **Real-time Board Validation**: Live state verification against EntityProvider
 - **Gas Optimized**: Single verification call vs recursive nested verification
 
 ## Signature Types
 - **EOA signatures**: Standard secp256k1 signatures (65 bytes each)
 - **Nested entity signatures**: Via Hanko claims referencing other entities
 - **Packed format**: rsrsrs...vvv encoding for gas efficiency
-- **Board-based validation**: Threshold voting with configurable quorum
+- **Board-based validation**: Threshold voting with configurable governance
 
-## Board Rules
-- **Configurable thresholds**: Required voting power per entity
-- **Delegate voting power**: Weighted signatures based on governance
-- **Real-time validation**: Current board hash verification
-- **Hierarchical composition**: Bottom-up claim processing
+## Board Structure (Clean Design)
+- **Parallel arrays**: `bytes32[] entityIds` + `uint16[] votingPowers` for gas efficiency
+- **Embedded delays**: `boardChangeDelay`, `controlChangeDelay`, `dividendChangeDelay`
+- **Lazy entities**: No registration required if `entityId == keccak256(board)`
+- **TradFi transitions**: Current board stays active during proposed changes
+- **BCD priority**: Control > Board > Dividend governance hierarchy
 
 ## Integration Points
 - **EntityProvider.verifyHankoSignature()**: Core verification function

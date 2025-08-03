@@ -125,8 +125,9 @@ XLN Entities can implement advanced DeFi behaviors natively. Examples:
 	•	All blocks are replayable and deterministic
 	•	State is stored as RLP + Merkle trees
 	•	Signature threshold must be met for progression
-	•	Real-time quorum validation via EntityProvider
+	•	Real-time Board validation via EntityProvider (BCD governance)
 	•	Hanko Bytes enable unlimited organizational complexity with gas efficiency
+	•	Lazy entities: No registration required for self-validating boards
 
 ⸻
 
