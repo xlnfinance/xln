@@ -121,11 +121,12 @@ XLN Entities can implement advanced DeFi behaviors natively. Examples:
 ⸻
 
 🔐 Security & Integrity
-	•	All actions are signed
+	•	All actions are signed via Hanko hierarchical signature system
 	•	All blocks are replayable and deterministic
 	•	State is stored as RLP + Merkle trees
 	•	Signature threshold must be met for progression
-	•	Quorum hash ensures that any signer must prove quorum validity
+	•	Real-time quorum validation via EntityProvider
+	•	Hanko Bytes enable unlimited organizational complexity with gas efficiency
 
 ⸻
 

@@ -29,17 +29,17 @@ Hanko Bytes separates **signature recovery** from **hierarchical verification**:
 ### **Data Structure**
 ```solidity
 struct HankoBytes {
-  bytes packedSignatures;    // Optimized: rsrsrs...vvv format
-  bytes32[] noEntities;      // Failed signers (sparse)
-  HankoClaim[] claims;       // Hierarchy (bottom-up)
+  bytes32[] placeholders;    // Entity IDs that failed to sign (index 0..N-1)
+  bytes packedSignatures;    // EOA signatures → yesEntities (index N..M-1)
+  HankoClaim[] claims;       // Entity claims to verify (index M..∞)
 }
 
 struct HankoClaim {
   bytes32 entityId;          // Entity being verified
-  uint256[] entityIndexes;   // References into entity arrays
-  uint256[] weights;         // Voting power distribution
+  uint256[] entityIndexes;   // Indexes covering ALL 3 stacks: placeholders[0..N-1], yesEntities[N..M-1], claims[M..∞]
+  uint256[] weights;         // Voting power distribution matching entityIndexes
   uint256 threshold;         // Required voting power
-  bytes32 quorumHash;        // Expected governance state
+  bytes32 expectedQuorumHash; // Expected quorum hash for real-time validation
 }
 ```
 
@@ -48,7 +48,7 @@ Instead of storing 65 bytes per signature, we pack efficiently:
 - **R,S values**: 32+32 bytes concatenated: `rsrsrsrs...`
 - **V values**: Single byte array: `vvvvv...` (1 bit per signature + padding)
 - **8 signatures**: 8×64 + 1 = 513 bytes (vs 8×65 = 520 bytes)
-- **Scales better**: 100 signatures = 6401 bytes (vs 6500 bytes)
+- **100 signatures**: 100×64 + 13 = 6413 bytes (vs 6500 bytes) = 1.34% savings
 
 ### **Verification Flow**
 1. **Unpack signatures**: Extract R,S,V from packed format
@@ -141,48 +141,9 @@ function getCompletionPercentage(hanko: HankoBytes): number {
 3. **DeFi protocols**: Compound, Aave, Uniswap governance
 4. **Enterprise wallets**: Fireblocks, Fordefi, institutional custody
 
-## 🚀 **Implementation Status**
 
-### ✅ **Complete**
-- Core data structures and encoding
-- EntityProvider integration
-- Gas-optimized verification
-- TypeScript SDK with demos
 
-### 🔄 **In Progress**  
-- Signature packing optimization
-- Hanko merging capabilities
-- Completion percentage tracking
-- Comprehensive test suite
 
-### 📋 **Roadmap**
-- EIP standardization proposal
-- Gnosis Safe plugin
-- Multi-chain deployment
-- Developer documentation
-
-## 💰 **Business Model**
-
-### **Open Source Core**
-- MIT licensed base protocol
-- Community-driven development
-- Maximum adoption focus
-
-### **Premium Services**
-- Enterprise integration consulting
-- Custom governance design
-- Priority support and SLAs
-- Advanced analytics and monitoring
-
-## 🎪 **Pitch Deck Highlights**
-
-> **"From 3-of-5 multisig to unlimited organizational complexity"**
-
-1. **The Problem**: Current multisig is limited to flat lists
-2. **The Market**: $100B+ in DAO treasuries need better governance  
-3. **The Solution**: Hierarchical signatures with gas efficiency
-4. **The Traction**: Built into XLN's financial infrastructure
-5. **The Ask**: Community adoption and protocol integration
 
 ---
 
