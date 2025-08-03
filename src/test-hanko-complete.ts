@@ -3,7 +3,7 @@
  * Tests real Ethereum signatures, flashloan governance, and edge cases
  */
 
-import { createHash, randomBytes } from 'crypto';
+const { createHash, randomBytes } = require('crypto');
 import { ethers } from 'ethers';
 import { 
   buildRealHanko, 
@@ -316,12 +316,14 @@ const runAllTests = async (): Promise<void> => {
   } catch (error) {
     console.error('\n❌ === TEST FAILED ===');
     console.error(error);
-    process.exit(1);
+    if (typeof process !== 'undefined') {
+      process.exit(1);
+    }
   }
 };
 
-// Run tests if this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run tests if this file is executed directly (Node.js only)
+if (typeof process !== 'undefined' && import.meta.url === `file://${process.argv[1]}`) {
   runAllTests();
 }
 

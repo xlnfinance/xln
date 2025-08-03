@@ -26,7 +26,9 @@ async function main() {
     console.log('\n❌ SOME TESTS FAILED!');
   }
   
-  process.exit(success ? 0 : 1);
+  if (typeof process !== 'undefined') {
+    process.exit(success ? 0 : 1);
+  }
 }
 
 main().catch(console.error);

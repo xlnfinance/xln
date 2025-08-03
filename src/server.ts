@@ -30,6 +30,7 @@ import { runDemo } from './rundemo.js';
 import { testFullCycle } from './hanko-real.js';
 import { runDepositoryHankoTests } from './test-depository-hanko.js';
 import { runBasicHankoTests } from './test-hanko-basic.js';
+import { runAllTests as runCompleteHankoTests } from './test-hanko-complete.js';
 
 // This code works in both Node.js and the browser
 import { Level } from 'level';
@@ -390,7 +391,7 @@ const main = async (): Promise<Env> => {
 
   // Add hanko demo to the main execution
   console.log('\n🖋️  Testing Complete Hanko Implementation...');
-  await testFullCycle();
+  await demoCompleteHanko();
   
   // 🧪 Run basic Hanko functionality tests first
   console.log('\n🧪 Running basic Hanko functionality tests...');
@@ -513,4 +514,17 @@ const verifyJurisdictionRegistrations = async () => {
   }
   
   console.log('✅ Jurisdiction verification complete!\n');
+};
+
+// === HANKO DEMO FUNCTION ===
+
+export const demoCompleteHanko = async (): Promise<void> => {
+  try {
+    console.log('🎯 Running complete Hanko test suite...');
+    await runCompleteHankoTests();
+    console.log('✅ Complete Hanko tests passed!');
+  } catch (error) {
+    console.error('❌ Complete Hanko tests failed:', error);
+    throw error;
+  }
 };

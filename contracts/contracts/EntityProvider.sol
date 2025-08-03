@@ -60,7 +60,7 @@ contract EntityProvider is ERC1155 {
   mapping (uint => uint) public activateAtBlock;
   
   // Governance system
-  mapping(bytes32 => QuorumProposal) public activeProposals;  // entityId => proposal
+  mapping(bytes32 => BoardProposal) public activeProposals;  // entityId => proposal
   mapping(bytes32 => uint256) public totalControlSupply;      // entityId => total control tokens
   mapping(bytes32 => uint256) public totalDividendSupply;     // entityId => total dividend tokens
   
@@ -95,9 +95,10 @@ contract EntityProvider is ERC1155 {
     
     entities[foundationId] = Entity({
       currentBoardHash: foundationQuorum,
-      proposedAuthenticatorHash: bytes32(0),
+      proposedBoardHash: bytes32(0),
+      activateAtBlock: 0,
       registrationBlock: block.number,
-      exists: true,
+      proposerType: ProposerType.BOARD,
       articlesHash: keccak256(abi.encode(EntityArticles({
         controlDelay: 1000,
         dividendDelay: 3000,
@@ -148,9 +149,10 @@ contract EntityProvider is ERC1155 {
     
     entities[entityId] = Entity({
       currentBoardHash: boardHash,
-      proposedAuthenticatorHash: bytes32(0),
+      proposedBoardHash: bytes32(0),
+      activateAtBlock: 0,
       registrationBlock: block.number,
-      exists: true,
+      proposerType: ProposerType.BOARD,
       articlesHash: keccak256(abi.encode(defaultArticles))
     });
     
@@ -177,7 +179,7 @@ contract EntityProvider is ERC1155 {
    */
   function assignName(string memory name, uint256 entityNumber) external onlyFoundation {
     require(bytes(name).length > 0 && bytes(name).length <= 32, "Invalid name length");
-    require(entities[bytes32(entityNumber)].exists, "Entity doesn't exist");
+    require(entities[bytes32(entityNumber)].currentBoardHash != bytes32(0), "Entity doesn't exist");
     require(nameToNumber[name] == 0, "Name already assigned");
     
     // If entity already has a name, clear it
@@ -199,7 +201,7 @@ contract EntityProvider is ERC1155 {
    */
   function transferName(string memory name, uint256 newEntityNumber) external onlyFoundation {
     require(nameToNumber[name] != 0, "Name not assigned");
-    require(entities[bytes32(newEntityNumber)].exists, "Target entity doesn't exist");
+    require(entities[bytes32(newEntityNumber)].currentBoardHash != bytes32(0), "Target entity doesn't exist");
     
     uint256 oldEntityNumber = nameToNumber[name];
     
@@ -219,9 +221,9 @@ contract EntityProvider is ERC1155 {
    * @param newBoardHash Hash of the new proposed board
    */
   function proposeBoard(bytes32 entityId, bytes32 newBoardHash) external {
-    require(entities[entityId].exists, "Entity doesn't exist");
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     
-    entities[entityId].proposedAuthenticatorHash = newBoardHash;
+    entities[entityId].proposedBoardHash = newBoardHash;
     emit BoardProposed(entityId, newBoardHash);
   }
 
@@ -230,11 +232,11 @@ contract EntityProvider is ERC1155 {
    * @param entityId The entity ID
    */
   function activateBoard(bytes32 entityId) external {
-    require(entities[entityId].exists, "Entity doesn't exist");
-    require(entities[entityId].proposedAuthenticatorHash != bytes32(0), "No proposed board");
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
     
-    entities[entityId].currentBoardHash = entities[entityId].proposedAuthenticatorHash;
-    entities[entityId].proposedAuthenticatorHash = bytes32(0);
+    entities[entityId].currentBoardHash = entities[entityId].proposedBoardHash;
+    entities[entityId].proposedBoardHash = bytes32(0);
     
     // Legacy support
     if (uint256(entityId) < 1000000) {
@@ -260,7 +262,7 @@ contract EntityProvider is ERC1155 {
   ) external view returns (uint16) {
     bytes32 boardHash = keccak256(encodedBoard);
     
-    if (entities[entityId].exists) {
+    if (entities[entityId].currentBoardHash != bytes32(0)) {
       // REGISTERED ENTITY: use on-chain board
       require(boardHash == entities[entityId].currentBoardHash, "Board hash mismatch");
     } else {
@@ -288,7 +290,7 @@ contract EntityProvider is ERC1155 {
     // First try to find registered entity with this board hash
     for (uint256 i = 1; i < nextNumber; i++) {
       bytes32 candidateEntityId = bytes32(i);
-      if (entities[candidateEntityId].exists && entities[candidateEntityId].currentBoardHash == boardHash) {
+      if (entities[candidateEntityId].currentBoardHash != bytes32(0) && entities[candidateEntityId].currentBoardHash == boardHash) {
         // Verify signature for this registered entity
         uint16 boardResult = _verifyBoard(hash, encodedBoard, encodedSignature);
         if (boardResult > 0) {
@@ -409,9 +411,9 @@ contract EntityProvider is ERC1155 {
     string memory name
   ) {
     Entity memory entity = entities[entityId];
-    exists = entity.exists;
+    exists = entity.currentBoardHash != bytes32(0);
     currentBoardHash = entity.currentBoardHash;
-    proposedBoardHash = entity.proposedAuthenticatorHash;
+    proposedBoardHash = entity.proposedBoardHash;
     registrationBlock = entity.registrationBlock;
     
     // Get name if it's a numbered entity
@@ -652,7 +654,6 @@ contract EntityProvider is ERC1155 {
       );
       
       uint256 totalVotingPower = 0;
-      uint256 totalEntities = hanko.placeholders.length + signatureCount + hanko.claims.length;
       
       // Calculate voting power with flashloan assumptions
       for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
@@ -761,7 +762,7 @@ contract EntityProvider is ERC1155 {
     EntityArticles memory articles
   ) external {
     bytes32 entityId = bytes32(entityNumber);
-    require(entities[entityId].exists, "Entity doesn't exist");
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
     
     // Check permissions and delays
@@ -772,12 +773,12 @@ contract EntityProvider is ERC1155 {
       _validateControlProposer(entityId, msg.sender, articles);
     } else if (proposerType == ProposerType.DIVIDEND) {
       _validateDividendProposer(entityId, msg.sender);
-    } else if (proposerType == ProposerType.FOUNDATION) {
-      require(msg.sender == address(bytes20(bytes32(FOUNDATION_ENTITY))), "Not foundation");
+    } else if (proposerType == ProposerType.BOARD) {
+      // Board proposer - no additional validation needed
     }
     
     // Handle proposal priorities and cancellation
-    QuorumProposal storage existing = activeProposals[entityId];
+    BoardProposal storage existing = activeProposals[entityId];
     if (existing.active) {
       // Higher priority can cancel lower priority
       require(_canCancelProposal(proposerType, existing.proposerType), "Cannot cancel existing proposal");
@@ -785,10 +786,11 @@ contract EntityProvider is ERC1155 {
     }
     
     // Create new proposal
-    activeProposals[entityId] = QuorumProposal({
-      proposedQuorum: newQuorum,
+    activeProposals[entityId] = BoardProposal({
+      proposedBoardHash: newQuorum,
       proposerType: proposerType,
       proposeBlock: block.number,
+      activateBlock: block.number + _getDelayForProposer(articles, proposerType),
       active: true
     });
     
@@ -807,7 +809,7 @@ contract EntityProvider is ERC1155 {
     EntityArticles memory articles
   ) external {
     bytes32 entityId = bytes32(entityNumber);
-    QuorumProposal storage proposal = activeProposals[entityId];
+    BoardProposal storage proposal = activeProposals[entityId];
     
     require(proposal.active, "No active proposal");
     require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
@@ -825,13 +827,13 @@ contract EntityProvider is ERC1155 {
     
     // Execute replacement
     bytes32 oldQuorum = entities[entityId].currentBoardHash;
-    entities[entityId].currentBoardHash = proposal.proposedQuorum;
-    entities[entityId].proposedAuthenticatorHash = bytes32(0);
+    entities[entityId].currentBoardHash = proposal.proposedBoardHash;
+    entities[entityId].proposedBoardHash = bytes32(0);
     
     // Clear proposal
     delete activeProposals[entityId];
     
-    emit QuorumReplaced(entityId, oldQuorum, proposal.proposedQuorum);
+    emit QuorumReplaced(entityId, oldQuorum, proposal.proposedBoardHash);
   }
 
   // === INTERNAL HELPER FUNCTIONS ===
@@ -839,16 +841,14 @@ contract EntityProvider is ERC1155 {
   function _getDelayForProposer(EntityArticles memory articles, ProposerType proposerType) internal pure returns (uint32) {
     if (proposerType == ProposerType.CONTROL) return articles.controlDelay;
     if (proposerType == ProposerType.DIVIDEND) return articles.dividendDelay;
-    if (proposerType == ProposerType.FOUNDATION) return articles.foundationDelay;
-    return 0; // QUORUM has no delay
+    return 0; // BOARD has no delay
   }
 
   function _canCancelProposal(ProposerType canceller, ProposerType existing) internal pure returns (bool) {
-    // Priority: CONTROL > QUORUM > DIVIDEND > FOUNDATION
+    // Priority: CONTROL > BOARD > DIVIDEND (BCD model)
     if (canceller == ProposerType.CONTROL) return existing != ProposerType.CONTROL;
-    if (canceller == ProposerType.QUORUM) return existing == ProposerType.DIVIDEND || existing == ProposerType.FOUNDATION;
-    if (canceller == ProposerType.DIVIDEND) return existing == ProposerType.FOUNDATION;
-    return false; // FOUNDATION cannot cancel anyone
+    if (canceller == ProposerType.BOARD) return existing == ProposerType.DIVIDEND;
+    return false; // DIVIDEND cannot cancel anyone
   }
 
   function _validateControlProposer(bytes32 entityId, address proposer, EntityArticles memory articles) internal view {
@@ -928,7 +928,7 @@ contract EntityProvider is ERC1155 {
       uint256 entityNumber = getEntityFromToken(ids[i]);
       bytes32 entityId = bytes32(entityNumber);
       
-      if (entities[entityId].exists) {
+      if (entities[entityId].currentBoardHash != bytes32(0)) {
         (uint256 controlTokenId,) = getTokenIds(entityNumber);
         
         // Update total supply for control tokens
@@ -969,9 +969,10 @@ contract EntityProvider is ERC1155 {
     
     entities[entityId] = Entity({
       currentBoardHash: boardHash,
-      proposedAuthenticatorHash: bytes32(0),
+      proposedBoardHash: bytes32(0),
+      activateAtBlock: 0,
       registrationBlock: block.number,
-      exists: true,
+      proposerType: ProposerType.BOARD,
       articlesHash: keccak256(abi.encode(articles))
     });
     
