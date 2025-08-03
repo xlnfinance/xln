@@ -2462,10 +2462,10 @@
                     if (jurisdiction.address.includes(`:${port}`)) {
                         return {
                             name: jurisdiction.name,
-                            rpc: jurisdiction.address,
+                            address: jurisdiction.address,
                             chainId: jurisdiction.chainId,
-                            entityProvider: jurisdiction.entityProviderAddress,
-                            depository: jurisdiction.depositoryAddress
+                            entityProviderAddress: jurisdiction.entityProviderAddress,
+                            depositoryAddress: jurisdiction.depositoryAddress
                         };
                     }
                 }
@@ -2955,7 +2955,7 @@
                         // Get next entity number using the connectToEthereum method
                         if (port === 8545) {
                             // For port 8545, we can use the existing function
-                            const nextNumber = await XLN.getNextEntityNumber();
+                            const nextNumber = await XLN.getNextEntityNumber(jurisdictionConfig);
                             document.getElementById(`nextNumber-${port}`).textContent = `#${nextNumber}`;
                         } else {
                             // For other ports, call the contract directly via RPC

@@ -3,6 +3,13 @@
  * Platform detection, crypto polyfills, logging, and helper functions
  */
 
+// Global polyfills for browser compatibility
+if (typeof global === 'undefined') {
+  (globalThis as any).global = globalThis;
+}
+
+
+
 // Environment detection and compatibility layer
 export const isBrowser = typeof window !== 'undefined';
 

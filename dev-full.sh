@@ -19,20 +19,12 @@ cleanup() {
 # Set up signal handlers
 trap cleanup SIGINT SIGTERM
 
-# Step 1: Reset networks (if requested)
-read -p "🔄 Reset networks and redeploy contracts? (y/N): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "🔄 Resetting networks..."
-    ./reset-networks.sh
-    if [ $? -ne 0 ]; then
-        echo "❌ Network reset failed!"
-        exit 1
-    fi
-else
-    echo "⏭️  Skipping network reset"
-    # Just ensure networks are running
-    ./start-networks.sh
+# Step 1: Auto-reset networks and redeploy
+echo "🔄 Auto-resetting networks and redeploying contracts..."
+./reset-networks.sh
+if [ $? -ne 0 ]; then
+    echo "❌ Network reset failed!"
+    exit 1
 fi
 
 echo ""

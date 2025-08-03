@@ -206,6 +206,14 @@ export const getEntityInfoFromChain = async (entityId: string, jurisdiction: Jur
 
 export const getNextEntityNumber = async (jurisdiction: JurisdictionConfig): Promise<number> => {
   try {
+    if (!jurisdiction) {
+      throw new Error('Jurisdiction parameter is required');
+    }
+    
+    if (!jurisdiction.name || !jurisdiction.address || !jurisdiction.entityProviderAddress) {
+      throw new Error('Jurisdiction object is missing required properties (name, address, entityProviderAddress)');
+    }
+    
     const { entityProvider } = await connectToEthereum(jurisdiction);
     
     if (DEBUG) console.log(`🔍 Fetching next entity number from ${jurisdiction.entityProviderAddress} (${jurisdiction.name})`);
@@ -238,7 +246,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
   try {
     let config: any;
     
-    if (!isBrowser) {
+    if (!isBrowser && typeof process !== 'undefined') {
       // Node.js environment - read file directly
       const configPath = path.join(process.cwd(), 'jurisdictions.json');
       const configContent = fs.readFileSync(configPath, 'utf8');

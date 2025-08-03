@@ -36,7 +36,7 @@
  * Uses actual secp256k1 signatures compatible with Solidity ecrecover
  */
 
-import { createHash, randomBytes } from 'crypto';
+const { createHash, randomBytes } = require('crypto');
 import { ethers } from 'ethers';
 import { HankoBytes, HankoClaim, HankoMergeResult } from './types.js';
 
