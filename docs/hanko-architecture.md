@@ -1,239 +1,197 @@
-# Hanko: The Next-Generation Hierarchical Signature Protocol
+# Hanko: Entities Are Signature Schemes, Not Contracts
 
-## 🚀 **Why Hanko Dominates Every DAO Framework**
+## 💸 **The Organizational Cost Crisis**
 
-| Framework | Cost per Entity | Hierarchy Support | Gas per Operation | Migration Effort | Composability |
-|-----------|----------------|-------------------|-------------------|------------------|---------------|
-| **Hanko (Lazy)** | **0 gas** | ✅ Unlimited nesting | **~50k gas** | ✅ Zero changes needed | ✅ Universal standard |
-| **Hanko (Registered)** | **50k gas** | ✅ Unlimited nesting | **~50k gas** | ✅ Zero changes needed | ✅ Universal standard |
-| Compound Governor | 1,700k gas | ❌ Flat only | 200k+ gas | ❌ Complete rewrite | ❌ Protocol-specific |
-| Gnosis Safe | 400k gas | ❌ Flat only | 100k+ gas | ❌ Complete rewrite | ❌ Limited |
-| EIP-4337 Accounts | 100-400k gas | ❌ Single account | 100k+ gas | ❌ New infrastructure | ❌ Wallet-focused |
-| Aragon | 800k+ gas | ⚠️ Limited hierarchy | 150k+ gas | ❌ Framework lock-in | ⚠️ Aragon ecosystem only |
-| OpenZeppelin Governor | 600k+ gas | ❌ Flat only | 180k+ gas | ❌ Complete rewrite | ❌ Limited |
+**Problem**: Creating organizational structure on blockchain is prohibitively expensive and architecturally limited.
 
-**The Verdict**: Hanko delivers 87.5-100% cost reduction with unlimited hierarchical complexity and zero migration friction.
+**Current Reality:**
+- Deploying a multisig: $40-400
+- Deploying a DAO: $170-1000  
+- Creating 10 sub-committees: $400-4000
+- Real organizations have 100s of entities: $40,000+
 
-## ⚡ **Power Points - Why DeFi Experts Choose Hanko**
+**Architectural Reality:**
+- Everything is flat (no hierarchies)
+- Everything is rigid (can't experiment)
+- Everything is expensive (deployment costs)
+- Everything is permanent (can't iterate)
 
-🏆 **Zero-Cost Entity Creation**: Create unlimited sub-DAOs, committees, and governance structures for 0 gas (lazy entities) vs 400k+ gas for traditional DAOs
+**The Insight That Matters**: Entities don't need to be contracts. They can be signature schemes.
 
-🏗️ **Real Corporate Hierarchies**: Map actual organizational structures to code - Board → Committee → Individual approval chains vs flat 3-of-5 multisigs
+## 🎯 **Hanko vs Traditional DAO Frameworks**
 
-🔄 **Instant Protocol Integration**: Any DeFi protocol adds Hanko support by calling `EntityProvider.verifyHankoSignature()` - zero smart contract changes needed
+| Framework | Cost per Entity | Hierarchy | Your Protocol Integration |
+|-----------|----------------|-----------|--------------------------|
+| **Hanko (Lazy)** | **$0** | ✅ Unlimited | `EntityProvider.verifyHanko(entityId, hash, hanko)` |
+| **Hanko (Registered)** | **$1.50** | ✅ Unlimited | `EntityProvider.verifyHanko(entityId, hash, hanko)` |
+| Compound Governor | $50+ | ❌ Flat | Complete protocol rewrite required |
+| Gnosis Safe | $12+ | ❌ Flat | Complete protocol rewrite required |
+| Aragon | $24+ | ⚠️ Limited | Aragon framework lock-in |
 
-🎯 **Payment Channel Ready**: Same entity provides both direct governance AND cryptographic proofs for channels, enabling enterprise-grade institutional workflows
+### **1. Entity Address Formation & Contract Integration**
 
-🚀 **BCD Governance Innovation**: Separate Board/Control/Dividend powers with TradFi-style transitions prevents the "Meta/Alphabet dual-class stock" problem
+**Entity Address**: `keccak256(jurisdiction_id + entity_provider_address + entity_id)`
 
-## 🎯 **Executive Summary**
+**Protocol Integration** (add one line to any DeFi contract):
+```solidity
+// Your existing function
+function executeProposal(uint256 proposalId) external {
+    require(msg.sender == timelock, "Unauthorized");
+    // execute...
+}
 
-**Hanko** revolutionizes DeFi governance by enabling unlimited hierarchical entities to sign any hash with a single, self-contained data structure. Unlike traditional DAO frameworks requiring 1 contract per entity (~400k gas deployment), our system supports infinite nesting with zero additional deployment costs through lazy entity architecture.
-
-## 🏗️ **Core Innovation: Breaking the 1-Contract = 1-Entity Paradigm**
-
-### **The DeFi Governance Crisis**
-- **EIP-4337 Account Abstraction**: 100k-400k gas per wallet creation (~$10-40 on Ethereum)
-- **Traditional DAOs**: Compound Governor = 1.7M gas, Gnosis Safe = 400k gas deployment
-- **Flat Architecture**: 3-of-5 multisigs can't represent real-world corporate structures
-- **Migration Nightmare**: Existing protocols locked into rigid governance systems
-
-### **Our Breakthrough: Dual Entity Architecture**
-```
-Entity Address = keccak256(jurisdiction_id + entity_provider_address + entity_id)
-```
-
-**Two Entity Types - Maximum Flexibility:**
-
-**1. Lazy Entities (Zero-Cost Creation)**
-When `currentBoardHash == bytes32(0)`, the entity is considered "lazy" and validated by checking if `entityId == keccak256(boardStructure)`. This allows any entity to exist instantly without on-chain registration - perfect for ephemeral governance structures, sub-committees, or experimental DAOs that may never need persistent state.
-
-**2. Registered Entities (Incremental IDs)**  
-Traditional registered entities receive sequential numeric IDs (1, 2, 3...) and have their `currentBoardHash` explicitly stored on-chain. This provides persistent identity for long-lived organizations, enables governance transitions through the BCD model, and supports complex institutional workflows requiring immutable historical records.
-
-**Strategic Choice**: Start lazy for experimentation, register when governance becomes mission-critical. Registration costs one-time gas but unlocks advanced features like board transitions, control holder overrides, and dividend token management.
-
-### **Technical Revolution**
-Hanko separates **signature recovery** from **hierarchical verification**:
-
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   EOA Layer     │    │  Hierarchy Layer │    │  Verification   │
-│                 │    │                  │    │                 │
-│ Raw 65b sigs    │ -> │ Bottom-up claims │ -> │ EntityProvider  │
-│ Pure crypto     │    │ Voting logic     │    │ State validation│
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+// Add Hanko support
+function executeProposalWithHanko(uint256 proposalId, bytes calldata hanko) external {
+    require(
+        ENTITY_PROVIDER.verifyHankoSignature(
+            keccak256("uniswap_governance"), 
+            keccak256(abi.encode(proposalId)), 
+            hanko
+        ), 
+        "Invalid signature"
+    );
+    // same execution logic
+}
 ```
 
-## 📊 **Technical Architecture**
+### **2. Cost Comparison: Lazy vs Registered Entities**
 
-### **Data Structure**
+**Lazy Entities (0 gas)**:
+- `entityId = keccak256(boardStructure)` 
+- Instant creation, no on-chain transaction
+- Perfect for: sub-committees, working groups, experimental governance
+
+**Registered Entities (~50k gas / $1.50)**:
+- Sequential numeric IDs (1, 2, 3...)
+- Stored `currentBoardHash` enables board transitions
+- Perfect for: permanent DAOs, corporate entities, token-governed organizations
+
+**Real Cost Example**:
+```
+Traditional Approach: MegaCorp DAO with 5 committees
+- Main DAO: 400k gas ($12)  
+- 5 committees: 5 × 400k = 2M gas ($60)
+- Total: $72
+
+Hanko Approach:
+- Main DAO (registered): 50k gas ($1.50)
+- 5 committees (lazy): 0 gas ($0)  
+- Total: $1.50
+- Savings: 98%
+```
+
+### **3. Unlimited Nesting Examples**
+
+**Corporate Structure**:
+```
+🏢 Tesla DAO (registered)
+├── 🏛️ Board of Directors (lazy)
+│   ├── 👤 Elon (CEO)
+│   ├── 👤 Robyn (Chairperson)  
+│   └── 👤 Drew (Independent Director)
+├── 🏛️ Finance Committee (lazy)
+│   ├── 👤 Zachary (CFO)
+│   └── 🏛️ Treasury Subcommittee (lazy)
+│       ├── 👤 Treasury Manager
+│       └── 🤖 Auto-rebalancing Bot
+└── 🏛️ Engineering (lazy)
+    ├── 👤 Head of AI
+    └── 🏛️ Autopilot Team (lazy)
+```
+
+**DeFi Protocol Governance**:
+```
+🏛️ Aave DAO (registered)
+├── 🏛️ Risk Committee (lazy) → Sets lending parameters
+├── 🏛️ Treasury Committee (lazy) → Manages protocol fees  
+├── 🏛️ Emergency Committee (lazy) → Pause functions
+└── 🏛️ Community (lazy) → General governance token holders
+```
+
+### **4. BCD Governance & Tradeable Shares**
+
+**Board-Control-Dividend Separation**:
+- **Board (B)**: Executive control, day-to-day operations, shortest delays
+- **Control (C)**: Veto power, can override board decisions, medium delays  
+- **Dividend (D)**: Economic rights only, longest delays, tradeable tokens
+
+**Example: Investment DAO**:
+```solidity
+struct InvestmentDAOBoard {
+    // Board: Active managers (non-tradeable)
+    bytes32[] boardEntityIds: [fund_manager_1, fund_manager_2];
+    uint16[] boardVotingPowers: [60, 40];
+    
+    // Control: Limited partners (restricted trading)
+    bytes32[] controlEntityIds: [lp_1, lp_2, lp_3];
+    uint16[] controlVotingPowers: [50, 30, 20];
+    
+    // Dividend: Profit-sharing tokens (freely tradeable)
+    address dividendToken: 0x...; // ERC20 token representing profit rights
+}
+```
+
+**Why This Matters**: Board manages investments, Control holders can fire the board, Dividend holders just receive profits. Each class can have different liquidity, voting rights, and trading restrictions.
+
+### **5. Payment Channel Integration**
+
+**External Verification**: Protocols validate entity authorization by calling `EntityProvider.verifyHankoSignature()` without direct interaction. Perfect for payment channels where entities provide cold-storage signatures proving organizational consent.
+
+**Internal Invocation**: Entities directly interact with contracts using Hanko for authorization. Standard pattern for treasury management and protocol governance.
+
+**Strategic Advantage**: Same entity works in both modes - direct DeFi governance AND cryptographic proofs for channels, derivatives, cross-chain bridges.
+
+---
+
+## 📈 **Market Opportunity**
+
+**Current Market**: ~$10B TVL across 4,000+ DAOs, all using expensive, flat governance structures.
+
+**Our Advantage**: Enable real organizational complexity at 1-2% of current costs, unlocking institutional adoption and complex corporate DeFi strategies.
+
+**Network Effects**: As more protocols integrate `EntityProvider.verifyHankoSignature()`, entities become more valuable and portable across the entire DeFi ecosystem.
+
+---
+
+## 💡 **Ready to Integrate?**
+
+**For Protocol Developers**: Add one line to enable Hanko governance in your protocol.
+**For Organizations**: Start with lazy entities (0 cost) to experiment with hierarchical governance.
+**For Institutions**: Use registered entities with BCD structures for sophisticated treasury management.
+
+---
+
+## 📚 **Appendix: Technical Implementation Details**
+
+### **Data Structures**
 ```solidity
 struct Hanko {
-  bytes32[] placeholders;    // Entity IDs that failed to sign (index 0..N-1)
-  bytes packedSignatures;    // EOA signatures → yesEntities (index N..M-1)
-  HankoClaim[] claims;       // Entity claims to verify (index M..∞)
+  bytes32[] placeholders;    // Entity IDs that failed to sign
+  bytes packedSignatures;    // EOA signatures (packed R,S,V format)
+  HankoClaim[] claims;       // Entity claims to verify
 }
 
 struct HankoClaim {
   bytes32 entityId;          // Entity being verified
-  uint256[] entityIndexes;   // Indexes covering ALL 3 stacks: placeholders[0..N-1], yesEntities[N..M-1], claims[M..∞]
-  uint256[] weights;         // Voting power distribution matching entityIndexes
+  uint256[] entityIndexes;   // Indexes into placeholders/signatures/claims
+  uint256[] weights;         // Voting power distribution
   uint256 threshold;         // Required voting power
-  // Note: No expectedQuorumHash - we build it just-in-time for gas efficiency
 }
 ```
 
-### **Board Hash Optimization: Why We Store Hashes, Not Structures**
+### **Signature Packing Optimization**
+Instead of 65 bytes per signature, we pack:
+- R,S values: Concatenated 64-byte chunks
+- V values: Bit-packed (8 values per byte)
+- 100 signatures: 6413 bytes vs 6500 bytes (1.4% savings)
 
-**The Storage Efficiency Revolution:**
-Instead of storing entire board structures on-chain (which could cost thousands of dollars for complex hierarchies), we store only a single `bytes32 boardHash = keccak256(abi.encode(entityIds, votingPowers, threshold, delays))`. This radical optimization delivers multiple benefits:
+### **Board Hash Storage**
+Store `bytes32 boardHash = keccak256(abi.encode(entityIds, votingPowers, threshold))` instead of full structures:
+- 100-member board: 32 bytes storage vs 3,200+ bytes
+- 3x gas savings that compound with complexity
 
-**Gas Efficiency**: A 100-member board with complex voting weights consumes just 32 bytes of storage (one SSTORE ~20k gas) instead of ~3,200 bytes for the full structure (~64k gas for arrays). The 3x gas savings become exponential as board complexity increases.
-
-**Cryptographic Integrity**: Hash-based verification ensures that any modification to voting powers, thresholds, or member lists requires explicit on-chain governance. No possibility of silent manipulation or gradual power creep that plagues traditional multisigs.
-
-**Lazy Validation**: For lazy entities, we can validate governance authority by recomputing the expected hash from provided data and comparing against `entityId`. This enables instant verification without any on-chain state, perfect for ephemeral governance or temporary committees.
-
-**Board Formation Flexibility**: The same hash can represent radically different governance structures - a simple 2-of-3 multisig has the same storage cost as a 50-member parliament with complex delegation rules and voting weights.
-
-### **Signature Packing Innovation**
-Revolutionary space optimization through bit-level packing:
-- **R,S values**: Concatenated 64-byte chunks: `rsrsrsrs...`
-- **V values**: Bit-packed array: `vvvvv...` (8 V-values per byte)  
-- **Gas Savings**: ~1.4% calldata reduction + signature verification parallelization
-- **100 signatures**: 6413 bytes vs naive 6500 bytes (87 bytes saved)
-- **Scale**: Savings compound with entity complexity
-
-### **Verification Flow**
-1. **Unpack signatures**: Extract R,S,V from packed format
-2. **Recover EOA addresses**: Build `yesEntities[]` from valid signatures  
-3. **Process claims bottom-up**: Start with primitive entities (pure EOAs)
-4. **EntityProvider verification**: Validate quorum hashes against live state
-5. **Hierarchical composition**: Each successful claim enables higher-level entities
-
-## 🔄 **Merge-ability & Completion Tracking**
-
-### **Hanko Merging**
-During entity consensus, partial signatures can be merged:
-```typescript
-function mergeHankos(hanko1: Hanko, hanko2: Hanko): Hanko {
-  // Combine unique signatures
-  // Merge entity completion states  
-  // Preserve claim hierarchy
-}
-```
-
-### **Completion Percentage**
-```typescript
-function getCompletionPercentage(hanko: Hanko): number {
-  // Calculate voting power achieved vs required
-  // Account for hierarchical dependencies
-  // Return 0-100% completion status
-}
-```
-
-## 🚀 **Game-Changing DeFi Advantages**
-
-### **1. Flexible Entity Creation Costs**
-```
-Traditional DAO:     400,000 gas    (~$12-40 @ 30 gwei)
-Lazy Hanko Entity:   0 gas          (Pure computation)
-Registered Entity:   ~50,000 gas    (Single SSTORE + minimal logic)
-Savings:             87.5-100% deployment cost elimination
-```
-
-**Strategic Flexibility**: Organizations can start with lazy entities for experimentation and testing, then register for advanced governance features only when needed. This creates a natural progression from proof-of-concept to production without wasted costs on premature optimization.
-
-### **2. Unlimited Hierarchical Composition**
-**Real-world Corporate Structure in Code:**
-```solidity
-// MegaCorp DAO with traditional flat 3-of-5 vs our nested reality
-struct MegaCorpBoard {
-    bytes32[] entityIds: [
-        keccak256("engineering_committee"),
-        keccak256("finance_committee"), 
-        keccak256("ceo_alice"),
-        keccak256("cfo_bob"),
-        keccak256("legal_department")
-    ];
-    uint16[] votingPowers: [25, 25, 20, 20, 10]; // Realistic power distribution
-    uint16 threshold: 51; // Majority rule
-}
-
-// Engineering Committee can have its own complex structure
-struct EngineeringBoard {
-    bytes32[] entityIds: [alice_address, bob_address, ci_cd_system];
-    uint16[] votingPowers: [40, 40, 20];
-    uint16 threshold: 60; // Requires human + system approval
-}
-```
-
-### **3. BCD Governance Innovation**
-**Beyond Dual-Class Stock - True Separation of Powers:**
-- **Board (B)**: Executive control, shortest proposal delays
-- **Control (C)**: Override power, medium delays, prevents hostile takeovers  
-- **Dividend (D)**: Economic rights, longest delays, inheritance-style backup
-- **TradFi Transitions**: Delayed activation prevents channel proof expiration
-
-### **4. Migration Path for Existing Protocols**
-**How Uniswap, Compound, Aave Could Adopt:**
-```solidity
-// Current: Hard-coded governance
-function executeProposal(uint256 proposalId) external {
-    require(msg.sender == timelock, "Unauthorized");
-    // Execute...
-}
-
-// Hanko Integration: Zero protocol changes needed
-function executeProposalWithHanko(uint256 proposalId, bytes calldata hanko) external {
-    bytes32 entityId = keccak256("uniswap_governance");
-    require(
-        ENTITY_PROVIDER.verifyHankoSignature(
-            entityId, 
-            keccak256(abi.encode(proposalId, block.timestamp)), 
-            hanko
-        ), 
-        "Invalid governance signature"
-    );
-    // Execute same logic...
-    // Remember: Track nonces internally for replay protection
-}
-```
-
-### **5. Dual Verification Patterns: External vs Internal Invocation**
-
-**The Payment Channel Revolution:**
-Hanko's true power emerges from its dual verification capability, enabling entities to operate both as direct contract callers and as cryptographic proof providers in trustless systems.
-
-**External Verification Pattern** - `EntityProvider.verifyHankoSignature()`:
-When protocols need to validate entity authorization without direct interaction, they call our verification function externally. This pattern is revolutionary for payment channels, state channels, and any system requiring cryptographic proofs of organizational consent. For example, XLN payment channels can accept Hanko signatures as proof that a corporate treasury has authorized a specific payment, enabling complex institutional flows without requiring the entity to directly interact with every protocol.
-
-**Internal Invocation Pattern** - Direct Contract Calls:
-When entities act as regular blockchain users, their Hanko signatures are verified internally before executing transactions. This traditional pattern works perfectly for treasury management, protocol governance, and any scenario where the entity directly interacts with smart contracts.
-
-**Strategic Advantage**: The same entity can seamlessly operate in both modes. A corporate DAO can directly govern its DeFi positions while simultaneously providing cryptographic authorization proofs for channel-based transactions, derivatives contracts, or cross-chain bridges - all using identical signature infrastructure.
-
-**Payment Channel Use Case**: Instead of requiring every institution to maintain hot wallets for channel operations, they can provide cold-storage Hanko signatures that prove organizational consent for specific payment ranges or transaction types. This enables enterprise-grade security for high-frequency trading, automated treasury operations, and institutional DeFi strategies.
-
-### **6. Optimistic Verification Model** 
-**Why It's Safer Than It Sounds:**
-The optimistic verification approach efficiently handles hierarchical dependencies by assuming referenced entities will validate successfully, then atomically reverting the entire transaction if any assumption proves false. This isn't "flashloan governance" - it's simply efficient dependency resolution that maintains cryptographic security while enabling complex organizational structures.
-
-**Atomic Failure Guarantee**: If any nested entity fails to meet its governance threshold, the entire hanko verification fails immediately. This ensures that partial authorization cannot lead to unintended consequences or security vulnerabilities.
-
-**Circular Reference Handling**: While theoretically possible, circular dependencies are rare in practice because UIs naturally prevent users from creating paradoxical governance structures. When they do occur, the system fails safely rather than deadlocking.
-
-**Real Security Foundation**: Every signature undergoes full `ecrecover` validation on-chain. The "optimistic" aspect only refers to dependency ordering, not cryptographic verification. Policy enforcement (like requiring at least one EOA signature) happens at the application layer, providing flexibility without compromising security.
-
-### **5. Clean Board Design**
-- **Parallel arrays**: `bytes32[] entityIds` + `uint16[] votingPowers` for gas efficiency
-- **Type safety**: Fixed `bytes32` vs variable `bytes` eliminates parsing errors
-- **Lazy entities**: Auto-validation when `entityId == keccak256(board)` (no registration)
-- **TradFi transitions**: Embedded delays prevent channel proof expiration
-- **BCD governance**: Control > Board > Dividend priority hierarchy
-
-## 🎯 **Revolutionary DeFi Use Cases**
+### **Optimistic Verification & Circular Dependencies**
+The system handles hierarchical dependencies by assuming referenced entities will validate successfully, then atomically reverting if any assumption fails. Circular dependencies are rare (UIs prevent them) and fail safely when they occur. Every signature still undergoes full `ecrecover` validation.
 
 ### **1. Next-Gen Protocol Governance**
 ```solidity
