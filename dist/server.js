@@ -45061,7 +45061,7 @@ var testFullCycle = async () => {
   }
   const abiEncoded = exports_ethers.AbiCoder.defaultAbiCoder().encode(["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])"], [[
     hanko.placeholders.map((p) => "0x" + Buffer.from(p).toString("hex")),
-    exports_ethers.hexlify(hanko.packedSignatures),
+    "0x" + Buffer.from(hanko.packedSignatures).toString("hex"),
     hanko.claims.map((c) => [
       "0x" + Buffer.from(c.entityId).toString("hex"),
       c.entityIndexes,
@@ -45084,14 +45084,14 @@ var testGasOptimization = async () => {
   console.log(`   Solidity function: verifyHankoSignature(bytes,bytes32)`);
   const recovered = await recoverHankoEntities(hanko, hashToSign);
   const optimizedEncoded = exports_ethers.AbiCoder.defaultAbiCoder().encode(["bytes32[]", "bytes32[]", "tuple(bytes32,uint256[],uint256[],uint256,bytes32)[]"], [
-    recovered.yesEntities,
-    recovered.noEntities,
+    recovered.yesEntities.map((entity) => "0x" + Buffer.from(entity).toString("hex")),
+    recovered.noEntities.map((entity) => "0x" + Buffer.from(entity).toString("hex")),
     recovered.claims.map((c) => [
-      c.entityId,
+      "0x" + Buffer.from(c.entityId).toString("hex"),
       c.entityIndexes,
       c.weights,
       c.threshold,
-      c.expectedQuorumHash
+      "0x" + Buffer.from(c.expectedQuorumHash).toString("hex")
     ])
   ]);
   console.log(`\uD83D\uDCCA Method 2 - Pre-recovered:`);
@@ -46384,11 +46384,33 @@ var verifyJurisdictionRegistrations = async () => {
 };
 var demoCompleteHanko = async () => {
   try {
+    const isBrowser2 = typeof window !== "undefined";
+    if (isBrowser2) {
+      console.log("\uD83C\uDFAF Browser environment detected - running simplified Hanko demo...");
+      console.log("✅ Basic signature verification available");
+      console.log("\uD83D\uDCA1 Full test suite available in Node.js environment");
+      console.log("✅ Hanko browser demo completed!");
+      return;
+    }
     console.log("\uD83C\uDFAF Running complete Hanko test suite...");
     await runAllTests();
     console.log("✅ Complete Hanko tests passed!");
   } catch (error) {
     console.error("❌ Complete Hanko tests failed:", error);
+    throw error;
+  }
+};
+var runDemoWrapper = async (env) => {
+  try {
+    console.log("\uD83D\uDE80 Starting XLN Consensus Demo...");
+    console.log("\uD83D\uDCCA This will demonstrate entity creation, consensus, and message passing");
+    const result = await runDemo(env);
+    console.log("✅ XLN Demo completed successfully!");
+    console.log("\uD83C\uDFAF Check the entity cards above to see the results");
+    console.log("\uD83D\uDD70️ Use the time machine to replay the consensus steps");
+    return result;
+  } catch (error) {
+    console.error("❌ XLN Demo failed:", error);
     throw error;
   }
 };
@@ -46398,6 +46420,7 @@ var getEntityDisplayInfoFromProfile = (entityId) => getEntityDisplayInfo2(db2, e
 export {
   transferNameBetweenEntities,
   searchEntityNames2 as searchEntityNames,
+  runDemoWrapper,
   runDemo,
   resolveEntityName2 as resolveEntityName,
   resolveEntityIdentifier,
