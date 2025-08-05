@@ -570,7 +570,7 @@ export const testFullCycle = async (): Promise<{ hanko: HankoBytes, abiEncoded: 
     ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])"],
     [[
       hanko.placeholders.map(p => '0x' + Buffer.from(p).toString('hex')),
-      ethers.hexlify(hanko.packedSignatures),
+      '0x' + Buffer.from(hanko.packedSignatures).toString('hex'),
       hanko.claims.map(c => [
         '0x' + Buffer.from(c.entityId).toString('hex'),
         c.entityIndexes,
@@ -606,14 +606,14 @@ export const testGasOptimization = async (): Promise<void> => {
   const optimizedEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
     ["bytes32[]", "bytes32[]", "tuple(bytes32,uint256[],uint256[],uint256,bytes32)[]"],
     [
-      recovered.yesEntities,
-      recovered.noEntities, 
+      recovered.yesEntities.map(entity => '0x' + Buffer.from(entity).toString('hex')),
+      recovered.noEntities.map(entity => '0x' + Buffer.from(entity).toString('hex')), 
       recovered.claims.map(c => [
-        c.entityId,
+        '0x' + Buffer.from(c.entityId).toString('hex'),
         c.entityIndexes,
         c.weights,
         c.threshold,
-        c.expectedQuorumHash
+        '0x' + Buffer.from(c.expectedQuorumHash).toString('hex')
       ])
     ]
   );

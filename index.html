@@ -234,6 +234,25 @@
             left: 0;
             margin-top: 4px;
         }
+        
+        /* Dark theme scrollbar */
+        .unified-dropdown-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .unified-dropdown-content::-webkit-scrollbar-track {
+            background: #1e1e1e;
+            border-radius: 4px;
+        }
+        
+        .unified-dropdown-content::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 4px;
+        }
+        
+        .unified-dropdown-content::-webkit-scrollbar-thumb:hover {
+            background: #666;
+        }
 
         .unified-dropdown-content.show {
             display: block;
@@ -1481,7 +1500,7 @@
             </div>
             
             <div class="admin-controls">
-                <button class="admin-btn" onclick="XLN.demoCompleteHanko()" title="Run Demo">
+                <button class="admin-btn" onclick="window.xlnEnv && XLN.runDemoWrapper(window.xlnEnv)" title="Run Demo">
                     <span>▶️</span>
                 </button>
                 <button class="admin-btn" onclick="XLN.clearDatabase()" title="Clear Database">
@@ -1503,34 +1522,7 @@
 
 
 
-        <!-- Entity Name Search -->
-        <div class="entity-search" style="margin: 20px 0; display: flex; align-items: center; gap: 10px;">
-            <label for="entitySearchInput" style="color: #d4d4d4; font-weight: 500;">🔍 Search Entities:</label>
-            <div style="position: relative; flex: 1; max-width: 400px;">
-                <input 
-                    type="text" 
-                    id="entitySearchInput" 
-                    placeholder="Type entity name... (e.g., Trading Collective)"
-                    style="width: 100%; padding: 10px 12px; border: 1px solid #555; border-radius: 6px; font-size: 14px; background: #2d2d2d; color: #d4d4d4; font-family: inherit;"
-                    autocomplete="off"
-                />
-                <div id="entitySearchResults" style="
-                    position: absolute; 
-                    top: 100%; 
-                    left: 0; 
-                    right: 0; 
-                    background: #2d2d2d; 
-                    border: 1px solid #555; 
-                    border-top: none; 
-                    border-radius: 0 0 6px 6px; 
-                    max-height: 300px; 
-                    overflow-y: auto; 
-                    z-index: 1000; 
-                    display: none;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-                "></div>
-            </div>
-        </div>
+        <!-- Search moved inside dropdown -->
 
         <!-- Selected Entity View -->
         <div class="selected-entity-view" id="selectedEntityView" style="display: none;">
@@ -1927,26 +1919,7 @@
         // Start auto-reload checking (every 10 seconds - much less frequent)
         setInterval(checkForChanges, 10000);
 
-        // Initialize environment
-        async function initializeEnvironment() {
-            try {
-                xlnEnv = await XLN.main();
-                window.xlnEnv = xlnEnv;
-                
-                
-                renderEntities();
-                populateReplicaSelect();
-                setupActionHandlers();
-                
-                console.log('🎯 XLN Environment loaded:', xlnEnv);
-                console.log('💡 Access via: window.xlnEnv');
-                
-            } catch (error) {
-                console.error('Failed to initialize XLN environment:', error);
-                document.getElementById('statusText').textContent = 
-                    `❌ Failed to load XLN environment: ${error.message}`;
-            }
-        }
+        // Environment initialization is now handled in main() function
 
         // Populate entity filter dropdown - OBSOLETE: Now handled by unified dropdown
         function populateEntityFilter() {
@@ -3910,20 +3883,7 @@
             searchResults.style.display = 'block';
         };
         
-        window.selectEntity = (entityId, name) => {
-            // Update search input
-            searchInput.value = name;
-            searchResults.style.display = 'none';
-            
-            // Update entity selector
-            const entitySelector = document.getElementById('entitySelector');
-            entitySelector.value = entityId;
-            
-            // Trigger entity filter update
-            renderEntities();
-            
-            console.log(`🎯 Selected entity: ${name} (${XLN.formatEntityDisplay(entityId)})`);
-        };
+        // Old selectEntity function removed - now handled by unified dropdown
 
         // --- Main Application Entry Point ---
         // Entity card expand/collapse functionality
@@ -3979,44 +3939,99 @@
             const dropdownContent = document.getElementById('dropdownContent');
             dropdownContent.innerHTML = '';
 
-            // Add Ethereum Mainnet jurisdiction
-            const jurisdictionHeader = createDropdownItem('🏛️', 'JURISDICTIONS', '', true);
-            dropdownContent.appendChild(jurisdictionHeader);
+            // Add search field as first item
+            const searchContainer = document.createElement('div');
+            searchContainer.className = 'dropdown-search-container';
+            searchContainer.innerHTML = `
+                <div class="dropdown-item search-item">
+                    <span class="item-icon">🔍</span>
+                    <input type="text" 
+                           placeholder="Find entity... (e.g., 1, 0x000..., alice.eth, 4.eth)" 
+                           class="dropdown-search-input"
+                           onclick="event.stopPropagation()"
+                           oninput="handleDropdownSearch(this.value)"
+                           style="background: transparent; border: none; color: #d4d4d4; flex: 1; outline: none;">
+                </div>
+            `;
+            dropdownContent.appendChild(searchContainer);
 
-            const ethereumItem = createDropdownItem('⚡', 'Ethereum Mainnet', 'ethereum-mainnet', false, 1);
-            ethereumItem.onclick = () => selectJurisdiction('ethereum-mainnet');
-            dropdownContent.appendChild(ethereumItem);
+            // Add separator
+            const separator = document.createElement('div');
+            separator.className = 'dropdown-separator';
+            separator.style.cssText = 'height: 1px; background: #444; margin: 4px 0;';
+            dropdownContent.appendChild(separator);
 
-            // Add demo signers under Ethereum
-            const signersHeader = createDropdownItem('👤', 'SIGNERS', '', true, 1);
-            dropdownContent.appendChild(signersHeader);
-
-            const demoSigners = ['alice', 'bob', 'carol', 'david', 'eve'];
-            demoSigners.forEach(signer => {
-                const signerItem = createDropdownItem('👤', `${signer}.eth`, signer, false, 2);
-                signerItem.onclick = () => selectSigner(signer);
-                dropdownContent.appendChild(signerItem);
+            // Full hierarchy tree: Jurisdictions → Signers → Entities
+            const jurisdictions = [
+                { key: 'ethereum', name: 'Ethereum', icon: '⟠' },
+                { key: 'polygon', name: 'Polygon', icon: '◆' },
+                { key: 'arbitrum', name: 'Arbitrum', icon: '△' }
+            ];
+            
+            // Get all replicas for tree structure
+            const replicasArray = xlnEnv.replicas ? 
+                (Array.isArray(xlnEnv.replicas) ? xlnEnv.replicas : Array.from(xlnEnv.replicas.values())) : [];
+            
+            // Group entities by signer
+            const entitiesBySigner = {};
+            replicasArray.forEach(replica => {
+                if (!entitiesBySigner[replica.signerId]) {
+                    entitiesBySigner[replica.signerId] = [];
+                }
+                entitiesBySigner[replica.signerId].push(replica);
             });
-
-            // Add entities for currently selected signer
-            if (xlnEnv.replicas && dropdownData.selectedSigner) {
-                const entitiesHeader = createDropdownItem('🏢', 'ENTITIES', '', true, 2);
-                dropdownContent.appendChild(entitiesHeader);
-
-                // Find entities for the selected signer
-                // Convert replicas Map to array before filtering
-                const replicasArray = Array.isArray(xlnEnv.replicas) ? xlnEnv.replicas : Array.from(xlnEnv.replicas.values());
-                const signerEntities = replicasArray.filter(replica => 
-                    replica.signerId === dropdownData.selectedSigner
-                );
-
-                signerEntities.forEach(replica => {
-                    const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId;
-                    const entityItem = createDropdownItem('🏢', `Entity ${entityDisplay}`, replica.entityId, false, 3);
-                    entityItem.onclick = () => selectEntity(replica.entityId, replica.signerId);
-                    dropdownContent.appendChild(entityItem);
+            
+            // All demo signers (show even if no entities)
+            const demoSigners = ['alice', 'bob', 'carol', 'david', 'eve'];
+            
+            jurisdictions.forEach(jurisdiction => {
+                // Add jurisdiction
+                const jurisdictionItem = createDropdownItemWithAvatar(jurisdiction.icon, '', jurisdiction.name, jurisdiction.key, false, 0);
+                jurisdictionItem.onclick = () => selectJurisdiction(jurisdiction.key);
+                dropdownContent.appendChild(jurisdictionItem);
+                
+                // Filter entities by jurisdiction first
+                const jurisdictionReplicas = replicasArray.filter(replica => {
+                    // Check if replica's jurisdiction matches current jurisdiction
+                    const replicaJurisdiction = replica.state?.config?.jurisdiction;
+                    if (!replicaJurisdiction) return false;
+                    
+                    // Match jurisdiction by name (more robust than key matching)
+                    return replicaJurisdiction.name === jurisdiction.name;
                 });
-            }
+                
+                // Group jurisdiction entities by signer
+                const jurisdictionEntitiesBySigner = {};
+                jurisdictionReplicas.forEach(replica => {
+                    if (!jurisdictionEntitiesBySigner[replica.signerId]) {
+                        jurisdictionEntitiesBySigner[replica.signerId] = [];
+                    }
+                    jurisdictionEntitiesBySigner[replica.signerId].push(replica);
+                });
+                
+                // Add signers that have entities in this jurisdiction
+                const signersWithEntities = Object.keys(jurisdictionEntitiesBySigner);
+                signersWithEntities.forEach(signer => {
+                    // Get signer avatar
+                    const signerAvatar = XLN.generateSignerAvatar ? XLN.generateSignerAvatar(signer) : '';
+                    
+                    // Create signer item (no emoji, only avatar)
+                    const signerItem = createDropdownItemWithAvatar('', signerAvatar, `${signer}.eth`, signer, false, 1);
+                    signerItem.onclick = () => selectSigner(signer);
+                    dropdownContent.appendChild(signerItem);
+
+                    // Add entities under this signer in this jurisdiction
+                    const signerEntities = jurisdictionEntitiesBySigner[signer] || [];
+                    signerEntities.forEach(replica => {
+                        const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId;
+                        const entityAvatar = XLN.generateEntityAvatar ? XLN.generateEntityAvatar(replica.entityId) : '';
+                        
+                        const entityItem = createDropdownItemWithAvatar('', entityAvatar, `${entityDisplay}`, replica.entityId, false, 2);
+                        entityItem.onclick = () => selectEntity(replica.entityId, replica.signerId);
+                        dropdownContent.appendChild(entityItem);
+                    });
+                });
+            });
         }
 
         function createDropdownItem(icon, text, value, isHeader = false, indent = 0) {
@@ -4035,23 +4050,87 @@
             return item;
         }
 
+        function createDropdownItemWithAvatar(icon, avatarSvg, text, value, isHeader = false, indent = 0) {
+            const item = document.createElement('div');
+            item.className = `dropdown-item ${isHeader ? 'header' : ''} ${indent > 0 ? `indent-${indent}` : ''}`;
+            
+            // Create icon span (only if no avatar)
+            let iconSpan = null;
+            if (!avatarSvg && icon) {
+                iconSpan = document.createElement('span');
+                iconSpan.className = 'item-icon';
+                iconSpan.textContent = icon;
+            }
+            
+            // Create avatar span if avatar is provided
+            let avatarSpan = null;
+            if (avatarSvg) {
+                avatarSpan = document.createElement('span');
+                avatarSpan.className = 'item-avatar';
+                avatarSpan.style.cssText = 'display: inline-block; width: 32px; height: 32px; margin-right: 12px; vertical-align: middle;';
+                
+                // Fix encoding issue - the avatar might already be a data URL
+                const avatarUrl = avatarSvg.startsWith('data:') ? avatarSvg : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(avatarSvg)}`;
+                
+                // Create img element for avatar
+                const avatarImg = document.createElement('img');
+                avatarImg.src = avatarUrl;
+                avatarImg.style.cssText = 'width: 100%; height: 100%; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.3);';
+                
+                // Create fallback div
+                const fallbackDiv = document.createElement('div');
+                fallbackDiv.style.cssText = 'width: 32px; height: 32px; border-radius: 16px; background: #333; display: none; align-items: center; justify-content: center; color: #9d9d9d; font-size: 16px; margin-right: 12px;';
+                fallbackDiv.textContent = '👤'; // Default fallback
+                
+                // Add error handler
+                avatarImg.onerror = () => {
+                    console.log('❌ Dropdown avatar failed to load');
+                    avatarImg.style.display = 'none';
+                    fallbackDiv.style.display = 'flex';
+                };
+                
+                avatarSpan.appendChild(avatarImg);
+                avatarSpan.appendChild(fallbackDiv);
+            }
+            
+            // Create text span
+            const textSpan = document.createElement('span');
+            textSpan.className = 'item-text';
+            textSpan.textContent = text;
+            
+            // Append elements
+            if (iconSpan) {
+                item.appendChild(iconSpan);
+            }
+            if (avatarSpan) {
+                item.appendChild(avatarSpan);
+            }
+            item.appendChild(textSpan);
+            
+            if (value) {
+                item.dataset.value = value;
+            }
+            
+            return item;
+        }
+
         function selectJurisdiction(jurisdiction) {
             dropdownData.selectedJurisdiction = jurisdiction;
             dropdownData.selectedSigner = null;
             dropdownData.selectedEntity = null;
             updateDropdownText();
-            populateUnifiedDropdown(); // Refresh to show signers
         }
 
         function selectSigner(signer) {
             dropdownData.selectedSigner = signer;
             dropdownData.selectedEntity = null;
             updateDropdownText();
-            populateUnifiedDropdown(); // Refresh to show entities
         }
 
         function selectEntity(entityId, signerId) {
             dropdownData.selectedEntity = entityId;
+            dropdownData.selectedSigner = signerId; // Also set the signer
+            dropdownData.selectedJurisdiction = 'ethereum'; // Also set jurisdiction
             updateDropdownText();
             
             // Find and render the selected entity
@@ -4062,7 +4141,13 @@
                     replica.entityId === entityId && replica.signerId === signerId
                 );
                 if (selectedReplica) {
+                    console.log(`🎯 Selected entity: ${XLN.formatEntityDisplay ? XLN.formatEntityDisplay(entityId) : entityId} (${signerId}.eth)`);
+                    console.log('📊 Selected replica:', selectedReplica);
                     renderSelectedEntity(selectedReplica);
+                    console.log('✅ renderSelectedEntity called');
+                } else {
+                    console.log(`❌ Entity not found: ${entityId} for signer ${signerId}`);
+                    console.log('📋 Available replicas:', replicasArray.map(r => `${XLN.formatEntityDisplay ? XLN.formatEntityDisplay(r.entityId) : r.entityId} (${r.signerId})`));
                 }
             }
             
@@ -4074,20 +4159,199 @@
             const dropdownText = document.getElementById('dropdownText');
             const dropdownIcon = document.querySelector('.dropdown-icon');
             
-            if (dropdownData.selectedEntity) {
+            // Get jurisdiction display name
+            const jurisdictionNames = {
+                'ethereum': 'Ethereum',
+                'polygon': 'Polygon', 
+                'arbitrum': 'Arbitrum'
+            };
+            const jurisdictionDisplay = dropdownData.selectedJurisdiction ? 
+                jurisdictionNames[dropdownData.selectedJurisdiction] || dropdownData.selectedJurisdiction : 
+                'Select Jurisdiction';
+            
+            if (dropdownData.selectedEntity && dropdownData.selectedSigner) {
                 const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(dropdownData.selectedEntity) : dropdownData.selectedEntity;
-                dropdownText.textContent = `🏛️ Ethereum → 👤 ${dropdownData.selectedSigner}.eth → 🏢 Entity ${entityDisplay}`;
+                dropdownText.textContent = `${jurisdictionDisplay} → ${dropdownData.selectedSigner}.eth → ${entityDisplay}`;
                 dropdownIcon.textContent = '🏢';
             } else if (dropdownData.selectedSigner) {
-                dropdownText.textContent = `🏛️ Ethereum → 👤 ${dropdownData.selectedSigner}.eth → Select Entity`;
+                dropdownText.textContent = `${jurisdictionDisplay} → ${dropdownData.selectedSigner}.eth → Select Entity`;
                 dropdownIcon.textContent = '👤';
             } else if (dropdownData.selectedJurisdiction) {
-                dropdownText.textContent = `🏛️ Ethereum Mainnet → Select Signer → Entity`;
-                dropdownIcon.textContent = '🏛️';
+                dropdownText.textContent = `${jurisdictionDisplay} → Select Signer → Entity`;
+                dropdownIcon.textContent = '⟠';
             } else {
                 dropdownText.textContent = 'Select Jurisdiction → Signer → Entity';
-                dropdownIcon.textContent = '🏛️';
+                dropdownIcon.textContent = '⟠';
             }
+        }
+
+        function updateSelectedEntityFromTimeIndex() {
+            console.log('🕰️ Updating selected entity from time index:', currentTimeIndex);
+            
+            let replicas;
+            if (currentTimeIndex === -1) {
+                // Live data
+                replicas = xlnEnv.replicas;
+                console.log('🕰️ Using live data');
+            } else {
+                // Historical data
+                const history = XLN.getHistory();
+                console.log('🕰️ History length:', history.length);
+                if (currentTimeIndex < history.length) {
+                    const snapshot = history[currentTimeIndex];
+                    console.log('🕰️ Using historical data from index:', currentTimeIndex);
+                    console.log('🕰️ Snapshot structure:', Object.keys(snapshot));
+                    
+                    // The snapshot IS the environment data, not wrapped in .env
+                    replicas = snapshot.replicas;
+                } else {
+                    console.log('❌ Invalid time index:', currentTimeIndex, 'history length:', history.length);
+                    return;
+                }
+            }
+            
+            if (!replicas) {
+                console.log('❌ No replicas available');
+                return;
+            }
+            
+            console.log('🕰️ Replicas type:', typeof replicas, 'size:', replicas.size || replicas.length);
+            
+            // Find the selected entity in the current time slice
+            const replicasArray = Array.isArray(replicas) ? replicas : Array.from(replicas.values());
+            console.log('🕰️ Searching for entity:', dropdownData.selectedEntity, 'signer:', dropdownData.selectedSigner);
+            console.log('🕰️ Available replicas:', replicasArray.map(r => `${r.entityId}:${r.signerId}`));
+            
+            const selectedReplica = replicasArray.find(replica => 
+                replica.entityId === dropdownData.selectedEntity && replica.signerId === dropdownData.selectedSigner
+            );
+            
+            if (selectedReplica) {
+                console.log('🕰️ Found replica for time index, updating view');
+                renderSelectedEntity(selectedReplica);
+            } else {
+                console.log('❌ Selected entity not found in current time slice');
+            }
+        }
+
+        window.handleDropdownSearch = function(query) {
+            if (!query.trim()) {
+                populateUnifiedDropdown(); // Show full tree if search is empty
+                return;
+            }
+
+            const dropdownContent = document.getElementById('dropdownContent');
+            
+            // Preserve the search input and only update results below it
+            const existingSearchContainer = dropdownContent.querySelector('.dropdown-search-container');
+            const existingSearchInput = existingSearchContainer ? existingSearchContainer.querySelector('input') : null;
+            
+            // Clear everything except search container
+            const elementsToRemove = Array.from(dropdownContent.children).filter(child => 
+                !child.classList.contains('dropdown-search-container')
+            );
+            elementsToRemove.forEach(element => element.remove());
+            
+            // Update search input value if it exists and is different
+            if (existingSearchInput && existingSearchInput.value !== query) {
+                existingSearchInput.value = query;
+            }
+
+            // Add separator
+            const separator = document.createElement('div');
+            separator.className = 'dropdown-separator';
+            separator.style.cssText = 'height: 1px; background: #444; margin: 4px 0;';
+            dropdownContent.appendChild(separator);
+
+            const results = [];
+            const lowerQuery = query.toLowerCase();
+
+            // Search jurisdictions
+            const jurisdictions = [
+                { key: 'ethereum', name: 'Ethereum', icon: '⟠', terms: ['ethereum', 'eth'] },
+                { key: 'polygon', name: 'Polygon', icon: '◆', terms: ['polygon', 'matic', 'poly'] },
+                { key: 'arbitrum', name: 'Arbitrum', icon: '△', terms: ['arbitrum', 'arb'] }
+            ];
+            
+            jurisdictions.forEach(jurisdiction => {
+                if (jurisdiction.terms.some(term => term.includes(lowerQuery)) || jurisdiction.name.toLowerCase().includes(lowerQuery)) {
+                    results.push({
+                        type: 'jurisdiction',
+                        icon: jurisdiction.icon,
+                        text: jurisdiction.name,
+                        value: jurisdiction.key,
+                        onClick: () => selectJurisdiction(jurisdiction.key)
+                    });
+                }
+            });
+
+            // Search signers
+            const demoSigners = ['alice', 'bob', 'carol', 'david', 'eve'];
+            demoSigners.forEach(signer => {
+                const signerText = `${signer}.eth`;
+                if (signerText.includes(lowerQuery) || signer.includes(lowerQuery)) {
+                    const signerAvatar = XLN.generateSignerAvatar ? XLN.generateSignerAvatar(signer) : '';
+                    results.push({
+                        type: 'signer',
+                        icon: '👤',
+                        avatar: signerAvatar,
+                        text: signerText,
+                        value: signer,
+                        onClick: () => selectSigner(signer)
+                    });
+                }
+            });
+
+            // Search entities
+            if (xlnEnv.replicas) {
+                const replicasArray = Array.isArray(xlnEnv.replicas) ? xlnEnv.replicas : Array.from(xlnEnv.replicas.values());
+                replicasArray.forEach(replica => {
+                    const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId;
+                    const searchTargets = [
+                        entityDisplay.toLowerCase(),
+                        replica.entityId.toLowerCase(),
+                        `${entityDisplay}.eth`.toLowerCase(),
+                        `${replica.signerId}.eth`.toLowerCase()
+                    ];
+
+                    if (searchTargets.some(target => target.includes(lowerQuery))) {
+                        const entityAvatar = XLN.generateEntityAvatar ? XLN.generateEntityAvatar(replica.entityId) : '';
+                        results.push({
+                            type: 'entity',
+                            icon: '🏢',
+                            avatar: entityAvatar,
+                            text: `${entityDisplay} (${replica.signerId}.eth)`,
+                            value: replica.entityId,
+                            onClick: () => selectEntity(replica.entityId, replica.signerId)
+                        });
+                    }
+                });
+            }
+
+            // Display results
+            if (results.length === 0) {
+                const noResults = document.createElement('div');
+                noResults.className = 'dropdown-item';
+                noResults.innerHTML = `<span class="item-icon">❌</span><span class="item-text">No results found</span>`;
+                dropdownContent.appendChild(noResults);
+            } else {
+                results.forEach(result => {
+                    const item = createDropdownItemWithAvatar(result.icon, result.avatar || '', result.text, result.value, false, 0);
+                    item.onclick = result.onClick;
+                    // Highlight search term
+                    const textSpan = item.querySelector('.item-text');
+                    if (textSpan) {
+                        textSpan.innerHTML = highlightSearchTerm(textSpan.textContent, query);
+                    }
+                    dropdownContent.appendChild(item);
+                });
+            }
+        }
+
+        function highlightSearchTerm(text, term) {
+            if (!term.trim()) return text;
+            const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+            return text.replace(regex, '<mark style="background: #007acc; color: white; padding: 1px 2px; border-radius: 2px;">$1</mark>');
         }
 
         function toggleUnifiedDropdown() {
@@ -4119,15 +4383,21 @@
 
         
         function renderSelectedEntity(replica) {
+            console.log('🖼️ renderSelectedEntity called with:', replica);
             const selectedEntityView = document.getElementById('selectedEntityView');
             
-            // For now, just create a single entity card (reusing existing logic)
-            selectedEntityView.innerHTML = '';
-            const entityCard = document.createElement('div');
-            entityCard.className = 'entity-card expanded'; // Always expanded in admin view
+            if (!selectedEntityView) {
+                console.error('❌ selectedEntityView element not found!');
+                return;
+            }
             
-            // Reuse the existing entity card creation logic but without the grid
-            // This is a simplified version - you can enhance it
+            // Make the selected entity view visible
+            selectedEntityView.style.display = 'block';
+            console.log('👁️ selectedEntityView made visible');
+            
+            // Create comprehensive entity profile page
+            selectedEntityView.innerHTML = '';
+            
             const config = replica.state.config;
             const shares = config.validators.includes(replica.signerId) ? 1 : 0;
             const totalShares = config.validators.length;
@@ -4135,43 +4405,166 @@
             const isProposer = replica.isProposer;
             const modeClass = config.mode === 'proposer-based' ? 'mode-proposer-based' : 'mode-gossip-based';
             
-            entityCard.innerHTML = `
-                <div class="entity-header">
-                    <div class="entity-title">
-                        <span>🏢 Entity ${XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId}</span>
-                        <span>👤 ${XLN.formatSignerDisplay ? XLN.formatSignerDisplay(replica.signerId) : replica.signerId}</span>
+            // Get avatars
+            console.log('🖼️ Getting avatars for entity:', replica.entityId, 'signer:', replica.signerId);
+            console.log('🔍 XLN.generateEntityAvatar available:', !!XLN.generateEntityAvatar);
+            console.log('🔍 XLN.generateSignerAvatar available:', !!XLN.generateSignerAvatar);
+            
+            const entityAvatar = XLN.generateEntityAvatar ? XLN.generateEntityAvatar(replica.entityId) : '';
+            const signerAvatar = XLN.generateSignerAvatar ? XLN.generateSignerAvatar(replica.signerId) : '';
+            
+            console.log('🖼️ Entity avatar length:', entityAvatar.length);
+            console.log('🖼️ Signer avatar length:', signerAvatar.length);
+            
+            if (entityAvatar.length > 100) {
+                console.log('🖼️ Entity avatar preview:', entityAvatar.substring(0, 100) + '...');
+            }
+            if (signerAvatar.length > 100) {
+                console.log('🖼️ Signer avatar preview:', signerAvatar.substring(0, 100) + '...');
+            }
+            
+            const profilePage = document.createElement('div');
+            profilePage.className = 'entity-profile-page';
+            profilePage.style.cssText = 'padding: 24px; background: #1e1e1e; border-radius: 8px; border: 1px solid #333;';
+            
+            // Create avatar HTML with fallbacks
+            // Fix encoding issue - the avatar might already be a data URL
+            const entityAvatarUrl = entityAvatar.startsWith('data:') ? entityAvatar : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(entityAvatar)}`;
+            const signerAvatarUrl = signerAvatar.startsWith('data:') ? signerAvatar : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(signerAvatar)}`;
+            
+            console.log('🔧 Entity avatar URL length:', entityAvatarUrl.length);
+            console.log('🔧 Signer avatar URL length:', signerAvatarUrl.length);
+            
+            const entityAvatarImg = entityAvatar ? 
+                `<img src="${entityAvatarUrl}" 
+                      style="width: 80px; height: 80px; border-radius: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" 
+                      onerror="console.log('❌ Entity avatar failed to load'); this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                 <div style="width: 80px; height: 80px; border-radius: 40px; background: #333; display: none; align-items: center; justify-content: center; color: #9d9d9d; font-size: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">🏢</div>` :
+                `<div style="width: 80px; height: 80px; border-radius: 40px; background: #333; display: flex; align-items: center; justify-content: center; color: #9d9d9d; font-size: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">🏢</div>`;
+                
+            const signerAvatarImg = signerAvatar ?
+                `<img src="${signerAvatarUrl}" 
+                      style="width: 24px; height: 24px; border-radius: 12px; margin-right: 8px;" 
+                      onerror="console.log('❌ Signer avatar failed to load'); this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                 <div style="width: 24px; height: 24px; border-radius: 12px; background: #333; display: none; align-items: center; justify-content: center; color: #9d9d9d; font-size: 12px; margin-right: 8px;">👤</div>` :
+                `<div style="width: 24px; height: 24px; border-radius: 12px; background: #333; display: flex; align-items: center; justify-content: center; color: #9d9d9d; font-size: 12px; margin-right: 8px;">👤</div>`;
+            
+            profilePage.innerHTML = `
+                <div class="profile-header" style="display: flex; align-items: center; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #333;">
+                    <div class="entity-avatar" style="margin-right: 20px;">
+                        ${entityAvatarImg}
                     </div>
-                    <div class="entity-mode ${modeClass}">${config.mode}</div>
+                    <div class="entity-title-section">
+                        <h1 style="margin: 0 0 8px 0; color: #fff; font-size: 32px; font-weight: 600;">
+                            Entity ${XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId}
+                        </h1>
+                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                            ${signerAvatarImg}
+                            <span style="color: #9d9d9d; font-size: 18px;">${XLN.formatSignerDisplay ? XLN.formatSignerDisplay(replica.signerId) : replica.signerId}</span>
+                        </div>
+                        <div class="entity-mode ${modeClass}" style="display: inline-block; padding: 4px 12px; border-radius: 16px; font-size: 14px; font-weight: 500;">${config.mode}</div>
+                    </div>
                 </div>
-                <div class="entity-metrics">
-                    <div class="metric-item">
-                        <div class="metric-value">${sharePercent}%</div>
-                        <div class="metric-label">Voting Power</div>
+                
+                <div class="profile-metrics" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-bottom: 32px;">
+                    <div class="metric-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 600; color: #007acc; margin-bottom: 4px;">${sharePercent}%</div>
+                        <div style="color: #9d9d9d; font-size: 14px;">Voting Power</div>
                     </div>
-                    <div class="metric-item">
-                        <div class="metric-value">${replica.state.messages.length}</div>
-                        <div class="metric-label">Messages</div>
+                    <div class="metric-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 600; color: #007acc; margin-bottom: 4px;">${replica.state.messages.length}</div>
+                        <div style="color: #9d9d9d; font-size: 14px;">Messages</div>
                     </div>
-                    <div class="metric-item">
-                        <div class="metric-value">${replica.state.proposals.size}</div>
-                        <div class="metric-label">Proposals</div>
+                    <div class="metric-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 600; color: #007acc; margin-bottom: 4px;">${replica.state.proposals.size}</div>
+                        <div style="color: #9d9d9d; font-size: 14px;">Proposals</div>
                     </div>
-                    <div class="metric-item">
-                        <div class="metric-value">${replica.state.height}</div>
-                        <div class="metric-label">Height</div>
-                    </div>
-                </div>
-                <div class="entity-details" style="display: block;">
-                    <div class="entity-identity">
-                        <strong>Entity ID:</strong> <span style="word-break: break-all; color: #9d9d9d; font-family: monospace;">${replica.entityId}</span><br>
-                        <strong>Signer:</strong> <span style="color: #9d9d9d; font-family: monospace;">${replica.signerId}</span><br>
-                        <strong>Role:</strong> ${isProposer ? '👑 Proposer' : '✅ Validator'}<br>
-                        <strong>Consensus:</strong> ${config.threshold}/${config.validators.length} threshold
+                    <div class="metric-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 600; color: #007acc; margin-bottom: 4px;">${replica.state.height}</div>
+                        <div style="color: #9d9d9d; font-size: 14px;">Height</div>
                     </div>
                 </div>
+                
+                <div class="profile-sections" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                    <div class="section-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px;">
+                        <h3 style="margin: 0 0 16px 0; color: #fff; font-size: 18px; font-weight: 600;">🔧 Configuration</h3>
+                        <div style="color: #d4d4d4; line-height: 1.6;">
+                            <div><strong>Entity ID:</strong></div>
+                            <div style="font-family: monospace; color: #9d9d9d; word-break: break-all; margin-bottom: 12px;">${replica.entityId}</div>
+                            <div><strong>Signer:</strong> <span style="font-family: monospace; color: #9d9d9d;">${replica.signerId}</span></div>
+                            <div><strong>Role:</strong> ${isProposer ? '👑 Proposer' : '✅ Validator'}</div>
+                            <div><strong>Consensus:</strong> ${config.threshold}/${config.validators.length} threshold</div>
+                            <div><strong>Mode:</strong> ${config.mode}</div>
+                            <div><strong>Validators:</strong> ${config.validators.join(', ')}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="section-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px;">
+                        <h3 style="margin: 0 0 16px 0; color: #fff; font-size: 18px; font-weight: 600;">📊 State Info</h3>
+                        <div style="color: #d4d4d4; line-height: 1.6;">
+                            <div><strong>Height:</strong> ${replica.state.height}</div>
+                            <div><strong>Timestamp:</strong> ${new Date(replica.state.timestamp).toLocaleString()}</div>
+                            <div><strong>Mempool:</strong> ${replica.mempool.length} transactions</div>
+                            <div><strong>Nonces:</strong> ${replica.state.nonces.size} tracked</div>
+                            ${replica.proposal ? `<div><strong>Current Proposal:</strong> Height ${replica.proposal.height}</div>` : ''}
+                            ${replica.lockedFrame ? `<div><strong>Locked Frame:</strong> Height ${replica.lockedFrame.height}</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="profile-sections" style="display: grid; grid-template-columns: 1fr; gap: 24px; margin-top: 24px;">
+                    <div class="section-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px;">
+                        <h3 style="margin: 0 0 16px 0; color: #fff; font-size: 18px; font-weight: 600;">💬 Messages (${replica.state.messages.length})</h3>
+                        <div style="max-height: 200px; overflow-y: auto; background: #1e1e1e; border-radius: 4px; padding: 12px;">
+                            ${replica.state.messages.length > 0 ? 
+                                replica.state.messages.slice(-10).map((msg, i) => 
+                                    `<div style="color: #d4d4d4; padding: 4px 0; border-bottom: 1px solid #333; font-family: monospace; font-size: 13px;">${i + 1}. ${msg}</div>`
+                                ).join('') : 
+                                '<div style="color: #666; text-align: center; padding: 20px;">No messages yet</div>'
+                            }
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="profile-sections" style="display: grid; grid-template-columns: 1fr; gap: 24px; margin-top: 24px;">
+                    <div class="section-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px;">
+                        <h3 style="margin: 0 0 16px 0; color: #fff; font-size: 18px; font-weight: 600;">📋 Proposals (${replica.state.proposals.size})</h3>
+                        <div style="max-height: 300px; overflow-y: auto; background: #1e1e1e; border-radius: 4px; padding: 12px;">
+                            ${replica.state.proposals.size > 0 ? 
+                                Array.from(replica.state.proposals.entries()).slice(-5).map(([propId, proposal]) => 
+                                    `<div style="background: #333; margin-bottom: 12px; padding: 16px; border-radius: 4px;">
+                                        <div style="color: #007acc; font-weight: 600; margin-bottom: 8px;">${propId}</div>
+                                        <div style="color: #d4d4d4; margin-bottom: 4px;"><strong>By:</strong> ${proposal.proposer}</div>
+                                        <div style="color: #d4d4d4; margin-bottom: 4px;"><strong>Status:</strong> <span style="color: ${proposal.status === 'passed' ? '#4CAF50' : proposal.status === 'failed' ? '#f44336' : '#ff9800'};">${proposal.status}</span></div>
+                                        <div style="color: #d4d4d4; margin-bottom: 8px;"><strong>Votes:</strong> ${proposal.votes.size}/${config.validators.length}</div>
+                                        <div style="color: #9d9d9d; font-size: 13px; font-family: monospace;">${proposal.action.data.message}</div>
+                                    </div>`
+                                ).join('') : 
+                                '<div style="color: #666; text-align: center; padding: 20px;">No proposals yet</div>'
+                            }
+                        </div>
+                    </div>
+                </div>
+                
+                ${replica.mempool.length > 0 ? `
+                <div class="profile-sections" style="display: grid; grid-template-columns: 1fr; gap: 24px; margin-top: 24px;">
+                    <div class="section-card" style="background: #2d2d2d; padding: 20px; border-radius: 8px;">
+                        <h3 style="margin: 0 0 16px 0; color: #fff; font-size: 18px; font-weight: 600;">⏳ Mempool (${replica.mempool.length})</h3>
+                        <div style="max-height: 200px; overflow-y: auto; background: #1e1e1e; border-radius: 4px; padding: 12px;">
+                            ${replica.mempool.slice(-5).map((tx, i) => 
+                                `<div style="color: #d4d4d4; padding: 8px; margin-bottom: 4px; background: #333; border-radius: 4px; font-family: monospace; font-size: 13px;">
+                                    <div><strong>Type:</strong> ${tx.type}</div>
+                                    <div><strong>Data:</strong> ${JSON.stringify(tx.data).slice(0, 100)}...</div>
+                                </div>`
+                            ).join('')}
+                        </div>
+                    </div>
+                </div>` : ''}
             `;
             
-            selectedEntityView.appendChild(entityCard);
+            selectedEntityView.appendChild(profilePage);
+            console.log('✅ Entity card appended to selectedEntityView');
+            console.log('🎯 renderSelectedEntity completed successfully');
         }
         
         // Event handlers for dropdowns
@@ -4214,6 +4607,7 @@
             try {
                 // Wait for the environment to load from the database
                 xlnEnv = await XLN.main();
+                window.xlnEnv = xlnEnv; // Make it globally accessible
                 console.log('🎯 XLN Environment loaded:', xlnEnv);
                 console.log('💡 Access via: window.xlnEnv');
 
@@ -4241,6 +4635,11 @@
                         currentTimeIndex = sliderValue;
                     }
                     renderEntities();
+                    
+                    // Update selected entity view if one is selected
+                    if (dropdownData.selectedEntity && dropdownData.selectedSigner) {
+                        updateSelectedEntityFromTimeIndex();
+                    }
                 });
 
                 // 3. Start the continuous render loop for live updates
