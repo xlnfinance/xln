@@ -16,11 +16,13 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #1e1e1e;
             min-height: 100vh;
-            color: #333;
-            overflow-x: hidden; /* Prevent horizontal scroll on entire page */
+            color: #d4d4d4;
+            overflow-x: hidden;
+            margin: 0;
+            padding: 0;
         }
 
         .container {
@@ -29,16 +31,279 @@
             padding: 20px;
         }
 
-        .header {
+        .admin-topbar {
+            background: #252526;
+            border-bottom: 1px solid #3e3e3e;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .admin-logo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #007acc;
+            font-weight: 600;
+            font-size: 1.2em;
+        }
+
+        .logo-icon {
+            font-size: 1.4em;
+        }
+
+        .admin-navigation {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            max-width: 600px;
+        }
+
+        .admin-select {
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: #d4d4d4;
+            font-size: 0.9em;
+            min-width: 180px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .admin-select:focus {
+            outline: none;
+            border-color: #007acc;
+            box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+        }
+
+        .admin-select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .admin-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .admin-btn {
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 8px 10px;
+            color: #d4d4d4;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 36px;
+            height: 36px;
+        }
+
+        .admin-btn:hover {
+            background: #404040;
+            border-color: #007acc;
+            color: #007acc;
+        }
+
+        /* Banking-style History I/O Section */
+        .history-io-section {
+            background: #2d2d2d;
+            border: 1px solid #3e3e3e;
+            border-radius: 8px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .history-header {
+            background: #252526;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #3e3e3e;
+        }
+
+        .history-header h3 {
+            margin: 0;
+            color: #d4d4d4;
+            font-size: 1em;
+            font-weight: 500;
+        }
+
+        .collapse-btn {
+            background: none;
+            border: none;
+            color: #9d9d9d;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: transform 0.2s ease;
+        }
+
+        .collapse-btn:hover {
+            color: #007acc;
+        }
+
+        .collapse-btn.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .history-content {
+            display: block;
+            transition: all 0.3s ease;
+        }
+
+        .history-content.collapsed {
+            display: none;
+        }
+
+        .server-io-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            margin: 0;
+        }
+
+        /* Unified Hierarchical Dropdown */
+        .unified-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .unified-dropdown-btn {
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 6px;
+            color: #d4d4d4;
+            padding: 8px 16px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 300px;
+            transition: all 0.2s ease;
+        }
+
+        .unified-dropdown-btn:hover {
+            background: #404040;
+            border-color: #007acc;
+        }
+
+        .dropdown-icon {
+            font-size: 16px;
+        }
+
+        .dropdown-text {
+            flex: 1;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dropdown-arrow {
+            transition: transform 0.2s ease;
+            color: #9d9d9d;
+        }
+
+        .unified-dropdown-btn.open .dropdown-arrow {
+            transform: rotate(180deg);
+        }
+
+        .unified-dropdown-content {
+            display: none;
+            position: absolute;
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            min-width: 100%;
+            max-height: 400px;
+            overflow-y: auto;
+            top: 100%;
+            left: 0;
+            margin-top: 4px;
+        }
+
+        .unified-dropdown-content.show {
+            display: block;
+        }
+
+        .dropdown-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #3e3e3e;
+            transition: background-color 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .dropdown-item:hover {
+            background: #404040;
+        }
+
+        .dropdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .dropdown-item.header {
+            background: #252526;
+            color: #007acc;
+            font-weight: 500;
+            cursor: default;
+            font-size: 13px;
+            padding: 8px 16px;
+        }
+
+        .dropdown-item.header:hover {
+            background: #252526;
+        }
+
+        .dropdown-item.indent-1 {
+            padding-left: 32px;
+        }
+
+        .dropdown-item.indent-2 {
+            padding-left: 48px;
+        }
+
+        .dropdown-item .item-icon {
+            font-size: 14px;
+            width: 16px;
             text-align: center;
-            color: white;
-            margin-bottom: 30px;
+        }
+
+        .dropdown-item .item-text {
+            flex: 1;
+            color: #d4d4d4;
+        }
+
+        .dropdown-item.selected {
+            background: #007acc;
+            color: #ffffff;
+        }
+
+        .dropdown-item.selected .item-text {
+            color: #ffffff;
         }
 
         .header h1 {
-            font-size: 2.5em;
+            font-size: 2.2em;
             margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            font-weight: 600;
+            color: #ffffff;
+            letter-spacing: -0.5px;
         }
 
         .status-bar {
@@ -368,11 +633,14 @@
         }
 
         .entities-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 20px;
             margin-bottom: 30px;
+            max-width: 100%;
+            margin-left: auto;
+            margin-right: auto;
         }
 
 
@@ -380,48 +648,183 @@
 
 
         .entity-card {
-            background: white;
-            border-radius: 15px;
-            padding: 15px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            transition: transform 0.3s ease;
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            border: 1px solid #3e3e3e;
+            transition: all 0.2s ease;
             width: 100%;
+            cursor: pointer;
+            margin-bottom: 8px;
+            user-select: none;
         }
 
         .entity-card:hover {
-            transform: translateY(-5px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+            border-color: #007acc;
+            background: #333333;
+        }
+
+        .entity-card.expanded {
+            border-color: #007acc;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.3);
         }
 
         .entity-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #f0f0f0;
-            padding-bottom: 10px;
+            margin-bottom: 16px;
+        }
+
+        .entity-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .expand-indicator {
+            color: #9d9d9d;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+
+        .entity-card:hover .expand-indicator {
+            color: #007acc;
+        }
+
+        .expand-icon {
+            transition: transform 0.2s ease;
+        }
+
+        .entity-card.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .entity-details {
+            border-top: 1px solid #404040;
+            padding-top: 16px;
+            margin-top: 16px;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+
+        .entity-details > div {
+            margin-bottom: 12px;
+            padding: 8px 0;
+        }
+
+        .entity-identity {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+
+        .jurisdiction-info {
+            background: #1e3a5f;
+            padding: 8px;
+            border-radius: 4px;
+            border-left: 3px solid #007acc;
+        }
+
+        .replica-stats {
+            background: #2a2a2a;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+
+        .messages-section, .proposals-section {
+            background: #252526;
+            padding: 8px;
+            border-radius: 4px;
+            color: #d4d4d4;
+        }
+
+        .message {
+            padding: 4px 8px;
+            margin: 4px 0;
+            background: #2d2d2d;
+            border-radius: 3px;
+            font-size: 0.8em;
+            color: #d4d4d4;
+            border-left: 2px solid #007acc;
+        }
+
+        .proposal {
+            padding: 6px;
+            margin: 4px 0;
+            background: #3d1a5c;
+            border-radius: 3px;
+            border-left: 3px solid #bb86fc;
+            color: #d4d4d4;
         }
 
         .entity-title {
-            font-size: 1.4em;
-            font-weight: bold;
-            color: #2c3e50;
-            text-transform: uppercase;
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
         .entity-mode {
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 0.8em;
-            font-weight: bold;
-            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 500;
+            background: #404040;
+            color: #d4d4d4;
+            border: 1px solid #555555;
         }
 
         .mode-proposer-based {
-            background: #3498db;
+            background: #1e3a5f;
+            color: #5DADE2;
+            border-color: #007acc;
         }
 
         .mode-gossip-based {
-            background: #9b59b6;
+            background: #3d1a5c;
+            color: #bb86fc;
+            border-color: #7c3aed;
+        }
+
+        .entity-metrics {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #404040;
+        }
+
+        .metric-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .metric-value {
+            font-size: 0.95em;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .metric-label {
+            font-size: 0.72em;
+            color: #9d9d9d;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            font-weight: 500;
         }
 
         .replica-grid {
@@ -834,9 +1237,9 @@
             height: 4px;
             border-radius: 2px;
             background: linear-gradient(90deg, 
-                #007bff 0%, 
+                #007acc 0%, 
                 #00ff88 var(--progress), 
-                #333 var(--progress), 
+                #404040 var(--progress), 
                 #555 100%);
             outline: none;
             -webkit-appearance: none;
@@ -850,25 +1253,25 @@
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            background: linear-gradient(45deg, #007bff, #0056b3);
+            background: linear-gradient(45deg, #007acc, #005a9a);
             cursor: pointer;
-            box-shadow: 0 1px 4px rgba(0,123,255,0.4);
+            box-shadow: 0 1px 4px rgba(0,122,204,0.4);
             transition: all 0.2s ease;
         }
 
         .time-slider::-webkit-slider-thumb:hover {
             transform: scale(1.1);
-            box-shadow: 0 2px 8px rgba(0,123,255,0.6);
+            box-shadow: 0 2px 8px rgba(0,122,204,0.6);
         }
 
         .time-slider::-moz-range-thumb {
             width: 14px;
             height: 14px;
             border-radius: 50%;
-            background: linear-gradient(45deg, #007bff, #0056b3);
+            background: linear-gradient(45deg, #007acc, #005a9a);
             cursor: pointer;
             border: none;
-            box-shadow: 0 1px 4px rgba(0,123,255,0.4);
+            box-shadow: 0 1px 4px rgba(0,122,204,0.4);
         }
 
         .server-input-section {
@@ -889,17 +1292,18 @@
         }
 
         .server-column {
-            background: rgba(255,255,255,0.95);
-            border: 2px solid #007bff;
-            border-radius: 10px;
+            background: #2d2d2d;
+            border: 2px solid #007acc;
+            border-radius: 8px;
             padding: 15px;
-            font-family: 'Monaco', 'Menlo', monospace;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
             font-size: 0.85em;
+            color: #d4d4d4;
         }
 
         .server-column-header {
             font-weight: bold;
-            color: #007bff;
+            color: #007acc;
             margin-bottom: 15px;
             padding-bottom: 8px;
             border-bottom: 1px solid #dee2e6;
@@ -989,17 +1393,17 @@
 
         /* Tab Styles */
         .actionable-tabs-container {
-            background: rgba(255,255,255,0.95);
-            border: 2px solid #007bff;
-            border-radius: 12px;
+            background: #2d2d2d;
+            border: 2px solid #007acc;
+            border-radius: 8px;
             margin-bottom: 20px;
             overflow: hidden;
         }
 
         .tabs-header {
             display: flex;
-            background: #f8f9fa;
-            border-bottom: 1px solid #dee2e6;
+            background: #252526;
+            border-bottom: 1px solid #3e3e3e;
         }
 
         .tab-button {
@@ -1007,29 +1411,31 @@
             background: transparent;
             border: none;
             padding: 15px 20px;
-            font-size: 1em;
-            font-weight: 600;
-            color: #6c757d;
+            font-size: 0.95em;
+            font-weight: 500;
+            color: #9d9d9d;
             cursor: pointer;
             transition: all 0.2s ease;
-            border-bottom: 3px solid transparent;
+            border-bottom: 2px solid transparent;
         }
 
         .tab-button:hover {
-            background: rgba(0, 123, 255, 0.1);
-            color: #007bff;
+            background: rgba(0, 122, 204, 0.15);
+            color: #007acc;
         }
 
         .tab-button.active {
-            background: white;
-            color: #007bff;
-            border-bottom: 3px solid #007bff;
+            background: #2d2d2d;
+            color: #007acc;
+            border-bottom: 2px solid #007acc;
         }
 
         .tab-content {
             display: none;
             padding: 20px;
             animation: fadeIn 0.3s ease;
+            background: #2d2d2d;
+            color: #d4d4d4;
         }
 
         .tab-content.active {
@@ -1054,12 +1460,100 @@
     </div>
     
     <div class="container">
+        <!-- Admin Top Bar -->
+        <div class="admin-topbar">
+            <div class="admin-logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">XLN</span>
+            </div>
+            
+            <div class="admin-navigation">
+                <div class="unified-dropdown" id="unifiedDropdown">
+                    <button class="unified-dropdown-btn" onclick="toggleUnifiedDropdown()">
+                        <span class="dropdown-icon">🏛️</span>
+                        <span class="dropdown-text" id="dropdownText">Select Jurisdiction → Signer → Entity</span>
+                        <span class="dropdown-arrow">▼</span>
+                    </button>
+                    <div class="unified-dropdown-content" id="dropdownContent">
+                        <!-- Tree structure will be populated here -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="admin-controls">
+                <button class="admin-btn" onclick="XLN.demoCompleteHanko()" title="Run Demo">
+                    <span>▶️</span>
+                </button>
+                <button class="admin-btn" onclick="XLN.clearDatabase()" title="Clear Database">
+                    <span>🗑️</span>
+                </button>
+                <button class="admin-btn" onclick="showEntityCreator()" title="Create New Entity">
+                    <span>➕</span>
+                </button>
+                <button class="admin-btn theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <span id="theme-icon">🌙</span>
+                </button>
+                <button class="admin-btn" onclick="showSettings()" title="Settings">
+                    <span>⚙️</span>
+                </button>
+            </div>
+        </div>
 
-        <div class="server-io-container" id="serverIOContainer" style="display: none;">
+
+
+
+
+        <!-- Entity Name Search -->
+        <div class="entity-search" style="margin: 20px 0; display: flex; align-items: center; gap: 10px;">
+            <label for="entitySearchInput" style="color: #d4d4d4; font-weight: 500;">🔍 Search Entities:</label>
+            <div style="position: relative; flex: 1; max-width: 400px;">
+                <input 
+                    type="text" 
+                    id="entitySearchInput" 
+                    placeholder="Type entity name... (e.g., Trading Collective)"
+                    style="width: 100%; padding: 10px 12px; border: 1px solid #555; border-radius: 6px; font-size: 14px; background: #2d2d2d; color: #d4d4d4; font-family: inherit;"
+                    autocomplete="off"
+                />
+                <div id="entitySearchResults" style="
+                    position: absolute; 
+                    top: 100%; 
+                    left: 0; 
+                    right: 0; 
+                    background: #2d2d2d; 
+                    border: 1px solid #555; 
+                    border-top: none; 
+                    border-radius: 0 0 6px 6px; 
+                    max-height: 300px; 
+                    overflow-y: auto; 
+                    z-index: 1000; 
+                    display: none;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+                "></div>
+            </div>
+        </div>
+
+        <!-- Selected Entity View -->
+        <div class="selected-entity-view" id="selectedEntityView" style="display: none;">
+            <!-- Single selected entity will be shown here -->
+        </div>
+        
+        <!-- Hidden: Original entities grid (for reference) -->
+        <div class="entities-grid" id="entitiesGrid" style="display: none;">
+            <!-- Entity cards will be populated here -->
+        </div>
+
+        <!-- History I/O Area (Banking App Style) -->
+        <div class="history-io-section" id="historyIOSection">
+            <div class="history-header">
+                <h3>📊 Transaction History & I/O</h3>
+                <button class="collapse-btn" onclick="toggleHistoryIO()" id="historyToggle">▼</button>
+            </div>
+            <div class="history-content" id="historyContent">
+                <div class="server-io-container" id="serverIOContainer">
             <div class="server-column">
                 <div class="server-column-header">
                     📨 Server Input (What's happening this tick)
-                    <span id="serverInputStatus" style="font-weight: normal; color: #6c757d; font-size: 0.85em;"></span>
+                            <span id="serverInputStatus" style="font-weight: normal; color: #9d9d9d; font-size: 0.85em;"></span>
                 </div>
                 
                 <div class="server-section">
@@ -1076,7 +1570,7 @@
             <div class="server-column">
                 <div class="server-column-header">
                     📤 Server Output (What's being sent and where)
-                    <span id="serverOutputStatus" style="font-weight: normal; color: #6c757d; font-size: 0.85em;"></span>
+                            <span id="serverOutputStatus" style="font-weight: normal; color: #9d9d9d; font-size: 0.85em;"></span>
                 </div>
                 
                 <div class="server-section">
@@ -1085,18 +1579,7 @@
                 </div>
             </div>
         </div>
-
-        <div class="entity-filter">
-            <label for="entitySelector">Display Entity:</label>
-            <select id="entitySelector"></select>
-            <div class="actions">
-                <button id="runDemoBtn" class="btn btn-primary">Run Demo</button>
-                <button id="clearDbBtn" class="btn btn-secondary">Clear Database</button>
             </div>
-        </div>
-
-        <div class="entities-grid" id="entitiesGrid">
-            <!-- Entity cards will be populated here -->
         </div>
 
         <div class="actionable-tabs-container">
@@ -1465,38 +1948,42 @@
             }
         }
 
-        // Populate entity filter dropdown
+        // Populate entity filter dropdown - OBSOLETE: Now handled by unified dropdown
         function populateEntityFilter() {
-            if (!xlnEnv) return;
-            
-            const entityFilter = document.getElementById('entitySelector');
-            const currentValue = entityFilter.value;
-            
-            // Get unique entity types
-            const entityTypes = [...new Set(Array.from(xlnEnv.replicas.keys()).map(key => key.split(':')[0]))];
-            
-            // Clear and repopulate
-            entityFilter.innerHTML = '<option value="all">All Entities</option>';
-            entityTypes.forEach(entityType => {
-                const option = document.createElement('option');
-                option.value = entityType;
-                option.textContent = entityType.toUpperCase();
-                entityFilter.appendChild(option);
-            });
-            
-            // Restore previous selection if it still exists
-            if (currentValue && Array.from(entityFilter.options).some(opt => opt.value === currentValue)) {
-                entityFilter.value = currentValue;
-            }
+            // No longer needed - unified dropdown handles entity selection
+            return;
         }
+
+        // Cache for avoiding unnecessary re-renders
+        let lastRenderState = null;
 
         // Render entities - each replica as separate card
         function renderEntities() {
             if (!xlnEnv) return;
             
             const entitiesGrid = document.getElementById('entitiesGrid');
-            const entityFilter = document.getElementById('entitySelector');
-            const selectedEntity = entityFilter.value;
+            // Use unified dropdown state instead of old entitySelector
+            // Note: This function is mostly obsolete with the new unified dropdown system
+            const selectedEntity = (typeof dropdownData !== 'undefined' && dropdownData) ? dropdownData.selectedEntity : null;
+            
+            // Quick change detection
+            const currentState = {
+                selectedEntity,
+                timeIndex: currentTimeIndex,
+                envHeight: xlnEnv.height,
+                replicasCount: xlnEnv.replicas.size
+            };
+            
+            // Don't re-render if nothing important changed
+            if (lastRenderState && 
+                lastRenderState.selectedEntity === currentState.selectedEntity &&
+                lastRenderState.timeIndex === currentState.timeIndex &&
+                lastRenderState.envHeight === currentState.envHeight &&
+                lastRenderState.replicasCount === currentState.replicasCount) {
+                return; // Skip re-render
+            }
+            
+            lastRenderState = currentState;
             
             // Clear existing content
             entitiesGrid.innerHTML = '';
@@ -1569,158 +2056,177 @@
                 const shares = config.shares[replica.signerId] || BigInt(0);
                 const sharePercent = ((Number(shares) / Number(totalShares)) * 100).toFixed(1);
                 
+                // Generate display data (reduced logging)
+                let entityAvatar = '';
+                let signerAvatar = '';
+                
+                try {
+                    entityAvatar = XLN.generateEntityAvatar ? XLN.generateEntityAvatar(replica.entityId) : '';
+                    signerAvatar = XLN.generateSignerAvatar ? XLN.generateSignerAvatar(replica.signerId) : '';
+                } catch (error) {
+                    console.error('❌ Avatar generation error:', error);
+                }
+                
+                // Entity display using the proper format function
+                const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId;
+                
+                // Signer display with name resolution (get clean name without emoji)
+                const signerInfo = XLN.getSignerDisplayInfo ? XLN.getSignerDisplayInfo(replica.signerId) : { name: replica.signerId };
+                const signerName = signerInfo.name || replica.signerId;
+
+                // Create wallet-style structure
+                const cardId = `card-${replica.entityId.slice(-4)}-${replica.signerId}`;
                 entityCard.innerHTML = `
                     <div class="entity-header">
-                        <div class="entity-title">${(() => {
-                            // Check if this is a numbered entity (pure number)
-                            const isNumberedEntity = /^[0-9]+$/.test(replica.entityId);
-                            
-                            if (isNumberedEntity) {
-                                const num = BigInt(replica.entityId);
-                                if (num > 0n && num < 1000000n) {
-                                    // For numbered entities, show the number nicely
-                                    return `#${num}:${replica.signerId}`;
-                                }
-                            }
-                            
-                            if (replica.entityId.length > 10) {
-                                // For long IDs (lazy), show first few chars
-                                return `${replica.entityId.slice(0, 8)}...:${replica.signerId}`;
-                            } else {
-                                // For short names/legacy
-                                return `${replica.entityId}:${replica.signerId}`;
-                            }
-                        })()} ${isHistorical ? '🕰️' : ''}</div>
-                        <div class="entity-mode ${modeClass}">${config.mode}</div>
-                    </div>
-                    
-                    <div class="entity-identity" style="padding: 10px; background: #f8f9fa; border-radius: 4px; margin: 10px 0; font-family: monospace; font-size: 0.9em;">
-                        <strong>🆔 Entity Identity:</strong><br>
-                        <strong>ID:</strong> <span style="word-break: break-all; color: #495057;">${replica.entityId}</span><br>
-                        <strong>Type:</strong> ${(() => {
-                            if (typeof XLN !== 'undefined' && XLN.detectEntityType) {
-                                const type = XLN.detectEntityType(replica.entityId);
-                                if (type === 'lazy') return '🔒 Lazy Entity (Free, ID = Quorum Hash)';
-                                if (type === 'numbered') return '🔢 Numbered Entity (On-chain Registered)';
-                                if (type === 'named') return '🏷️ Named Entity (Premium)';
-                            }
-                            return '🔄 Legacy Entity';
-                        })()}<br>
-                        ${(() => {
-                            // Check if this is a numbered entity (pure number)
-                            const isNumberedEntity = /^[0-9]+$/.test(replica.entityId);
-                            if (isNumberedEntity) {
-                                const num = BigInt(replica.entityId);
-                                if (num > 0n && num < 1000000n) {
-                                    return `<strong>Entity Number:</strong> #${num}<br>`;
-                                }
-                            }
-                            return '';
-                        })()}
-                        <strong>Validators:</strong> ${config.validators.join(', ')}<br>
-                        <strong>Threshold:</strong> ${config.threshold}/${config.validators.length}
-                    </div>
-                    
-                    <div class="threshold-info">
-                        <strong>Role:</strong> ${isProposer ? '👑 Proposer' : '✅ Validator'}<br>
-                        <strong>Voting Power:</strong> ${shares} / ${totalShares} shares (${sharePercent}%)<br>
-                        <strong>Consensus Threshold:</strong> ${config.threshold} / ${totalShares} shares (${thresholdPercent}%)
-                        <div class="power-bar">
-                            <div class="power-fill" style="width: ${thresholdPercent}%"></div>
+                        <div class="entity-title" id="title-${replica.entityId.slice(-4)}-${replica.signerId}">
                         </div>
+                        <div class="entity-controls">
+                        <div class="entity-mode ${modeClass}">${config.mode}</div>
+                            <div class="expand-indicator">
+                                <span class="expand-icon">▼</span>
+                    </div>
+                        </div>
+                    </div>
+                    <div class="entity-metrics">
+                        <div class="metric-item">
+                            <div class="metric-value">${sharePercent}%</div>
+                            <div class="metric-label">Voting Power</div>
+                        </div>
+                        <div class="metric-item">
+                            <div class="metric-value">${replica.state.messages.length}</div>
+                            <div class="metric-label">Messages</div>
+                        </div>
+                        <div class="metric-item">
+                            <div class="metric-value">${replica.state.proposals.size}</div>
+                            <div class="metric-label">Proposals</div>
+                        </div>
+                        <div class="metric-item">
+                            <div class="metric-value">${replica.state.height}</div>
+                            <div class="metric-label">Height</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Expandable Details Section -->
+                    <div class="entity-details" id="details-${cardId}" style="display: none;">
+                        <div class="entity-identity">
+                            <strong>Entity ID:</strong> <span style="word-break: break-all; color: #9d9d9d; font-family: monospace;">${replica.entityId}</span><br>
+                            <strong>Signer:</strong> <span style="color: #9d9d9d; font-family: monospace;">${replica.signerId}</span><br>
+                        <strong>Role:</strong> ${isProposer ? '👑 Proposer' : '✅ Validator'}<br>
+                            <strong>Consensus:</strong> ${config.threshold}/${config.validators.length} threshold
                     </div>
                     
                     ${config.jurisdiction ? `
-                        <div class="jurisdiction-info" style="padding: 10px; background: #e3f2fd; border-left: 4px solid #2196f3; margin: 10px 0; border-radius: 4px;">
+                            <div class="jurisdiction-info">
                             <strong>🏛️ Jurisdiction:</strong> ${config.jurisdiction.name}<br>
-                            <small>
-                                <strong>Address:</strong> ${config.jurisdiction.address}<br>
-                                <strong>Entity Provider:</strong> ${config.jurisdiction.entityProviderAddress}<br>
-                                <strong>Depository:</strong> ${config.jurisdiction.depositoryAddress}
-                                ${config.jurisdiction.chainId ? `<br><strong>Chain ID:</strong> ${config.jurisdiction.chainId}` : ''}
+                                <small style="color: #9d9d9d;">
+                                    <strong>Provider:</strong> ${config.jurisdiction.entityProviderAddress?.slice(0,10)}...<br>
+                                    <strong>Depository:</strong> ${config.jurisdiction.depositoryAddress?.slice(0,10)}...
                             </small>
                         </div>
-                    ` : `
-                        <div class="jurisdiction-info" style="padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; margin: 10px 0; border-radius: 4px;">
-                            <strong>⚠️ No Jurisdiction:</strong> Entity missing jurisdiction registration<br>
-                            <small>All entities must be registered under a jurisdiction for legal compliance</small>
-                        </div>
-                    `}
-                    
-                    <div class="replica-stats" style="padding: 15px; background: #f8f9fa; border-radius: 5px; margin: 10px 0; font-family: monospace; font-size: 0.85em;">
-                        <strong>📊 Replica State:</strong><br>
-                        <strong>📏 Frame Height: ${replica.state.height}</strong><br>
-                        <strong>📝 Mempool: ${replica.mempool.length} txs</strong>
-                        ${replica.mempool.length > 0 ? `<br>  ${replica.mempool.map((tx, i) => {
-                            if (tx.type === 'chat') return `${i+1}. 💬 "${tx.data.message}" (${tx.data.from})`;
-                            if (tx.type === 'propose') return `${i+1}. 📝 "${tx.data.action.data.message}" (${tx.data.proposer})`;
-                            if (tx.type === 'vote') return `${i+1}. 🗳️ ${tx.data.choice} on ${tx.data.proposalId.slice(0,8)}... (${tx.data.voter})`;
-                            return `${i+1}. ${tx.type}`;
-                        }).join('<br>  ')}` : ''}<br>
-                        <strong>💬 Messages: ${replica.state.messages.length}</strong><br>
-                        <strong>🗳️ Proposals: ${replica.state.proposals.size}</strong><br>
-                        <strong>🔢 Nonces:</strong> ${replica.state.nonces.size > 0 ? 
-                            Array.from(replica.state.nonces.entries()).map(([user, nonce]) => `${user}:${nonce}`).join(', ') : 
-                            'none'}<br>
-                        ${replica.proposal ? `<strong style="color: #28a745;">📝 Currently Proposing:</strong><br>
-                          • Height: ${replica.proposal.height}<br>
-                          • Hash: ${replica.proposal.hash}<br>
-                          • Txs: ${replica.proposal.txs.length}<br>
-                          • Signatures: ${replica.proposal.signatures.size}/${replica.state.config.validators.length}` : ''}
-                        ${replica.lockedFrame ? `<strong style="color: #ffc107;">🔒 Locked Frame (Precommitted):</strong><br>
-                          • Height: ${replica.lockedFrame.height}<br>
-                          • Hash: ${replica.lockedFrame.hash}<br>
-                          • Txs: ${replica.lockedFrame.txs.length}` : ''}
+                        ` : ''}
+                        
+                        <div class="replica-stats">
+                            <strong>📊 State Details:</strong><br>
+                            <strong>📝 Mempool:</strong> ${replica.mempool.length} txs<br>
+                            <strong>🔢 Nonces:</strong> ${replica.state.nonces.size || 'none'}<br>
+                            ${replica.proposal ? `<strong style="color: #5DADE2;">📝 Proposing Block ${replica.proposal.height}</strong><br>` : ''}
+                            ${replica.lockedFrame ? `<strong style="color: #f39c12;">🔒 Locked on Block ${replica.lockedFrame.height}</strong><br>` : ''}
                     </div>
                     
+                        ${replica.state.messages.length > 0 ? `
                     <div class="messages-section">
-                        <strong>📨 ${replica.signerId}'s Message Feed:</strong>
-                        ${replica.state.messages.length > 0 ? 
-                            replica.state.messages.map(msg => `
-                                <div class="message ${msg.includes('[COLLECTIVE]') ? 'collective' : ''}">
-                                    ${msg}
+                                <strong>💬 Recent Messages:</strong>
+                                ${replica.state.messages.slice(-3).map(msg => `
+                                    <div class="message">${msg}</div>
+                                `).join('')}
+                                ${replica.state.messages.length > 3 ? `<small>...and ${replica.state.messages.length - 3} more</small>` : ''}
                                 </div>
-                            `).join('') : 
-                            '<div class="message">No messages yet</div>'
-                        }
-                    </div>
+                        ` : ''}
                     
                     ${replica.state.proposals.size > 0 ? `
-                        <div class="messages-section">
-                            <strong>🗳️ ${replica.signerId}'s Proposals:</strong>
-                            ${Array.from(replica.state.proposals.values()).map(proposal => {
-                                const yesVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'yes').map(([voter, _]) => voter);
-                                const noVoters = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === 'no').map(([voter, _]) => voter);
-                                
-                                return `<div class="message">
-                                    <strong>ID:</strong> ${proposal.id}<br>
-                                    <strong>Proposer:</strong> ${proposal.proposer}<br>
-                                    <strong>Status:</strong> ${proposal.status}<br>
-                                    <strong>Action:</strong> ${proposal.action.data.message}<br>
-                                    <strong>Votes (${proposal.votes.size} total):</strong><br>
-                                    ${yesVoters.length > 0 ? `  ✅ YES (${yesVoters.length}): ${yesVoters.join(', ')}<br>` : ''}
-                                    ${noVoters.length > 0 ? `  ❌ NO (${noVoters.length}): ${noVoters.join(', ')}<br>` : ''}
-                                    ${yesVoters.length === 0 && noVoters.length === 0 ? '  (No votes yet)<br>' : ''}
-                                    <small>Created: ${new Date(proposal.created).toLocaleTimeString()}</small>
+                            <div class="proposals-section">
+                                <strong>🗳️ Active Proposals:</strong>
+                                ${Array.from(replica.state.proposals.values()).slice(0, 2).map(proposal => {
+                                    const yesVotes = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === true).length;
+                                    const noVotes = Array.from(proposal.votes.entries()).filter(([_, vote]) => vote === false).length;
+                                    return `
+                                    <div class="proposal">
+                                        <strong>"${proposal.action.data.message}"</strong><br>
+                                        <small>✅ ${yesVotes} Yes, ❌ ${noVotes} No • ${proposal.proposer}</small>
                                 </div>`;
                             }).join('')}
+                                ${replica.state.proposals.size > 2 ? `<small>...and ${replica.state.proposals.size - 2} more</small>` : ''}
                         </div>
                     ` : ''}
+                    </div>
                 `;
+                entityCard.dataset.cardId = cardId;
+                entityCard.onclick = () => toggleEntityDetails(cardId);
                 
+                // Now populate the title with DOM manipulation to avoid HTML escaping
+                const titleDiv = entityCard.querySelector(`#title-${replica.entityId.slice(-4)}-${replica.signerId}`);
+                
+                // Add entity avatar
+                if (entityAvatar) {
+                    const entityImg = document.createElement('img');
+                    entityImg.src = entityAvatar;
+                    entityImg.alt = 'Entity Avatar';
+                    entityImg.style.width = '24px';
+                    entityImg.style.height = '24px';
+                    entityImg.style.borderRadius = '4px';
+                    titleDiv.appendChild(entityImg);
+                } else {
+                    titleDiv.appendChild(document.createTextNode('🏢'));
+                }
+                
+                // Add entity name
+                const entitySpan = document.createElement('span');
+                entitySpan.textContent = `Entity #${entityDisplay}:`;
+                titleDiv.appendChild(entitySpan);
+                
+                // Add signer avatar
+                if (signerAvatar) {
+                    const signerImg = document.createElement('img');
+                    signerImg.src = signerAvatar;
+                    signerImg.alt = 'Signer Avatar';
+                    signerImg.style.width = '20px';
+                    signerImg.style.height = '20px';
+                    signerImg.style.borderRadius = '50%';
+                    titleDiv.appendChild(signerImg);
+                } else {
+                    titleDiv.appendChild(document.createTextNode('👤'));
+                }
+                
+                // Add signer name
+                const signerSpan = document.createElement('span');
+                signerSpan.textContent = signerName;
+                titleDiv.appendChild(signerSpan);
+                
+                // Add historical indicator
+                if (isHistorical) {
+                    titleDiv.appendChild(document.createTextNode('🕰️'));
+                }
+                
+                // Append card to grid
                 entitiesGrid.appendChild(entityCard);
             });
             
             // Update time machine UI
             updateTimeMachineUI();
-        }
+        };
         
         // Render server input section
         function renderServerInput(serverInput, isHistorical) {
+            const historySection = document.getElementById('historyIOSection');
             const container = document.getElementById('serverIOContainer');
             const status = document.getElementById('serverInputStatus');
             const serverTxsList = document.getElementById('serverTxsList');
             const entityInputsList = document.getElementById('entityInputsList');
+            
+            // Show history section when there's data
+            if (serverInput && (serverInput.serverTxs.length || serverInput.entityInputs.length)) {
+                historySection.style.display = 'block';
+            }
             
             // Always show the container
             container.style.display = 'grid';
@@ -3288,41 +3794,422 @@
             updateTotalWeight();
         });
 
-        // Add entity filter event listener
-        document.addEventListener('DOMContentLoaded', () => {
-            const entityFilter = document.getElementById('entitySelector');
-            entityFilter.addEventListener('change', () => {
-                renderEntities();
-            });
-        });
+        // Entity filtering now handled by unified dropdown - no separate listener needed
 
         // Initialization handled by DOMContentLoaded main() function
 
-        document.getElementById('clearDbBtn').addEventListener('click', () => {
-            if (confirm('Are you sure you want to clear the entire database? This cannot be undone.')) {
-                if (window.XLN && typeof window.XLN.clearDatabase === 'function') {
-                    window.XLN.clearDatabase().then(() => {
-                        console.log('Database cleared, reloading page.');
-                        location.reload();
-                    });
-                } else {
-                    console.error('clearDatabase function not found on XLN object.');
-                }
-            }
-        });
+        // Clear database and run demo now handled by top bar buttons - no separate listeners needed
 
-        document.getElementById('runDemoBtn').addEventListener('click', async () => {
-            if (window.XLN && typeof window.XLN.runDemo === 'function' && xlnEnv) {
-                console.log('Running demo...');
-                window.XLN.runDemo(xlnEnv);
-                console.log('Demo finished.');
-                // The UI will update automatically via its existing render interval.
-            } else {
-                console.error('Could not run demo. XLN.runDemo function or environment not found.');
+        // Function to reinitialize after database clear (instead of page reload)
+        window.reinitializeAfterClear = async function() {
+            try {
+                console.log('🔄 Reinitializing application after database clear...');
+                
+                // Reset global state
+                xlnEnv = null;
+                window.xlnEnv = null;
+                
+                // Clear UI state
+                const entitiesGrid = document.getElementById('entitiesGrid');
+                if (entitiesGrid) entitiesGrid.innerHTML = '';
+                
+                // Reinitialize environment from scratch
+                xlnEnv = await XLN.main();
+                window.xlnEnv = xlnEnv;
+                
+                // Re-render UI
+                setupEntitySearch(); // Reinitialize autocomplete search
+                renderEntities();
+                populateReplicaSelect();
+                updateTimeMachineUI();
+                
+                console.log('✅ Application reinitialized successfully');
+            } catch (error) {
+                console.error('❌ Failed to reinitialize after clear:', error);
+                // Fallback to page reload if reinit fails
+                        location.reload();
             }
-        });
+        };
+
+        // === ENTITY NAME SEARCH AUTOCOMPLETE ===
+        
+        let searchTimeout;
+        const searchInput = document.getElementById('entitySearchInput');
+        const searchResults = document.getElementById('entitySearchResults');
+        
+        // Setup autocomplete functionality
+        const setupEntitySearch = () => {
+            if (!searchInput || !searchResults) return;
+            
+            searchInput.addEventListener('input', async (e) => {
+                const query = e.target.value.trim();
+                
+                // Clear previous timeout
+                clearTimeout(searchTimeout);
+                
+                if (query.length < 2) {
+                    searchResults.style.display = 'none';
+                    return;
+                }
+                
+                // Debounce search
+                searchTimeout = setTimeout(async () => {
+                    try {
+                        const results = await XLN.searchEntityNames(query, 5);
+                        displaySearchResults(results);
+                    } catch (error) {
+                        console.error('Search error:', error);
+                        searchResults.style.display = 'none';
+                    }
+                }, 300);
+            });
+            
+            // Hide results when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                    searchResults.style.display = 'none';
+                }
+            });
+            
+            // Focus/clear on click
+            searchInput.addEventListener('focus', () => {
+                if (searchInput.value.trim().length >= 2) {
+                    searchResults.style.display = 'block';
+                }
+            });
+        };
+        
+        const displaySearchResults = (results) => {
+            if (!results || results.length === 0) {
+                searchResults.style.display = 'none';
+                return;
+            }
+            
+            const html = results.map(result => `
+                <div class="search-result-item" style="
+                    padding: 12px; 
+                    border-bottom: 1px solid #eee; 
+                    cursor: pointer; 
+                    display: flex; 
+                    align-items: center; 
+                    gap: 10px;
+                    transition: background-color 0.2s;
+                " 
+                onmouseover="this.style.backgroundColor='#404040'" 
+                onmouseout="this.style.backgroundColor='#2d2d2d'"
+                onclick="selectEntity('${result.entityId}', '${result.name}')">
+                    <img src="${result.avatar}" alt="Avatar" style="width: 24px; height: 24px; border-radius: 50%;">
+                    <div>
+                        <div style="font-weight: bold; color: #ffffff;">${result.name}</div>
+                        <div style="font-size: 12px; color: #9d9d9d;">Entity ${XLN.formatEntityDisplay(result.entityId)}</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            searchResults.innerHTML = html;
+            searchResults.style.display = 'block';
+        };
+        
+        window.selectEntity = (entityId, name) => {
+            // Update search input
+            searchInput.value = name;
+            searchResults.style.display = 'none';
+            
+            // Update entity selector
+            const entitySelector = document.getElementById('entitySelector');
+            entitySelector.value = entityId;
+            
+            // Trigger entity filter update
+            renderEntities();
+            
+            console.log(`🎯 Selected entity: ${name} (${XLN.formatEntityDisplay(entityId)})`);
+        };
 
         // --- Main Application Entry Point ---
+        // Entity card expand/collapse functionality
+        function toggleEntityDetails(cardId) {
+            const detailsDiv = document.getElementById(`details-${cardId}`);
+            const entityCard = document.querySelector(`[data-card-id="${cardId}"]`);
+            
+            if (detailsDiv.style.display === 'none') {
+                detailsDiv.style.display = 'block';
+                entityCard.classList.add('expanded');
+                entityCard.title = 'Click to collapse details';
+                } else {
+                detailsDiv.style.display = 'none';
+                entityCard.classList.remove('expanded');
+                entityCard.title = 'Click to expand details';
+            }
+        }
+
+        // Make toggleEntityDetails available globally
+        window.toggleEntityDetails = toggleEntityDetails;
+
+        // Theme toggle functionality
+        let isDarkMode = true; // Start with dark mode
+        function toggleTheme() {
+            isDarkMode = !isDarkMode;
+            const root = document.documentElement;
+            const themeIcon = document.getElementById('theme-icon');
+            
+            if (isDarkMode) {
+                // Dark mode
+                document.body.style.background = '#1e1e1e';
+                document.body.style.color = '#d4d4d4';
+                themeIcon.textContent = '🌙';
+            } else {
+                // Light mode  
+                document.body.style.background = '#ffffff';
+                document.body.style.color = '#333333';
+                themeIcon.textContent = '☀️';
+            }
+        }
+        window.toggleTheme = toggleTheme;
+
+        // Unified dropdown functionality
+        let dropdownData = {
+            selectedJurisdiction: null,
+            selectedSigner: null,
+            selectedEntity: null
+        };
+
+        function populateUnifiedDropdown() {
+            if (!xlnEnv) return;
+
+            const dropdownContent = document.getElementById('dropdownContent');
+            dropdownContent.innerHTML = '';
+
+            // Add Ethereum Mainnet jurisdiction
+            const jurisdictionHeader = createDropdownItem('🏛️', 'JURISDICTIONS', '', true);
+            dropdownContent.appendChild(jurisdictionHeader);
+
+            const ethereumItem = createDropdownItem('⚡', 'Ethereum Mainnet', 'ethereum-mainnet', false, 1);
+            ethereumItem.onclick = () => selectJurisdiction('ethereum-mainnet');
+            dropdownContent.appendChild(ethereumItem);
+
+            // Add demo signers under Ethereum
+            const signersHeader = createDropdownItem('👤', 'SIGNERS', '', true, 1);
+            dropdownContent.appendChild(signersHeader);
+
+            const demoSigners = ['alice', 'bob', 'carol', 'david', 'eve'];
+            demoSigners.forEach(signer => {
+                const signerItem = createDropdownItem('👤', `${signer}.eth`, signer, false, 2);
+                signerItem.onclick = () => selectSigner(signer);
+                dropdownContent.appendChild(signerItem);
+            });
+
+            // Add entities for currently selected signer
+            if (xlnEnv.replicas && dropdownData.selectedSigner) {
+                const entitiesHeader = createDropdownItem('🏢', 'ENTITIES', '', true, 2);
+                dropdownContent.appendChild(entitiesHeader);
+
+                // Find entities for the selected signer
+                // Convert replicas Map to array before filtering
+                const replicasArray = Array.isArray(xlnEnv.replicas) ? xlnEnv.replicas : Array.from(xlnEnv.replicas.values());
+                const signerEntities = replicasArray.filter(replica => 
+                    replica.signerId === dropdownData.selectedSigner
+                );
+
+                signerEntities.forEach(replica => {
+                    const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId;
+                    const entityItem = createDropdownItem('🏢', `Entity ${entityDisplay}`, replica.entityId, false, 3);
+                    entityItem.onclick = () => selectEntity(replica.entityId, replica.signerId);
+                    dropdownContent.appendChild(entityItem);
+                });
+            }
+        }
+
+        function createDropdownItem(icon, text, value, isHeader = false, indent = 0) {
+            const item = document.createElement('div');
+            item.className = `dropdown-item ${isHeader ? 'header' : ''} ${indent > 0 ? `indent-${indent}` : ''}`;
+            
+            item.innerHTML = `
+                <span class="item-icon">${icon}</span>
+                <span class="item-text">${text}</span>
+            `;
+            
+            if (value) {
+                item.dataset.value = value;
+            }
+            
+            return item;
+        }
+
+        function selectJurisdiction(jurisdiction) {
+            dropdownData.selectedJurisdiction = jurisdiction;
+            dropdownData.selectedSigner = null;
+            dropdownData.selectedEntity = null;
+            updateDropdownText();
+            populateUnifiedDropdown(); // Refresh to show signers
+        }
+
+        function selectSigner(signer) {
+            dropdownData.selectedSigner = signer;
+            dropdownData.selectedEntity = null;
+            updateDropdownText();
+            populateUnifiedDropdown(); // Refresh to show entities
+        }
+
+        function selectEntity(entityId, signerId) {
+            dropdownData.selectedEntity = entityId;
+            updateDropdownText();
+            
+            // Find and render the selected entity
+            if (xlnEnv.replicas) {
+                // Convert replicas Map to array before finding
+                const replicasArray = Array.isArray(xlnEnv.replicas) ? xlnEnv.replicas : Array.from(xlnEnv.replicas.values());
+                const selectedReplica = replicasArray.find(replica => 
+                    replica.entityId === entityId && replica.signerId === signerId
+                );
+                if (selectedReplica) {
+                    renderSelectedEntity(selectedReplica);
+                }
+            }
+            
+            // Close dropdown
+            toggleUnifiedDropdown();
+        }
+
+        function updateDropdownText() {
+            const dropdownText = document.getElementById('dropdownText');
+            const dropdownIcon = document.querySelector('.dropdown-icon');
+            
+            if (dropdownData.selectedEntity) {
+                const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(dropdownData.selectedEntity) : dropdownData.selectedEntity;
+                dropdownText.textContent = `🏛️ Ethereum → 👤 ${dropdownData.selectedSigner}.eth → 🏢 Entity ${entityDisplay}`;
+                dropdownIcon.textContent = '🏢';
+            } else if (dropdownData.selectedSigner) {
+                dropdownText.textContent = `🏛️ Ethereum → 👤 ${dropdownData.selectedSigner}.eth → Select Entity`;
+                dropdownIcon.textContent = '👤';
+            } else if (dropdownData.selectedJurisdiction) {
+                dropdownText.textContent = `🏛️ Ethereum Mainnet → Select Signer → Entity`;
+                dropdownIcon.textContent = '🏛️';
+            } else {
+                dropdownText.textContent = 'Select Jurisdiction → Signer → Entity';
+                dropdownIcon.textContent = '🏛️';
+            }
+        }
+
+        function toggleUnifiedDropdown() {
+            const dropdownBtn = document.querySelector('.unified-dropdown-btn');
+            const dropdownContent = document.getElementById('dropdownContent');
+            
+            dropdownBtn.classList.toggle('open');
+            dropdownContent.classList.toggle('show');
+            
+            if (dropdownContent.classList.contains('show')) {
+                populateUnifiedDropdown();
+            }
+        }
+        window.toggleUnifiedDropdown = toggleUnifiedDropdown;
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('unifiedDropdown');
+            if (!dropdown.contains(event.target)) {
+                const dropdownBtn = document.querySelector('.unified-dropdown-btn');
+                const dropdownContent = document.getElementById('dropdownContent');
+                dropdownBtn.classList.remove('open');
+                dropdownContent.classList.remove('show');
+            }
+        });
+        
+
+        
+
+        
+        function renderSelectedEntity(replica) {
+            const selectedEntityView = document.getElementById('selectedEntityView');
+            
+            // For now, just create a single entity card (reusing existing logic)
+            selectedEntityView.innerHTML = '';
+            const entityCard = document.createElement('div');
+            entityCard.className = 'entity-card expanded'; // Always expanded in admin view
+            
+            // Reuse the existing entity card creation logic but without the grid
+            // This is a simplified version - you can enhance it
+            const config = replica.state.config;
+            const shares = config.validators.includes(replica.signerId) ? 1 : 0;
+            const totalShares = config.validators.length;
+            const sharePercent = totalShares > 0 ? ((shares / totalShares) * 100).toFixed(1) : '0.0';
+            const isProposer = replica.isProposer;
+            const modeClass = config.mode === 'proposer-based' ? 'mode-proposer-based' : 'mode-gossip-based';
+            
+            entityCard.innerHTML = `
+                <div class="entity-header">
+                    <div class="entity-title">
+                        <span>🏢 Entity ${XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId}</span>
+                        <span>👤 ${XLN.formatSignerDisplay ? XLN.formatSignerDisplay(replica.signerId) : replica.signerId}</span>
+                    </div>
+                    <div class="entity-mode ${modeClass}">${config.mode}</div>
+                </div>
+                <div class="entity-metrics">
+                    <div class="metric-item">
+                        <div class="metric-value">${sharePercent}%</div>
+                        <div class="metric-label">Voting Power</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value">${replica.state.messages.length}</div>
+                        <div class="metric-label">Messages</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value">${replica.state.proposals.size}</div>
+                        <div class="metric-label">Proposals</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value">${replica.state.height}</div>
+                        <div class="metric-label">Height</div>
+                    </div>
+                </div>
+                <div class="entity-details" style="display: block;">
+                    <div class="entity-identity">
+                        <strong>Entity ID:</strong> <span style="word-break: break-all; color: #9d9d9d; font-family: monospace;">${replica.entityId}</span><br>
+                        <strong>Signer:</strong> <span style="color: #9d9d9d; font-family: monospace;">${replica.signerId}</span><br>
+                        <strong>Role:</strong> ${isProposer ? '👑 Proposer' : '✅ Validator'}<br>
+                        <strong>Consensus:</strong> ${config.threshold}/${config.validators.length} threshold
+                    </div>
+                </div>
+            `;
+            
+            selectedEntityView.appendChild(entityCard);
+        }
+        
+        // Event handlers for dropdowns
+        // No longer needed - unified dropdown handles its own events
+        
+        // Placeholder functions for admin buttons
+        function showEntityCreator() {
+            console.log('Show entity creator');
+            // TODO: Show entity creation modal
+        }
+        
+        function showSettings() {
+            console.log('Show settings');
+            // TODO: Show settings modal
+        }
+        
+        window.populateUnifiedDropdown = populateUnifiedDropdown;
+        window.toggleUnifiedDropdown = toggleUnifiedDropdown;
+        window.showEntityCreator = showEntityCreator;
+        window.showSettings = showSettings;
+
+        // History I/O collapse functionality
+        function toggleHistoryIO() {
+            const historyContent = document.getElementById('historyContent');
+            const historyToggle = document.getElementById('historyToggle');
+            
+            if (historyContent.style.display === 'none') {
+                historyContent.style.display = 'block';
+                historyToggle.textContent = '▼';
+                historyToggle.classList.remove('collapsed');
+            } else {
+                historyContent.style.display = 'none';
+                historyToggle.textContent = '▶';
+                historyToggle.classList.add('collapsed');
+            }
+        }
+        window.toggleHistoryIO = toggleHistoryIO;
+
         async function main() {
             try {
                 // Wait for the environment to load from the database
@@ -3332,16 +4219,17 @@
 
                 // 3. Perform initial UI setup and render
                 setupActionHandlers();
+                setupEntitySearch(); // Initialize autocomplete search
+                populateUnifiedDropdown(); // Initialize unified dropdown
                 updateTotalWeight();
                 populateJurisdictions(); // Populate available jurisdictions
                 window.onEntityTypeChange(); // Initialize entity type display
         window.onJurisdictionChange(); // Initialize jurisdiction with Ethereum default
         setTimeout(() => window.updateExpectedEntityId(), 100); // Initialize entity ID preview
-                renderEntities(); // First render with loaded data
+                // Entities now rendered by unified dropdown selection - no need for initial renderEntities call
                 populateReplicaSelect();
 
-                // Add event listeners that depend on initial state
-                document.getElementById('entitySelector').addEventListener('change', renderEntities);
+                // Entity selection now handled by unified dropdown - no separate event listener needed
                 document.getElementById('timeSlider').addEventListener('input', (e) => {
                     const history = XLN.getHistory();
                     const sliderValue = parseInt(e.target.value);
@@ -3368,4 +4256,6 @@
         document.addEventListener('DOMContentLoaded', main);
     </script>
 </body>
+</html> 
+</html> 
 </html> 

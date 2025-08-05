@@ -3,8 +3,8 @@
  * Tests real Ethereum signatures, flashloan governance, and edge cases
  */
 
-const { createHash, randomBytes } = require('crypto');
 import { ethers } from 'ethers';
+import { createHash, randomBytes } from './utils.js';
 import { 
   buildRealHanko, 
   packRealSignatures, 
@@ -83,7 +83,12 @@ const testSignaturePacking = async (): Promise<void> => {
   for (let i = 0; i < signatures.length; i++) {
     const original = signatures[i];
     const recovered = unpacked[i];
-    const match = original.equals(recovered);
+    
+    // Browser-compatible comparison: convert to hex strings
+    const originalHex = Buffer.from(original).toString('hex');
+    const recoveredHex = Buffer.from(recovered).toString('hex');
+    const match = originalHex === recoveredHex;
+    
     console.log(`   Signature ${i + 1}: ${match ? '✅' : '❌'} Match`);
     
     if (!match) {

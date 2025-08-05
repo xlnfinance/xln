@@ -12,12 +12,14 @@ import {
 } from './entity-factory.js';
 import { registerNumberedEntityOnChain, getJurisdictionByAddress } from './evm.js';
 import { applyServerInput } from './server.js';
+import { formatEntityDisplay, formatSignerDisplay } from './utils.js';
 
 // Helper function - exact copy from server.ts
 const processUntilEmpty = (env: Env, inputs: EntityInput[]) => {
   let outputs = inputs;
   while (outputs.length > 0) {
-    outputs = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
+    const result = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
+    outputs = result.entityOutbox;
   }
 };
 
@@ -258,7 +260,8 @@ const runDemo = async (env: Env): Promise<Env> => {
     let allEntitiesConsensus = true;
     
     entitiesByType.forEach((replicas, entityType) => {
-      console.log(`\n📊 Entity: ${entityType.toUpperCase()}`);
+      const displayName = formatEntityDisplay(entityType);
+      console.log(`\n📊 Entity #${displayName}`);
       console.log(`   Mode: ${replicas[0][1].state.config.mode}`);
       console.log(`   Threshold: ${replicas[0][1].state.config.threshold}`);
       console.log(`   Validators: ${replicas[0][1].state.config.validators.length}`);
@@ -267,7 +270,7 @@ const runDemo = async (env: Env): Promise<Env> => {
       const shares = replicas[0][1].state.config.shares;
       console.log(`   Voting Power:`);
       Object.entries(shares).forEach(([validator, power]) => {
-        console.log(`     ${validator}: ${power} shares`);
+        console.log(`     ${formatSignerDisplay(validator)}: ${power} shares`);
       });
       
              // Check consensus within entity

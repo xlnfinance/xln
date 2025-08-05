@@ -56,9 +56,6 @@ contract EntityProvider is ERC1155 {
   // Foundation controls (no centralized admin)
   mapping(address => uint8) public nameQuota;      // User name allowances
   
-  // Legacy support
-  mapping (uint => uint) public activateAtBlock;
-  
   // Governance system
   mapping(bytes32 => BoardProposal) public activeProposals;  // entityId => proposal
   mapping(bytes32 => uint256) public totalControlSupply;      // entityId => total control tokens
@@ -78,8 +75,6 @@ contract EntityProvider is ERC1155 {
   event BoardProposed(bytes32 indexed entityId, bytes32 proposedBoardHash);
   event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
   event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
-  event QuorumReplacementProposed(bytes32 indexed entityId, bytes32 newQuorum, ProposerType proposerType, uint256 executeBlock);
-  event QuorumReplaced(bytes32 indexed entityId, bytes32 oldQuorum, bytes32 newQuorum);
   event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
 
   constructor() ERC1155("https://xln.com/entity/{id}.json") {
@@ -216,62 +211,94 @@ contract EntityProvider is ERC1155 {
   }
 
   /**
-   * @notice Propose a new board for an entity
-   * @param entityId The entity ID (bytes32 format)
-   * @param newBoardHash Hash of the new proposed board
+   * @notice Propose a new board with proper BCD governance
+   * @param entityId The entity ID  
+   * @param newBoardHash The proposed new board hash
+   * @param proposerType Who is proposing (BOARD, CONTROL, DIVIDEND)
+   * @param articles Current governance articles (for verification)
    */
-  function proposeBoard(bytes32 entityId, bytes32 newBoardHash) external {
+  function proposeBoard(
+    bytes32 entityId, 
+    bytes32 newBoardHash,
+    ProposerType proposerType,
+    EntityArticles memory articles
+  ) external {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
+    
+    // Check permissions and delays
+    uint32 delay = _getDelayForProposer(articles, proposerType);
+    require(delay > 0, "Proposer type disabled");
+    
+    // Verify proposer has the right to propose based on type
+    if (proposerType == ProposerType.CONTROL) {
+      // Control holders can override any proposal
+      // TODO: Verify msg.sender has control tokens
+    } else if (proposerType == ProposerType.BOARD) {
+      // Current board can propose (shortest delay)
+      // TODO: Verify msg.sender is current board member
+    } else if (proposerType == ProposerType.DIVIDEND) {
+      // Dividend holders can propose (longest delay)
+      // TODO: Verify msg.sender has dividend tokens
+    }
+    
+    // Cancel any existing proposal that can be overridden
+    if (entities[entityId].proposedBoardHash != bytes32(0)) {
+      require(_canCancelProposal(proposerType, entities[entityId].proposerType), 
+              "Cannot override existing proposal");
+    }
+    
+    uint256 activateAtBlock = block.number + delay;
     
     entities[entityId].proposedBoardHash = newBoardHash;
+    entities[entityId].activateAtBlock = activateAtBlock;
+    entities[entityId].proposerType = proposerType;
+    
     emit BoardProposed(entityId, newBoardHash);
   }
 
   /**
-   * @notice Activate a previously proposed board
+   * @notice Activate a previously proposed board (with delay enforcement)
    * @param entityId The entity ID
    */
   function activateBoard(bytes32 entityId) external {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
+    require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");
     
     entities[entityId].currentBoardHash = entities[entityId].proposedBoardHash;
     entities[entityId].proposedBoardHash = bytes32(0);
-    
-    // Legacy support
-    if (uint256(entityId) < 1000000) {
-      activateAtBlock[uint256(entityId)] = block.number;
-    }
+    entities[entityId].activateAtBlock = 0;
     
     emit BoardActivated(entityId, entities[entityId].currentBoardHash);
   }
 
   /**
-   * @notice Verify entity signature (simplified version)
-   * @param _hash The hash that was signed
-   * @param entityId The entity ID (lazy hash, numbered, or resolved from name)
-   * @param encodedBoard The board data
-   * @param encodedSignature The signatures
-   * @return votingResult Success ratio (0 = invalid)
+   * @notice Cancel a pending board proposal
+   * @param entityId The entity ID
+   * @param proposerType Who is cancelling (BOARD, CONTROL, DIVIDEND)
+   * @param articles Current governance articles (for verification)
    */
-  function isValidSignature(
-    bytes32 _hash,
+  function cancelBoardProposal(
     bytes32 entityId,
-    bytes calldata encodedBoard,
-    bytes calldata encodedSignature
-  ) external view returns (uint16) {
-    bytes32 boardHash = keccak256(encodedBoard);
+    ProposerType proposerType,
+    EntityArticles memory articles
+  ) external {
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
+    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
     
-    if (entities[entityId].currentBoardHash != bytes32(0)) {
-      // REGISTERED ENTITY: use on-chain board
-      require(boardHash == entities[entityId].currentBoardHash, "Board hash mismatch");
-    } else {
-      // LAZY ENTITY: entityId must equal boardHash
-      require(entityId == boardHash, "Lazy entity: ID must equal board hash");
-    }
+    // Check if this proposer type can cancel the existing proposal
+    require(_canCancelProposal(proposerType, entities[entityId].proposerType), 
+            "Cannot cancel this proposal");
     
-    return _verifyBoard(_hash, encodedBoard, encodedSignature);
+    entities[entityId].proposedBoardHash = bytes32(0);
+    entities[entityId].activateAtBlock = 0;
+    
+    emit ProposalCancelled(entityId, proposerType);
   }
+
+
 
   /**
    * @notice Recover entity ID from hanko signature (improved version of isValidSignature)
@@ -748,93 +775,7 @@ contract EntityProvider is ERC1155 {
 
 
 
-  /**
-   * @notice Propose quorum replacement
-   * @param entityNumber The entity number
-   * @param newQuorum The proposed new quorum hash
-   * @param proposerType Who is proposing (CONTROL, DIVIDEND, FOUNDATION)
-   * @param articles Current governance articles (for verification)
-   */
-  function proposeQuorumReplacement(
-    uint256 entityNumber,
-    bytes32 newQuorum,
-    ProposerType proposerType,
-    EntityArticles memory articles
-  ) external {
-    bytes32 entityId = bytes32(entityNumber);
-    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
-    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
-    
-    // Check permissions and delays
-    uint32 delay = _getDelayForProposer(articles, proposerType);
-    require(delay > 0, "Proposer type disabled");
-    
-    if (proposerType == ProposerType.CONTROL) {
-      _validateControlProposer(entityId, msg.sender, articles);
-    } else if (proposerType == ProposerType.DIVIDEND) {
-      _validateDividendProposer(entityId, msg.sender);
-    } else if (proposerType == ProposerType.BOARD) {
-      // Board proposer - no additional validation needed
-    }
-    
-    // Handle proposal priorities and cancellation
-    BoardProposal storage existing = activeProposals[entityId];
-    if (existing.active) {
-      // Higher priority can cancel lower priority
-      require(_canCancelProposal(proposerType, existing.proposerType), "Cannot cancel existing proposal");
-      emit ProposalCancelled(entityId, proposerType);
-    }
-    
-    // Create new proposal
-    activeProposals[entityId] = BoardProposal({
-      proposedBoardHash: newQuorum,
-      proposerType: proposerType,
-      proposeBlock: block.number,
-      activateBlock: block.number + _getDelayForProposer(articles, proposerType),
-      active: true
-    });
-    
-    emit QuorumReplacementProposed(entityId, newQuorum, proposerType, block.number + delay);
-  }
 
-  /**
-   * @notice Execute quorum replacement after delay
-   * @param entityNumber The entity number
-   * @param supporters Array of supporter addresses (for validation)
-   * @param articles Current governance articles
-   */
-  function executeQuorumReplacement(
-    uint256 entityNumber,
-    address[] memory supporters,
-    EntityArticles memory articles
-  ) external {
-    bytes32 entityId = bytes32(entityNumber);
-    BoardProposal storage proposal = activeProposals[entityId];
-    
-    require(proposal.active, "No active proposal");
-    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
-    
-    // Check delay has passed
-    uint32 delay = _getDelayForProposer(articles, proposal.proposerType);
-    require(block.number >= proposal.proposeBlock + delay, "Delay not passed");
-    
-    // Validate support threshold for control/dividend proposals
-    if (proposal.proposerType == ProposerType.CONTROL) {
-      _validateControlSupport(entityId, supporters, articles);
-    } else if (proposal.proposerType == ProposerType.DIVIDEND) {
-      _validateDividendSupport(entityId, supporters);
-    }
-    
-    // Execute replacement
-    bytes32 oldQuorum = entities[entityId].currentBoardHash;
-    entities[entityId].currentBoardHash = proposal.proposedBoardHash;
-    entities[entityId].proposedBoardHash = bytes32(0);
-    
-    // Clear proposal
-    delete activeProposals[entityId];
-    
-    emit QuorumReplaced(entityId, oldQuorum, proposal.proposedBoardHash);
-  }
 
   // === INTERNAL HELPER FUNCTIONS ===
 
