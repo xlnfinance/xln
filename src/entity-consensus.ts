@@ -8,7 +8,7 @@ import {
   EntityReplica, Env, JurisdictionConfig, Proposal 
 } from './types.js';
 import { applyEntityTx } from './entity-tx.js';
-import { log, DEBUG } from './utils.js';
+import { log, DEBUG, formatEntityDisplay, formatSignerDisplay } from './utils.js';
 
 // === SECURITY VALIDATION ===
 
@@ -181,6 +181,24 @@ const validateVotingPower = (power: bigint): boolean => {
  * Main entity input processor - handles consensus, proposals, and state transitions
  */
 export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityInput: EntityInput): EntityInput[] => {
+  // Debug: Log every input being processed with timestamp and unique identifier
+  const entityDisplay = formatEntityDisplay(entityInput.entityId);
+  const timestamp = Date.now();
+  const currentProposalHash = entityReplica.proposal?.hash?.slice(0,10) || 'none';
+  const frameHash = entityInput.proposedFrame?.hash?.slice(0,10) || 'none';
+  
+  console.log(`🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}:${formatSignerDisplay(entityInput.signerId)}`);
+  console.log(`🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${entityReplica.mempool.length}, isProposer: ${entityReplica.isProposer}`);
+  console.log(`🔍 INPUT-DETAILS: txs=${entityInput.entityTxs?.length || 0}, precommits=${entityInput.precommits?.size || 0}, frame=${frameHash}`);
+  if (entityInput.precommits?.size) {
+    const precommitSigners = Array.from(entityInput.precommits.keys());
+    console.log(`🔍 INPUT-PRECOMMITS: Received precommits from: ${precommitSigners.join(', ')}`);
+    // Track exactly which proposal these precommits are for
+    const firstPrecommit = entityInput.precommits.values().next().value;
+    const proposalHashFromSig = firstPrecommit ? firstPrecommit.split('_')[2]?.slice(0,10) : 'unknown';
+    console.log(`🔍 PRECOMMIT-PROPOSAL: These precommits are for proposal: ${proposalHashFromSig}`);
+  }
+  
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
     log.error(`❌ Invalid input for ${entityInput.entityId}:${entityInput.signerId}`);
@@ -240,6 +258,7 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     if (config.mode === 'gossip-based') {
       // Send precommit to all validators
       config.validators.forEach(validatorId => {
+        console.log(`🔍 GOSSIP: [${timestamp}] ${entityReplica.signerId} sending precommit to ${validatorId} for entity ${entityInput.entityId.slice(0,10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0,20)}...`);
         entityOutbox.push({
           entityId: entityInput.entityId,
           signerId: validatorId,
@@ -250,6 +269,8 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     } else {
       // Send precommit to proposer only
       const proposerId = config.validators[0];
+      console.log(`🔍 PROPOSER: [${timestamp}] ${entityReplica.signerId} sending precommit to ${proposerId} for entity ${entityInput.entityId.slice(0,10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0,20)}...`);
+      console.log(`🔍 PROPOSER-REASON: Signed new proposal, current state: proposal=${currentProposalHash}, locked=${entityReplica.lockedFrame?.hash?.slice(0,10) || 'none'}`);
       entityOutbox.push({
         entityId: entityInput.entityId,
         signerId: proposerId,
@@ -307,16 +328,31 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
       entityReplica.proposal = undefined;
       entityReplica.lockedFrame = undefined; // Release lock after commit
       
-      // Notify all validators
-      entityReplica.state.config.validators.forEach(validatorId => {
-        entityOutbox.push({
-          entityId: entityInput.entityId,
-          signerId: validatorId,
-          precommits: sortedSignatures,
-          proposedFrame: committedFrame
+      // Only send commit notifications in proposer-based mode
+      // In gossip mode, everyone already has all precommits via gossip
+      if (entityReplica.state.config.mode === 'proposer-based') {
+        const committedProposalHash = committedFrame.hash.slice(0,10);
+        console.log(`🔍 COMMIT-START: [${timestamp}] ${entityReplica.signerId} reached threshold for proposal ${committedProposalHash}, sending commit notifications...`);
+        
+        // Notify all validators (except self - proposer already has all precommits)
+        entityReplica.state.config.validators.forEach(validatorId => {
+          if (validatorId !== entityReplica.signerId) {
+            const precommitSigners = Array.from(sortedSignatures.keys());
+            console.log(`🔍 COMMIT: [${timestamp}] ${entityReplica.signerId} sending commit notification to ${validatorId} for entity ${entityInput.entityId.slice(0,10)}, proposal ${committedProposalHash} (${sortedSignatures.size} precommits from: ${precommitSigners.join(', ')})`);
+            entityOutbox.push({
+              entityId: entityInput.entityId,
+              signerId: validatorId,
+              precommits: sortedSignatures,
+              proposedFrame: committedFrame
+            });
+          }
         });
-      });
-      if (DEBUG) console.log(`    → Sending commit notifications to ${entityReplica.state.config.validators.length} validators`);
+        const notifiedCount = entityReplica.state.config.validators.length - 1; // excluding self
+        if (DEBUG) console.log(`    → Sending commit notifications to ${notifiedCount} validators (excluding self)`);
+      } else {
+        console.log(`🔍 GOSSIP-COMMIT: [${timestamp}] ${entityReplica.signerId} NOT sending commit notifications (gossip mode) for entity ${entityInput.entityId.slice(0,10)}...`);
+        if (DEBUG) console.log(`    → Gossip mode: No commit notifications needed (everyone has precommits via gossip)`);
+      }
     }
   }
   
@@ -382,6 +418,41 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     if (DEBUG) console.log(`    ⚠️  CORNER CASE: Proposer already has pending proposal - no new auto-propose`);
   }
   
+  // Debug: Log outputs being generated with detailed analysis
+  console.log(`🔍 OUTPUT-GENERATED: [${timestamp}] Entity #${entityDisplay}:${formatSignerDisplay(entityReplica.signerId)} generating ${entityOutbox.length} outputs`);
+  console.log(`🔍 OUTPUT-FINAL-STATE: proposal=${entityReplica.proposal?.hash?.slice(0,10) || 'none'}, mempool=${entityReplica.mempool.length}, locked=${entityReplica.lockedFrame?.hash?.slice(0,10) || 'none'}`);
+  
+  entityOutbox.forEach((output, index) => {
+    const targetDisplay = formatEntityDisplay(output.entityId);
+    const outputFrameHash = output.proposedFrame?.hash?.slice(0,10) || 'none';
+    console.log(`🔍 OUTPUT-${index + 1}: [${timestamp}] To Entity #${targetDisplay}:${formatSignerDisplay(output.signerId)} - txs=${output.entityTxs?.length || 0}, precommits=${output.precommits?.size || 0}, frame=${outputFrameHash}`);
+    
+    if (output.precommits?.size) {
+      const precommitSigners = Array.from(output.precommits.keys());
+      console.log(`🔍 OUTPUT-${index + 1}-PRECOMMITS: Sending precommits from: ${precommitSigners.join(', ')}`);
+      
+      // Show the actual signature content to track duplicates
+      output.precommits.forEach((sig, signer) => {
+        const sigShort = sig.slice(0,20);
+        const proposalFromSig = sig.split('_')[2]?.slice(0,10) || 'unknown';
+        console.log(`🔍 OUTPUT-${index + 1}-SIG-DETAIL: ${signer} -> ${sigShort}... (proposal: ${proposalFromSig})`);
+      });
+    }
+    
+    // Classify output type for clarity
+    if (output.proposedFrame && output.precommits?.size) {
+      console.log(`🔍 OUTPUT-${index + 1}-TYPE: COMMIT_NOTIFICATION (frame + precommits)`);
+    } else if (output.precommits?.size) {
+      console.log(`🔍 OUTPUT-${index + 1}-TYPE: PRECOMMIT_VOTE (precommits only)`);
+    } else if (output.proposedFrame) {
+      console.log(`🔍 OUTPUT-${index + 1}-TYPE: PROPOSAL (frame only)`);
+    } else if (output.entityTxs?.length) {
+      console.log(`🔍 OUTPUT-${index + 1}-TYPE: TRANSACTION_FORWARD (txs only)`);
+    } else {
+      console.log(`🔍 OUTPUT-${index + 1}-TYPE: UNKNOWN (empty output)`);
+    }
+  });
+  
   return entityOutbox;
 };
 
@@ -420,26 +491,58 @@ export const sortSignatures = (signatures: Map<string, string>, config: Consensu
 export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
   const merged = new Map<string, EntityInput>();
   let duplicateCount = 0;
+  const timestamp = Date.now();
+
+  // Always log input count for debugging with detailed breakdown
+  console.log(`🔍 MERGE-START: [${timestamp}] Processing ${inputs.length} entity inputs for merging`);
+  
+  // Pre-analysis: Show all inputs before merging to identify potential Carol duplicates
+  const inputAnalysis = inputs.map((input, i) => {
+    const entityShort = input.entityId.slice(0,10);
+    const frameHash = input.proposedFrame?.hash?.slice(0,10) || 'none';
+    const precommitCount = input.precommits?.size || 0;
+    const precommitSigners = input.precommits ? Array.from(input.precommits.keys()).join(',') : 'none';
+    return `${i+1}:${entityShort}:${input.signerId}(txs=${input.entityTxs?.length||0},pc=${precommitCount}[${precommitSigners}],f=${frameHash})`;
+  });
+  console.log(`🔍 MERGE-INPUTS: ${inputAnalysis.join(' | ')}`);
+  
+  // Look for potential Carol duplicates specifically
+  const carolInputs = inputs.filter(input => input.signerId.includes('carol'));
+  if (carolInputs.length > 1) {
+    console.log(`🔍 MERGE-CAROL-ALERT: Found ${carolInputs.length} inputs from Carol - potential duplicate source!`);
+    carolInputs.forEach((input, i) => {
+      const entityShort = input.entityId.slice(0,10);
+      const precommitSigners = input.precommits ? Array.from(input.precommits.keys()).join(',') : 'none';
+      console.log(`🔍 MERGE-CAROL-${i+1}: ${entityShort}:${input.signerId} - precommits: ${precommitSigners}`);
+    });
+  }
 
   for (const input of inputs) {
     const key = `${input.entityId}:${input.signerId}`;
+    const entityShort = input.entityId.slice(0, 10);
     
     if (merged.has(key)) {
       const existing = merged.get(key)!;
       duplicateCount++;
       
+      console.log(`🔍 DUPLICATE-FOUND: Merging duplicate input ${duplicateCount} for ${entityShort}:${input.signerId}`);
+      
       // Merge entity transactions
       if (input.entityTxs) {
         existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
+        console.log(`🔍 MERGE-TXS: Added ${input.entityTxs.length} transactions`);
       }
       
       // Merge precommits
       if (input.precommits) {
         const existingPrecommits = existing.precommits || new Map();
+        console.log(`🔍 MERGE-PRECOMMITS: Merging ${input.precommits.size} precommits into existing ${existingPrecommits.size} for ${entityShort}:${input.signerId}`);
         input.precommits.forEach((signature, signerId) => {
+          console.log(`🔍 MERGE-DETAIL: Adding precommit from ${signerId} (sig: ${signature.slice(0,20)}...)`);
           existingPrecommits.set(signerId, signature);
         });
         existing.precommits = existingPrecommits;
+        console.log(`🔍 MERGE-RESULT: Total ${existingPrecommits.size} precommits after merge`);
       }
       
       // Keep the latest frame (simplified)

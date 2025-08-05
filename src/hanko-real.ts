@@ -36,9 +36,40 @@
  * Uses actual secp256k1 signatures compatible with Solidity ecrecover
  */
 
-const { createHash, randomBytes } = require('crypto');
+import { createHash, randomBytes } from './utils.js';
 import { ethers } from 'ethers';
 import { HankoBytes, HankoClaim, HankoMergeResult } from './types.js';
+
+// Browser-compatible Buffer.concat replacement
+const bufferConcat = (buffers: Buffer[]): Buffer => {
+  if (typeof Buffer.concat === 'function') {
+    return Buffer.concat(buffers);
+  } else {
+    // Browser fallback: manual concatenation
+    const totalLength = buffers.reduce((sum, buf) => sum + buf.length, 0);
+    const result = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const buf of buffers) {
+      result.set(buf, offset);
+      offset += buf.length;
+    }
+    return Buffer.from(result);
+  }
+};
+
+// Browser-compatible Buffer.alloc replacement
+const bufferAlloc = (size: number, fill?: number): Buffer => {
+  if (typeof Buffer.alloc === 'function') {
+    return Buffer.alloc(size, fill);
+  } else {
+    // Browser fallback: create and fill manually
+    const result = new Uint8Array(size);
+    if (fill !== undefined) {
+      result.fill(fill);
+    }
+    return Buffer.from(result);
+  }
+};
 
 // === REAL ETHEREUM SIGNATURES ===
 
@@ -69,7 +100,7 @@ const createRealSignature = async (hash: Buffer, privateKey: Buffer): Promise<Bu
     rPadded.set(r, 32 - r.length);
     sPadded.set(s, 32 - s.length);
     
-    return Buffer.concat([
+    return bufferConcat([
       Buffer.from(rPadded),
       Buffer.from(sPadded), 
       Buffer.from([v])
@@ -109,7 +140,7 @@ export const createDirectHashSignature = async (hash: Buffer, privateKey: Buffer
     
     console.log(`🔑 Created signature: r=${ethers.hexlify(r).slice(0,10)}..., s=${ethers.hexlify(s).slice(0,10)}..., v=${v}`);
     
-    return Buffer.concat([
+    return bufferConcat([
       Buffer.from(rPadded),
       Buffer.from(sPadded),
       Buffer.from([v])
@@ -151,7 +182,7 @@ export const packRealSignatures = (signatures: Buffer[]): Buffer => {
   console.log(`📦 Packing ${signatures.length} REAL signatures...`);
   
   if (signatures.length === 0) {
-    return Buffer.alloc(0);
+    return bufferAlloc(0);
   }
   
   // Validate all signatures are exactly 65 bytes
@@ -167,17 +198,19 @@ export const packRealSignatures = (signatures: Buffer[]): Buffer => {
   }
   
   // Pack R,S values
-  const rsValues = Buffer.alloc(signatures.length * 64);
+  const rsValues = bufferAlloc(signatures.length * 64);
   let rsOffset = 0;
   
   for (const sig of signatures) {
-    sig.copy(rsValues, rsOffset, 0, 64);
+    // Browser-compatible copy: extract R,S (first 64 bytes) and copy to rsValues
+    const rsBytes = sig.slice(0, 64);
+    rsValues.set(rsBytes, rsOffset);
     rsOffset += 64;
   }
   
   // Pack V values as bits
   const vBytesNeeded = Math.ceil(signatures.length / 8);
-  const vValues = Buffer.alloc(vBytesNeeded);
+  const vValues = bufferAlloc(vBytesNeeded);
   
   for (let i = 0; i < signatures.length; i++) {
     const vByte = signatures[i][64];
@@ -189,7 +222,7 @@ export const packRealSignatures = (signatures: Buffer[]): Buffer => {
     }
   }
   
-  const packed = Buffer.concat([rsValues, vValues]);
+  const packed = bufferConcat([rsValues, vValues]);
   console.log(`✅ Packed ${signatures.length} real signatures: ${packed.length} bytes`);
   
   return packed;
@@ -250,7 +283,7 @@ export const unpackRealSignatures = (packedSignatures: Buffer): Buffer[] => {
     const vBit = (vValues[byteIndex] >> bitIndex) & 1;
     const vByte = vBit === 0 ? 27 : 28;
     
-    const signature = Buffer.concat([rs, Buffer.from([vByte])]);
+    const signature = bufferConcat([rs, Buffer.from([vByte])]);
     signatures.push(signature);
   }
   
@@ -536,14 +569,14 @@ export const testFullCycle = async (): Promise<{ hanko: HankoBytes, abiEncoded: 
   const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
     ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])"],
     [[
-      hanko.placeholders,
-      hanko.packedSignatures,
+      hanko.placeholders.map(p => '0x' + Buffer.from(p).toString('hex')),
+      ethers.hexlify(hanko.packedSignatures),
       hanko.claims.map(c => [
-        c.entityId,
+        '0x' + Buffer.from(c.entityId).toString('hex'),
         c.entityIndexes,
         c.weights,
         c.threshold,
-        c.expectedQuorumHash
+        '0x' + Buffer.from(c.expectedQuorumHash).toString('hex')
       ])
     ]]
   );

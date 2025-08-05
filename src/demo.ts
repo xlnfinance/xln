@@ -12,6 +12,7 @@ import {
   generateLazyEntityId, generateNumberedEntityId, detectEntityType,
   createLazyEntity, createNumberedEntity
 } from './entity-factory.js';
+import { formatEntityDisplay, formatSignerDisplay } from './utils.js';
 
 // === DEMO ENTITY CONFIGURATIONS ===
 
@@ -154,8 +155,9 @@ export const logEntitySummary = (replica: EntityReplica, entityId: string): void
   const messages = replica.state.messages.length;
   const proposals = replica.state.proposals.size;
   const height = replica.state.height;
+  const displayName = formatEntityDisplay(entityId);
   
-  console.log(`  ${entityId}:${replica.signerId}: ${messages} messages, ${proposals} proposals, height ${height}`);
+  console.log(`  ${displayName}:${formatSignerDisplay(replica.signerId)}: ${messages} messages, ${proposals} proposals, height ${height}`);
   
   // Log messages
   if (messages > 0) {

@@ -178,6 +178,13 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
     return newEntityState;
   }
   
+  if (entityTx.type === 'profile-update') {
+    // Profile updates are processed via consensus but don't change entity state
+    // The actual profile update happens in the gossip layer after consensus
+    if (DEBUG) console.log(`    🏷️ Profile update transaction processed (gossip layer will handle storage)`);
+    return entityState; // State unchanged, profile update handled separately
+  }
+  
   return entityState;
   } catch (error) {
     log.error(`❌ Transaction execution error: ${error}`);

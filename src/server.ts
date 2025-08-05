@@ -3,7 +3,7 @@
 // await import('./debug.js'); 
 
 // Import utilities and types
-import { isBrowser, log, hash, DEBUG, clearDatabase, createHash } from './utils.js';
+import { isBrowser, log, hash, DEBUG, clearDatabase, createHash, formatEntityDisplay, formatSignerDisplay, generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo } from './utils.js';
 import { 
   Env, EnvSnapshot, EntityInput, EntityReplica, EntityState, EntityTx, 
   ServerInput, ServerTx, ProposedEntityFrame, Proposal, ProposalAction,
@@ -31,17 +31,23 @@ import { testFullCycle } from './hanko-real.js';
 import { runDepositoryHankoTests } from './test-depository-hanko.js';
 import { runBasicHankoTests } from './test-hanko-basic.js';
 import { runAllTests as runCompleteHankoTests } from './test-hanko-complete.js';
+import {
+  initializeDemoProfiles, getProfile, storeProfile,
+  searchEntityNames as searchEntityNamesOriginal,
+  resolveEntityName as resolveEntityNameOriginal,
+  getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
+  processProfileUpdate, createProfileUpdateTx
+} from './name-resolution.js';
 
-// This code works in both Node.js and the browser
+// High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 import { encode, decode } from './snapshot-coder.js';
-
 import { ethers } from 'ethers';
 import path from 'path';
 import fs from 'fs';
+
 // --- Database Setup ---
-// In browser: LevelDB uses IndexedDB with persistent storage
-// In Node.js: Uses filesystem with relative path to prevent permission issues
+// Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
 const db: Level<Buffer, Buffer> = new Level('db', { 
   valueEncoding: 'buffer', 
   keyEncoding: 'binary'
@@ -163,32 +169,32 @@ const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: Enti
 
 
 
-const applyServerInput = (env: Env, serverInput: ServerInput): EntityInput[] => {
+const applyServerInput = (env: Env, serverInput: ServerInput): { entityOutbox: EntityInput[], mergedInputs: EntityInput[] } => {
   const startTime = Date.now();
   
   try {
     // SECURITY: Validate server input
     if (!serverInput) {
       log.error('❌ Null server input provided');
-      return [];
+      return { entityOutbox: [], mergedInputs: [] };
     }
     if (!Array.isArray(serverInput.serverTxs)) {
       log.error(`❌ Invalid serverTxs: expected array, got ${typeof serverInput.serverTxs}`);
-      return [];
+      return { entityOutbox: [], mergedInputs: [] };
     }
     if (!Array.isArray(serverInput.entityInputs)) {
       log.error(`❌ Invalid entityInputs: expected array, got ${typeof serverInput.entityInputs}`);
-      return [];
+      return { entityOutbox: [], mergedInputs: [] };
     }
     
     // SECURITY: Resource limits
     if (serverInput.serverTxs.length > 1000) {
       log.error(`❌ Too many server transactions: ${serverInput.serverTxs.length} > 1000`);
-      return [];
+      return { entityOutbox: [], mergedInputs: [] };
     }
     if (serverInput.entityInputs.length > 10000) {
       log.error(`❌ Too many entity inputs: ${serverInput.entityInputs.length} > 10000`);
-      return [];
+      return { entityOutbox: [], mergedInputs: [] };
     }
     
     // Merge new serverInput into env.serverInput
@@ -218,7 +224,7 @@ const applyServerInput = (env: Env, serverInput: ServerInput): EntityInput[] => 
     // Process server transactions (replica imports) from env.serverInput
     env.serverInput.serverTxs.forEach(serverTx => {
       if (serverTx.type === 'importReplica') {
-        if (DEBUG) console.log(`Importing replica ${serverTx.entityId}:${serverTx.signerId} (proposer: ${serverTx.data.isProposer})`);
+        if (DEBUG) console.log(`Importing replica Entity #${formatEntityDisplay(serverTx.entityId)}:${formatSignerDisplay(serverTx.signerId)} (proposer: ${serverTx.data.isProposer})`);
         
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
         env.replicas.set(replicaKey, {
@@ -261,10 +267,11 @@ const applyServerInput = (env: Env, serverInput: ServerInput): EntityInput[] => 
     env.timestamp = Date.now();
     
     // Capture snapshot BEFORE clearing (to show what was actually processed)
-    const inputDescription = `Tick ${env.height - 1}: ${env.serverInput.serverTxs.length} serverTxs, ${env.serverInput.entityInputs.length} entityInputs → ${entityOutbox.length} outputs`;
+    // Use merged inputs to avoid showing intermediate gossip messages in UI
+    const inputDescription = `Tick ${env.height - 1}: ${env.serverInput.serverTxs.length} serverTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
     const processedInput = {
       serverTxs: [...env.serverInput.serverTxs],
-      entityInputs: [...env.serverInput.entityInputs]
+      entityInputs: [...mergedInputs] // Use merged inputs instead of raw inputs
     };
     
     // Clear processed data from env.serverInput
@@ -286,7 +293,10 @@ const applyServerInput = (env: Env, serverInput: ServerInput): EntityInput[] => 
     if (DEBUG) {
       console.log(`Replica states:`);
       env.replicas.forEach((replica, key) => {
-        console.log(`  ${key}: mempool=${replica.mempool.length}, messages=${replica.state.messages.length}, proposal=${replica.proposal ? '✓' : '✗'}`);
+        const [entityId, signerId] = key.split(':');
+        const entityDisplay = formatEntityDisplay(entityId);
+        const signerDisplay = formatSignerDisplay(signerId);
+        console.log(`  Entity #${entityDisplay}:${signerDisplay}: mempool=${replica.mempool.length}, messages=${replica.state.messages.length}, proposal=${replica.proposal ? '✓' : '✗'}`);
       });
     }
     
@@ -296,10 +306,10 @@ const applyServerInput = (env: Env, serverInput: ServerInput): EntityInput[] => 
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
     }
     
-    return entityOutbox;
-  } catch (error: any) {
+    return { entityOutbox, mergedInputs };
+  } catch (error) {
     log.error(`❌ Error processing server input:`, error);
-    return [];
+    return { entityOutbox: [], mergedInputs: [] };
   }
 };
 
@@ -389,20 +399,28 @@ const main = async (): Promise<Env> => {
     }
   }
 
-  // Add hanko demo to the main execution
-  console.log('\n🖋️  Testing Complete Hanko Implementation...');
-  await demoCompleteHanko();
-  
-  // 🧪 Run basic Hanko functionality tests first
-  console.log('\n🧪 Running basic Hanko functionality tests...');
-  await runBasicHankoTests();
-  
-  // 🧪 Run comprehensive Depository-Hanko integration tests
-  console.log('\n🧪 Running comprehensive Depository-Hanko integration tests...');
-  try {
-    await runDepositoryHankoTests();
-  } catch (error) {
-    console.log('ℹ️  Depository integration tests skipped (contract setup required):', error.message.substring(0, 100));
+  // Initialize demo profiles (works in both Node.js and browser)
+  await initializeDemoProfiles(db, env);
+
+  // Only run demos in Node.js environment, not browser
+  if (!isBrowser) {
+    // Add hanko demo to the main execution
+    console.log('\n🖋️  Testing Complete Hanko Implementation...');
+    await demoCompleteHanko();
+    
+    // 🧪 Run basic Hanko functionality tests first
+    console.log('\n🧪 Running basic Hanko functionality tests...');
+    await runBasicHankoTests();
+    
+    // 🧪 Run comprehensive Depository-Hanko integration tests
+    console.log('\n🧪 Running comprehensive Depository-Hanko integration tests...');
+    try {
+      await runDepositoryHankoTests();
+    } catch (error) {
+      console.log('ℹ️  Depository integration tests skipped (contract setup required):', (error as Error).message?.substring(0, 100) || 'Unknown error');
+    }
+  } else {
+    console.log('🌐 Browser environment: Demos available via UI buttons, not auto-running');
   }
 
   log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
@@ -425,6 +443,7 @@ export {
   clearDatabase, 
   getAvailableJurisdictions, 
   getJurisdictionByAddress, 
+  demoCompleteHanko,
 
   // Entity creation functions
   createLazyEntity,
@@ -438,6 +457,18 @@ export {
   detectEntityType,
   encodeBoard,
   hashBoard,
+  // Display and avatar functions
+  formatEntityDisplay,
+  formatSignerDisplay,
+  generateEntityAvatar,
+  generateSignerAvatar,
+  getEntityDisplayInfo,
+  getSignerDisplayInfo,
+  // Name resolution functions
+  searchEntityNames,
+  resolveEntityName,
+  getEntityDisplayInfoFromProfile,
+  createProfileUpdateTx,
   // Blockchain registration functions
   registerNumberedEntityOnChain,
   assignNameOnChain,
@@ -456,13 +487,22 @@ export {
 if (!isBrowser) {
   main().then(async env => {
     if (env) {
-      console.log('✅ Node.js environment initialized. Running demo for local testing...');
-      await runDemo(env);
+      // Check if demo should run automatically (can be disabled with NO_DEMO=1)
+      const noDemoFlag = process.env.NO_DEMO === '1' || process.argv.includes('--no-demo');
       
-      // Add a small delay to ensure demo completes before verification
-      setTimeout(async () => {
-        await verifyJurisdictionRegistrations();
-      }, 2000);
+      if (!noDemoFlag) {
+        console.log('✅ Node.js environment initialized. Running demo for local testing...');
+        console.log('💡 To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag');
+        await runDemo(env);
+        
+        // Add a small delay to ensure demo completes before verification
+        setTimeout(async () => {
+          await verifyJurisdictionRegistrations();
+        }, 2000);
+      } else {
+        console.log('✅ Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)');
+        console.log('💡 Use XLN.runDemo(env) to run demo manually if needed');
+      }
     }
   }).catch(error => {
     console.error('❌ An error occurred during Node.js auto-execution:', error);
@@ -518,7 +558,7 @@ const verifyJurisdictionRegistrations = async () => {
 
 // === HANKO DEMO FUNCTION ===
 
-export const demoCompleteHanko = async (): Promise<void> => {
+const demoCompleteHanko = async (): Promise<void> => {
   try {
     console.log('🎯 Running complete Hanko test suite...');
     await runCompleteHankoTests();
@@ -528,3 +568,8 @@ export const demoCompleteHanko = async (): Promise<void> => {
     throw error;
   }
 };
+
+// === NAME RESOLUTION WRAPPERS (override imports) ===
+const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
+const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, entityId);
+const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(db, entityId);
