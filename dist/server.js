@@ -44408,7 +44408,7 @@ var generateJurisdictions = async () => {
       config = JSON.parse(configContent);
       console.log("✅ Loaded jurisdictions from config file");
     } else {
-      const response = await fetch("/jurisdictions.json");
+      const response = await fetch("./jurisdictions.json");
       if (!response.ok) {
         throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
       }
