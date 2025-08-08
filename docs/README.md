@@ -2,7 +2,19 @@
 
 “Imagine a financial system where every participant runs their own simulation, every action is deterministic, and every entity is sovereign by design.”
 
-Welcome to XLN — a post-rollup, post-Lightning, post-state-channel architecture for the programmable economy. Here, every asset, action, and agreement lives inside nested machines with their own state, time, and truth. This document takes you from the bottom of the stack — the Server — up to the Signer-Entity-Channel abstraction, covering programmability, DeFi logic, and modular governance.
+Welcome to XLN — a post-rollup, post-Lightning, post-state-channel architecture for the programmable economy. Here, every asset, action, and agreement lives inside nested machines with their own state, time, and truth. There is no single global ledger; instead, each Jurisdiction, Entity, and Account is its own machine with a deterministic, append-only ledger (J/E/A machines). This document takes you from the bottom of the stack — the Server — up to the Signer-Entity-Channel abstraction, covering programmability, DeFi logic, and modular governance.
+
+⸻
+
+## JEA: Jurisdiction → Entity → Account (J/E/A machines)
+
+XLN models the world as layered, composable machines:
+
+- **J-machine (Jurisdiction)**: public truth, reserves, dispute resolution; validates external claims and provides registry semantics.
+- **E-machine (Entity)**: corporations, DAOs, banks, and states; programmable governance and policy encoded as proposals and quorums.
+- **A-machine (Account)**: user-level channels, identities, and subcontracts executing local logic and producing proofs.
+
+“The machine is the law.” Sovereignty is cryptographic, not geographic.
 
 ⸻
 
@@ -142,6 +154,21 @@ But they never depend on these events for internal logic unless explicitly coded
 
 ⸻
 
+## Implications and Success Criteria
+
+**Implications**
+- Consensus becomes personal: each machine advances with its own quorum, eliminating global MEV and sequencer risk.
+- Zero-marginal-cost organization: Hanko makes entities signature schemes; infinite committees at 0 gas.
+- Programmable institutions: BCD splits Board/Control/Dividend, matching corporate reality and enabling tradeable control/economics.
+
+**When XLN succeeds**
+- Nations deploy digital governance with deterministic accountability.
+- DAOs issue passports, shares, and debt via entities.
+- Individuals fork jurisdictions and coordinate globally.
+- DeFi becomes networks of interlinked machine-states.
+
+⸻
+
 🌍 Final Thoughts
 
 XLN is not a smart contract platform.
@@ -162,3 +189,4 @@ For further details, see:
 	•	EntityProvider.sol - quorum hash & jurisdiction interface
 	•	Depository.sol - reserve/collateral tracking
 	•	CLI tools (DevTree, BlockValidator, SignatureVerifier)
+	•	Memo: docs/memo-to-model.md (tone, positioning, and summary guide)
