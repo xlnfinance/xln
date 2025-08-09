@@ -3,11 +3,8 @@ pragma solidity ^0.8.24;
 
 
 import "./ECDSA.sol";
-import "./console.sol";
 import "hardhat/console.sol";
-
 import "./EntityProvider.sol";
-
 import "./SubcontractProvider.sol";
 
 // Add necessary interfaces
@@ -18,11 +15,8 @@ interface IERC20 {
 interface IERC721 {
   function transferFrom(address from, address to, uint256 tokenId) external;
 }
-//interface IERC1155 {
-//  function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes calldata data) external;
-//}
-// IERC1155 already imported from EntityProvider.sol
-contract Depository is Console {
+
+contract Depository {
 
   // Multi-provider support
   mapping(address => bool) public approvedEntityProviders;
@@ -51,14 +45,12 @@ contract Depository is Console {
   event TransferReserveToCollateral(address indexed receiver, address indexed addr, uint collateral, int ondelta, uint tokenId);
   event DisputeStarted(address indexed sender, address indexed peer, uint indexed disputeNonce, bytes initialArguments);
   event CooperativeClose(address indexed sender, address indexed peer, uint indexed cooperativeNonce);
-  
-  //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
 
   // Token type identifiers
   uint8 constant TypeERC20 = 0;
   uint8 constant TypeERC721 = 1;
-  uint8 constant TypeERC1155 = 2;   
+  uint8 constant TypeERC1155 = 2;
 
 
 
@@ -136,25 +128,17 @@ contract Depository is Console {
     // but never Token <=> Collateral. 'reserve' acts as an intermediary balance
     ReserveToExternalToken[] reserveToExternalToken;
     ExternalTokenToReserve[] externalTokenToReserve;
-
     // don't require a signature
     ReserveToReserve[] reserveToReserve;
     ReserveToCollateral[] reserveToCollateral;
-
     // cooperativeUpdate and cooperativeProof are always signed by the peer
     CooperativeUpdate[] cooperativeUpdate;
     CooperativeDisputeProof[] cooperativeDisputeProof;
-
     // initialDisputeProof is signed by the peer, but could be outdated
     // another peer has time to respond with a newer proof
     InitialDisputeProof[] initialDisputeProof;
     FinalDisputeProof[] finalDisputeProof;
-
-
     TokenAmountPair[] flashloans;
-
-    //bytes32[] revealSecret;
-    //bytes32[] cleanSecret;
     uint hub_id;
   }
 
@@ -232,20 +216,7 @@ contract Depository is Console {
     // the order is important: first go methods that increase entity's balance
     // then methods that deduct from it
 
-    completeSuccess = true; 
-
-
-    /*
-    // flashloans allow to settle batch of cooperativeUpdate
-    for (uint i = 0; i < batch.flashloans.length; i++) {
-      _reserves[msg.sender][batch.flashloans[i].tokenId] += batch.flashloans[i].amount;
-    }
-
-    for (uint i = 0; i < batch.flashloans.length; i++) {
-      // fails if not enough _reserves 
-      _reserves[entityAddress][batch.flashloans[i].tokenId] -= batch.flashloans[i].amount;
-    }
-    */
+    completeSuccess = true;
     
     for (uint i = 0; i < batch.cooperativeUpdate.length; i++) {
       if(!(cooperativeUpdate(batch.cooperativeUpdate[i]))){
@@ -278,15 +249,6 @@ contract Depository is Console {
         completeSuccess = false;
       }
     }
-    
-    /*
-    for (uint i = 0; i < batch.revealSecret.length; i++) {
-      revealSecret(batch.revealSecret[i]);
-    }
-
-    for (uint i = 0; i < batch.cleanSecret.length; i++) {
-      cleanSecret(batch.cleanSecret[i]);
-    }*/
 
     // increase gasused for hubs
     // this is hardest to fake metric of real usage
@@ -471,28 +433,18 @@ contract Depository is Console {
   }
   function externalTokenToReserve(ExternalTokenToReserve memory params) public {
     if (params.internalTokenId == 0) {
-      // create new token
       _tokens.push(params.packedToken);
       params.internalTokenId = _tokens.length - 1;
-
-      //console.log("Saved new token:", params.internalTokenId);
     } else {
       params.packedToken = _tokens[params.internalTokenId];
-      //require(_tokens[params.internalTokenId] == params.packedToken, "Token data mismatch");
     }
 
-
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(params.packedToken);
-    //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
 
     // todo: allow longer uint256 tokenId for ERC721 and ERC1155 
-    // e.g. Rarible has format of 0xCreatorAddress..00000TokenId
     if (tokenType == TypeERC20) {
-      //console.log("20", contractAddress, msg.sender, address(this));
-
       require(IERC20(contractAddress).transferFrom(msg.sender, address(this), params.amount), "Fail");
     } else if (tokenType == TypeERC721) {
-      // 721 does not return bool on transfer
       IERC721(contractAddress).transferFrom(msg.sender, address(this), uint(tokenId));
     } else if (tokenType == TypeERC1155) {
       IERC1155(contractAddress).safeTransferFrom(msg.sender, address(this), uint(tokenId), params.amount, "");
@@ -509,9 +461,7 @@ contract Depository is Console {
   }
   function reserveToExternalToken(ReserveToExternalToken memory params) public {
     enforceDebts(msg.sender, params.tokenId);
-
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
-    //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
 
     require(_reserves[msg.sender][params.tokenId] >= params.amount, "Not enough reserve");
 
@@ -638,10 +588,7 @@ contract Depository is Console {
         }
 
         emit TransferReserveToCollateral(receiver, addr, col.collateral, col.ondelta, tokenId);
-
-        log("Deposited to channel ", _collaterals[ch_key][tokenId].collateral);
       } else {
-        log("Not enough funds", msg.sender);
         return false;
       }
       logChannel(params.receiver, addr);
@@ -666,11 +613,8 @@ contract Depository is Console {
     params.forgiveDebtsInTokenIds);
 
     bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-
-    log('Encoded msg', encoded_msg);
     
     if(params.peer != ECDSA.recover(hash, params.sig)) {
-      log("Invalid signer ", ECDSA.recover(hash, params.sig));
       return false;
     }
 
@@ -811,9 +755,6 @@ contract Depository is Console {
         uint debtAmount = delta < 0 ? uint(-delta) : uint(delta) - col.collateral;
         _reserves[getsCollateral][tokenId] += col.collateral;
         
-        log('gets debt', getsDebt);
-        log('debt', debtAmount);
-
         if (_reserves[getsDebt][tokenId] >= debtAmount) {
           // will pay right away without creating Debt
           _reserves[getsCollateral][tokenId] += debtAmount;
@@ -850,11 +791,6 @@ contract Depository is Console {
   function cooperativeDisputeProof (CooperativeDisputeProof memory params) public returns (bool) {
     bytes memory ch_key = channelKey(msg.sender, params.peer);
 
-
-    console.log("Received proof");
-    console.logBytes32(keccak256(abi.encode(params.proofbody)));
-    console.logBytes32(keccak256(params.initialArguments));
-
     bytes memory encoded_msg = abi.encode(
       MessageType.CooperativeDisputeProof, 
       ch_key, 
@@ -862,9 +798,6 @@ contract Depository is Console {
       keccak256(abi.encode(params.proofbody)),
       keccak256(params.initialArguments)
     );
-
-    bytes32 hash = keccak256(encoded_msg);
-
 
     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
@@ -893,8 +826,6 @@ contract Depository is Console {
       params.proofbodyHash);
 
     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-
-    log('encoded_msg',encoded_msg);
 
     require(ECDSA.recover(final_hash, params.sig) == params.peer, "Invalid signer");
 
@@ -934,14 +865,10 @@ contract Depository is Console {
         finalProofbodyHash);
 
       bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-      log('encoded_msg',encoded_msg);
       require(ECDSA.recover(final_hash, params.sig) == params.peer, "Invalid signer");
 
       // TODO: if nonce is same, Left one's proof is considered valid
-
       require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
-
-      
     } else {
       // counterparty agrees or does not respond 
       bool senderIsCounterparty = params.startedByLeft != msg.sender < params.peer;
@@ -1022,42 +949,6 @@ contract Depository is Console {
     }
     return response;    
   }
-
-  /*
-
-  function getAllHubs () public view returns (Hub[] memory) {
-    return _hubs;
-  }
-  function getAllTokens () public view returns (bytes32[] memory) {
-    return _tokens;
-  }
-  
-
-
-  function createDebt(address addr, address creditor, uint tokenId, uint amount) public {
-    _debts[addr][tokenId].push(Debt({
-      creditor: creditor,
-      amount: amount
-    }));
-  }
-  */
-
-
-  function logChannel(address a1, address a2) public {
-    /*
-    bytes memory ch_key = channelKey(a1, a2);
-    log(">>> Logging channel", ch_key);
-    log("cooperativeNonce", _channels[ch_key].cooperativeNonce);
-    log("disputeHash", _channels[ch_key].disputeHash);
-
-    for (uint i = 0; i < _tokens.length; i++) {
-      log("Token", _tokens[i]);
-      log("Left:", _reserves[a1][i]);
-      log("Right:", _reserves[a2][i]);
-      log("collateral", _collaterals[ch_key][i].collateral);
-      log("ondelta", _collaterals[ch_key][i].ondelta);
-    }*/
-  }       
 
   function onERC1155Received(
       address operator,
