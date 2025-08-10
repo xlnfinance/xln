@@ -5110,11 +5110,14 @@
                     }
                 }));
                 
-                // Process the server transactions using centralized processUntilEmpty
-                await XLN.processUntilEmpty(xlnEnv, {
+                // Process the server transactions using applyServerInput + processUntilEmpty
+                let outputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: serverTxs,
                     entityInputs: []
                 });
+                
+                // Process outputs until empty using centralized processUntilEmpty
+                await XLN.processUntilEmpty(xlnEnv, outputs);
                 
                 // Perform jurisdiction registration if selected
                 if (jurisdictionConfig) {
