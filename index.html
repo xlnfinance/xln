@@ -5110,19 +5110,20 @@
                     }
                 }));
                 
-                // Process the server transactions (using same pattern as working createSimpleEntity)
-                let outputs = XLN.applyServerInput(xlnEnv, {
+                // Process the server transactions (fix: applyServerInput returns {entityOutbox, mergedInputs})
+                let result = XLN.applyServerInput(xlnEnv, {
                     serverTxs: serverTxs,
                     entityInputs: []
                 });
+                let outputs = result.entityOutbox;
                 
                 // Process outputs until empty
                 while (outputs && outputs.length > 0) {
-                    const newOutputs = XLN.applyServerInput(xlnEnv, {
+                    const newResult = XLN.applyServerInput(xlnEnv, {
                         serverTxs: [],
                         entityInputs: outputs
                     });
-                    outputs.splice(0, outputs.length, ...newOutputs);
+                    outputs = newResult.entityOutbox;
                 }
                 
                 // Perform jurisdiction registration if selected
