@@ -180,8 +180,10 @@ export const createNumberedEntity = async (name: string, validators: string[], t
   if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
   if (DEBUG) console.log(`   💸 Gas required for registration`);
   
-  // Simulate blockchain call
-  const entityNumber = Math.floor(Math.random() * 1000000) + 1; // Demo: random number
+  // Simulate blockchain call - use sequential numbers for demo
+  // Use a simple global counter for demo purposes
+  if (!globalThis._entityCounter) globalThis._entityCounter = 0;
+  const entityNumber = ++globalThis._entityCounter;
   const entityId = generateNumberedEntityId(entityNumber);
   
   if (DEBUG) console.log(`   ✅ Assigned Entity Number: ${entityNumber}`);
