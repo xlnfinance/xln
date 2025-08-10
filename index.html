@@ -4957,43 +4957,190 @@
         }
 
         // Remove the old voteOnProposal function since we're moving to dropdown-based voting
-        function submitEntityFormation(tabId) { 
-            // Get form values
+        async function submitEntityFormation(tabId) { 
+            if (!xlnEnv) return;
+            
+            // Always go to current time when creating entities
+            currentTimeIndex = -1;
+            
+            // Get form values from tab-specific elements
             const entityType = document.getElementById(`entityType-${tabId}`)?.value || 'lazy';
             const entityName = document.getElementById(`entityName-${tabId}`)?.value || 'ACME';
             const threshold = parseInt(document.getElementById(`threshold-${tabId}`)?.value) || 1;
+            const selectedJurisdiction = 8545; // Default to Ethereum for now
             
-            // Get validators
+            // Validation
+            if (!entityName.trim()) {
+                alert('Please enter an entity name');
+                return;
+            }
+            
+            // Name validation for named entities
+            if (entityType === 'named') {
+                if (!/^[a-zA-Z0-9_-]+$/.test(entityName)) {
+                    alert('Named entity names can only contain letters, numbers, underscores, and hyphens');
+                    return;
+                }
+                if (entityName.length < 3 || entityName.length > 32) {
+                    alert('Named entity names must be between 3 and 32 characters');
+                    return;
+                }
+            }
+            
+            // Get validators from tab-specific form
             const validators = [];
+            const shares = {};
+            let totalShares = 0;
+            
             const validatorsList = document.getElementById(`validatorsList-${tabId}`);
             if (validatorsList) {
                 const validatorRows = validatorsList.querySelectorAll('.validator-row-simple');
                 validatorRows.forEach((row, index) => {
                     const select = row.querySelector(`select`);
-                    const weight = row.querySelector(`input[type="number"]`);
-                    if (select?.value) {
-                        validators.push({
-                            name: select.value,
-                            weight: parseInt(weight?.value) || 1
-                        });
+                    const weightInput = row.querySelector(`input[type="number"]`);
+                    if (select?.value && weightInput) {
+                        const weight = parseInt(weightInput.value) || 1;
+                        if (weight > 0) {
+                            validators.push(select.value);
+                            shares[select.value] = BigInt(weight);
+                            totalShares += weight;
+                        }
                     }
                 });
             }
             
+            // Validation
             if (validators.length === 0) {
-                alert('Please select at least one validator');
+                alert('Please add at least one validator');
                 return;
             }
             
-            console.log('🏛️ Entity formation submitted:', {
-                type: entityType,
-                name: entityName,
-                validators: validators,
-                threshold: threshold
-            });
+            if (threshold > totalShares) {
+                alert(`Threshold (${threshold}) cannot be greater than total weight (${totalShares})`);
+                return;
+            }
             
-            // TODO: Integrate with actual XLN entity creation
-            alert(`Entity "${entityName}" creation initiated!\nType: ${entityType}\nValidators: ${validators.length}\nThreshold: ${threshold}`);
+            // Check for duplicate validator names
+            const uniqueValidators = new Set(validators);
+            if (uniqueValidators.size !== validators.length) {
+                alert('Validator names must be unique');
+                return;
+            }
+            
+            let jurisdictionConfig = await window.getJurisdictionByPort(selectedJurisdiction);
+            if (!jurisdictionConfig) {
+                alert('Invalid jurisdiction selected');
+                return;
+            }
+            
+            console.log(`🏛️ Creating ${entityType} entity: ${entityName}`);
+            if (jurisdictionConfig) console.log(`   Jurisdiction: ${jurisdictionConfig.name}`);
+            console.log(`   Validators: ${validators.join(', ')}`);
+            console.log(`   Threshold: ${threshold}/${totalShares}`);
+            
+            let config;
+            let entityId;
+            let entityNumber;
+            
+            try {
+                // Create entity using new 3-tier system
+                if (entityType === 'lazy') {
+                    config = XLN.createLazyEntity(entityName, validators, BigInt(threshold), jurisdictionConfig);
+                    entityId = XLN.generateLazyEntityId(validators, BigInt(threshold));
+                    console.log(`🔒 Lazy Entity ID: ${entityId}`);
+                    
+                } else if (entityType === 'numbered') {
+                    const result = await XLN.createNumberedEntity(entityName, validators, BigInt(threshold), jurisdictionConfig);
+                    config = result.config;
+                    entityNumber = result.entityNumber;
+                    entityId = XLN.generateNumberedEntityId(entityNumber);
+                    console.log(`🔢 Numbered Entity: #${entityNumber}`);
+                    console.log(`🆔 Entity ID: ${entityId}`);
+                    
+                    // Simulate blockchain registration
+                    try {
+                        const regResult = await XLN.registerNumberedEntityOnChain(config, entityName);
+                        console.log(`✅ Entity registered on-chain: ${regResult.txHash}`);
+                        alert(`Numbered entity #${regResult.entityNumber} created successfully!\nTransaction: ${regResult.txHash.slice(0, 10)}...`);
+                    } catch (error) {
+                        console.error('❌ Registration failed:', error);
+                        alert(`Registration failed: ${error.message}`);
+                        return;
+                    }
+                    
+                } else if (entityType === 'named') {
+                    // First create a numbered entity
+                    const result = await XLN.createNumberedEntity(entityName, validators, BigInt(threshold), jurisdictionConfig);
+                    config = result.config;
+                    entityNumber = result.entityNumber;
+                    entityId = XLN.generateNumberedEntityId(entityNumber);
+                    
+                    // Register the numbered entity first
+                    const regResult = await XLN.registerNumberedEntityOnChain(config, entityName);
+                    console.log(`🔢 Created numbered entity #${regResult.entityNumber} for name assignment`);
+                    
+                    // Request name assignment from admin
+                    try {
+                        const requestId = await XLN.requestNamedEntity(entityName, regResult.entityNumber, jurisdictionConfig);
+                        console.log(`🏷️ Name assignment requested: ${requestId}`);
+                        alert(`Named entity request submitted!\n\nEntity Number: #${regResult.entityNumber}\nName: "${entityName}"\nRequest ID: ${requestId}\n\nYour entity is functional now. Admin will assign the name later.`);
+                    } catch (error) {
+                        console.error('❌ Name request failed:', error);
+                        alert(`Name request failed: ${error.message}\n\nYour numbered entity #${regResult.entityNumber} is still functional.`);
+                    }
+                }
+                
+                // Check if entity already exists with this ID
+                const existingEntity = Array.from(xlnEnv.replicas.keys()).find(key => 
+                    key.startsWith(entityId + ':') || key.startsWith(entityName + ':')
+                );
+                if (existingEntity) {
+                    alert(`Entity with this configuration already exists: ${existingEntity}`);
+                    return;
+                }
+                
+                // Create server transactions for all validators using the generated entityId
+                const serverTxs = validators.map((signerId, index) => ({
+                    type: 'importReplica',
+                    entityId: entityId, // Use the generated entity ID
+                    signerId: signerId,
+                    data: {
+                        config: config,
+                        isProposer: index === 0 // First validator is proposer
+                    }
+                }));
+                
+                // Process the server transactions using centralized processUntilEmpty
+                await XLN.processUntilEmpty(xlnEnv, {
+                    serverTxs: serverTxs,
+                    entityInputs: []
+                });
+                
+                // Perform jurisdiction registration if selected
+                if (jurisdictionConfig) {
+                    console.log(`🏛️  Entity "${entityName}" configured with jurisdiction "${jurisdictionConfig.name}"`);
+                    console.log(`    EntityProvider: ${jurisdictionConfig.entityProviderAddress}`);
+                    console.log(`    Depository: ${jurisdictionConfig.depositoryAddress}`);
+                    console.log(`    Chain ID: ${jurisdictionConfig.chainId}`);
+                    console.log(`    📝 Note: Full blockchain registration will be implemented in next iteration`);
+                }
+                
+                // Success feedback - only for lazy entities (numbered/named have specific alerts)
+                if (entityType === 'lazy') {
+                    const jurisdictionMessage = jurisdictionConfig 
+                        ? `\n🏛️ Jurisdiction: ${jurisdictionConfig.name}` 
+                        : '\n⚠️ Warning: No jurisdiction selected';
+                    
+                    alert(`✅ Entity "${entityName}" created successfully!${jurisdictionMessage}\n\nValidators: ${validators.join(', ')}\nThreshold: ${threshold}/${totalShares}`);
+                }
+                
+                // Refresh all entity displays
+                renderEntityPanels();
+                
+            } catch (error) {
+                console.error('Failed to create entity:', error);
+                alert(`Failed to create entity: ${error.message}`);
+            }
         }
         
         function addValidatorToTab(tabId) {
