@@ -39782,7 +39782,7 @@ var init_buffer = __esm(() => {
   /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 });
 
-// node_modules/debug/node_modules/ms/index.js
+// node_modules/ms/index.js
 var require_ms = __commonJS((exports, module) => {
   var s = 1000;
   var m = s * 60;
@@ -43449,6 +43449,7 @@ var validateMessage = (message) => {
   }
 };
 var applyEntityTx = (env, entityState, entityTx) => {
+  console.log(`\uD83D\uDEA8 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, entityTx.data);
   try {
     if (entityTx.type === "chat") {
       const { from, message } = entityTx.data;
@@ -43505,15 +43506,16 @@ var applyEntityTx = (env, entityState, entityTx) => {
       return newEntityState;
     }
     if (entityTx.type === "vote") {
-      const { proposalId, voter, choice } = entityTx.data;
+      console.log(`\uD83D\uDDF3️ PROCESSING VOTE: entityTx.data=`, entityTx.data);
+      const { proposalId, voter, choice, comment } = entityTx.data;
       const proposal = entityState.proposals.get(proposalId);
+      console.log(`\uD83D\uDDF3️ Vote lookup: proposalId=${proposalId}, found=${!!proposal}, status=${proposal?.status}`);
+      console.log(`\uD83D\uDDF3️ Available proposals:`, Array.from(entityState.proposals.keys()));
       if (!proposal || proposal.status !== "pending") {
-        if (DEBUG)
-          console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
+        console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
         return entityState;
       }
-      if (DEBUG)
-        console.log(`    \uD83D\uDDF3️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
+      console.log(`    \uD83D\uDDF3️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
       const newEntityState = {
         ...entityState,
         nonces: new Map(entityState.nonces),
@@ -43605,7 +43607,7 @@ var validateEntityInput = (input) => {
           log.error(`❌ Invalid transaction: ${JSON.stringify(tx)}`);
           return false;
         }
-        if (typeof tx.type !== "string" || !["chat", "propose", "vote"].includes(tx.type)) {
+        if (typeof tx.type !== "string" || !["chat", "propose", "vote", "profile-update"].includes(tx.type)) {
           log.error(`❌ Invalid transaction type: ${tx.type}`);
           return false;
         }
@@ -43740,6 +43742,11 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
   }
   const entityOutbox = [];
   if (entityInput.entityTxs?.length) {
+    if (entityReplica.signerId === "alice") {
+      console.log(`\uD83D\uDD25 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
+      console.log(`\uD83D\uDD25 ALICE-RECEIVES: Transaction types:`, entityInput.entityTxs.map((tx) => tx.type));
+      console.log(`\uD83D\uDD25 ALICE-RECEIVES: Alice isProposer=${entityReplica.isProposer}, current mempool=${entityReplica.mempool.length}`);
+    }
     entityReplica.mempool.push(...entityInput.entityTxs);
     if (DEBUG)
       console.log(`    → Added ${entityInput.entityTxs.length} txs to mempool (total: ${entityReplica.mempool.length})`);
@@ -43749,6 +43756,19 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
   } else if (entityInput.entityTxs && entityInput.entityTxs.length === 0) {
     if (DEBUG)
       console.log(`    ⚠️  CORNER CASE: Empty transaction array received - no mempool changes`);
+  }
+  if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
+    if (DEBUG)
+      console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
+    const proposerId = entityReplica.state.config.validators[0];
+    console.log(`\uD83D\uDD25 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
+    console.log(`\uD83D\uDD25 BOB-TO-ALICE: Transaction types:`, entityReplica.mempool.map((tx) => tx.type));
+    entityOutbox.push({
+      entityId: entityInput.entityId,
+      signerId: proposerId,
+      entityTxs: [...entityReplica.mempool]
+    });
+    entityReplica.mempool.length = 0;
   }
   if (entityInput.precommits?.size && entityInput.proposedFrame && !entityReplica.proposal) {
     const signers = Array.from(entityInput.precommits.keys());
@@ -43859,6 +43879,9 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
     }
   }
   if (entityReplica.isProposer && entityReplica.mempool.length > 0 && !entityReplica.proposal) {
+    console.log(`\uD83D\uDD25 ALICE-PROPOSES: Alice auto-propose triggered!`);
+    console.log(`\uD83D\uDD25 ALICE-PROPOSES: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
+    console.log(`\uD83D\uDD25 ALICE-PROPOSES: Mempool transaction types:`, entityReplica.mempool.map((tx) => tx.type));
     if (DEBUG)
       console.log(`    \uD83D\uDE80 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
     const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
@@ -43898,6 +43921,8 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
     if (DEBUG)
       console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
     const proposerId = entityReplica.state.config.validators[0];
+    console.log(`\uD83D\uDD25 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
+    console.log(`\uD83D\uDD25 BOB-TO-ALICE: Transaction types:`, entityReplica.mempool.map((tx) => tx.type));
     entityOutbox.push({
       entityId: entityInput.entityId,
       signerId: proposerId,
@@ -44451,13 +44476,6 @@ var getJurisdictionByAddress = async (address) => {
 init_utils5();
 init_entity_factory();
 init_utils5();
-var processUntilEmpty = (env, inputs) => {
-  let outputs = inputs;
-  while (outputs.length > 0) {
-    const result = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
-    outputs = result.entityOutbox;
-  }
-};
 var runDemo = async (env) => {
   if (DEBUG) {
     console.log("\uD83D\uDE80 Starting XLN Consensus Demo - Multi-Entity Test");
@@ -46414,6 +46432,41 @@ var runDemoWrapper = async (env) => {
     throw error;
   }
 };
+var processUntilEmpty = (env, inputs) => {
+  let outputs = inputs || [];
+  let iterationCount = 0;
+  const maxIterations = 10;
+  console.log("\uD83D\uDD25 PROCESS-CASCADE: Starting with", outputs.length, "initial outputs");
+  console.log("\uD83D\uDD25 PROCESS-CASCADE: Initial outputs:", outputs.map((o2) => ({
+    entityId: o2.entityId.slice(0, 8) + "...",
+    signerId: o2.signerId,
+    txs: o2.entityTxs?.length || 0,
+    precommits: o2.precommits?.size || 0,
+    hasFrame: !!o2.proposedFrame
+  })));
+  while (outputs.length > 0 && iterationCount < maxIterations) {
+    iterationCount++;
+    console.log(`\uD83D\uDD25 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
+    const result = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
+    outputs = result.entityOutbox;
+    console.log(`\uD83D\uDD25 PROCESS-CASCADE: Iteration ${iterationCount} generated ${outputs.length} new outputs`);
+    if (outputs.length > 0) {
+      console.log("\uD83D\uDD25 PROCESS-CASCADE: New outputs:", outputs.map((o2) => ({
+        entityId: o2.entityId.slice(0, 8) + "...",
+        signerId: o2.signerId,
+        txs: o2.entityTxs?.length || 0,
+        precommits: o2.precommits?.size || 0,
+        hasFrame: !!o2.proposedFrame
+      })));
+    }
+  }
+  if (iterationCount >= maxIterations) {
+    console.warn("⚠️ processUntilEmpty reached maximum iterations");
+  } else {
+    console.log(`\uD83D\uDD25 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
+  }
+  return env;
+};
 var searchEntityNames2 = (query, limit) => searchEntityNames(db2, query, limit);
 var resolveEntityName2 = (entityId) => resolveEntityName(db2, entityId);
 var getEntityDisplayInfoFromProfile = (entityId) => getEntityDisplayInfo2(db2, entityId);
@@ -46426,6 +46479,7 @@ export {
   resolveEntityIdentifier,
   requestNamedEntity,
   registerNumberedEntityOnChain,
+  processUntilEmpty,
   main,
   isEntityRegistered,
   hashBoard,

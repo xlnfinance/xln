@@ -26,9 +26,9 @@
         }
 
         .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
+            width: 100%;
+            margin: 0;
+            padding: 0;
         }
 
         .admin-topbar {
@@ -93,6 +93,772 @@
             gap: 8px;
         }
 
+        /* Split View Controls */
+        .split-view-controls {
+            background: #252526;
+            border: 1px solid #3e3e3e;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .add-entity-panel-btn {
+            background: #007acc;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 16px;
+            color: white;
+            font-size: 0.9em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .add-entity-panel-btn:hover {
+            background: #0086e6;
+            transform: translateY(-1px);
+        }
+
+        /* Entity Panels Side-by-Side Layout */
+        .entity-panels-container {
+            display: flex;
+            gap: 0;
+            padding: 0;
+            width: 100%;
+            height: calc(100vh - 80px);
+            overflow-x: auto;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #666 #2d2d2d;
+        }
+
+        .entity-panels-container::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        .entity-panels-container::-webkit-scrollbar-thumb {
+            background: #666;
+            border-radius: 4px;
+        }
+
+        .entity-panels-container::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 4px;
+        }
+
+        .entity-panel {
+            background: #2d2d2d;
+            border-right: 1px solid #3e3e3e;
+            padding: 20px;
+            flex: 1;
+            min-width: 25vw;
+        }
+
+        /* Dynamic panel width based on number of panels */
+        .entity-panels-container[data-panel-count="1"] .entity-panel {
+            flex: 1;
+            min-width: 100%;
+        }
+
+        .entity-panels-container[data-panel-count="2"] .entity-panel {
+            flex: 1;
+            min-width: 50%;
+        }
+
+        .entity-panels-container[data-panel-count="3"] .entity-panel {
+            flex: 1;
+            min-width: 33.333%;
+        }
+
+        .entity-panels-container[data-panel-count="4"] .entity-panel,
+        .entity-panels-container[data-panel-count="5"] .entity-panel,
+        .entity-panels-container[data-panel-count="6"] .entity-panel,
+        .entity-panels-container[data-panel-count="7"] .entity-panel,
+        .entity-panels-container[data-panel-count="8"] .entity-panel,
+        .entity-panels-container[data-panel-count="9"] .entity-panel,
+        .entity-panels-container[data-panel-count="10"] .entity-panel {
+            flex: 0 0 25vw;
+            min-width: 25vw;
+        }
+
+
+
+
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #3e3e3e;
+            gap: 12px;
+        }
+
+        .panel-header .unified-dropdown {
+            flex: 1;
+        }
+
+        /* Collapsible Component System */
+        .panel-component {
+            background: #252526;
+            border: 1px solid #3e3e3e;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        .component-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #2d2d2d;
+            border-bottom: 1px solid #3e3e3e;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s ease;
+        }
+
+        .component-header:hover {
+            background: #333333;
+        }
+
+        .component-title {
+            font-size: 0.9em;
+            font-weight: 500;
+            color: #d4d4d4;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .component-toggle {
+            color: #9d9d9d;
+            font-size: 12px;
+            transition: transform 0.2s ease;
+        }
+
+        .component-header.collapsed .component-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .component-content {
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            overflow: hidden;
+        }
+
+        .component-content.collapsed {
+            max-height: 0 !important;
+            opacity: 0;
+        }
+
+        /* Consensus State Component */
+        .consensus-state {
+            padding: 12px;
+            font-size: 0.85em;
+        }
+
+        .consensus-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px solid #3e3e3e;
+        }
+
+        .consensus-item:last-child {
+            border-bottom: none;
+        }
+
+        .consensus-label {
+            color: #9d9d9d;
+        }
+
+        .consensus-value {
+            color: #d4d4d4;
+            font-weight: 500;
+        }
+
+        .consensus-status-locked {
+            color: #f14c4c;
+        }
+
+        .consensus-status-unlocked {
+            color: #4ade80;
+        }
+
+        /* Scrollable Components (Chat, Proposals, History) */
+        .scrollable-component {
+            height: 25vh;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .scrollable-component::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .scrollable-component::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+
+        .scrollable-component::-webkit-scrollbar-thumb {
+            background: #555;
+            border-radius: 3px;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 20px;
+            font-size: 0.9em;
+        }
+
+        /* Chat Component */
+        .chat-message {
+            background: #2d2d2d;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 6px;
+            border-left: 3px solid #007acc;
+        }
+
+        .chat-meta {
+            font-size: 0.75em;
+            color: #9d9d9d;
+            margin-bottom: 4px;
+        }
+
+        .chat-content {
+            color: #d4d4d4;
+            font-size: 0.85em;
+        }
+
+        /* Proposals Component */
+        .proposal-item {
+            background: #2d2d2d;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 6px;
+            border-left: 3px solid #7c3aed;
+        }
+
+        .proposal-title {
+            font-weight: 500;
+            color: #d4d4d4;
+            margin-bottom: 4px;
+            font-size: 0.85em;
+        }
+
+        .proposal-meta {
+            font-size: 0.75em;
+            color: #9d9d9d;
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .proposal-item.executed {
+            border-left-color: #22c55e;
+            background: #1e3a2e;
+        }
+        
+        .executed-badge {
+            background: #22c55e;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-size: 0.7em;
+            font-weight: 600;
+        }
+        
+        .proposal-progress {
+            margin-top: 8px;
+        }
+        
+        .progress-bar {
+            background: #3d3d3d;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 4px;
+        }
+        
+        .progress-fill {
+            background: linear-gradient(90deg, #7c3aed, #a855f7);
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-text {
+            font-size: 0.75em;
+            color: #888;
+        }
+        
+        .vote-details {
+            margin-top: 6px;
+            font-size: 0.75em;
+            color: #aaa;
+            line-height: 1.3;
+        }
+
+        /* Transaction History Component */
+        .tx-item {
+            background: #2d2d2d;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 6px;
+            border-left: 3px solid #fb923c;
+        }
+
+        .tx-meta {
+            font-size: 0.75em;
+            color: #9d9d9d;
+            margin-bottom: 4px;
+        }
+
+        .tx-details {
+            color: #d4d4d4;
+            font-size: 0.85em;
+        }
+
+        /* Controls Component */
+        .controls-section {
+            padding: 12px;
+        }
+
+        .controls-dropdown {
+            width: 100%;
+            padding: 8px;
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 4px;
+            color: #d4d4d4;
+            margin-bottom: 12px;
+        }
+
+        .controls-form {
+            transition: all 0.3s ease;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-label {
+            display: block;
+            color: #9d9d9d;
+            font-size: 0.85em;
+            margin-bottom: 4px;
+        }
+
+        .form-input,
+        .form-textarea {
+            width: 100%;
+            padding: 6px 8px;
+            background: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-size: 0.85em;
+            resize: vertical;
+        }
+
+        .form-textarea {
+            min-height: 60px;
+        }
+
+        .form-button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background-color 0.2s ease;
+        }
+
+        .form-button:hover {
+            background: #0086e6;
+        }
+
+        /* Universal horizontal scroll for all components */
+        .panel-component .component-content,
+        .board-container,
+        .consensus-item,
+        .chat-message,
+        .proposal-item,
+        .frame-item,
+        .tx-item {
+            overflow-x: auto;
+            overflow-y: auto;
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+            word-break: break-word;
+            scrollbar-width: thin;
+            scrollbar-color: #666 #2d2d2d;
+        }
+
+        /* Webkit scrollbar styling for all components */
+        .panel-component .component-content::-webkit-scrollbar,
+        .board-container::-webkit-scrollbar,
+        .consensus-item::-webkit-scrollbar,
+        .chat-message::-webkit-scrollbar,
+        .proposal-item::-webkit-scrollbar,
+        .frame-item::-webkit-scrollbar,
+        .tx-item::-webkit-scrollbar {
+            height: 4px;
+            width: 4px;
+        }
+
+        .panel-component .component-content::-webkit-scrollbar-thumb,
+        .board-container::-webkit-scrollbar-thumb,
+        .consensus-item::-webkit-scrollbar-thumb,
+        .chat-message::-webkit-scrollbar-thumb,
+        .proposal-item::-webkit-scrollbar-thumb,
+        .frame-item::-webkit-scrollbar-thumb,
+        .tx-item::-webkit-scrollbar-thumb {
+            background: #666;
+            border-radius: 2px;
+        }
+
+        .panel-component .component-content::-webkit-scrollbar-track,
+        .board-container::-webkit-scrollbar-track,
+        .consensus-item::-webkit-scrollbar-track,
+        .chat-message::-webkit-scrollbar-track,
+        .proposal-item::-webkit-scrollbar-track,
+        .frame-item::-webkit-scrollbar-track,
+        .tx-item::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 2px;
+        }
+
+        /* Board Component Styling */
+        .board-container {
+            width: 100%;
+        }
+
+        .board-header {
+            font-size: 0.8em;
+            color: #007acc;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .board-members {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 120px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: #666 #2d2d2d;
+        }
+
+        .board-members::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .board-members::-webkit-scrollbar-thumb {
+            background: #666;
+            border-radius: 2px;
+        }
+
+        .board-members::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 2px;
+        }
+
+        .board-member {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            font-size: 0.8em;
+        }
+
+        .board-member:hover {
+            background: #404040;
+        }
+
+        .board-member.current-signer {
+            background: #1e3a5f;
+            border: 1px solid #007acc;
+        }
+
+        .board-avatar {
+            width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            flex-shrink: 0;
+        }
+
+        .board-name {
+            flex: 1;
+            color: #d4d4d4;
+            font-size: 0.8em;
+        }
+
+        .board-weight {
+            background: #404040;
+            color: #007acc;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.7em;
+            font-weight: bold;
+            margin-left: 4px;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        .proposer-badge,
+        .current-badge {
+            font-size: 0.7em;
+        }
+
+        .proposer-badge {
+            color: #ffd700;
+        }
+
+        .current-badge {
+            color: #007acc;
+        }
+
+        /* Entity History Panel Styling */
+        .entity-history-panel {
+            background: #1e1e1e;
+        }
+
+        .entity-history-container {
+            height: 40vh;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        .frame-item {
+            border-bottom: 1px solid #3e3e3e;
+            padding: 12px;
+            margin-bottom: 0;
+        }
+
+        .frame-item:last-child {
+            border-bottom: none;
+        }
+
+        .frame-item.current-frame {
+            background: #1e3a5f;
+            border-left: 3px solid #007acc;
+        }
+
+        .frame-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            font-weight: 500;
+            color: #007acc;
+        }
+
+        .frame-time {
+            font-size: 0.8em;
+            color: #9d9d9d;
+        }
+
+        .frame-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .frame-inputs,
+        .frame-outputs {
+            background: #2d2d2d;
+            border-radius: 4px;
+            padding: 8px;
+        }
+
+        .frame-section-title {
+            font-size: 0.8em;
+            font-weight: 500;
+            color: #d4d4d4;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .frame-item-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .frame-data-item {
+            background: #1a1a1a;
+            border-radius: 3px;
+            padding: 4px 6px;
+            font-size: 0.75em;
+            color: #d4d4d4;
+            border-left: 2px solid #555;
+        }
+
+        .frame-data-item.input {
+            border-left-color: #4ade80;
+        }
+
+        .frame-data-item.output {
+            border-left-color: #fb923c;
+        }
+
+        .frame-data-item.server-tx {
+            border-left-color: #007acc;
+        }
+
+        .frame-empty {
+            color: #666;
+            font-style: italic;
+            font-size: 0.75em;
+            padding: 8px;
+            text-align: center;
+        }
+
+        .frame-inactive {
+            color: #666;
+            font-style: italic;
+            font-size: 0.8em;
+            padding: 8px 12px;
+            text-align: center;
+            border-left: 2px solid #555;
+        }
+
+        .activity-badge {
+            font-size: 0.8em;
+            margin-left: 8px;
+        }
+
+        .frame-item.has-activity {
+            border-left: 2px solid #4ade80;
+        }
+
+        .frame-item.no-activity {
+            opacity: 0.6;
+            border-left: 2px solid #666;
+        }
+
+        .panel-header-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-add-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #007acc;
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .panel-add-btn:hover {
+            background: #0086e6;
+            transform: scale(1.1);
+        }
+
+        .panel-title {
+            color: #007acc;
+            font-size: 1.1em;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .panel-close-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #666;
+            color: white;
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .panel-close-btn:hover {
+            background: #888;
+            transform: scale(1.1);
+        }
+
+        .tab-entity-selector {
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .tab-dropdown-label {
+            color: #9d9d9d;
+            font-size: 0.85em;
+            font-weight: 500;
+            min-width: 80px;
+        }
+
+        /* Responsive Design for Side-by-Side Panels */
+        @media (max-width: 1200px) {
+            .entity-panel {
+                min-width: 350px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .entity-panel {
+                min-width: 300px;
+            }
+            
+            .tab-entity-selector {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+            
+            .tab-dropdown-label {
+                min-width: auto;
+                font-size: 0.8em;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .entity-panel {
+                min-width: 280px;
+                padding: 16px;
+            }
+        }
+
         .admin-btn {
             background: #2d2d2d;
             border: 1px solid #555;
@@ -112,6 +878,214 @@
             background: #404040;
             border-color: #007acc;
             color: #007acc;
+        }
+
+        #dropdownModeBtn {
+            position: relative;
+        }
+
+        #dropdownModeBtn:after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 6px;
+            height: 6px;
+            background: #007acc;
+            border-radius: 50%;
+        }
+
+        /* Entity Profile Section */
+        .entity-profile-section {
+            background: #1e1e1e;
+            border: 1px solid #3e3e3e;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            min-height: 80px;
+        }
+
+        .entity-profile {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .profile-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 2px solid #007acc;
+            box-shadow: 0 2px 8px rgba(0, 122, 204, 0.3);
+        }
+
+        .profile-info {
+            flex: 1;
+        }
+
+        .profile-name {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #ffffff;
+            margin-bottom: 4px;
+        }
+
+        .profile-details {
+            font-size: 0.85em;
+            color: #cccccc;
+            line-height: 1.4;
+        }
+
+        .profile-role {
+            display: inline-block;
+            background: #007acc;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.7em;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .profile-board {
+            margin-top: 12px;
+        }
+
+        .board-title {
+            margin-bottom: 8px;
+            color: #cccccc;
+            font-size: 0.85em;
+        }
+
+        .board-members-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 4px;
+            margin-top: 8px;
+        }
+
+        .board-member-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+            min-height: 24px;
+            font-size: 0.8em;
+            background: #3a3a3a;
+            border: 1px solid #4a4a4a;
+        }
+
+        .board-member-row:hover {
+            background: #3e3e3e;
+        }
+
+        .board-member-row.current-signer {
+            background: #2d4a6b;
+            border: 1px solid #007acc;
+        }
+
+        .mini-avatar {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1px solid #666;
+        }
+
+        .validator-name {
+            flex: 1;
+            color: #ffffff;
+            font-size: 0.8em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .validator-weight {
+            background: #007acc;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 0.7em;
+            font-weight: bold;
+            min-width: 16px;
+            text-align: center;
+        }
+
+        .mini-badge {
+            font-size: 0.8em;
+        }
+
+        /* Banking-style transaction list */
+        .banking-transactions {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .banking-transaction-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: #2d2d2d;
+            border-radius: 6px;
+            min-height: 48px;
+            border-left: 3px solid #007acc;
+            transition: background 0.2s;
+        }
+
+        .banking-transaction-item:hover {
+            background: #353535;
+        }
+
+        .banking-transaction-item.banking-input {
+            border-left-color: #4ade80;
+        }
+
+        .banking-transaction-item.banking-output {
+            border-left-color: #fb923c;
+        }
+
+        .banking-transaction-item.banking-import {
+            border-left-color: #8b5cf6;
+            background: #2a2540;
+        }
+
+        .transaction-icon {
+            font-size: 1.2em;
+            margin-right: 12px;
+            min-width: 24px;
+            text-align: center;
+        }
+
+        .transaction-details {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .transaction-primary {
+            font-weight: 600;
+            color: #ffffff;
+            font-size: 0.9em;
+        }
+
+        .transaction-secondary {
+            color: #cccccc;
+            font-size: 0.8em;
+            line-height: 1.3;
+        }
+
+        .transaction-amount {
+            color: #007acc;
+            font-size: 0.8em;
+            font-weight: 500;
+            text-align: right;
+            min-width: 60px;
         }
 
         /* Banking-style History I/O Section */
@@ -215,7 +1189,8 @@
             color: #9d9d9d;
         }
 
-        .unified-dropdown-btn.open .dropdown-arrow {
+        .unified-dropdown-btn.open .dropdown-arrow,
+        .unified-dropdown.open .dropdown-arrow {
             transform: rotate(180deg);
         }
 
@@ -227,8 +1202,8 @@
             border-radius: 6px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
             z-index: 1000;
-            min-width: 100%;
-            max-height: 400px;
+            width: 350px;
+            max-height: 300px;
             overflow-y: auto;
             top: 100%;
             left: 0;
@@ -258,18 +1233,61 @@
             display: block;
         }
 
+        .unified-dropdown.open .unified-dropdown-content {
+            display: block;
+        }
+
         .dropdown-item {
-            padding: 10px 16px;
+            padding: 8px 12px;
             cursor: pointer;
             border-bottom: 1px solid #3e3e3e;
             transition: background-color 0.2s ease;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .dropdown-item:hover {
             background: #404040;
+        }
+
+        .dropdown-item img {
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            flex-shrink: 0;
+        }
+
+        .dropdown-item .entity-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dropdown-search-container {
+            padding: 8px;
+            border-bottom: 2px solid #555;
+            background: #252525;
+        }
+
+        .dropdown-search-input {
+            width: 100%;
+            padding: 6px 8px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .dropdown-search-input:focus {
+            border-color: #007acc;
+            background: #1e1e1e;
         }
 
         .dropdown-item:last-child {
@@ -290,11 +1308,11 @@
         }
 
         .dropdown-item.indent-1 {
-            padding-left: 32px;
+            padding-left: 24px;
         }
 
         .dropdown-item.indent-2 {
-            padding-left: 48px;
+            padding-left: 36px;
         }
 
         .dropdown-item .item-icon {
@@ -578,6 +1596,123 @@
             border: 2px solid #ddd;
             border-radius: 6px;
             font-size: 14px;
+        }
+
+        .validator-selector-container {
+            flex: 2;
+            position: relative;
+        }
+
+        .validator-selector {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            font-size: 14px;
+            min-height: 40px;
+            transition: border-color 0.2s;
+        }
+
+        .validator-selector:hover {
+            border-color: #007bff;
+        }
+
+        .validator-selector.open {
+            border-color: #007bff;
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+
+        .validator-display {
+            flex: 1;
+            color: #333;
+        }
+
+        .validator-avatar {
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        .dropdown-arrow {
+            color: #666;
+            font-size: 12px;
+            margin-left: 8px;
+            transition: transform 0.2s;
+        }
+
+        .validator-selector.open .dropdown-arrow {
+            transform: rotate(180deg);
+        }
+
+        .validator-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 2px solid #007bff;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .validator-search {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .validator-search input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .validator-search input:focus {
+            border-color: #007bff;
+        }
+
+        .validator-options {
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .validator-option {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #f5f5f5;
+            transition: background-color 0.2s;
+        }
+
+        .validator-option:hover {
+            background-color: #f8f9fa;
+        }
+
+        .validator-option:last-child {
+            border-bottom: none;
+        }
+
+        .validator-option img {
+            width: 20px;
+            height: 20px;
+            border-radius: 10px;
+            margin-right: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+
+        .validator-option .signer-name {
+            font-size: 13px;
+            color: #333;
         }
 
         .btn-small {
@@ -1487,20 +2622,11 @@
             </div>
             
             <div class="admin-navigation">
-                <div class="unified-dropdown" id="unifiedDropdown">
-                    <button class="unified-dropdown-btn" onclick="toggleUnifiedDropdown()">
-                        <span class="dropdown-icon">🏛️</span>
-                        <span class="dropdown-text" id="dropdownText">Select Jurisdiction → Signer → Entity</span>
-                        <span class="dropdown-arrow">▼</span>
-                    </button>
-                    <div class="unified-dropdown-content" id="dropdownContent">
-                        <!-- Tree structure will be populated here -->
-                    </div>
-                </div>
+                <!-- Removed unified dropdown - moved to individual tabs -->
             </div>
             
             <div class="admin-controls">
-                <button class="admin-btn" onclick="window.xlnEnv && XLN.runDemoWrapper(window.xlnEnv)" title="Run Demo">
+                <button class="admin-btn" onclick="runDemoAndRefresh()" title="Run Demo">
                     <span>▶️</span>
                 </button>
                 <button class="admin-btn" onclick="XLN.clearDatabase()" title="Clear Database">
@@ -1515,6 +2641,9 @@
                 <button class="admin-btn" onclick="showSettings()" title="Settings">
                     <span>⚙️</span>
                 </button>
+                <button class="admin-btn" onclick="toggleDropdownMode()" title="Toggle Dropdown Mode" id="dropdownModeBtn">
+                    <span>🔄</span>
+                </button>
             </div>
         </div>
 
@@ -1522,11 +2651,11 @@
 
 
 
-        <!-- Search moved inside dropdown -->
+        <!-- Split View Entity Panels -->
 
-        <!-- Selected Entity View -->
-        <div class="selected-entity-view" id="selectedEntityView" style="display: none;">
-            <!-- Single selected entity will be shown here -->
+        <!-- Entity Panels Container -->
+        <div class="entity-panels-container" id="entityPanelsContainer">
+            <!-- Entity panels will be populated here -->
         </div>
         
         <!-- Hidden: Original entities grid (for reference) -->
@@ -1576,10 +2705,7 @@
 
         <div class="actionable-tabs-container">
             <div class="tabs-header">
-                <button class="tab-button active" onclick="switchTab('controls')" id="controlsTab">
-                    🎮 Interactive Controls
-                </button>
-                <button class="tab-button" onclick="switchTab('formation')" id="formationTab">
+                <button class="tab-button active" onclick="switchTab('formation')" id="formationTab">
                     🏗️ Entity Formation
                 </button>
                 <button class="tab-button" onclick="switchTab('jurisdictions')" id="jurisdictionsTab">
@@ -1587,45 +2713,7 @@
                 </button>
             </div>
             
-            <div id="controlsTabContent" class="tab-content active">
-                <div class="control-panel">
-                    <div class="control-group">
-                        <label>📍 Select Replica:</label>
-                        <select id="replicaSelect"></select>
-                    </div>
-                    <div class="control-group">
-                        <label>⚡ Select Action:</label>
-                        <select id="actionSelect">
-                            <option value="chat">💬 Chat Message</option>
-                            <option value="propose">📝 Create Proposal</option>
-                            <option value="vote">🗳️ Vote on Proposal</option>
-                        </select>
-                    </div>
-                    <div class="control-group" id="inputGroup">
-                        <label id="inputLabel">💬 Message:</label>
-                        <input type="text" id="inputField" placeholder="Enter your message...">
-                    </div>
-                    <div class="control-group" id="proposalGroup" style="display: none;">
-                        <label>📝 Proposal:</label>
-                        <input type="text" id="proposalField" placeholder="Enter proposal text...">
-                    </div>
-                    <div class="control-group" id="voteGroup" style="display: none;">
-                        <label>🗳️ Vote on Proposal:</label>
-                        <select id="proposalSelect"></select>
-                        <select id="voteChoice">
-                            <option value="yes">✅ Yes</option>
-                            <option value="no">❌ No</option>
-                        </select>
-                    </div>
-                    <div class="button-group">
-                        <button class="btn btn-primary" onclick="executeAction()">🚀 Execute Action</button>
-                        <button class="btn btn-secondary" onclick="refreshView()">🔄 Refresh View</button>
-                        <button class="btn btn-secondary" onclick="checkForUpdates()">🔍 Check for Updates</button>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="formationTabContent" class="tab-content">
+            <div id="formationTabContent" class="tab-content active">
                 <div class="simple-formation-panel">
                     <div class="formation-group">
                         <label for="jurisdictionSelect">🏛️ Jurisdiction:</label>
@@ -1671,30 +2759,37 @@
                     <div class="validators-section">
                         <h4>👥 Validators:</h4>
                         <div id="validatorsList">
-                            <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="alice" value="alice" oninput="updateExpectedEntityId()">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight(); updateExpectedEntityId()">
-                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                            <div class="validator-row" data-validator-id="0">
+                                <div class="validator-selector-container">
+                                    <div class="validator-selector" onclick="openValidatorDropdown(0)">
+                                        <img class="validator-avatar" src="" alt="" style="width: 24px; height: 24px; border-radius: 12px; margin-right: 8px; display: none;">
+                                        <span class="validator-display">Select signer...</span>
+                                        <span class="dropdown-arrow">▼</span>
                             </div>
-                            <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="bob" value="bob" oninput="updateExpectedEntityId()">
-                                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight(); updateExpectedEntityId()">
-                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                                    <div class="validator-dropdown" id="validatorDropdown0" style="display: none;">
+                                        <div class="validator-search">
+                                            <input type="text" placeholder="Search signers..." oninput="searchValidators(0, this.value)" onclick="event.stopPropagation()">
                             </div>
-                            <div class="validator-row">
-                                <input type="text" class="validator-name" placeholder="carol" value="carol" oninput="updateExpectedEntityId()">
+                                        <div class="validator-options" id="validatorOptions0">
+                                            <!-- Populated by JS -->
+                                        </div>
+                                    </div>
+                                </div>
                                 <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight(); updateExpectedEntityId()">
-                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
+                                <button class="btn btn-danger btn-small" onclick="removeValidator(this)" style="visibility: hidden;">❌</button>
                             </div>
                         </div>
                         <button class="btn btn-secondary" onclick="addValidatorRow()">➕ Add New Validator</button>
+                        <small class="text-muted" style="display: block; margin-top: 8px;">
+                            💡 Start with a single signer for personal use, or add more for multisig/corporate entities
+                        </small>
                     </div>
                     
                     <div class="threshold-section">
-                        <label for="thresholdSlider">🎯 Threshold: <span id="thresholdValue">2</span></label>
-                        <input type="range" id="thresholdSlider" min="1" max="10" value="2" oninput="updateThreshold()">
+                        <label for="thresholdSlider">🎯 Threshold: <span id="thresholdValue">1</span></label>
+                        <input type="range" id="thresholdSlider" min="1" max="2" value="1" oninput="updateThreshold()">
                         <div class="threshold-info">
-                            <span>Total Weight: <span id="totalWeight">3</span></span>
+                            <span>Total Weight: <span id="totalWeight">1</span></span>
                         </div>
                     </div>
                     
@@ -1893,6 +2988,2129 @@
         
         // Make XLN available globally for debugging
         window.xlnEnv = null;
+
+        // Tab Management System
+        const STORAGE_KEY = 'xln-entity-tabs';
+        let tabSystem = {
+            tabs: [],
+            activeTabId: null,
+            nextTabId: 1
+        };
+
+        // Initialize tab system
+        function initializeTabSystem() {
+            loadTabsFromStorage();
+            if (tabSystem.tabs.length === 0) {
+                // Create 3 default panels for demo
+                addTab(); // Panel 1
+                addTab(); // Panel 2 
+                addTab(); // Panel 3
+            }
+            renderTabs();
+        }
+
+        // Generate unique tab ID
+        function generateTabId() {
+            return `tab-${tabSystem.nextTabId++}`;
+        }
+
+        // Save tabs to localStorage
+        function saveTabsToStorage() {
+            try {
+                const tabData = {
+                    tabs: tabSystem.tabs,
+                    activeTabId: tabSystem.activeTabId,
+                    nextTabId: tabSystem.nextTabId
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(tabData));
+                console.log('💾 Tabs saved to localStorage:', tabData);
+            } catch (error) {
+                console.error('❌ Failed to save tabs:', error);
+            }
+        }
+
+        // Load tabs from localStorage
+        function loadTabsFromStorage() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    const tabData = JSON.parse(saved);
+                    tabSystem.tabs = tabData.tabs || [];
+                    tabSystem.activeTabId = tabData.activeTabId || null;
+                    tabSystem.nextTabId = tabData.nextTabId || 1;
+                    console.log('📁 Tabs loaded from localStorage:', tabData);
+                }
+            } catch (error) {
+                console.error('❌ Failed to load tabs:', error);
+                // Initialize with empty tab system on error
+                tabSystem.tabs = [];
+                tabSystem.activeTabId = null;
+                tabSystem.nextTabId = 1;
+            }
+        }
+
+        // Add new tab
+        function addTab() {
+            const panelNumber = tabSystem.tabs.length + 1;
+            
+            // Auto-select first available entity for new tabs (always use first entity found)
+            let defaultJurisdiction = '';
+            let defaultSigner = '';
+            let defaultEntityId = '';
+            
+            if (xlnEnv && xlnEnv.replicas && xlnEnv.replicas.size > 0) {
+                const firstReplica = Array.from(xlnEnv.replicas.values())[0];
+                if (firstReplica) {
+                    defaultJurisdiction = firstReplica.state?.config?.jurisdiction?.name || 'Ethereum';
+                    defaultSigner = firstReplica.signerId || 'alice.eth';
+                    defaultEntityId = firstReplica.entityId || '';
+                }
+            }
+            
+            const newTab = {
+                id: generateTabId(),
+                title: `Entity Panel ${panelNumber}`,
+                jurisdiction: defaultJurisdiction,
+                signer: defaultSigner,
+                entityId: defaultEntityId,
+                isActive: false
+            };
+
+            tabSystem.tabs.push(newTab);
+            setActiveTab(newTab.id);
+            renderTabs();
+            saveTabsToStorage();
+
+            console.log('➕ Added new panel:', newTab);
+        }
+
+        // Close tab
+        function closeTab(tabId) {
+            console.log('❌ Closing tab:', tabId);
+            
+            if (tabSystem.tabs.length <= 1) {
+                console.log('⚠️ Cannot close last tab');
+                return; // Keep at least one tab
+            }
+
+            const tabIndex = tabSystem.tabs.findIndex(t => t.id === tabId);
+            if (tabIndex === -1) return;
+
+            tabSystem.tabs.splice(tabIndex, 1);
+
+            // If closed tab was active, switch to first remaining tab
+            if (tabSystem.activeTabId === tabId) {
+                tabSystem.activeTabId = tabSystem.tabs[0].id;
+            }
+
+            renderTabs();
+            saveTabsToStorage();
+        }
+
+        // Set active tab
+        function setActiveTab(tabId) {
+            console.log('🎯 Setting active tab:', tabId);
+            
+            // Update tab states
+            tabSystem.tabs.forEach(tab => {
+                tab.isActive = tab.id === tabId;
+            });
+            tabSystem.activeTabId = tabId;
+
+            renderTabs();
+            saveTabsToStorage();
+        }
+
+        // Get active tab
+        function getActiveTab() {
+            return tabSystem.tabs.find(tab => tab.id === tabSystem.activeTabId);
+        }
+
+        // Update tab title and data
+        function updateTab(tabId, updates) {
+            const tab = tabSystem.tabs.find(t => t.id === tabId);
+            if (tab) {
+                Object.assign(tab, updates);
+                // Only update the dropdown text for this specific tab, don't re-render all panels
+                updateTabDropdownDisplay(tabId);
+                saveTabsToStorage();
+            }
+        }
+
+        // Update dropdown display for specific tab only
+        function updateTabDropdownDisplay(tabId) {
+            const tab = tabSystem.tabs.find(t => t.id === tabId);
+            if (!tab) return;
+
+            const dropdownText = document.getElementById(`dropdownText-${tabId}`);
+            if (dropdownText && tab.jurisdiction && tab.signer && tab.entityId) {
+                const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(tab.entityId) : tab.entityId;
+                const signerDisplay = XLN.formatSignerDisplay ? XLN.formatSignerDisplay(tab.signer) : tab.signer;
+                dropdownText.textContent = `${tab.jurisdiction} → ${signerDisplay} → ${entityDisplay}`;
+            }
+        }
+
+        // Render entity panels in grid layout
+        function renderTabs() {
+            renderEntityPanels();
+        }
+
+        // Render all entity panels
+        function renderEntityPanels() {
+            const container = document.getElementById('entityPanelsContainer');
+            if (!container) return;
+
+            container.innerHTML = '';
+            
+            // Set panel count attribute for responsive CSS
+            container.setAttribute('data-panel-count', tabSystem.tabs.length);
+
+            tabSystem.tabs.forEach((tab, index) => {
+                const panel = document.createElement('div');
+                panel.className = 'entity-panel';
+                panel.setAttribute('data-panel-id', tab.id);
+                
+                const isLastPanel = index === tabSystem.tabs.length - 1;
+                const showCloseButton = tabSystem.tabs.length > 1;
+
+                panel.innerHTML = `
+                    <div class="panel-header">
+                        <div class="unified-dropdown" id="dropdown-${tab.id}">
+                            <button class="unified-dropdown-btn" onclick="toggleTabDropdown('${tab.id}')" style="width: 100%;">
+                                <span class="dropdown-icon">🏛️</span>
+                                <span class="dropdown-text" id="dropdownText-${tab.id}">Select Entity</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </button>
+                            <div class="unified-dropdown-content" id="dropdownContent-${tab.id}">
+                                <!-- Tree structure will be populated here -->
+                            </div>
+                        </div>
+                        <div class="panel-header-controls">
+                            ${isLastPanel ? '<button class="panel-add-btn" onclick="addTab()" title="Add Entity Panel">➕</button>' : ''}
+                            ${showCloseButton ? `<button class="panel-close-btn" onclick="closeTab('${tab.id}')" title="Close panel">×</button>` : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Entity Profile Section -->
+                    <div class="entity-profile-section" id="entityProfile-${tab.id}">
+                        <div class="empty-state">- select entity to view profile</div>
+                    </div>
+                    
+                    <!-- Consensus State Component -->
+                    <div class="panel-component" id="consensus-${tab.id}">
+                        <div class="component-header" onclick="toggleComponent('consensus-${tab.id}')">
+                            <div class="component-title">
+                                <span>⚖️</span>
+                                <span>Consensus State</span>
+                            </div>
+                            <div class="component-toggle">▼</div>
+                        </div>
+                        <div class="component-content" style="max-height: 200px;">
+                            <div class="consensus-state" id="consensusContent-${tab.id}">
+                                <div class="empty-state">- select entity to view consensus state</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chat Component -->
+                    <div class="panel-component" id="chat-${tab.id}">
+                        <div class="component-header" onclick="toggleComponent('chat-${tab.id}')">
+                            <div class="component-title">
+                                <span>💬</span>
+                                <span>Chat</span>
+                            </div>
+                            <div class="component-toggle">▼</div>
+                        </div>
+                        <div class="component-content" style="max-height: 25vh;">
+                            <div class="scrollable-component" id="chatContent-${tab.id}">
+                                <div class="empty-state">- no messages</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Proposals Component -->
+                    <div class="panel-component" id="proposals-${tab.id}">
+                        <div class="component-header collapsed" onclick="toggleComponent('proposals-${tab.id}')">
+                            <div class="component-title">
+                                <span>📋</span>
+                                <span>Proposals</span>
+                            </div>
+                            <div class="component-toggle">▼</div>
+                        </div>
+                        <div class="component-content collapsed" style="max-height: 25vh;">
+                            <div class="scrollable-component" id="proposalsContent-${tab.id}">
+                                <div class="empty-state">- no proposals</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Entity Frame History (Vertical Panel) -->
+                    <div class="panel-component entity-history-panel" id="history-${tab.id}">
+                        <div class="component-header collapsed" onclick="toggleComponent('history-${tab.id}')">
+                            <div class="component-title">
+                                <span>🗂️</span>
+                                <span>History</span>
+                            </div>
+                            <div class="component-toggle">▼</div>
+                        </div>
+                        <div class="component-content collapsed" style="max-height: 40vh;">
+                            <div class="entity-history-container" id="historyContent-${tab.id}">
+                                <div class="empty-state">- no frame history</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Controls Component -->
+                    <div class="panel-component" id="controls-${tab.id}">
+                        <div class="component-header collapsed" onclick="toggleComponent('controls-${tab.id}')">
+                            <div class="component-title">
+                                <span>⚙️</span>
+                                <span>Controls</span>
+                            </div>
+                            <div class="component-toggle">▼</div>
+                        </div>
+                        <div class="component-content collapsed" style="max-height: 400px;">
+                            <div class="controls-section" id="controlsContent-${tab.id}">
+                                <select class="controls-dropdown" onchange="updateControlsForm('${tab.id}', this.value)">
+                                    <option value="chat" selected>💬 Create chat message</option>
+                                    <option value="proposal">📋 Add proposal</option>
+                                    <option value="vote">🗳️ Vote on proposal</option>
+                                    <option value="entity">🏛️ Form new entity</option>
+                                    <option value="jtx">💸 Send J-tx</option>
+                                    <option value="settings">⚙️ Update settings</option>
+                                </select>
+                                <div class="controls-form" id="controlsForm-${tab.id}">
+                                    <div class="form-group">
+                                        <label class="form-label">Message:</label>
+                                        <textarea class="form-textarea" placeholder="Enter your message..."></textarea>
+                                    </div>
+                                    <button class="form-button" onclick="submitChatMessage('${tab.id}')">Send Message</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // No click behavior needed - panels are just display containers
+
+                container.appendChild(panel);
+                
+                // Apply component states and auto-render content
+                applyComponentStates(tab.id);
+                
+                // Auto-render entity content if tab has an entity selected
+                if (tab.entityId) {
+                    renderEntityInTab(tab.id, tab.signer, tab.entityId);
+                }
+            });
+        }
+
+        // Toggle dropdown for specific tab
+        function toggleTabDropdown(tabId) {
+            console.log('🔽 Toggle dropdown for tab:', tabId);
+            const dropdown = document.getElementById(`dropdown-${tabId}`);
+            const content = document.getElementById(`dropdownContent-${tabId}`);
+            
+            if (!dropdown || !content) {
+                console.error('❌ Dropdown elements not found:', { dropdown, content });
+                return;
+            }
+
+            const isOpen = dropdown.classList.contains('open');
+            console.log('📊 Dropdown state:', { isOpen, xlnEnv: !!xlnEnv });
+            
+            // Close all other dropdowns
+            document.querySelectorAll('.unified-dropdown').forEach(d => {
+                d.classList.remove('open');
+            });
+
+            if (!isOpen) {
+                dropdown.classList.add('open');
+                populateTabDropdown(tabId);
+            }
+        }
+
+        // Populate dropdown for specific tab
+        function populateTabDropdown(tabId) {
+            console.log('📝 Populating dropdown for tab:', tabId);
+            const content = document.getElementById(`dropdownContent-${tabId}`);
+            if (!content) {
+                console.error('❌ Content element not found for tab:', tabId);
+                return;
+            }
+            if (!xlnEnv) {
+                console.error('❌ xlnEnv not available:', xlnEnv);
+                return;
+            }
+            console.log('✅ xlnEnv available with replicas:', xlnEnv.replicas?.size || 0);
+
+            content.innerHTML = `
+                <div class="dropdown-search-container">
+                    <input type="text" class="dropdown-search-input" placeholder="🔍 Search jurisdictions, signers, entities..." 
+                           oninput="handleTabDropdownSearch('${tabId}', this.value)" 
+                           onclick="event.stopPropagation()">
+                </div>
+                <div class="dropdown-results" id="dropdownResults-${tabId}">
+                    <!-- Results will be populated here -->
+                </div>
+            `;
+
+            updateTabDropdownResults(tabId, '');
+        }
+
+        // Handle search in tab dropdown
+        function handleTabDropdownSearch(tabId, searchTerm) {
+            updateTabDropdownResults(tabId, searchTerm);
+        }
+
+        // Update dropdown results for tab
+        function updateTabDropdownResults(tabId, searchTerm) {
+            const resultsContainer = document.getElementById(`dropdownResults-${tabId}`);
+            if (!resultsContainer || !xlnEnv) return;
+
+            resultsContainer.innerHTML = '';
+
+            // Get all available jurisdictions
+            const jurisdictions = [
+                { name: 'Ethereum', id: 'ethereum' },
+                { name: 'Polygon', id: 'polygon' },
+                { name: 'Arbitrum', id: 'arbitrum' }
+            ];
+
+            if (dropdownMode === 'signer-first') {
+                // Original mode: Jurisdiction → Signer → Entity
+                renderSignerFirstDropdown(tabId, jurisdictions, resultsContainer, searchTerm);
+            } else {
+                // New mode: Jurisdiction → Entity → Signers
+                renderEntityFirstDropdown(tabId, jurisdictions, resultsContainer, searchTerm);
+            }
+        }
+
+        // Original dropdown: Jurisdiction → Signer → Entity
+        function renderSignerFirstDropdown(tabId, jurisdictions, resultsContainer, searchTerm) {
+            jurisdictions.forEach((jurisdiction, jIndex) => {
+                // Get replicas for this jurisdiction
+                const replicas = Array.from(xlnEnv.replicas.values()).filter(replica => 
+                    replica.state?.config?.jurisdiction?.name === jurisdiction.name
+                );
+
+                if (replicas.length === 0) return;
+
+                // Group replicas by signer
+                const signerGroups = {};
+                replicas.forEach(replica => {
+                    const signerId = replica.signerId;
+                    if (!signerGroups[signerId]) {
+                        signerGroups[signerId] = [];
+                    }
+                    signerGroups[signerId].push(replica);
+                });
+
+                // Add jurisdiction header
+                const isLastJurisdiction = jIndex === jurisdictions.length - 1;
+                const jurisdictionItem = createTabDropdownTreeItem(
+                    `🏛️ ${jurisdiction.name}`, 
+                    '', 
+                    0, 
+                    false, 
+                    false,
+                    searchTerm
+                );
+                resultsContainer.appendChild(jurisdictionItem);
+
+                // Add signers and their entities
+                const signerKeys = Object.keys(signerGroups);
+                signerKeys.forEach((signerId, sIndex) => {
+                    const signerEntities = signerGroups[signerId];
+                    const isLastSigner = sIndex === signerKeys.length - 1;
+
+                    // Add signer
+                    const signerItem = createTabDropdownTreeItem(
+                        `👤 ${XLN.formatSignerDisplay ? XLN.formatSignerDisplay(signerId) : signerId}`, 
+                        '', 
+                        1, 
+                        false, 
+                        isLastSigner && isLastJurisdiction,
+                        searchTerm
+                    );
+                    resultsContainer.appendChild(signerItem);
+
+                    // Add entities for this signer
+                    signerEntities.forEach((replica, eIndex) => {
+                        const isLastEntity = eIndex === signerEntities.length - 1;
+                        const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId;
+                        
+                        const entityItem = createTabDropdownTreeItem(
+                            `🏢 ${entityDisplay}`, 
+                            `${jurisdiction.name}:${signerId}:${replica.entityId}`, 
+                            2, 
+                            true, 
+                            isLastEntity && isLastSigner && isLastJurisdiction,
+                            searchTerm
+                        );
+                        
+                        entityItem.onclick = () => selectTabEntity(tabId, jurisdiction.name, signerId, replica.entityId);
+                        resultsContainer.appendChild(entityItem);
+                    });
+                });
+            });
+        }
+
+        // New dropdown: Jurisdiction → Entity → Signers  
+        function renderEntityFirstDropdown(tabId, jurisdictions, resultsContainer, searchTerm) {
+            jurisdictions.forEach((jurisdiction, jIndex) => {
+                // Get replicas for this jurisdiction
+                const replicas = Array.from(xlnEnv.replicas.values()).filter(replica => 
+                    replica.state?.config?.jurisdiction?.name === jurisdiction.name
+                );
+
+                if (replicas.length === 0) return;
+
+                // Group replicas by entity
+                const entityGroups = {};
+                replicas.forEach(replica => {
+                    const entityId = replica.entityId;
+                    if (!entityGroups[entityId]) {
+                        entityGroups[entityId] = [];
+                    }
+                    entityGroups[entityId].push(replica);
+                });
+
+                // Add jurisdiction header
+                const isLastJurisdiction = jIndex === jurisdictions.length - 1;
+                const jurisdictionItem = createTabDropdownTreeItem(
+                    `🏛️ ${jurisdiction.name}`, 
+                    '', 
+                    0, 
+                    false, 
+                    false,
+                    searchTerm
+                );
+                resultsContainer.appendChild(jurisdictionItem);
+
+                // Add entities and their signers
+                const entityKeys = Object.keys(entityGroups);
+                entityKeys.forEach((entityId, eIndex) => {
+                    const entitySigners = entityGroups[entityId];
+                    const isLastEntity = eIndex === entityKeys.length - 1;
+                    const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(entityId) : entityId;
+
+                    // Add entity
+                    const entityItem = createTabDropdownTreeItem(
+                        `🏢 ${entityDisplay} (${entitySigners.length} signers)`, 
+                        '', 
+                        1, 
+                        false, 
+                        isLastEntity && isLastJurisdiction,
+                        searchTerm
+                    );
+                    resultsContainer.appendChild(entityItem);
+
+                    // Add signers for this entity
+                    entitySigners.forEach((replica, sIndex) => {
+                        const isLastSigner = sIndex === entitySigners.length - 1;
+                        
+                        const signerItem = createTabDropdownTreeItem(
+                            `👤 ${XLN.formatSignerDisplay ? XLN.formatSignerDisplay(replica.signerId) : replica.signerId}`, 
+                            `${jurisdiction.name}:${replica.signerId}:${replica.entityId}`, 
+                            2, 
+                            true, 
+                            isLastSigner && isLastEntity && isLastJurisdiction,
+                            searchTerm
+                        );
+                        
+                        signerItem.onclick = () => selectTabEntity(tabId, jurisdiction.name, replica.signerId, replica.entityId);
+                        resultsContainer.appendChild(signerItem);
+                    });
+                });
+            });
+        }
+
+        // Create tree-structured dropdown item with ASCII art
+        function createTabDropdownTreeItem(text, value, level, isSelectable, isLast, searchTerm) {
+            const item = document.createElement('div');
+            item.className = `dropdown-item ${level > 0 ? `indent-${level}` : ''}`;
+            
+            // Create ASCII tree structure
+            let prefix = '';
+            if (level === 1) {
+                prefix = '├─ ';
+            } else if (level === 2) {
+                prefix = '│  └─ ';
+            }
+            
+            item.innerHTML = `
+                <span class="tree-prefix" style="color: #666; font-family: monospace;">${prefix}</span>
+                <span class="item-text">${text}</span>
+            `;
+            
+            if (isSelectable) {
+                item.style.cursor = 'pointer';
+                item.dataset.value = value;
+            } else {
+                item.style.cursor = 'default';
+                item.style.color = '#9d9d9d';
+            }
+
+            // Apply search highlighting if needed
+            if (searchTerm && text.toLowerCase().includes(searchTerm.toLowerCase())) {
+                highlightSearchTerm(item, searchTerm);
+            }
+            
+            return item;
+        }
+
+        // Select entity in specific tab (wrapper for dropdown selection)
+        function selectTabEntity(tabId, jurisdiction, signerId, entityId) {
+            selectEntityInTab(tabId, jurisdiction, signerId, entityId);
+        }
+
+        // Select entity in specific tab
+        function selectEntityInTab(tabId, jurisdiction, signerId, entityId) {
+            console.log(`🎯 Selecting entity in tab ${tabId}:`, { jurisdiction, signerId, entityId });
+
+            // Ensure jurisdiction is a string (it might be an object)
+            const jurisdictionName = typeof jurisdiction === 'string' ? jurisdiction : jurisdiction?.name || 'Unknown';
+
+            // Update tab data
+            const entityDisplay = XLN.formatEntityDisplay ? XLN.formatEntityDisplay(entityId) : entityId;
+            updateTab(tabId, {
+                title: `Entity ${entityDisplay}`,
+                jurisdiction: jurisdictionName,
+                signer: signerId,
+                entityId: entityId
+            });
+
+            // Dropdown text will be updated by updateTab -> updateTabDropdownDisplay
+
+            // Close dropdown
+            const dropdown = document.getElementById(`dropdown-${tabId}`);
+            if (dropdown) {
+                dropdown.classList.remove('open');
+            }
+
+            // Render entity profile for this tab
+            renderEntityInTab(tabId, signerId, entityId);
+        }
+
+        // Render entity profile in specific tab
+        function renderEntityInTab(tabId, signerId, entityId) {
+            if (!xlnEnv) return;
+
+            // Get current or historical replica
+            let replica;
+            if (currentTimeIndex === -1) {
+                // Current time - get from current environment
+                replica = Array.from(xlnEnv.replicas.values()).find(r => 
+                    r.signerId === signerId && r.entityId === entityId
+                );
+            } else {
+                // Historical time - get from snapshot
+                const snapshot = XLN.getHistory()[currentTimeIndex];
+                if (snapshot && snapshot.replicas) {
+                    replica = Array.from(snapshot.replicas.values()).find(r => 
+                        r.signerId === signerId && r.entityId === entityId
+                    );
+                }
+            }
+
+            if (!replica) {
+                // Clear all components if entity not found
+                ['consensusContent', 'chatContent', 'proposalsContent', 'historyContent'].forEach(compPrefix => {
+                    const elem = document.getElementById(`${compPrefix}-${tabId}`);
+                    if (elem) elem.innerHTML = '<div class="empty-state">Entity not found</div>';
+                });
+                return;
+            }
+
+            console.log(`🎯 Rendering entity in tab ${tabId}:`, replica);
+
+            // Update tab data to match exactly what we're showing (reactive binding)
+            const tab = tabSystem.tabs.find(t => t.id === tabId);
+            if (tab) {
+                const jurisdictionName = replica.state?.config?.jurisdiction?.name || 'Ethereum';
+                tab.jurisdiction = jurisdictionName;
+                tab.signer = signerId;
+                tab.entityId = entityId;
+                
+                // Update dropdown display to match panel content exactly
+                updateTabDropdownDisplay(tabId);
+                saveTabsToStorage();
+            }
+
+            // Render entity profile and all components with the replica data
+            renderEntityProfile(tabId, replica);
+            renderConsensusState(tabId, replica);
+            renderChatMessages(tabId, replica);
+            renderProposals(tabId, replica);
+            renderTransactionHistory(tabId, replica);
+        }
+
+        // Render entity profile with identicon
+        function renderEntityProfile(tabId, replica) {
+            const container = document.getElementById(`entityProfile-${tabId}`);
+            if (!container || !replica) {
+                if (container) container.innerHTML = '<div class="empty-state">- select entity to view profile</div>';
+                return;
+            }
+
+            const config = replica.state?.config || {};
+            const validators = config.validators || [];
+            const weights = config.weights || [];
+            const threshold = config.threshold || 1;
+            const entityNumber = replica.entityId.startsWith('0x0000000000000000000000000000000000000000000000000000000000000000') ? 
+                parseInt(replica.entityId.slice(-2), 16) : null;
+            
+            // Generate avatar for the ENTITY (not signer) - use entityId for consistent avatars
+            const avatarSvg = XLN.generateSignerAvatar ? XLN.generateSignerAvatar(replica.entityId) : null;
+            
+            // Determine role
+            const isProposer = validators.length > 0 && validators[0] === replica.signerId;
+            
+            // Create board list with weights
+            const boardList = validators.map((validator, index) => {
+                const weight = weights[index] || 1;
+                const isCurrentSigner = validator === replica.signerId;
+                const isValidatorProposer = index === 0;
+                const validatorAvatar = XLN.generateSignerAvatar ? XLN.generateSignerAvatar(validator) : null;
+                
+                return `
+                    <div class="board-member-row ${isCurrentSigner ? 'current-signer' : ''}" 
+                         onclick="switchToValidator('${tabId}', '${validator}')" 
+                         title="Click to view ${validator}">
+                        ${validatorAvatar ? `<img src="${validatorAvatar}" class="mini-avatar">` : ''}
+                        <span class="validator-name">${validator}</span>
+                        <span class="validator-weight">${weight}</span>
+                        ${isValidatorProposer ? '<span class="mini-badge">👑</span>' : ''}
+                        ${isCurrentSigner ? '<span class="mini-badge">👈</span>' : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            const profileHTML = `
+                <div class="entity-profile">
+                    ${avatarSvg ? `<img src="${avatarSvg}" class="profile-avatar" onerror="this.style.display='none'">` : ''}
+                    <div class="profile-info">
+                        <div class="profile-name">
+                            ${entityNumber !== null ? `Entity ${entityNumber}` : `Entity ${replica.entityId.slice(-4)}`}
+                            ${isProposer ? '<span class="profile-role">Proposer</span>' : ''}
+                        </div>
+
+                        <div class="profile-board">
+                            <div class="board-title"><strong>Board:</strong> ${threshold}/${validators.length} threshold</div>
+                            <div class="board-members-list">
+                                ${boardList}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = profileHTML;
+        }
+
+        // Generate entity profile HTML (extracted from existing renderSelectedEntity)
+        function generateEntityProfileHTML(replica) {
+            const config = replica.state?.config || {};
+            const state = replica.state || {};
+            
+            // Generate avatar URLs
+            const entityAvatarSvg = XLN.generateAvatar ? XLN.generateAvatar(replica.entityId, 64) : '';
+            const signerAvatarSvg = XLN.generateAvatar ? XLN.generateAvatar(replica.signerId, 32) : '';
+            
+            const entityAvatarUrl = entityAvatarSvg.startsWith('data:') ? entityAvatarSvg : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(entityAvatarSvg)}`;
+            const signerAvatarUrl = signerAvatarSvg.startsWith('data:') ? signerAvatarSvg : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(signerAvatarSvg)}`;
+            
+            const entityAvatarImg = `<img src="${entityAvatarUrl}" style="width: 64px; height: 64px; border-radius: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="width: 64px; height: 64px; border-radius: 32px; background: #333; display: none; align-items: center; justify-content: center; color: #9d9d9d; font-size: 24px;">🏢</div>`;
+            
+            const signerAvatarImg = `<img src="${signerAvatarUrl}" style="width: 32px; height: 32px; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); margin-right: 8px;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div style="width: 32px; height: 32px; border-radius: 16px; background: #333; display: none; align-items: center; justify-content: center; color: #9d9d9d; font-size: 16px; margin-right: 8px;">👤</div>`;
+
+            // Continue with the rest of the existing entity profile HTML generation...
+            // This is a simplified version - you would include all the existing profile sections
+            return `
+                <div class="entity-profile-page">
+                    <div class="profile-header">
+                        <div class="entity-avatar" style="margin-right: 20px;">
+                            ${entityAvatarImg}
+                        </div>
+                        <div class="entity-title-section">
+                            <h1 style="margin: 0 0 8px 0; color: #007acc; font-size: 1.8em;">Entity ${XLN.formatEntityDisplay ? XLN.formatEntityDisplay(replica.entityId) : replica.entityId}</h1>
+                            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                                ${signerAvatarImg}
+                                <span style="color: #9d9d9d; font-size: 18px;">${XLN.formatSignerDisplay ? XLN.formatSignerDisplay(replica.signerId) : replica.signerId}</span>
+                            </div>
+
+                        </div>
+                    </div>
+                    
+                    <div class="profile-content">
+                        <!-- Minimal entity info -->
+                        <div style="display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 0.75em; color: #aaa;">
+                            <img src="${XLN.generateEntityAvatar(replica.entityId)}" style="width: 16px; height: 16px; border-radius: 50%;" />
+                            <span style="color: #fff;">Entity ${XLN.extractNumberFromEntityId ? XLN.extractNumberFromEntityId(replica.entityId) || replica.entityId.slice(0,4) : replica.entityId.slice(0,4)}</span>
+                            <span style="margin-left: 4px;">${Object.entries(state.config?.board || {}).map(([signer, weight]) => `${signer}:${weight}`).join(' ')}</span>
+                        </div>
+                        
+
+                    </div>
+                </div>
+            `;
+        }
+
+        // Highlight search term in dropdown items
+        function highlightSearchTerm(element, searchTerm) {
+            if (!searchTerm) return;
+            
+            const walker = document.createTreeWalker(
+                element,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+            );
+            
+            const textNodes = [];
+            let node;
+            while (node = walker.nextNode()) {
+                textNodes.push(node);
+            }
+            
+            textNodes.forEach(textNode => {
+                const text = textNode.textContent;
+                const lowerText = text.toLowerCase();
+                const lowerSearchTerm = searchTerm.toLowerCase();
+                
+                if (lowerText.includes(lowerSearchTerm)) {
+                    const index = lowerText.indexOf(lowerSearchTerm);
+                    const before = text.substring(0, index);
+                    const match = text.substring(index, index + searchTerm.length);
+                    const after = text.substring(index + searchTerm.length);
+                    
+                    const highlightSpan = document.createElement('span');
+                    highlightSpan.style.backgroundColor = '#ffd700';
+                    highlightSpan.style.color = '#000';
+                    highlightSpan.style.padding = '2px 4px';
+                    highlightSpan.style.borderRadius = '3px';
+                    highlightSpan.textContent = match;
+                    
+                    const fragment = document.createDocumentFragment();
+                    if (before) fragment.appendChild(document.createTextNode(before));
+                    fragment.appendChild(highlightSpan);
+                    if (after) fragment.appendChild(document.createTextNode(after));
+                    
+                    textNode.parentNode.replaceChild(fragment, textNode);
+                }
+            });
+        }
+
+        // Component Layout State Management
+        let componentStates = {};
+
+        // Load component states from localStorage and URL hash
+        function loadComponentStates() {
+            try {
+                // First try to load from URL hash
+                if (location.hash) {
+                    const hashData = location.hash.substring(1);
+                    const decodedData = atob(hashData);
+                    const urlStates = JSON.parse(decodedData);
+                    if (urlStates.componentStates) {
+                        componentStates = urlStates.componentStates;
+                        return;
+                    }
+                }
+                
+                // Fallback to localStorage
+                const saved = localStorage.getItem('xlnComponentStates');
+                if (saved) {
+                    componentStates = JSON.parse(saved);
+                }
+            } catch (e) {
+                console.warn('Failed to load component states:', e);
+                componentStates = {};
+            }
+        }
+
+        // Save component states to localStorage and URL hash
+        function saveComponentStates() {
+            try {
+                localStorage.setItem('xlnComponentStates', JSON.stringify(componentStates));
+                
+                // Also save to URL hash for sharing
+                const exportData = {
+                    componentStates: componentStates,
+                    timestamp: Date.now(),
+                    version: '1.0'
+                };
+                const encoded = btoa(JSON.stringify(exportData));
+                history.replaceState(null, '', '#' + encoded);
+            } catch (e) {
+                console.warn('Failed to save component states:', e);
+            }
+        }
+
+        // Get component state (default: consensus and chat expanded)
+        function getComponentState(componentId) {
+            if (componentStates[componentId] !== undefined) {
+                return componentStates[componentId];
+            }
+            
+            // Default states: consensus and chat expanded, others collapsed
+            return componentId.includes('consensus-') || componentId.includes('chat-');
+        }
+
+        // Toggle component collapse/expand
+        function toggleComponent(componentId) {
+            const component = document.getElementById(componentId);
+            if (!component) return;
+
+            const header = component.querySelector('.component-header');
+            const content = component.querySelector('.component-content');
+            const toggle = component.querySelector('.component-toggle');
+
+            const isCollapsed = header.classList.contains('collapsed');
+            
+            if (isCollapsed) {
+                // Expand
+                header.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+                componentStates[componentId] = true;
+            } else {
+                // Collapse
+                header.classList.add('collapsed');
+                content.classList.add('collapsed');
+                componentStates[componentId] = false;
+            }
+
+            saveComponentStates();
+        }
+
+        // Apply saved component states to a panel
+        function applyComponentStates(tabId) {
+            const components = ['consensus', 'chat', 'proposals', 'history', 'controls'];
+            
+            components.forEach(comp => {
+                const componentId = `${comp}-${tabId}`;
+                const isExpanded = getComponentState(componentId);
+                const component = document.getElementById(componentId);
+                
+                if (component) {
+                    const header = component.querySelector('.component-header');
+                    const content = component.querySelector('.component-content');
+                    
+                    if (isExpanded) {
+                        header.classList.remove('collapsed');
+                        content.classList.remove('collapsed');
+                    } else {
+                        header.classList.add('collapsed');
+                        content.classList.add('collapsed');
+                    }
+                }
+            });
+        }
+
+        // Update controls form based on dropdown selection
+        function updateControlsForm(tabId, action) {
+            const formContainer = document.getElementById(`controlsForm-${tabId}`);
+            if (!formContainer) return;
+
+            let formHTML = '';
+
+            switch (action) {
+                case 'chat':
+                    formHTML = `
+                        <div class="form-group">
+                            <label class="form-label">Message:</label>
+                            <textarea class="form-textarea" placeholder="Enter your message..."></textarea>
+                        </div>
+                        <button class="form-button" onclick="submitChatMessage('${tabId}')">Send Message</button>
+                    `;
+                    break;
+                    
+                case 'proposal':
+                    formHTML = `
+                        <div class="form-group">
+                            <label class="form-label">Proposal Title:</label>
+                            <input type="text" class="form-input" placeholder="Enter proposal title...">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Description:</label>
+                            <textarea class="form-textarea" placeholder="Describe your proposal..."></textarea>
+                        </div>
+                        <button class="form-button" onclick="submitProposal('${tabId}')">Create Proposal</button>
+                    `;
+                    break;
+                    
+                case 'vote':
+                    // Get current replica to populate proposals
+                    const activeTab = tabSystem.tabs.find(tab => tab.id === tabId);
+                    const replica = activeTab ? xlnEnv?.replicas?.get(`${activeTab.signer}:${activeTab.entityId}`) : null;
+                    
+                    console.log('🗳️ Vote form - Active tab:', activeTab);
+                    console.log('🗳️ Vote form - Replica:', replica);
+                    console.log('🗳️ Vote form - All replicas:', Array.from(xlnEnv?.replicas?.keys() || []));
+                    
+                    let proposalOptions = '<option value="">Select a proposal...</option>';
+                    let proposalCount = 0;
+                    let allProposals = new Map();
+                    
+                    if (activeTab && xlnEnv?.replicas) {
+                        // Check all replicas for the same entity to get all proposals
+                        Array.from(xlnEnv.replicas.values()).forEach(r => {
+                            if (r.entityId === activeTab.entityId && r.state?.proposals) {
+                                console.log(`🗳️ Checking replica ${r.signerId} for proposals...`);
+                                console.log('🗳️ Replica proposals:', r.state.proposals);
+                                console.log('🗳️ Proposals type:', typeof r.state.proposals);
+                                
+                                if (r.state.proposals instanceof Map) {
+                                    console.log('🗳️ Processing Map proposals, size:', r.state.proposals.size);
+                                    r.state.proposals.forEach((proposal, key) => {
+                                        allProposals.set(key, proposal);
+                                    });
+                                } else if (typeof r.state.proposals === 'object') {
+                                    console.log('🗳️ Processing object proposals, keys:', Object.keys(r.state.proposals));
+                                    Object.entries(r.state.proposals).forEach(([key, proposal]) => {
+                                        allProposals.set(key, proposal);
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    
+                    console.log('🗳️ All proposals found across replicas:', allProposals);
+                    
+                    // Convert to options
+                    allProposals.forEach((proposal, key) => {
+                        console.log('🗳️ Processing proposal:', key, proposal);
+                        const proposalText = proposal.action?.data?.message || 'Unknown proposal';
+                        const proposer = proposal.proposer || 'Unknown';
+                        proposalOptions += `<option value="${escapeHtml(key)}">${escapeHtml(proposalText)} (by ${escapeHtml(proposer)})</option>`;
+                        proposalCount++;
+                    });
+                    
+                    console.log('🗳️ Total proposals found:', proposalCount);
+                    console.log('🗳️ Final proposal options HTML:', proposalOptions);
+                    
+                    formHTML = `
+                        <div class="form-group">
+                            <label class="form-label">Select Proposal:</label>
+                            <select class="form-input" id="proposalSelect-${tabId}">
+                                ${proposalOptions}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Vote:</label>
+                            <select class="form-input" id="voteChoice-${tabId}">
+                                <option value="yes">✅ Yes</option>
+                                <option value="no">❌ No</option>
+                                <option value="abstain">⚪ Abstain</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Comment (optional):</label>
+                            <textarea class="form-textarea" id="voteComment-${tabId}" placeholder="Add a comment to explain your vote..."></textarea>
+                        </div>
+                        <button class="form-button" onclick="submitVote('${tabId}')">Submit Vote</button>
+                    `;
+                    break;
+                    
+                case 'entity':
+                    formHTML = `
+                        <div class="form-group">
+                            <label class="form-label">🏛️ Jurisdiction:</label>
+                            <select class="form-input" id="jurisdiction-${tabId}">
+                                <option value="8545" selected>Ethereum Mainnet (Port 8545)</option>
+                                <option value="8546">Polygon Network (Port 8546)</option>
+                                <option value="8547">Arbitrum One (Port 8547)</option>
+                            </select>
+                            <div style="padding: 6px; background: #e8f5e8; border-left: 3px solid #4caf50; margin: 6px 0; border-radius: 3px; font-size: 0.8em;">
+                                <strong>📡 Network:</strong> Ethereum Mainnet<br>
+                                <strong>🔗 RPC Port:</strong> 8545
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">🆔 Entity Type:</label>
+                            <select class="form-input" id="entityType-${tabId}" onchange="onEntityTypeChangeTab('${tabId}')">
+                                <option value="lazy">🔒 Lazy Entity (Free - ID = Quorum Hash)</option>
+                                <option value="numbered">🔢 Numbered Entity (Gas Required - Sequential ID)</option>
+                                <option value="named">🏷️ Named Entity (Premium Gas + Admin Approval)</option>
+                            </select>
+                            <div style="padding: 6px; background: #f8f9fa; border-left: 3px solid #6c757d; margin: 6px 0; border-radius: 3px; font-size: 0.75em; color: #666;">
+                                <strong>🔒 Lazy:</strong> Free to create, entityId = hash(validators), works immediately.<br>
+                                <strong>🔢 Numbered:</strong> Small gas cost, get sequential number like #42, on-chain registered.<br>
+                                <strong>🏷️ Named:</strong> Premium gas + admin approval, get custom name like "coinbase".
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">🏷️ Entity Name:</label>
+                            <input type="text" class="form-input" id="entityName-${tabId}" placeholder="e.g., trading, chat, governance" value="ACME">
+                            <div style="font-size: 0.75em; color: #666; margin-top: 4px;">
+                                Display name for your entity (not used for ID generation in lazy mode)
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">👥 Validators:</label>
+                            <div id="validatorsList-${tabId}">
+                                <div class="validator-row-simple" data-validator-id="0" style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+                                    <select class="form-input" id="validator0-${tabId}" style="flex: 1;">
+                                        <option value="">Select signer...</option>
+                                        <option value="alice.eth">alice.eth</option>
+                                        <option value="bob.eth">bob.eth</option>
+                                        <option value="carol.eth">carol.eth</option>
+                                    </select>
+                                    <input type="number" class="form-input" style="width: 60px;" placeholder="1" value="1" min="1">
+                                </div>
+                            </div>
+                            <button type="button" class="form-button" style="margin-top: 8px; background: #666; font-size: 0.8em; padding: 6px 12px;" onclick="addValidatorToTab('${tabId}')">➕ Add Validator</button>
+                            <div style="font-size: 0.75em; color: #666; margin-top: 4px;">
+                                💡 Start with a single signer for personal use, or add more for multisig/corporate entities
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">🎯 Threshold: <span id="thresholdValue-${tabId}">1</span></label>
+                            <input type="range" class="form-input" id="threshold-${tabId}" min="1" max="2" value="1" style="width: 100%;" oninput="updateThresholdTab('${tabId}')">
+                            <div style="display: flex; justify-content: space-between; font-size: 0.8em; color: #666;">
+                                <span>Total Weight: <span id="totalWeight-${tabId}">1</span></span>
+                                <span>Required: <span id="thresholdValue-${tabId}">1</span></span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">🔒 Quorum Hash:</label>
+                            <div id="quorumHash-${tabId}" style="font-family: monospace; font-size: 0.7em; padding: 6px; background: #e9ecef; border: 2px solid #6c757d; border-radius: 6px; color: #495057; word-break: break-all;">
+                                Configure validators and threshold to see quorum hash
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">🆔 Expected Entity ID:</label>
+                            <div id="expectedEntityId-${tabId}" style="font-family: monospace; font-size: 0.7em; padding: 6px; background: #1a1a1a; border: 1px solid #444; border-radius: 4px; color: #d4d4d4; word-break: break-all;">
+                                Configure validators and threshold to see entity ID
+                            </div>
+                        </div>
+                        
+                        <button class="form-button" onclick="submitEntityFormation('${tabId}')">🚀 Create Entity</button>
+                    `;
+                    break;
+                    
+                case 'jtx':
+                    formHTML = `
+                        <div class="form-group">
+                            <label class="form-label">To Entity:</label>
+                            <input type="text" class="form-input" placeholder="Entity ID or name">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Amount:</label>
+                            <input type="number" class="form-input" step="0.01" placeholder="0.00">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Message (optional):</label>
+                            <input type="text" class="form-input" placeholder="Transaction note">
+                        </div>
+                        <button class="form-button" onclick="submitJTx('${tabId}')">Send J-tx</button>
+                    `;
+                    break;
+                    
+                case 'settings':
+                    formHTML = `
+                        <div class="form-group">
+                            <label class="form-label">Update Type:</label>
+                            <select class="form-input">
+                                <option value="threshold">Change Threshold</option>
+                                <option value="validators">Update Validators</option>
+                                <option value="metadata">Update Metadata</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">New Value:</label>
+                            <input type="text" class="form-input" placeholder="Enter new value...">
+                        </div>
+                        <button class="form-button" onclick="submitSettingsUpdate('${tabId}')">Update Settings</button>
+                    `;
+                    break;
+                    
+                default:
+                    formHTML = '<div class="empty-state">Select an action above</div>';
+            }
+
+            formContainer.innerHTML = formHTML;
+        }
+
+        // Render consensus state for an entity
+        function renderConsensusState(tabId, replica) {
+            const container = document.getElementById(`consensusContent-${tabId}`);
+            if (!container || !replica) {
+                container.innerHTML = '<div class="empty-state">- select entity to view consensus state</div>';
+                return;
+            }
+
+            const state = replica.state || {};
+            const config = state.config || {};
+            const isLocked = replica.lockedFrame ? true : false;
+            const isProposing = replica.proposal ? true : false;
+            const frameHeight = toNumber(replica.blockHeight || 0);
+            const proposalHeight = replica.proposal?.height ? toNumber(replica.proposal.height) : 'N/A';
+            const lockedHeight = replica.lockedFrame?.height ? toNumber(replica.lockedFrame.height) : 'N/A';
+            
+            // Determine role: first signer in validators list = proposer
+            const validators = config.validators || [];
+            const isCurrentProposer = validators.length > 0 && validators[0] === replica.signerId;
+            const role = isCurrentProposer ? '👑 Proposer' : (isProposing ? `📝 Proposing (${proposalHeight})` : '👁️ Validator');
+
+            container.innerHTML = `
+                <div class="consensus-item">
+                    <span class="consensus-label">Status:</span>
+                    <span class="consensus-value ${isLocked ? 'consensus-status-locked' : 'consensus-status-unlocked'}">
+                        ${isLocked ? `🔒 Locked (${lockedHeight})` : '🔓 Unlocked'}
+                    </span>
+                </div>
+                <div class="consensus-item">
+                    <span class="consensus-label">Role:</span>
+                    <span class="consensus-value">${role}</span>
+                </div>
+                <div class="consensus-item">
+                    <span class="consensus-label">Frame Height:</span>
+                    <span class="consensus-value">${frameHeight}</span>
+                </div>
+                <div class="consensus-item">
+                    <span class="consensus-label">Messages:</span>
+                    <span class="consensus-value">${state.messages?.length || 0}</span>
+                </div>
+                <div class="consensus-item">
+                    <span class="consensus-label">Proposals:</span>
+                    <span class="consensus-value">${state.proposals?.size || 0}</span>
+                </div>
+            `;
+        }
+
+        // Render clickable board with avatars
+        function renderClickableBoard(tabId, config, currentSignerId) {
+            const validators = config.validators || [];
+            const threshold = toNumber(config.threshold || 1);
+            
+            if (validators.length === 0) {
+                return '<span>No validators</span>';
+            }
+
+            console.log('🔍 Board config:', { validators, threshold, config });
+
+            const boardHTML = validators.map((validator, index) => {
+                const isCurrentSigner = validator === currentSignerId;
+                const isProposer = index === 0; // First signer = proposer
+                const avatarSvg = XLN.generateSignerAvatar ? XLN.generateSignerAvatar(validator) : null;
+                
+                return `
+                    <div class="board-member ${isCurrentSigner ? 'current-signer' : ''}" 
+                         onclick="switchToValidator('${tabId}', '${validator}')" 
+                         title="Click to view ${validator}">
+                        ${avatarSvg ? `<img src="${avatarSvg}" class="board-avatar" onerror="this.style.display='none'">` : ''}
+                        <span class="board-name">${validator}</span>
+                        ${isProposer ? '<span class="proposer-badge">👑</span>' : ''}
+                        ${isCurrentSigner ? '<span class="current-badge">👈</span>' : ''}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="board-container">
+                    <div class="board-header">Threshold: ${threshold}/${validators.length}</div>
+                    <div class="board-members">${boardHTML}</div>
+                </div>
+            `;
+        }
+
+        // Switch panel to view a different validator
+        function switchToValidator(tabId, validatorId) {
+            console.log(`🔄 Switching tab ${tabId} to validator: ${validatorId}`);
+            
+            // Find replica for this validator
+            const targetReplica = Array.from(xlnEnv.replicas.values()).find(r => r.signerId === validatorId);
+            if (!targetReplica) {
+                console.warn('Validator replica not found:', validatorId);
+                return;
+            }
+
+            // Update tab data
+            updateTab(tabId, {
+                signer: validatorId,
+                entityId: targetReplica.entityId,
+                jurisdiction: targetReplica.state?.config?.jurisdiction?.name || 'Ethereum'
+            });
+        }
+
+        // HTML escaping function to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Universal BigInt conversion utility
+        function toNumber(value) {
+            if (typeof value === 'bigint') {
+                return Number(value);
+            }
+            return value;
+        }
+
+        // Safe arithmetic operations that handle BigInt
+        function safeAdd(a, b) {
+            return toNumber(a) + toNumber(b);
+        }
+
+        function safeDivide(a, b) {
+            return toNumber(a) / toNumber(b);
+        }
+
+        function safeMultiply(a, b) {
+            return toNumber(a) * toNumber(b);
+        }
+
+        // Safe JSON stringify that handles BigInt
+        function safeStringify(obj, maxLength = null) {
+            try {
+                const result = JSON.stringify(obj, (key, value) => 
+                    typeof value === 'bigint' ? value.toString() : value
+                );
+                return maxLength ? result.slice(0, maxLength) + (result.length > maxLength ? '...' : '') : result;
+            } catch (error) {
+                return '[Serialization Error]';
+            }
+        }
+
+        // Render chat messages for an entity
+        function renderChatMessages(tabId, replica) {
+            const container = document.getElementById(`chatContent-${tabId}`);
+            if (!container || !replica) {
+                container.innerHTML = '<div class="empty-state">- no messages</div>';
+                return;
+            }
+
+            const messages = replica.state?.messages || [];
+            
+            if (messages.length === 0) {
+                container.innerHTML = '<div class="empty-state">- no messages</div>';
+                return;
+            }
+
+            // Messages are simple strings in the actual data structure
+            container.innerHTML = messages.map((msg, index) => `
+                <div class="chat-message">
+                    <div class="chat-meta">Message #${index + 1} • ${escapeHtml(replica.signerId)}</div>
+                    <div class="chat-content">${escapeHtml(msg)}</div>
+                </div>
+            `).join('');
+
+            // Scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Render proposals for an entity
+        function renderProposals(tabId, replica) {
+            const container = document.getElementById(`proposalsContent-${tabId}`);
+            if (!container || !replica) {
+                container.innerHTML = '<div class="empty-state">- no proposals</div>';
+                return;
+            }
+
+            // Debug: log the proposals structure
+            console.log(`📋 Rendering proposals for ${replica.signerId}:${replica.entityId?.slice(0,8)}...`);
+            console.log(`📋 Replica state:`, replica.state);
+            console.log(`📋 Proposals:`, replica.state?.proposals);
+            console.log(`📋 Proposals type:`, typeof replica.state?.proposals);
+            console.log(`📋 Proposals constructor:`, replica.state?.proposals?.constructor?.name);
+
+            // Get proposals from current state and history
+            const currentProposals = replica.state?.proposals;
+            let allProposals = [];
+            
+            // Add current proposals - handle both Map and Object cases
+            if (currentProposals) {
+                if (currentProposals instanceof Map && currentProposals.size > 0) {
+                    allProposals = Array.from(currentProposals.entries()).map(([key, proposal], index) => ({
+                        key,
+                        proposal,
+                        type: 'current',
+                        index: index + 1
+                    }));
+                } else if (typeof currentProposals === 'object' && Object.keys(currentProposals).length > 0) {
+                    // Handle if proposals is a plain object instead of Map
+                    allProposals = Object.entries(currentProposals).map(([key, proposal], index) => ({
+                        key,
+                        proposal,
+                        type: 'current',
+                        index: index + 1
+                    }));
+                }
+            }
+            
+            // Add proposals from history
+            if (xlnEnv.history) {
+                xlnEnv.history.forEach((snapshot, frameIndex) => {
+                    const historicalReplica = Array.from(snapshot.replicas.values()).find(r => r.entityId === replica.entityId);
+                    if (historicalReplica?.state?.proposals && historicalReplica.state.proposals.size > 0) {
+                        Array.from(historicalReplica.state.proposals.entries()).forEach(([key, proposal]) => {
+                            // Avoid duplicates
+                            if (!allProposals.find(p => p.key === key)) {
+                                allProposals.push({
+                                    key,
+                                    proposal,
+                                    type: 'historical',
+                                    frame: frameIndex,
+                                    index: allProposals.length + 1
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+            
+            if (allProposals.length === 0) {
+                container.innerHTML = '<div class="empty-state">- no proposals</div>';
+                return;
+            }
+            
+            container.innerHTML = allProposals.map(item => {
+                const proposal = item.proposal;
+                const proposalText = proposal.action?.data?.message || 'Unknown proposal';
+                const proposer = proposal.proposer || 'Unknown';
+                const votes = proposal.votes ? Array.from(proposal.votes.entries()) : [];
+                const yesVotes = votes.filter(([_, vote]) => vote === true);
+                const noVotes = votes.filter(([_, vote]) => vote === false);
+                const abstainVotes = votes.filter(([_, vote]) => vote === 'abstain');
+                
+                // Get threshold from replica state (assuming it's in the board config)
+                const threshold = toNumber(replica.state?.config?.threshold || 1);
+                const yesCount = yesVotes.length;
+                const progressPercent = Math.min(safeDivide(safeMultiply(yesCount, 100), threshold), 100);
+                const isExecuted = proposal.status === 'executed' || yesCount >= threshold;
+                
+                // Debug: log vote processing
+                console.log(`🗳️ Rendering proposal ${item.key}:`, proposal);
+                console.log(`🗳️ Raw votes for proposal ${item.key}:`, proposal.votes);
+                console.log(`🗳️ Votes array:`, votes);
+                
+                // Build vote details with comments
+                const voteDetails = votes.map(([voter, voteData]) => {
+                    console.log(`🗳️ Processing vote from ${voter}:`, voteData, typeof voteData);
+                    
+                    // Handle both old format (boolean) and new format (object with choice and comment)
+                    const vote = typeof voteData === 'object' ? voteData.choice : voteData;
+                    const comment = typeof voteData === 'object' ? voteData.comment : null;
+                    
+                    const voteIcon = vote === 'yes' || vote === true ? '✅' : vote === 'no' || vote === false ? '❌' : '⚪';
+                    const voteText = vote === 'yes' || vote === true ? 'yes' : vote === 'no' || vote === false ? 'no' : 'abstain';
+                    
+                    let voteDisplay = `${escapeHtml(voter)} - ${voteIcon} ${voteText}`;
+                    if (comment) {
+                        voteDisplay += `<br/>&nbsp;&nbsp;&nbsp;&nbsp;"${escapeHtml(comment)}"`;
+                    }
+                    return voteDisplay;
+                }).join(', ');
+                
+                console.log(`🗳️ Final vote details for proposal ${item.key}:`, voteDetails);
+                
+                return `
+                    <div class="proposal-item ${isExecuted ? 'executed' : ''}">
+                        <div class="proposal-title">${escapeHtml(proposalText)}</div>
+                        <div class="proposal-meta">
+                            <span>By: ${escapeHtml(proposer)}</span>
+                            ${isExecuted ? '<span class="executed-badge">✅ EXECUTED</span>' : ''}
+                        </div>
+                        <div class="proposal-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progressPercent}%"></div>
+                            </div>
+                            <div class="progress-text">${yesCount}/${threshold} votes (${Math.round(progressPercent)}%)</div>
+                        </div>
+                        ${voteDetails ? `<div class="vote-details">${voteDetails}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Banking-style horizontal transaction rendering
+        function renderBankingInput(input) {
+            // Get primary transaction info
+            let primaryInfo = 'Entity Input';
+            let secondaryInfo = '';
+            let amount = '';
+            
+            if (input.entityTxs && input.entityTxs.length > 0) {
+                // Show ALL transactions, not just first one
+                if (input.entityTxs.length === 1) {
+                    const tx = input.entityTxs[0];
+                    if (tx.type === 'chat') {
+                        primaryInfo = '💬 Chat Message';
+                        secondaryInfo = `"${tx.data.message}" from ${tx.data.from}`;
+                    } else if (tx.type === 'propose') {
+                        primaryInfo = '📝 Proposal';
+                        secondaryInfo = `${tx.data.action?.data?.message || 'New proposal'} by ${tx.data.proposer}`;
+                    } else if (tx.type === 'vote') {
+                        primaryInfo = '🗳️ Vote';
+                        secondaryInfo = `${tx.data.choice} on ${tx.data.proposalId?.slice(0,8)}... from ${tx.data.voter || 'unknown'}`;
+                    } else {
+                        primaryInfo = `⚙️ ${tx.type}`;
+                        secondaryInfo = safeStringify(tx.data, 40);
+                    }
+                } else {
+                    // Multiple transactions - show summary
+                    primaryInfo = `📦 ${input.entityTxs.length} Transactions`;
+                    const types = input.entityTxs.map(tx => tx.type).join(', ');
+                    secondaryInfo = `Types: ${types}`;
+                    amount = `${input.entityTxs.length} txs`;
+                }
+            }
+            
+            if (input.precommits && input.precommits.size > 0) {
+                const signers = Array.from(input.precommits.keys()).join(', ');
+                if (primaryInfo === 'Entity Input') {
+                    primaryInfo = '🔐 Precommits';
+                    secondaryInfo = `${input.precommits.size} signatures from ${signers}`;
+                } else {
+                    amount = `${input.precommits.size} precommits`;
+                }
+            }
+            
+            if (input.proposedFrame) {
+                if (primaryInfo === 'Entity Input') {
+                    primaryInfo = '📋 Frame Proposal';
+                    secondaryInfo = `${input.proposedFrame.hash?.slice(0,12)}... from ${input.signerId}`;
+                }
+            }
+            
+            return `
+                <div class="banking-transaction-item banking-input">
+                    <div class="transaction-icon">📥</div>
+                    <div class="transaction-details">
+                        <div class="transaction-primary">${primaryInfo}</div>
+                        <div class="transaction-secondary">${secondaryInfo}</div>
+                    </div>
+                    <div class="transaction-amount">${amount}</div>
+                </div>
+            `;
+        }
+
+        function renderBankingImport(serverTx) {
+            let primaryInfo = '🔄 Replica Import';
+            let secondaryInfo = `Imported from server`;
+            let amount = '';
+            
+            if (serverTx.type === 'importReplica') {
+                primaryInfo = '🔄 Replica Import';
+                secondaryInfo = `Server imported ${serverTx.data.signerId} (proposer: ${serverTx.data.isProposer ? 'Yes' : 'No'})`;
+                amount = 'IMPORT';
+            }
+            
+            return `
+                <div class="banking-transaction-item banking-import">
+                    <div class="transaction-icon">🔄</div>
+                    <div class="transaction-details">
+                        <div class="transaction-primary">${primaryInfo}</div>
+                        <div class="transaction-secondary">${secondaryInfo}</div>
+                    </div>
+                    <div class="transaction-amount">${amount}</div>
+                </div>
+            `;
+        }
+
+        function renderBankingOutput(output) {
+            // Get primary transaction info
+            let primaryInfo = 'Entity Output';
+            let secondaryInfo = '';
+            let amount = '';
+            
+            if (output.entityTxs && output.entityTxs.length > 0) {
+                // Show ALL transactions, not just first one
+                if (output.entityTxs.length === 1) {
+                    const tx = output.entityTxs[0];
+                    const recipients = output.destinations?.join(', ') || 'network';
+                    if (tx.type === 'chat') {
+                        primaryInfo = '💬 Chat Sent';
+                        secondaryInfo = `"${tx.data.message}" to ${recipients}`;
+                    } else if (tx.type === 'propose') {
+                        primaryInfo = '📝 Proposal Sent';
+                        secondaryInfo = `${tx.data.action?.data?.message || 'New proposal'} to ${recipients}`;
+                    } else if (tx.type === 'vote') {
+                        primaryInfo = '🗳️ Vote Sent';
+                        secondaryInfo = `${tx.data.choice} on ${tx.data.proposalId?.slice(0,8)}... to ${recipients}`;
+                    } else {
+                        primaryInfo = `⚙️ ${tx.type} Sent`;
+                        secondaryInfo = `${safeStringify(tx.data, 30)} to ${recipients}`;
+                    }
+                } else {
+                    // Multiple transactions - show summary
+                    primaryInfo = `📦 ${output.entityTxs.length} Transactions Sent`;
+                    const types = output.entityTxs.map(tx => tx.type).join(', ');
+                    const recipients = output.destinations?.join(', ') || 'network';
+                    secondaryInfo = `Types: ${types} to ${recipients}`;
+                    amount = `${output.entityTxs.length} txs`;
+                }
+            }
+            
+            if (output.precommits && output.precommits.size > 0) {
+                if (primaryInfo === 'Entity Output') {
+                    primaryInfo = '🔐 Precommits Sent';
+                    secondaryInfo = `${output.precommits.size} signatures to ${output.destinations?.join(', ') || 'validators'}`;
+                } else {
+                    amount = `${output.precommits.size} precommits`;
+                }
+            }
+            
+            if (output.proposedFrame) {
+                if (primaryInfo === 'Entity Output') {
+                    primaryInfo = '📋 Frame Sent';
+                    secondaryInfo = `${output.proposedFrame.hash?.slice(0,12)}... to ${output.destinations?.join(', ') || 'network'}`;
+                }
+            }
+            
+            return `
+                <div class="banking-transaction-item banking-output">
+                    <div class="transaction-icon">📤</div>
+                    <div class="transaction-details">
+                        <div class="transaction-primary">${primaryInfo}</div>
+                        <div class="transaction-secondary">${secondaryInfo}</div>
+                    </div>
+                    <div class="transaction-amount">${amount}</div>
+                </div>
+            `;
+        }
+
+        // Render FULL server history filtered by this replica's activity
+        function renderTransactionHistory(tabId, replica) {
+            const container = document.getElementById(`historyContent-${tabId}`);
+            if (!container || !replica) {
+                container.innerHTML = '<div class="empty-state">- no frame history</div>';
+                return;
+            }
+
+            // Check multiple possible history sources
+            const history = xlnEnv.history || XLN.getHistory() || [];
+            console.log(`🗂️ History check: xlnEnv.history=${xlnEnv.history?.length}, XLN.getHistory()=${XLN.getHistory()?.length}`);
+            
+            if (!history || history.length === 0) {
+                container.innerHTML = '<div class="empty-state">- no server history available</div>';
+                return;
+            }
+
+            console.log(`🗂️ Rendering history for replica ${replica.signerId}:${replica.entityId}, total frames: ${history.length}`);
+                        console.log(`🗂️ First few snapshots:`, history.slice(0, 3).map((s, i) => ({ 
+                frame: i, 
+                keys: Object.keys(s), 
+                serverInput: s.serverInput ? Object.keys(s.serverInput) : 'missing',
+                entityInputsCount: s.serverInput?.entityInputs?.length || s.entityInputs?.length || 0,
+                serverOutputsCount: s.serverOutputs?.length || s.outputs?.length || 0
+            })));
+
+            // Show ENTIRE server history, highlighting this replica's activity
+            const serverFrames = history.map((snapshot, frameIndex) => {
+                // Get entity inputs from the correct location: serverInput.entityInputs
+                const entityInputs = snapshot.serverInput?.entityInputs || snapshot.entityInputs || [];
+                const serverOutputs = snapshot.serverOutputs || snapshot.outputs || [];
+                
+                console.log(`🔍 Frame ${frameIndex}: entityInputs=${entityInputs.length}, serverOutputs=${serverOutputs.length}, snapshot keys:`, Object.keys(snapshot));
+                
+                            // Find ONLY this specific replica's activity (strict filtering)
+            const replicaInputs = entityInputs.filter(input => {
+                // Only inputs TO this specific replica (entityId + signerId combo)
+                const match = input.entityId === replica.entityId && input.signerId === replica.signerId;
+                if (match) {
+                    console.log(`✅ Found replica input in frame ${frameIndex}:`, { entityId: input.entityId, signerId: input.signerId, type: input.type || 'unknown' });
+                }
+                return match;
+            }) || [];
+            
+            const replicaOutputs = serverOutputs.filter(output => {
+                // Only outputs FROM this specific replica
+                const match = output.entityId === replica.entityId && output.signerId === replica.signerId;
+                if (match) {
+                    console.log(`✅ Found replica output in frame ${frameIndex}:`, { entityId: output.entityId, signerId: output.signerId, type: output.type || 'unknown' });
+                }
+                return match;
+            }) || [];
+
+            // Also include serverTx imports related to this replica
+            const serverTxs = snapshot.serverTxs || snapshot.serverInput?.serverTxs || [];
+            
+            const replicaImports = serverTxs.filter(serverTx => {
+                if (serverTx.type === 'importReplica') {
+                    const match = serverTx.entityId === replica.entityId && serverTx.data.signerId === replica.signerId;
+                    if (match) {
+                        console.log(`✅ Found replica import in frame ${frameIndex}:`, { entityId: serverTx.entityId, signerId: serverTx.data.signerId });
+                    }
+                    return match;
+                }
+                return false;
+            }) || [];
+
+                // Also check serverTxs that might relate to this replica
+                const relevantServerTxs = snapshot.serverTxs?.filter(tx =>
+                    tx.entityId === replica.entityId || tx.from === replica.signerId
+                ) || [];
+                
+                return {
+                    frameIndex,
+                    snapshot,
+                    inputs: replicaInputs,
+                    outputs: replicaOutputs,
+                    imports: replicaImports,
+                    serverTxs: relevantServerTxs,
+                    timestamp: snapshot.timestamp || (Date.now() - (xlnEnv.history.length - frameIndex) * 1000),
+                    hasActivity: replicaInputs.length > 0 || replicaOutputs.length > 0 || replicaImports.length > 0
+                };
+            });
+
+            console.log(`📊 Found ${serverFrames.filter(f => f.hasActivity).length} frames with activity out of ${serverFrames.length} total`);
+
+            // Render ALL server frames (chronological order, newest first)
+            container.innerHTML = serverFrames.slice().reverse().map(frame => {
+                const isCurrentFrame = typeof currentTimeIndex !== 'undefined' && frame.frameIndex === currentTimeIndex;
+                const hasActivity = frame.hasActivity;
+                
+                return `
+                    <div class="frame-item ${isCurrentFrame ? 'current-frame' : ''} ${hasActivity ? 'has-activity' : 'no-activity'}" data-frame="${frame.frameIndex}">
+                        <div class="frame-header">
+                            <span>Server Frame ${frame.frameIndex}</span>
+                            <span class="frame-time">${new Date(frame.timestamp).toLocaleTimeString()}</span>
+                            ${hasActivity ? '<span class="activity-badge">🟢</span>' : '<span class="activity-badge">⚪</span>'}
+                        </div>
+                        ${hasActivity ? `
+                        <div class="frame-content">
+                            <div class="banking-transactions">
+                                ${frame.imports.map(imp => renderBankingImport(imp)).join('')}
+                                ${frame.inputs.map(input => renderBankingInput(input)).join('')}
+                                ${frame.outputs.map(output => renderBankingOutput(output)).join('')}
+                            </div>
+                        </div>
+                        ` : '<div class="frame-inactive">No activity from this replica in this frame</div>'}
+                    </div>
+                `;
+            }).join('');
+
+            // Auto-focus current server frame 
+            setTimeout(() => {
+                if (typeof currentTimeIndex !== 'undefined' && currentTimeIndex >= 0) {
+                    const currentFrameElement = container.querySelector(`[data-frame="${currentTimeIndex}"]`);
+                    if (currentFrameElement) {
+                        currentFrameElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        console.log(`🎯 Auto-focused frame ${currentTimeIndex}`);
+                    }
+                }
+            }, 100);
+        }
+
+        // Form submission functions
+        function submitChatMessage(tabId) {
+            const tab = tabSystem.tabs.find(t => t.id === tabId);
+            if (!tab || !tab.entityId) return;
+            
+            const messageTextarea = document.querySelector(`#controlsForm-${tabId} textarea`);
+            if (!messageTextarea || !messageTextarea.value.trim()) return;
+            
+            const message = messageTextarea.value.trim();
+            
+            // Submit message to XLN system
+            try {
+                // First apply the input
+                const result = XLN.applyServerInput(xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: [{
+                        entityId: tab.entityId,
+                        signerId: tab.signer,
+                        entityTxs: [{
+                            type: 'chat',
+                            data: { from: tab.signer, message: message }
+                        }]
+                    }]
+                });
+                
+                // Then process until empty to complete all cascading operations
+                let outputs = result.entityOutbox;
+                let iterationCount = 0;
+                console.log(`💬 Starting cascade processing with ${outputs.length} initial outputs`);
+                
+                // Debug: check proposer status
+                const proposerReplicas = Array.from(xlnEnv.replicas.values()).filter(r => 
+                    r.entityId === tab.entityId && r.isProposer
+                );
+                console.log(`💬 Found ${proposerReplicas.length} proposer replicas for entity:`, 
+                    proposerReplicas.map(r => r.signerId)
+                );
+                
+                XLN.processUntilEmpty(xlnEnv, outputs);
+                
+                console.log(`💬 Chat message sent and processed:`, message);
+                messageTextarea.value = '';
+                
+                // Refresh ALL entity displays since other replicas may have been affected
+                refreshAllEntityDisplays();
+            } catch (error) {
+                console.error('Failed to send chat message:', error);
+            }
+        }
+        
+        function submitProposal(tabId) {
+            const tab = tabSystem.tabs.find(t => t.id === tabId);
+            if (!tab || !tab.entityId) return;
+            
+            const titleInput = document.querySelector(`#controlsForm-${tabId} input[type="text"]`);
+            const descTextarea = document.querySelector(`#controlsForm-${tabId} textarea`);
+            if (!titleInput || !descTextarea || !titleInput.value.trim()) return;
+            
+            const title = titleInput.value.trim();
+            const description = descTextarea.value.trim();
+            const proposalText = title + (description ? ': ' + description : '');
+            
+            // Submit proposal to XLN system
+            try {
+                // First apply the input
+                const result = XLN.applyServerInput(xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: [{
+                        entityId: tab.entityId,
+                        signerId: tab.signer,
+                        entityTxs: [{
+                            type: 'propose',
+                            data: {
+                                action: { type: 'collective_message', data: { message: proposalText } },
+                                proposer: tab.signer
+                            }
+                        }]
+                    }]
+                });
+                
+                // Then process until empty to complete all cascading operations
+                XLN.processUntilEmpty(xlnEnv, result.entityOutbox);
+                
+                console.log('📝 Proposal sent and processed:', proposalText);
+                titleInput.value = '';
+                descTextarea.value = '';
+                
+                // Refresh ALL entity displays since other replicas may have been affected
+                refreshAllEntityDisplays();
+            } catch (error) {
+                console.error('Failed to send proposal:', error);
+            }
+        }
+        
+        function submitVote(tabId) {
+            console.log('🗳️ Submitting vote for', tabId);
+            
+            // Get form values
+            const proposalId = document.getElementById(`proposalSelect-${tabId}`)?.value;
+            const voteChoice = document.getElementById(`voteChoice-${tabId}`)?.value;
+            const comment = document.getElementById(`voteComment-${tabId}`)?.value?.trim() || '';
+            
+            console.log('🗳️ Vote form data:', { proposalId, voteChoice, comment });
+            
+            if (!proposalId) {
+                alert('Please select a proposal to vote on');
+                return;
+            }
+            
+            // Check if user already voted on this proposal
+            const currentProposal = replica.state.proposals.get(proposalId);
+            if (currentProposal && currentProposal.votes.has(replica.signerId)) {
+                alert(`You have already voted on this proposal as "${currentProposal.votes.get(replica.signerId)}".`);
+                return;
+            }
+            
+            if (!voteChoice) {
+                alert('Please select your vote choice');
+                return;
+            }
+            
+            // Get the replica for this tab
+            const activeTab = tabSystem.tabs.find(tab => tab.id === tabId);
+            if (!activeTab) {
+                alert('Invalid tab');
+                return;
+            }
+            
+            console.log('🗳️ Active tab:', activeTab);
+            console.log('🗳️ Looking for replica key:', `${activeTab.signer}:${activeTab.entityId}`);
+            console.log('🗳️ Available replica keys:', Array.from(xlnEnv?.replicas?.keys() || []));
+            console.log('🗳️ All replicas:', xlnEnv?.replicas);
+            
+            // Try multiple possible key formats
+            let replica = xlnEnv?.replicas?.get(`${activeTab.signer}:${activeTab.entityId}`);
+            
+            if (!replica) {
+                // Try reverse format
+                replica = xlnEnv?.replicas?.get(`${activeTab.entityId}:${activeTab.signer}`);
+            }
+            
+            if (!replica) {
+                // Try finding any replica with matching entityId and signer
+                replica = Array.from(xlnEnv?.replicas?.values() || []).find(r => 
+                    r.entityId === activeTab.entityId && r.signerId === activeTab.signer
+                );
+            }
+            
+            if (!replica) {
+                console.error('🗳️ Replica not found! Tab data:', activeTab);
+                console.error('🗳️ Available replicas:', Array.from(xlnEnv?.replicas?.keys() || []));
+                console.error('🗳️ Available replica values:', Array.from(xlnEnv?.replicas?.values() || []).map(r => ({ entityId: r.entityId, signerId: r.signerId })));
+                alert(`Entity replica not found. Looking for: ${activeTab.signer}:${activeTab.entityId}\nAvailable keys: ${Array.from(xlnEnv?.replicas?.keys() || []).join(', ')}`);
+                return;
+            }
+            
+            console.log('🗳️ Found replica:', replica);
+            
+            // Create vote transaction
+            const voteValue = voteChoice === 'yes' ? 'yes' : voteChoice === 'no' ? 'no' : 'abstain';
+            const entityTx = {
+                type: 'vote',
+                data: {
+                    proposalId,
+                    voter: replica.signerId,
+                    choice: voteValue,
+                    comment: comment || undefined // Only include comment if provided
+                }
+            };
+            
+            console.log('🗳️ Created vote transaction:', entityTx);
+            console.log('🗳️ Vote from:', replica.signerId, 'for entity:', replica.entityId.slice(0,8) + '...');
+            
+            try {
+                console.log('🔥 VOTE-INVOKE: Starting clean vote transaction');
+                console.log('🔥 VOTE-INVOKE: Current env state:', {
+                    serverTxs: xlnEnv.serverInput.serverTxs.length,
+                    entityInputs: xlnEnv.serverInput.entityInputs.length,
+                    height: xlnEnv.height
+                });
+                
+                // Apply the vote transaction
+                let result = XLN.applyServerInput(xlnEnv, {
+                    serverTxs: [],
+                    entityInputs: [{
+                        entityId: replica.entityId,
+                        signerId: replica.signerId,
+                        entityTxs: [entityTx]
+                    }]
+                });
+                
+                console.log('🔥 VOTE-INVOKE: Initial result:', result);
+                console.log('🔥 VOTE-INVOKE: EntityOutbox length:', result.entityOutbox.length);
+                
+                // Process until empty for full consensus cascade
+                console.log('🔥 VOTE-INVOKE: Starting processUntilEmpty cascade');
+                XLN.processUntilEmpty(xlnEnv, result.entityOutbox);
+                
+                console.log('✅ Vote submitted and processed successfully');
+                
+                // Log current proposal state from all replicas
+                Array.from(xlnEnv.replicas.values()).forEach(r => {
+                    if (r.entityId === replica.entityId) {
+                        console.log(`🗳️ After vote - Replica ${r.signerId} proposals:`, r.state?.proposals);
+                        if (r.state?.proposals) {
+                            const proposal = r.state.proposals.get ? r.state.proposals.get(proposalId) : r.state.proposals[proposalId];
+                            console.log(`🗳️ After vote - Proposal ${proposalId} state in ${r.signerId}:`, proposal);
+                            if (proposal?.votes) {
+                                console.log(`🗳️ After vote - Votes in ${r.signerId}:`, Array.from(proposal.votes.entries ? proposal.votes.entries() : Object.entries(proposal.votes)));
+                            }
+                        }
+                    }
+                });
+                
+                // Clear the form
+                document.getElementById(`proposalSelect-${tabId}`).value = '';
+                document.getElementById(`voteChoice-${tabId}`).value = 'yes';
+                document.getElementById(`voteComment-${tabId}`).value = '';
+                
+                // Refresh all displays
+                refreshAllEntityDisplays();
+                
+            } catch (error) {
+                console.error('❌ Failed to submit vote:', error);
+                alert(`Failed to submit vote: ${error.message}`);
+            }
+        }
+
+        function refreshAllEntityDisplays() {
+            console.log('🔄 Refreshing all entity displays...');
+            
+            // Refresh all active tabs
+            tabSystem.tabs.forEach(tab => {
+                const replica = Array.from(xlnEnv.replicas.values()).find(r => 
+                    r.entityId === tab.entityId && r.signerId === tab.signer
+                );
+                
+                if (replica) {
+                    console.log(`🔄 Refreshing tab ${tab.id} (${tab.signer}:${tab.entityId?.slice(0, 8)}...)`);
+                    renderChatMessages(tab.id, replica);
+                    renderProposals(tab.id, replica);
+                    renderTransactionHistory(tab.id, replica);
+                    
+                    // Refresh controls form if it's set to vote (to update proposal dropdown)
+                    const controlsDropdown = document.querySelector(`#controlsContent-${tab.id} .controls-dropdown`);
+                    if (controlsDropdown && controlsDropdown.value === 'vote') {
+                        updateControlsForm(tab.id, 'vote');
+                    }
+                }
+            });
+            
+            console.log('✅ All entity displays refreshed');
+        }
+
+        // Remove the old voteOnProposal function since we're moving to dropdown-based voting
+        function submitEntityFormation(tabId) { 
+            // Get form values
+            const entityType = document.getElementById(`entityType-${tabId}`)?.value || 'lazy';
+            const entityName = document.getElementById(`entityName-${tabId}`)?.value || 'ACME';
+            const threshold = parseInt(document.getElementById(`threshold-${tabId}`)?.value) || 1;
+            
+            // Get validators
+            const validators = [];
+            const validatorsList = document.getElementById(`validatorsList-${tabId}`);
+            if (validatorsList) {
+                const validatorRows = validatorsList.querySelectorAll('.validator-row-simple');
+                validatorRows.forEach((row, index) => {
+                    const select = row.querySelector(`select`);
+                    const weight = row.querySelector(`input[type="number"]`);
+                    if (select?.value) {
+                        validators.push({
+                            name: select.value,
+                            weight: parseInt(weight?.value) || 1
+                        });
+                    }
+                });
+            }
+            
+            if (validators.length === 0) {
+                alert('Please select at least one validator');
+                return;
+            }
+            
+            console.log('🏛️ Entity formation submitted:', {
+                type: entityType,
+                name: entityName,
+                validators: validators,
+                threshold: threshold
+            });
+            
+            // TODO: Integrate with actual XLN entity creation
+            alert(`Entity "${entityName}" creation initiated!\nType: ${entityType}\nValidators: ${validators.length}\nThreshold: ${threshold}`);
+        }
+        
+        function addValidatorToTab(tabId) {
+            const validatorsList = document.getElementById(`validatorsList-${tabId}`);
+            if (!validatorsList) return;
+            
+            const validatorCount = validatorsList.querySelectorAll('.validator-row-simple').length;
+            const newRow = document.createElement('div');
+            newRow.className = 'validator-row-simple';
+            newRow.setAttribute('data-validator-id', validatorCount);
+            
+            newRow.innerHTML = `
+                <select class="form-input" id="validator${validatorCount}-${tabId}">
+                    <option value="">Select signer...</option>
+                    <option value="alice.eth">alice.eth</option>
+                    <option value="bob.eth">bob.eth</option>
+                    <option value="carol.eth">carol.eth</option>
+                </select>
+                <input type="number" class="form-input" style="width: 60px; margin-left: 8px;" placeholder="1" value="1" min="1">
+                <button type="button" class="form-button" style="margin-left: 8px; background: #f14c4c; padding: 4px 8px;" onclick="this.parentElement.remove()">❌</button>
+            `;
+            
+            validatorsList.appendChild(newRow);
+        }
+        
+        function onEntityTypeChangeTab(tabId) {
+            // Update entity type info or preview if needed
+            console.log('Entity type changed for tab:', tabId);
+        }
+        
+        function updateThresholdTab(tabId) {
+            const thresholdInput = document.getElementById(`threshold-${tabId}`);
+            const thresholdDisplay = document.getElementById(`thresholdValue-${tabId}`);
+            if (thresholdInput && thresholdDisplay) {
+                thresholdDisplay.textContent = thresholdInput.value;
+            }
+        }
+
+        // Run demo and refresh all UI
+        async function runDemoAndRefresh() {
+            if (!window.xlnEnv) {
+                console.error('❌ XLN environment not loaded');
+                return;
+            }
+
+            try {
+                console.log('🚀 Running demo and refreshing UI...');
+                
+                // Run the demo
+                await XLN.runDemoWrapper(window.xlnEnv);
+                
+                // Refresh all entity panels
+                renderEntityPanels();
+                
+                // Update time machine if it exists
+                if (typeof updateTimeMachine === 'function') {
+                    updateTimeMachine();
+                }
+                
+                console.log('✅ Demo completed and UI refreshed!');
+            } catch (error) {
+                console.error('❌ Failed to run demo:', error);
+            }
+        }
+        
+        function submitJTx(tabId) { console.log('J-tx submitted for', tabId); }
+        function submitSettingsUpdate(tabId) { console.log('Settings update submitted for', tabId); }
+
+        // Dropdown mode management
+        let dropdownMode = localStorage.getItem('xlnDropdownMode') || 'signer-first'; // 'signer-first' or 'entity-first'
+
+        function toggleDropdownMode() {
+            dropdownMode = dropdownMode === 'signer-first' ? 'entity-first' : 'signer-first';
+            localStorage.setItem('xlnDropdownMode', dropdownMode);
+            
+            // Update button tooltip
+            const btn = document.getElementById('dropdownModeBtn');
+            if (btn) {
+                btn.title = dropdownMode === 'signer-first' 
+                    ? 'Current: Jurisdiction→Signer→Entity (Click for Entity→Signers)'
+                    : 'Current: Jurisdiction→Entity→Signers (Click for Signer→Entity)';
+            }
+            
+            // Refresh all dropdowns
+            document.querySelectorAll('[id^="dropdownContent-"]').forEach(dropdown => {
+                const tabId = dropdown.id.replace('dropdownContent-', '');
+                populateTabDropdown(tabId);
+            });
+            
+            console.log(`🔄 Dropdown mode changed to: ${dropdownMode}`);
+        }
+
+        // Initialize component states on page load
+        loadComponentStates();
+
+        // Initialize dropdown mode button tooltip
+        const btn = document.getElementById('dropdownModeBtn');
+        if (btn) {
+            btn.title = dropdownMode === 'signer-first' 
+                ? 'Current: Jurisdiction→Signer→Entity (Click for Entity→Signers)'
+                : 'Current: Jurisdiction→Entity→Signers (Click for Signer→Entity)';
+        }
+
+        // Expose tab functions globally for onclick handlers
+        window.addTab = addTab;
+        window.closeTab = closeTab;
+        window.setActiveTab = setActiveTab;
+        window.toggleTabDropdown = toggleTabDropdown;
+        window.handleTabDropdownSearch = handleTabDropdownSearch;
+        window.toggleComponent = toggleComponent;
+        window.updateControlsForm = updateControlsForm;
+        window.switchToValidator = switchToValidator;
+        window.addValidatorToTab = addValidatorToTab;
+        window.onEntityTypeChangeTab = onEntityTypeChangeTab;
+        window.runDemoAndRefresh = runDemoAndRefresh;
+        window.toggleDropdownMode = toggleDropdownMode;
+
         window.XLN = XLN;
 
         // Auto-reload detection using HTTP polling
@@ -2019,7 +5237,7 @@
                 entityCard.className = 'entity-card';
                 
                 const config = replica.state.config;
-                const modeClass = config.mode === 'proposer-based' ? 'mode-proposer-based' : 'mode-gossip-based';
+                // Mode class removed - we don't show gossip/proposer distinction
                 
                 // Calculate total voting power
                 const totalShares = Object.values(config.shares).reduce((sum, val) => sum + val, BigInt(0));
@@ -2447,78 +5665,11 @@
         }
 
         // Interactive control functions
-        function populateReplicaSelect() {
-            if (!xlnEnv) return;
-            
-            const replicaSelect = document.getElementById('replicaSelect');
-            replicaSelect.innerHTML = '';
-            
-            for (const [key, replica] of xlnEnv.replicas) {
-                const option = document.createElement('option');
-                option.value = key;
-                option.textContent = `${replica.entityId}:${replica.signerId} ${replica.isProposer ? '(👑 Proposer)' : '(✅ Validator)'}`;
-                replicaSelect.appendChild(option);
-            }
-        }
+        // Removed populateReplicaSelect - replaced by new panel-based system
 
-        function setupActionHandlers() {
-            const actionSelect = document.getElementById('actionSelect');
-            actionSelect.addEventListener('change', updateActionUI);
-            updateActionUI(); // Initial setup
-        }
 
-        function updateActionUI() {
-            const action = document.getElementById('actionSelect').value;
-            const inputGroup = document.getElementById('inputGroup');
-            const proposalGroup = document.getElementById('proposalGroup');
-            const voteGroup = document.getElementById('voteGroup');
-            const inputLabel = document.getElementById('inputLabel');
-            const inputField = document.getElementById('inputField');
-            
-            // Hide all groups first
-            inputGroup.style.display = 'none';
-            proposalGroup.style.display = 'none';
-            voteGroup.style.display = 'none';
-            
-            if (action === 'chat') {
-                inputGroup.style.display = 'flex';
-                inputLabel.textContent = '💬 Message:';
-                inputField.placeholder = 'Enter your message...';
-            } else if (action === 'propose') {
-                proposalGroup.style.display = 'flex';
-            } else if (action === 'vote') {
-                voteGroup.style.display = 'flex';
-                populateProposalSelect();
-            }
-        }
 
-        function populateProposalSelect() {
-            if (!xlnEnv) return;
-            
-            const replicaKey = document.getElementById('replicaSelect').value;
-            const replica = xlnEnv.replicas.get(replicaKey);
-            const proposalSelect = document.getElementById('proposalSelect');
-            
-            proposalSelect.innerHTML = '';
-            
-            if (replica && replica.state.proposals.size > 0) {
-                for (const [proposalId, proposal] of replica.state.proposals) {
-                    if (proposal.status === 'pending') {
-                        const option = document.createElement('option');
-                        option.value = proposalId;
-                        option.textContent = `${proposal.action.data.message} (by ${proposal.proposer})`;
-                        proposalSelect.appendChild(option);
-                    }
-                }
-            }
-            
-            if (proposalSelect.options.length === 0) {
-                const option = document.createElement('option');
-                option.value = '';
-                option.textContent = 'No pending proposals';
-                proposalSelect.appendChild(option);
-            }
-        }
+        // Removed populateProposalSelect - replaced by new panel-based proposal system
 
         function executeAction() {
             if (!xlnEnv) return;
@@ -2527,7 +5678,7 @@
             currentTimeIndex = -1;
             
             const replicaKey = document.getElementById('replicaSelect').value;
-            const action = document.getElementById('actionSelect').value;
+            const action = 'chat'; // Default to chat since we removed the dropdown
             const replica = xlnEnv.replicas.get(replicaKey);
             
             if (!replica) {
@@ -2607,16 +5758,12 @@
             }
             
             renderEntities();
-            populateReplicaSelect();
-            if (action === 'vote') {
-                populateProposalSelect();
-            }
+
         }
 
         // Make functions global
         window.executeAction = executeAction;
-        window.populateReplicaSelect = populateReplicaSelect;
-        window.updateActionUI = updateActionUI;
+        // Removed populateReplicaSelect global assignment
 
         // Simulation functions
         window.simulateChat = () => {
@@ -2824,15 +5971,41 @@
         // Simple entity formation functions
         window.addValidatorRow = () => {
             const validatorsList = document.getElementById('validatorsList');
+            const newValidatorId = Date.now(); // Simple unique ID
             const newRow = document.createElement('div');
             newRow.className = 'validator-row';
+            newRow.setAttribute('data-validator-id', newValidatorId);
             newRow.innerHTML = `
-                <input type="text" class="validator-name" placeholder="validator name">
-                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight()">
+                <div class="validator-selector-container">
+                    <div class="validator-selector" onclick="openValidatorDropdown(${newValidatorId})">
+                        <img class="validator-avatar" src="" alt="" style="width: 24px; height: 24px; border-radius: 12px; margin-right: 8px;">
+                        <span class="validator-display">Select signer...</span>
+                        <span class="dropdown-arrow">▼</span>
+                    </div>
+                    <div class="validator-dropdown" id="validatorDropdown${newValidatorId}" style="display: none;">
+                        <div class="validator-search">
+                            <input type="text" placeholder="Search signers..." oninput="searchValidators(${newValidatorId}, this.value)" onclick="event.stopPropagation()">
+                        </div>
+                        <div class="validator-options" id="validatorOptions${newValidatorId}">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+                <input type="number" class="validator-weight" placeholder="1" value="1" min="1" oninput="updateTotalWeight(); updateExpectedEntityId()">
                 <button class="btn btn-danger btn-small" onclick="removeValidator(this)">❌</button>
             `;
             validatorsList.appendChild(newRow);
+            
+            // Initialize the new validator selector
+            initializeValidatorSelector(newValidatorId);
             updateTotalWeight();
+            
+            // Show remove buttons for all validators when there's more than one
+            if (validatorsList.children.length > 1) {
+                validatorsList.querySelectorAll('.btn-danger').forEach(button => {
+                    button.style.visibility = 'visible';
+                });
+            }
         };
 
         window.removeValidator = (button) => {
@@ -2841,6 +6014,15 @@
             if (validatorsList.children.length > 1) {
                 row.remove();
                 updateTotalWeight();
+                updateExpectedEntityId();
+                
+                // If only one validator left, hide its remove button
+                if (validatorsList.children.length === 1) {
+                    const lastRemoveButton = validatorsList.querySelector('.btn-danger');
+                    if (lastRemoveButton) {
+                        lastRemoveButton.style.visibility = 'hidden';
+                    }
+                }
             } else {
                 alert('Must have at least one validator');
             }
@@ -2864,6 +6046,179 @@
             if (currentThreshold > totalWeight) {
                 thresholdSlider.value = totalWeight;
                 updateThreshold();
+            }
+        };
+
+        // Validator selector functions
+        window.openValidatorDropdown = (validatorId) => {
+            console.log('🔍 Opening validator dropdown:', validatorId);
+            
+            // Close any other open dropdowns
+            document.querySelectorAll('.validator-dropdown').forEach(dropdown => {
+                if (dropdown.id !== `validatorDropdown${validatorId}`) {
+                    dropdown.style.display = 'none';
+                    const selector = dropdown.parentElement.querySelector('.validator-selector');
+                    if (selector) selector.classList.remove('open');
+                }
+            });
+            
+            const dropdown = document.getElementById(`validatorDropdown${validatorId}`);
+            const selector = dropdown.parentElement.querySelector('.validator-selector');
+            
+            if (dropdown.style.display === 'none') {
+                dropdown.style.display = 'block';
+                selector.classList.add('open');
+                populateValidatorOptions(validatorId);
+                
+                // Focus search input
+                const searchInput = dropdown.querySelector('input');
+                if (searchInput) {
+                    setTimeout(() => searchInput.focus(), 50);
+                }
+            } else {
+                dropdown.style.display = 'none';
+                selector.classList.remove('open');
+            }
+        };
+
+        window.searchValidators = (validatorId, query) => {
+            console.log('🔍 Searching validators:', validatorId, query);
+            populateValidatorOptions(validatorId, query);
+        };
+
+        window.selectValidatorOption = (validatorId, signerName) => {
+            console.log('✅ Selected validator:', validatorId, signerName);
+            
+            const row = document.querySelector(`[data-validator-id="${validatorId}"]`);
+            if (!row) return;
+            
+            const display = row.querySelector('.validator-display');
+            const avatar = row.querySelector('.validator-avatar');
+            const dropdown = document.getElementById(`validatorDropdown${validatorId}`);
+            const selector = row.querySelector('.validator-selector');
+            
+            // Update display
+            display.textContent = `${signerName}.eth`;
+            
+            // Update avatar
+            if (XLN.generateSignerAvatar) {
+                const avatarSvg = XLN.generateSignerAvatar(signerName);
+                const avatarUrl = avatarSvg.startsWith('data:') ? avatarSvg : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(avatarSvg)}`;
+                avatar.src = avatarUrl;
+                avatar.style.display = 'inline-block';
+                
+                avatar.onerror = () => {
+                    avatar.style.display = 'none';
+                    console.log('❌ Validator avatar failed to load');
+                };
+            }
+            
+            // Store selected value
+            row.setAttribute('data-selected-signer', signerName);
+            
+            // Close dropdown
+            dropdown.style.display = 'none';
+            selector.classList.remove('open');
+            
+            // Update entity preview
+            updateExpectedEntityId();
+        };
+
+        const populateValidatorOptions = (validatorId, searchQuery = '') => {
+            const optionsContainer = document.getElementById(`validatorOptions${validatorId}`);
+            if (!optionsContainer) return;
+            
+            optionsContainer.innerHTML = '';
+            
+            // Demo signers
+            const demoSigners = ['alice', 'bob', 'carol', 'david', 'eve'];
+            
+            // Filter by search query
+            const filteredSigners = demoSigners.filter(signer => 
+                signer.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                `${signer}.eth`.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+            
+            // Get currently selected validators to avoid duplicates
+            const selectedValidators = new Set();
+            document.querySelectorAll('.validator-row').forEach(row => {
+                const selectedSigner = row.getAttribute('data-selected-signer');
+                if (selectedSigner) selectedValidators.add(selectedSigner);
+            });
+            
+            filteredSigners.forEach(signer => {
+                const option = document.createElement('div');
+                option.className = 'validator-option';
+                
+                // Create avatar
+                const avatar = document.createElement('img');
+                avatar.style.cssText = 'width: 20px; height: 20px; border-radius: 10px; margin-right: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.2);';
+                
+                if (XLN.generateSignerAvatar) {
+                    const avatarSvg = XLN.generateSignerAvatar(signer);
+                    const avatarUrl = avatarSvg.startsWith('data:') ? avatarSvg : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(avatarSvg)}`;
+                    avatar.src = avatarUrl;
+                    
+                    avatar.onerror = () => {
+                        avatar.style.display = 'none';
+                    };
+                }
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'signer-name';
+                nameSpan.textContent = `${signer}.eth`;
+                
+                // Dim if already selected
+                if (selectedValidators.has(signer)) {
+                    option.style.opacity = '0.5';
+                    option.style.pointerEvents = 'none';
+                    nameSpan.textContent += ' (already selected)';
+                }
+                
+                option.appendChild(avatar);
+                option.appendChild(nameSpan);
+                
+                if (!selectedValidators.has(signer)) {
+                    option.onclick = () => selectValidatorOption(validatorId, signer);
+                }
+                
+                optionsContainer.appendChild(option);
+            });
+            
+            if (filteredSigners.length === 0) {
+                const noResults = document.createElement('div');
+                noResults.className = 'validator-option';
+                noResults.style.textAlign = 'center';
+                noResults.style.color = '#666';
+                noResults.textContent = 'No signers found';
+                optionsContainer.appendChild(noResults);
+            }
+        };
+
+        window.initializeValidatorSelector = (validatorId) => {
+            // For existing validators, set initial values
+            const row = document.querySelector(`[data-validator-id="${validatorId}"]`);
+            if (!row) return;
+            
+            const display = row.querySelector('.validator-display');
+            const currentText = display.textContent;
+            
+            // If it's already showing a signer name, set up the avatar
+            if (currentText.includes('.eth') && currentText !== 'Select signer...') {
+                const signerName = currentText.replace('.eth', '');
+                row.setAttribute('data-selected-signer', signerName);
+                
+                const avatar = row.querySelector('.validator-avatar');
+                if (XLN.generateSignerAvatar && avatar) {
+                    const avatarSvg = XLN.generateSignerAvatar(signerName);
+                    const avatarUrl = avatarSvg.startsWith('data:') ? avatarSvg : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(avatarSvg)}`;
+                    avatar.src = avatarUrl;
+                    avatar.style.display = 'inline-block';
+                    
+                    avatar.onerror = () => {
+                        avatar.style.display = 'none';
+                    };
+                }
             }
         };
 
@@ -2970,14 +6325,14 @@
                 const entityType = document.getElementById('entityTypeSelect')?.value || 'lazy';
                 const entityName = document.getElementById('entityNameInput')?.value || 'ACME';
                 
-                // Get validator data
+                // Get validator data using new selector system
                 const validators = [];
                 const validatorRows = document.querySelectorAll('.validator-row');
                 validatorRows.forEach(row => {
-                    const name = row.querySelector('.validator-name')?.value?.trim();
+                    const selectedSigner = row.getAttribute('data-selected-signer');
                     const weight = parseInt(row.querySelector('.validator-weight')?.value) || 1;
-                    if (name) {
-                        validators.push({ name, weight });
+                    if (selectedSigner) {
+                        validators.push({ name: selectedSigner, weight });
                     }
                 });
                 
@@ -3054,8 +6409,20 @@
                     nextNumberInfo.style.display = 'block';
                     nextNumberDisplay.textContent = 'Loading...';
                     try {
-                        const nextNumber = await XLN.getNextEntityNumber();
+                        // Get selected jurisdiction
+                        const selectedJurisdiction = jurisdictionSelect.value;
+                        if (selectedJurisdiction) {
+                            const jurisdictions = await XLN.getAvailableJurisdictions();
+                            const jurisdiction = jurisdictions.get(selectedJurisdiction);
+                            if (jurisdiction) {
+                                const nextNumber = await XLN.getNextEntityNumber(jurisdiction);
                         nextNumberDisplay.textContent = `#${nextNumber}`;
+                            } else {
+                                nextNumberDisplay.textContent = 'Select jurisdiction first';
+                            }
+                        } else {
+                            nextNumberDisplay.textContent = 'Select jurisdiction first';
+                        }
                     } catch (error) {
                         nextNumberDisplay.textContent = 'Error loading';
                         console.error('Failed to fetch next entity number:', error);
@@ -3071,8 +6438,20 @@
                     nextNumberInfo.style.display = 'block';
                     nextNumberDisplay.textContent = 'Loading...';
                     try {
-                        const nextNumber = await XLN.getNextEntityNumber();
+                        // Get selected jurisdiction
+                        const selectedJurisdiction = jurisdictionSelect.value;
+                        if (selectedJurisdiction) {
+                            const jurisdictions = await XLN.getAvailableJurisdictions();
+                            const jurisdiction = jurisdictions.get(selectedJurisdiction);
+                            if (jurisdiction) {
+                                const nextNumber = await XLN.getNextEntityNumber(jurisdiction);
                         nextNumberDisplay.textContent = `#${nextNumber} (then named)`;
+                            } else {
+                                nextNumberDisplay.textContent = 'Select jurisdiction first';
+                            }
+                        } else {
+                            nextNumberDisplay.textContent = 'Select jurisdiction first';
+                        }
                     } catch (error) {
                         nextNumberDisplay.textContent = 'Error loading';
                         console.error('Failed to fetch next entity number:', error);
@@ -3137,18 +6516,24 @@
             let totalShares = 0;
             
             validatorRows.forEach((row, index) => {
-                const nameInput = row.querySelector('.validator-name');
+                // Use the new selector system - get selected signer from data attribute
+                const selectedSigner = row.getAttribute('data-selected-signer');
                 const weightInput = row.querySelector('.validator-weight');
                 
-                if (nameInput && weightInput) {
-                    const name = nameInput.value.trim();
+                if (selectedSigner && weightInput) {
                     const weight = parseInt(weightInput.value.trim()) || 1;
                     
-                    if (name && weight > 0) {
-                        validators.push(name);
-                        shares[name] = BigInt(weight);
+                    if (weight > 0) {
+                        validators.push(selectedSigner);
+                        shares[selectedSigner] = BigInt(weight);
                         totalShares += weight;
                     }
+                } else if (!selectedSigner) {
+                    // Show which validator is not selected
+                    const validatorDisplay = row.querySelector('.validator-display');
+                    const displayText = validatorDisplay ? validatorDisplay.textContent : 'Unknown';
+                    alert(`Please select a signer for validator: ${displayText}`);
+                    return;
                 }
             });
             
@@ -3291,7 +6676,6 @@
             // Clear form and refresh view
             clearSimpleForm();
             renderEntities();
-            populateReplicaSelect();
             } catch (error) {
                 console.error('Failed to create entity:', error);
                 alert(`Failed to create entity: ${error.message}`);
@@ -3643,12 +7027,36 @@
             const history = XLN.getHistory();
             if (history.length > 0) {
                 currentTimeIndex = 0;
+                console.log('🕰️ Go to history start (index 0)');
+                updateTimeMachineUI();
+                
+                // Update all tabs with current time state (same as slider)
+                if (typeof tabSystem !== 'undefined' && tabSystem.tabs) {
+                    tabSystem.tabs.forEach(tab => {
+                        if (tab.entityId && tab.signer) {
+                            renderEntityInTab(tab.id, tab.signer, tab.entityId);
+                        }
+                    });
+                }
+                
                 renderEntities();
             }
         };
 
         window.goToHistoryEnd = () => {
             currentTimeIndex = -1; // Current time
+            console.log('🕰️ Go to history end (live)');
+            updateTimeMachineUI();
+            
+            // Update all tabs with current time state (same as slider)
+            if (typeof tabSystem !== 'undefined' && tabSystem.tabs) {
+                tabSystem.tabs.forEach(tab => {
+                    if (tab.entityId && tab.signer) {
+                        renderEntityInTab(tab.id, tab.signer, tab.entityId);
+                    }
+                });
+            }
+            
             renderEntities();
         };
 
@@ -3663,6 +7071,19 @@
                 // Go one step back, but not below 0
                 currentTimeIndex = Math.max(0, currentTimeIndex - 1);
             }
+            
+            console.log('🕰️ Step backward to index:', currentTimeIndex);
+            updateTimeMachineUI();
+            
+            // Update all tabs with current time state (same as slider)
+            if (typeof tabSystem !== 'undefined' && tabSystem.tabs) {
+                tabSystem.tabs.forEach(tab => {
+                    if (tab.entityId && tab.signer) {
+                        renderEntityInTab(tab.id, tab.signer, tab.entityId);
+                    }
+                });
+            }
+            
             renderEntities();
         };
 
@@ -3680,39 +7101,23 @@
                 // At last meaningful snapshot, go to live
                 currentTimeIndex = -1;
             }
-            renderEntities();
-        };
+            
+            console.log('🕰️ Step forward to index:', currentTimeIndex);
+            updateTimeMachineUI();
+            
+            // Update all tabs with current time state (same as slider)
+            if (typeof tabSystem !== 'undefined' && tabSystem.tabs) {
+                tabSystem.tabs.forEach(tab => {
+                    if (tab.entityId && tab.signer) {
+                        renderEntityInTab(tab.id, tab.signer, tab.entityId);
+                    }
+                });
+            }
+            
+                renderEntities();
+            };
 
-        // Ensure functions are globally accessible
-        if (typeof window.stepBackward === 'undefined') {
-            console.warn('stepBackward not defined globally, defining now');
-            window.stepBackward = () => {
-                const history = XLN.getHistory();
-                if (history.length === 0) return;
-                
-                if (currentTimeIndex === -1) {
-                    currentTimeIndex = history.length - 1;
-                } else if (currentTimeIndex > 0) {
-                    currentTimeIndex--;
-                }
-                renderEntities();
-            };
-        }
-        
-        if (typeof window.stepForward === 'undefined') {
-            console.warn('stepForward not defined globally, defining now');
-            window.stepForward = () => {
-                const history = XLN.getHistory();
-                if (history.length === 0) return;
-                
-                if (currentTimeIndex < history.length - 1) {
-                    currentTimeIndex++;
-                } else {
-                    currentTimeIndex = -1;
-                }
-                renderEntities();
-            };
-        }
+        // Step functions are now properly defined above with consistent behavior
 
         // Time slider event handler and keyboard shortcuts
         document.addEventListener('DOMContentLoaded', () => {
@@ -3733,6 +7138,18 @@
                     const sliderMax = maxMeaningfulIndex + 1;
                     const progressPercent = sliderMax > 0 ? (sliderValue / sliderMax) * 100 : 0;
                     sliderContainer.style.setProperty('--progress', `${progressPercent}%`);
+                }
+                
+                console.log('🕰️ Time slider changed to index:', currentTimeIndex);
+                updateTimeMachineUI();
+                
+                // Update all tabs with current time state
+                if (typeof tabSystem !== 'undefined' && tabSystem.tabs) {
+                    tabSystem.tabs.forEach(tab => {
+                        if (tab.entityId && tab.signer) {
+                            renderEntityInTab(tab.id, tab.signer, tab.entityId);
+                        }
+                    });
                 }
                 
                 renderEntities();
@@ -3793,7 +7210,6 @@
                 // Re-render UI
                 setupEntitySearch(); // Reinitialize autocomplete search
                 renderEntities();
-                populateReplicaSelect();
                 updateTimeMachineUI();
                 
                 console.log('✅ Application reinitialized successfully');
@@ -4348,11 +7764,7 @@
             }
         }
 
-        function highlightSearchTerm(text, term) {
-            if (!term.trim()) return text;
-            const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-            return text.replace(regex, '<mark style="background: #007acc; color: white; padding: 1px 2px; border-radius: 2px;">$1</mark>');
-        }
+
 
         function toggleUnifiedDropdown() {
             const dropdownBtn = document.querySelector('.unified-dropdown-btn');
@@ -4367,14 +7779,14 @@
         }
         window.toggleUnifiedDropdown = toggleUnifiedDropdown;
 
-        // Close dropdown when clicking outside
+        // Close dropdowns when clicking outside (for individual tab dropdowns)
         document.addEventListener('click', function(event) {
-            const dropdown = document.getElementById('unifiedDropdown');
-            if (!dropdown.contains(event.target)) {
-                const dropdownBtn = document.querySelector('.unified-dropdown-btn');
-                const dropdownContent = document.getElementById('dropdownContent');
-                dropdownBtn.classList.remove('open');
-                dropdownContent.classList.remove('show');
+            // Close all tab dropdowns if clicking outside
+            const clickedDropdown = event.target.closest('.unified-dropdown');
+            if (!clickedDropdown) {
+                document.querySelectorAll('.unified-dropdown').forEach(dropdown => {
+                    dropdown.classList.remove('open');
+                });
             }
         });
         
@@ -4403,7 +7815,7 @@
             const totalShares = config.validators.length;
             const sharePercent = totalShares > 0 ? ((shares / totalShares) * 100).toFixed(1) : '0.0';
             const isProposer = replica.isProposer;
-            const modeClass = config.mode === 'proposer-based' ? 'mode-proposer-based' : 'mode-gossip-based';
+            // Mode class removed - we don't show gossip/proposer distinction
             
             // Get avatars
             console.log('🖼️ Getting avatars for entity:', replica.entityId, 'signer:', replica.signerId);
@@ -4554,7 +7966,7 @@
                             ${replica.mempool.slice(-5).map((tx, i) => 
                                 `<div style="color: #d4d4d4; padding: 8px; margin-bottom: 4px; background: #333; border-radius: 4px; font-family: monospace; font-size: 13px;">
                                     <div><strong>Type:</strong> ${tx.type}</div>
-                                    <div><strong>Data:</strong> ${JSON.stringify(tx.data).slice(0, 100)}...</div>
+                                    <div><strong>Data:</strong> ${JSON.stringify(tx.data, (key, value) => typeof value === 'bigint' ? value.toString() : value).slice(0, 100)}...</div>
                                 </div>`
                             ).join('')}
                         </div>
@@ -4572,9 +7984,13 @@
         
         // Placeholder functions for admin buttons
         function showEntityCreator() {
-            console.log('Show entity creator');
+            console.log('🏛️ Show entity creator');
             // TODO: Show entity creation modal
+            alert('Entity Creator coming soon! Use the Controls section in any panel for now.');
         }
+
+        // Expose to global scope
+        window.showEntityCreator = showEntityCreator;
         
         function showSettings() {
             console.log('Show settings');
@@ -4585,6 +8001,10 @@
         window.toggleUnifiedDropdown = toggleUnifiedDropdown;
         window.showEntityCreator = showEntityCreator;
         window.showSettings = showSettings;
+        window.submitChatMessage = submitChatMessage;
+        window.submitProposal = submitProposal;
+        window.submitVote = submitVote;
+        // Removed voteOnProposal - replaced with dropdown-based voting
 
         // History I/O collapse functionality
         function toggleHistoryIO() {
@@ -4612,37 +8032,39 @@
                 console.log('💡 Access via: window.xlnEnv');
 
                 // 3. Perform initial UI setup and render
-                setupActionHandlers();
+
                 setupEntitySearch(); // Initialize autocomplete search
-                populateUnifiedDropdown(); // Initialize unified dropdown
+                initializeTabSystem(); // Initialize the tab system
                 updateTotalWeight();
                 populateJurisdictions(); // Populate available jurisdictions
                 window.onEntityTypeChange(); // Initialize entity type display
         window.onJurisdictionChange(); // Initialize jurisdiction with Ethereum default
         setTimeout(() => window.updateExpectedEntityId(), 100); // Initialize entity ID preview
                 // Entities now rendered by unified dropdown selection - no need for initial renderEntities call
-                populateReplicaSelect();
 
-                // Entity selection now handled by unified dropdown - no separate event listener needed
-                document.getElementById('timeSlider').addEventListener('input', (e) => {
-                    const history = XLN.getHistory();
-                    const sliderValue = parseInt(e.target.value);
-                    const maxIndex = Math.max(0, history.length - 1);
-                    
-                    if (sliderValue > maxIndex) {
-                        currentTimeIndex = -1; // Live
-                    } else {
-                        currentTimeIndex = sliderValue;
-                    }
-                    renderEntities();
-                    
-                    // Update selected entity view if one is selected
-                    if (dropdownData.selectedEntity && dropdownData.selectedSigner) {
-                        updateSelectedEntityFromTimeIndex();
+                // Time machine event handling is done in DOMContentLoaded above
+
+                // 3. Initialize validator selectors on the form
+                document.querySelectorAll('.validator-row[data-validator-id]').forEach(row => {
+                    const validatorId = row.getAttribute('data-validator-id');
+                    if (validatorId) {
+                        initializeValidatorSelector(validatorId);
                     }
                 });
 
-                // 3. Start the continuous render loop for live updates
+                // 4. Add global click handler to close validator dropdowns
+                document.addEventListener('click', (event) => {
+                    // Close validator dropdowns if click is outside
+                    if (!event.target.closest('.validator-selector-container')) {
+                        document.querySelectorAll('.validator-dropdown').forEach(dropdown => {
+                            dropdown.style.display = 'none';
+                            const selector = dropdown.parentElement.querySelector('.validator-selector');
+                            if (selector) selector.classList.remove('open');
+                        });
+                    }
+                });
+
+                // 4. Start the continuous render loop for live updates
                 setInterval(renderEntities, 1000);
 
             } catch (error) {

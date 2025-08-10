@@ -46,7 +46,7 @@ export interface Proposal {
   id: string; // hash of the proposal
   proposer: string;
   action: ProposalAction;
-  votes: Map<string, 'yes' | 'no'>;
+  votes: Map<string, 'yes' | 'no' | 'abstain'>;
   status: 'pending' | 'executed' | 'rejected';
   created: number; // entity timestamp when proposal was created (deterministic)
 }
@@ -56,6 +56,13 @@ export interface ProposalAction {
   data: {
     message: string;
   };
+}
+
+export interface VoteData {
+  proposalId: string;
+  voter: string;
+  choice: 'yes' | 'no' | 'abstain';
+  comment?: string;
 }
 
 export interface EntityTx {

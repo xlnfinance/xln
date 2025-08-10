@@ -42,7 +42,7 @@ const validateEntityInput = (input: EntityInput): boolean => {
           log.error(`❌ Invalid transaction: ${JSON.stringify(tx)}`);
           return false;
         }
-        if (typeof tx.type !== 'string' || !['chat', 'propose', 'vote'].includes(tx.type)) {
+        if (typeof tx.type !== 'string' || !['chat', 'propose', 'vote', 'profile-update'].includes(tx.type)) {
           log.error(`❌ Invalid transaction type: ${tx.type}`);
           return false;
         }
@@ -213,6 +213,11 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
   
   // Add transactions to mempool (mutable for performance)
   if (entityInput.entityTxs?.length) {
+    if (entityReplica.signerId === 'alice') {
+      console.log(`🔥 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
+      console.log(`🔥 ALICE-RECEIVES: Transaction types:`, entityInput.entityTxs.map(tx => tx.type));
+      console.log(`🔥 ALICE-RECEIVES: Alice isProposer=${entityReplica.isProposer}, current mempool=${entityReplica.mempool.length}`);
+    }
     entityReplica.mempool.push(...entityInput.entityTxs);
     if (DEBUG) console.log(`    → Added ${entityInput.entityTxs.length} txs to mempool (total: ${entityReplica.mempool.length})`);
     if (DEBUG && entityInput.entityTxs.length > 3) {
@@ -222,7 +227,24 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     if (DEBUG) console.log(`    ⚠️  CORNER CASE: Empty transaction array received - no mempool changes`);
   }
   
-  // Handle commit notifications FIRST (when receiving finalized frame from proposer)
+  // CRITICAL: Forward transactions to proposer BEFORE processing commits
+  // This prevents race condition where commits clear mempool before forwarding
+  if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
+    if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
+    // Send mempool to proposer
+    const proposerId = entityReplica.state.config.validators[0];
+    console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
+    console.log(`🔥 BOB-TO-ALICE: Transaction types:`, entityReplica.mempool.map(tx => tx.type));
+    entityOutbox.push({
+      entityId: entityInput.entityId,
+      signerId: proposerId,
+      entityTxs: [...entityReplica.mempool]
+    });
+    // Clear mempool after sending
+    entityReplica.mempool.length = 0;
+  }
+  
+  // Handle commit notifications AFTER forwarding (when receiving finalized frame from proposer)
   if (entityInput.precommits?.size && entityInput.proposedFrame && !entityReplica.proposal) {
     const signers = Array.from(entityInput.precommits.keys());
     const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
@@ -360,6 +382,9 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
   
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
   if (entityReplica.isProposer && entityReplica.mempool.length > 0 && !entityReplica.proposal) {
+    console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
+    console.log(`🔥 ALICE-PROPOSES: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
+    console.log(`🔥 ALICE-PROPOSES: Mempool transaction types:`, entityReplica.mempool.map(tx => tx.type));
     if (DEBUG) console.log(`    🚀 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
     // Compute new state once during proposal
     const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
@@ -407,6 +432,8 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
+    console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
+    console.log(`🔥 BOB-TO-ALICE: Transaction types:`, entityReplica.mempool.map(tx => tx.type));
     entityOutbox.push({
       entityId: entityInput.entityId,
       signerId: proposerId,

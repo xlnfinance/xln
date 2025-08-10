@@ -4,7 +4,7 @@
  */
 
 import { 
-  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig 
+  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig, VoteData 
 } from './types.js';
 import { createHash, DEBUG, log } from './utils.js';
 import { calculateQuorumPower } from './entity-consensus.js';
@@ -56,6 +56,7 @@ const validateMessage = (message: string): boolean => {
  * COMPLETE IMPLEMENTATION moved from server.ts
  */
 export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: EntityTx): EntityState => {
+  console.log(`🚨 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, entityTx.data);
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
@@ -101,7 +102,7 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       id: proposalId,
       proposer,
       action,
-      votes: new Map([[proposer, 'yes']]), // Proposer auto-votes yes
+      votes: new Map([[proposer, 'yes']]), // Proposer automatically votes yes without comment
       status: 'pending',
       created: entityState.timestamp // Use deterministic entity timestamp
     };
@@ -130,15 +131,19 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
   }
   
   if (entityTx.type === 'vote') {
-    const { proposalId, voter, choice } = entityTx.data;
+    console.log(`🗳️ PROCESSING VOTE: entityTx.data=`, entityTx.data);
+    const { proposalId, voter, choice, comment } = entityTx.data;
     const proposal = entityState.proposals.get(proposalId);
     
+    console.log(`🗳️ Vote lookup: proposalId=${proposalId}, found=${!!proposal}, status=${proposal?.status}`);
+    console.log(`🗳️ Available proposals:`, Array.from(entityState.proposals.keys()));
+    
     if (!proposal || proposal.status !== 'pending') {
-      if (DEBUG) console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
+      console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
       return entityState;
     }
     
-    if (DEBUG) console.log(`    🗳️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
+    console.log(`    🗳️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
     
     const newEntityState = {
       ...entityState,

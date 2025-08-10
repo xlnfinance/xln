@@ -600,6 +600,49 @@ const runDemoWrapper = async (env: any): Promise<any> => {
   }
 };
 
+// === CONSENSUS PROCESSING UTILITIES ===
+export const processUntilEmpty = (env: Env, inputs?: EntityInput[]) => {
+  let outputs = inputs || [];
+  let iterationCount = 0;
+  const maxIterations = 10; // Safety limit
+  
+  console.log('🔥 PROCESS-CASCADE: Starting with', outputs.length, 'initial outputs');
+  console.log('🔥 PROCESS-CASCADE: Initial outputs:', outputs.map(o => ({
+    entityId: o.entityId.slice(0,8) + '...',
+    signerId: o.signerId,
+    txs: o.entityTxs?.length || 0,
+    precommits: o.precommits?.size || 0,
+    hasFrame: !!o.proposedFrame
+  })));
+  
+  while (outputs.length > 0 && iterationCount < maxIterations) {
+    iterationCount++;
+    console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
+    
+    const result = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
+    outputs = result.entityOutbox;
+    
+    console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} generated ${outputs.length} new outputs`);
+    if (outputs.length > 0) {
+      console.log('🔥 PROCESS-CASCADE: New outputs:', outputs.map(o => ({
+        entityId: o.entityId.slice(0,8) + '...',
+        signerId: o.signerId,
+        txs: o.entityTxs?.length || 0,
+        precommits: o.precommits?.size || 0,
+        hasFrame: !!o.proposedFrame
+      })));
+    }
+  }
+  
+  if (iterationCount >= maxIterations) {
+    console.warn('⚠️ processUntilEmpty reached maximum iterations');
+  } else {
+    console.log(`🔥 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
+  }
+  
+  return env;
+};
+
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
 const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, entityId);

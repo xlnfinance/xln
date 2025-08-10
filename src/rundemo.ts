@@ -11,17 +11,8 @@ import {
   generateLazyEntityId, generateNumberedEntityId
 } from './entity-factory.js';
 import { registerNumberedEntityOnChain, getJurisdictionByAddress } from './evm.js';
-import { applyServerInput } from './server.js';
+import { applyServerInput, processUntilEmpty } from './server.js';
 import { formatEntityDisplay, formatSignerDisplay } from './utils.js';
-
-// Helper function - exact copy from server.ts
-const processUntilEmpty = (env: Env, inputs: EntityInput[]) => {
-  let outputs = inputs;
-  while (outputs.length > 0) {
-    const result = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
-    outputs = result.entityOutbox;
-  }
-};
 
 // Exact 1:1 copy of runDemo function from server.ts
 const runDemo = async (env: Env): Promise<Env> => {
