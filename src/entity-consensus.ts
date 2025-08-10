@@ -385,6 +385,27 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
     console.log(`🔥 ALICE-PROPOSES: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
     console.log(`🔥 ALICE-PROPOSES: Mempool transaction types:`, entityReplica.mempool.map(tx => tx.type));
+    
+    // Check if this is a single signer entity (threshold = 1, only 1 validator)
+    const isSingleSigner = entityReplica.state.config.validators.length === 1 && 
+                           entityReplica.state.config.threshold === BigInt(1);
+    
+    if (isSingleSigner) {
+      console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
+      // For single signer entities, directly apply transactions without consensus
+      const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
+      entityReplica.state = {
+        ...newEntityState,
+        height: entityReplica.state.height + 1
+      };
+      
+      // Clear mempool after direct application
+      entityReplica.mempool.length = 0;
+      
+      if (DEBUG) console.log(`    ⚡ Single signer entity: transactions applied directly, height: ${entityReplica.state.height}`);
+      return entityOutbox; // Skip the full consensus process
+    }
+    
     if (DEBUG) console.log(`    🚀 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
     // Compute new state once during proposal
     const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
