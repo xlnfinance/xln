@@ -20107,7 +20107,9 @@ var encodeBoard = (config) => {
     console.log(`   Jurisdiction: ${jurisdiction.name}`);
   if (DEBUG)
     console.log(`   \uD83D\uDCB8 Gas required for registration`);
-  const entityNumber = Math.floor(Math.random() * 1e6) + 1;
+  if (!globalThis._entityCounter)
+    globalThis._entityCounter = 0;
+  const entityNumber = ++globalThis._entityCounter;
   const entityId = generateNumberedEntityId(entityNumber);
   if (DEBUG)
     console.log(`   ✅ Assigned Entity Number: ${entityNumber}`);
@@ -43526,8 +43528,12 @@ var applyEntityTx = (env, entityState, entityTx) => {
         ...proposal,
         votes: new Map(proposal.votes)
       };
-      updatedProposal.votes.set(voter, choice);
-      const yesVoters = Array.from(updatedProposal.votes.entries()).filter(([_, vote]) => vote === "yes").map(([voter2, _]) => voter2);
+      const voteData = comment ? { choice, comment } : choice;
+      updatedProposal.votes.set(voter, voteData);
+      const yesVoters = Array.from(updatedProposal.votes.entries()).filter(([_, voteData2]) => {
+        const vote = typeof voteData2 === "object" ? voteData2.choice : voteData2;
+        return vote === "yes";
+      }).map(([voter2, _]) => voter2);
       const totalYesPower = calculateQuorumPower(entityState.config, yesVoters);
       if (DEBUG) {
         const totalShares = Object.values(entityState.config.shares).reduce((sum, val) => sum + val, BigInt(0));
@@ -43882,6 +43888,19 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
     console.log(`\uD83D\uDD25 ALICE-PROPOSES: Alice auto-propose triggered!`);
     console.log(`\uD83D\uDD25 ALICE-PROPOSES: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
     console.log(`\uD83D\uDD25 ALICE-PROPOSES: Mempool transaction types:`, entityReplica.mempool.map((tx) => tx.type));
+    const isSingleSigner = entityReplica.state.config.validators.length === 1 && entityReplica.state.config.threshold === BigInt(1);
+    if (isSingleSigner) {
+      console.log(`\uD83D\uDE80 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
+      const newEntityState2 = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
+      entityReplica.state = {
+        ...newEntityState2,
+        height: entityReplica.state.height + 1
+      };
+      entityReplica.mempool.length = 0;
+      if (DEBUG)
+        console.log(`    ⚡ Single signer entity: transactions applied directly, height: ${entityReplica.state.height}`);
+      return entityOutbox;
+    }
     if (DEBUG)
       console.log(`    \uD83D\uDE80 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
     const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
@@ -44576,6 +44595,33 @@ var runDemo = async (env) => {
   });
   console.log(`
 \uD83D\uDD25 CORNER CASE TESTS:`);
+  console.log(`
+⚠️  CORNER CASE 0: Single signer entity - direct execution`);
+  const singleSignerConfig = {
+    mode: "proposer-based",
+    threshold: BigInt(1),
+    validators: ["alice"],
+    shares: { alice: BigInt(1) },
+    jurisdiction: ethereumJurisdiction
+  };
+  const singleEntityId = generateLazyEntityId(["alice"], BigInt(1));
+  applyServerInput(env, {
+    serverTxs: [{
+      type: "importReplica",
+      entityId: singleEntityId,
+      signerId: "alice",
+      data: {
+        config: singleSignerConfig,
+        isProposer: true
+      }
+    }],
+    entityInputs: []
+  });
+  processUntilEmpty(env, [{
+    entityId: singleEntityId,
+    signerId: "alice",
+    entityTxs: [{ type: "chat", data: { from: "alice", message: "Single signer test message!" } }]
+  }]);
   console.log(`
 ⚠️  CORNER CASE 1: Single transaction in chat`);
   processUntilEmpty(env, [{

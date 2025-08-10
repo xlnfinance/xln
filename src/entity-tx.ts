@@ -156,11 +156,16 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       ...proposal,
       votes: new Map(proposal.votes)
     };
-    updatedProposal.votes.set(voter, choice);
+    // Store vote with comment if provided
+    const voteData = comment ? { choice, comment } : choice;
+    updatedProposal.votes.set(voter, voteData);
     
     // Calculate voting power for 'yes' votes
     const yesVoters = Array.from(updatedProposal.votes.entries())
-      .filter(([_, vote]) => vote === 'yes')
+      .filter(([_, voteData]) => {
+        const vote = typeof voteData === 'object' ? voteData.choice : voteData;
+        return vote === 'yes';
+      })
       .map(([voter, _]) => voter);
     
     const totalYesPower = calculateQuorumPower(entityState.config, yesVoters);

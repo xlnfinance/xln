@@ -37,6 +37,13 @@ export const createGovernanceEntityConfig = (): ConsensusConfig => ({
   shares: { alice: 3n, bob: 3n, carol: 3n, david: 3n, eve: 3n }
 });
 
+export const createSingleSignerEntityConfig = (): ConsensusConfig => ({
+  mode: 'proposer-based',
+  threshold: 1n,
+  validators: ['alice'],
+  shares: { alice: 1n }
+});
+
 // === DEMO ENTITY CREATION ===
 
 export const createDemoEntities = (): { [key: string]: string } => {

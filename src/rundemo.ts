@@ -132,6 +132,37 @@ const runDemo = async (env: Env): Promise<Env> => {
   
   console.log('\n🔥 CORNER CASE TESTS:');
   
+  // === CORNER CASE 0: Single signer entity (should bypass consensus) ===
+  console.log('\n⚠️  CORNER CASE 0: Single signer entity - direct execution');
+  const singleSignerConfig: ConsensusConfig = {
+    mode: 'proposer-based',
+    threshold: BigInt(1),
+    validators: ['alice'],
+    shares: { alice: BigInt(1) },
+    jurisdiction: ethereumJurisdiction
+  };
+  
+  const singleEntityId = generateLazyEntityId(['alice'], BigInt(1));
+  
+  applyServerInput(env, {
+    serverTxs: [{
+      type: 'importReplica' as const,
+      entityId: singleEntityId,
+      signerId: 'alice',
+      data: {
+        config: singleSignerConfig,
+        isProposer: true
+      }
+    }],
+    entityInputs: []
+  });
+  
+  processUntilEmpty(env, [{
+    entityId: singleEntityId,
+    signerId: 'alice',
+    entityTxs: [{ type: 'chat', data: { from: 'alice', message: 'Single signer test message!' } }]
+  }]);
+  
   // === CORNER CASE 1: Single transaction (minimal consensus) ===
   console.log('\n⚠️  CORNER CASE 1: Single transaction in chat');
   processUntilEmpty(env, [{

@@ -15,14 +15,19 @@
             overflow-x: hidden; /* Prevent horizontal scroll on entire page */
         }
 
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
         body {
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: #1e1e1e;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0f0f0f 100%);
             min-height: 100vh;
-            color: #d4d4d4;
+            color: #e8e8e8;
             overflow-x: hidden;
             margin: 0;
             padding: 0;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         .container {
@@ -32,28 +37,41 @@
         }
 
         .admin-topbar {
-            background: #252526;
-            border-bottom: 1px solid #3e3e3e;
-            padding: 12px 20px;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 16px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            gap: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
 
         .admin-logo {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
             color: #007acc;
             font-weight: 600;
-            font-size: 1.2em;
+        }
+        
+        .logo-text {
+            font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+            font-size: 20px;
+            font-weight: 400;
+            color: #ffffff;
+            letter-spacing: 0.5px;
+            text-transform: lowercase;
         }
 
         .logo-icon {
             font-size: 1.4em;
+            color: #ffffff;
         }
 
         .admin-navigation {
@@ -65,26 +83,36 @@
         }
 
         .admin-select {
-            background: #2d2d2d;
-            border: 1px solid #555;
-            border-radius: 6px;
-            padding: 8px 12px;
-            color: #d4d4d4;
+            background: rgba(30, 30, 30, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #e8e8e8;
             font-size: 0.9em;
+            font-weight: 500;
             min-width: 180px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .admin-select:hover {
+            border-color: rgba(0, 212, 170, 0.3);
+            background: rgba(40, 40, 40, 0.9);
         }
 
         .admin-select:focus {
             outline: none;
-            border-color: #007acc;
-            box-shadow: 0 0 0 2px rgba(0, 122, 204, 0.2);
+            border-color: #00d4aa;
+            box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
+            background: rgba(35, 35, 35, 0.95);
         }
 
         .admin-select:disabled {
-            opacity: 0.5;
+            opacity: 0.4;
             cursor: not-allowed;
+            filter: grayscale(1);
         }
 
         .admin-controls {
@@ -2200,16 +2228,17 @@
 
         .reload-indicator {
             position: fixed;
-            top: 20px;
+            top: 80px;
             right: 20px;
             background: #28a745;
             color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9em;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
             opacity: 0;
             transition: opacity 0.3s ease;
-            z-index: 1000;
+            z-index: 9999;
+            pointer-events: none;
         }
 
         .reload-indicator.show {
@@ -2606,10 +2635,207 @@
             display: flex;
             gap: 10px;
         }
+        
+        /* Settings Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        
+        .modal-content {
+            background: var(--bg-color);
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .modal-header h3 {
+            margin: 0;
+            color: var(--text-color);
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-color);
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-close:hover {
+            background-color: var(--hover-color);
+            border-radius: 50%;
+        }
+        
+        .modal-body {
+            padding: 20px;
+        }
+        
+        .setting-group {
+            margin-bottom: 25px;
+        }
+        
+        .setting-group label {
+            display: block;
+            margin-bottom: 10px;
+            color: var(--text-color);
+            font-size: 14px;
+        }
+        
+        .setting-group small {
+            color: var(--text-muted);
+        }
+        
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+            margin: 10px 0;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #333;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .toggle-slider {
+            background-color: #007acc;
+        }
+        
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        
+        .toggle-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 5px;
+        }
+        
+        /* Slider */
+        .slider-container {
+            margin: 10px 0;
+        }
+        
+        .slider-container input[type="range"] {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #333;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        .slider-container input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007acc;
+            cursor: pointer;
+        }
+        
+        .slider-container input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #007acc;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .slider-value {
+            text-align: center;
+            margin-top: 8px;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+        
+        /* Proposal Status Styles */
+        .proposal-item.failed {
+            opacity: 0.7;
+            border-left: 3px solid #dc3545;
+        }
+        
+        .failed-badge {
+            background: #dc3545;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        
+        .vote-entry {
+            margin-bottom: 4px;
+        }
+        
+        .vote-comment {
+            font-style: italic;
+            color: var(--text-muted);
+            margin-left: 16px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
-    <div class="reload-indicator" id="reloadIndicator">
+    <div class="reload-indicator" id="reloadIndicator" style="display: none;">
         🔄 Reloading...
     </div>
     
@@ -2617,8 +2843,7 @@
         <!-- Admin Top Bar -->
         <div class="admin-topbar">
             <div class="admin-logo">
-                <span class="logo-icon">⚡</span>
-                <span class="logo-text">XLN</span>
+                <span class="logo-text">xln core</span>
             </div>
             
             <div class="admin-navigation">
@@ -2988,6 +3213,9 @@
         
         // Make XLN available globally for debugging
         window.xlnEnv = null;
+        
+        // Initialize server delay from localStorage
+        window.serverDelay = parseInt(localStorage.getItem('xln-server-delay') || '0');
 
         // Tab Management System
         const STORAGE_KEY = 'xln-entity-tabs';
@@ -3131,8 +3359,10 @@
             const tab = tabSystem.tabs.find(t => t.id === tabId);
             if (tab) {
                 Object.assign(tab, updates);
-                // Only update the dropdown text for this specific tab, don't re-render all panels
+                // Update the dropdown text for this specific tab
                 updateTabDropdownDisplay(tabId);
+                // Refresh the entity display for this tab to show the new signer
+                renderEntityInTab(tabId);
                 saveTabsToStorage();
             }
         }
@@ -4030,7 +4260,7 @@
                         
                         <div class="form-group">
                             <label class="form-label">🆔 Entity Type:</label>
-                            <select class="form-input" id="entityType-${tabId}" onchange="onEntityTypeChangeTab('${tabId}')">
+                            <select class="form-input" id="entityType-${tabId}" onchange="onEntityTypeChangeTab('${tabId}'); updateTabQuorumHash('${tabId}')">
                                 <option value="lazy">🔒 Lazy Entity (Free - ID = Quorum Hash)</option>
                                 <option value="numbered">🔢 Numbered Entity (Gas Required - Sequential ID)</option>
                                 <option value="named">🏷️ Named Entity (Premium Gas + Admin Approval)</option>
@@ -4044,7 +4274,7 @@
                         
                         <div class="form-group">
                             <label class="form-label">🏷️ Entity Name:</label>
-                            <input type="text" class="form-input" id="entityName-${tabId}" placeholder="e.g., trading, chat, governance" value="ACME">
+                            <input type="text" class="form-input" id="entityName-${tabId}" placeholder="e.g., trading, chat, governance" value="ACME" oninput="updateTabQuorumHash('${tabId}')">
                             <div style="font-size: 0.75em; color: #666; margin-top: 4px;">
                                 Display name for your entity (not used for ID generation in lazy mode)
                             </div>
@@ -4054,13 +4284,13 @@
                             <label class="form-label">👥 Validators:</label>
                             <div id="validatorsList-${tabId}">
                                 <div class="validator-row-simple" data-validator-id="0" style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
-                                    <select class="form-input" id="validator0-${tabId}" style="flex: 1;">
+                                    <select class="form-input" id="validator0-${tabId}" style="flex: 1;" onchange="updateTabQuorumHash('${tabId}')">
                                         <option value="">Select signer...</option>
                                         <option value="alice.eth">alice.eth</option>
                                         <option value="bob.eth">bob.eth</option>
                                         <option value="carol.eth">carol.eth</option>
                                     </select>
-                                    <input type="number" class="form-input" style="width: 60px;" placeholder="1" value="1" min="1">
+                                    <input type="number" class="form-input" style="width: 60px;" placeholder="1" value="1" min="1" oninput="updateTabQuorumHash('${tabId}')">
                                 </div>
                             </div>
                             <button type="button" class="form-button" style="margin-top: 8px; background: #666; font-size: 0.8em; padding: 6px 12px;" onclick="addValidatorToTab('${tabId}')">➕ Add Validator</button>
@@ -4378,15 +4608,42 @@
                 const proposalText = proposal.action?.data?.message || 'Unknown proposal';
                 const proposer = proposal.proposer || 'Unknown';
                 const votes = proposal.votes ? Array.from(proposal.votes.entries()) : [];
-                const yesVotes = votes.filter(([_, vote]) => vote === true);
-                const noVotes = votes.filter(([_, vote]) => vote === false);
+                const yesVotes = votes.filter(([_, vote]) => vote === true || vote === 'yes');
+                const noVotes = votes.filter(([_, vote]) => vote === false || vote === 'no');
                 const abstainVotes = votes.filter(([_, vote]) => vote === 'abstain');
                 
-                // Get threshold from replica state (assuming it's in the board config)
-                const threshold = toNumber(replica.state?.config?.threshold || 1);
-                const yesCount = yesVotes.length;
-                const progressPercent = Math.min(safeDivide(safeMultiply(yesCount, 100), threshold), 100);
-                const isExecuted = proposal.status === 'executed' || yesCount >= threshold;
+                // Calculate voting power correctly using shares, not just count
+                const config = replica.state?.config;
+                const threshold = toNumber(config?.threshold || 1);
+                const shares = config?.shares || {};
+                
+                // Calculate total voting power of YES votes
+                const yesVotingPower = yesVotes.reduce((total, [voter, _]) => {
+                    const voterShares = toNumber(shares[voter] || 0);
+                    return total + voterShares;
+                }, 0);
+                
+                // Calculate total voting power that has voted
+                const totalVoted = votes.reduce((total, [voter, _]) => {
+                    const voterShares = toNumber(shares[voter] || 0);
+                    return total + voterShares;
+                }, 0);
+                
+                // Calculate total possible voting power
+                const totalPossiblePower = Object.values(shares).reduce((total, power) => {
+                    return total + toNumber(power);
+                }, 0);
+                
+                // Calculate remaining voting power that could still vote
+                const remainingPower = totalPossiblePower - totalVoted;
+                
+                // Check if proposal can still reach threshold
+                const maxPossibleYes = yesVotingPower + remainingPower;
+                const canStillPass = maxPossibleYes >= threshold;
+                const isFailed = !canStillPass && proposal.status !== 'executed';
+                
+                const progressPercent = Math.min(safeDivide(safeMultiply(yesVotingPower, 100), threshold), 100);
+                const isExecuted = proposal.status === 'executed' || yesVotingPower >= threshold;
                 
                 // Debug: log vote processing
                 console.log(`🗳️ Rendering proposal ${item.key}:`, proposal);
@@ -4404,27 +4661,29 @@
                     const voteIcon = vote === 'yes' || vote === true ? '✅' : vote === 'no' || vote === false ? '❌' : '⚪';
                     const voteText = vote === 'yes' || vote === true ? 'yes' : vote === 'no' || vote === false ? 'no' : 'abstain';
                     
-                    let voteDisplay = `${escapeHtml(voter)} - ${voteIcon} ${voteText}`;
-                    if (comment) {
-                        voteDisplay += `<br/>&nbsp;&nbsp;&nbsp;&nbsp;"${escapeHtml(comment)}"`;
+                    let voteDisplay = `<div class="vote-entry">${escapeHtml(voter)} - ${voteIcon} ${voteText}`;
+                    if (comment && comment.trim()) {
+                        voteDisplay += `<br/><span class="vote-comment">"${escapeHtml(comment.trim())}"</span>`;
                     }
+                    voteDisplay += '</div>';
                     return voteDisplay;
-                }).join(', ');
+                }).join('');
                 
                 console.log(`🗳️ Final vote details for proposal ${item.key}:`, voteDetails);
                 
                 return `
-                    <div class="proposal-item ${isExecuted ? 'executed' : ''}">
+                    <div class="proposal-item ${isExecuted ? 'executed' : ''} ${isFailed ? 'failed' : ''}">
                         <div class="proposal-title">${escapeHtml(proposalText)}</div>
                         <div class="proposal-meta">
                             <span>By: ${escapeHtml(proposer)}</span>
                             ${isExecuted ? '<span class="executed-badge">✅ EXECUTED</span>' : ''}
+                            ${isFailed ? '<span class="failed-badge">❌ FAILED</span>' : ''}
                         </div>
                         <div class="proposal-progress">
                             <div class="progress-bar">
                                 <div class="progress-fill" style="width: ${progressPercent}%"></div>
                             </div>
-                            <div class="progress-text">${yesCount}/${threshold} votes (${Math.round(progressPercent)}%)</div>
+                            <div class="progress-text">${yesVotingPower}/${threshold} votes (${Math.round(progressPercent)}%)</div>
                         </div>
                         ${voteDetails ? `<div class="vote-details">${voteDetails}</div>` : ''}
                     </div>
@@ -4691,7 +4950,7 @@
             }).join('');
 
             // Auto-focus current server frame 
-            setTimeout(() => {
+                    setTimeout(() => {
                 if (typeof currentTimeIndex !== 'undefined' && currentTimeIndex >= 0) {
                     const currentFrameElement = container.querySelector(`[data-frame="${currentTimeIndex}"]`);
                     if (currentFrameElement) {
@@ -4799,6 +5058,21 @@
         function submitVote(tabId) {
             console.log('🗳️ Submitting vote for', tabId);
             
+            // Get current tab info
+            const tab = tabSystem.tabs.find(t => t.id === tabId);
+            if (!tab || !tab.entityId || !tab.signer) {
+                alert('Invalid tab or missing entity/signer information');
+                return;
+            }
+            
+            // Get replica for this tab
+            const replicaKey = `${tab.entityId}:${tab.signer}`;
+            const tabReplica = xlnEnv.replicas.get(replicaKey);
+            if (!tabReplica) {
+                alert('Replica not found for current tab');
+                return;
+            }
+            
             // Get form values
             const proposalId = document.getElementById(`proposalSelect-${tabId}`)?.value;
             const voteChoice = document.getElementById(`voteChoice-${tabId}`)?.value;
@@ -4812,9 +5086,9 @@
             }
             
             // Check if user already voted on this proposal
-            const currentProposal = replica.state.proposals.get(proposalId);
-            if (currentProposal && currentProposal.votes.has(replica.signerId)) {
-                alert(`You have already voted on this proposal as "${currentProposal.votes.get(replica.signerId)}".`);
+            const currentProposal = tabReplica.state.proposals.get(proposalId);
+            if (currentProposal && currentProposal.votes.has(tabReplica.signerId)) {
+                alert(`You have already voted on this proposal as "${currentProposal.votes.get(tabReplica.signerId)}".`);
                 return;
             }
             
@@ -4823,42 +5097,7 @@
                 return;
             }
             
-            // Get the replica for this tab
-            const activeTab = tabSystem.tabs.find(tab => tab.id === tabId);
-            if (!activeTab) {
-                alert('Invalid tab');
-                return;
-            }
-            
-            console.log('🗳️ Active tab:', activeTab);
-            console.log('🗳️ Looking for replica key:', `${activeTab.signer}:${activeTab.entityId}`);
-            console.log('🗳️ Available replica keys:', Array.from(xlnEnv?.replicas?.keys() || []));
-            console.log('🗳️ All replicas:', xlnEnv?.replicas);
-            
-            // Try multiple possible key formats
-            let replica = xlnEnv?.replicas?.get(`${activeTab.signer}:${activeTab.entityId}`);
-            
-            if (!replica) {
-                // Try reverse format
-                replica = xlnEnv?.replicas?.get(`${activeTab.entityId}:${activeTab.signer}`);
-            }
-            
-            if (!replica) {
-                // Try finding any replica with matching entityId and signer
-                replica = Array.from(xlnEnv?.replicas?.values() || []).find(r => 
-                    r.entityId === activeTab.entityId && r.signerId === activeTab.signer
-                );
-            }
-            
-            if (!replica) {
-                console.error('🗳️ Replica not found! Tab data:', activeTab);
-                console.error('🗳️ Available replicas:', Array.from(xlnEnv?.replicas?.keys() || []));
-                console.error('🗳️ Available replica values:', Array.from(xlnEnv?.replicas?.values() || []).map(r => ({ entityId: r.entityId, signerId: r.signerId })));
-                alert(`Entity replica not found. Looking for: ${activeTab.signer}:${activeTab.entityId}\nAvailable keys: ${Array.from(xlnEnv?.replicas?.keys() || []).join(', ')}`);
-                return;
-            }
-            
-            console.log('🗳️ Found replica:', replica);
+            console.log('🗳️ Found replica:', tabReplica);
             
             // Create vote transaction
             const voteValue = voteChoice === 'yes' ? 'yes' : voteChoice === 'no' ? 'no' : 'abstain';
@@ -4866,14 +5105,14 @@
                 type: 'vote',
                 data: {
                     proposalId,
-                    voter: replica.signerId,
+                    voter: tabReplica.signerId,
                     choice: voteValue,
                     comment: comment || undefined // Only include comment if provided
                 }
             };
             
             console.log('🗳️ Created vote transaction:', entityTx);
-            console.log('🗳️ Vote from:', replica.signerId, 'for entity:', replica.entityId.slice(0,8) + '...');
+            console.log('🗳️ Vote from:', tabReplica.signerId, 'for entity:', tabReplica.entityId.slice(0,8) + '...');
             
             try {
                 console.log('🔥 VOTE-INVOKE: Starting clean vote transaction');
@@ -4887,8 +5126,8 @@
                 let result = XLN.applyServerInput(xlnEnv, {
                     serverTxs: [],
                     entityInputs: [{
-                        entityId: replica.entityId,
-                        signerId: replica.signerId,
+                        entityId: tabReplica.entityId,
+                        signerId: tabReplica.signerId,
                         entityTxs: [entityTx]
                     }]
                 });
@@ -4904,7 +5143,7 @@
                 
                 // Log current proposal state from all replicas
                 Array.from(xlnEnv.replicas.values()).forEach(r => {
-                    if (r.entityId === replica.entityId) {
+                    if (r.entityId === tabReplica.entityId) {
                         console.log(`🗳️ After vote - Replica ${r.signerId} proposals:`, r.state?.proposals);
                         if (r.state?.proposals) {
                             const proposal = r.state.proposals.get ? r.state.proposals.get(proposalId) : r.state.proposals[proposalId];
@@ -4989,6 +5228,7 @@
             
             // Get validators from tab-specific form
             const validators = [];
+            const validatorData = []; // For lazy entity ID generation with weights
             const shares = {};
             let totalShares = 0;
             
@@ -5002,6 +5242,7 @@
                         const weight = parseInt(weightInput.value) || 1;
                         if (weight > 0) {
                             validators.push(select.value);
+                            validatorData.push({name: select.value, weight: weight});
                             shares[select.value] = BigInt(weight);
                             totalShares += weight;
                         }
@@ -5046,7 +5287,7 @@
                 // Create entity using new 3-tier system
                 if (entityType === 'lazy') {
                     config = XLN.createLazyEntity(entityName, validators, BigInt(threshold), jurisdictionConfig);
-                    entityId = XLN.generateLazyEntityId(validators, BigInt(threshold));
+                    entityId = XLN.generateLazyEntityId(validatorData, BigInt(threshold)); // Use validatorData with weights
                     console.log(`🔒 Lazy Entity ID: ${entityId}`);
                     
                 } else if (entityType === 'numbered') {
@@ -5163,14 +5404,14 @@
             newRow.setAttribute('data-validator-id', validatorCount);
             
             newRow.innerHTML = `
-                <select class="form-input" id="validator${validatorCount}-${tabId}">
+                <select class="form-input" id="validator${validatorCount}-${tabId}" onchange="updateTabQuorumHash('${tabId}')">
                     <option value="">Select signer...</option>
                     <option value="alice.eth">alice.eth</option>
                     <option value="bob.eth">bob.eth</option>
                     <option value="carol.eth">carol.eth</option>
                 </select>
-                <input type="number" class="form-input" style="width: 60px; margin-left: 8px;" placeholder="1" value="1" min="1">
-                <button type="button" class="form-button" style="margin-left: 8px; background: #f14c4c; padding: 4px 8px;" onclick="this.parentElement.remove()">❌</button>
+                <input type="number" class="form-input" style="width: 60px; margin-left: 8px;" placeholder="1" value="1" min="1" oninput="updateTabQuorumHash('${tabId}')">
+                <button type="button" class="form-button" style="margin-left: 8px; background: #f14c4c; padding: 4px 8px;" onclick="this.parentElement.remove(); updateTabQuorumHash('${tabId}')">❌</button>
             `;
             
             validatorsList.appendChild(newRow);
@@ -5186,6 +5427,76 @@
             const thresholdDisplay = document.getElementById(`thresholdValue-${tabId}`);
             if (thresholdInput && thresholdDisplay) {
                 thresholdDisplay.textContent = thresholdInput.value;
+            }
+            
+            // Update the quorum hash and entity ID preview
+            updateTabQuorumHash(tabId);
+        }
+        
+        function updateTabQuorumHash(tabId) {
+            const entityType = document.getElementById(`entityType-${tabId}`)?.value || 'lazy';
+            const entityName = document.getElementById(`entityName-${tabId}`)?.value || 'ACME';
+            const threshold = parseInt(document.getElementById(`threshold-${tabId}`)?.value) || 1;
+            
+            // Get validators with weights
+            const validatorData = [];
+            const validatorsList = document.getElementById(`validatorsList-${tabId}`);
+            if (validatorsList) {
+                const validatorRows = validatorsList.querySelectorAll('.validator-row-simple');
+                validatorRows.forEach((row, index) => {
+                    const select = row.querySelector(`select`);
+                    const weightInput = row.querySelector(`input[type="number"]`);
+                    if (select?.value && weightInput) {
+                        const weight = parseInt(weightInput.value) || 1;
+                        if (weight > 0) {
+                            validatorData.push({name: select.value, weight: weight});
+                        }
+                    }
+                });
+            }
+            
+            // Update total weight display
+            const totalWeight = validatorData.reduce((sum, v) => sum + v.weight, 0);
+            const totalWeightDisplay = document.getElementById(`totalWeight-${tabId}`);
+            if (totalWeightDisplay) {
+                totalWeightDisplay.textContent = totalWeight;
+            }
+            
+            // Update threshold max
+            const thresholdInput = document.getElementById(`threshold-${tabId}`);
+            if (thresholdInput) {
+                thresholdInput.max = totalWeight;
+                if (parseInt(thresholdInput.value) > totalWeight) {
+                    thresholdInput.value = totalWeight;
+                    const thresholdDisplay = document.getElementById(`thresholdValue-${tabId}`);
+                    if (thresholdDisplay) thresholdDisplay.textContent = totalWeight;
+                }
+            }
+            
+            // Generate quorum hash and entity ID preview
+            try {
+                if (validatorData.length > 0) {
+                    const quorumHashDiv = document.getElementById(`quorumHash-${tabId}`);
+                    const expectedEntityIdDiv = document.getElementById(`expectedEntityId-${tabId}`);
+                    
+                    if (entityType === 'lazy' && quorumHashDiv && expectedEntityIdDiv) {
+                        // Generate entity ID for lazy entities using weights
+                        const entityId = XLN.generateLazyEntityId(validatorData, BigInt(threshold));
+                        const quorumData = {
+                            validators: validatorData.slice().sort((a, b) => a.name.localeCompare(b.name)),
+                            threshold: threshold.toString()
+                        };
+                        const quorumHash = XLN.hashBoard(JSON.stringify(quorumData));
+                        
+                        quorumHashDiv.textContent = quorumHash;
+                        expectedEntityIdDiv.textContent = entityId;
+                    } else if (quorumHashDiv && expectedEntityIdDiv) {
+                        quorumHashDiv.textContent = 'Configure validators to see quorum hash';
+                        expectedEntityIdDiv.textContent = 'Configure validators to see entity ID';
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating quorum hash:', error);
             }
         }
 
@@ -5268,6 +5579,7 @@
         window.runDemoAndRefresh = runDemoAndRefresh;
         window.toggleDropdownMode = toggleDropdownMode;
         window.updateThresholdTab = updateThresholdTab;
+        window.updateTabQuorumHash = updateTabQuorumHash;
         window.submitEntityFormation = submitEntityFormation;
 
         window.XLN = XLN;
@@ -5279,11 +5591,15 @@
                 const modified = response.headers.get('last-modified');
                 
                 if (lastModified && modified !== lastModified) {
+                    console.log('🔄 Server file changed, triggering reload...');
                     const indicator = document.getElementById('reloadIndicator');
-                    indicator.classList.add('show');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 500);
+                    if (indicator) {
+                        indicator.style.display = 'block';
+                        indicator.classList.add('show');
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 500);
+                    }
                 }
                 lastModified = modified;
             } catch (error) {
@@ -8153,13 +8469,84 @@
         
         function showSettings() {
             console.log('Show settings');
-            // TODO: Show settings modal
+            
+            // Create settings modal if it doesn't exist
+            let settingsModal = document.getElementById('settingsModal');
+            if (!settingsModal) {
+                settingsModal = document.createElement('div');
+                settingsModal.id = 'settingsModal';
+                settingsModal.className = 'modal-overlay';
+                settingsModal.innerHTML = `
+                    <div class="modal-content settings-modal">
+                        <div class="modal-header">
+                            <h3>⚙️ Settings</h3>
+                            <button class="modal-close" onclick="closeSettings()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="setting-group">
+                                <label for="dropdownModeToggle">
+                                    <strong>Dropdown Hierarchy Mode</strong>
+                                    <br><small>Toggle between Jurisdiction→Signer→Entity vs Jurisdiction→Entity→Signers</small>
+                                </label>
+                                <div class="toggle-switch">
+                                    <input type="checkbox" id="dropdownModeToggle" onchange="toggleDropdownMode()">
+                                    <span class="toggle-slider"></span>
+                                </div>
+                                <div class="toggle-labels">
+                                    <span>Jur→Signer→Entity</span>
+                                    <span>Jur→Entity→Signers</span>
+                                </div>
+                            </div>
+                            
+                            <div class="setting-group">
+                                <label for="serverDelaySlider">
+                                    <strong>Server Processing Delay</strong>
+                                    <br><small>Simulate network delay in consensus processing (0ms = instant)</small>
+                                </label>
+                                <div class="slider-container">
+                                    <input type="range" id="serverDelaySlider" min="0" max="1000" value="0" oninput="updateServerDelay(this.value)">
+                                    <div class="slider-value">
+                                        <span id="delayValue">0</span> ms
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(settingsModal);
+                
+                // Load current settings
+                const currentDropdownMode = localStorage.getItem('xln-dropdown-mode') === 'entity-first';
+                document.getElementById('dropdownModeToggle').checked = currentDropdownMode;
+                
+                const currentDelay = parseInt(localStorage.getItem('xln-server-delay') || '0');
+                document.getElementById('serverDelaySlider').value = currentDelay;
+                document.getElementById('delayValue').textContent = currentDelay;
+            }
+            
+            settingsModal.style.display = 'flex';
+        }
+        
+        function closeSettings() {
+            const settingsModal = document.getElementById('settingsModal');
+            if (settingsModal) {
+                settingsModal.style.display = 'none';
+            }
+        }
+        
+        function updateServerDelay(value) {
+            document.getElementById('delayValue').textContent = value;
+            localStorage.setItem('xln-server-delay', value);
+            // Apply the delay to processUntilEmpty - we'll need to modify that function
+            window.serverDelay = parseInt(value);
         }
         
         window.populateUnifiedDropdown = populateUnifiedDropdown;
         window.toggleUnifiedDropdown = toggleUnifiedDropdown;
         window.showEntityCreator = showEntityCreator;
         window.showSettings = showSettings;
+        window.closeSettings = closeSettings;
+        window.updateServerDelay = updateServerDelay;
         window.submitChatMessage = submitChatMessage;
         window.submitProposal = submitProposal;
         window.submitVote = submitVote;
