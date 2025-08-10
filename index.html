@@ -5110,14 +5110,20 @@
                     }
                 }));
                 
-                // Process the server transactions using applyServerInput + processUntilEmpty
+                // Process the server transactions (using same pattern as working createSimpleEntity)
                 let outputs = XLN.applyServerInput(xlnEnv, {
                     serverTxs: serverTxs,
                     entityInputs: []
                 });
                 
-                // Process outputs until empty using centralized processUntilEmpty
-                await XLN.processUntilEmpty(xlnEnv, outputs);
+                // Process outputs until empty
+                while (outputs && outputs.length > 0) {
+                    const newOutputs = XLN.applyServerInput(xlnEnv, {
+                        serverTxs: [],
+                        entityInputs: outputs
+                    });
+                    outputs.splice(0, outputs.length, ...newOutputs);
+                }
                 
                 // Perform jurisdiction registration if selected
                 if (jurisdictionConfig) {
