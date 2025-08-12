@@ -21,3 +21,4 @@ logs/*
 bun.lockb
 # Local database files
 db/
+nul
