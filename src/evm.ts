@@ -253,8 +253,8 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       config = JSON.parse(configContent);
       console.log('✅ Loaded jurisdictions from config file');
     } else {
-      // Browser environment - fetch from server (relative path for GitHub Pages compatibility)
-      const response = await fetch('./jurisdictions.json');
+      // Browser environment - fetch from server (use root path so it works under /ui/* routes)
+      const response = await fetch('/jurisdictions.json');
       if (!response.ok) {
         throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
       }

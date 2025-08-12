@@ -4,6 +4,14 @@
   "main": "index.js",
   "scripts": {
     "dev": "./dev-full.sh",
+    "serve": "bun run serve.ts",
+    "serve:dev": "bun build src/server.ts --target browser --outfile dist/server.js && bun run serve.ts",
+    "notify:done": "bash ./scripts/notify.sh 'Task complete' 'XLN Agent' 'All done'",
+    "notify:fail": "bash ./scripts/notify.sh 'Task failed' 'XLN Agent' 'Check logs' 'Basso'",
+    "ui:dev": "cd ui && bun run dev",
+    "ui:build": "cd ui && bun run build && bash ../scripts/notify.sh 'UI build complete' 'XLN Agent' 'ui/dist ready'",
+    "test:e2e:notify": "bunx playwright test && bash ./scripts/notify.sh 'E2E passed' 'XLN Agent' || bash ./scripts/notify.sh 'E2E failed' 'XLN Agent' 'See report' 'Basso'",
+    "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "dev:quick": "./dev-quick.sh",
     "dev:watch": "./dev-watch.sh",
     "dev:reset": "./reset-networks.sh",
@@ -41,6 +49,7 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@playwright/test": "^1.47.2",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@tsconfig/node20": "^20.1.4",
     "@types/blessed": "^0.1.25",

@@ -42,8 +42,8 @@ sleep 2
 
 echo "🌐 Starting development server..."
 
-# Step 3: Start HTTP server in background  
-bunx serve . -p 8080 &
+# Step 3: Start HTTP server in background (serves legacy + /ui with SPA fallback)
+bun run serve.ts &
 SERVE_PID=$!
 
 # Wait for server to start
