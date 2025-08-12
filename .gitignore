@@ -1,3 +1,12 @@
+# E2E artifacts
+e2e/test-results/
+e2e/**/test-results/
+playwright-report/
+test-results/
+
+# OS/editor noise
+.DS_Store
+*.log
 
 node_modules
 .DS_Store
