@@ -40,19 +40,20 @@ WATCH_PID=$!
 # Wait a moment for initial build
 sleep 2
 
-echo "🌐 Starting development server..."
+echo "🌐 Starting Svelte development server..."
 
-# Step 3: Start HTTP server in background  
-bunx serve . -p 8080 &
+# Step 3: Start Svelte dev server in background  
+cd frontend && npm run dev &
 SERVE_PID=$!
 
 # Wait for server to start
-sleep 1
+sleep 3
 
 echo ""
 echo "✅ Full Development Environment Ready!"
 echo ""
-echo "🌐 Open: http://localhost:8080"
+echo "🌐 Open: http://localhost:5173 (Svelte frontend)"
+echo "🌐 API: http://localhost:8080 (if needed)"
 echo "📦 TypeScript: Auto-compiling on file changes"
 echo "🔗 Networks: Running on ports 8545, 8546, 8547"
 echo "📝 Contracts: Fresh deployment completed"
@@ -61,4 +62,4 @@ echo "💡 All services running - Press Ctrl+C to stop everything"
 echo ""
 
 # Wait for processes (this keeps the script running)
-wait $WATCH_PID $SERVE_PID 
+wait $WATCH_PID $SERVE_PID
