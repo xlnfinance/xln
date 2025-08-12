@@ -68,26 +68,10 @@ else
     echo "📁 Using bun's built-in watch mode"
 fi
 
-# Start simple HTTP server in background
-echo "🌐 Starting development server on http://localhost:8080..."
-bun run -e "
-const server = Bun.serve({
-  port: 8080,
-  fetch(request) {
-    const url = new URL(request.url);
-    const path = url.pathname === '/' ? '/index.html' : url.pathname;
-    
-    try {
-      const file = Bun.file('.' + path);
-      return new Response(file);
-    } catch (error) {
-      return new Response('Not found', { status: 404 });
-    }
-  },
-});
-console.log('Server running on http://localhost:8080');
-" &
-SERVER_PID=$!
+# Note: This script now only handles TypeScript compilation
+# For the frontend, run: cd frontend && npm run dev
+echo "📝 Note: TypeScript compilation only - for frontend run: cd frontend && npm run dev"
+SERVER_PID=""
 
 # Function to cleanup on exit
 cleanup() {
@@ -107,8 +91,8 @@ echo "   🌐 Development server: http://localhost:8080"
 echo "   📄 Open browser to see debugging interface"
 echo "   🔄 Files will auto-reload on changes with timestamp notifications"
 echo ""
-echo "💡 Look for rebuild messages with timestamps when you save files"
+echo "� Look for rebuild messages with timestamps when you save files"
 echo "Press Ctrl+C to stop..."
 
 # Wait for processes
-wait $WATCH_PID $SERVER_PID 
+wait $WATCH_PID $SERVER_PID

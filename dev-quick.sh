@@ -21,19 +21,19 @@ WATCH_PID=$!
 # Wait for TypeScript to build initially
 sleep 3
 
-# Start HTTP server
-echo "🌐 Starting HTTP server on port 8080..."
-bunx serve . -p 8080 &
+# Start Svelte dev server
+echo "🌐 Starting Svelte development server..."
+cd frontend && npm run dev &
 SERVE_PID=$!
 
-sleep 1
+sleep 3
 
 echo ""
 echo "✅ Quick Development Ready!"
-echo "🌐 Open: http://localhost:8080"
+echo "🌐 Open: http://localhost:5173 (Svelte frontend)"
 echo "📦 Auto-compilation: ON"
 echo ""
 echo "💡 Press Ctrl+C to stop"
 
 # Keep script running
-wait $WATCH_PID $SERVE_PID 
+wait $WATCH_PID $SERVE_PID
