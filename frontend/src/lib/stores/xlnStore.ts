@@ -32,8 +32,16 @@ const xlnOperations = {
       error.set(null);
       
       // Initialize the environment using XLNServer utility
-      const env = await XLNServer.main();
-      
+      const env: any = await XLNServer.main();
+
+      // Ensure history and serverOutputs exist so time machine works
+      const hist = await XLNServer.getHistory();
+      env.history = Array.isArray(hist) ? hist : [];
+      env.serverOutputs = Array.isArray(env.serverOutputs) ? env.serverOutputs : [];
+
+      // Log for debugging
+      console.log(`🕰️ xlnStore.initialize: history length = ${env.history.length}`);
+
       xlnEnvironment.set(env);
       isLoading.set(false);
       

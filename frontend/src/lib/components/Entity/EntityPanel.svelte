@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { Tab, EntityReplica } from '../../types';
   import { xlnOperations, replicas } from '../../stores/xlnStore';
+  import { visibleReplicas } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { XLNServer, escapeHtml } from '../../utils/xlnServer';
@@ -22,7 +23,9 @@
   // Reactive statement to get replica data
   $: {
     if (tab.entityId && tab.signer) {
-      replica = xlnOperations.getReplica(tab.entityId, tab.signer);
+      // Prefer time-aware replicas if available
+      const candidate = $visibleReplicas?.get?.(`${tab.entityId}:${tab.signer}`);
+      replica = candidate || xlnOperations.getReplica(tab.entityId, tab.signer);
     } else {
       replica = null;
     }

@@ -14,6 +14,21 @@ export const currentTimeIndex = derived(timeState, $state => $state.currentTimeI
 export const isLive = derived(timeState, $state => $state.isLive);
 export const maxTimeIndex = derived(timeState, $state => $state.maxTimeIndex);
 
+// When not live, expose replicas from the selected snapshot; otherwise use live env replicas
+export const visibleReplicas = derived(
+  [timeState, history, xlnEnvironment],
+  ([$timeState, $history, $env]) => {
+    if ($timeState.isLive) {
+      return $env?.replicas || new Map();
+    }
+    const idx = $timeState.currentTimeIndex;
+    if (idx >= 0 && idx < $history.length) {
+      return $history[idx]?.replicas || new Map();
+    }
+    return new Map();
+  }
+);
+
 // Time operations
 const timeOperations = {
   // Update max time index based on history length
