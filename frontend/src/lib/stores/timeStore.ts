@@ -30,20 +30,29 @@ const timeOperations = {
   // Go to specific time index
   goToTimeIndex(index: number) {
     const $timeState = get(timeState);
-    const clampedIndex = Math.max(-1, Math.min(index, $timeState.maxTimeIndex));
+    const $history = get(history);
+    const clampedIndex = Math.max(0, Math.min(index, $timeState.maxTimeIndex));
     
     timeState.set({
       currentTimeIndex: clampedIndex,
       maxTimeIndex: $timeState.maxTimeIndex,
-      isLive: clampedIndex === -1
+      isLive: false
     });
     
-    console.log('🕰️ Time machine moved to index:', clampedIndex);
+    console.log('🕰️ Time machine moved to index:', clampedIndex, 'of', $history.length, 'snapshots');
   },
 
   // Go to live (current time)
   goToLive() {
-    this.goToTimeIndex(-1);
+    const $timeState = get(timeState);
+    
+    timeState.set({
+      currentTimeIndex: -1,
+      maxTimeIndex: $timeState.maxTimeIndex,
+      isLive: true
+    });
+    
+    console.log('🕰️ Time machine moved to LIVE mode');
   },
 
   // Go to history start

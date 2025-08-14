@@ -28,7 +28,7 @@
 
   function getSliderValue(state: any, historyArray: any[]) {
     if (state.isLive) {
-      return state.maxTimeIndex + 1; // Live position
+      return historyArray.length; // Live position is beyond last snapshot
     }
     return state.currentTimeIndex;
   }
@@ -37,18 +37,22 @@
     if (state.isLive) {
       return 100;
     }
-    const sliderMax = state.maxTimeIndex + 1;
-    return sliderMax > 0 ? (state.currentTimeIndex / sliderMax) * 100 : 0;
+    const totalSteps = historyArray.length; // Include live position
+    return totalSteps > 0 ? (state.currentTimeIndex / (totalSteps - 1)) * 100 : 0;
   }
 
   function handleSliderChange(event: Event) {
     const target = event.target as HTMLInputElement;
     const value = parseInt(target.value);
-    const maxMeaningfulIndex = $timeState.maxTimeIndex;
+    const historyLength = $history.length;
     
-    if (value > maxMeaningfulIndex) {
+    console.log('🎛️ Time slider changed to:', value, 'History length:', historyLength);
+    
+    if (value >= historyLength) {
+      // Go to live
       timeOperations.goToLive();
     } else {
+      // Go to specific historical index
       timeOperations.goToTimeIndex(value);
     }
   }
@@ -127,7 +131,7 @@
       type="range" 
       class="time-slider" 
       min="0" 
-      max={$timeState.maxTimeIndex + 1}
+      max={$history.length}
       value={sliderValue}
       disabled={$history.length === 0}
       on:input={handleSliderChange}

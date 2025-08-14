@@ -8,87 +8,172 @@ let XLNModule: any = null;
 function createMockXLNModule() {
   console.log('🌐 Creating mock XLN module for browser environment');
   
-  // Mock environment with sample data
-  const mockEnv = {
-    replicas: new Map([
-      ['0x0000000000000000000000000000000000000000000000000000000000000001:alice', {
-        entityId: '0x0000000000000000000000000000000000000000000000000000000000000001',
-        signerId: 'alice',
-        state: {
-          height: 5,
-          timestamp: Date.now(),
-          nonces: new Map(),
-          messages: ['Hello from Alice!', 'This is a demo message', 'Consensus is working!'],
-          proposals: new Map([
-            ['prop1', {
-              proposer: 'alice',
-              action: { type: 'collective_message', data: { message: 'Increase block size' } },
-              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
-              status: 'active'
-            }]
-          ]),
-          config: {
-            validators: ['alice', 'bob', 'carol'],
-            threshold: 2,
-            shares: { alice: 1, bob: 1, carol: 1 },
-            mode: 'proposer-based',
-            jurisdiction: { name: 'Ethereum', chainId: 1 }
-          }
-        },
-        mempool: [],
-        isProposer: true
-      }],
-      ['0x0000000000000000000000000000000000000000000000000000000000000001:bob', {
-        entityId: '0x0000000000000000000000000000000000000000000000000000000000000001',
-        signerId: 'bob',
-        state: {
-          height: 5,
-          timestamp: Date.now(),
-          nonces: new Map(),
-          messages: ['Hello from Bob!', 'Consensus demo active'],
-          proposals: new Map([
-            ['prop1', {
-              proposer: 'alice',
-              action: { type: 'collective_message', data: { message: 'Increase block size' } },
-              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
-              status: 'active'
-            }]
-          ]),
-          config: {
-            validators: ['alice', 'bob', 'carol'],
-            threshold: 2,
-            shares: { alice: 1, bob: 1, carol: 1 },
-            mode: 'proposer-based',
-            jurisdiction: { name: 'Ethereum', chainId: 1 }
-          }
-        },
-        mempool: [],
-        isProposer: false
-      }]
-    ]),
-    height: 5,
-    timestamp: Date.now(),
-    serverInput: { serverTxs: [], entityInputs: [] }
-  };
+  // Create progressive snapshots for time machine functionality
+  const baseTime = Date.now() - 10000; // 10 seconds ago
+  const entityId = '0x0000000000000000000000000000000000000000000000000000000000000001';
+  
+  // Helper function to create replica state at different heights
+  function createReplicaState(signerId: string, height: number, messages: string[], proposals: any = {}) {
+    return {
+      entityId,
+      signerId,
+      state: {
+        height,
+        timestamp: baseTime + (height * 1000),
+        nonces: new Map(),
+        messages: [...messages],
+        proposals: new Map(Object.entries(proposals)),
+        config: {
+          validators: ['alice', 'bob', 'carol'],
+          threshold: 2,
+          shares: { alice: 1, bob: 1, carol: 1 },
+          mode: 'proposer-based',
+          jurisdiction: { name: 'Ethereum', chainId: 1 }
+        }
+      },
+      mempool: [],
+      isProposer: signerId === 'alice',
+      blockHeight: height
+    };
+  }
 
+  // Create historical snapshots showing progression
   const mockHistory = [
     {
-      height: 1,
-      timestamp: Date.now() - 4000,
-      description: 'Initial setup',
+      height: 0,
+      timestamp: baseTime,
+      description: 'Genesis - System initialization',
       replicas: new Map(),
       serverInput: { serverTxs: [], entityInputs: [] },
       serverOutputs: []
     },
     {
+      height: 1,
+      timestamp: baseTime + 1000,
+      description: 'Entity created - Validators joined',
+      replicas: new Map([
+        [`${entityId}:alice`, createReplicaState('alice', 1, ['System initialized'], {})],
+        [`${entityId}:bob`, createReplicaState('bob', 1, ['System initialized'], {})]
+      ]),
+      serverInput: { serverTxs: [], entityInputs: [] },
+      serverOutputs: []
+    },
+    {
       height: 2,
-      timestamp: Date.now() - 3000,
-      description: 'Entity creation',
-      replicas: mockEnv.replicas,
+      timestamp: baseTime + 2000,
+      description: 'First messages - Chat activity begins',
+      replicas: new Map([
+        [`${entityId}:alice`, createReplicaState('alice', 2, ['System initialized', 'Hello from Alice!'], {})],
+        [`${entityId}:bob`, createReplicaState('bob', 2, ['System initialized', 'Hello from Bob!'], {})]
+      ]),
+      serverInput: { serverTxs: [], entityInputs: [] },
+      serverOutputs: []
+    },
+    {
+      height: 3,
+      timestamp: baseTime + 3000,
+      description: 'Proposal submitted - Governance begins',
+      replicas: new Map([
+        [`${entityId}:alice`, createReplicaState('alice', 3, 
+          ['System initialized', 'Hello from Alice!', 'Submitting proposal...'], 
+          {
+            'prop1': {
+              proposer: 'alice',
+              action: { type: 'collective_message', data: { message: 'Increase block size' } },
+              votes: new Map([['alice', 'yes']]),
+              status: 'active'
+            }
+          }
+        )],
+        [`${entityId}:bob`, createReplicaState('bob', 3, 
+          ['System initialized', 'Hello from Bob!', 'Reviewing proposal...'], 
+          {
+            'prop1': {
+              proposer: 'alice',
+              action: { type: 'collective_message', data: { message: 'Increase block size' } },
+              votes: new Map([['alice', 'yes']]),
+              status: 'active'
+            }
+          }
+        )]
+      ]),
+      serverInput: { serverTxs: [], entityInputs: [] },
+      serverOutputs: []
+    },
+    {
+      height: 4,
+      timestamp: baseTime + 4000,
+      description: 'Votes cast - Consensus building',
+      replicas: new Map([
+        [`${entityId}:alice`, createReplicaState('alice', 4, 
+          ['System initialized', 'Hello from Alice!', 'Submitting proposal...', 'Waiting for votes...'], 
+          {
+            'prop1': {
+              proposer: 'alice',
+              action: { type: 'collective_message', data: { message: 'Increase block size' } },
+              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
+              status: 'active'
+            }
+          }
+        )],
+        [`${entityId}:bob`, createReplicaState('bob', 4, 
+          ['System initialized', 'Hello from Bob!', 'Reviewing proposal...', 'Voted YES on proposal'], 
+          {
+            'prop1': {
+              proposer: 'alice',
+              action: { type: 'collective_message', data: { message: 'Increase block size' } },
+              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
+              status: 'active'
+            }
+          }
+        )]
+      ]),
+      serverInput: { serverTxs: [], entityInputs: [] },
+      serverOutputs: []
+    },
+    {
+      height: 5,
+      timestamp: baseTime + 5000,
+      description: 'Current state - Proposal executed',
+      replicas: new Map([
+        [`${entityId}:alice`, createReplicaState('alice', 5, 
+          ['System initialized', 'Hello from Alice!', 'Submitting proposal...', 'Waiting for votes...', 'Proposal passed!'], 
+          {
+            'prop1': {
+              proposer: 'alice',
+              action: { type: 'collective_message', data: { message: 'Increase block size' } },
+              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
+              status: 'executed'
+            }
+          }
+        )],
+        [`${entityId}:bob`, createReplicaState('bob', 5, 
+          ['System initialized', 'Hello from Bob!', 'Reviewing proposal...', 'Voted YES on proposal', 'Consensus achieved!'], 
+          {
+            'prop1': {
+              proposer: 'alice',
+              action: { type: 'collective_message', data: { message: 'Increase block size' } },
+              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
+              status: 'executed'
+            }
+          }
+        )]
+      ]),
       serverInput: { serverTxs: [], entityInputs: [] },
       serverOutputs: []
     }
   ];
+
+  // Current environment state (latest snapshot)
+  const currentSnapshot = mockHistory[mockHistory.length - 1];
+  const mockEnv = {
+    replicas: currentSnapshot.replicas,
+    height: currentSnapshot.height,
+    timestamp: currentSnapshot.timestamp,
+    history: mockHistory,
+    serverInput: { serverTxs: [], entityInputs: [] },
+    serverOutputs: []
+  };
 
   return {
     main: async () => {

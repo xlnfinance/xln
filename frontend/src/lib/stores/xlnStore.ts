@@ -1,16 +1,33 @@
 import { writable, derived, get } from 'svelte/store';
 import type { XLNEnvironment, EntityReplica, Snapshot, EntityTx, EntityInput, EntityOutput } from '../types';
 import { XLNServer } from '../utils/xlnServer';
+import { timeState } from './timeStore';
 
 // Main XLN Environment Store
 export const xlnEnvironment = writable<XLNEnvironment | null>(null);
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
 
-// Derived stores for easier access
+// Derived stores for easier access - now time-aware
 export const replicas = derived(
-  xlnEnvironment,
-  ($env) => $env?.replicas || new Map<string, EntityReplica>()
+  [xlnEnvironment, timeState],
+  ([$env, $timeState]) => {
+    if (!$env) return new Map<string, EntityReplica>();
+    
+    // If we're in live mode, return current replicas
+    if ($timeState.isLive) {
+      return $env.replicas || new Map<string, EntityReplica>();
+    }
+    
+    // If we're viewing historical data, get replicas from the snapshot
+    if ($env.history && $timeState.currentTimeIndex >= 0 && $timeState.currentTimeIndex < $env.history.length) {
+      const snapshot = $env.history[$timeState.currentTimeIndex];
+      return snapshot.replicas || new Map<string, EntityReplica>();
+    }
+    
+    // Fallback to current replicas
+    return $env.replicas || new Map<string, EntityReplica>();
+  }
 );
 
 export const history = derived(
@@ -19,8 +36,24 @@ export const history = derived(
 );
 
 export const currentHeight = derived(
-  xlnEnvironment,
-  ($env) => $env?.height || 0
+  [xlnEnvironment, timeState],
+  ([$env, $timeState]) => {
+    if (!$env) return 0;
+    
+    // If we're in live mode, return current height
+    if ($timeState.isLive) {
+      return $env.height || 0;
+    }
+    
+    // If we're viewing historical data, get height from the snapshot
+    if ($env.history && $timeState.currentTimeIndex >= 0 && $timeState.currentTimeIndex < $env.history.length) {
+      const snapshot = $env.history[$timeState.currentTimeIndex];
+      return snapshot.height || 0;
+    }
+    
+    // Fallback to current height
+    return $env.height || 0;
+  }
 );
 
 // XLN Operations
