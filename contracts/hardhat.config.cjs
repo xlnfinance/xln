@@ -18,6 +18,10 @@ module.exports = {
     },
     hardhat: {
       chainId: 1337,
+      mining: {
+        auto: true,
+        interval: 1000
+      }
     },
     ethereum: {
       url: "http://127.0.0.1:8545",
