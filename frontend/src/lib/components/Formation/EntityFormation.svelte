@@ -1,11 +1,14 @@
 <script lang="ts">
   import { xlnOperations } from '../../stores/xlnStore';
+  import { entityService, isCreatingEntity, entityError, entities } from '../../services/entityService';
+  import { jurisdictions, allJurisdictionsConnected } from '../../services/jurisdictionService';
+  import { availableSigners } from '../../services/signerService';
   import Button from '../Common/Button.svelte';
   import FormField from '../Common/FormField.svelte';
   import type { EntityFormData } from '../../types';
 
   let formData: EntityFormData = {
-    jurisdiction: '8545',
+    jurisdiction: '',
     entityType: 'lazy',
     entityName: 'ACME',
     validators: [{ name: 'alice', weight: 1 }],
@@ -14,6 +17,20 @@
 
   let isCreating = false;
   let error = '';
+
+  // Set default jurisdiction when jurisdictions become available
+  $: if ($jurisdictions.size > 0 && !formData.jurisdiction) {
+    const connectedJurisdictions = Array.from($jurisdictions.values()).filter(j => j.connected);
+    if (connectedJurisdictions.length > 0) {
+      formData.jurisdiction = connectedJurisdictions[0].name;
+    } else {
+      // If no connected jurisdictions, select the first one anyway for testing
+      const allJurisdictions = Array.from($jurisdictions.values());
+      if (allJurisdictions.length > 0) {
+        formData.jurisdiction = allJurisdictions[0].name;
+      }
+    }
+  }
 
   function addValidator() {
     formData.validators = [...formData.validators, { name: '', weight: 1 }];
@@ -33,10 +50,9 @@
   }
 
   async function createEntity() {
-    if (isCreating) return;
+    if ($isCreatingEntity) return;
     
     error = '';
-    isCreating = true;
 
     try {
       // Validate form
@@ -53,22 +69,46 @@
         throw new Error('Threshold cannot exceed total weight');
       }
 
-      // Create entity using store operations
-      await xlnOperations.createEntity({
-        entityType: formData.entityType,
-        entityName: formData.entityName,
-        validators: formData.validators.map(v => v.name),
-        threshold: formData.threshold,
-        jurisdiction: formData.jurisdiction
-      });
+      // Check if jurisdictions are connected
+      if (!$allJurisdictionsConnected) {
+        throw new Error('Not all jurisdictions are connected. Please check the Jurisdictions tab.');
+      }
 
-      // Reset form on success
-      clearForm();
+      // Use the selected jurisdiction directly
+      const jurisdictionName = formData.jurisdiction;
+      if (!jurisdictionName) {
+        throw new Error('Please select a jurisdiction');
+      }
+
+      // Create entity using the real entity service
+      if (formData.entityType === 'numbered') {
+        const entityConfig = await entityService.createNumberedEntity(
+          formData.entityName,
+          jurisdictionName,
+          formData.validators.map(v => v.name),
+          formData.threshold
+        );
+
+        console.log('✅ Numbered entity created:', entityConfig);
+        
+        // Reset form on success
+        clearForm();
+      } else {
+        // For now, fall back to XLN operations for lazy/named entities
+        await xlnOperations.createEntity({
+          entityType: formData.entityType,
+          entityName: formData.entityName,
+          validators: formData.validators.map(v => v.name),
+          threshold: formData.threshold,
+          jurisdiction: formData.jurisdiction
+        });
+
+        // Reset form on success
+        clearForm();
+      }
       
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to create entity';
-    } finally {
-      isCreating = false;
     }
   }
 
@@ -144,15 +184,23 @@
     <div class="formation-group">
       <label for="jurisdictionSelect">🏛️ Jurisdiction:</label>
       <select id="jurisdictionSelect" bind:value={formData.jurisdiction}>
-        <option value="8545">Ethereum Mainnet (Port 8545)</option>
-        <option value="8546">Polygon Network (Port 8546)</option>
-        <option value="8547">Arbitrum One (Port 8547)</option>
+        {#if $jurisdictions.size === 0}
+          <option value="">Loading jurisdictions...</option>
+        {:else}
+          {#each Array.from($jurisdictions.values()) as jurisdiction}
+            <option value={jurisdiction.name} disabled={!jurisdiction.connected}>
+              {jurisdiction.name.charAt(0).toUpperCase() + jurisdiction.name.slice(1)} Network 
+              {jurisdiction.connected ? '✅' : '❌'}
+            </option>
+          {:else}
+            <option value="">No jurisdictions found</option>
+          {/each}
+        {/if}
       </select>
       <div class="jurisdiction-info">
         <small>
-          <strong>📡 Network:</strong> {formData.jurisdiction === '8545' ? 'Ethereum Mainnet' : 
-                                        formData.jurisdiction === '8546' ? 'Polygon Network' : 'Arbitrum One'}<br>
-          <strong>🔗 RPC Port:</strong> {formData.jurisdiction}
+          <strong>📡 Network:</strong> {formData.jurisdiction ? formData.jurisdiction.charAt(0).toUpperCase() + formData.jurisdiction.slice(1) : 'Select jurisdiction'}<br>
+          <strong>🔗 Status:</strong> {Array.from($jurisdictions.values()).find(j => j.name === formData.jurisdiction)?.connected ? '✅ Connected' : '❌ Disconnected'}
         </small>
       </div>
     </div>
@@ -195,11 +243,9 @@
           <div class="validator-row">
             <select bind:value={validator.name} class="validator-name">
               <option value="">Select signer...</option>
-              <option value="alice">alice.eth</option>
-              <option value="bob">bob.eth</option>
-              <option value="carol">carol.eth</option>
-              <option value="david">david.eth</option>
-              <option value="eve">eve.eth</option>
+              {#each $availableSigners as signer}
+                <option value={signer.id}>{signer.avatar} {signer.displayName}</option>
+              {/each}
             </select>
             <input 
               type="number" 
