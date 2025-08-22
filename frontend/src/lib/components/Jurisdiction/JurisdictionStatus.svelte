@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { 
-    jurisdictionService, 
+    jurisdictionOperations, 
     jurisdictions, 
     isConnecting, 
     connectionError, 
@@ -11,7 +11,7 @@
     formatEntityId,
     type JurisdictionStatus,
     type EntityShareInfo
-  } from '../../services/jurisdictionService';
+  } from '../../stores/jurisdictionStore';
 
   let refreshInterval: NodeJS.Timeout;
   let selectedJurisdiction: string = 'ethereum';
@@ -22,11 +22,11 @@
   // Initialize jurisdiction service on mount
   onMount(async () => {
     try {
-      await jurisdictionService.initialize();
+      await jurisdictionOperations.initialize();
       
       // Set up periodic refresh
       refreshInterval = setInterval(() => {
-        jurisdictionService.refreshJurisdictionStatus();
+        jurisdictionOperations.refreshJurisdictionStatus();
       }, 30000); // Refresh every 30 seconds
       
       // Load initial entity info
@@ -40,11 +40,11 @@
     if (refreshInterval) {
       clearInterval(refreshInterval);
     }
-    jurisdictionService.disconnect();
+    jurisdictionOperations.disconnect();
   });
 
   async function handleRefresh() {
-    await jurisdictionService.refreshJurisdictionStatus();
+    await jurisdictionOperations.refreshJurisdictionStatus();
   }
 
   async function loadEntityInfo() {
@@ -52,7 +52,7 @@
     
     loadingEntityInfo = true;
     try {
-      entityInfo = await jurisdictionService.getEntityInfo(selectedJurisdiction, entityNumber);
+      entityInfo = await jurisdictionOperations.getEntityInfo(selectedJurisdiction, entityNumber);
     } catch (error) {
       console.error('Failed to load entity info:', error);
       entityInfo = null;
@@ -64,7 +64,7 @@
   async function handleCreateEntity() {
     try {
       const boardHash = `0x${Math.random().toString(16).substr(2, 64)}`;
-      const result = await jurisdictionService.createEntity(selectedJurisdiction, boardHash);
+      const result = await jurisdictionOperations.createEntity(selectedJurisdiction, boardHash);
       console.log('Entity created:', result);
       
       // Update entity number to the newly created one

@@ -1,9 +1,9 @@
-// Entity Service - Real Entity Creation & Share Management
-// Handles numbered entity creation with C/D shares and TradFi-like operations
+// Entity Service - Real Entity Creation & Share Management for XLN Daemon
+// This is the daemon-level entity management that works in both CLI and browser modes
 
-import { writable, derived, get } from 'svelte/store';
-import { jurisdictionService, type EntityShareInfo } from './jurisdictionService';
-import { xlnOperations } from '../stores/xlnStore';
+import { jurisdictionService, type EntityShareInfo } from './jurisdiction-service.js';
+import { applyServerInput } from './server.js';
+import type { Env } from './types.js';
 
 // Types for entity management
 export interface EntityConfig {
@@ -56,46 +56,26 @@ export interface BoardVote {
   executedAt?: number;
 }
 
-// Stores
-export const entities = writable<Map<string, EntityConfig>>(new Map());
-export const shareOwnerships = writable<Map<string, ShareOwnership[]>>(new Map());
-export const shareTransfers = writable<ShareTransfer[]>([]);
-export const boardVotes = writable<BoardVote[]>([]);
-export const isCreatingEntity = writable<boolean>(false);
-export const entityError = writable<string | null>(null);
-
-// Derived stores
-export const entitiesByJurisdiction = derived(
-  entities,
-  ($entities) => {
-    const byJurisdiction = new Map<string, EntityConfig[]>();
-    for (const entity of $entities.values()) {
-      const existing = byJurisdiction.get(entity.jurisdiction) || [];
-      existing.push(entity);
-      byJurisdiction.set(entity.jurisdiction, existing);
-    }
-    return byJurisdiction;
-  }
-);
-
-export const activeVotes = derived(
-  boardVotes,
-  ($votes) => $votes.filter(vote => vote.status === 'active')
-);
+// Global entity state
+const entities: Map<string, EntityConfig> = new Map();
+const shareOwnerships: Map<string, ShareOwnership[]> = new Map();
+const shareTransfers: ShareTransfer[] = [];
+const boardVotes: BoardVote[] = [];
+let isCreatingEntity = false;
+let entityError: string | null = null;
 
 // Entity Service Implementation
-class EntityServiceImpl {
-  private nextEntityId = 1;
-
+export class EntityService {
   async createNumberedEntity(
     entityName: string,
     jurisdiction: string,
     validators: string[],
-    threshold: number
+    threshold: number,
+    env?: Env
   ): Promise<EntityConfig> {
     try {
-      isCreatingEntity.set(true);
-      entityError.set(null);
+      isCreatingEntity = true;
+      entityError = null;
 
       console.log(`🏗️ Creating numbered entity "${entityName}" on ${jurisdiction}`);
 
@@ -119,24 +99,24 @@ class EntityServiceImpl {
       };
 
       // Store entity configuration
-      const $entities = get(entities);
-      $entities.set(entityConfig.entityId, entityConfig);
-      entities.set($entities);
+      entities.set(entityConfig.entityId, entityConfig);
 
       // Initialize share ownership (entity owns 100% of its own shares initially)
       await this.initializeShareOwnership(entityConfig);
 
-      // Create E-machine replica for this entity
-      await this.createEntityReplica(entityConfig);
+      // Create E-machine replica for this entity if env is provided
+      if (env) {
+        await this.createEntityReplica(entityConfig, env);
+      }
 
       console.log(`✅ Entity created: ${entityName} (#${result.entityNumber}) on ${jurisdiction}`);
       
-      isCreatingEntity.set(false);
+      isCreatingEntity = false;
       return entityConfig;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to create entity';
-      entityError.set(errorMessage);
-      isCreatingEntity.set(false);
+      entityError = errorMessage;
+      isCreatingEntity = false;
       console.error('❌ Entity creation failed:', error);
       throw error;
     }
@@ -166,14 +146,12 @@ class EntityServiceImpl {
       lastUpdated: Date.now()
     };
 
-    const $ownerships = get(shareOwnerships);
-    $ownerships.set(entity.entityId, [ownership]);
-    shareOwnerships.set($ownerships);
+    shareOwnerships.set(entity.entityId, [ownership]);
 
     console.log(`💰 Initialized share ownership for ${entity.entityName}: 1Q C-shares, 1Q D-shares`);
   }
 
-  private async createEntityReplica(entity: EntityConfig) {
+  private async createEntityReplica(entity: EntityConfig, env: Env) {
     try {
       // Create server transactions to import the entity replica for all validators
       const serverTxs = entity.validators.map((signerId, index) => ({
@@ -197,7 +175,7 @@ class EntityServiceImpl {
       }));
 
       // Apply the server transactions through XLN operations
-      await xlnOperations.applyServerInput({ serverTxs });
+      applyServerInput(env, { serverTxs, entityInputs: [] });
 
       console.log(`🔗 Created E-machine replicas for entity ${entity.entityName}`);
     } catch (error) {
@@ -229,9 +207,7 @@ class EntityServiceImpl {
       };
 
       // Add to transfers list
-      const $transfers = get(shareTransfers);
-      $transfers.push(transfer);
-      shareTransfers.set($transfers);
+      shareTransfers.push(transfer);
 
       // Update ownership records
       await this.updateShareOwnership(entityId, from, to, cShares, dShares);
@@ -239,7 +215,6 @@ class EntityServiceImpl {
       // Mark transfer as confirmed (in real implementation, this would wait for blockchain confirmation)
       transfer.status = 'confirmed';
       transfer.transactionHash = `0x${Math.random().toString(16).substr(2, 64)}`;
-      shareTransfers.set($transfers);
 
       console.log(`✅ Share transfer completed: ${transfer.id}`);
       return transfer;
@@ -256,8 +231,7 @@ class EntityServiceImpl {
     cShares: bigint,
     dShares: bigint
   ) {
-    const $ownerships = get(shareOwnerships);
-    const entityOwnerships = $ownerships.get(entityId) || [];
+    const entityOwnerships = shareOwnerships.get(entityId) || [];
 
     // Find or create ownership records
     let fromOwnership = entityOwnerships.find(o => o.holder === from);
@@ -268,7 +242,7 @@ class EntityServiceImpl {
     }
 
     if (fromOwnership.cShares < cShares || fromOwnership.dShares < dShares) {
-      throw new Error(`Insufficient shares for transfer`);
+      throw new Error('Insufficient shares for transfer');
     }
 
     // Update from ownership
@@ -278,7 +252,7 @@ class EntityServiceImpl {
 
     // Update or create to ownership
     if (!toOwnership) {
-      const entity = get(entities).get(entityId);
+      const entity = entities.get(entityId);
       toOwnership = {
         entityId,
         entityNumber: entity?.entityNumber || 0,
@@ -299,8 +273,7 @@ class EntityServiceImpl {
     // Recalculate percentages
     await this.recalculateOwnershipPercentages(entityId, entityOwnerships);
 
-    $ownerships.set(entityId, entityOwnerships);
-    shareOwnerships.set($ownerships);
+    shareOwnerships.set(entityId, entityOwnerships);
   }
 
   private async recalculateOwnershipPercentages(entityId: string, ownerships: ShareOwnership[]) {
@@ -319,7 +292,7 @@ class EntityServiceImpl {
     newBoardHash: string
   ): Promise<BoardVote> {
     try {
-      const entity = get(entities).get(entityId);
+      const entity = entities.get(entityId);
       if (!entity) {
         throw new Error(`Entity ${entityId} not found`);
       }
@@ -340,9 +313,7 @@ class EntityServiceImpl {
         createdAt: Date.now()
       };
 
-      const $votes = get(boardVotes);
-      $votes.push(vote);
-      boardVotes.set($votes);
+      boardVotes.push(vote);
 
       console.log(`✅ Board hash replacement proposal created: ${vote.id}`);
       return vote;
@@ -358,8 +329,7 @@ class EntityServiceImpl {
     choice: 'yes' | 'no' | 'abstain'
   ): Promise<void> {
     try {
-      const $votes = get(boardVotes);
-      const vote = $votes.find(v => v.id === voteId);
+      const vote = boardVotes.find(v => v.id === voteId);
       
       if (!vote) {
         throw new Error(`Vote ${voteId} not found`);
@@ -370,8 +340,7 @@ class EntityServiceImpl {
       }
 
       // Get voter's C-share ownership
-      const $ownerships = get(shareOwnerships);
-      const entityOwnerships = $ownerships.get(vote.entityId) || [];
+      const entityOwnerships = shareOwnerships.get(vote.entityId) || [];
       const voterOwnership = entityOwnerships.find(o => o.holder === voter);
 
       if (!voterOwnership || voterOwnership.cShares === BigInt(0)) {
@@ -403,8 +372,6 @@ class EntityServiceImpl {
         vote.status = 'failed';
       }
 
-      boardVotes.set($votes);
-
       console.log(`🗳️ Vote cast by ${voter}: ${choice} on ${voteId}`);
     } catch (error) {
       console.error('❌ Failed to cast vote:', error);
@@ -414,8 +381,7 @@ class EntityServiceImpl {
 
   private async executeBoardHashReplacement(vote: BoardVote) {
     try {
-      const $entities = get(entities);
-      const entity = $entities.get(vote.entityId);
+      const entity = entities.get(vote.entityId);
       
       if (!entity) {
         throw new Error(`Entity ${vote.entityId} not found`);
@@ -423,8 +389,7 @@ class EntityServiceImpl {
 
       // Update entity board hash
       entity.boardHash = vote.newBoardHash;
-      $entities.set(vote.entityId, entity);
-      entities.set($entities);
+      entities.set(vote.entityId, entity);
 
       // Mark vote as executed
       vote.status = 'executed';
@@ -440,24 +405,47 @@ class EntityServiceImpl {
     }
   }
 
-  async getEntityInfo(entityId: string): Promise<EntityConfig | null> {
-    const $entities = get(entities);
-    return $entities.get(entityId) || null;
+  // Getter methods
+  getEntityInfo(entityId: string): EntityConfig | null {
+    return entities.get(entityId) || null;
   }
 
-  async getShareOwnership(entityId: string): Promise<ShareOwnership[]> {
-    const $ownerships = get(shareOwnerships);
-    return $ownerships.get(entityId) || [];
+  getShareOwnership(entityId: string): ShareOwnership[] {
+    return shareOwnerships.get(entityId) || [];
   }
 
-  async getEntityTransfers(entityId: string): Promise<ShareTransfer[]> {
-    const $transfers = get(shareTransfers);
-    return $transfers.filter(t => t.entityId === entityId);
+  getEntityTransfers(entityId: string): ShareTransfer[] {
+    return shareTransfers.filter(t => t.entityId === entityId);
   }
 
-  async getEntityVotes(entityId: string): Promise<BoardVote[]> {
-    const $votes = get(boardVotes);
-    return $votes.filter(v => v.entityId === entityId);
+  getEntityVotes(entityId: string): BoardVote[] {
+    return boardVotes.filter(v => v.entityId === entityId);
+  }
+
+  getAllEntities(): Map<string, EntityConfig> {
+    return entities;
+  }
+
+  getEntitiesByJurisdiction(): Map<string, EntityConfig[]> {
+    const byJurisdiction = new Map<string, EntityConfig[]>();
+    for (const entity of entities.values()) {
+      const existing = byJurisdiction.get(entity.jurisdiction) || [];
+      existing.push(entity);
+      byJurisdiction.set(entity.jurisdiction, existing);
+    }
+    return byJurisdiction;
+  }
+
+  getActiveVotes(): BoardVote[] {
+    return boardVotes.filter(vote => vote.status === 'active');
+  }
+
+  isEntityCreationInProgress(): boolean {
+    return isCreatingEntity;
+  }
+
+  getEntityError(): string | null {
+    return entityError;
   }
 
   // Utility methods
@@ -489,7 +477,7 @@ class EntityServiceImpl {
 }
 
 // Export singleton instance
-export const entityService = new EntityServiceImpl();
+export const entityService = new EntityService();
 
 // Export utility functions
 export function formatEntityId(entityNumber: number): string {

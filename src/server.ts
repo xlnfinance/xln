@@ -26,6 +26,8 @@ import {
   getJurisdictions, getAvailableJurisdictions, getJurisdictionByAddress
 } from './evm.js';
 import { runDemo } from './rundemo.js';
+import { jurisdictionService } from './jurisdiction-service.js';
+import { entityService } from './entity-service.js';
 
 import { testFullCycle } from './hanko-real.js';
 import { runDepositoryHankoTests } from './test-depository-hanko.js';
@@ -445,6 +447,10 @@ export {
   getAvailableJurisdictions, 
   getJurisdictionByAddress, 
   demoCompleteHanko,
+
+  // Services
+  jurisdictionService,
+  entityService,
 
   // Entity creation functions
   createLazyEntity,

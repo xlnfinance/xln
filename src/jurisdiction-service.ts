@@ -1,8 +1,8 @@
-// Jurisdiction Service - J-Machine Integration
-// Handles connection to 3 hardhat nodes and EntityProvider.sol contracts
+// Jurisdiction Service - J-Machine Integration for XLN Daemon
+// This is the daemon-level jurisdiction management that works in both CLI and browser modes
 
-import { writable, derived, get } from 'svelte/store';
 import { ethers } from 'ethers';
+import { isBrowser } from './utils.js';
 
 // Types for jurisdiction management
 export interface JurisdictionConfig {
@@ -60,29 +60,15 @@ const DEPOSITORY_ABI = [
   "event Withdrawal(address indexed token, address indexed account, uint256 amount)"
 ];
 
-// Stores
-export const jurisdictions = writable<Map<string, JurisdictionStatus>>(new Map());
-export const isConnecting = writable<boolean>(false);
-export const connectionError = writable<string | null>(null);
-
-// Derived store for connection status
-export const allJurisdictionsConnected = derived(
-  jurisdictions,
-  ($jurisdictions) => {
-    const statuses = Array.from($jurisdictions.values());
-    return statuses.length === 3 && statuses.every(status => status.connected);
-  }
-);
+// Global jurisdiction state
+let jurisdictionConfigs: Map<string, JurisdictionConfig> = new Map();
+let jurisdictionStatuses: Map<string, JurisdictionStatus> = new Map();
+let eventListeners: Map<string, ethers.Contract> = new Map();
 
 // Jurisdiction Service Implementation
-class JurisdictionServiceImpl {
-  private jurisdictionConfigs: Map<string, JurisdictionConfig> = new Map();
-  private eventListeners: Map<string, ethers.Contract> = new Map();
-
-  async initialize() {
+export class JurisdictionService {
+  async initialize(): Promise<Map<string, JurisdictionStatus>> {
     try {
-      isConnecting.set(true);
-      connectionError.set(null);
       console.log('🏛️ Starting J-Machine initialization...');
 
       // Load jurisdiction configurations
@@ -98,11 +84,8 @@ class JurisdictionServiceImpl {
       console.log('👂 Set up event listeners');
 
       console.log('🏛️ J-Machine initialized successfully');
-      isConnecting.set(false);
+      return jurisdictionStatuses;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to initialize J-Machine';
-      connectionError.set(errorMessage);
-      isConnecting.set(false);
       console.error('❌ J-Machine initialization failed:', error);
       throw error;
     }
@@ -110,25 +93,34 @@ class JurisdictionServiceImpl {
 
   private async loadJurisdictionConfigs() {
     try {
-      console.log('📡 Fetching jurisdiction configurations from /jurisdictions.json...');
-      // In browser environment, we'll use the jurisdictions.json data
-      // In production, this would be loaded from the server
-      const response = await fetch('/jurisdictions.json');
-      console.log('📡 Response status:', response.status, response.statusText);
+      console.log('📡 Loading jurisdiction configurations...');
       
-      if (!response.ok) {
-        throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+      let data: any;
+      
+      if (isBrowser) {
+        // In browser, fetch from static file
+        const response = await fetch('/jurisdictions.json');
+        if (!response.ok) {
+          throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+        }
+        data = await response.json();
+      } else {
+        // In Node.js, read from file system
+        const fs = await import('fs');
+        const path = await import('path');
+        const jurisdictionsPath = path.resolve('jurisdictions.json');
+        const fileContent = fs.readFileSync(jurisdictionsPath, 'utf-8');
+        data = JSON.parse(fileContent);
       }
       
-      const data = await response.json();
       console.log('📋 Fetched data:', data);
       
       for (const [key, config] of Object.entries(data.jurisdictions)) {
-        this.jurisdictionConfigs.set(key, config as JurisdictionConfig);
+        jurisdictionConfigs.set(key, config as JurisdictionConfig);
         console.log(`📋 Loaded jurisdiction: ${key}`, config);
       }
 
-      console.log('📋 Loaded jurisdiction configurations:', this.jurisdictionConfigs.size);
+      console.log('📋 Loaded jurisdiction configurations:', jurisdictionConfigs.size);
     } catch (error) {
       console.error('❌ Failed to load jurisdiction configs:', error);
       throw error;
@@ -138,7 +130,7 @@ class JurisdictionServiceImpl {
   private async connectToAllJurisdictions() {
     const statusMap = new Map<string, JurisdictionStatus>();
 
-    for (const [name, config] of this.jurisdictionConfigs) {
+    for (const [name, config] of jurisdictionConfigs) {
       console.log(`🔌 Attempting to connect to ${config.name} (${config.rpc})...`);
       try {
         const status = await this.connectToJurisdiction(name, config);
@@ -155,12 +147,12 @@ class JurisdictionServiceImpl {
         statusMap.set(name, errorStatus);
         console.error(`❌ Failed to connect to ${config.name}:`, error);
         
-        // For now, let's still add disconnected jurisdictions to the map so they show up in the dropdown
+        // Still add disconnected jurisdictions for UI display
         console.log(`➕ Adding disconnected jurisdiction ${config.name} to map for dropdown display`);
       }
     }
 
-    jurisdictions.set(statusMap);
+    jurisdictionStatuses = statusMap;
     console.log(`🗺️ Final jurisdiction map size: ${statusMap.size}`);
   }
 
@@ -205,9 +197,7 @@ class JurisdictionServiceImpl {
   }
 
   private async setupEventListeners() {
-    const $jurisdictions = get(jurisdictions);
-
-    for (const [name, status] of $jurisdictions) {
+    for (const [name, status] of jurisdictionStatuses) {
       if (status.connected && status.entityProviderContract) {
         // Listen for EntityRegistered events
         status.entityProviderContract.on('EntityRegistered', (entityId, entityNumber, boardHash, event) => {
@@ -231,7 +221,7 @@ class JurisdictionServiceImpl {
           this.handleGovernanceEnabled(name, entityId, controlTokenId, dividendTokenId, event);
         });
 
-        this.eventListeners.set(name, status.entityProviderContract);
+        eventListeners.set(name, status.entityProviderContract);
       }
     }
 
@@ -278,11 +268,9 @@ class JurisdictionServiceImpl {
     // TODO: Integrate with server.ts to create actual proposals
   }
 
-
-
   // Public methods for entity operations
   async createEntity(jurisdiction: string, boardHash: string, signerPrivateKey?: string): Promise<{ entityNumber: number; transactionHash: string }> {
-    const status = get(jurisdictions).get(jurisdiction);
+    const status = jurisdictionStatuses.get(jurisdiction);
     if (!status || !status.connected || !status.entityProviderContract) {
       throw new Error(`Not connected to jurisdiction: ${jurisdiction}`);
     }
@@ -319,7 +307,7 @@ class JurisdictionServiceImpl {
   }
 
   async getEntityInfo(jurisdiction: string, entityNumber: number): Promise<EntityShareInfo | null> {
-    const status = get(jurisdictions).get(jurisdiction);
+    const status = jurisdictionStatuses.get(jurisdiction);
     if (!status || !status.connected || !status.entityProviderContract) {
       return null;
     }
@@ -357,28 +345,36 @@ class JurisdictionServiceImpl {
     }
   }
 
-  async refreshJurisdictionStatus() {
+  async refreshJurisdictionStatus(): Promise<Map<string, JurisdictionStatus>> {
     await this.connectToAllJurisdictions();
+    return jurisdictionStatuses;
+  }
+
+  getJurisdictions(): Map<string, JurisdictionStatus> {
+    return jurisdictionStatuses;
+  }
+
+  getAllJurisdictionsConnected(): boolean {
+    const statuses = Array.from(jurisdictionStatuses.values());
+    return statuses.length === 3 && statuses.every(status => status.connected);
   }
 
   disconnect() {
     // Clean up event listeners
-    for (const [name, contract] of this.eventListeners) {
+    for (const [name, contract] of eventListeners) {
       contract.removeAllListeners();
     }
-    this.eventListeners.clear();
+    eventListeners.clear();
 
-    // Reset stores
-    jurisdictions.set(new Map());
-    isConnecting.set(false);
-    connectionError.set(null);
+    // Reset state
+    jurisdictionStatuses.clear();
 
     console.log('🔌 Disconnected from all jurisdictions');
   }
 }
 
 // Export singleton instance
-export const jurisdictionService = new JurisdictionServiceImpl();
+export const jurisdictionService = new JurisdictionService();
 
 // Utility functions
 export function formatShares(shares: bigint): string {

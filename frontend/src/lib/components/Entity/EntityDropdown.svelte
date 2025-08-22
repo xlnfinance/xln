@@ -3,8 +3,13 @@
   import { replicas } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
   import { XLNServer } from '../../utils/xlnServer';
-  import { jurisdictions, jurisdictionService } from '../../services/jurisdictionService';
-  import { entityService, entities } from '../../services/entityService';
+  import { 
+    jurisdictions, 
+    jurisdictionOperations,
+    isConnecting,
+    connectionError
+  } from '../../stores/jurisdictionStore';
+  import { entities, entityOperations } from '../../stores/entityStore';
   import type { Tab } from '../../types';
 
   export let tab: Tab;
@@ -25,14 +30,11 @@
       
       // Initialize jurisdiction service if not already done
       if ($jurisdictions.size === 0) {
-        await jurisdictionService.initialize();
+        await jurisdictionOperations.initialize();
       }
       
-      // Initialize entity service if not already done
-      if ($entities.size === 0) {
-        // Entity service doesn't have initialize method, just load entities
-        console.log('📋 Loading existing entities...');
-      }
+      // Entity service is reactive and doesn't need explicit initialization
+      console.log('📋 Entity store is reactive and ready');
       
       console.log('✅ EntityDropdown services initialized');
       isLoading = false;
@@ -361,7 +363,7 @@
       isLoading = true;
       error = null;
       console.log('🔄 Refreshing jurisdictions...');
-      await jurisdictionService.refreshJurisdictionStatus();
+      await jurisdictionOperations.refreshJurisdictionStatus();
       console.log('✅ Jurisdictions refreshed');
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to refresh jurisdictions';

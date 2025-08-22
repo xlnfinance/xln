@@ -1,7 +1,7 @@
 <script lang="ts">
   import { xlnOperations } from '../../stores/xlnStore';
-  import { entityService, isCreatingEntity, entityError, entities } from '../../services/entityService';
-  import { jurisdictions, allJurisdictionsConnected } from '../../services/jurisdictionService';
+  import { jurisdictions, allJurisdictionsConnected } from '../../stores/jurisdictionStore';
+  import { entities, isCreatingEntity, entityError, entityOperations } from '../../stores/entityStore';
   import { availableSigners } from '../../services/signerService';
   import Button from '../Common/Button.svelte';
   import FormField from '../Common/FormField.svelte';
@@ -50,7 +50,7 @@
   }
 
   async function createEntity() {
-    if ($isCreatingEntity) return;
+    if (isCreatingEntity) return;
     
     error = '';
 
@@ -80,16 +80,28 @@
         throw new Error('Please select a jurisdiction');
       }
 
-      // Create entity using the real entity service
+      // Create entity using the entity operations
       if (formData.entityType === 'numbered') {
-        const entityConfig = await entityService.createNumberedEntity(
+        const entityConfig = await entityOperations.createNumberedEntity(
           formData.entityName,
-          jurisdictionName,
           formData.validators.map(v => v.name),
-          formData.threshold
+          formData.threshold,
+          jurisdictionName
         );
 
         console.log('✅ Numbered entity created:', entityConfig);
+        
+        // Reset form on success
+        clearForm();
+      } else if (formData.entityType === 'lazy') {
+        const entityConfig = await entityOperations.createLazyEntity(
+          formData.entityName,
+          formData.validators.map(v => v.name),
+          formData.threshold,
+          jurisdictionName
+        );
+
+        console.log('✅ Lazy entity created:', entityConfig);
         
         // Reset form on success
         clearForm();
