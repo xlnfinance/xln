@@ -1,8 +1,15 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { replicas } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
   import { XLNServer } from '../../utils/xlnServer';
+  import { 
+    jurisdictions, 
+    jurisdictionOperations,
+    isConnecting,
+    connectionError
+  } from '../../stores/jurisdictionStore';
+  import { entities, entityOperations } from '../../stores/entityStore';
   import type { Tab } from '../../types';
 
   export let tab: Tab;
@@ -12,6 +19,31 @@
   let isOpen = false;
   let searchTerm = '';
   let dropdownContent: HTMLDivElement;
+  let isLoading = false;
+  let error: string | null = null;
+
+  // Initialize services on component mount
+  onMount(async () => {
+    try {
+      isLoading = true;
+      console.log('🔄 Initializing EntityDropdown services...');
+      
+      // Initialize jurisdiction service if not already done
+      if ($jurisdictions.size === 0) {
+        await jurisdictionOperations.initialize();
+      }
+      
+      // Entity service is reactive and doesn't need explicit initialization
+      console.log('📋 Entity store is reactive and ready');
+      
+      console.log('✅ EntityDropdown services initialized');
+      isLoading = false;
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to initialize services';
+      isLoading = false;
+      console.error('❌ EntityDropdown initialization failed:', err);
+    }
+  });
 
   // Get dropdown display text
   $: dropdownText = getDropdownText(tab);
@@ -39,13 +71,27 @@
     if (!dropdownContent) return;
     
     dropdownContent.innerHTML = `
-      <div class="dropdown-search-container">
-        <input type="text" class="dropdown-search-input" placeholder="🔍 Search jurisdictions, signers, entities..." />
+      <div class="dropdown-header">
+        <div class="dropdown-search-container">
+          <input type="text" class="dropdown-search-input" placeholder="🔍 Search jurisdictions, signers, entities..." />
+        </div>
+        <button class="refresh-btn" title="Refresh jurisdictions" onclick="this.dispatchEvent(new CustomEvent('refresh'))">
+          🔄
+        </button>
       </div>
       <div class="dropdown-results" id="dropdownResults">
         <!-- Results will be populated here -->
       </div>
     `;
+
+    // Add refresh button event listener
+    const refreshBtn = dropdownContent.querySelector('.refresh-btn');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        refreshJurisdictions();
+      });
+    }
 
     const searchInput = dropdownContent.querySelector('.dropdown-search-input') as HTMLInputElement;
     const resultsContainer = dropdownContent.querySelector('.dropdown-results') as HTMLDivElement;
@@ -69,20 +115,30 @@
 
     resultsContainer.innerHTML = '';
 
-    // Get all available jurisdictions
-    const jurisdictions = [
-      { name: 'Ethereum', id: 'ethereum' },
-      { name: 'Polygon', id: 'polygon' },
-      { name: 'Arbitrum', id: 'arbitrum' }
-    ];
+    // Get dynamic jurisdictions from jurisdiction service
+    const jurisdictionsData = getJurisdictionsData();
+
+    if (jurisdictionsData.length === 0) {
+      resultsContainer.innerHTML = '<div class="dropdown-item">Loading jurisdictions...</div>';
+      return;
+    }
 
     const dropdownMode = $settings.dropdownMode;
 
     if (dropdownMode === 'signer-first') {
-      renderSignerFirstDropdown(jurisdictions, resultsContainer, searchTerm);
+      renderSignerFirstDropdown(jurisdictionsData, resultsContainer, searchTerm);
     } else {
-      renderEntityFirstDropdown(jurisdictions, resultsContainer, searchTerm);
+      renderEntityFirstDropdown(jurisdictionsData, resultsContainer, searchTerm);
     }
+  }
+
+  function getJurisdictionsData() {
+    return Array.from($jurisdictions.values()).map(status => ({
+      name: status.name,
+      id: status.name.toLowerCase(),
+      connected: status.connected,
+      error: status.error
+    }));
   }
 
   function renderSignerFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, searchTerm: string) {
@@ -104,16 +160,30 @@
         signerGroups[signerId].push(replica);
       });
 
-      // Add jurisdiction header
+      // Add jurisdiction header with connection status
+      const statusIcon = jurisdiction.connected ? '✅' : '❌';
+      const statusText = jurisdiction.connected ? 'Connected' : jurisdiction.error || 'Disconnected';
       const jurisdictionItem = createDropdownTreeItem(
-        `🏛️ ${jurisdiction.name}`, 
+        `🏛️ ${jurisdiction.name} ${statusIcon}`, 
         '', 
         0, 
         false, 
         false,
         searchTerm
       );
-      resultsContainer.appendChild(jurisdictionItem);
+      
+      // Add status info as subtitle
+      if (!jurisdiction.connected) {
+        const statusSubtitle = document.createElement('div');
+        statusSubtitle.className = 'dropdown-item indent-1';
+        statusSubtitle.style.color = '#ff6b6b';
+        statusSubtitle.style.fontSize = '12px';
+        statusSubtitle.innerHTML = `<span class="tree-prefix" style="color: #666; font-family: monospace;">├─ </span>⚠️ ${statusText}`;
+        resultsContainer.appendChild(jurisdictionItem);
+        resultsContainer.appendChild(statusSubtitle);
+      } else {
+        resultsContainer.appendChild(jurisdictionItem);
+      }
 
       // Add signers and their entities
       const signerKeys = Object.keys(signerGroups);
@@ -172,16 +242,30 @@
         entityGroups[entityId].push(replica);
       });
 
-      // Add jurisdiction header
+      // Add jurisdiction header with connection status
+      const statusIcon = jurisdiction.connected ? '✅' : '❌';
+      const statusText = jurisdiction.connected ? 'Connected' : jurisdiction.error || 'Disconnected';
       const jurisdictionItem = createDropdownTreeItem(
-        `🏛️ ${jurisdiction.name}`, 
+        `🏛️ ${jurisdiction.name} ${statusIcon}`, 
         '', 
         0, 
         false, 
         false,
         searchTerm
       );
-      resultsContainer.appendChild(jurisdictionItem);
+      
+      // Add status info as subtitle
+      if (!jurisdiction.connected) {
+        const statusSubtitle = document.createElement('div');
+        statusSubtitle.className = 'dropdown-item indent-1';
+        statusSubtitle.style.color = '#ff6b6b';
+        statusSubtitle.style.fontSize = '12px';
+        statusSubtitle.innerHTML = `<span class="tree-prefix" style="color: #666; font-family: monospace;">├─ </span>⚠️ ${statusText}`;
+        resultsContainer.appendChild(jurisdictionItem);
+        resultsContainer.appendChild(statusSubtitle);
+      } else {
+        resultsContainer.appendChild(jurisdictionItem);
+      }
 
       // Add entities and their signers
       const entityKeys = Object.keys(entityGroups);
@@ -274,6 +358,21 @@
     isOpen = false;
   }
 
+  async function refreshJurisdictions() {
+    try {
+      isLoading = true;
+      error = null;
+      console.log('🔄 Refreshing jurisdictions...');
+      await jurisdictionOperations.refreshJurisdictionStatus();
+      console.log('✅ Jurisdictions refreshed');
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to refresh jurisdictions';
+      console.error('❌ Failed to refresh jurisdictions:', err);
+    } finally {
+      isLoading = false;
+    }
+  }
+
   // Close dropdown when clicking outside
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as HTMLElement;
@@ -286,9 +385,19 @@
 <svelte:window on:click={handleClickOutside} />
 
 <div class="unified-dropdown" class:open={isOpen}>
-  <button class="unified-dropdown-btn" on:click={toggleDropdown} style="width: 100%;">
-    <span class="dropdown-icon">🏛️</span>
-    <span class="dropdown-text">{dropdownText}</span>
+  <button class="unified-dropdown-btn" on:click={toggleDropdown} style="width: 100%;" disabled={isLoading}>
+    <span class="dropdown-icon">
+      {#if isLoading}🔄{:else}🏛️{/if}
+    </span>
+    <span class="dropdown-text">
+      {#if isLoading}
+        Initializing...
+      {:else if error}
+        Error: {error}
+      {:else}
+        {dropdownText}
+      {/if}
+    </span>
     <span class="dropdown-arrow">▼</span>
   </button>
   <div class="unified-dropdown-content" class:show={isOpen} bind:this={dropdownContent}>
@@ -319,9 +428,14 @@
     transition: all 0.2s ease;
   }
 
-  .unified-dropdown-btn:hover {
+  .unified-dropdown-btn:hover:not(:disabled) {
     background: #404040;
     border-color: #007acc;
+  }
+
+  .unified-dropdown-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .dropdown-icon {
@@ -414,10 +528,32 @@
     padding-left: 36px;
   }
 
-  :global(.dropdown-search-container) {
+  :global(.dropdown-header) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 8px;
     border-bottom: 2px solid #555;
     background: #252525;
+  }
+
+  :global(.dropdown-search-container) {
+    flex: 1;
+  }
+
+  :global(.refresh-btn) {
+    background: #007acc;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s ease;
+  }
+
+  :global(.refresh-btn:hover) {
+    background: #0086e6;
   }
 
   :global(.dropdown-search-input) {

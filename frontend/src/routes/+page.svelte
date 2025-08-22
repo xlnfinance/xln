@@ -10,6 +10,8 @@
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
   import { timeOperations } from '../lib/stores/timeStore';
+  import { signerService } from '../lib/services/signerService';
+  import { jurisdictionOperations } from '../lib/stores/jurisdictionStore';
 
   let activeTab = 'formation';
 
@@ -34,6 +36,12 @@
       
       // Initialize time machine
       timeOperations.initialize();
+      
+      // Initialize signer service
+      await signerService.initialize();
+      
+      // Initialize jurisdiction service
+      await jurisdictionOperations.initialize();
       
       // Initialize XLN environment
       await xlnOperations.initialize();
