@@ -1,4 +1,18 @@
-Below is a comprehensive technical brief that captures every aspect of the discussion, outlining a novel blockchain design based on hierarchical, actor‐inspired state machines. This design leverages a dual–input/output model for transactions and events, a layered submachine architecture, and multi–signature validation to achieve secure, distributed state changes. The brief is organized into the following sections:
+# XLN Technical Specification: The Organizational Layer for Digital Finance
+
+**TradFi + DeFi = XLN**
+
+This specification describes XLN's revolutionary architecture that delivers institutional-grade governance with crypto-native innovation. By treating organizations as computational entities rather than smart contracts, XLN creates the superset of traditional and decentralized finance.
+
+## Core Innovation
+
+Where traditional finance relies on paper hierarchies and DeFi relies on flat tokens, XLN introduces **programmable organizational primitives** that deliver the best of both worlds:
+
+- **From TradFi**: Hierarchical governance, audit trails, compliance hooks
+- **From DeFi**: Zero-cost creation, permissionless innovation, atomic execution  
+- **Beyond Both**: State machines that make organizations truly programmable
+
+The specification is organized into the following sections:
 
 - [1. Overview](#1-overview)
 - [2. Account Model and State](#2-account-model-and-state)

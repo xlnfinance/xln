@@ -1,76 +1,89 @@
 <script lang="ts">
   import type { EntityReplica, Tab } from '../../types';
-  
+
   export let replica: EntityReplica | null;
   export let tab: Tab;
 </script>
 
-<div class="entity-history-container">
+<div class="transaction-history">
   {#if replica}
-    <div class="frame-item">
-      <div class="frame-header">
-        <span>Server Frame 0</span>
-        <span class="frame-time">{new Date().toLocaleTimeString()}</span>
-        <span class="activity-badge">🟢</span>
-      </div>
-      <div class="frame-inactive">Transaction history will be populated here</div>
+    <div class="history-list">
+      {#each replica.state.messages as message, i (i)}
+        <div class="history-item">
+          <div class="item-icon">
+            {#if message.type === 'chat'}
+              <span>💬</span>
+            {:else if message.type === 'proposal'}
+              <span>🗳️</span>
+            {:else}
+              <span>⚙️</span>
+            {/if}
+          </div>
+          <div class="item-details">
+            <div class="item-header">
+              <span class="item-type">{message.type}</span>
+              <span class="item-timestamp">{new Date(message.timestamp).toLocaleTimeString()}</span>
+            </div>
+            <div class="item-content">
+              {#if message.type === 'chat'}
+                <p><strong>{message.data.from}:</strong> {message.data.message}</p>
+              {:else if message.type === 'proposal'}
+                <p>Proposal to "{message.data.action.data.message}"</p>
+              {/if}
+            </div>
+          </div>
+        </div>
+      {/each}
     </div>
   {:else}
-    <div class="empty-state">- no frame history</div>
+    <p class="no-history">No history available.</p>
   {/if}
 </div>
 
 <style>
-  .entity-history-container {
-    height: 40vh;
-    overflow-y: auto;
-    padding: 0;
+  .transaction-history {
+    padding: 10px;
   }
-
-  .frame-item {
-    border-bottom: 1px solid #3e3e3e;
-    padding: 12px;
-    margin-bottom: 0;
+  .no-history {
+    color: #9d9d9d;
+    text-align: center;
+    padding: 20px;
   }
-
-  .frame-item:last-child {
-    border-bottom: none;
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
-
-  .frame-header {
+  .history-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px;
+    background: #333;
+    border-radius: 4px;
+  }
+  .item-icon {
+    font-size: 1.2em;
+  }
+  .item-details {
+    flex: 1;
+  }
+  .item-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
-    font-size: 0.9em;
-    font-weight: 500;
-    color: #007acc;
+    margin-bottom: 4px;
   }
-
-  .frame-time {
+  .item-type {
+    font-weight: bold;
+    font-size: 0.9em;
+    text-transform: capitalize;
+  }
+  .item-timestamp {
     font-size: 0.8em;
     color: #9d9d9d;
   }
-
-  .frame-inactive {
-    color: #666;
-    font-style: italic;
-    font-size: 0.8em;
-    padding: 8px 12px;
-    text-align: center;
-    border-left: 2px solid #555;
-  }
-
-  .activity-badge {
-    font-size: 0.8em;
-    margin-left: 8px;
-  }
-
-  .empty-state {
-    text-align: center;
-    color: #666;
-    font-style: italic;
-    padding: 20px;
+  .item-content {
     font-size: 0.9em;
   }
 </style>

@@ -971,6 +971,75 @@ contract EntityProvider is ERC1155 {
     _safeTransferFrom(entityAddress, to, tokenId, amount, "");
   }
 
+  // === CONTROL SHARES RELEASE TO DEPOSITORY ===
 
+  event ControlSharesReleased(
+    bytes32 indexed entityId, 
+    address indexed depository, 
+    uint256 controlAmount, 
+    uint256 dividendAmount,
+    string purpose
+  );
+
+  /**
+   * @notice Release entity's control and/or dividend shares to depository for trading
+   * @dev This mirrors real corporate stock issuance - entity manages its own share releases
+   * @param entityNumber The entity number
+   * @param depository Depository contract address to receive the shares
+   * @param controlAmount Amount of control tokens to release (0 to skip)
+   * @param dividendAmount Amount of dividend tokens to release (0 to skip) 
+   * @param purpose Human-readable purpose (e.g., "Series A", "Employee Pool", "Public Sale")
+   * @param encodedBoard Entity's board data
+   * @param encodedSignature Entity's Hanko signatures authorizing this release
+   */
+  function releaseControlShares(
+    uint256 entityNumber,
+    address depository,
+    uint256 controlAmount,
+    uint256 dividendAmount,
+    string calldata purpose,
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
+  ) external {
+    require(depository != address(0), "Invalid depository address");
+    require(controlAmount > 0 || dividendAmount > 0, "Must release some tokens");
+    
+    bytes32 entityId = bytes32(entityNumber);
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    
+    // Create release authorization hash
+    bytes32 releaseHash = keccak256(abi.encodePacked(
+      "RELEASE_CONTROL_SHARES",
+      entityNumber,
+      depository,
+      controlAmount,
+      dividendAmount,
+      keccak256(bytes(purpose)),
+      block.timestamp
+    ));
+    
+    // Verify entity signature authorization
+    uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, releaseHash);
+    require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    
+    address entityAddress = address(uint160(uint256(entityId)));
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+    
+    // Transfer control tokens if requested
+    if (controlAmount > 0) {
+      require(balanceOf(entityAddress, controlTokenId) >= controlAmount, "Insufficient control tokens");
+      _safeTransferFrom(entityAddress, depository, controlTokenId, controlAmount, 
+        abi.encode("CONTROL_SHARE_RELEASE", purpose));
+    }
+    
+    // Transfer dividend tokens if requested  
+    if (dividendAmount > 0) {
+      require(balanceOf(entityAddress, dividendTokenId) >= dividendAmount, "Insufficient dividend tokens");
+      _safeTransferFrom(entityAddress, depository, dividendTokenId, dividendAmount,
+        abi.encode("DIVIDEND_SHARE_RELEASE", purpose));
+    }
+    
+    emit ControlSharesReleased(entityId, depository, controlAmount, dividendAmount, purpose);
+  }
 
 }

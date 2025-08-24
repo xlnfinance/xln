@@ -1,6 +1,12 @@
-# XLN: Xtensible Layered Network
+# XLN: Where Traditional Finance Meets DeFi
 
-XLN is not a rollup or another L2. It is a machine language for sovereign economic agents: each Entity is a state-time machine with its own blocks, quorum, and storage. There is **no single global ledger**; instead, every Jurisdiction/Entity/Account maintains its own append-only ledger and interops via signed messages.
+**TradFi + DeFi = XLN** — The superset of both worlds, delivering institutional-grade governance with crypto-native innovation.
+
+XLN is not a rollup or another L2. It is the **organizational layer** for digital finance: each Entity is a state-time machine with its own blocks, quorum, and storage. There is **no single global ledger**; instead, every Jurisdiction/Entity/Account maintains its own append-only ledger and interops via signed messages.
+
+**For Crypto**: Zero-cost DAO creation, infinite organizational complexity, cross-chain identity  
+**For Institutions**: Cryptographic audit trails, hierarchical approvals, dual-class governance  
+**For Everyone**: The missing infrastructure for programmable organizations
 
 ## At a glance (J/E/A machines)
 
@@ -30,13 +36,35 @@ graph TD
   EG -->|registration / numbering| JR
 ```
 
+## Why XLN: The Best of Both Worlds
+
+### From Traditional Finance
+- ✅ **Hierarchical governance** like real corporations
+- ✅ **Dual-class shares** (Meta/Alphabet style)
+- ✅ **Audit trails** for every decision
+- ✅ **Subsidiary management** with proper controls
+- ✅ **Compliance-ready** architecture
+
+### From DeFi
+- ✅ **Zero-cost entity creation** (spawn 1000 DAOs free)
+- ✅ **Composable governance** modules
+- ✅ **Cross-chain operations** native
+- ✅ **Permissionless innovation** 
+- ✅ **Cryptographic guarantees** throughout
+
+### Beyond Both
+- 🚀 **State machines** > Smart contracts
+- 🚀 **Bilateral sovereignty** > Global consensus
+- 🚀 **Organizational primitives** as first-class citizens
+- 🚀 **Infinite complexity** at zero marginal cost
+
 ## Key Concepts
 
-1. **JEA**: Jurisdiction → Entity → Account hierarchy. Jurisdiction handles reserves and disputes, Entities encode governance, Accounts run channels/subcontracts.
-2. **State-time machines (per-machine ledgers)**: Each machine maintains an append-only, signed block history. Machines interoperate through inbox/outbox semantics; there is no requirement for a single chain-wide consensus.
-3. **Personal consensus**: Each machine advances when its quorum signs; determinism and replayability by design.
-4. **Hanko governance**: Entities are signature schemes. Create "lazy entities" at 0 gas; use registered entities for on-chain anchoring and BCD separation (Board/Control/Dividend).
-5. **DeFi integration**: A single hierarchical Hanko proof can authorize complex cross-protocol treasury actions.
+1. **JEA**: Jurisdiction → Entity → Account hierarchy. Think of it as Registry → Organization → Operations.
+2. **State-time machines**: Each participant maintains their own cryptographically-secured ledger. No single point of failure.
+3. **Personal consensus**: Your organization advances when YOUR quorum signs. No waiting for global agreement.
+4. **Hanko signatures**: One signature proves entire approval hierarchies. Board→CEO→CFO→Treasury in one proof.
+5. **Universal integration**: Single Hanko authorization works across Uniswap, Aave, Compound, and any protocol.
 
 We refer to these as J/E/A machines: a Jurisdiction machine (J-machine), an Entity machine (E-machine), and an Account machine (A-machine).
 
@@ -140,8 +168,18 @@ On-chain registration will attempt via local RPCs; if none are running you’ll 
 - **A-root**: Merkle root of A-machine state recorded by an E-machine block.
 - **Hanko**: Hierarchical signature scheme treating entities as signature programs.
 
+## The XLN Advantage: Best of Both Worlds
+
+**From Wall Street**: Hierarchies, controls, audit trails, compliance  
+**From Web3**: Permissionless, composable, global, instant  
+**Beyond Both**: Programmable organizations at zero marginal cost
+
+We're not building another blockchain. We're building the organizational infrastructure that makes both traditional and decentralized finance obsolete by delivering everything each promises and more.
+
 ## Tagline options
 
-- Build your own jurisdiction.
-- The machine is the new nation.
-- Not a protocol. A constitution.
+- Where Wall Street meets Web3.
+- TradFi + DeFi = XLN.
+- The organizational layer for digital finance.
+- Corporate governance, cryptographically guaranteed.
+- Build organizations like you build software.

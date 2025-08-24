@@ -1,8 +1,12 @@
-# XLN: Programmable Corporate Law on Blockchain
+# XLN: Where Corporate Law Meets Code
 
-## What XLN Actually Is
+## The Superset Solution
 
-XLN is a hierarchical blockchain architecture where organizations exist as **computational entities** rather than deployed contracts. They're solving a fundamental problem: blockchain governance is too expensive and too flat for real-world organizations.
+**TradFi + DeFi = XLN**
+
+Traditional finance perfected organizational hierarchies but trapped them in paper. DeFi liberated finance but flattened organizations. XLN delivers both: the sophistication of corporate structures with the efficiency of code.
+
+XLN is a hierarchical blockchain architecture where organizations exist as **computational entities** — delivering the best of both worlds without the limitations of either.
 
 ## The Core Innovation: Zero-Cost Hierarchical Entities
 
