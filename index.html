@@ -4683,7 +4683,7 @@
                             <div class="progress-bar">
                                 <div class="progress-fill" style="width: ${progressPercent}%"></div>
                             </div>
-                            <div class="progress-text">${yesVotingPower}/${threshold} votes (${Math.round(progressPercent)}%)</div>
+                            <div class="progress-text">${yesVotes.length}/${votes.length} votes (${yesVotingPower}/${threshold} power, ${Math.round(progressPercent)}%)</div>
                         </div>
                         ${voteDetails ? `<div class="vote-details">${voteDetails}</div>` : ''}
                     </div>
