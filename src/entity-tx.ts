@@ -195,6 +195,42 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
     return entityState; // State unchanged, profile update handled separately
   }
   
+  if (entityTx.type === 'j_event') {
+    const { from, event, observedAt, blockNumber, transactionHash } = entityTx.data;
+    
+    if (DEBUG) {
+      console.log(`    🔭 J-EVENT: ${from} observed ${event.type} at block ${blockNumber}`);
+      console.log(`    🔭 J-EVENT-DATA:`, event.data);
+    }
+    
+    // Create new state to add j-event observation
+    const newEntityState = {
+      ...entityState,
+      messages: [...entityState.messages],
+      nonces: new Map(entityState.nonces)
+    };
+    
+    // Increment nonce for the observer
+    const currentNonce = newEntityState.nonces.get(from) || 0;
+    newEntityState.nonces.set(from, currentNonce + 1);
+    
+    // Add j-event as a message (for now - later this could trigger more complex logic)
+    const jEventMessage = `${from} observed j-event: ${event.type} (block ${blockNumber}, tx ${transactionHash.slice(0,10)}...)`;
+    newEntityState.messages.push(jEventMessage);
+    
+    // Limit messages to 10 maximum
+    if (newEntityState.messages.length > 10) {
+      newEntityState.messages.shift();
+    }
+    
+    // TODO: In the future, j-events could trigger:
+    // - Automatic proposals based on jurisdiction events
+    // - State updates based on confirmed external actions  
+    // - Consensus on what external events were observed
+    
+    return newEntityState;
+  }
+  
   return entityState;
   } catch (error) {
     log.error(`❌ Transaction execution error: ${error}`);

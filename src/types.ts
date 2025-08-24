@@ -66,7 +66,7 @@ export interface VoteData {
 }
 
 export interface EntityTx {
-  type: 'chat' | 'propose' | 'vote' | 'profile-update';
+  type: 'chat' | 'propose' | 'vote' | 'profile-update' | 'j_event';
   data: any;
 }
 

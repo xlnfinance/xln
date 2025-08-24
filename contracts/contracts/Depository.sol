@@ -64,6 +64,9 @@ contract Depository is Console {
 
 
   bytes32[] public _tokens;
+  
+  // Efficient token lookup: packedToken -> internalTokenId
+  mapping(bytes32 => uint256) public tokenToId;
 
   // === MULTI-PROVIDER MANAGEMENT ===
   
@@ -471,11 +474,17 @@ contract Depository is Console {
   }
   function externalTokenToReserve(ExternalTokenToReserve memory params) public {
     if (params.internalTokenId == 0) {
-      // create new token
-      _tokens.push(params.packedToken);
-      params.internalTokenId = _tokens.length - 1;
-
-      //console.log("Saved new token:", params.internalTokenId);
+      // Check if token already exists using efficient lookup
+      params.internalTokenId = tokenToId[params.packedToken];
+      
+      if (params.internalTokenId == 0) {
+        // Create new token
+        _tokens.push(params.packedToken);
+        params.internalTokenId = _tokens.length - 1;
+        tokenToId[params.packedToken] = params.internalTokenId;
+        
+        //console.log("Saved new token:", params.internalTokenId);
+      }
     } else {
       params.packedToken = _tokens[params.internalTokenId];
       //require(_tokens[params.internalTokenId] == params.packedToken, "Token data mismatch");
@@ -537,6 +546,43 @@ contract Depository is Console {
     require(_reserves[msg.sender][params.tokenId] >= params.amount);
     _reserves[msg.sender][params.tokenId] -= params.amount;
     _reserves[params.receiver][params.tokenId] += params.amount;
+  }
+
+  /**
+   * @notice Transfer control/dividend shares between entity reserves
+   * @dev Wrapper around reserveToReserve with better semantics for control shares
+   * @param to Recipient entity address
+   * @param internalTokenId Internal token ID (use getControlShareTokenId helper)
+   * @param amount Amount of shares to transfer
+   * @param purpose Human-readable purpose (e.g., "Sale", "Investment", "Dividend Distribution")
+   */
+  function transferControlShares(
+    address to,
+    uint256 internalTokenId,
+    uint256 amount,
+    string calldata purpose
+  ) external {
+    enforceDebts(msg.sender, internalTokenId);
+
+    require(_reserves[msg.sender][internalTokenId] >= amount, "Insufficient control shares");
+    require(to != address(0), "Invalid recipient");
+    require(to != msg.sender, "Cannot transfer to self");
+
+    _reserves[msg.sender][internalTokenId] -= amount;
+    _reserves[to][internalTokenId] += amount;
+
+    emit ControlSharesTransferred(msg.sender, to, internalTokenId, amount, purpose);
+  }
+
+  /**
+   * @notice Get internal token ID for EntityProvider control/dividend tokens
+   * @param entityProvider EntityProvider contract address
+   * @param externalTokenId External token ID (entity number for control, entity number | 0x8000... for dividend)
+   * @return internalTokenId Internal token ID for use with reserves
+   */
+  function getControlShareTokenId(address entityProvider, uint256 externalTokenId) external view returns (uint256 internalTokenId) {
+    bytes32 packedToken = packTokenReference(TypeERC1155, entityProvider, uint96(externalTokenId));
+    return tokenToId[packedToken];
   }
 
 
@@ -1059,6 +1105,23 @@ contract Depository is Console {
     }*/
   }       
 
+  // Events for control/dividend shares
+  event ControlSharesReceived(
+    address indexed entityProvider,
+    address indexed fromEntity, 
+    uint256 indexed tokenId,
+    uint256 amount,
+    bytes data
+  );
+  
+  event ControlSharesTransferred(
+    address indexed from,
+    address indexed to,
+    uint256 indexed internalTokenId,
+    uint256 amount,
+    string purpose
+  );
+
   function onERC1155Received(
       address operator,
       address from,
@@ -1069,6 +1132,27 @@ contract Depository is Console {
       external
       returns(bytes4)
   {
+    // If this is from an approved EntityProvider, automatically add to reserves
+    if (approvedEntityProviders[msg.sender]) {
+      // Create or find internal token ID for this EntityProvider token
+      bytes32 packedToken = packTokenReference(TypeERC1155, msg.sender, uint96(id));
+      
+      // Use efficient lookup instead of O(n) iteration
+      uint256 internalTokenId = tokenToId[packedToken];
+      
+      // Create new internal token ID if not found
+      if (internalTokenId == 0) {
+        _tokens.push(packedToken);
+        internalTokenId = _tokens.length - 1;
+        tokenToId[packedToken] = internalTokenId;
+      }
+      
+      // Add to sender's reserves (the entity that sent the tokens)
+      _reserves[from][internalTokenId] += value;
+      
+      emit ControlSharesReceived(msg.sender, from, id, value, data);
+    }
+    
     return this.onERC1155Received.selector;
   }
 

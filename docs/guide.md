@@ -1,7 +1,9 @@
 # XLN Consensus System Development Guidelines
 
 ## Project Overview
-XLN (Cross-chain Liquidity Network) consensus system with Byzantine fault tolerance for financial applications. Core functionality: propose→sign→commit flow with proper state synchronization across distributed validators.
+XLN: The Organizational Layer for Digital Finance — Where TradFi meets DeFi. 
+
+XLN delivers institutional-grade governance with crypto-native innovation through hierarchical state machines. Core functionality: propose→sign→commit flow with cryptographic hierarchies enabling both enterprise compliance and DeFi composability.
 
 ## Core Architecture Rules
 
