@@ -2,8 +2,12 @@
   import { xlnOperations } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
+  import TutorialLauncher from '../Tutorial/TutorialLauncher.svelte';
+  import TutorialOverlay from '../Tutorial/TutorialOverlay.svelte';
+  import { isActiveTutorial, currentTutorial, currentStep, progressPercentage } from '../Tutorial/TutorialService';
 
   let showSettingsModal = false;
+  let showTutorialLauncher = false;
 
   // Reactive theme icon
   $: themeIcon = $settings.theme === 'dark' ? '🌙' : '☀️';
@@ -34,6 +38,10 @@
   function handleCreateEntity() {
     // TODO: Show entity creation modal
     alert('Entity Creator coming soon! Use the Controls section in any panel for now.');
+  }
+
+  function handleStartTutorial() {
+    showTutorialLauncher = true;
   }
 
   function handleToggleTheme() {
@@ -80,6 +88,9 @@
     </button>
     <button class="admin-btn" on:click={handleCreateEntity} title="Create New Entity">
       <span>➕</span>
+    </button>
+    <button class="admin-btn admin-btn-tutorial" on:click={handleStartTutorial} title="Start Interactive Tutorial">
+      <span>🎯</span>
     </button>
     <button class="admin-btn" on:click={handleAddPanel} title="Add Entity Panel">
       <span>📋</span>
@@ -388,4 +399,46 @@
     font-weight: 600;
     color: #d4d4d4;
   }
+
+  .admin-btn-tutorial {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: white;
+    position: relative;
+  }
+
+  .admin-btn-tutorial:hover {
+    background: linear-gradient(135deg, #2563eb, #1e40af);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  }
+
+  .admin-btn-tutorial::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    background: linear-gradient(45deg, #3b82f6, #8b5cf6, #06b6d4);
+    border-radius: 8px;
+    z-index: -1;
+    animation: tutorialGlow 2s infinite;
+  }
+
+  @keyframes tutorialGlow {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.8; }
+  }
 </style>
+
+<!-- Tutorial Components -->
+<TutorialLauncher bind:isVisible={showTutorialLauncher} />
+
+{#if $isActiveTutorial && $currentTutorial && $currentStep}
+  <TutorialOverlay 
+    isVisible={$isActiveTutorial}
+    currentStep={0}
+    totalSteps={$currentTutorial.steps.length}
+    tutorialData={[$currentStep]}
+  />
+{/if}

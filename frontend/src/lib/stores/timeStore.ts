@@ -54,6 +54,9 @@ const timeOperations = {
     });
     
     console.log('🕰️ Time machine moved to index:', clampedIndex);
+    
+    // Trigger entity panel updates like old index.html
+    this.triggerEntityPanelUpdates();
   },
 
   // Go to live (current time)
@@ -138,6 +141,14 @@ const timeOperations = {
         totalFrames: $history.length
       };
     }
+  },
+
+  // Trigger entity panel updates (like old index.html renderEntityInTab calls)
+  triggerEntityPanelUpdates() {
+    // Dispatch custom event that entity panels can listen to
+    window.dispatchEvent(new CustomEvent('timeChanged', {
+      detail: { timeIndex: get(timeState).currentTimeIndex }
+    }));
   },
 
   // Initialize time machine

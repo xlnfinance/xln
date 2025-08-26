@@ -7,8 +7,8 @@ export default defineConfig({
   retries: 1,
   outputDir: 'e2e/test-results',
   use: {
-    baseURL: 'http://localhost:8080',
-    headless: true,
+    baseURL: 'http://localhost:5173',
+    headless: process.env.HEADED !== 'true', // Headless by default, use HEADED=true for visual
     trace: 'on-first-retry',
     screenshot: 'on',
     viewport: { width: 1920, height: 1080 },
