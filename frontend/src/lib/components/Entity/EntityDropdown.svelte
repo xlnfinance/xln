@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { replicas } from '../../stores/xlnStore';
+  import { visibleReplicas } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
   import { XLNServer } from '../../utils/xlnServer';
   import type { Tab } from '../../types';
@@ -155,8 +156,9 @@
 
   function renderEntityFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, searchTerm: string) {
     jurisdictions.forEach((jurisdiction, jIndex) => {
-      // Get replicas for this jurisdiction
-      const replicasArray = Array.from($replicas.values()).filter(replica => 
+      // Get replicas for this jurisdiction (use time-aware replicas)
+      const currentReplicas = $visibleReplicas || $replicas;
+      const replicasArray = Array.from(currentReplicas.values()).filter(replica => 
         replica.state?.config?.jurisdiction?.name === jurisdiction.name
       );
 

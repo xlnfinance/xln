@@ -84,55 +84,79 @@ const xlnOperations = {
 
   // Submit a chat message
   async submitChatMessage(entityId: string, signerId: string, message: string) {
-    return this.applyServerInput({
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'chat',
-          data: { from: signerId, message }
-        }],
-        destinations: []
-      }]
-    });
+    const entityInputs = [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'chat',
+        data: { from: signerId, message }
+      }],
+      destinations: []
+    }];
+
+    const env = get(xlnEnvironment);
+    if (env && (window as any).processUntilEmpty) {
+      console.log('🔥 Calling processUntilEmpty for chat');
+      const result = (window as any).processUntilEmpty(env, [], entityInputs);
+      this.updateFromEnvironment();
+      return result;
+    } else {
+      return this.applyServerInput({ entityInputs });
+    }
   },
 
   // Submit a proposal
   async submitProposal(entityId: string, signerId: string, proposalText: string) {
-    return this.applyServerInput({
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'propose',
-          data: {
-            action: { type: 'collective_message', data: { message: proposalText } },
-            proposer: signerId
-          }
-        }],
-        destinations: []
-      }]
-    });
+    const entityInputs = [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'propose',
+        data: {
+          action: { type: 'collective_message', data: { message: proposalText } },
+          proposer: signerId
+        }
+      }],
+      destinations: []
+    }];
+
+    const env = get(xlnEnvironment);
+    if (env && (window as any).processUntilEmpty) {
+      console.log('🔥 Calling processUntilEmpty for proposal');
+      const result = (window as any).processUntilEmpty(env, [], entityInputs);
+      this.updateFromEnvironment();
+      return result;
+    } else {
+      return this.applyServerInput({ entityInputs });
+    }
   },
 
   // Submit a vote
   async submitVote(entityId: string, signerId: string, proposalId: string, choice: 'yes' | 'no' | 'abstain', comment?: string) {
-    return this.applyServerInput({
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'vote',
-          data: {
-            proposalId,
-            voter: signerId,
-            choice,
-            comment
-          }
-        }],
-        destinations: []
-      }]
-    });
+    const entityInputs = [{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'vote',
+        data: {
+          proposalId,
+          voter: signerId,
+          choice,
+          comment
+        }
+      }],
+      destinations: []
+    }];
+
+    const env = get(xlnEnvironment);
+    if (env && (window as any).processUntilEmpty) {
+      console.log('🔥 Calling processUntilEmpty for vote');
+      const result = (window as any).processUntilEmpty(env, [], entityInputs);
+      this.updateFromEnvironment();
+      return result;
+    } else {
+      return this.applyServerInput({ entityInputs });
+    }
   },
 
   // Create a new entity
@@ -181,8 +205,18 @@ const xlnOperations = {
         }
       }));
 
-      // Apply the server transactions
-      return this.applyServerInput({ serverTxs });
+      // Call processUntilEmpty directly with serverTxs like old index.html
+      const env = get(xlnEnvironment);
+      if (env && (window as any).processUntilEmpty) {
+        console.log('🔥 Calling processUntilEmpty with serverTxs');
+        const result = (window as any).processUntilEmpty(env, serverTxs);
+        this.updateFromEnvironment();
+        return result;
+      } else {
+        // Fallback if processUntilEmpty not available
+        const result = this.applyServerInput({ serverTxs });
+        return result;
+      }
     } catch (err) {
       console.error('❌ Failed to create entity:', err);
       throw err;

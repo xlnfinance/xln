@@ -69,6 +69,23 @@
     const allTabs = tabOperations.getActiveTab();
     // Show close button if more than 1 tab exists
     // This will be updated reactively through the parent
+    
+    // Listen for time machine changes (like old index.html)
+    const handleTimeChanged = (event: CustomEvent) => {
+      console.log('🕰️ EntityPanel received time change event:', event.detail.timeIndex);
+      // Force reactivity by triggering replica update
+      if (tab.entityId && tab.signer) {
+        // The reactive statement will automatically pick up the new visibleReplicas
+        // due to timeState changes, but we can force a console log
+        console.log(`🔄 Panel ${tab.id} updating for time index:`, event.detail.timeIndex);
+      }
+    };
+    
+    window.addEventListener('timeChanged', handleTimeChanged as EventListener);
+    
+    return () => {
+      window.removeEventListener('timeChanged', handleTimeChanged as EventListener);
+    };
   });
 </script>
 
