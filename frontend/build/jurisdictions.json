@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2025-08-26T15:09:36Z",
+  "jurisdictions": {
+    "ethereum": {
+      "name": "Ethereum",
+      "chainId": 1337,
+      "rpc": "http://localhost:8545",
+      "contracts": {
+        "entityProvider": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+      },
+      "explorer": "http://localhost:8545",
+      "currency": "ETH",
+      "status": "active"
+    },
+    "polygon": {
+      "name": "Polygon",
+      "chainId": 1337,
+      "rpc": "http://localhost:8546", 
+      "contracts": {
+        "entityProvider": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+      },
+      "explorer": "http://localhost:8546",
+      "currency": "MATIC",
+      "status": "active"
+    },
+    "arbitrum": {
+      "name": "Arbitrum",
+      "chainId": 1337,
+      "rpc": "http://localhost:8547",
+      "contracts": {
+        "entityProvider": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x0165878A594ca255338adfa4d48449f69242Eb8F"
+      },
+      "explorer": "http://localhost:8547",
+      "currency": "ETH",
+      "status": "active"
+    }
+  },
+  "defaults": {
+    "timeout": 30000,
+    "retryAttempts": 3,
+    "gasLimit": 1000000
+  }
+}
