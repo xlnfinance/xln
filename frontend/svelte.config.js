@@ -20,6 +20,10 @@ const config = {
 		prerender: {
 			handleHttpError: 'warn',
 			handleMissingId: 'warn'
+		},
+		// Set base path for GitHub Pages deployment
+		paths: {
+			base: process.env.NODE_ENV === 'production' ? '/xln' : ''
 		}
 	}
 };
