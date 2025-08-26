@@ -6,7 +6,7 @@ node_modules
 .netlify
 .wrangler
 /.svelte-kit
-/build
+# /build - commented out for GitHub Pages deployment
 
 # OS
 .DS_Store
