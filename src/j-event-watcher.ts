@@ -211,8 +211,8 @@ export class JEventWatcher {
     try {
       // Get all relevant events from both contracts
       const [epEvents, depEvents] = await Promise.all([
-        this.entityProviderContract.queryFilter({}, fromBlock, toBlock),
-        this.depositoryContract.queryFilter({}, fromBlock, toBlock)
+        this.entityProviderContract.queryFilter("*", fromBlock, toBlock),
+        this.depositoryContract.queryFilter("*", fromBlock, toBlock)
       ]);
 
       // Process events in chronological order

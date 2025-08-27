@@ -150,14 +150,14 @@ export const clearDatabase = async (db?: any) => {
         console.log('✅ All databases cleared, re-initializing...');
         
         // Trigger re-initialization instead of page reload
-        if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
-          window.reinitializeAfterClear();
+        if (typeof window !== 'undefined' && (window as any).reinitializeAfterClear) {
+          (window as any).reinitializeAfterClear();
         }
         return;
       } catch (error) {
         console.log('❌ Error clearing IndexedDB:', error);
-        if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
-          window.reinitializeAfterClear();
+        if (typeof window !== 'undefined' && (window as any).reinitializeAfterClear) {
+          (window as any).reinitializeAfterClear();
         }
         return;
       }

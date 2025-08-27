@@ -12,10 +12,11 @@ import { DEBUG } from './utils.js';
 export const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
   const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
   const cloneArray = <T>(arr: T[]) => [...arr];
-  
+
   return {
     entityId: replica.entityId,
     signerId: replica.signerId,
+    storage: replica.storage,  // 🔑 сохраняем ссылку, не копируем
     state: {
       height: replica.state.height,
       timestamp: replica.state.timestamp,
@@ -48,12 +49,13 @@ export const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
   };
 };
 
+
 export const captureSnapshot = (
-  env: Env, 
-  envHistory: EnvSnapshot[], 
-  db: any, 
-  serverInput: ServerInput, 
-  serverOutputs: EntityInput[], 
+  env: Env,
+  envHistory: EnvSnapshot[],
+  db: any,
+  serverInput: ServerInput,
+  serverOutputs: EntityInput[],
   description: string
 ): void => {
   const snapshot: EnvSnapshot = {
@@ -78,7 +80,7 @@ export const captureSnapshot = (
     })),
     description
   };
-  
+
   envHistory.push(snapshot);
 
   // --- PERSISTENCE WITH BATCH OPERATIONS ---
@@ -86,9 +88,9 @@ export const captureSnapshot = (
   const batch = db.batch();
   batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
   batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-  
+
   batch.write();
-  
+
   if (DEBUG) {
     console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);
     if (serverInput.serverTxs.length > 0) {
@@ -108,4 +110,4 @@ export const captureSnapshot = (
       });
     }
   }
-}; 
+};

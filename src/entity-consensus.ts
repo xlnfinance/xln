@@ -211,18 +211,26 @@ export const applyEntityInput = async (
   if (entityInput.entityTxs?.length) {
     if (entityReplica.signerId === 'alice') {
       console.log(`🔥 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
-      console.log(`🔥 ALICE-RECEIVES: Transaction types:`, entityInput.entityTxs.map(tx => tx.type));
-      console.log(`🔥 ALICE-RECEIVES: Alice isProposer=${entityReplica.isProposer}, current mempool=${entityReplica.mempool.length}`);
-    }
-    
-    // ✅ Keep mempool only in memory
-    for (const tx of entityInput.entityTxs) {
-      entityReplica.mempool.push(tx)
+      console.log(
+        `🔥 ALICE-RECEIVES: Transaction types:`,
+        entityInput.entityTxs.map((tx) => tx.type),
+      );
+      console.log(
+        `🔥 ALICE-RECEIVES: Alice isProposer=${entityReplica.isProposer}, current mempool=${entityReplica.mempool.length}`,
+      );
     }
 
-    if (DEBUG) console.log(`    → Added ${entityInput.entityTxs.length} txs to mempool (total: ${entityReplica.mempool.length})`)
+    // ✅ Keep mempool only in memory
+    for (const tx of entityInput.entityTxs) {
+      entityReplica.mempool.push(tx);
+    }
+
+    if (DEBUG)
+      console.log(
+        `    → Added ${entityInput.entityTxs.length} txs to mempool (total: ${entityReplica.mempool.length})`,
+      );
     if (DEBUG && entityInput.entityTxs.length > 3) {
-      console.log(`    ⚠️  CORNER CASE: Large batch of ${entityInput.entityTxs.length} transactions`)
+      console.log(`    ⚠️  CORNER CASE: Large batch of ${entityInput.entityTxs.length} transactions`);
     }
   } else if (entityInput.entityTxs && entityInput.entityTxs.length === 0) {
     if (DEBUG) console.log(`    ⚠️  CORNER CASE: Empty transaction array received - no mempool changes`);
@@ -280,7 +288,7 @@ export const applyEntityInput = async (
 
   // === Auto-propose (only proposer, if mempool not empty)
   if (entityReplica.isProposer && !entityReplica.proposal) {
-    const mempoolTxs = await storage.getAll<EntityTx>('mempool');
+    const mempoolTxs = entityReplica.mempool.slice(); // Use in-memory mempool
     if (mempoolTxs.length > 0) {
       const newState = await applyEntityFrame(env, entityReplica.state, mempoolTxs, storage);
       const frameHash = `frame_${entityReplica.state.height + 1}_${timestamp}`;
@@ -296,6 +304,9 @@ export const applyEntityInput = async (
 
       await storage.set('proposal', frameHash, proposal);
       entityReplica.proposal = proposal;
+
+      // Clear mempool after proposing
+      entityReplica.mempool.length = 0;
 
       if (DEBUG) console.log(`🚀 Auto-proposed frame ${frameHash}`);
     }

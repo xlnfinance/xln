@@ -42,11 +42,20 @@ export interface EntityInput {
   proposedFrame?: ProposedEntityFrame;
 }
 
+export interface EntityStorage {
+  get<T>(type: string, key: string): Promise<T | undefined>;
+  set<T>(type: string, key: string, value: T): Promise<void>;
+  getRoot(): Promise<string>; // bytes32 hex
+  getProof(type: string, key: string): Promise<any>;
+  getAll<T>(type: string): Promise<T[]>;
+  clear(type: string): Promise<void>;
+}
+
 export interface Proposal {
   id: string; // hash of the proposal
   proposer: string;
   action: ProposalAction;
-  votes: Map<string, 'yes' | 'no' | 'abstain'>;
+  votes: Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment?: string }>;
   status: 'pending' | 'executed' | 'rejected';
   created: number; // entity timestamp when proposal was created (deterministic)
 }
@@ -95,6 +104,7 @@ export interface EntityReplica {
   proposal?: ProposedEntityFrame;
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   isProposer: boolean;
+  storage: EntityStorage;
 }
 
 export interface Env {
@@ -118,13 +128,13 @@ export interface EnvSnapshot {
 export type EntityType = 'lazy' | 'numbered' | 'named';
 
 // Constants
-export const ENC = 'hex' as const; 
+export const ENC = 'hex' as const;
 
 // === HANKO BYTES SYSTEM (Final Design) ===
 export interface HankoBytes {
-  placeholders: Buffer[];    // Entity IDs that failed to sign (index 0..N-1)
-  packedSignatures: Buffer;  // EOA signatures → yesEntities (index N..M-1)
-  claims: HankoClaim[];      // Entity claims to verify (index M..∞)
+  placeholders: Buffer[]; // Entity IDs that failed to sign (index 0..N-1)
+  packedSignatures: Buffer; // EOA signatures → yesEntities (index N..M-1)
+  claims: HankoClaim[]; // Entity claims to verify (index M..∞)
 }
 
 export interface HankoClaim {
@@ -132,6 +142,7 @@ export interface HankoClaim {
   entityIndexes: number[];
   weights: number[];
   threshold: number;
+  expectedQuorumHash: Buffer;
 }
 
 export interface HankoVerificationResult {
@@ -168,11 +179,11 @@ export interface HankoContext {
  */
 export interface EntityProfile {
   entityId: string;
-  name: string;          // Human-readable name e.g., "Alice Corp", "Bob's DAO"
-  avatar?: string;       // Custom avatar URL (fallback to generated identicon)
-  bio?: string;          // Short description
-  website?: string;      // Optional website URL
-  lastUpdated: number;   // Timestamp of last update
+  name: string; // Human-readable name e.g., "Alice Corp", "Bob's DAO"
+  avatar?: string; // Custom avatar URL (fallback to generated identicon)
+  bio?: string; // Short description
+  website?: string; // Optional website URL
+  lastUpdated: number; // Timestamp of last update
   hankoSignature: string; // Signature proving entity ownership
 }
 
@@ -201,4 +212,4 @@ export interface NameSearchResult {
   name: string;
   avatar: string;
   relevance: number; // Search relevance score 0-1
-} 
+}

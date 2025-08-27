@@ -162,7 +162,7 @@ export const createLazyEntity = async (name: string, validators: string[], thres
   };
 
   // Initialize storage with dedicated DB
-  const storage = await createMPTStorage(`./db/entities/${entityId}`);
+  const storage = await createMPTStorage(`db/entities/${entityId}`);
 
   return { config, storage };
 };
@@ -209,7 +209,7 @@ export const createNumberedEntity = async (name: string, validators: string[], t
   };
 
   // Initialize storage with dedicated DB
-  const storage = await createMPTStorage(`./db/entities/${entityId}`);
+  const storage = await createMPTStorage(`db/entities/${entityId}`);
 
   return { config, entityNumber, storage };
 };
