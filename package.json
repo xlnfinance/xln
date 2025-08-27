@@ -1,7 +1,54 @@
 {
   "name": "xlnfinance",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "./dist/server.js",
+  "module": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "require": "./dist/server.js",
+      "browser": "./dist/server.js",
+      "import": "./dist/server.js"
+    },
+    "./server-dev": {
+      "types": "./dist/server-dev.d.ts",
+      "import": "./dist/server-dev.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./utils": {
+      "types": "./dist/utils.d.ts",
+      "import": "./dist/utils.js"
+    },
+    "./entity-factory": {
+      "types": "./dist/entity-factory.d.ts",
+      "import": "./dist/entity-factory.js"
+    },
+    "./entity-consensus": {
+      "types": "./dist/entity-consensus.d.ts",
+      "import": "./dist/entity-consensus.js"
+    },
+    "./evm": {
+      "types": "./dist/evm.d.ts",
+      "import": "./dist/evm.js"
+    },
+    "./rundemo": {
+      "types": "./dist/rundemo.d.ts",
+      "import": "./dist/rundemo.js"
+    },
+    "./name-resolution": {
+      "types": "./dist/name-resolution.d.ts",
+      "import": "./dist/name-resolution.js"
+    },
+    "./hanko-real": {
+      "types": "./dist/hanko-real.d.ts",
+      "import": "./dist/hanko-real.js"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "dev": "./dev-full.sh",
     "serve": "bun run serve.ts",
@@ -33,7 +80,8 @@
     "test:section": "mocha -r ts-node/register src/test/section.test.ts --timeout 60000 --exit",
     "test:derive": "mocha -r ts-node/register src/test/derive.test.ts --timeout 10000 --exit",
     "t2": "tsc && ts-node src/test/derive.test.ts",
-    "build": "tsc",
+    "build": "tsc && bun build src/server.ts --target browser --outfile dist/server.js --external ethers --external level --external memory-level --external abstract-level",
+    "build:dev": "bun build src/server.ts --target node --outfile dist/server-dev.js",
     "watch": "tsc --watch",
     "env:build": "cd ./contracts && npx hardhat compile",
     "env:run": "cd ./contracts && npx hardhat node",
@@ -68,6 +116,8 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "@ethereumjs/mpt": "^10.0.0",
+    "@ethereumjs/util": "^10.0.0",
     "argon2": "^0.43.1",
     "bip39": "^3.1.0",
     "buffer": "^6.0.3",
@@ -76,6 +126,7 @@
     "jdenticon": "^3.3.0",
     "js-sha3": "^0.9.3",
     "level": "^8.0.1",
+    "memory-level": "^3.1.0",
     "merkletreejs": "^0.4.0",
     "msgpackr": "^1.11.5",
     "ws": "^8.17.0",
