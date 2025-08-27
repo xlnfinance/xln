@@ -5,7 +5,17 @@
   import { visibleReplicas } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
-  import { XLNServer, escapeHtml } from '../../utils/xlnServer';
+  import { getXLN } from '../../stores/xlnStore';
+  
+  // Simple HTML escape (moved from deleted utils)
+  function escapeHtml(unsafe: string): string {
+    return unsafe
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
   import EntityDropdown from './EntityDropdown.svelte';
   import EntityProfile from './EntityProfile.svelte';
   import ConsensusState from './ConsensusState.svelte';

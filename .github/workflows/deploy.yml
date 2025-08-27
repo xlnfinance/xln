@@ -36,55 +36,11 @@ jobs:
           cd frontend
           bun run build:static
           
-      - name: Setup dual deployment structure
+      - name: Copy legacy index.html
         run: |
           mkdir -p dist
-          # Copy new Svelte app as main index.html
-          cp -r frontend/build/* dist/
-          # Copy old visual debugger as legacy.html and debug.html
           cp index.html dist/legacy.html
-          cp index.html dist/debug.html
-          # Create a simple landing page that links to both
-          cat > dist/versions.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>XLN Platform - Choose Version</title>
-            <style>
-              body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 40px; background: #0f0f0f; color: #e0e0e0; }
-              .container { max-width: 600px; margin: 0 auto; text-align: center; }
-              h1 { color: #00d4ff; margin-bottom: 20px; }
-              .version-card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 30px; margin: 20px 0; }
-              .version-card h2 { color: #ffffff; margin-bottom: 15px; }
-              .version-card p { color: #b0b0b0; margin-bottom: 20px; line-height: 1.5; }
-              .btn { display: inline-block; padding: 12px 24px; background: #00d4ff; color: #000; text-decoration: none; border-radius: 6px; font-weight: 500; transition: background 0.2s; }
-              .btn:hover { background: #00b8e6; }
-              .btn.secondary { background: #333; color: #fff; }
-              .btn.secondary:hover { background: #444; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <h1>🚀 XLN Platform</h1>
-              <p>Choose your version:</p>
-              
-              <div class="version-card">
-                <h2>🎯 New Svelte App (Recommended)</h2>
-                <p>Modern interface with entity management, tutorials, and enhanced UX. Built with Svelte for optimal performance.</p>
-                <a href="/xln/" class="btn">Launch New App</a>
-              </div>
-              
-              <div class="version-card">
-                <h2>🔧 Legacy Visual Debugger</h2>
-                <p>Original consensus debugging interface with raw protocol visualization. For advanced debugging and development.</p>
-                <a href="/xln/legacy.html" class="btn secondary">Launch Debugger</a>
-              </div>
-            </div>
-          </body>
-          </html>
-          EOF
+          cp -r frontend/build/* dist/
           
       - name: Setup Pages
         uses: actions/configure-pages@v4
