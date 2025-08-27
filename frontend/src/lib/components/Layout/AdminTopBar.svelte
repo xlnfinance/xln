@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { xlnOperations } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, error } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
   import TutorialLauncher from '../Tutorial/TutorialLauncher.svelte';
@@ -15,7 +15,13 @@
   // Event handlers
   async function handleRunDemo() {
     try {
-      await xlnOperations.runDemo();
+      // Direct XLN call - no wrapper needed
+      console.log('🎯 Running XLN demo...');
+      const xln = await getXLN();
+      const env = $xlnEnvironment || await xln.main();
+      
+      const result = await xln.runDemo(env);
+      xlnEnvironment.set(result);
       console.log('✅ Demo completed successfully');
     } catch (error) {
       console.error('❌ Demo failed:', error);
