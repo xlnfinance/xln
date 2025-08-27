@@ -4,7 +4,7 @@
  */
 
 import { 
-  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig, VoteData 
+  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig, VoteData, EntityStorage 
 } from './types.js';
 import { createHash, DEBUG, log } from './utils.js';
 import { calculateQuorumPower } from './entity-consensus.js';
@@ -55,7 +55,7 @@ const validateMessage = (message: string): boolean => {
  * Apply a single entity transaction to the entity state
  * COMPLETE IMPLEMENTATION moved from server.ts
  */
-export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: EntityTx): EntityState => {
+export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx, storage?: EntityStorage): Promise<EntityState> => {
   console.log(`🚨 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, entityTx.data);
   try {
     if (entityTx.type === 'chat') {
