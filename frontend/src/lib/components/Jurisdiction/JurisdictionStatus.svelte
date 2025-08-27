@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { xlnOperations } from '../../stores/xlnStore';
+  import { getXLN } from '../../stores/xlnStore';
   import Button from '../Common/Button.svelte';
 
   interface JurisdictionInfo {

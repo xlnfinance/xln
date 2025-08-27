@@ -1,23 +1,20 @@
 import { test, expect } from '@playwright/test';
 
-// Helper to select first validator as 'alice'
-async function selectFirstValidatorAsAlice(page) {
-  // Open the dropdown for the first validator row (data-validator-id="0")
-  await page.locator('[data-validator-id="0"] .validator-selector').click();
-  // Click within the options container to avoid matching other text on page
-  const options = page.locator('#validatorOptions0');
-  await expect(options).toBeVisible();
-  await options.getByText('alice.eth', { exact: true }).click();
-}
-
 test('creates a new lazy entity via formation panel', async ({ page }) => {
   await page.goto('/');
 
-  // Ensure formation tab is visible (default active)
-  await expect(page.locator('#formationTabContent')).toBeVisible();
-
   // Wait for app environment to be ready
-  await page.waitForFunction(() => Boolean((window as any).xlnEnv), undefined, { timeout: 30000 });
+  await page.waitForFunction(() => Boolean((window as any).xlnEnv), { timeout: 30000 });
+
+  // Navigate to Formation tab
+  await page.locator('text=Formation').click();
+  await page.waitForTimeout(500);
+
+  // Capture initial replica count
+  const beforeCount = await page.evaluate(() => {
+    const env = (window as any).xlnEnv;
+    return env ? env.replicas.size : 0;
+  });
 
   // Jurisdiction defaults to 8545 (Ethereum). Ensure it is selected.
   const jurisdiction = page.locator('#jurisdictionSelect');
@@ -30,14 +27,9 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
   const name = `PlaywrightEntity_${Date.now()}`;
   await page.locator('#entityNameInput').fill(name);
 
-  // Capture initial replica count
-  const beforeCount = await page.evaluate(() => {
-    const env = (window as any).xlnEnv;
-    return env ? env.replicas.size : 0;
-  });
-
-  // Choose validator 'alice' for the first row
-  await selectFirstValidatorAsAlice(page);
+  // Select validator 'alice' for the first validator row
+  const firstValidatorSelect = page.locator('.validator-name').first();
+  await firstValidatorSelect.selectOption('alice');
 
   // Ensure threshold is 1
   const threshold = page.locator('#thresholdSlider');
@@ -51,6 +43,9 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
   await expect(createBtn).toBeVisible();
   await createBtn.click();
 
+  // Wait for entity creation to complete
+  await page.waitForTimeout(2000);
+
   // Verify in the app state that new replicas were imported
   // For a single validator, we expect at least +1 replica
   await page.waitForFunction(
@@ -61,20 +56,20 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
     beforeCount,
     { timeout: 30000 }
   );
+  
   const afterCount = await page.evaluate(() => {
     const env = (window as any).xlnEnv;
     return env ? env.replicas.size : 0;
   });
+  
+  console.log(`✅ Entity creation test: replicas before=${beforeCount}, after=${afterCount}`);
   expect(afterCount).toBeGreaterThan(beforeCount);
 
-  // Visual confirmation steps for video: open history IO and first entity dropdown
-  await page.locator('#historyToggle').click();
-  await page.waitForTimeout(300);
-  await page.locator('.entity-panels-container').evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'start' }));
-  const firstDropdownBtn = page.locator('.entity-panel .unified-dropdown-btn').first();
-  await firstDropdownBtn.click();
+  // Visual confirmation: take a screenshot for verification
+  await page.screenshot({ path: 'entity-created.png', fullPage: true });
+  
   // Hold the final frame a bit so the video isn't 0:00
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(1000);
 });
 
 

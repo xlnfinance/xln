@@ -179,45 +179,6 @@ export const processProfileUpdate = async (
     console.error('Error processing profile update:', error);
   }
 };
-
-// === INITIALIZATION & DEMO DATA ===
-
-/**
- * Initialize demo profiles for existing entities
- */
-export const initializeDemoProfiles = async (db: any, env: Env): Promise<void> => {
-  if (!db) return;
-  
-  console.log('🏷️ Initializing demo entity profiles...');
-  
-  // Create profiles for existing entities
-  const demoProfiles: EntityProfile[] = [
-    {
-      entityId: '0x0000000000000000000000000000000000000000000000000000000000000001',
-      name: 'Trading Collective',
-      bio: 'A decentralized trading group focused on DeFi strategies',
-      website: 'https://trading-collective.xyz',
-      lastUpdated: Date.now(),
-      hankoSignature: 'demo_signature_1'
-    },
-    {
-      entityId: '0x0000000000000000000000000000000000000000000000000000000000000002',
-      name: 'Governance DAO',
-      bio: 'Multi-signature governance entity for protocol decisions',
-      website: 'https://governance-dao.org',
-      lastUpdated: Date.now(),
-      hankoSignature: 'demo_signature_2'
-    }
-  ];
-  
-  // Store demo profiles
-  for (const profile of demoProfiles) {
-    await storeProfile(db, profile);
-  }
-  
-  console.log(`✅ Initialized ${demoProfiles.length} demo profiles`);
-};
-
 // === NAME RESOLUTION HELPERS ===
 
 /**

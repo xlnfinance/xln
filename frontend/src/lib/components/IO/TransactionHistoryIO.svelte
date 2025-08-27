@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { xlnOperations, xlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import { timeState } from '../../stores/timeStore';
 
   let isCollapsed = false;

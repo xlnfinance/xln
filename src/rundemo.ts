@@ -47,7 +47,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   // Create numbered entity (blockchain registered)
   const chatEntityId = generateNumberedEntityId(1); // Use entity #1
   
-  applyServerInput(env, {
+  await applyServerInput(env, {
     serverTxs: chatValidators.map((signerId, index) => ({
       type: 'importReplica' as const,
       entityId: chatEntityId,
@@ -84,7 +84,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   console.log(`📋 Fixed supply: 1 quadrillion control & dividend tokens (held by entity)`);
   console.log(`🔄 Distribution: Use reserveToReserve() to manually distribute tokens`);
   
-  applyServerInput(env, {
+  await applyServerInput(env, {
     serverTxs: tradingValidators.map((signerId, index) => ({
       type: 'importReplica' as const,
       entityId: tradingEntityId,
@@ -117,7 +117,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   // Create lazy entity (hash-based ID)
   const govEntityId = generateLazyEntityId(govValidators, BigInt(10));
 
-  applyServerInput(env, {
+  await applyServerInput(env, {
     serverTxs: govValidators.map((signerId, index) => ({
       type: 'importReplica' as const,
       entityId: govEntityId,
@@ -144,7 +144,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   
   const singleEntityId = generateLazyEntityId(['alice'], BigInt(1));
   
-  applyServerInput(env, {
+  await applyServerInput(env, {
     serverTxs: [{
       type: 'importReplica' as const,
       entityId: singleEntityId,
@@ -157,7 +157,7 @@ const runDemo = async (env: Env): Promise<Env> => {
     entityInputs: []
   });
   
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: singleEntityId,
     signerId: 'alice',
     entityTxs: [{ type: 'chat', data: { from: 'alice', message: 'Single signer test message!' } }]
@@ -165,7 +165,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   
   // === CORNER CASE 1: Single transaction (minimal consensus) ===
   console.log('\n⚠️  CORNER CASE 1: Single transaction in chat');
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: chatEntityId,
     signerId: 'alice',
     entityTxs: [{ type: 'chat', data: { from: 'alice', message: 'First message in chat!' } }]
@@ -173,7 +173,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   
   // === CORNER CASE 2: Batch proposals (stress test) ===
   console.log('\n⚠️  CORNER CASE 2: Batch proposals in trading');
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: tradingEntityId,
     signerId: 'alice',
     entityTxs: [
@@ -185,7 +185,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   
   // === CORNER CASE 3: High threshold governance (needs 4/5 validators) ===
   console.log('\n⚠️  CORNER CASE 3: High threshold governance vote');
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: govEntityId,
     signerId: 'alice',
     entityTxs: [{ type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Governance proposal: Increase block size limit' } }, proposer: 'alice' } }]
@@ -193,7 +193,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   
   // === CORNER CASE 4: Multiple entities concurrent activity ===
   console.log('\n⚠️  CORNER CASE 4: Concurrent multi-entity activity');
-  processUntilEmpty(env, [
+  await processUntilEmpty(env, [
     {
       entityId: chatEntityId,
       signerId: 'alice',
@@ -221,7 +221,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   
   // === CORNER CASE 5: Empty mempool auto-propose (should be ignored) ===
   console.log('\n⚠️  CORNER CASE 5: Empty mempool test (no auto-propose)');
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: chatEntityId,
     signerId: 'alice',
     entityTxs: [] // Empty transactions should not trigger proposal
@@ -234,7 +234,7 @@ const runDemo = async (env: Env): Promise<Env> => {
     data: { from: ['alice', 'bob', 'carol'][i % 3], message: `Batch message ${i + 1}` }
   }));
   
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: chatEntityId,
     signerId: 'alice',
     entityTxs: largeBatch
@@ -244,7 +244,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   console.log('\n⚠️  CORNER CASE 7: Proposal voting system');
   
   // Create a proposal that needs votes
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: tradingEntityId,
     signerId: 'alice',
     entityTxs: [
@@ -255,7 +255,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   // Simulate voting on the proposal
   // We need to get the proposal ID from the previous execution, but for demo purposes, we'll simulate voting workflow
   console.log('\n⚠️  CORNER CASE 7b: Voting on proposals (simulated)');
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env, [{
     entityId: govEntityId,
     signerId: 'alice',
     entityTxs: [

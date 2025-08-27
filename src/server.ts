@@ -32,7 +32,7 @@ import { runDepositoryHankoTests } from './test-depository-hanko.js';
 import { runBasicHankoTests } from './test-hanko-basic.js';
 import { runAllTests as runCompleteHankoTests } from './test-hanko-complete.js';
 import {
-  initializeDemoProfiles, getProfile, storeProfile,
+  getProfile, storeProfile,
   searchEntityNames as searchEntityNamesOriginal,
   resolveEntityName as resolveEntityNameOriginal,
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
@@ -59,10 +59,21 @@ declare const console: any;
 
 // === ETHEREUM INTEGRATION ===
 
+// === SVELTE REACTIVITY INTEGRATION ===
+// Callback that Svelte can register to get notified of env changes
+let envChangeCallback: ((env: Env) => void) | null = null;
 
+export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
+  envChangeCallback = callback;
+};
 
-// Global history for time machine
-let envHistory: EnvSnapshot[] = [];
+const notifyEnvChange = (env: Env) => {
+  if (envChangeCallback) {
+    envChangeCallback(env);
+  }
+};
+
+// Note: History is now stored in env.history (no global variable needed)
 
 // === SNAPSHOT UTILITIES ===
 const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
@@ -104,7 +115,7 @@ const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
   };
 };
 
-const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: EntityInput[], description: string): void => {
+const captureSnapshot = async (env: Env, serverInput: ServerInput, serverOutputs: EntityInput[], description: string): Promise<void> => {
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
@@ -128,18 +139,28 @@ const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: Enti
     description
   };
   
-  envHistory.push(snapshot);
+  env.history = env.history || [];
+  env.history.push(snapshot);
 
   // --- PERSISTENCE WITH BATCH OPERATIONS ---
   // Use batch operations for better performance
-  const batch = db.batch();
-  batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
-  batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-  
-  batch.write();
+  try {
+    const batch = db.batch();
+    batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
+    batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
+    
+    await batch.write();
+    
+    if (DEBUG) {
+      console.log(`💾 Snapshot ${snapshot.height} saved to IndexedDB successfully`);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to save snapshot ${snapshot.height} to IndexedDB:`, error);
+    throw error;
+  }
   
   if (DEBUG) {
-    console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);
+    console.log(`📸 Snapshot captured: "${description}" (${env.history.length} total)`);
     if (serverInput.serverTxs.length > 0) {
       console.log(`    🖥️  ServerTxs: ${serverInput.serverTxs.length}`);
       serverInput.serverTxs.forEach((tx, i) => {
@@ -169,7 +190,7 @@ const captureSnapshot = (env: Env, serverInput: ServerInput, serverOutputs: Enti
 
 
 
-const applyServerInput = (env: Env, serverInput: ServerInput): { entityOutbox: EntityInput[], mergedInputs: EntityInput[] } => {
+const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ entityOutbox: EntityInput[], mergedInputs: EntityInput[] }> => {
   const startTime = Date.now();
   
   try {
@@ -279,7 +300,10 @@ const applyServerInput = (env: Env, serverInput: ServerInput): { entityOutbox: E
     env.serverInput.entityInputs.length = 0;
     
     // Capture snapshot with the actual processed input and outputs
-    captureSnapshot(env, processedInput, entityOutbox, inputDescription);
+    await captureSnapshot(env, processedInput, entityOutbox, inputDescription);
+    
+    // Notify Svelte about environment changes
+    notifyEnvChange(env);
     
     if (DEBUG && entityOutbox.length > 0) {
       console.log(`📤 Outputs: ${entityOutbox.length} messages`);
@@ -321,7 +345,8 @@ const main = async (): Promise<Env> => {
     replicas: new Map(),
     height: 0,
     timestamp: Date.now(),
-    serverInput: { serverTxs: [], entityInputs: [] }
+    serverInput: { serverTxs: [], entityInputs: [] },
+    history: []
   };
 
   // Then try to load saved state if available
@@ -360,7 +385,7 @@ const main = async (): Promise<Env> => {
     }
     
     console.log(`📊 Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
-    envHistory = snapshots;
+    env.history = snapshots;
 
     if (snapshots.length > 0) {
       const latestSnapshot = snapshots[snapshots.length - 1];
@@ -369,8 +394,9 @@ const main = async (): Promise<Env> => {
         height: latestSnapshot.height,
         timestamp: latestSnapshot.timestamp,
         serverInput: latestSnapshot.serverInput,
+        history: snapshots  // Include the loaded history
       };
-      console.log(`✅ History restored. Server is at height ${env.height} with ${envHistory.length} snapshots.`);
+      console.log(`✅ History restored. Server is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
         height: env.height,
         replicaCount: env.replicas.size,
@@ -399,8 +425,7 @@ const main = async (): Promise<Env> => {
     }
   }
 
-  // Initialize demo profiles (works in both Node.js and browser)
-  await initializeDemoProfiles(db, env);
+  // Demo profiles are only initialized during runDemo - not by default
 
   // Only run demos in Node.js environment, not browser
   if (!isBrowser) {
@@ -429,9 +454,31 @@ const main = async (): Promise<Env> => {
 };
 
 // === TIME MACHINE API ===
-const getHistory = () => envHistory;
-const getSnapshot = (index: number) => index >= 0 && index < envHistory.length ? envHistory[index] : null;
-const getCurrentHistoryIndex = () => envHistory.length - 1;
+const getHistory = () => env.history || [];
+const getSnapshot = (index: number) => {
+  const history = env.history || [];
+  return index >= 0 && index < history.length ? history[index] : null;
+};
+const getCurrentHistoryIndex = () => (env.history || []).length - 1;
+
+// Server-specific clearDatabase that also resets history
+const clearDatabaseAndHistory = async () => {
+  console.log('🗑️ Clearing database and resetting server history...');
+  
+  // Clear the Level database
+  await clearDatabase(db);
+  
+  // Reset the server environment to initial state (including history)
+  env = {
+    replicas: new Map(),
+    height: 0,
+    timestamp: Date.now(),
+    serverInput: { serverTxs: [], entityInputs: [] },
+    history: []
+  };
+  
+  console.log('✅ Database and server history cleared');
+};
 
 export { 
   runDemo, 
@@ -441,7 +488,8 @@ export {
   getHistory, 
   getSnapshot, 
   getCurrentHistoryIndex, 
-  clearDatabase, 
+  clearDatabase,
+  clearDatabaseAndHistory, 
   getAvailableJurisdictions, 
   getJurisdictionByAddress, 
   demoCompleteHanko,
@@ -601,7 +649,7 @@ const runDemoWrapper = async (env: any): Promise<any> => {
 };
 
 // === CONSENSUS PROCESSING UTILITIES ===
-export const processUntilEmpty = (env: Env, inputs?: EntityInput[]) => {
+export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   let outputs = inputs || [];
   let iterationCount = 0;
   const maxIterations = 10; // Safety limit
@@ -619,7 +667,7 @@ export const processUntilEmpty = (env: Env, inputs?: EntityInput[]) => {
     iterationCount++;
     console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
     
-    const result = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
+    const result = await applyServerInput(env, { serverTxs: [], entityInputs: outputs });
     outputs = result.entityOutbox;
     
     console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} generated ${outputs.length} new outputs`);

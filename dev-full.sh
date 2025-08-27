@@ -32,9 +32,10 @@ echo "📦 Starting TypeScript watch compilation..."
 
 # Step 2: Start file watching in background
 mkdir -p dist
+mkdir -p frontend/static
 
-# Start TypeScript watch compilation
-bun build src/server.ts --target browser --outfile dist/server.js --watch &
+# Start TypeScript watch compilation - build to frontend/static so vite can serve it
+bun build src/server.ts --target browser --outfile frontend/static/server.js --watch &
 WATCH_PID=$!
 
 # Wait a moment for initial build
@@ -43,7 +44,7 @@ sleep 2
 echo "🌐 Starting Svelte development server..."
 
 # Step 3: Start Svelte dev server in background  
-cd frontend && npm run dev &
+cd frontend && bun run dev &
 SERVE_PID=$!
 
 # Wait for server to start
@@ -52,8 +53,8 @@ sleep 3
 echo ""
 echo "✅ Full Development Environment Ready!"
 echo ""
-echo "🌐 Open: http://localhost:5173 (Svelte frontend)"
-echo "🌐 API: http://localhost:8080 (if needed)"
+echo "🌐 Open: http://localhost:8080 (Svelte frontend)"
+echo "🌐 API: http://localhost:8080 (unified on same port)"
 echo "📦 TypeScript: Auto-compiling on file changes"
 echo "🔗 Networks: Running on ports 8545, 8546, 8547"
 echo "📝 Contracts: Fresh deployment completed"
