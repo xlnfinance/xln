@@ -22,3 +22,4 @@ bun.lockb
 # Local database files
 db/
 nul
+dist/
