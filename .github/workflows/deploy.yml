@@ -38,11 +38,15 @@ jobs:
           
       - name: Deploy Svelte app with legacy debugger
         run: |
+          # Clean dist directory to ensure no conflicts
+          rm -rf dist
           mkdir -p dist
           # Copy new Svelte app as main deployment (this includes index.html)
           cp -r frontend/build/* dist/
           # Copy legacy visual debugger alongside
           cp legacy.html dist/legacy.html
+          # Ensure no README or other root files interfere
+          ls -la dist/
           
       - name: Setup Pages
         uses: actions/configure-pages@v4
