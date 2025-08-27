@@ -1,16 +1,25 @@
-import { writable, derived, get } from 'svelte/store';
-import type { XLNEnvironment, EntityReplica, Snapshot, EntityTx, EntityInput, EntityOutput } from '../types';
-import { XLNServer } from '../utils/xlnServer';
+import { writable, derived } from 'svelte/store';
 
-// Main XLN Environment Store
-export const xlnEnvironment = writable<XLNEnvironment | null>(null);
+// Direct import of XLN server module (no wrapper boilerplate needed)
+let XLN: any = null;
+
+async function getXLN() {
+  if (XLN) return XLN;
+  
+  const serverUrl = new URL('/xln/server.js', window.location.origin).href;
+  XLN = await import(/* @vite-ignore */ serverUrl);
+  return XLN;
+}
+
+// Simple reactive store for XLN environment - just like legacy index.html
+export const xlnEnvironment = writable<any>(null);
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
 
-// Derived stores for easier access
+// Derived stores for convenience
 export const replicas = derived(
   xlnEnvironment,
-  ($env) => $env?.replicas || new Map<string, EntityReplica>()
+  ($env) => $env?.replicas || new Map()
 );
 
 export const history = derived(
@@ -23,32 +32,27 @@ export const currentHeight = derived(
   ($env) => $env?.height || 0
 );
 
-// XLN Operations
-const xlnOperations = {
-  // Initialize XLN environment
+// Lean operations - just like legacy index.html approach
+export const xlnOperations = {
+  // Initialize XLN environment - direct call to XLN.main()
   async initialize() {
     try {
       isLoading.set(true);
       error.set(null);
       
-      // Initialize the environment using XLNServer utility
-      const env: any = await XLNServer.main();
+      const xln = await getXLN();
+      const env = await xln.main();
 
-      // Ensure history and serverOutputs exist so time machine works
-      const hist = await XLNServer.getHistory();
-      env.history = Array.isArray(hist) ? hist : [];
-      env.serverOutputs = Array.isArray(env.serverOutputs) ? env.serverOutputs : [];
-
-      // Log for debugging
-      console.log(`🕰️ xlnStore.initialize: history length = ${env.history.length}`);
-
+      // Ensure history exists for time machine
+      env.history = env.history || xln.getHistory?.() || [];
+      
       xlnEnvironment.set(env);
       isLoading.set(false);
       
-      console.log('🎯 XLN Environment initialized:', env);
+      console.log('✅ XLN Environment initialized');
       return env;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to initialize XLN environment';
+      const errorMessage = err instanceof Error ? err.message : 'Failed to initialize';
       error.set(errorMessage);
       isLoading.set(false);
       console.error('❌ XLN initialization failed:', err);
@@ -56,244 +60,11 @@ const xlnOperations = {
     }
   },
 
-  // Apply server input and process consensus
-  async applyServerInput(input: { serverTxs?: any[], entityInputs?: EntityInput[] }) {
-    const env = get(xlnEnvironment);
-    if (!env) throw new Error('XLN environment not initialized');
-
-    try {
-      const result = await XLNServer.applyServerInput(env, {
-        serverTxs: input.serverTxs || [],
-        entityInputs: input.entityInputs || []
-      });
-
-      // Process until empty for full consensus cascade
-      if (result.entityOutbox && result.entityOutbox.length > 0) {
-        await XLNServer.processUntilEmpty(env, result.entityOutbox);
-      }
-
-      // Update the store with new environment state
-      xlnEnvironment.set(env);
-      
-      return result;
-    } catch (err) {
-      console.error('❌ Failed to apply server input:', err);
-      throw err;
-    }
-  },
-
-  // Submit a chat message
-  async submitChatMessage(entityId: string, signerId: string, message: string) {
-    const entityInputs = [{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'chat',
-        data: { from: signerId, message }
-      }],
-      destinations: []
-    }];
-
-    const env = get(xlnEnvironment);
-    if (env && (window as any).processUntilEmpty) {
-      console.log('🔥 Calling processUntilEmpty for chat');
-      const result = (window as any).processUntilEmpty(env, [], entityInputs);
-      this.updateFromEnvironment();
-      return result;
-    } else {
-      return this.applyServerInput({ entityInputs });
-    }
-  },
-
-  // Submit a proposal
-  async submitProposal(entityId: string, signerId: string, proposalText: string) {
-    const entityInputs = [{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'propose',
-        data: {
-          action: { type: 'collective_message', data: { message: proposalText } },
-          proposer: signerId
-        }
-      }],
-      destinations: []
-    }];
-
-    const env = get(xlnEnvironment);
-    if (env && (window as any).processUntilEmpty) {
-      console.log('🔥 Calling processUntilEmpty for proposal');
-      const result = (window as any).processUntilEmpty(env, [], entityInputs);
-      this.updateFromEnvironment();
-      return result;
-    } else {
-      return this.applyServerInput({ entityInputs });
-    }
-  },
-
-  // Submit a vote
-  async submitVote(entityId: string, signerId: string, proposalId: string, choice: 'yes' | 'no' | 'abstain', comment?: string) {
-    const entityInputs = [{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'vote',
-        data: {
-          proposalId,
-          voter: signerId,
-          choice,
-          comment
-        }
-      }],
-      destinations: []
-    }];
-
-    const env = get(xlnEnvironment);
-    if (env && (window as any).processUntilEmpty) {
-      console.log('🔥 Calling processUntilEmpty for vote');
-      const result = (window as any).processUntilEmpty(env, [], entityInputs);
-      this.updateFromEnvironment();
-      return result;
-    } else {
-      return this.applyServerInput({ entityInputs });
-    }
-  },
-
-  // Create a new entity
-  async createEntity(entityData: {
-    entityType: 'lazy' | 'numbered' | 'named';
-    entityName: string;
-    validators: string[];
-    threshold: number;
-    jurisdiction?: any;
-  }) {
-    try {
-      let config: any;
-      let entityId: string;
-      
-      if (entityData.entityType === 'lazy') {
-        config = await XLNServer.createLazyEntity(
-          entityData.entityName,
-          entityData.validators,
-          BigInt(entityData.threshold),
-          entityData.jurisdiction
-        );
-        entityId = await XLNServer.generateLazyEntityId(
-          entityData.validators.map((name, i) => ({ name, weight: 1 })),
-          BigInt(entityData.threshold)
-        );
-      } else {
-        // Handle numbered and named entities
-        const result = await XLNServer.createNumberedEntity(
-          entityData.entityName,
-          entityData.validators,
-          BigInt(entityData.threshold),
-          entityData.jurisdiction
-        );
-        config = result.config;
-        entityId = await XLNServer.generateNumberedEntityId(result.entityNumber);
-      }
-
-      // Create server transactions for all validators
-      const serverTxs = entityData.validators.map((signerId, index) => ({
-        type: 'importReplica',
-        entityId,
-        signerId,
-        data: {
-          config,
-          isProposer: index === 0 // First validator is proposer
-        }
-      }));
-
-      // Call processUntilEmpty directly with serverTxs like old index.html
-      const env = get(xlnEnvironment);
-      if (env && (window as any).processUntilEmpty) {
-        console.log('🔥 Calling processUntilEmpty with serverTxs');
-        const result = (window as any).processUntilEmpty(env, serverTxs);
-        this.updateFromEnvironment();
-        return result;
-      } else {
-        // Fallback if processUntilEmpty not available
-        const result = this.applyServerInput({ serverTxs });
-        return result;
-      }
-    } catch (err) {
-      console.error('❌ Failed to create entity:', err);
-      throw err;
-    }
-  },
-
-  // Run demo
-  async runDemo() {
-    const env = get(xlnEnvironment);
-    if (!env) throw new Error('XLN environment not initialized');
-
-    try {
-      await XLNServer.runDemoWrapper(env);
-      
-      // Update the store
-      xlnEnvironment.set(env);
-      
-      console.log('✅ Demo completed successfully');
-    } catch (err) {
-      console.error('❌ Demo failed:', err);
-      throw err;
-    }
-  },
-
-  // Clear database
-  async clearDatabase() {
-    try {
-      await XLNServer.clearDatabase();
-      
-      // Reinitialize environment
-      await this.initialize();
-      
-      console.log('✅ Database cleared and reinitialized');
-    } catch (err) {
-      console.error('❌ Failed to clear database:', err);
-      throw err;
-    }
-  },
-
-  // Get history snapshot at specific index
-  getHistorySnapshot(index: number): Snapshot | null {
-    const env = get(xlnEnvironment);
-    if (!env || !env.history || index < 0 || index >= env.history.length) {
-      return null;
-    }
-    return env.history[index];
-  },
-
-  // Get replica by entity and signer
-  getReplica(entityId: string, signerId: string): EntityReplica | null {
-    const $replicas = get(replicas);
-    
-    // Try different key formats
-    const possibleKeys = [
-      `${entityId}:${signerId}`,
-      `${signerId}:${entityId}`,
-      entityId,
-      signerId
-    ];
-    
-    for (const key of possibleKeys) {
-      const replica = $replicas.get(key);
-      if (replica && replica.entityId === entityId && replica.signerId === signerId) {
-        return replica;
-      }
-    }
-    
-    // Fallback: search through all replicas
-    for (const replica of $replicas.values()) {
-      if (replica.entityId === entityId && replica.signerId === signerId) {
-        return replica;
-      }
-    }
-    
-    return null;
+  // Direct access to XLN functions (no wrapper boilerplate)
+  async getXLN() {
+    return await getXLN();
   }
 };
 
-// Export individual stores and operations
-export { xlnOperations };
+// Export XLN for direct use in components (like legacy index.html)
+export { getXLN };

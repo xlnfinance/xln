@@ -3,7 +3,7 @@
   import { replicas } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
-  import { XLNServer } from '../../utils/xlnServer';
+  import { getXLN } from '../../stores/xlnStore';
   import type { Tab } from '../../types';
 
   export let tab: Tab;
