@@ -63,6 +63,26 @@ export const xlnOperations = {
   // Direct access to XLN functions (no wrapper boilerplate)
   async getXLN() {
     return await getXLN();
+  },
+
+  // Run demo - matches legacy index.html functionality
+  async runDemo() {
+    try {
+      const xln = await getXLN();
+      const env = xlnEnvironment.get() || await this.initialize();
+      
+      console.log('🎯 Running XLN demo...');
+      const result = await xln.runDemo(env);
+      
+      // Update environment with demo results
+      xlnEnvironment.set(result);
+      console.log('✅ Demo completed successfully');
+      return result;
+    } catch (err) {
+      console.error('❌ Demo failed:', err);
+      error.set(`Demo failed: ${err.message}`);
+      throw err;
+    }
   }
 };
 
