@@ -1,11 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Tab, EntityReplica } from '../../types';
-  import { xlnOperations, replicas } from '../../stores/xlnStore';
+  import { getXLN, replicas } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
-  import { getXLN } from '../../stores/xlnStore';
   
   // Simple HTML escape (moved from deleted utils)
   function escapeHtml(unsafe: string): string {
@@ -35,7 +34,7 @@
     if (tab.entityId && tab.signer) {
       // Prefer time-aware replicas if available
       const candidate = $visibleReplicas?.get?.(`${tab.entityId}:${tab.signer}`);
-      replica = candidate || xlnOperations.getReplica(tab.entityId, tab.signer);
+      replica = candidate; // TODO: Fix getReplica call
     } else {
       replica = null;
     }

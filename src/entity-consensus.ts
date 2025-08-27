@@ -410,8 +410,8 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     // Compute new state once during proposal
     const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
     
-    // Proposer creates new timestamp for this frame
-    const newTimestamp = env.timestamp;
+    // Proposer creates new timestamp for this frame (always use current time for new proposals)
+    const newTimestamp = Date.now();
     
     // SECURITY: Validate timestamp
     if (!validateTimestamp(newTimestamp, Date.now())) {

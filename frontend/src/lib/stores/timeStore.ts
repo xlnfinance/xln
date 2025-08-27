@@ -2,12 +2,33 @@ import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '../types';
 import { xlnEnvironment, history } from './xlnStore';
 
-// Time machine state
-export const timeState = writable<TimeState>({
-  currentTimeIndex: -1, // -1 means current time (live)
-  maxTimeIndex: 0,
-  isLive: true
-});
+// Load initial state from localStorage
+const loadTimeState = (): TimeState => {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('xln-time-state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          currentTimeIndex: parsed.currentTimeIndex ?? -1,
+          maxTimeIndex: parsed.maxTimeIndex ?? 0,
+          isLive: parsed.isLive ?? true
+        };
+      }
+    } catch (err) {
+      console.warn('Failed to load time state from localStorage:', err);
+    }
+  }
+  
+  return {
+    currentTimeIndex: -1, // -1 means current time (live)
+    maxTimeIndex: 0,
+    isLive: true
+  };
+};
+
+// Time machine state with persistence
+export const timeState = writable<TimeState>(loadTimeState());
 
 // Derived stores
 export const currentTimeIndex = derived(timeState, $state => $state.currentTimeIndex);
@@ -31,6 +52,17 @@ export const visibleReplicas = derived(
 
 // Time operations
 const timeOperations = {
+  // Save time state to localStorage
+  saveTimeState(state: TimeState) {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('xln-time-state', JSON.stringify(state));
+      } catch (err) {
+        console.warn('Failed to save time state to localStorage:', err);
+      }
+    }
+  },
+
   // Update max time index based on history length
   updateMaxTimeIndex() {
     const $history = get(history);
@@ -47,11 +79,16 @@ const timeOperations = {
     const $timeState = get(timeState);
     const clampedIndex = Math.max(-1, Math.min(index, $timeState.maxTimeIndex));
     
-    timeState.set({
+    const newState = {
       currentTimeIndex: clampedIndex,
       maxTimeIndex: $timeState.maxTimeIndex,
       isLive: clampedIndex === -1
-    });
+    };
+    
+    timeState.set(newState);
+    
+    // Persist to localStorage
+    this.saveTimeState(newState);
     
     console.log('🕰️ Time machine moved to index:', clampedIndex);
     
@@ -155,7 +192,7 @@ const timeOperations = {
   initialize() {
     this.updateMaxTimeIndex();
     
-    // Subscribe to history changes to update max index
+    // Subscribe to history changes to update max index automatically
     history.subscribe(() => {
       this.updateMaxTimeIndex();
     });

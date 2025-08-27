@@ -102,6 +102,7 @@ export interface Env {
   height: number;
   timestamp: number;
   serverInput: ServerInput; // Persistent storage for merged inputs
+  history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   // Future: add database connections, config, utilities, etc.
 }
 

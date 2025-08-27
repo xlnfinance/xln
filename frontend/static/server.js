@@ -38042,7 +38042,7 @@ var require_ms = __commonJS((exports, module) => {
 
 // node_modules/debug/src/common.js
 var require_common3 = __commonJS((exports, module) => {
-  function setup(env) {
+  function setup(env2) {
     createDebug.debug = createDebug;
     createDebug.default = createDebug;
     createDebug.coerce = coerce;
@@ -38051,8 +38051,8 @@ var require_common3 = __commonJS((exports, module) => {
     createDebug.enabled = enabled;
     createDebug.humanize = require_ms();
     createDebug.destroy = destroy;
-    Object.keys(env).forEach((key) => {
-      createDebug[key] = env[key];
+    Object.keys(env2).forEach((key) => {
+      createDebug[key] = env2[key];
     });
     createDebug.names = [];
     createDebug.skips = [];
@@ -41356,7 +41356,7 @@ var validateMessage = (message) => {
     return false;
   }
 };
-var applyEntityTx = (env, entityState, entityTx) => {
+var applyEntityTx = (env2, entityState, entityTx) => {
   console.log(`\uD83D\uDEA8 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, entityTx.data);
   try {
     if (entityTx.type === "chat") {
@@ -41649,7 +41649,7 @@ var validateVotingPower = (power) => {
     return false;
   }
 };
-var applyEntityInput = (env, entityReplica, entityInput) => {
+var applyEntityInput = (env2, entityReplica, entityInput) => {
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const timestamp2 = Date.now();
   const currentProposalHash = entityReplica.proposal?.hash?.slice(0, 10) || "none";
@@ -41817,7 +41817,7 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
     const isSingleSigner = entityReplica.state.config.validators.length === 1 && entityReplica.state.config.threshold === BigInt(1);
     if (isSingleSigner) {
       console.log(`\uD83D\uDE80 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
-      const newEntityState2 = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
+      const newEntityState2 = applyEntityFrame(env2, entityReplica.state, entityReplica.mempool);
       entityReplica.state = {
         ...newEntityState2,
         height: entityReplica.state.height + 1
@@ -41829,8 +41829,8 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
     }
     if (DEBUG)
       console.log(`    \uD83D\uDE80 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
-    const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
-    const newTimestamp = env.timestamp;
+    const newEntityState = applyEntityFrame(env2, entityReplica.state, entityReplica.mempool);
+    const newTimestamp = Date.now();
     if (!validateTimestamp(newTimestamp, Date.now())) {
       log2.error(`❌ Invalid proposal timestamp: ${newTimestamp}`);
       return entityOutbox;
@@ -41907,8 +41907,8 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
   });
   return entityOutbox;
 };
-var applyEntityFrame = (env, entityState, entityTxs) => {
-  return entityTxs.reduce((currentEntityState, entityTx) => applyEntityTx(env, currentEntityState, entityTx), entityState);
+var applyEntityFrame = (env2, entityState, entityTxs) => {
+  return entityTxs.reduce((currentEntityState, entityTx) => applyEntityTx(env2, currentEntityState, entityTx), entityState);
 };
 var calculateQuorumPower = (config, signers) => {
   return signers.reduce((total, signerId) => {
@@ -42534,7 +42534,7 @@ var getJurisdictionByAddress = async (address) => {
 init_utils5();
 init_entity_factory();
 init_utils5();
-var runDemo = async (env) => {
+var runDemo = async (env2) => {
   if (DEBUG) {
     console.log("\uD83D\uDE80 Starting XLN Consensus Demo - Multi-Entity Test");
     console.log("✨ Using deterministic hash-based proposal IDs (no randomness)");
@@ -42560,7 +42560,7 @@ var runDemo = async (env) => {
     jurisdiction: ethereumJurisdiction
   };
   const chatEntityId = generateNumberedEntityId(1);
-  applyServerInput(env, {
+  await applyServerInput(env2, {
     serverTxs: chatValidators.map((signerId, index) => ({
       type: "importReplica",
       entityId: chatEntityId,
@@ -42591,7 +42591,7 @@ var runDemo = async (env) => {
   console.log(`✅ Entity #2 governance automatically created with fixed supply`);
   console.log(`\uD83D\uDCCB Fixed supply: 1 quadrillion control & dividend tokens (held by entity)`);
   console.log(`\uD83D\uDD04 Distribution: Use reserveToReserve() to manually distribute tokens`);
-  applyServerInput(env, {
+  await applyServerInput(env2, {
     serverTxs: tradingValidators.map((signerId, index) => ({
       type: "importReplica",
       entityId: tradingEntityId,
@@ -42620,7 +42620,7 @@ var runDemo = async (env) => {
     jurisdiction: ethereumJurisdiction
   };
   const govEntityId = generateLazyEntityId(govValidators, BigInt(10));
-  applyServerInput(env, {
+  await applyServerInput(env2, {
     serverTxs: govValidators.map((signerId, index) => ({
       type: "importReplica",
       entityId: govEntityId,
@@ -42644,7 +42644,7 @@ var runDemo = async (env) => {
     jurisdiction: ethereumJurisdiction
   };
   const singleEntityId = generateLazyEntityId(["alice"], BigInt(1));
-  applyServerInput(env, {
+  await applyServerInput(env2, {
     serverTxs: [{
       type: "importReplica",
       entityId: singleEntityId,
@@ -42656,21 +42656,21 @@ var runDemo = async (env) => {
     }],
     entityInputs: []
   });
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: singleEntityId,
     signerId: "alice",
     entityTxs: [{ type: "chat", data: { from: "alice", message: "Single signer test message!" } }]
   }]);
   console.log(`
 ⚠️  CORNER CASE 1: Single transaction in chat`);
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: chatEntityId,
     signerId: "alice",
     entityTxs: [{ type: "chat", data: { from: "alice", message: "First message in chat!" } }]
   }]);
   console.log(`
 ⚠️  CORNER CASE 2: Batch proposals in trading`);
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: tradingEntityId,
     signerId: "alice",
     entityTxs: [
@@ -42681,14 +42681,14 @@ var runDemo = async (env) => {
   }]);
   console.log(`
 ⚠️  CORNER CASE 3: High threshold governance vote`);
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: govEntityId,
     signerId: "alice",
     entityTxs: [{ type: "propose", data: { action: { type: "collective_message", data: { message: "Governance proposal: Increase block size limit" } }, proposer: "alice" } }]
   }]);
   console.log(`
 ⚠️  CORNER CASE 4: Concurrent multi-entity activity`);
-  processUntilEmpty(env, [
+  await processUntilEmpty(env2, [
     {
       entityId: chatEntityId,
       signerId: "alice",
@@ -42715,7 +42715,7 @@ var runDemo = async (env) => {
   ]);
   console.log(`
 ⚠️  CORNER CASE 5: Empty mempool test (no auto-propose)`);
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: chatEntityId,
     signerId: "alice",
     entityTxs: []
@@ -42726,14 +42726,14 @@ var runDemo = async (env) => {
     type: "chat",
     data: { from: ["alice", "bob", "carol"][i2 % 3], message: `Batch message ${i2 + 1}` }
   }));
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: chatEntityId,
     signerId: "alice",
     entityTxs: largeBatch
   }]);
   console.log(`
 ⚠️  CORNER CASE 7: Proposal voting system`);
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: tradingEntityId,
     signerId: "alice",
     entityTxs: [
@@ -42742,7 +42742,7 @@ var runDemo = async (env) => {
   }]);
   console.log(`
 ⚠️  CORNER CASE 7b: Voting on proposals (simulated)`);
-  processUntilEmpty(env, [{
+  await processUntilEmpty(env2, [{
     entityId: govEntityId,
     signerId: "alice",
     entityTxs: [
@@ -42755,7 +42755,7 @@ var runDemo = async (env) => {
     console.log("✨ All proposal IDs are deterministic hashes of proposal data");
     console.log("\uD83C\uDF0D Environment-based architecture working correctly");
     const entitiesByType = new Map;
-    env.replicas.forEach((replica, key) => {
+    env2.replicas.forEach((replica, key) => {
       const entityType = replica.entityId;
       if (!entitiesByType.has(entityType)) {
         entitiesByType.set(entityType, []);
@@ -42811,12 +42811,12 @@ var runDemo = async (env) => {
 \uD83C\uDFC6 === OVERALL RESULT ===`);
     console.log(`${allEntitiesConsensus ? "✅ SUCCESS" : "❌ FAILED"} - All entities achieved consensus`);
     console.log(`\uD83D\uDCCA Total entities tested: ${entitiesByType.size}`);
-    console.log(`\uD83D\uDCCA Total replicas: ${env.replicas.size}`);
-    console.log(`\uD83D\uDD04 Total server ticks: ${env.height}`);
+    console.log(`\uD83D\uDCCA Total replicas: ${env2.replicas.size}`);
+    console.log(`\uD83D\uDD04 Total server ticks: ${env2.height}`);
     console.log("\uD83C\uDFAF Fully deterministic - no randomness used");
     console.log("\uD83C\uDF0D Environment-based architecture with clean function signatures");
     const modeCount = new Map;
-    env.replicas.forEach((replica) => {
+    env2.replicas.forEach((replica) => {
       const mode = replica.state.config.mode;
       modeCount.set(mode, (modeCount.get(mode) || 0) + 1);
     });
@@ -42886,7 +42886,7 @@ var runDemo = async (env) => {
       throw error;
     }
   }, 1000);
-  return env;
+  return env2;
 };
 
 // src/test-depository-hanko.ts
@@ -43964,19 +43964,6 @@ if (typeof process !== "undefined" && import.meta.url === `file://${process.argv
 
 // src/name-resolution.ts
 init_utils5();
-var storeProfile = async (db, profile) => {
-  if (!db) {
-    console.warn("Database not available for profile storage");
-    return;
-  }
-  try {
-    await db.put(`profile:${profile.entityId}`, JSON.stringify(profile));
-    await updateNameIndex(db, profile.name, profile.entityId);
-    console.log(`\uD83D\uDCDD Stored profile for ${profile.name} (${formatEntityDisplay(profile.entityId)})`);
-  } catch (error) {
-    console.error("Error storing profile:", error);
-  }
-};
 var getProfile = async (db, entityId) => {
   if (!db)
     return null;
@@ -43985,19 +43972,6 @@ var getProfile = async (db, entityId) => {
     return JSON.parse(data);
   } catch (error) {
     return null;
-  }
-};
-var updateNameIndex = async (db, name, entityId) => {
-  try {
-    let nameIndex = {};
-    try {
-      const data = await db.get("name-index");
-      nameIndex = JSON.parse(data);
-    } catch {}
-    nameIndex[name.toLowerCase()] = entityId;
-    await db.put("name-index", JSON.stringify(nameIndex));
-  } catch (error) {
-    console.error("Error updating name index:", error);
   }
 };
 var searchEntityNames = async (db, query, limit = 10) => {
@@ -44043,33 +44017,6 @@ var createProfileUpdateTx = (updates) => {
     type: "profile-update",
     data: updates
   };
-};
-var initializeDemoProfiles = async (db, env) => {
-  if (!db)
-    return;
-  console.log("\uD83C\uDFF7️ Initializing demo entity profiles...");
-  const demoProfiles = [
-    {
-      entityId: "0x0000000000000000000000000000000000000000000000000000000000000001",
-      name: "Trading Collective",
-      bio: "A decentralized trading group focused on DeFi strategies",
-      website: "https://trading-collective.xyz",
-      lastUpdated: Date.now(),
-      hankoSignature: "demo_signature_1"
-    },
-    {
-      entityId: "0x0000000000000000000000000000000000000000000000000000000000000002",
-      name: "Governance DAO",
-      bio: "Multi-signature governance entity for protocol decisions",
-      website: "https://governance-dao.org",
-      lastUpdated: Date.now(),
-      hankoSignature: "demo_signature_2"
-    }
-  ];
-  for (const profile of demoProfiles) {
-    await storeProfile(db, profile);
-  }
-  console.log(`✅ Initialized ${demoProfiles.length} demo profiles`);
 };
 var resolveEntityName = async (db, entityId) => {
   const profile = await getProfile(db, entityId);
@@ -44126,7 +44073,15 @@ var db = new $Level("db", {
   valueEncoding: "buffer",
   keyEncoding: "binary"
 });
-var envHistory = [];
+var envChangeCallback = null;
+var registerEnvChangeCallback = (callback) => {
+  envChangeCallback = callback;
+};
+var notifyEnvChange = (env2) => {
+  if (envChangeCallback) {
+    envChangeCallback(env2);
+  }
+};
 var deepCloneReplica = (replica) => {
   const cloneMap = (map) => new Map(map);
   const cloneArray = (arr) => [...arr];
@@ -44162,11 +44117,11 @@ var deepCloneReplica = (replica) => {
     isProposer: replica.isProposer
   };
 };
-var captureSnapshot = (env, serverInput, serverOutputs, description) => {
+var captureSnapshot = async (env2, serverInput, serverOutputs, description) => {
   const snapshot = {
-    height: env.height,
-    timestamp: env.timestamp,
-    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [
+    height: env2.height,
+    timestamp: env2.timestamp,
+    replicas: new Map(Array.from(env2.replicas.entries()).map(([key, replica]) => [
       key,
       deepCloneReplica(replica)
     ])),
@@ -44185,13 +44140,22 @@ var captureSnapshot = (env, serverInput, serverOutputs, description) => {
     })),
     description
   };
-  envHistory.push(snapshot);
-  const batch = db.batch();
-  batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
-  batch.put(Buffer.from("latest_height"), Buffer.from(snapshot.height.toString()));
-  batch.write();
+  env2.history = env2.history || [];
+  env2.history.push(snapshot);
+  try {
+    const batch = db.batch();
+    batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
+    batch.put(Buffer.from("latest_height"), Buffer.from(snapshot.height.toString()));
+    await batch.write();
+    if (DEBUG) {
+      console.log(`\uD83D\uDCBE Snapshot ${snapshot.height} saved to IndexedDB successfully`);
+    }
+  } catch (error) {
+    console.error(`❌ Failed to save snapshot ${snapshot.height} to IndexedDB:`, error);
+    throw error;
+  }
   if (DEBUG) {
-    console.log(`\uD83D\uDCF8 Snapshot captured: "${description}" (${envHistory.length} total)`);
+    console.log(`\uD83D\uDCF8 Snapshot captured: "${description}" (${env2.history.length} total)`);
     if (serverInput.serverTxs.length > 0) {
       console.log(`    \uD83D\uDDA5️  ServerTxs: ${serverInput.serverTxs.length}`);
       serverInput.serverTxs.forEach((tx, i2) => {
@@ -44213,7 +44177,7 @@ var captureSnapshot = (env, serverInput, serverOutputs, description) => {
     }
   }
 };
-var applyServerInput = (env, serverInput) => {
+var applyServerInput = async (env2, serverInput) => {
   const startTime = Date.now();
   try {
     if (!serverInput) {
@@ -44236,15 +44200,15 @@ var applyServerInput = (env, serverInput) => {
       log2.error(`❌ Too many entity inputs: ${serverInput.entityInputs.length} > 10000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
-    env.serverInput.serverTxs.push(...serverInput.serverTxs);
-    env.serverInput.entityInputs.push(...serverInput.entityInputs);
-    const mergedInputs = mergeEntityInputs(env.serverInput.entityInputs);
+    env2.serverInput.serverTxs.push(...serverInput.serverTxs);
+    env2.serverInput.entityInputs.push(...serverInput.entityInputs);
+    const mergedInputs = mergeEntityInputs(env2.serverInput.entityInputs);
     const entityOutbox = [];
     if (DEBUG) {
       console.log(`
-=== TICK ${env.height} ===`);
+=== TICK ${env2.height} ===`);
       console.log(`Server inputs: ${serverInput.serverTxs.length} new serverTxs, ${serverInput.entityInputs.length} new entityInputs`);
-      console.log(`Total in env: ${env.serverInput.serverTxs.length} serverTxs, ${env.serverInput.entityInputs.length} entityInputs (merged to ${mergedInputs.length})`);
+      console.log(`Total in env: ${env2.serverInput.serverTxs.length} serverTxs, ${env2.serverInput.entityInputs.length} entityInputs (merged to ${mergedInputs.length})`);
       if (mergedInputs.length > 0) {
         console.log(`\uD83D\uDD04 Processing merged inputs:`);
         mergedInputs.forEach((input, i2) => {
@@ -44259,17 +44223,17 @@ var applyServerInput = (env, serverInput) => {
         });
       }
     }
-    env.serverInput.serverTxs.forEach((serverTx) => {
+    env2.serverInput.serverTxs.forEach((serverTx) => {
       if (serverTx.type === "importReplica") {
         if (DEBUG)
           console.log(`Importing replica Entity #${formatEntityDisplay(serverTx.entityId)}:${formatSignerDisplay(serverTx.signerId)} (proposer: ${serverTx.data.isProposer})`);
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
-        env.replicas.set(replicaKey, {
+        env2.replicas.set(replicaKey, {
           entityId: serverTx.entityId,
           signerId: serverTx.signerId,
           state: {
             height: 0,
-            timestamp: env.timestamp,
+            timestamp: env2.timestamp,
             nonces: new Map,
             messages: [],
             proposals: new Map,
@@ -44282,7 +44246,7 @@ var applyServerInput = (env, serverInput) => {
     });
     mergedInputs.forEach((entityInput) => {
       const replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
-      const entityReplica = env.replicas.get(replicaKey);
+      const entityReplica = env2.replicas.get(replicaKey);
       if (entityReplica) {
         if (DEBUG) {
           console.log(`Processing input for ${replicaKey}:`);
@@ -44293,20 +44257,21 @@ var applyServerInput = (env, serverInput) => {
           if (entityInput.precommits?.size)
             console.log(`  → ${entityInput.precommits.size} precommits`);
         }
-        const entityOutputs = applyEntityInput(env, entityReplica, entityInput);
+        const entityOutputs = applyEntityInput(env2, entityReplica, entityInput);
         entityOutbox.push(...entityOutputs);
       }
     });
-    env.height++;
-    env.timestamp = Date.now();
-    const inputDescription = `Tick ${env.height - 1}: ${env.serverInput.serverTxs.length} serverTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
+    env2.height++;
+    env2.timestamp = Date.now();
+    const inputDescription = `Tick ${env2.height - 1}: ${env2.serverInput.serverTxs.length} serverTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
     const processedInput = {
-      serverTxs: [...env.serverInput.serverTxs],
+      serverTxs: [...env2.serverInput.serverTxs],
       entityInputs: [...mergedInputs]
     };
-    env.serverInput.serverTxs.length = 0;
-    env.serverInput.entityInputs.length = 0;
-    captureSnapshot(env, processedInput, entityOutbox, inputDescription);
+    env2.serverInput.serverTxs.length = 0;
+    env2.serverInput.entityInputs.length = 0;
+    await captureSnapshot(env2, processedInput, entityOutbox, inputDescription);
+    notifyEnvChange(env2);
     if (DEBUG && entityOutbox.length > 0) {
       console.log(`\uD83D\uDCE4 Outputs: ${entityOutbox.length} messages`);
       entityOutbox.forEach((output2, i2) => {
@@ -44317,7 +44282,7 @@ var applyServerInput = (env, serverInput) => {
     }
     if (DEBUG) {
       console.log(`Replica states:`);
-      env.replicas.forEach((replica, key) => {
+      env2.replicas.forEach((replica, key) => {
         const [entityId, signerId] = key.split(":");
         const entityDisplay = formatEntityDisplay(entityId);
         const signerDisplay = formatSignerDisplay(signerId);
@@ -44326,7 +44291,7 @@ var applyServerInput = (env, serverInput) => {
     }
     const endTime = Date.now();
     if (DEBUG) {
-      console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
+      console.log(`⏱️  Tick ${env2.height - 1} completed in ${endTime - startTime}ms`);
     }
     return { entityOutbox, mergedInputs };
   } catch (error) {
@@ -44335,11 +44300,12 @@ var applyServerInput = (env, serverInput) => {
   }
 };
 var main = async () => {
-  let env = {
+  let env2 = {
     replicas: new Map,
     height: 0,
     timestamp: Date.now(),
-    serverInput: { serverTxs: [], entityInputs: [] }
+    serverInput: { serverTxs: [], entityInputs: [] },
+    history: []
   };
   try {
     if (isBrowser) {
@@ -44368,21 +44334,22 @@ var main = async () => {
       throw new Error("LEVEL_NOT_FOUND");
     }
     console.log(`\uD83D\uDCCA Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
-    envHistory = snapshots;
+    env2.history = snapshots;
     if (snapshots.length > 0) {
       const latestSnapshot = snapshots[snapshots.length - 1];
-      env = {
+      env2 = {
         replicas: latestSnapshot.replicas,
         height: latestSnapshot.height,
         timestamp: latestSnapshot.timestamp,
-        serverInput: latestSnapshot.serverInput
+        serverInput: latestSnapshot.serverInput,
+        history: snapshots
       };
-      console.log(`✅ History restored. Server is at height ${env.height} with ${envHistory.length} snapshots.`);
+      console.log(`✅ History restored. Server is at height ${env2.height} with ${env2.history.length} snapshots.`);
       console.log(`\uD83D\uDCC8 Snapshot details:`, {
-        height: env.height,
-        replicaCount: env.replicas.size,
-        timestamp: new Date(env.timestamp).toISOString(),
-        serverInputs: env.serverInput.entityInputs.length
+        height: env2.height,
+        replicaCount: env2.replicas.size,
+        timestamp: new Date(env2.timestamp).toISOString(),
+        serverInputs: env2.serverInput.entityInputs.length
       });
     }
   } catch (error) {
@@ -44404,7 +44371,6 @@ var main = async () => {
       throw error;
     }
   }
-  await initializeDemoProfiles(db, env);
   if (!isBrowser) {
     console.log(`
 \uD83D\uDD8B️  Testing Complete Hanko Implementation...`);
@@ -44422,20 +44388,35 @@ var main = async () => {
   } else {
     console.log("\uD83C\uDF10 Browser environment: Demos available via UI buttons, not auto-running");
   }
-  log2.info(`\uD83C\uDFAF Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
-  return env;
+  log2.info(`\uD83C\uDFAF Server startup complete. Height: ${env2.height}, Entities: ${env2.replicas.size}`);
+  return env2;
 };
-var getHistory = () => envHistory;
-var getSnapshot = (index) => index >= 0 && index < envHistory.length ? envHistory[index] : null;
-var getCurrentHistoryIndex = () => envHistory.length - 1;
+var getHistory = () => env.history || [];
+var getSnapshot = (index) => {
+  const history = env.history || [];
+  return index >= 0 && index < history.length ? history[index] : null;
+};
+var getCurrentHistoryIndex = () => (env.history || []).length - 1;
+var clearDatabaseAndHistory = async () => {
+  console.log("\uD83D\uDDD1️ Clearing database and resetting server history...");
+  await clearDatabase(db);
+  env = {
+    replicas: new Map,
+    height: 0,
+    timestamp: Date.now(),
+    serverInput: { serverTxs: [], entityInputs: [] },
+    history: []
+  };
+  console.log("✅ Database and server history cleared");
+};
 if (!isBrowser) {
-  main().then(async (env) => {
-    if (env) {
+  main().then(async (env2) => {
+    if (env2) {
       const noDemoFlag = process.env.NO_DEMO === "1" || process.argv.includes("--no-demo");
       if (!noDemoFlag) {
         console.log("✅ Node.js environment initialized. Running demo for local testing...");
         console.log("\uD83D\uDCA1 To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag");
-        await runDemo(env);
+        await runDemo(env2);
         setTimeout(async () => {
           await verifyJurisdictionRegistrations();
         }, 2000);
@@ -44502,11 +44483,11 @@ var demoCompleteHanko = async () => {
     throw error;
   }
 };
-var runDemoWrapper = async (env) => {
+var runDemoWrapper = async (env2) => {
   try {
     console.log("\uD83D\uDE80 Starting XLN Consensus Demo...");
     console.log("\uD83D\uDCCA This will demonstrate entity creation, consensus, and message passing");
-    const result = await runDemo(env);
+    const result = await runDemo(env2);
     console.log("✅ XLN Demo completed successfully!");
     console.log("\uD83C\uDFAF Check the entity cards above to see the results");
     console.log("\uD83D\uDD70️ Use the time machine to replay the consensus steps");
@@ -44516,7 +44497,7 @@ var runDemoWrapper = async (env) => {
     throw error;
   }
 };
-var processUntilEmpty = (env, inputs) => {
+var processUntilEmpty = async (env2, inputs) => {
   let outputs = inputs || [];
   let iterationCount = 0;
   const maxIterations = 10;
@@ -44531,7 +44512,7 @@ var processUntilEmpty = (env, inputs) => {
   while (outputs.length > 0 && iterationCount < maxIterations) {
     iterationCount++;
     console.log(`\uD83D\uDD25 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
-    const result = applyServerInput(env, { serverTxs: [], entityInputs: outputs });
+    const result = await applyServerInput(env2, { serverTxs: [], entityInputs: outputs });
     outputs = result.entityOutbox;
     console.log(`\uD83D\uDD25 PROCESS-CASCADE: Iteration ${iterationCount} generated ${outputs.length} new outputs`);
     if (outputs.length > 0) {
@@ -44549,7 +44530,7 @@ var processUntilEmpty = (env, inputs) => {
   } else {
     console.log(`\uD83D\uDD25 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
   }
-  return env;
+  return env2;
 };
 var searchEntityNames2 = (query, limit) => searchEntityNames(db, query, limit);
 var resolveEntityName2 = (entityId) => resolveEntityName(db, entityId);
@@ -44563,6 +44544,7 @@ export {
   resolveEntityIdentifier,
   requestNamedEntity,
   registerNumberedEntityOnChain,
+  registerEnvChangeCallback,
   processUntilEmpty,
   main,
   isEntityRegistered,
@@ -44591,6 +44573,7 @@ export {
   createNumberedEntity,
   createLazyEntity,
   connectToEthereum,
+  clearDatabaseAndHistory,
   clearDatabase,
   assignNameOnChain,
   applyServerInput

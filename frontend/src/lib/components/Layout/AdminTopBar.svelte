@@ -21,8 +21,10 @@
       const env = $xlnEnvironment || await xln.main();
       
       const result = await xln.runDemo(env);
+      
       xlnEnvironment.set(result);
       console.log('✅ Demo completed successfully');
+      console.log(`📸 History snapshots: ${result.history.length}`);
     } catch (error) {
       console.error('❌ Demo failed:', error);
       alert(`Demo failed: ${error.message}`);
@@ -32,8 +34,34 @@
   async function handleClearDatabase() {
     if (confirm('Are you sure you want to clear the database? This will reset all data.')) {
       try {
-        await xlnOperations.clearDatabase();
-        console.log('✅ Database cleared successfully');
+        const xln = await getXLN();
+        await xln.clearDatabaseAndHistory();
+        
+        // Clear all browser storage
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Clear IndexedDB databases
+        if (typeof indexedDB !== 'undefined') {
+          const dbNames = ['db', 'level-js-db', 'level-db', 'xln-db'];
+          for (const dbName of dbNames) {
+            try {
+              await new Promise<void>((resolve, reject) => {
+                const deleteReq = indexedDB.deleteDatabase(dbName);
+                deleteReq.onsuccess = () => resolve();
+                deleteReq.onerror = () => reject(deleteReq.error);
+                deleteReq.onblocked = () => resolve(); // Continue anyway
+              });
+              console.log(`✅ Cleared IndexedDB: ${dbName}`);
+            } catch (err) {
+              console.log(`⚠️ Could not clear IndexedDB: ${dbName}`, err);
+            }
+          }
+        }
+        
+        console.log('✅ All storage cleared successfully');
+        // Reload the page to reinitialize with clean state
+        window.location.reload();
       } catch (error) {
         console.error('❌ Clear database failed:', error);
         alert(`Clear database failed: ${error.message}`);

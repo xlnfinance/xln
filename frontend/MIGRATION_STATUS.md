@@ -125,21 +125,6 @@
 
 ## 🔧 Technical Notes
 
-### Store Integration Pattern
-```typescript
-// Component usage pattern
-import { xlnOperations } from '../stores/xlnStore';
-import { tabOperations } from '../stores/tabStore';
-
-// Reactive data
-$: replica = xlnOperations.getReplica(entityId, signerId);
-
-// Actions
-async function handleSubmit() {
-  await xlnOperations.submitChatMessage(entityId, signerId, message);
-}
-```
-
 ### Component Communication
 - **Props Down**: Parent components pass data via props
 - **Events Up**: Child components emit events to parents

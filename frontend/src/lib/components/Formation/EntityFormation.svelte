@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { xlnOperations } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import Button from '../Common/Button.svelte';
   import FormField from '../Common/FormField.svelte';
   import type { EntityFormData } from '../../types';
@@ -53,14 +53,61 @@
         throw new Error('Threshold cannot exceed total weight');
       }
 
-      // Create entity using store operations
-      await xlnOperations.createEntity({
-        entityType: formData.entityType,
-        entityName: formData.entityName,
-        validators: formData.validators.map(v => v.name),
-        threshold: formData.threshold,
-        jurisdiction: formData.jurisdiction
+      // Create entity using proper server workflow
+      const xln = await getXLN();
+      const env = $xlnEnvironment;
+      
+      if (!env) {
+        throw new Error('XLN environment not ready');
+      }
+      
+      const validatorNames = formData.validators.map(v => v.name);
+      const threshold = BigInt(formData.threshold);
+      
+      // Create proper jurisdiction object
+      const jurisdictionConfig = {
+        name: formData.jurisdiction === '8545' ? 'Ethereum' : 
+              formData.jurisdiction === '8546' ? 'Polygon' : 'Arbitrum',
+        port: formData.jurisdiction,
+        url: `http://localhost:${formData.jurisdiction}`
+      };
+      
+      let config;
+      let entityId;
+      
+      if (formData.entityType === 'lazy') {
+        // For lazy entities, we need to generate the ID separately
+        entityId = xln.generateLazyEntityId(validatorNames, threshold);
+        config = xln.createLazyEntity(formData.entityName, validatorNames, threshold, jurisdictionConfig);
+        console.log('✅ Lazy entity config created:', config);
+        console.log('✅ Entity ID:', entityId);
+      } else {
+        const creation = await xln.createNumberedEntity(formData.entityName, validatorNames, threshold, jurisdictionConfig);
+        config = creation.config;
+        entityId = creation.config.entityId; // Numbered entities include entityId in config
+        console.log('✅ Numbered entity config created:', creation);
+      }
+      
+      // Create serverTxs to import replicas for each validator
+      const serverTxs = validatorNames.map((signerId, index) => ({
+        type: 'importReplica' as const,
+        entityId: entityId,
+        signerId,
+        data: {
+          config,
+          isProposer: index === 0 // First validator is proposer
+        }
+      }));
+      
+      // Apply to server and process until empty
+      const result = xln.applyServerInput(env, {
+        serverTxs,
+        entityInputs: []
       });
+      
+      console.log('🔥 Processing entity creation through server...');
+      xln.processUntilEmpty(env, result.entityOutbox);
+      console.log('✅ Entity creation complete!');
 
       // Reset form on success
       clearForm();
