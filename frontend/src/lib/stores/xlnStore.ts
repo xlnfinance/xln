@@ -32,59 +32,31 @@ export const currentHeight = derived(
   ($env) => $env?.height || 0
 );
 
-// Lean operations - just like legacy index.html approach
-export const xlnOperations = {
-  // Initialize XLN environment - direct call to XLN.main()
-  async initialize() {
-    try {
-      isLoading.set(true);
-      error.set(null);
-      
-      const xln = await getXLN();
-      const env = await xln.main();
+// Helper functions for common patterns (not wrappers)
+export async function initializeXLN() {
+  try {
+    isLoading.set(true);
+    error.set(null);
+    
+    const xln = await getXLN();
+    const env = await xln.main();
 
-      // Ensure history exists for time machine
-      env.history = env.history || xln.getHistory?.() || [];
-      
-      xlnEnvironment.set(env);
-      isLoading.set(false);
-      
-      console.log('✅ XLN Environment initialized');
-      return env;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to initialize';
-      error.set(errorMessage);
-      isLoading.set(false);
-      console.error('❌ XLN initialization failed:', err);
-      throw err;
-    }
-  },
-
-  // Direct access to XLN functions (no wrapper boilerplate)
-  async getXLN() {
-    return await getXLN();
-  },
-
-  // Run demo - matches legacy index.html functionality
-  async runDemo() {
-    try {
-      const xln = await getXLN();
-      const env = xlnEnvironment.get() || await this.initialize();
-      
-      console.log('🎯 Running XLN demo...');
-      const result = await xln.runDemo(env);
-      
-      // Update environment with demo results
-      xlnEnvironment.set(result);
-      console.log('✅ Demo completed successfully');
-      return result;
-    } catch (err) {
-      console.error('❌ Demo failed:', err);
-      error.set(`Demo failed: ${err.message}`);
-      throw err;
-    }
+    // Ensure history exists for time machine
+    env.history = env.history || xln.getHistory?.() || [];
+    
+    xlnEnvironment.set(env);
+    isLoading.set(false);
+    
+    console.log('✅ XLN Environment initialized');
+    return env;
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Failed to initialize';
+    error.set(errorMessage);
+    isLoading.set(false);
+    console.error('❌ XLN initialization failed:', err);
+    throw err;
   }
-};
+}
 
 // Export XLN for direct use in components (like legacy index.html)
 export { getXLN };

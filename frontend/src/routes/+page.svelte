@@ -6,7 +6,7 @@
   import TransactionHistoryIO from '../lib/components/IO/TransactionHistoryIO.svelte';
   import EntityFormation from '../lib/components/Formation/EntityFormation.svelte';
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
-  import { xlnOperations, isLoading, error } from '../lib/stores/xlnStore';
+  import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
   import { timeOperations } from '../lib/stores/timeStore';
@@ -36,7 +36,7 @@
       timeOperations.initialize();
       
       // Initialize XLN environment
-      await xlnOperations.initialize();
+      await initializeXLN();
       
       console.log('✅ XLN Svelte application initialized successfully');
     } catch (err) {
@@ -63,7 +63,7 @@
       <div class="error-icon">❌</div>
       <div class="error-text">Failed to load XLN Environment</div>
       <div class="error-details">{$error}</div>
-      <button class="retry-btn" on:click={() => xlnOperations.initialize()}>
+      <button class="retry-btn" on:click={() => initializeXLN()}>
         Retry
       </button>
     </div>
