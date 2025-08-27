@@ -36,11 +36,13 @@ jobs:
           cd frontend
           bun run build:static
           
-      - name: Copy legacy index.html
+      - name: Deploy Svelte app with legacy debugger
         run: |
           mkdir -p dist
-          cp index.html dist/legacy.html
+          # Copy new Svelte app as main deployment (this includes index.html)
           cp -r frontend/build/* dist/
+          # Copy legacy visual debugger alongside
+          cp legacy.html dist/legacy.html
           
       - name: Setup Pages
         uses: actions/configure-pages@v4
