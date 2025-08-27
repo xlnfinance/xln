@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { EntityReplica, Tab } from '../../types';
-  
+
   export let replica: EntityReplica | null;
   export let tab: Tab;
 </script>

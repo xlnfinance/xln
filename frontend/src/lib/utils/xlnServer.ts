@@ -1,255 +1,75 @@
 // XLN Server Integration Utilities
-// This module provides a mock implementation for browser compatibility
-// The full XLN server functionality requires Node.js environment
+// CLIENT-SIDE ONLY - This module should only be used in browser environment
+// Designed for progressive loading after SSR completes
 
-let XLNModule: any = null;
+import { browser } from '$app/environment';
 
-// Create a mock XLN module for browser compatibility
-function createMockXLNModule() {
-  console.log('🌐 Creating mock XLN module for browser environment');
+let XLN: any = null;
+let loadingPromise: Promise<any> | null = null;
+
+// Client-side only import of xlnfinance
+const getXLNModule = async () => {
+  // Prevent any SSR execution
+  if (!browser) {
+    throw new Error('XLN module can only be used in browser environment');
+  }
+
+  // Return cached module if already loaded
+  if (XLN) return XLN;
   
-  // Mock environment with sample data
-  const mockEnv = {
-    replicas: new Map([
-      ['0x0000000000000000000000000000000000000000000000000000000000000001:alice', {
-        entityId: '0x0000000000000000000000000000000000000000000000000000000000000001',
-        signerId: 'alice',
-        state: {
-          height: 5,
-          timestamp: Date.now(),
-          nonces: new Map(),
-          messages: ['Hello from Alice!', 'This is a demo message', 'Consensus is working!'],
-          proposals: new Map([
-            ['prop1', {
-              proposer: 'alice',
-              action: { type: 'collective_message', data: { message: 'Increase block size' } },
-              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
-              status: 'active'
-            }]
-          ]),
-          config: {
-            validators: ['alice', 'bob', 'carol'],
-            threshold: 2,
-            shares: { alice: 1, bob: 1, carol: 1 },
-            mode: 'proposer-based',
-            jurisdiction: { name: 'Ethereum', chainId: 1 }
-          }
-        },
-        mempool: [],
-        isProposer: true
-      }],
-      ['0x0000000000000000000000000000000000000000000000000000000000000001:bob', {
-        entityId: '0x0000000000000000000000000000000000000000000000000000000000000001',
-        signerId: 'bob',
-        state: {
-          height: 5,
-          timestamp: Date.now(),
-          nonces: new Map(),
-          messages: ['Hello from Bob!', 'Consensus demo active'],
-          proposals: new Map([
-            ['prop1', {
-              proposer: 'alice',
-              action: { type: 'collective_message', data: { message: 'Increase block size' } },
-              votes: new Map([['alice', 'yes'], ['bob', 'yes']]),
-              status: 'active'
-            }]
-          ]),
-          config: {
-            validators: ['alice', 'bob', 'carol'],
-            threshold: 2,
-            shares: { alice: 1, bob: 1, carol: 1 },
-            mode: 'proposer-based',
-            jurisdiction: { name: 'Ethereum', chainId: 1 }
-          }
-        },
-        mempool: [],
-        isProposer: false
-      }]
-    ]),
-    height: 5,
-    timestamp: Date.now(),
-    serverInput: { serverTxs: [], entityInputs: [] }
-  };
-
-  const mockHistory = [
-    {
-      height: 1,
-      timestamp: Date.now() - 4000,
-      description: 'Initial setup',
-      replicas: new Map(),
-      serverInput: { serverTxs: [], entityInputs: [] },
-      serverOutputs: []
-    },
-    {
-      height: 2,
-      timestamp: Date.now() - 3000,
-      description: 'Entity creation',
-      replicas: mockEnv.replicas,
-      serverInput: { serverTxs: [], entityInputs: [] },
-      serverOutputs: []
+  // Return existing loading promise if already in progress
+  if (loadingPromise) return loadingPromise;
+  
+  // Start loading the module
+  loadingPromise = (async () => {
+    try {
+      console.log('🔄 Loading XLN module client-side...');
+      const module = await import('xlnfinance');
+      XLN = module;
+      console.log('✅ XLN module loaded successfully');
+      return XLN;
+    } catch (error) {
+      console.error('❌ Failed to load xlnfinance module:', error);
+      loadingPromise = null; // Reset to allow retry
+      throw error;
     }
-  ];
-
-  return {
-    main: async () => {
-      console.log('🎯 Mock XLN environment initialized');
-      return mockEnv;
-    },
-    
-    applyServerInput: (env: any, input: any) => {
-      console.log('📨 Mock applyServerInput called');
-      return { entityOutbox: [], mergedInputs: [] };
-    },
-    
-    processUntilEmpty: (env: any, outputs: any[]) => {
-      console.log('🔄 Mock processUntilEmpty called');
-      return env;
-    },
-    
-    runDemoWrapper: async (env: any) => {
-      console.log('🚀 Mock demo completed');
-      return env;
-    },
-    
-    clearDatabase: async () => {
-      console.log('🗑️ Mock database cleared');
-    },
-    
-    getHistory: () => mockHistory,
-    
-    getSnapshot: (index: number) => mockHistory[index] || null,
-    
-    generateSignerAvatar: (signerId: string) => {
-      // Generate a simple SVG avatar
-      const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
-      const color = colors[signerId.charCodeAt(0) % colors.length];
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
-        <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="16" cy="16" r="16" fill="${color}"/>
-          <text x="16" y="20" text-anchor="middle" fill="white" font-family="Arial" font-size="12" font-weight="bold">
-            ${signerId.charAt(0).toUpperCase()}
-          </text>
-        </svg>
-      `)}`;
-    },
-    
-    generateEntityAvatar: (entityId: string) => {
-      const colors = ['#6C5CE7', '#A29BFE', '#FD79A8', '#FDCB6E', '#E17055'];
-      const color = colors[entityId.charCodeAt(0) % colors.length];
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
-        <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="4" fill="${color}"/>
-          <text x="16" y="20" text-anchor="middle" fill="white" font-family="Arial" font-size="10" font-weight="bold">
-            #${entityId.slice(-2)}
-          </text>
-        </svg>
-      `)}`;
-    },
-    
-    formatEntityDisplay: (entityId: string) => {
-      if (entityId.startsWith('0x000000000000000000000000000000000000000000000000000000000000000')) {
-        const num = parseInt(entityId.slice(-2), 16);
-        return num.toString();
-      }
-      return entityId.slice(0, 8);
-    },
-    
-    formatSignerDisplay: (signerId: string) => signerId,
-    
-    createLazyEntity: async () => ({ config: {} }),
-    generateLazyEntityId: async () => '0x1234567890abcdef',
-    createNumberedEntity: async () => ({ config: {}, entityNumber: 1 }),
-    generateNumberedEntityId: async () => '0x0000000000000000000000000000000000000000000000000000000000000001'
-  };
-}
-
-// Get XLN module (mock for browser)
-export async function getXLNModule() {
-  if (!XLNModule) {
-    console.log('🌐 Browser environment detected - using mock XLN module');
-    console.log('💡 For full functionality, run the Node.js server separately');
-    XLNModule = createMockXLNModule();
-  }
-  return XLNModule;
-}
-
-// Type-safe wrapper functions for XLN operations
-export const XLNServer = {
-  async main() {
-    const XLN = await getXLNModule();
-    return XLN.main();
-  },
-
-  async applyServerInput(env: any, input: any) {
-    const XLN = await getXLNModule();
-    return XLN.applyServerInput(env, input);
-  },
-
-  async processUntilEmpty(env: any, outputs: any[]) {
-    const XLN = await getXLNModule();
-    return XLN.processUntilEmpty(env, outputs);
-  },
-
-  async createLazyEntity(name: string, validators: string[], threshold: bigint, jurisdiction?: any) {
-    const XLN = await getXLNModule();
-    return XLN.createLazyEntity(name, validators, threshold, jurisdiction);
-  },
-
-  async generateLazyEntityId(validators: any[], threshold: bigint) {
-    const XLN = await getXLNModule();
-    return XLN.generateLazyEntityId(validators, threshold);
-  },
-
-  async createNumberedEntity(name: string, validators: string[], threshold: bigint, jurisdiction?: any) {
-    const XLN = await getXLNModule();
-    return XLN.createNumberedEntity(name, validators, threshold, jurisdiction);
-  },
-
-  async generateNumberedEntityId(entityNumber: number) {
-    const XLN = await getXLNModule();
-    return XLN.generateNumberedEntityId(entityNumber);
-  },
-
-  async runDemoWrapper(env: any) {
-    const XLN = await getXLNModule();
-    return XLN.runDemoWrapper(env);
-  },
-
-  async clearDatabase() {
-    const XLN = await getXLNModule();
-    return XLN.clearDatabase();
-  },
-
-  async getHistory() {
-    const XLN = await getXLNModule();
-    return XLN.getHistory();
-  },
-
-  async getSnapshot(index: number) {
-    const XLN = await getXLNModule();
-    return XLN.getSnapshot(index);
-  },
-
-  async generateSignerAvatar(signerId: string) {
-    const XLN = await getXLNModule();
-    return XLN.generateSignerAvatar ? XLN.generateSignerAvatar(signerId) : null;
-  },
-
-  async generateEntityAvatar(entityId: string) {
-    const XLN = await getXLNModule();
-    return XLN.generateEntityAvatar ? XLN.generateEntityAvatar(entityId) : null;
-  },
-
-  async formatEntityDisplay(entityId: string) {
-    const XLN = await getXLNModule();
-    return XLN.formatEntityDisplay ? XLN.formatEntityDisplay(entityId) : entityId;
-  },
-
-  async formatSignerDisplay(signerId: string) {
-    const XLN = await getXLNModule();
-    return XLN.formatSignerDisplay ? XLN.formatSignerDisplay(signerId) : signerId;
-  }
+  })();
+  
+  return loadingPromise;
 };
+
+// Interface for XLN module methods
+interface XLNModule {
+  main(): Promise<any>;
+  applyServerInput(env: any, input: any): Promise<any>;
+  processUntilEmpty(env: any, outputs: any[]): Promise<any>;
+  createLazyEntity(name: string, validators: string[], threshold: bigint, jurisdiction?: any): Promise<any>;
+  generateLazyEntityId(validators: any[], threshold: bigint): Promise<any>;
+  createNumberedEntity(name: string, validators: string[], threshold: bigint, jurisdiction?: any): Promise<any>;
+  generateNumberedEntityId(entityNumber: number): Promise<any>;
+  runDemoWrapper(env: any): Promise<any>;
+  clearDatabase(): Promise<any>;
+  getHistory(): Promise<any>;
+  getSnapshot(index: number): Promise<any>;
+  generateSignerAvatar?(signerId: string): Promise<any>;
+  generateEntityAvatar?(entityId: string): Promise<any>;
+  formatEntityDisplay?(entityId: string): Promise<string>;
+  formatSignerDisplay?(signerId: string): Promise<string>;
+}
+
+// Proxy that automatically loads XLN module and delegates all method calls
+export const XLNServer: XLNModule = new Proxy({} as XLNModule, {
+  get: (target, prop: string) => {
+    return async (...args: any[]) => {
+      const XLN = await getXLNModule();
+      const method = XLN[prop];
+      if (typeof method === 'function') {
+        return method(...args);
+      }
+      return method;
+    };
+  }
+});
 
 // Utility functions for safe type conversion
 export function toNumber(value: any): number {
@@ -261,9 +81,7 @@ export function toNumber(value: any): number {
 
 export function safeStringify(obj: any, maxLength?: number): string {
   try {
-    const result = JSON.stringify(obj, (key, value) => 
-      typeof value === 'bigint' ? value.toString() : value
-    );
+    const result = JSON.stringify(obj, (key, value) => (typeof value === 'bigint' ? value.toString() : value));
     return maxLength ? result.slice(0, maxLength) + (result.length > maxLength ? '...' : '') : result;
   } catch (error) {
     return '[Serialization Error]';
@@ -271,6 +89,18 @@ export function safeStringify(obj: any, maxLength?: number): string {
 }
 
 export function escapeHtml(text: string): string {
+  // SSR-safe HTML escaping
+  if (typeof window === 'undefined') {
+    // Server-side implementation
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+  
+  // Browser implementation
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;

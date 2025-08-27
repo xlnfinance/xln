@@ -1,5 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
+import { browser } from '$app/environment';
 import type { XLNEnvironment, EntityReplica, Snapshot, EntityTx, EntityInput, EntityOutput } from '../types';
+// import type { EntityReplica, Env as XLNEnvironment } from "xlnfinance/types"
 import { XLNServer } from '../utils/xlnServer';
 
 // Main XLN Environment Store
@@ -8,29 +10,29 @@ export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
 
 // Derived stores for easier access
-export const replicas = derived(
-  xlnEnvironment,
-  ($env) => $env?.replicas || new Map<string, EntityReplica>()
-);
+export const replicas = derived(xlnEnvironment, ($env) => $env?.replicas || new Map<string, EntityReplica>());
 
-export const history = derived(
-  xlnEnvironment,
-  ($env) => $env?.history || []
-);
+export const history = derived(xlnEnvironment, ($env) => $env?.history || []);
 
-export const currentHeight = derived(
-  xlnEnvironment,
-  ($env) => $env?.height || 0
-);
+export const currentHeight = derived(xlnEnvironment, ($env) => $env?.height || 0);
 
 // XLN Operations
 const xlnOperations = {
-  // Initialize XLN environment
+  // Initialize XLN environment (client-side only)
   async initialize() {
     try {
       isLoading.set(true);
       error.set(null);
-      
+
+      // Only initialize in browser environment
+      if (!browser) {
+        console.log('🌐 SSR: Skipping XLN initialization, will run client-side');
+        isLoading.set(false);
+        return null;
+      }
+
+      console.log('🚀 Client-side: Initializing XLN environment...');
+
       // Initialize the environment using XLNServer utility
       const env: any = await XLNServer.main();
 
@@ -44,7 +46,7 @@ const xlnOperations = {
 
       xlnEnvironment.set(env);
       isLoading.set(false);
-      
+
       console.log('🎯 XLN Environment initialized:', env);
       return env;
     } catch (err) {
@@ -56,15 +58,19 @@ const xlnOperations = {
     }
   },
 
-  // Apply server input and process consensus
-  async applyServerInput(input: { serverTxs?: any[], entityInputs?: EntityInput[] }) {
+  // Apply server input and process consensus (client-side only)
+  async applyServerInput(input: { serverTxs?: any[]; entityInputs?: EntityInput[] }) {
+    if (!browser) {
+      throw new Error('XLN operations can only be performed client-side');
+    }
+
     const env = get(xlnEnvironment);
     if (!env) throw new Error('XLN environment not initialized');
 
     try {
       const result = await XLNServer.applyServerInput(env, {
         serverTxs: input.serverTxs || [],
-        entityInputs: input.entityInputs || []
+        entityInputs: input.entityInputs || [],
       });
 
       // Process until empty for full consensus cascade
@@ -74,7 +80,7 @@ const xlnOperations = {
 
       // Update the store with new environment state
       xlnEnvironment.set(env);
-      
+
       return result;
     } catch (err) {
       console.error('❌ Failed to apply server input:', err);
@@ -85,57 +91,75 @@ const xlnOperations = {
   // Submit a chat message
   async submitChatMessage(entityId: string, signerId: string, message: string) {
     return this.applyServerInput({
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'chat',
-          data: { from: signerId, message }
-        }],
-        destinations: []
-      }]
+      entityInputs: [
+        {
+          entityId,
+          signerId,
+          entityTxs: [
+            {
+              type: 'chat',
+              data: { from: signerId, message },
+            },
+          ],
+          destinations: [],
+        },
+      ],
     });
   },
 
   // Submit a proposal
   async submitProposal(entityId: string, signerId: string, proposalText: string) {
     return this.applyServerInput({
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'propose',
-          data: {
-            action: { type: 'collective_message', data: { message: proposalText } },
-            proposer: signerId
-          }
-        }],
-        destinations: []
-      }]
+      entityInputs: [
+        {
+          entityId,
+          signerId,
+          entityTxs: [
+            {
+              type: 'propose',
+              data: {
+                action: { type: 'collective_message', data: { message: proposalText } },
+                proposer: signerId,
+              },
+            },
+          ],
+          destinations: [],
+        },
+      ],
     });
   },
 
   // Submit a vote
-  async submitVote(entityId: string, signerId: string, proposalId: string, choice: 'yes' | 'no' | 'abstain', comment?: string) {
+  async submitVote(
+    entityId: string,
+    signerId: string,
+    proposalId: string,
+    choice: 'yes' | 'no' | 'abstain',
+    comment?: string,
+  ) {
     return this.applyServerInput({
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'vote',
-          data: {
-            proposalId,
-            voter: signerId,
-            choice,
-            comment
-          }
-        }],
-        destinations: []
-      }]
+      entityInputs: [
+        {
+          entityId,
+          signerId,
+          entityTxs: [
+            {
+              type: 'vote',
+              data: {
+                proposalId,
+                voter: signerId,
+                choice,
+                comment,
+              },
+            },
+          ],
+          destinations: [],
+        },
+      ],
     });
   },
 
-  // Create a new entity
+  // Create a new entity (client-side only)
   async createEntity(entityData: {
     entityType: 'lazy' | 'numbered' | 'named';
     entityName: string;
@@ -143,20 +167,24 @@ const xlnOperations = {
     threshold: number;
     jurisdiction?: any;
   }) {
+    if (!browser) {
+      throw new Error('Entity creation can only be performed client-side');
+    }
+
     try {
       let config: any;
       let entityId: string;
-      
+
       if (entityData.entityType === 'lazy') {
         config = await XLNServer.createLazyEntity(
           entityData.entityName,
           entityData.validators,
           BigInt(entityData.threshold),
-          entityData.jurisdiction
+          entityData.jurisdiction,
         );
         entityId = await XLNServer.generateLazyEntityId(
           entityData.validators.map((name, i) => ({ name, weight: 1 })),
-          BigInt(entityData.threshold)
+          BigInt(entityData.threshold),
         );
       } else {
         // Handle numbered and named entities
@@ -164,7 +192,7 @@ const xlnOperations = {
           entityData.entityName,
           entityData.validators,
           BigInt(entityData.threshold),
-          entityData.jurisdiction
+          entityData.jurisdiction,
         );
         config = result.config;
         entityId = await XLNServer.generateNumberedEntityId(result.entityNumber);
@@ -177,8 +205,8 @@ const xlnOperations = {
         signerId,
         data: {
           config,
-          isProposer: index === 0 // First validator is proposer
-        }
+          isProposer: index === 0, // First validator is proposer
+        },
       }));
 
       // Apply the server transactions
@@ -189,17 +217,21 @@ const xlnOperations = {
     }
   },
 
-  // Run demo
+  // Run demo (client-side only)
   async runDemo() {
+    if (!browser) {
+      throw new Error('Demo can only be run client-side');
+    }
+
     const env = get(xlnEnvironment);
     if (!env) throw new Error('XLN environment not initialized');
 
     try {
       await XLNServer.runDemoWrapper(env);
-      
+
       // Update the store
       xlnEnvironment.set(env);
-      
+
       console.log('✅ Demo completed successfully');
     } catch (err) {
       console.error('❌ Demo failed:', err);
@@ -207,14 +239,18 @@ const xlnOperations = {
     }
   },
 
-  // Clear database
+  // Clear database (client-side only)
   async clearDatabase() {
+    if (!browser) {
+      throw new Error('Database operations can only be performed client-side');
+    }
+
     try {
       await XLNServer.clearDatabase();
-      
+
       // Reinitialize environment
       await this.initialize();
-      
+
       console.log('✅ Database cleared and reinitialized');
     } catch (err) {
       console.error('❌ Failed to clear database:', err);
@@ -234,31 +270,26 @@ const xlnOperations = {
   // Get replica by entity and signer
   getReplica(entityId: string, signerId: string): EntityReplica | null {
     const $replicas = get(replicas);
-    
+
     // Try different key formats
-    const possibleKeys = [
-      `${entityId}:${signerId}`,
-      `${signerId}:${entityId}`,
-      entityId,
-      signerId
-    ];
-    
+    const possibleKeys = [`${entityId}:${signerId}`, `${signerId}:${entityId}`, entityId, signerId];
+
     for (const key of possibleKeys) {
       const replica = $replicas.get(key);
       if (replica && replica.entityId === entityId && replica.signerId === signerId) {
         return replica;
       }
     }
-    
+
     // Fallback: search through all replicas
     for (const replica of $replicas.values()) {
       if (replica.entityId === entityId && replica.signerId === signerId) {
         return replica;
       }
     }
-    
+
     return null;
-  }
+  },
 };
 
 // Export individual stores and operations
