@@ -6,7 +6,7 @@
 import { ethers } from 'ethers';
 import { ConsensusConfig, JurisdictionConfig, EntityType, EntityStorage } from './types.js';
 import { hash, DEBUG } from './utils.js';
-import { createMPTStorage } from './entity-mpt.js';
+import { createCachedMPTStorage } from './entity-cached-storage.js';
 
 // Entity encoding utilities
 export const encodeBoard = (config: ConsensusConfig): string => {
@@ -161,8 +161,8 @@ export const createLazyEntity = async (name: string, validators: string[], thres
     jurisdiction
   };
 
-  // Initialize storage with dedicated DB
-  const storage = await createMPTStorage(`db/entities/${entityId}`);
+  // Initialize storage with dedicated DB (cached)
+  const storage = await createCachedMPTStorage(`db/entities/${entityId}`);
 
   return { config, storage };
 };
@@ -208,8 +208,8 @@ export const createNumberedEntity = async (name: string, validators: string[], t
     jurisdiction
   };
 
-  // Initialize storage with dedicated DB
-  const storage = await createMPTStorage(`db/entities/${entityId}`);
+  // Initialize storage with dedicated DB (cached)
+  const storage = await createCachedMPTStorage(`db/entities/${entityId}`);
 
   return { config, entityNumber, storage };
 };

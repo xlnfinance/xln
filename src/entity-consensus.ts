@@ -207,7 +207,7 @@ export const applyEntityInput = async (
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const outbox: EntityInput[] = [];
 
-  // Add transactions to mempool using storage
+  // Add transactions to in-memory mempool
   if (entityInput.entityTxs?.length) {
     if (entityReplica.signerId === 'alice') {
       console.log(`🔥 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
@@ -242,7 +242,7 @@ export const applyEntityInput = async (
     const newState = { ...entityInput.proposedFrame.newState, height: newHeight };
 
     await persistEntityState(storage, newState);
-    await storage.clear('mempool');
+    // Mempool is now purely in-memory - no storage operations needed
     await storage.set('committed', entityInput.proposedFrame.hash, entityInput.proposedFrame);
 
     const root = await storage.getRoot();
@@ -280,7 +280,7 @@ export const applyEntityInput = async (
       const committedState = await commitFrame(entityReplica, storage);
       entityReplica.state = committedState;
       entityReplica.proposal = undefined;
-      await storage.clear('mempool');
+      // Mempool is now purely in-memory - no storage operations needed
 
       if (DEBUG) console.log(`→ Threshold reached, committed frame at height ${committedState.height}`);
     }

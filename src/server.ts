@@ -91,7 +91,7 @@ import { encode, decode } from './snapshot-coder.js';
 // import { ethers } from 'ethers';
 // import path from 'path';
 // import fs from 'fs';
-import { createMPTStorage } from './entity-mpt.js';
+import { createCachedMPTStorage } from './entity-cached-storage.js';
 
 // --- Global DB for snapshots, name resolution, registry ---
 const globalDb: Level<Buffer, Buffer> = new Level('db/global', {
@@ -146,20 +146,42 @@ const applyServerInput = async (
     for (const serverTx of env.serverInput.serverTxs) {
       if (serverTx.type === 'importReplica') {
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
-        const storage = await createMPTStorage(`db/entities/${serverTx.entityId}`);
+        const storage = await createCachedMPTStorage(`db/entities/${serverTx.entityId}`);
 
-        env.replicas.set(replicaKey, {
-          entityId: serverTx.entityId,
-          signerId: serverTx.signerId,
-          storage,
-          state: {
+        // Try to hydrate existing state from MPT storage
+        const persistedHeight = await storage.get<number>('state', 'height');
+        let loadedState: EntityState;
+        if (persistedHeight !== undefined) {
+          const timestamp = (await storage.get<number>('state', 'timestamp')) ?? env.timestamp;
+          const messages = (await storage.get<string[]>('state', 'messages')) ?? [];
+          const proposals = (await storage.get<Map<string, Proposal>>('state', 'proposals')) ?? new Map();
+          const nonces = (await storage.get<Map<string, number>>('state', 'nonces')) ?? new Map();
+          const config = (await storage.get<ConsensusConfig>('state', 'config')) ?? serverTx.data.config;
+
+          loadedState = { height: persistedHeight, timestamp, messages, proposals, nonces, config };
+
+          if (DEBUG) {
+            const root = await storage.getRoot();
+            console.log(
+              `📦 Loaded persisted entity state for ${serverTx.entityId} at height ${persistedHeight}, root=${root.slice(0, 16)}...`,
+            );
+          }
+        } else {
+          loadedState = {
             height: 0,
             timestamp: env.timestamp,
             nonces: new Map(),
             messages: [],
             proposals: new Map(),
             config: serverTx.data.config,
-          },
+          };
+        }
+
+        env.replicas.set(replicaKey, {
+          entityId: serverTx.entityId,
+          signerId: serverTx.signerId,
+          storage,
+          state: loadedState,
           mempool: [],
           isProposer: serverTx.data.isProposer,
         });

@@ -1,8 +1,9 @@
-import { MerklePatriciaTrie, createMPT, createMerkleProof } from '@ethereumjs/mpt';
-import { MapDB, bytesToHex, utf8ToBytes } from '@ethereumjs/util';
+import { MerklePatriciaTrie, createMerkleProof } from '@ethereumjs/mpt';
+import { bytesToHex, utf8ToBytes } from '@ethereumjs/util';
 import { EntityStorage } from './types.js';
 import { Level } from 'level';
 import { LevelDB } from './entity-leveldb.js';
+import { encode as snapEncode, decode as snapDecode } from './snapshot-coder.js';
 
 export async function createMPTStorage(path: string): Promise<EntityStorage> {
   const trie = new MerklePatriciaTrie({
@@ -12,28 +13,22 @@ export async function createMPTStorage(path: string): Promise<EntityStorage> {
 
   const storage: EntityStorage = {
     async get<T>(type: string, key: string): Promise<T | undefined> {
-      const value = await trie.get(Buffer.from(`${type}:${key}`));
-      return value ? JSON.parse(value.toString(), (key, val) => {
-        // Convert string numbers back to BigInt for known BigInt fields
-        if ((key === 'threshold' || key === 'shares') && typeof val === 'string' && /^\d+$/.test(val)) {
-          return BigInt(val);
-        }
-        if (key === 'shares' && typeof val === 'object' && val !== null) {
-          // Handle shares object with string values
-          const shares: { [key: string]: bigint } = {};
-          for (const [shareKey, shareVal] of Object.entries(val)) {
-            shares[shareKey] = typeof shareVal === 'string' ? BigInt(shareVal) : shareVal as bigint;
-          }
-          return shares;
-        }
-        return val;
-      }) : undefined;
+      const value = await trie.get(utf8ToBytes(`${type}:${key}`));
+      if (!value) return undefined;
+      return snapDecode(Buffer.from(value)) as T;
     },
 
     async set<T>(type: string, key: string, value: T): Promise<void> {
-      await trie.put(Buffer.from(`${type}:${key}`), Buffer.from(JSON.stringify(value, (key, val) => 
-        typeof val === 'bigint' ? val.toString() : val
-      )));
+      // Persist value (supports Map/BigInt via snapshot encoder)
+      await trie.put(utf8ToBytes(`${type}:${key}`), snapEncode(value));
+
+      // Maintain per-type index of keys
+      const rawIndex = await trie.get(utf8ToBytes(indexKey(type)));
+      const keys: string[] = rawIndex ? (snapDecode(Buffer.from(rawIndex)) as string[]) : [];
+      if (!keys.includes(key)) {
+        keys.push(key);
+        await trie.put(utf8ToBytes(indexKey(type)), snapEncode(keys));
+      }
     },
 
     async getRoot(): Promise<string> {
@@ -46,7 +41,7 @@ export async function createMPTStorage(path: string): Promise<EntityStorage> {
 
     async getAll<T>(type: string): Promise<T[]> {
       const raw = await trie.get(utf8ToBytes(indexKey(type)));
-      const keys: string[] = raw ? JSON.parse(raw.toString()) : [];
+      const keys: string[] = raw ? (snapDecode(Buffer.from(raw)) as string[]) : [];
       const items: T[] = [];
       for (const key of keys) {
         const val = await storage.get<T>(type, key);
@@ -56,9 +51,10 @@ export async function createMPTStorage(path: string): Promise<EntityStorage> {
     },
 
     async clear(type: string): Promise<void> {
-      const keys = (await storage.getAll<string>(type)) || [];
-      for (const key of keys) {
-        await trie.del(utf8ToBytes(`${type}:${key}`));
+      const raw = await trie.get(utf8ToBytes(indexKey(type)));
+      const keys: string[] = raw ? (snapDecode(Buffer.from(raw)) as string[]) : [];
+      for (const k of keys) {
+        await trie.del(utf8ToBytes(`${type}:${k}`));
       }
       await trie.del(utf8ToBytes(indexKey(type)));
     },
