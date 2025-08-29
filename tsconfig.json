@@ -18,8 +18,8 @@
     "noEmit": false,
 
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": []
+    "types": ["bun", "node"]
   },
   "include": ["src/**/*", "./package.json"],
-  "exclude": ["node_modules", "**/*.test.ts"]
+  "exclude": ["node_modules"]
 }

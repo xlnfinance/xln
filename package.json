@@ -8,7 +8,7 @@
     ".": {
       "types": "./dist/server.d.ts",
       "require": "./dist/server.js",
-      "browser": "./dist/server.js",
+      "browser": "./dist/server-browser.js",
       "import": "./dist/server.js"
     },
     "./server-dev": {
@@ -80,8 +80,7 @@
     "test:section": "mocha -r ts-node/register src/test/section.test.ts --timeout 60000 --exit",
     "test:derive": "mocha -r ts-node/register src/test/derive.test.ts --timeout 10000 --exit",
     "t2": "tsc && ts-node src/test/derive.test.ts",
-    "build": "tsc && bun build src/server.ts --target browser --outfile dist/server.js --external ethers --external level --external memory-level --external abstract-level",
-    "build:dev": "bun build src/server.ts --target node --outfile dist/server-dev.js",
+    "build": "tsc && bun build src/server.ts --target browser --outfile dist/server-browser.js --external ethers --external level --external memory-level --external abstract-level",
     "watch": "tsc --watch",
     "env:build": "cd ./contracts && npx hardhat compile",
     "env:run": "cd ./contracts && npx hardhat node",
@@ -97,9 +96,9 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "@playwright/test": "^1.47.2",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@tsconfig/node20": "^20.1.4",
+    "@types/bun": "^1.2.21",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.17.6",
     "@types/ws": "^8.5.10",
