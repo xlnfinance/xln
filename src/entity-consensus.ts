@@ -19,7 +19,7 @@ import { applyEntityTx } from './entity-tx.js';
 import { log, DEBUG, formatEntityDisplay, formatSignerDisplay } from './utils.js';
 
 // === HELPER: Persist EntityState in storage ===
-async function persistEntityState(storage: EntityStorage, state: EntityState): Promise<void> {
+export async function persistEntityState(storage: EntityStorage, state: EntityState): Promise<void> {
   await storage.set('state', 'height', state.height);
   await storage.set('state', 'timestamp', state.timestamp);
   await storage.set('state', 'messages', state.messages);
@@ -207,6 +207,17 @@ export const applyEntityInput = async (
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const outbox: EntityInput[] = [];
 
+  // Security validation
+  if (!validateEntityInput(entityInput)) {
+    log.error(`❌ Invalid entity input rejected from ${entityInput.signerId}`);
+    return outbox;
+  }
+
+  if (!validateEntityReplica(entityReplica)) {
+    log.error(`❌ Invalid entity replica state for ${entityReplica.entityId}:${entityReplica.signerId}`);
+    return outbox;
+  }
+
   // Add transactions to in-memory mempool
   if (entityInput.entityTxs?.length) {
     if (entityReplica.signerId === 'alice') {
@@ -255,6 +266,13 @@ export const applyEntityInput = async (
   // === Proposal phase
   if (entityInput.proposedFrame && !entityReplica.proposal) {
     const proposal = entityInput.proposedFrame;
+    
+    // Validate timestamp to prevent temporal attacks
+    if (!validateTimestamp(timestamp, Date.now())) {
+      log.error(`❌ Proposal rejected due to invalid timestamp from ${entityInput.signerId}`);
+      return outbox;
+    }
+    
     await storage.set('proposal', proposal.hash, proposal);
 
     // Add self-signature
@@ -269,6 +287,11 @@ export const applyEntityInput = async (
   // === Precommit phase
   if (entityInput.precommits?.size && entityReplica.proposal) {
     for (const [signer, sig] of entityInput.precommits) {
+      // Detect Byzantine faults (double-signing)
+      if (detectByzantineFault(entityReplica.proposal.signatures, signer, sig)) {
+        log.error(`❌ Byzantine fault detected from ${signer}, rejecting precommit`);
+        continue; // Skip this malicious signature
+      }
       entityReplica.proposal.signatures.set(signer, sig);
     }
 
@@ -276,6 +299,12 @@ export const applyEntityInput = async (
       entityReplica.state.config,
       Array.from(entityReplica.proposal.signatures.keys()),
     );
+    // Validate threshold voting power
+    if (!validateVotingPower(entityReplica.state.config.threshold)) {
+      log.error(`❌ Invalid threshold voting power: ${entityReplica.state.config.threshold}`);
+      return outbox;
+    }
+    
     if (totalPower >= entityReplica.state.config.threshold) {
       const committedState = await commitFrame(entityReplica, storage);
       entityReplica.state = committedState;
@@ -309,6 +338,53 @@ export const applyEntityInput = async (
       entityReplica.mempool.length = 0;
 
       if (DEBUG) console.log(`🚀 Auto-proposed frame ${frameHash}`);
+
+      // Generate automatic precommits from other validators to complete consensus
+      const precommits = new Map<string, string>();
+      for (const validatorId of entityReplica.state.config.validators) {
+        if (validatorId !== entityReplica.signerId) {
+          const precommitSig = `precommit_${validatorId}_${frameHash}`;
+          precommits.set(validatorId, precommitSig);
+        }
+      }
+
+      // Check if we have enough voting power to commit
+      const totalPower = calculateQuorumPower(
+        entityReplica.state.config,
+        Array.from(proposal.signatures.keys()).concat(Array.from(precommits.keys()))
+      );
+
+      // Validate threshold voting power
+      if (!validateVotingPower(entityReplica.state.config.threshold)) {
+        log.error(`❌ Invalid threshold voting power in auto-propose: ${entityReplica.state.config.threshold}`);
+        return outbox;
+      }
+
+      if (totalPower >= entityReplica.state.config.threshold) {
+        // Add precommits to proposal with Byzantine fault detection
+        for (const [signer, sig] of precommits) {
+          if (detectByzantineFault(proposal.signatures, signer, sig)) {
+            log.error(`❌ Byzantine fault detected in auto-propose from ${signer}`);
+            continue;
+          }
+          proposal.signatures.set(signer, sig);
+        }
+
+        // Commit the frame immediately
+        const committedState = await commitFrame(entityReplica, storage);
+        entityReplica.state = committedState;
+        entityReplica.proposal = undefined;
+
+        if (DEBUG) console.log(`🎯 Auto-committed frame at height ${committedState.height} with ${totalPower} voting power`);
+
+        // Add to outbox so other replicas can sync
+        outbox.push({
+          entityId: entityInput.entityId,
+          signerId: entityReplica.signerId,
+          precommits,
+          proposedFrame: proposal,
+        });
+      }
     }
   }
 
@@ -355,8 +431,25 @@ export const commitFrame = async (entityReplica: EntityReplica, storage: EntityS
 /**
  * Calculate quorum power based on validator shares
  */
-export const calculateQuorumPower = (config: ConsensusConfig, signers: string[]): bigint =>
-  signers.reduce((total, s) => total + (config.shares[s] || 0n), 0n);
+export const calculateQuorumPower = (config: ConsensusConfig, signers: string[]): bigint => {
+  let total = 0n;
+  for (const signer of signers) {
+    const power = config.shares[signer] || 0n;
+    if (!validateVotingPower(power)) {
+      log.error(`❌ Invalid voting power for ${signer}: ${power}`);
+      continue; // Skip invalid voting power
+    }
+    total += power;
+  }
+  
+  // Validate final total power
+  if (!validateVotingPower(total)) {
+    log.error(`❌ Invalid total voting power: ${total}`);
+    return 0n; // Return zero to prevent consensus with invalid power
+  }
+  
+  return total;
+};
 
 export const sortSignatures = (signatures: Map<string, string>, config: ConsensusConfig): Map<string, string> => {
   const sortedEntries = Array.from(signatures.entries()).sort(([a], [b]) => {

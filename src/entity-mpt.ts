@@ -6,8 +6,10 @@ import { LevelDB } from './entity-leveldb.js';
 import { encode as snapEncode, decode as snapDecode } from './snapshot-coder.js';
 
 export async function createMPTStorage(path: string): Promise<EntityStorage> {
+  const leveldb = new Level(path, { keyEncoding: 'view', valueEncoding: 'view' });
+  await leveldb.open();
   const trie = new MerklePatriciaTrie({
-    db: new LevelDB(new Level(path)),
+    db: new LevelDB(leveldb as any),
   });
   const indexKey = (type: string) => `${type}:_index`;
 

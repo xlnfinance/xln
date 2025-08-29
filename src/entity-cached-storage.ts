@@ -33,7 +33,7 @@ class LRUCache<T> {
         this.cache.delete(firstKey);
       }
     }
-    
+
     this.cache.set(key, value);
   }
 
@@ -67,24 +67,24 @@ export class CachedEntityStorage implements EntityStorage {
 
   async get<T>(type: string, key: string): Promise<T | undefined> {
     const cacheKey = `${type}:${key}`;
-    
+
     // Try cache first
     const cached = this.cache.get(cacheKey);
     if (cached !== undefined) {
       this.cacheStats.hits++;
-      if (DEBUG) console.log(`🎯 Cache HIT for ${cacheKey}`);
+      // if (DEBUG) console.log(`🎯 Cache HIT for ${cacheKey}`);
       return cached as T;
     }
 
     // Cache miss - fetch from persistent storage
     this.cacheStats.misses++;
     const value = await this.persistentStorage.get<T>(type, key);
-    
+
     if (value !== undefined) {
       this.cache.set(cacheKey, value);
-      if (DEBUG) console.log(`💾 Cache MISS for ${cacheKey}, loaded from disk`);
+      // if (DEBUG) console.log(`💾 Cache MISS for ${cacheKey}, loaded from disk`);
     }
-    
+
     return value;
   }
 
@@ -98,11 +98,11 @@ export class CachedEntityStorage implements EntityStorage {
 
     // Invalidate root cache since state changed
     this.rootCache = null;
-    
+
     // Invalidate type index cache since we may have added a new key
     this.indexCache.delete(type);
 
-    if (DEBUG) console.log(`✍️  Write-through for ${cacheKey}`);
+    // if (DEBUG) console.log(`✍️  Write-through for ${cacheKey}`);
   }
 
   async getRoot(): Promise<string> {
@@ -125,7 +125,7 @@ export class CachedEntityStorage implements EntityStorage {
     if (!keys) {
       // Get all keys for this type from persistent storage
       const allItems = await this.persistentStorage.getAll<T>(type);
-      
+
       // We need to extract keys somehow - let's fetch the index directly
       // This is a bit hacky but works with current MPT implementation
       const indexKey = `${type}:_index`;
@@ -158,12 +158,12 @@ export class CachedEntityStorage implements EntityStorage {
         keysToDelete.push(cacheKey);
       }
     }
-    
+
     keysToDelete.forEach(key => this.cache.delete(key));
     this.indexCache.delete(type);
     this.rootCache = null; // Invalidate root
 
-    if (DEBUG) console.log(`🧹 Cleared cache for type: ${type}`);
+    // if (DEBUG) console.log(`🧹 Cleared cache for type: ${type}`);
   }
 
   // Utility methods for monitoring cache performance
@@ -186,7 +186,7 @@ export class CachedEntityStorage implements EntityStorage {
     this.cache.clear();
     this.indexCache.clear();
     this.rootCache = null;
-    if (DEBUG) console.log('🔄 Cache completely invalidated');
+    // if (DEBUG) console.log('🔄 Cache completely invalidated');
   }
 }
 

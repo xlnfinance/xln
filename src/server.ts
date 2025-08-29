@@ -52,6 +52,7 @@ import {
   applyEntityFrame,
   calculateQuorumPower,
   sortSignatures,
+  persistEntityState,
   mergeEntityInputs,
   getEntityStateSummary,
 } from './entity-consensus.js';
@@ -109,10 +110,17 @@ const captureSnapshot = (
   serverOutputs: EntityInput[],
   description: string,
 ): void => {
+  // Normalize replica keys to consistent format: entityId:signerId
+  const normalizedReplicas = new Map<string, EntityReplica>();
+  for (const [originalKey, replica] of env.replicas) {
+    const normalizedKey = `${replica.entityId}:${replica.signerId}`;
+    normalizedReplicas.set(normalizedKey, replica);
+  }
+
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
-    replicas: new Map(env.replicas), // store in-memory state only
+    replicas: normalizedReplicas,
     serverInput,
     serverOutputs,
     description,
@@ -145,8 +153,10 @@ const applyServerInput = async (
     // Import replicas
     for (const serverTx of env.serverInput.serverTxs) {
       if (serverTx.type === 'importReplica') {
+        // Always use entityId:signerId format for consistency
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
-        const storage = await createCachedMPTStorage(`db/entities/${serverTx.entityId}`);
+        const uniqueDbPath = `db/entities/${serverTx.entityId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const storage = await createCachedMPTStorage(uniqueDbPath);
 
         // Try to hydrate existing state from MPT storage
         const persistedHeight = await storage.get<number>('state', 'height');
@@ -167,6 +177,7 @@ const applyServerInput = async (
             );
           }
         } else {
+          console.log(`📦 No persisted state found for ${serverTx.entityId}`);
           loadedState = {
             height: 0,
             timestamp: env.timestamp,
@@ -195,6 +206,28 @@ const applyServerInput = async (
       if (entityReplica) {
         const outputs = await applyEntityInput(env, entityReplica, entityInput, entityReplica.storage);
         entityOutbox.push(...outputs);
+      }
+    }
+
+    // Process outbox entries to propagate consensus to other replicas
+    if (entityOutbox.length > 0) {
+      for (const outboxEntry of entityOutbox) {
+        // Find all replicas for this entity except the sender
+        for (const [replicaKey, replica] of env.replicas) {
+          if (replica.entityId === outboxEntry.entityId && replica.signerId !== outboxEntry.signerId) {
+            // Apply the consensus result to non-proposer replicas
+            if (outboxEntry.precommits && outboxEntry.proposedFrame) {
+              // Update replica state with the committed frame
+              replica.state = {
+                ...outboxEntry.proposedFrame.newState,
+                height: replica.state.height + 1,
+              };
+
+              // Persist the updated state
+              await persistEntityState(replica.storage, replica.state);
+            }
+          }
+        }
       }
     }
 
