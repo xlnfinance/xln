@@ -21,7 +21,7 @@
       {isCollapsed ? '▶' : '▼'}
     </button>
   </div>
-  
+
   {#if !isCollapsed}
     <div class="history-content">
       <div class="server-io-container">
@@ -32,12 +32,12 @@
               {$timeState.isLive ? '⚡ Current' : '🕰️ Historical'}
             </span>
           </div>
-          
+
           <div class="server-section">
             <h4>🖥️ Server Transactions</h4>
             <div class="server-txs-list">
               {#if serverInput.serverTxs.length > 0}
-                {#each serverInput.serverTxs as tx}
+                {#each serverInput.serverTxs as tx (tx.entityId + tx.signerId)}
                   <div class="input-item">
                     <strong>🖥️ {tx.type}</strong>: {tx.entityId}:{tx.signerId}
                     {tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
@@ -48,20 +48,25 @@
               {/if}
             </div>
           </div>
-          
+
           <div class="server-section">
             <h4>🔄 Entity Inputs</h4>
             <div class="entity-inputs-list">
               {#if serverInput.entityInputs.length > 0}
-                {#each serverInput.entityInputs as input}
+                {#each serverInput.entityInputs as input (input.entityId + input.signerId)}
                   <div class="input-item">
                     <strong>{input.entityId}:{input.signerId}</strong>
                     {#if input.entityTxs && input.entityTxs.length > 0}
-                      <br>📝 <strong>{input.entityTxs.length} transactions:</strong>
-                      {#each input.entityTxs as tx, i}
-                        <br>  {i+1}. {tx.type === 'chat' ? `💬 Chat: "${tx.data.message}"` : 
-                                     tx.type === 'propose' ? `📝 Propose: "${tx.data.action.data.message}"` :
-                                     tx.type === 'vote' ? `🗳️ Vote: ${tx.data.choice}` : `⚙️ ${tx.type}`}
+                      <br />📝 <strong>{input.entityTxs.length} transactions:</strong>
+                      {#each input.entityTxs as tx, i (tx.type + i)}
+                        <br />
+                        {i + 1}. {tx.type === 'chat'
+                          ? `💬 Chat: "${tx.data.message}"`
+                          : tx.type === 'propose'
+                            ? `📝 Propose: "${tx.data.action.data.message}"`
+                            : tx.type === 'vote'
+                              ? `🗳️ Vote: ${tx.data.choice}`
+                              : `⚙️ ${tx.type}`}
                       {/each}
                     {/if}
                   </div>
@@ -72,7 +77,7 @@
             </div>
           </div>
         </div>
-        
+
         <div class="server-column">
           <div class="server-column-header">
             📤 Server Output (What's being sent and where)
@@ -80,20 +85,25 @@
               {$timeState.isLive ? '⚡ Current' : '🕰️ Historical'}
             </span>
           </div>
-          
+
           <div class="server-section">
             <h4>🚀 Entity Outputs</h4>
             <div class="entity-outputs-list">
               {#if serverOutputs.length > 0}
-                {#each serverOutputs as output, index}
+                {#each serverOutputs as output, index (output.entityId + output.signerId)}
                   <div class="input-item">
                     <strong>📤 {index + 1}. → {output.signerId}</strong>
                     {#if output.entityTxs && output.entityTxs.length > 0}
-                      <br>📝 <strong>{output.entityTxs.length} transactions:</strong>
-                      {#each output.entityTxs as tx, i}
-                        <br>  {i+1}. {tx.type === 'chat' ? `💬 Chat: "${tx.data.message}"` : 
-                                     tx.type === 'propose' ? `📝 Propose: "${tx.data.action.data.message}"` :
-                                     tx.type === 'vote' ? `🗳️ Vote: ${tx.data.choice}` : `⚙️ ${tx.type}`}
+                      <br />📝 <strong>{output.entityTxs.length} transactions:</strong>
+                      {#each output.entityTxs as tx, i (tx.type + i)}
+                        <br />
+                        {i + 1}. {tx.type === 'chat'
+                          ? `💬 Chat: "${tx.data.message}"`
+                          : tx.type === 'propose'
+                            ? `📝 Propose: "${tx.data.action.data.message}"`
+                            : tx.type === 'vote'
+                              ? `🗳️ Vote: ${tx.data.choice}`
+                              : `⚙️ ${tx.type}`}
                       {/each}
                     {/if}
                   </div>

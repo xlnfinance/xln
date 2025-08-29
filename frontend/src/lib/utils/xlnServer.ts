@@ -16,10 +16,10 @@ const getXLNModule = async () => {
 
   // Return cached module if already loaded
   if (XLN) return XLN;
-  
+
   // Return existing loading promise if already in progress
   if (loadingPromise) return loadingPromise;
-  
+
   // Start loading the module
   loadingPromise = (async () => {
     try {
@@ -34,7 +34,7 @@ const getXLNModule = async () => {
       throw error;
     }
   })();
-  
+
   return loadingPromise;
 };
 
@@ -99,7 +99,7 @@ export function escapeHtml(text: string): string {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
   }
-  
+
   // Browser implementation
   const div = document.createElement('div');
   div.textContent = text;

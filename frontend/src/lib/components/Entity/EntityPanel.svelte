@@ -1,11 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Tab, EntityReplica } from '../../types';
-  import { xlnOperations, replicas } from '../../stores/xlnStore';
+  import { xlnOperations } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
-  import { XLNServer, escapeHtml } from '../../utils/xlnServer';
   import EntityDropdown from './EntityDropdown.svelte';
   import EntityProfile from './EntityProfile.svelte';
   import ConsensusState from './ConsensusState.svelte';
@@ -23,9 +22,14 @@
   // Reactive statement to get replica data
   $: {
     if (tab.entityId && tab.signer) {
-      // Prefer time-aware replicas if available
-      const candidate = $visibleReplicas?.get?.(`${tab.entityId}:${tab.signer}`);
-      replica = candidate || xlnOperations.getReplica(tab.entityId, tab.signer);
+      // Use consistent entityId:signerId key format
+      const replicaKey = `${tab.entityId}:${tab.signer}`;
+      replica = $visibleReplicas?.get?.(replicaKey) || null;
+
+      // Only fall back to live data if we're in live mode
+      if (!replica && $visibleReplicas && $visibleReplicas.size === 0) {
+        replica = xlnOperations.getReplica(tab.entityId, tab.signer);
+      }
     } else {
       replica = null;
     }
@@ -45,12 +49,12 @@
   // Handle entity selection from dropdown
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signer, entityId } = event.detail;
-    
+
     tabOperations.updateTab(tab.id, {
       jurisdiction,
       signer,
       entityId,
-      title: `Entity ${entityId.slice(-4)}`
+      title: `Entity ${entityId.slice(-4)}`,
     });
   }
 
@@ -66,7 +70,7 @@
 
   onMount(() => {
     // Check if we should show close button
-    const allTabs = tabOperations.getActiveTab();
+    // const allTabs = tabOperations.getActiveTab();
     // Show close button if more than 1 tab exists
     // This will be updated reactively through the parent
   });
@@ -74,31 +78,24 @@
 
 <div class="entity-panel" data-panel-id={tab.id}>
   <div class="panel-header">
-    <EntityDropdown 
-      {tab} 
-      on:entitySelect={handleEntitySelect}
-    />
+    <EntityDropdown {tab} on:entitySelect={handleEntitySelect} />
     <div class="panel-header-controls">
       {#if isLast}
-        <button class="panel-add-btn" on:click={handleAddTab} title="Add Entity Panel">
-          ➕
-        </button>
+        <button class="panel-add-btn" on:click={handleAddTab} title="Add Entity Panel"> ➕ </button>
       {/if}
       {#if showCloseButton}
-        <button class="panel-close-btn" on:click={handleCloseTab} title="Close panel">
-          ×
-        </button>
+        <button class="panel-close-btn" on:click={handleCloseTab} title="Close panel"> × </button>
       {/if}
     </div>
   </div>
-  
+
   <!-- Entity Profile Section -->
   <EntityProfile {replica} {tab} />
-  
+
   <!-- Consensus State Component -->
   <div class="panel-component" id="consensus-{tab.id}">
-    <div 
-      class="component-header" 
+    <div
+      class="component-header"
       class:collapsed={!consensusExpanded}
       on:click={() => toggleComponent(`consensus-${tab.id}`)}
       role="button"
@@ -111,18 +108,14 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
-      class="component-content" 
-      class:collapsed={!consensusExpanded}
-      style="max-height: 200px;"
-    >
+    <div class="component-content" class:collapsed={!consensusExpanded} style="max-height: 200px;">
       <ConsensusState {replica} />
     </div>
   </div>
 
   <!-- Chat Component -->
   <div class="panel-component" id="chat-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!chatExpanded}
       on:click={() => toggleComponent(`chat-${tab.id}`)}
@@ -136,18 +129,14 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
-      class="component-content"
-      class:collapsed={!chatExpanded}
-      style="max-height: 25vh;"
-    >
+    <div class="component-content" class:collapsed={!chatExpanded} style="max-height: 25vh;">
       <ChatMessages {replica} {tab} />
     </div>
   </div>
 
   <!-- Proposals Component -->
   <div class="panel-component" id="proposals-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!proposalsExpanded}
       on:click={() => toggleComponent(`proposals-${tab.id}`)}
@@ -161,18 +150,14 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
-      class="component-content"
-      class:collapsed={!proposalsExpanded}
-      style="max-height: 25vh;"
-    >
+    <div class="component-content" class:collapsed={!proposalsExpanded} style="max-height: 25vh;">
       <ProposalsList {replica} {tab} />
     </div>
   </div>
 
   <!-- Transaction History Component -->
   <div class="panel-component entity-history-panel" id="history-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!historyExpanded}
       on:click={() => toggleComponent(`history-${tab.id}`)}
@@ -186,18 +171,14 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
-      class="component-content"
-      class:collapsed={!historyExpanded}
-      style="max-height: 40vh;"
-    >
+    <div class="component-content" class:collapsed={!historyExpanded} style="max-height: 40vh;">
       <TransactionHistory {replica} {tab} />
     </div>
   </div>
 
   <!-- Controls Component -->
   <div class="panel-component" id="controls-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!controlsExpanded}
       on:click={() => toggleComponent(`controls-${tab.id}`)}
@@ -211,11 +192,7 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
-      class="component-content"
-      class:collapsed={!controlsExpanded}
-      style="max-height: 400px;"
-    >
+    <div class="component-content" class:collapsed={!controlsExpanded} style="max-height: 400px;">
       <ControlsPanel {replica} {tab} />
     </div>
   </div>
@@ -331,7 +308,9 @@
   }
 
   .component-content {
-    transition: max-height 0.3s ease, opacity 0.3s ease;
+    transition:
+      max-height 0.3s ease,
+      opacity 0.3s ease;
     overflow: hidden;
   }
 

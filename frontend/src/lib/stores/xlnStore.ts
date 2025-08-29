@@ -78,8 +78,16 @@ const xlnOperations = {
         await XLNServer.processUntilEmpty(env, result.entityOutbox);
       }
 
+      // Force Svelte reactivity by creating a new environment object
+      const updatedEnv = {
+        ...env,
+        replicas: new Map(env.replicas),
+        history: [...(env.history || [])],
+        timestamp: Date.now(),
+      };
+
       // Update the store with new environment state
-      xlnEnvironment.set(env);
+      xlnEnvironment.set(updatedEnv);
 
       return result;
     } catch (err) {
@@ -210,7 +218,10 @@ const xlnOperations = {
       }));
 
       // Apply the server transactions
-      return this.applyServerInput({ serverTxs });
+      const result = await this.applyServerInput({ serverTxs });
+
+      // The applyServerInput method already handles reactivity, so we can return the result
+      return result;
     } catch (err) {
       console.error('❌ Failed to create entity:', err);
       throw err;
@@ -229,8 +240,17 @@ const xlnOperations = {
     try {
       await XLNServer.runDemoWrapper(env);
 
-      // Update the store
-      xlnEnvironment.set(env);
+      // Force Svelte reactivity by creating a new environment object
+      // This ensures that deep changes to replica states are detected
+      const updatedEnv = {
+        ...env,
+        replicas: new Map(env.replicas),
+        history: [...(env.history || [])],
+        timestamp: Date.now(), // Update timestamp to ensure change detection
+      };
+
+      // Update the store with the new object reference
+      xlnEnvironment.set(updatedEnv);
 
       console.log('✅ Demo completed successfully');
     } catch (err) {

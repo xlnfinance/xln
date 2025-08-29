@@ -34,7 +34,8 @@ echo "📦 Starting TypeScript watch compilation..."
 mkdir -p dist
 
 # Start TypeScript watch compilation
-bun build src/server.ts --target browser --outfile dist/server.js --watch &
+# bun build src/server.ts --target browser --outfile dist/server.js --watch &
+bun run build --watch &
 WATCH_PID=$!
 
 # Wait a moment for initial build

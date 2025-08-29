@@ -1,12 +1,12 @@
 <script lang="ts">
-  import TransactionHistoryIO from './lib/components/Common/TransactionHistoryIO.svelte';
+  import TransactionHistoryIO from './lib/components/IO/TransactionHistoryIO.svelte';
   import EntityFormation from './lib/components/Formation/EntityFormation.svelte';
   import JurisdictionStatus from './lib/components/Jurisdiction/JurisdictionStatus.svelte';
 </script>
 
 <main class="test-app">
   <h1>🧪 Component Test Page</h1>
-  
+
   <div class="test-section">
     <h2>TransactionHistoryIO Component</h2>
     <TransactionHistoryIO />
