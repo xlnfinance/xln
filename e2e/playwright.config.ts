@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   // testDir is relative to this config file's directory
   testDir: '.',
-  timeout: 60000,
+  timeout: 20000,
   retries: 1,
   outputDir: 'e2e/test-results',
   use: {

@@ -118,10 +118,26 @@
     </div>
   </div>
   
-  <!-- Entity Profile Section -->
-  <EntityProfile {replica} {tab} />
-  
-  <!-- Consensus State Component -->
+  {#if !tab.entityId || !tab.signer}
+    <!-- Empty State: No Entity Selected -->
+    <div class="empty-panel-state">
+      <div class="empty-panel-message">
+        <div class="empty-icon">🏢</div>
+        <h3>Select Entity to View Profile</h3>
+        <p>Use the dropdown above to select:</p>
+        <div class="selection-steps">
+          <div class="step">📍 <strong>Jurisdiction</strong> → Network/Port</div>
+          <div class="step">👤 <strong>Signer</strong> → Your Identity</div>
+          <div class="step">🏢 <strong>Entity</strong> → Which Entity</div>
+        </div>
+        <small>Once selected, you'll see consensus, chat, proposals, and controls.</small>
+      </div>
+    </div>
+  {:else}
+    <!-- Entity Profile Section -->
+    <EntityProfile {replica} {tab} />
+    
+    <!-- Consensus State Component -->
   <div class="panel-component" id="consensus-{tab.id}">
     <div 
       class="component-header" 
@@ -245,6 +261,7 @@
       <ControlsPanel {replica} {tab} />
     </div>
   </div>
+  {/if}
 </div>
 
 <style>
@@ -364,6 +381,55 @@
   .component-content.collapsed {
     max-height: 0 !important;
     opacity: 0;
+  }
+
+  .empty-panel-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    padding: 40px 20px;
+  }
+
+  .empty-panel-message {
+    text-align: center;
+    max-width: 300px;
+    color: #d4d4d4;
+  }
+
+  .empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.6;
+  }
+
+  .empty-panel-message h3 {
+    margin: 0 0 12px 0;
+    color: #007acc;
+    font-size: 18px;
+  }
+
+  .empty-panel-message p {
+    margin: 0 0 16px 0;
+    color: #999;
+  }
+
+  .selection-steps {
+    text-align: left;
+    margin: 16px 0;
+  }
+
+  .step {
+    margin: 8px 0;
+    padding: 6px 0;
+    font-size: 14px;
+    color: #ccc;
+  }
+
+  .empty-panel-message small {
+    color: #777;
+    font-style: italic;
+    font-size: 12px;
   }
 
   .entity-history-panel {

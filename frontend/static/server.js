@@ -38042,7 +38042,7 @@ var require_ms = __commonJS((exports, module) => {
 
 // node_modules/debug/src/common.js
 var require_common3 = __commonJS((exports, module) => {
-  function setup(env2) {
+  function setup(env) {
     createDebug.debug = createDebug;
     createDebug.default = createDebug;
     createDebug.coerce = coerce;
@@ -38051,8 +38051,8 @@ var require_common3 = __commonJS((exports, module) => {
     createDebug.enabled = enabled;
     createDebug.humanize = require_ms();
     createDebug.destroy = destroy;
-    Object.keys(env2).forEach((key) => {
-      createDebug[key] = env2[key];
+    Object.keys(env).forEach((key) => {
+      createDebug[key] = env[key];
     });
     createDebug.names = [];
     createDebug.skips = [];
@@ -41356,7 +41356,7 @@ var validateMessage = (message) => {
     return false;
   }
 };
-var applyEntityTx = (env2, entityState, entityTx) => {
+var applyEntityTx = (env, entityState, entityTx) => {
   console.log(`\uD83D\uDEA8 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, entityTx.data);
   try {
     if (entityTx.type === "chat") {
@@ -41649,7 +41649,7 @@ var validateVotingPower = (power) => {
     return false;
   }
 };
-var applyEntityInput = (env2, entityReplica, entityInput) => {
+var applyEntityInput = (env, entityReplica, entityInput) => {
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const timestamp2 = Date.now();
   const currentProposalHash = entityReplica.proposal?.hash?.slice(0, 10) || "none";
@@ -41817,7 +41817,7 @@ var applyEntityInput = (env2, entityReplica, entityInput) => {
     const isSingleSigner = entityReplica.state.config.validators.length === 1 && entityReplica.state.config.threshold === BigInt(1);
     if (isSingleSigner) {
       console.log(`\uD83D\uDE80 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
-      const newEntityState2 = applyEntityFrame(env2, entityReplica.state, entityReplica.mempool);
+      const newEntityState2 = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
       entityReplica.state = {
         ...newEntityState2,
         height: entityReplica.state.height + 1
@@ -41829,7 +41829,7 @@ var applyEntityInput = (env2, entityReplica, entityInput) => {
     }
     if (DEBUG)
       console.log(`    \uD83D\uDE80 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`);
-    const newEntityState = applyEntityFrame(env2, entityReplica.state, entityReplica.mempool);
+    const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
     const newTimestamp = Date.now();
     if (!validateTimestamp(newTimestamp, Date.now())) {
       log2.error(`❌ Invalid proposal timestamp: ${newTimestamp}`);
@@ -41907,8 +41907,8 @@ var applyEntityInput = (env2, entityReplica, entityInput) => {
   });
   return entityOutbox;
 };
-var applyEntityFrame = (env2, entityState, entityTxs) => {
-  return entityTxs.reduce((currentEntityState, entityTx) => applyEntityTx(env2, currentEntityState, entityTx), entityState);
+var applyEntityFrame = (env, entityState, entityTxs) => {
+  return entityTxs.reduce((currentEntityState, entityTx) => applyEntityTx(env, currentEntityState, entityTx), entityState);
 };
 var calculateQuorumPower = (config, signers) => {
   return signers.reduce((total, signerId) => {
@@ -42534,7 +42534,7 @@ var getJurisdictionByAddress = async (address) => {
 init_utils5();
 init_entity_factory();
 init_utils5();
-var runDemo = async (env2) => {
+var runDemo = async (env) => {
   if (DEBUG) {
     console.log("\uD83D\uDE80 Starting XLN Consensus Demo - Multi-Entity Test");
     console.log("✨ Using deterministic hash-based proposal IDs (no randomness)");
@@ -42560,7 +42560,7 @@ var runDemo = async (env2) => {
     jurisdiction: ethereumJurisdiction
   };
   const chatEntityId = generateNumberedEntityId(1);
-  await applyServerInput(env2, {
+  await applyServerInput(env, {
     serverTxs: chatValidators.map((signerId, index) => ({
       type: "importReplica",
       entityId: chatEntityId,
@@ -42591,7 +42591,7 @@ var runDemo = async (env2) => {
   console.log(`✅ Entity #2 governance automatically created with fixed supply`);
   console.log(`\uD83D\uDCCB Fixed supply: 1 quadrillion control & dividend tokens (held by entity)`);
   console.log(`\uD83D\uDD04 Distribution: Use reserveToReserve() to manually distribute tokens`);
-  await applyServerInput(env2, {
+  await applyServerInput(env, {
     serverTxs: tradingValidators.map((signerId, index) => ({
       type: "importReplica",
       entityId: tradingEntityId,
@@ -42620,7 +42620,7 @@ var runDemo = async (env2) => {
     jurisdiction: ethereumJurisdiction
   };
   const govEntityId = generateLazyEntityId(govValidators, BigInt(10));
-  await applyServerInput(env2, {
+  await applyServerInput(env, {
     serverTxs: govValidators.map((signerId, index) => ({
       type: "importReplica",
       entityId: govEntityId,
@@ -42644,7 +42644,7 @@ var runDemo = async (env2) => {
     jurisdiction: ethereumJurisdiction
   };
   const singleEntityId = generateLazyEntityId(["alice"], BigInt(1));
-  await applyServerInput(env2, {
+  await applyServerInput(env, {
     serverTxs: [{
       type: "importReplica",
       entityId: singleEntityId,
@@ -42656,21 +42656,21 @@ var runDemo = async (env2) => {
     }],
     entityInputs: []
   });
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: singleEntityId,
     signerId: "alice",
     entityTxs: [{ type: "chat", data: { from: "alice", message: "Single signer test message!" } }]
   }]);
   console.log(`
 ⚠️  CORNER CASE 1: Single transaction in chat`);
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: chatEntityId,
     signerId: "alice",
     entityTxs: [{ type: "chat", data: { from: "alice", message: "First message in chat!" } }]
   }]);
   console.log(`
 ⚠️  CORNER CASE 2: Batch proposals in trading`);
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: tradingEntityId,
     signerId: "alice",
     entityTxs: [
@@ -42681,14 +42681,14 @@ var runDemo = async (env2) => {
   }]);
   console.log(`
 ⚠️  CORNER CASE 3: High threshold governance vote`);
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: govEntityId,
     signerId: "alice",
     entityTxs: [{ type: "propose", data: { action: { type: "collective_message", data: { message: "Governance proposal: Increase block size limit" } }, proposer: "alice" } }]
   }]);
   console.log(`
 ⚠️  CORNER CASE 4: Concurrent multi-entity activity`);
-  await processUntilEmpty(env2, [
+  await processUntilEmpty(env, [
     {
       entityId: chatEntityId,
       signerId: "alice",
@@ -42715,7 +42715,7 @@ var runDemo = async (env2) => {
   ]);
   console.log(`
 ⚠️  CORNER CASE 5: Empty mempool test (no auto-propose)`);
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: chatEntityId,
     signerId: "alice",
     entityTxs: []
@@ -42726,14 +42726,14 @@ var runDemo = async (env2) => {
     type: "chat",
     data: { from: ["alice", "bob", "carol"][i2 % 3], message: `Batch message ${i2 + 1}` }
   }));
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: chatEntityId,
     signerId: "alice",
     entityTxs: largeBatch
   }]);
   console.log(`
 ⚠️  CORNER CASE 7: Proposal voting system`);
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: tradingEntityId,
     signerId: "alice",
     entityTxs: [
@@ -42742,7 +42742,7 @@ var runDemo = async (env2) => {
   }]);
   console.log(`
 ⚠️  CORNER CASE 7b: Voting on proposals (simulated)`);
-  await processUntilEmpty(env2, [{
+  await processUntilEmpty(env, [{
     entityId: govEntityId,
     signerId: "alice",
     entityTxs: [
@@ -42755,7 +42755,7 @@ var runDemo = async (env2) => {
     console.log("✨ All proposal IDs are deterministic hashes of proposal data");
     console.log("\uD83C\uDF0D Environment-based architecture working correctly");
     const entitiesByType = new Map;
-    env2.replicas.forEach((replica, key) => {
+    env.replicas.forEach((replica, key) => {
       const entityType = replica.entityId;
       if (!entitiesByType.has(entityType)) {
         entitiesByType.set(entityType, []);
@@ -42811,12 +42811,12 @@ var runDemo = async (env2) => {
 \uD83C\uDFC6 === OVERALL RESULT ===`);
     console.log(`${allEntitiesConsensus ? "✅ SUCCESS" : "❌ FAILED"} - All entities achieved consensus`);
     console.log(`\uD83D\uDCCA Total entities tested: ${entitiesByType.size}`);
-    console.log(`\uD83D\uDCCA Total replicas: ${env2.replicas.size}`);
-    console.log(`\uD83D\uDD04 Total server ticks: ${env2.height}`);
+    console.log(`\uD83D\uDCCA Total replicas: ${env.replicas.size}`);
+    console.log(`\uD83D\uDD04 Total server ticks: ${env.height}`);
     console.log("\uD83C\uDFAF Fully deterministic - no randomness used");
     console.log("\uD83C\uDF0D Environment-based architecture with clean function signatures");
     const modeCount = new Map;
-    env2.replicas.forEach((replica) => {
+    env.replicas.forEach((replica) => {
       const mode = replica.state.config.mode;
       modeCount.set(mode, (modeCount.get(mode) || 0) + 1);
     });
@@ -42886,7 +42886,7 @@ var runDemo = async (env2) => {
       throw error;
     }
   }, 1000);
-  return env2;
+  return env;
 };
 
 // src/test-depository-hanko.ts
@@ -44074,6 +44074,7 @@ var db = new $Level("db", {
   keyEncoding: "binary"
 });
 var envChangeCallback = null;
+var env;
 var registerEnvChangeCallback = (callback) => {
   envChangeCallback = callback;
 };
@@ -44223,6 +44224,7 @@ var applyServerInput = async (env2, serverInput) => {
         });
       }
     }
+    console.log(`\uD83D\uDD0D REPLICA-DEBUG: Processing ${env2.serverInput.serverTxs.length} serverTxs, current replicas: ${env2.replicas.size}`);
     env2.serverInput.serverTxs.forEach((serverTx) => {
       if (serverTx.type === "importReplica") {
         if (DEBUG)
@@ -44242,8 +44244,10 @@ var applyServerInput = async (env2, serverInput) => {
           mempool: [],
           isProposer: serverTx.data.isProposer
         });
+        console.log(`\uD83D\uDD0D REPLICA-DEBUG: Added replica ${replicaKey}, total replicas now: ${env2.replicas.size}`);
       }
     });
+    console.log(`\uD83D\uDD0D REPLICA-DEBUG: After processing serverTxs, total replicas: ${env2.replicas.size}`);
     mergedInputs.forEach((entityInput) => {
       const replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
       const entityReplica = env2.replicas.get(replicaKey);
@@ -44271,6 +44275,28 @@ var applyServerInput = async (env2, serverInput) => {
     env2.serverInput.serverTxs.length = 0;
     env2.serverInput.entityInputs.length = 0;
     await captureSnapshot(env2, processedInput, entityOutbox, inputDescription);
+    console.log(`\uD83D\uDD0D REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env2.replicas.size}`);
+    console.log(`\uD83D\uDD0D REPLICA-DEBUG: Replica keys:`, Array.from(env2.replicas.keys()));
+    const oldEntityKeys = Array.from(env2.replicas.keys()).filter((key) => key.startsWith("0x0000000000000000000000000000000000000000000000000000000000000001:") || key.startsWith("0x0000000000000000000000000000000000000000000000000000000000000002:"));
+    const newEntityKeys = Array.from(env2.replicas.keys()).filter((key) => !key.startsWith("0x0000000000000000000000000000000000000000000000000000000000000001:") && !key.startsWith("0x0000000000000000000000000000000000000000000000000000000000000002:") && !key.startsWith("0x57e360b00f393ea6d898d6119f71db49241be80aec0fbdecf6358b0103d43a31:"));
+    console.log(`\uD83D\uDD0D OLD-ENTITY-DEBUG: ${oldEntityKeys.length} old entities:`, oldEntityKeys.slice(0, 2));
+    console.log(`\uD83D\uDD0D NEW-ENTITY-DEBUG: ${newEntityKeys.length} new entities:`, newEntityKeys.slice(0, 2));
+    if (oldEntityKeys.length > 0 && newEntityKeys.length > 0) {
+      const oldReplica = env2.replicas.get(oldEntityKeys[0]);
+      const newReplica = env2.replicas.get(newEntityKeys[0]);
+      console.log(`\uD83D\uDD0D OLD-REPLICA-STRUCTURE:`, {
+        hasState: !!oldReplica?.state,
+        hasConfig: !!oldReplica?.state?.config,
+        hasJurisdiction: !!oldReplica?.state?.config?.jurisdiction,
+        jurisdictionName: oldReplica?.state?.config?.jurisdiction?.name
+      });
+      console.log(`\uD83D\uDD0D NEW-REPLICA-STRUCTURE:`, {
+        hasState: !!newReplica?.state,
+        hasConfig: !!newReplica?.state?.config,
+        hasJurisdiction: !!newReplica?.state?.config?.jurisdiction,
+        jurisdictionName: newReplica?.state?.config?.jurisdiction?.name
+      });
+    }
     notifyEnvChange(env2);
     if (DEBUG && entityOutbox.length > 0) {
       console.log(`\uD83D\uDCE4 Outputs: ${entityOutbox.length} messages`);
@@ -44300,7 +44326,7 @@ var applyServerInput = async (env2, serverInput) => {
   }
 };
 var main = async () => {
-  let env2 = {
+  env = {
     replicas: new Map,
     height: 0,
     timestamp: Date.now(),
@@ -44334,22 +44360,22 @@ var main = async () => {
       throw new Error("LEVEL_NOT_FOUND");
     }
     console.log(`\uD83D\uDCCA Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
-    env2.history = snapshots;
+    env.history = snapshots;
     if (snapshots.length > 0) {
       const latestSnapshot = snapshots[snapshots.length - 1];
-      env2 = {
+      env = {
         replicas: latestSnapshot.replicas,
         height: latestSnapshot.height,
         timestamp: latestSnapshot.timestamp,
         serverInput: latestSnapshot.serverInput,
         history: snapshots
       };
-      console.log(`✅ History restored. Server is at height ${env2.height} with ${env2.history.length} snapshots.`);
+      console.log(`✅ History restored. Server is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`\uD83D\uDCC8 Snapshot details:`, {
-        height: env2.height,
-        replicaCount: env2.replicas.size,
-        timestamp: new Date(env2.timestamp).toISOString(),
-        serverInputs: env2.serverInput.entityInputs.length
+        height: env.height,
+        replicaCount: env.replicas.size,
+        timestamp: new Date(env.timestamp).toISOString(),
+        serverInputs: env.serverInput.entityInputs.length
       });
     }
   } catch (error) {
@@ -44388,8 +44414,8 @@ var main = async () => {
   } else {
     console.log("\uD83C\uDF10 Browser environment: Demos available via UI buttons, not auto-running");
   }
-  log2.info(`\uD83C\uDFAF Server startup complete. Height: ${env2.height}, Entities: ${env2.replicas.size}`);
-  return env2;
+  log2.info(`\uD83C\uDFAF Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
+  return env;
 };
 var getHistory = () => env.history || [];
 var getSnapshot = (index) => {

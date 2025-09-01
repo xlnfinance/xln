@@ -119,16 +119,30 @@
 </script>
 
 <div class="controls-section">
-  <select class="controls-dropdown" bind:value={selectedAction}>
-    <option value="chat" selected>💬 Create chat message</option>
-    <option value="proposal">📋 Add proposal</option>
-    <option value="vote">🗳️ Vote on proposal</option>
-    <option value="entity">🏛️ Form new entity</option>
-    <option value="jtx">💸 Send J-tx</option>
-    <option value="settings">⚙️ Update settings</option>
-  </select>
-  
-  <div class="controls-form">
+  {#if !tab.entityId || !tab.signer}
+    <div class="empty-controls">
+      <div class="empty-message">
+        <h4>🎯 Select Entity & Signer First</h4>
+        <p>Please use the dropdown above to select:</p>
+        <ul>
+          <li>📍 <strong>Jurisdiction</strong> (network)</li>
+          <li>👤 <strong>Signer</strong> (your identity)</li>
+          <li>🏢 <strong>Entity</strong> (which entity to control)</li>
+        </ul>
+        <small>Once selected, controls will appear here for chat, proposals, voting, etc.</small>
+      </div>
+    </div>
+  {:else}
+    <select class="controls-dropdown" bind:value={selectedAction}>
+      <option value="chat" selected>💬 Create chat message</option>
+      <option value="proposal">📋 Add proposal</option>
+      <option value="vote">🗳️ Vote on proposal</option>
+      <option value="entity">🏛️ Form new entity</option>
+      <option value="jtx">💸 Send J-tx</option>
+      <option value="settings">⚙️ Update settings</option>
+    </select>
+    
+    <div class="controls-form">
     {#if selectedAction === 'chat'}
       <div class="form-group">
         <label class="form-label">Message:</label>
@@ -180,7 +194,8 @@
         </div>
       </div>
     {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -242,5 +257,38 @@
 
   .form-button:hover {
     background: #0086e6;
+  }
+
+  .empty-controls {
+    text-align: center;
+    padding: 20px;
+  }
+
+  .empty-message {
+    background: #2d2d2d;
+    border: 2px dashed #555;
+    border-radius: 8px;
+    padding: 20px;
+    color: #d4d4d4;
+  }
+
+  .empty-message h4 {
+    margin: 0 0 12px 0;
+    color: #007acc;
+  }
+
+  .empty-message ul {
+    text-align: left;
+    margin: 12px 0;
+    padding-left: 20px;
+  }
+
+  .empty-message li {
+    margin: 8px 0;
+  }
+
+  .empty-message small {
+    color: #999;
+    font-style: italic;
   }
 </style>
