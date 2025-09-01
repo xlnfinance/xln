@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { tabOperations } from '../../stores/tabStore';
   import Button from '../Common/Button.svelte';
   import FormField from '../Common/FormField.svelte';
   import type { EntityFormData } from '../../types';
@@ -9,19 +11,34 @@
     entityType: 'lazy',
     entityName: 'ACME',
     validators: [{ name: 'alice', weight: 1 }],
-    threshold: 1
+    threshold: 1 // Will be updated to match total weight on load
   };
 
   let isCreating = false;
   let error = '';
+  let userModifiedThreshold = false; // Track if user manually changed threshold
+
+  // Set initial threshold to max on component mount
+  onMount(() => {
+    const initialTotalWeight = formData.validators.reduce((sum, v) => sum + v.weight, 0);
+    formData.threshold = initialTotalWeight;
+  });
 
   function addValidator() {
     formData.validators = [...formData.validators, { name: '', weight: 1 }];
+    // Auto-set threshold to max when validators change
+    updateThresholdToMax();
   }
 
   function removeValidator(index: number) {
     if (formData.validators.length > 1) {
       formData.validators = formData.validators.filter((_, i) => i !== index);
+      // Handle threshold based on remaining validators
+      if (formData.validators.length === 1) {
+        updateThresholdForSingleValidator();
+      } else {
+        updateThresholdToMax();
+      }
     }
   }
 
@@ -30,6 +47,26 @@
     if (formData.threshold > totalWeight) {
       formData.threshold = totalWeight;
     }
+  }
+
+  function updateThresholdToMax() {
+    // Set threshold to maximum (total weight) whenever validators or weights change
+    const totalWeight = formData.validators.reduce((sum, v) => sum + v.weight, 0);
+    formData.threshold = totalWeight;
+    userModifiedThreshold = false; // Reset flag since this is an auto-update
+  }
+
+  function updateThresholdForSingleValidator() {
+    // When there's only one validator, threshold must be 1
+    if (formData.validators.length === 1) {
+      formData.threshold = 1;
+      userModifiedThreshold = false;
+    }
+  }
+
+  function onThresholdChange() {
+    // User manually changed threshold
+    userModifiedThreshold = true;
   }
 
   async function createEntity() {
@@ -78,6 +115,15 @@
       if (formData.entityType === 'lazy') {
         // For lazy entities, we need to generate the ID separately
         entityId = xln.generateLazyEntityId(validatorNames, threshold);
+        
+        // Check if this board hash is already used
+        const existingReplicas = Array.from(env.replicas.keys());
+        const isDuplicate = existingReplicas.some(key => key.startsWith(entityId + ':'));
+        
+        if (isDuplicate) {
+          throw new Error(`⚠️ This validator configuration already exists! Entity ID ${entityId.slice(-8)} is already in use. Try different validators or weights to create a unique entity.`);
+        }
+        
         config = xln.createLazyEntity(formData.entityName, validatorNames, threshold, jurisdictionConfig);
         console.log('✅ Lazy entity config created:', config);
         console.log('✅ Entity ID:', entityId);
@@ -109,6 +155,21 @@
       xln.processUntilEmpty(env, result.entityOutbox);
       console.log('✅ Entity creation complete!');
 
+      // Auto-create panels with entity and signers pre-selected
+      const jurisdictionName = formData.jurisdiction === '8545' ? 'Ethereum' : 
+                               formData.jurisdiction === '8546' ? 'Polygon' : 'Arbitrum';
+      
+      console.log(`🎯 Auto-creating ${validatorNames.length} panels with entity and signers pre-selected`);
+      console.log(`🌐 Jurisdiction: ${formData.jurisdiction} → ${jurisdictionName}`);
+      
+      for (let i = 0; i < validatorNames.length; i++) {
+        const signer = validatorNames[i];
+        console.log(`📋 Creating panel ${i + 1} for entity ${entityId} with signer: ${signer} on ${jurisdictionName}`);
+        tabOperations.addTab(entityId, signer, jurisdictionName);
+      }
+      
+      console.log(`✅ ${validatorNames.length} panels auto-created with replicas selected!`);
+
       // Reset form on success
       clearForm();
       
@@ -128,11 +189,29 @@
       threshold: 1
     };
     error = '';
+    userModifiedThreshold = false; // Reset threshold tracking
+    
+    // Set threshold to max after reset
+    const totalWeight = formData.validators.reduce((sum, v) => sum + v.weight, 0);
+    formData.threshold = totalWeight;
   }
 
   // Reactive updates
   $: totalWeight = formData.validators.reduce((sum, v) => sum + v.weight, 0);
   $: if (formData.threshold > totalWeight) formData.threshold = totalWeight;
+  
+  // Auto-set threshold based on number of validators and weights
+  $: {
+    const newTotalWeight = formData.validators.reduce((sum, v) => sum + v.weight, 0);
+    // Auto-update threshold if user hasn't manually changed it
+    if (!userModifiedThreshold && newTotalWeight > 0) {
+      if (formData.validators.length === 1) {
+        formData.threshold = 1; // Single validator always has threshold 1
+      } else {
+        formData.threshold = newTotalWeight; // Multiple validators default to max
+      }
+    }
+  }
 
   // Calculate quorum hash for lazy entities
   $: quorumHash = formData.entityType === 'lazy' ? calculateQuorumHash(formData.validators, formData.threshold) : '';
@@ -251,10 +330,13 @@
             <input 
               type="number" 
               bind:value={validator.weight}
+              on:input={() => {
+                updateTotalWeight();
+                if (!userModifiedThreshold) updateThresholdToMax();
+              }}
               class="validator-weight" 
               min="1" 
               placeholder="1"
-              on:input={updateTotalWeight}
             >
             {#if formData.validators.length > 1}
               <button 
@@ -274,21 +356,24 @@
       <small>💡 Start with a single signer for personal use, or add more for multisig/corporate entities</small>
     </div>
     
-    <div class="threshold-section">
-      <label for="thresholdSlider">🎯 Threshold: {formData.threshold}</label>
-      <input 
-        type="range" 
-        id="thresholdSlider" 
-        bind:value={formData.threshold}
-        min="1" 
-        max={totalWeight}
-        class="threshold-slider"
-      >
-      <div class="threshold-info">
-        <span>Total Weight: <strong>{totalWeight}</strong></span>
-        <span>Required: <strong>{formData.threshold}</strong></span>
+    {#if formData.validators.length > 1}
+      <div class="threshold-section">
+        <label for="thresholdSlider">🎯 Threshold: {formData.threshold}</label>
+        <input 
+          type="range" 
+          id="thresholdSlider" 
+          bind:value={formData.threshold}
+          on:input={onThresholdChange}
+          min="1" 
+          max={totalWeight}
+          class="threshold-slider"
+        >
+        <div class="threshold-info">
+          <span>Total Weight: <strong>{totalWeight}</strong></span>
+          <span>Required: <strong>{formData.threshold}</strong></span>
+        </div>
       </div>
-    </div>
+    {/if}
 
     {#if formData.entityType === 'lazy'}
       <div class="quorum-hash-section">

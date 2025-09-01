@@ -271,11 +271,283 @@ export const multiSigGovernanceTutorial: Tutorial = {
   ]
 };
 
+// === PROPOSAL WORKFLOW TUTORIAL ===
+export const proposalWorkflowTutorial: Tutorial = {
+  id: 'proposal-workflow',
+  title: '🗳️ Proposal & Voting Workflow',
+  description: 'Learn how to create proposals, vote, and execute collective decisions in XLN entities.',
+  difficulty: 'intermediate',
+  estimatedTime: '8 minutes',
+  steps: [
+    {
+      id: 'introduction',
+      title: 'Proposal System Overview',
+      description: 'Learn how XLN enables collective decision-making through proposals and voting.',
+      action: 'wait',
+      target: '.app-container',
+      explanation: 'XLN proposals allow entity members to propose actions and vote democratically. Proposals execute automatically when thresholds are met.',
+      screenshot: 'proposal-01-introduction'
+    },
+    {
+      id: 'navigate-formation',
+      title: 'Open Entity Formation',
+      description: 'Click the Formation tab to create a new entity for our proposal demonstration',
+      action: 'click',
+      target: 'button:has-text("Formation")',
+      explanation: 'First, we need an entity with multiple validators to demonstrate the proposal workflow.',
+      screenshot: 'proposal-02-formation-tab'
+    },
+    {
+      id: 'set-entity-name',
+      title: 'Name Your Entity',
+      description: 'Enter "Governance DAO" as the entity name',
+      action: 'fill',
+      target: '#entityNameInput',
+      value: 'Governance DAO',
+      explanation: 'Give your entity a meaningful name that reflects its purpose.',
+      screenshot: 'proposal-03-entity-name'
+    },
+    {
+      id: 'add-validator',
+      title: 'Add Second Validator',
+      description: 'Click "Add Validator" to create a multi-signature entity',
+      action: 'click',
+      target: 'button:has-text("➕ Add Validator")',
+      explanation: 'Multi-validator entities enable democratic governance through voting.',
+      screenshot: 'proposal-04-add-validator'
+    },
+    {
+      id: 'select-alice',
+      title: 'Choose Alice as First Validator',
+      description: 'Select alice from the dropdown for the first validator',
+      action: 'select',
+      target: '.validator-row:first-child .validator-name',
+      value: 'alice',
+      explanation: 'Alice will be our first validator with voting rights.',
+      screenshot: 'proposal-05-select-alice'
+    },
+    {
+      id: 'select-bob',
+      title: 'Choose Bob as Second Validator',
+      description: 'Select bob from the dropdown for the second validator',
+      action: 'select',
+      target: '.validator-row:last-child .validator-name',
+      value: 'bob',
+      explanation: 'Bob will be our second validator. With 2 validators, we can demonstrate voting.',
+      screenshot: 'proposal-06-select-bob'
+    },
+    {
+      id: 'set-threshold',
+      title: 'Set Voting Threshold',
+      description: 'Set threshold to 1 so either validator can approve proposals',
+      action: 'fill',
+      target: '#thresholdSlider',
+      value: '1',
+      explanation: 'Threshold determines how many validators must approve a proposal for it to execute.',
+      screenshot: 'proposal-07-threshold'
+    },
+    {
+      id: 'create-entity',
+      title: 'Create the Entity',
+      description: 'Click "Create Entity" to establish your governance entity',
+      action: 'click',
+      target: 'button:has-text("Create Entity")',
+      explanation: 'This creates the entity with the configured validators and voting rules.',
+      screenshot: 'proposal-08-create-entity'
+    },
+    {
+      id: 'wait-creation',
+      title: 'Entity Created Successfully',
+      description: 'Your governance entity is now ready for proposals and voting',
+      action: 'wait',
+      target: '.entity-panel',
+      explanation: 'The entity is now active and ready for governance operations.',
+      screenshot: 'proposal-09-entity-ready'
+    },
+    {
+      id: 'select-entity-dropdown',
+      title: 'Select Your Entity',
+      description: 'Click the entity dropdown to select your newly created entity',
+      action: 'click',
+      target: '.unified-dropdown:first-child',
+      explanation: 'Select the entity to interact with it.',
+      screenshot: 'proposal-10-entity-dropdown'
+    },
+    {
+      id: 'pick-entity',
+      title: 'Choose Your Entity',
+      description: 'Select the "Governance DAO" entity from the dropdown',
+      action: 'click',
+      target: '#dropdownResults .dropdown-item:first-child',
+      explanation: 'This selects the entity for governance operations.',
+      screenshot: 'proposal-11-pick-entity'
+    },
+    {
+      id: 'select-signer-dropdown',
+      title: 'Select Signer',
+      description: 'Click the signer dropdown to choose who will create the proposal',
+      action: 'click',
+      target: '.unified-dropdown:nth-child(2)',
+      explanation: 'The signer determines who is creating and initially voting on the proposal.',
+      screenshot: 'proposal-12-signer-dropdown'
+    },
+    {
+      id: 'pick-alice-signer',
+      title: 'Choose Alice as Signer',
+      description: 'Select Alice to act as the proposal creator',
+      action: 'click',
+      target: '#dropdownResults .dropdown-item:first-child',
+      explanation: 'Alice will create the proposal and automatically vote as the proposer.',
+      screenshot: 'proposal-13-pick-alice'
+    },
+    {
+      id: 'expand-controls',
+      title: 'Expand Controls Section',
+      description: 'Click "Controls" to open the proposal creation interface',
+      action: 'click',
+      target: '.entity-panel button:has-text("Controls")',
+      explanation: 'The controls section contains proposal creation and voting tools.',
+      screenshot: 'proposal-14-expand-controls'
+    },
+    {
+      id: 'fill-proposal-title',
+      title: 'Enter Proposal Title',
+      description: 'Type "Marketing Budget Approval" as the proposal title',
+      action: 'fill',
+      target: 'input[placeholder="Enter proposal title..."]',
+      value: 'Marketing Budget Approval',
+      explanation: 'Clear, descriptive titles help validators understand what they\'re voting on.',
+      screenshot: 'proposal-15-title-filled'
+    },
+    {
+      id: 'fill-proposal-description',
+      title: 'Enter Proposal Description',
+      description: 'Add a detailed description of the proposal',
+      action: 'fill',
+      target: 'textarea[placeholder="Enter proposal description..."]',
+      value: 'Approve $75,000 budget for Q4 marketing campaigns including social media, content creation, and partnership outreach.',
+      explanation: 'Detailed descriptions help validators make informed decisions.',
+      screenshot: 'proposal-16-description-filled'
+    },
+    {
+      id: 'submit-proposal',
+      title: 'Create the Proposal',
+      description: 'Click "Create Proposal" to submit it to the entity for voting',
+      action: 'click',
+      target: 'button:has-text("Create Proposal")',
+      explanation: 'This creates the proposal and automatically adds Alice\'s YES vote as the proposer.',
+      screenshot: 'proposal-17-proposal-created'
+    },
+    {
+      id: 'view-proposal',
+      title: 'Proposal Created!',
+      description: 'Your proposal is now visible in the proposals list with Alice\'s automatic vote',
+      action: 'wait',
+      target: '.proposal-item',
+      explanation: 'Proposals show voting status, threshold progress, and execution state.',
+      screenshot: 'proposal-18-proposal-visible'
+    },
+    {
+      id: 'switch-to-bob',
+      title: 'Switch to Bob for Voting',
+      description: 'Now let\'s switch to Bob to demonstrate the voting process',
+      action: 'click',
+      target: '.unified-dropdown:nth-child(2)',
+      explanation: 'Different signers can vote on proposals to reach consensus.',
+      screenshot: 'proposal-19-switch-bob'
+    },
+    {
+      id: 'select-bob-signer',
+      title: 'Select Bob as Signer',
+      description: 'Choose Bob from the signer dropdown',
+      action: 'click',
+      target: '#dropdownResults .dropdown-item:nth-child(2)',
+      explanation: 'Bob will now vote on Alice\'s proposal.',
+      screenshot: 'proposal-20-bob-selected'
+    },
+    {
+      id: 'expand-bob-controls',
+      title: 'Open Bob\'s Controls',
+      description: 'Click "Controls" to access Bob\'s voting interface',
+      action: 'click',
+      target: '.entity-panel button:has-text("Controls")',
+      explanation: 'Each signer has access to the same governance tools.',
+      screenshot: 'proposal-21-bob-controls'
+    },
+    {
+      id: 'select-proposal-vote',
+      title: 'Select Proposal to Vote On',
+      description: 'Choose the "Marketing Budget Approval" proposal from the voting dropdown',
+      action: 'select',
+      target: 'select option:has-text("Marketing Budget")',
+      value: 'Marketing Budget Approval',
+      explanation: 'Select which proposal to vote on from the list of pending proposals.',
+      screenshot: 'proposal-22-select-proposal'
+    },
+    {
+      id: 'vote-yes',
+      title: 'Vote YES on the Proposal',
+      description: 'Select "Yes" to approve the marketing budget proposal',
+      action: 'click',
+      target: 'input[type="radio"][value="yes"]',
+      explanation: 'Bob votes YES to approve the marketing budget.',
+      screenshot: 'proposal-23-vote-yes'
+    },
+    {
+      id: 'add-vote-comment',
+      title: 'Add Vote Comment',
+      description: 'Add a comment explaining your vote',
+      action: 'fill',
+      target: 'textarea[placeholder*="vote comment"]',
+      value: 'Excellent proposal. The marketing budget is well-justified and will drive growth.',
+      explanation: 'Comments provide context for voting decisions and improve governance transparency.',
+      screenshot: 'proposal-24-vote-comment'
+    },
+    {
+      id: 'submit-vote',
+      title: 'Submit Your Vote',
+      description: 'Click "Submit Vote" to record Bob\'s YES vote',
+      action: 'click',
+      target: 'button:has-text("Submit Vote")',
+      explanation: 'This records Bob\'s vote and may trigger proposal execution if threshold is met.',
+      screenshot: 'proposal-25-vote-submitted'
+    },
+    {
+      id: 'proposal-executed',
+      title: 'Proposal Approved & Executed!',
+      description: 'The proposal reached consensus and executed automatically',
+      action: 'wait',
+      target: '.proposal-item:has-text("APPROVED")',
+      explanation: 'When voting threshold is met, proposals execute automatically. Check the chat for execution confirmation.',
+      screenshot: 'proposal-26-executed'
+    },
+    {
+      id: 'view-collective-message',
+      title: 'Collective Action Recorded',
+      description: 'Notice the collective message in chat confirming proposal execution',
+      action: 'wait',
+      target: '.chat-messages .message-item:has-text("[COLLECTIVE]")',
+      explanation: 'Executed proposals generate collective messages visible to all entity members.',
+      screenshot: 'proposal-27-collective-message'
+    },
+    {
+      id: 'completion',
+      title: 'Proposal Workflow Complete!',
+      description: 'You\'ve mastered XLN\'s governance system: creating proposals, voting, and automatic execution',
+      action: 'wait',
+      target: '.entity-panel',
+      explanation: '🎉 You now understand XLN\'s democratic governance: proposals → voting → automatic execution. This enables trustless collective decision-making.',
+      screenshot: 'proposal-28-completion'
+    }
+  ]
+};
+
 // Export all tutorials
 export const allTutorials: Tutorial[] = [
   quickStartTutorial,
   completeWorkflowTutorial,
-  multiSigGovernanceTutorial
+  multiSigGovernanceTutorial,
+  proposalWorkflowTutorial
 ];
 
 // Utility functions

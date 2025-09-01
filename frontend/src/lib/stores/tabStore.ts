@@ -144,13 +144,8 @@ const tabOperations = {
 
   // Initialize with default tabs
   initializeDefaultTabs() {
-    const currentTabs = get(tabs);
-    if (currentTabs.length === 0) {
-      // Create 3 default panels for demo
-      this.addTab(); // Panel 1
-      this.addTab(); // Panel 2 
-      this.addTab(); // Panel 3
-    }
+    // Start with 0 panels - user creates entities to get panels
+    console.log('📋 Starting with 0 panels by default');
   },
 
   // Clear all tabs and reset

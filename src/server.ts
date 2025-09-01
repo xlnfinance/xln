@@ -63,6 +63,9 @@ declare const console: any;
 // Callback that Svelte can register to get notified of env changes
 let envChangeCallback: ((env: Env) => void) | null = null;
 
+// Module-level environment variable
+let env: Env;
+
 export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
   envChangeCallback = callback;
 };
@@ -243,6 +246,7 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
     }
     
     // Process server transactions (replica imports) from env.serverInput
+    console.log(`🔍 REPLICA-DEBUG: Processing ${env.serverInput.serverTxs.length} serverTxs, current replicas: ${env.replicas.size}`);
     env.serverInput.serverTxs.forEach(serverTx => {
       if (serverTx.type === 'importReplica') {
         if (DEBUG) console.log(`Importing replica Entity #${formatEntityDisplay(serverTx.entityId)}:${formatSignerDisplay(serverTx.signerId)} (proposer: ${serverTx.data.isProposer})`);
@@ -262,8 +266,10 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
           mempool: [],
           isProposer: serverTx.data.isProposer
         });
+        console.log(`🔍 REPLICA-DEBUG: Added replica ${replicaKey}, total replicas now: ${env.replicas.size}`);
       }
     });
+    console.log(`🔍 REPLICA-DEBUG: After processing serverTxs, total replicas: ${env.replicas.size}`);
     
     // Process entity inputs
     mergedInputs.forEach(entityInput => {
@@ -303,6 +309,40 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
     await captureSnapshot(env, processedInput, entityOutbox, inputDescription);
     
     // Notify Svelte about environment changes
+    console.log(`🔍 REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env.replicas.size}`);
+    console.log(`🔍 REPLICA-DEBUG: Replica keys:`, Array.from(env.replicas.keys()));
+    
+    // Compare old vs new entities
+    const oldEntityKeys = Array.from(env.replicas.keys()).filter(key => 
+      key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') ||
+      key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:')
+    );
+    const newEntityKeys = Array.from(env.replicas.keys()).filter(key => 
+      !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') &&
+      !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:') &&
+      !key.startsWith('0x57e360b00f393ea6d898d6119f71db49241be80aec0fbdecf6358b0103d43a31:')
+    );
+    
+    console.log(`🔍 OLD-ENTITY-DEBUG: ${oldEntityKeys.length} old entities:`, oldEntityKeys.slice(0, 2));
+    console.log(`🔍 NEW-ENTITY-DEBUG: ${newEntityKeys.length} new entities:`, newEntityKeys.slice(0, 2));
+    
+    if (oldEntityKeys.length > 0 && newEntityKeys.length > 0) {
+      const oldReplica = env.replicas.get(oldEntityKeys[0]);
+      const newReplica = env.replicas.get(newEntityKeys[0]);
+      console.log(`🔍 OLD-REPLICA-STRUCTURE:`, {
+        hasState: !!oldReplica?.state,
+        hasConfig: !!oldReplica?.state?.config,
+        hasJurisdiction: !!oldReplica?.state?.config?.jurisdiction,
+        jurisdictionName: oldReplica?.state?.config?.jurisdiction?.name
+      });
+      console.log(`🔍 NEW-REPLICA-STRUCTURE:`, {
+        hasState: !!newReplica?.state,
+        hasConfig: !!newReplica?.state?.config,
+        hasJurisdiction: !!newReplica?.state?.config?.jurisdiction,
+        jurisdictionName: newReplica?.state?.config?.jurisdiction?.name
+      });
+    }
+    
     notifyEnvChange(env);
     
     if (DEBUG && entityOutbox.length > 0) {
@@ -341,7 +381,7 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
   // First, create default environment
-  let env: Env = {
+  env = {
     replicas: new Map(),
     height: 0,
     timestamp: Date.now(),
