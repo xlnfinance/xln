@@ -66,8 +66,27 @@ export interface VoteData {
 }
 
 export interface EntityTx {
-  type: 'chat' | 'propose' | 'vote' | 'profile-update' | 'j_event';
+  type: 'chat' | 'propose' | 'vote' | 'profile-update' | 'j_event' | 
+        'deposit' | 'withdraw' | 'channel_open' | 'channel_update' | 'channel_close' |
+        'transfer' | 'collateral_lock' | 'collateral_unlock';
   data: any;
+}
+
+export interface AssetBalance {
+  symbol: string;        // "ETH", "USDT", "ACME-SHARES"
+  amount: bigint;        // Balance in smallest unit (wei, cents, shares)
+  decimals: number;      // For display (18 for ETH, 6 for USDT, 0 for shares)
+  contractAddress?: string; // For ERC20 tokens
+}
+
+export interface ChannelState {
+  counterparty: string;     // Other entity's address
+  myBalance: bigint;        // My balance in this channel
+  theirBalance: bigint;     // Their balance in this channel
+  collateral: AssetBalance[]; // Assets locked as collateral
+  nonce: number;           // Channel nonce for updates
+  isActive: boolean;       // Channel status
+  lastUpdate: number;      // Timestamp of last update
 }
 
 export interface EntityState {
@@ -77,6 +96,11 @@ export interface EntityState {
   messages: string[];
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
+  
+  // 💰 NEW: Financial state
+  reserves: Map<string, AssetBalance>;    // symbol -> balance ("ETH" -> {amount: 10n, decimals: 18})
+  channels: Map<string, ChannelState>;    // counterpartyId -> channel state
+  collaterals: Map<string, AssetBalance>; // Total assets locked in channels
 }
 
 export interface ProposedEntityFrame {
