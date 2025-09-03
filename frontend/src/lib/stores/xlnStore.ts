@@ -1,13 +1,38 @@
 import { writable, derived } from 'svelte/store';
 
-// Direct import of XLN server module (no wrapper boilerplate needed)
-let XLN: any = null;
+// XLN Client - communicates with server instead of importing server code
+class XLNClient {
+  private baseUrl: string;
+  private envChangeCallback?: (env: any) => void;
+
+  constructor() {
+    this.baseUrl = window.location.origin;
+  }
+
+  registerEnvChangeCallback(callback: (env: any) => void) {
+    this.envChangeCallback = callback;
+  }
+
+  async main() {
+    // For now, return a minimal environment
+    // Later this can fetch from server API
+    const env = {
+      replicas: new Map(),
+      height: 0,
+      timestamp: Date.now(),
+      serverInput: { serverTxs: [], entityInputs: [] },
+      history: []
+    };
+
+    return env;
+  }
+}
+
+let XLN: XLNClient | null = null;
 
 async function getXLN() {
   if (XLN) return XLN;
-  
-  const serverUrl = new URL('/server.js', window.location.origin).href;
-  XLN = await import(/* @vite-ignore */ serverUrl);
+  XLN = new XLNClient();
   return XLN;
 }
 
