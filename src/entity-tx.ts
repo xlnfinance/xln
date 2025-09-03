@@ -4,10 +4,45 @@
  */
 
 import { 
-  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig, VoteData 
+  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig, VoteData, AssetBalance 
 } from './types.js';
 import { createHash, DEBUG, log } from './utils.js';
-import { calculateQuorumPower } from './entity-consensus.js';
+
+// === FINANCIAL HELPER FUNCTIONS ===
+
+export const formatAssetAmount = (balance: AssetBalance): string => {
+  const divisor = BigInt(10) ** BigInt(balance.decimals);
+  const wholePart = balance.amount / divisor;
+  const fractionalPart = balance.amount % divisor;
+  
+  if (fractionalPart === 0n) {
+    return `${wholePart} ${balance.symbol}`;
+  }
+  
+  const fractionalStr = fractionalPart.toString().padStart(balance.decimals, '0');
+  return `${wholePart}.${fractionalStr} ${balance.symbol}`;
+};
+
+export const addToReserves = (reserves: Map<string, AssetBalance>, symbol: string, amount: bigint, decimals: number, contractAddress?: string): void => {
+  const existing = reserves.get(symbol);
+  if (existing) {
+    existing.amount += amount;
+  } else {
+    reserves.set(symbol, { symbol, amount, decimals, contractAddress });
+  }
+};
+
+export const subtractFromReserves = (reserves: Map<string, AssetBalance>, symbol: string, amount: bigint): boolean => {
+  const existing = reserves.get(symbol);
+  if (!existing || existing.amount < amount) {
+    return false; // Insufficient balance
+  }
+  existing.amount -= amount;
+  if (existing.amount === 0n) {
+    reserves.delete(symbol);
+  }
+  return true;
+};
 
 // === SECURITY VALIDATION ===
 
@@ -78,7 +113,11 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
         ...entityState,
         nonces: new Map(entityState.nonces),
         messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals)
+        proposals: new Map(entityState.proposals),
+        // 💰 Clone financial state
+        reserves: new Map(entityState.reserves),
+        channels: new Map(entityState.channels),
+        collaterals: new Map(entityState.collaterals)
       };
       
       newEntityState.nonces.set(from, expectedNonce);
@@ -115,7 +154,11 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       ...entityState,
       nonces: new Map(entityState.nonces),
       messages: [...entityState.messages],
-      proposals: new Map(entityState.proposals)
+      proposals: new Map(entityState.proposals),
+      // 💰 Clone financial state
+      reserves: new Map(entityState.reserves),
+      channels: new Map(entityState.channels),
+      collaterals: new Map(entityState.collaterals)
     };
     
     if (shouldExecuteImmediately) {
@@ -149,7 +192,11 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       ...entityState,
       nonces: new Map(entityState.nonces),
       messages: [...entityState.messages],
-      proposals: new Map(entityState.proposals)
+      proposals: new Map(entityState.proposals),
+      // 💰 Clone financial state
+      reserves: new Map(entityState.reserves),
+      channels: new Map(entityState.channels),
+      collaterals: new Map(entityState.collaterals)
     };
     
     const updatedProposal = {
@@ -207,7 +254,12 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
     const newEntityState = {
       ...entityState,
       messages: [...entityState.messages],
-      nonces: new Map(entityState.nonces)
+      nonces: new Map(entityState.nonces),
+      proposals: new Map(entityState.proposals),
+      // 💰 Clone financial state
+      reserves: new Map(entityState.reserves),
+      channels: new Map(entityState.channels),
+      collaterals: new Map(entityState.collaterals)
     };
     
     // Increment nonce for the observer

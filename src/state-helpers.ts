@@ -27,7 +27,11 @@ export const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
           { ...proposal, votes: cloneMap(proposal.votes) }
         ])
       ),
-      config: replica.state.config
+      config: replica.state.config,
+      // 💰 Clone financial state
+      reserves: cloneMap(replica.state.reserves),
+      channels: cloneMap(replica.state.channels),
+      collaterals: cloneMap(replica.state.collaterals)
     },
     mempool: cloneArray(replica.mempool),
     proposal: replica.proposal ? {

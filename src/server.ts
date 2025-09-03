@@ -261,7 +261,11 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
             nonces: new Map(),
             messages: [],
             proposals: new Map(),
-            config: serverTx.data.config
+            config: serverTx.data.config,
+            // 💰 Initialize financial state
+            reserves: new Map(),
+            channels: new Map(),
+            collaterals: new Map()
           },
           mempool: [],
           isProposer: serverTx.data.isProposer

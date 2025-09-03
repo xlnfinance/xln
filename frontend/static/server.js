@@ -41371,7 +41371,10 @@ var applyEntityTx = (env, entityState, entityTx) => {
         ...entityState,
         nonces: new Map(entityState.nonces),
         messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals)
+        proposals: new Map(entityState.proposals),
+        reserves: new Map(entityState.reserves),
+        channels: new Map(entityState.channels),
+        collaterals: new Map(entityState.collaterals)
       };
       newEntityState.nonces.set(from2, expectedNonce);
       newEntityState.messages.push(`${from2}: ${message}`);
@@ -41399,7 +41402,10 @@ var applyEntityTx = (env, entityState, entityTx) => {
         ...entityState,
         nonces: new Map(entityState.nonces),
         messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals)
+        proposals: new Map(entityState.proposals),
+        reserves: new Map(entityState.reserves),
+        channels: new Map(entityState.channels),
+        collaterals: new Map(entityState.collaterals)
       };
       if (shouldExecuteImmediately) {
         proposal.status = "executed";
@@ -41428,7 +41434,10 @@ var applyEntityTx = (env, entityState, entityTx) => {
         ...entityState,
         nonces: new Map(entityState.nonces),
         messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals)
+        proposals: new Map(entityState.proposals),
+        reserves: new Map(entityState.reserves),
+        channels: new Map(entityState.channels),
+        collaterals: new Map(entityState.collaterals)
       };
       const updatedProposal = {
         ...proposal,
@@ -41469,7 +41478,11 @@ var applyEntityTx = (env, entityState, entityTx) => {
       const newEntityState = {
         ...entityState,
         messages: [...entityState.messages],
-        nonces: new Map(entityState.nonces)
+        nonces: new Map(entityState.nonces),
+        proposals: new Map(entityState.proposals),
+        reserves: new Map(entityState.reserves),
+        channels: new Map(entityState.channels),
+        collaterals: new Map(entityState.collaterals)
       };
       const currentNonce = newEntityState.nonces.get(from2) || 0;
       newEntityState.nonces.set(from2, currentNonce + 1);
@@ -41704,7 +41717,7 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
   }
   if (entityInput.precommits?.size && entityInput.proposedFrame && !entityReplica.proposal) {
     const signers = Array.from(entityInput.precommits.keys());
-    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
+    const totalPower = calculateQuorumPower2(entityReplica.state.config, signers);
     if (totalPower >= entityReplica.state.config.threshold) {
       if (DEBUG)
         console.log(`    → Received commit notification with ${entityInput.precommits.size} signatures`);
@@ -41760,7 +41773,7 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
     if (DEBUG)
       console.log(`    → Collected ${entityInput.precommits.size} signatures (total: ${entityReplica.proposal.signatures.size})`);
     const signers = Array.from(entityReplica.proposal.signatures.keys());
-    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
+    const totalPower = calculateQuorumPower2(entityReplica.state.config, signers);
     if (!validateVotingPower(totalPower)) {
       log2.error(`❌ Invalid voting power calculation: ${totalPower}`);
       return entityOutbox;
@@ -41910,7 +41923,7 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
 var applyEntityFrame = (env, entityState, entityTxs) => {
   return entityTxs.reduce((currentEntityState, entityTx) => applyEntityTx(env, currentEntityState, entityTx), entityState);
 };
-var calculateQuorumPower = (config, signers) => {
+var calculateQuorumPower2 = (config, signers) => {
   return signers.reduce((total, signerId) => {
     return total + (config.shares[signerId] || 0n);
   }, 0n);
@@ -44239,7 +44252,10 @@ var applyServerInput = async (env2, serverInput) => {
             nonces: new Map,
             messages: [],
             proposals: new Map,
-            config: serverTx.data.config
+            config: serverTx.data.config,
+            reserves: new Map,
+            channels: new Map,
+            collaterals: new Map
           },
           mempool: [],
           isProposer: serverTx.data.isProposer
