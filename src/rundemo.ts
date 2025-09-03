@@ -5,7 +5,7 @@
 
 import { DEBUG } from './utils.js';
 import { 
-  Env, EntityInput, ConsensusConfig, EntityTx, EntityReplica, Proposal
+  Env, EntityInput, ConsensusConfig, EntityTx, EntityReplica, Proposal, AssetBalance
 } from './types.js';
 import {
   generateLazyEntityId, generateNumberedEntityId
@@ -13,6 +13,7 @@ import {
 import { registerNumberedEntityOnChain, getJurisdictionByAddress } from './evm.js';
 import { applyServerInput, processUntilEmpty } from './server.js';
 import { formatEntityDisplay, formatSignerDisplay } from './utils.js';
+import { addToReserves } from './entity-tx.js';
 
 // Exact 1:1 copy of runDemo function from server.ts
 const runDemo = async (env: Env): Promise<Env> => {
@@ -59,6 +60,27 @@ const runDemo = async (env: Env): Promise<Env> => {
     })),
     entityInputs: []
   });
+
+  // 💰 Add demo financial data - simulate Depository.sol reserves
+  console.log('💰 Adding demo financial reserves to entities...');
+  
+  // Add reserves to Alice in chat entity (CompanyA example)
+  const aliceChatReplica = env.replicas.get(`${chatEntityId}:alice`);
+  if (aliceChatReplica) {
+    addToReserves(aliceChatReplica.state.reserves, 'ETH', 10000000000000000000n, 18); // 10 ETH
+    addToReserves(aliceChatReplica.state.reserves, 'USDT', 23000000n, 6); // 23 USDT
+    addToReserves(aliceChatReplica.state.reserves, 'ACME-SHARES', 1235n, 0); // 1235 shares
+    console.log(`💰 Alice reserves: 10 ETH, 23 USDT, 1235 ACME-SHARES`);
+  }
+  
+  // Add different reserves to Bob (different portfolio)
+  const bobChatReplica = env.replicas.get(`${chatEntityId}:bob`);
+  if (bobChatReplica) {
+    addToReserves(bobChatReplica.state.reserves, 'ETH', 5000000000000000000n, 18); // 5 ETH
+    addToReserves(bobChatReplica.state.reserves, 'USDC', 50000000n, 6); // 50 USDC
+    addToReserves(bobChatReplica.state.reserves, 'BTC-SHARES', 100n, 8); // 1.00000000 BTC shares
+    console.log(`💰 Bob reserves: 5 ETH, 50 USDC, 1.00000000 BTC-SHARES`);
+  }
   
   // === TEST 2: Trading Entity - NUMBERED ENTITY (Weighted Voting) ===
   console.log('\n📋 TEST 2: Trading Entity - Numbered Entity with Jurisdiction');

@@ -41336,6 +41336,14 @@ init_entity_factory();
 
 // src/entity-tx.ts
 init_utils5();
+var addToReserves = (reserves, symbol, amount, decimals, contractAddress) => {
+  const existing = reserves.get(symbol);
+  if (existing) {
+    existing.amount += amount;
+  } else {
+    reserves.set(symbol, { symbol, amount, decimals, contractAddress });
+  }
+};
 var validateMessage = (message) => {
   try {
     if (typeof message !== "string") {
@@ -42585,6 +42593,21 @@ var runDemo = async (env) => {
     })),
     entityInputs: []
   });
+  console.log("\uD83D\uDCB0 Adding demo financial reserves to entities...");
+  const aliceChatReplica = env.replicas.get(`${chatEntityId}:alice`);
+  if (aliceChatReplica) {
+    addToReserves(aliceChatReplica.state.reserves, "ETH", 10000000000000000000n, 18);
+    addToReserves(aliceChatReplica.state.reserves, "USDT", 23000000n, 6);
+    addToReserves(aliceChatReplica.state.reserves, "ACME-SHARES", 1235n, 0);
+    console.log(`\uD83D\uDCB0 Alice reserves: 10 ETH, 23 USDT, 1235 ACME-SHARES`);
+  }
+  const bobChatReplica = env.replicas.get(`${chatEntityId}:bob`);
+  if (bobChatReplica) {
+    addToReserves(bobChatReplica.state.reserves, "ETH", 5000000000000000000n, 18);
+    addToReserves(bobChatReplica.state.reserves, "USDC", 50000000n, 6);
+    addToReserves(bobChatReplica.state.reserves, "BTC-SHARES", 100n, 8);
+    console.log(`\uD83D\uDCB0 Bob reserves: 5 ETH, 50 USDC, 1.00000000 BTC-SHARES`);
+  }
   console.log(`
 \uD83D\uDCCB TEST 2: Trading Entity - Numbered Entity with Jurisdiction`);
   const tradingValidators = ["alice", "bob", "carol", "david"];
