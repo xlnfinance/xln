@@ -35,7 +35,7 @@ mkdir -p dist
 mkdir -p frontend/static
 
 # Start TypeScript watch compilation - build to frontend/static so vite can serve it
-bun build src/server.ts --target browser --outfile frontend/static/server.js --watch &
+bun build src/server.ts --target browser --outfile frontend/static/server.js --watch --bundle &
 WATCH_PID=$!
 
 # Wait a moment for initial build

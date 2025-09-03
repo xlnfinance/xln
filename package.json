@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "./dev-full.sh",
     "serve": "bun run serve.ts",
-    "serve:dev": "bun build src/server.ts --target browser --outfile dist/server.js && bun run serve.ts",
+    "serve:dev": "bun build src/server.ts --target browser --outfile dist/server.js --bundle && bun run serve.ts",
     "notify:done": "bash ./scripts/notify.sh 'Task complete' 'XLN Agent' 'All done'",
     "notify:fail": "bash ./scripts/notify.sh 'Task failed' 'XLN Agent' 'Check logs' 'Basso'",
     "ui:dev": "cd ui && bun run dev",
