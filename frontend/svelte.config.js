@@ -21,9 +21,9 @@ const config = {
 			handleHttpError: 'warn',
 			handleMissingId: 'warn'
 		},
-		// Set base path for GitHub Pages deployment
+		// Set base path - empty for server deployment
 		paths: {
-			base: process.env.NODE_ENV === 'production' ? '/xln' : ''
+			base: ''
 		}
 	}
 };
