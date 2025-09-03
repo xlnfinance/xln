@@ -1,7 +1,5 @@
-// Simple Bun HTTP server for legacy UI and Svelte UI with SPA fallback
-// - Serves legacy files from project root (e.g., /index.html, /dist/server.js)
-// - Serves Svelte build under /ui/* from ui/dist
-// - SPA fallback: any /ui/* 404 falls back to ui/dist/index.html
+// Simple Bun HTTP server for XLN Svelte frontend
+// Serves Svelte build from frontend/build/ with SPA fallback
 
 const textTypes: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -10,6 +8,11 @@ const textTypes: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
 };
 
 const getContentType = (pathname: string): string | undefined => {
@@ -31,51 +34,29 @@ const serveFile = async (filePath: string): Promise<Response | null> => {
   }
 };
 
-const uiDistRoot = 'ui/dist';
-
 const handler = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // Log minimal request info
   console.log(`➡️  ${request.method} ${path}`);
 
-  // Health
+  // Health check
   if (path === '/healthz') return new Response('ok');
 
-  // Serve Svelte UI under /ui/* with SPA fallback
-  if (path === '/ui' || path.startsWith('/ui/')) {
-    const subPath = path === '/ui' ? '/index.html' : path.slice('/ui'.length);
-    const candidate = `${uiDistRoot}${subPath}`;
-
-    // Try exact asset first
-    const exact = await serveFile(candidate);
-    if (exact) return exact;
-
-    // Fallback to index.html for SPA routes
-    const fallback = await serveFile(`${uiDistRoot}/index.html`);
-    if (fallback) return fallback;
-
-    return new Response('ui not built', { status: 404 });
-  }
-
-  // Explicit mapping for runtime bundle
-  if (path === '/dist/server.js' || path.startsWith('/dist/')) {
-    const file = await serveFile(`.${path}`);
-    if (file) return file;
-    return new Response('not found', { status: 404 });
-  }
-
-  // Legacy index
-  if (path === '/' || path === '/index.html') {
-    const file = await serveFile('./index.html');
+  // Serve root as index.html
+  if (path === '/') {
+    const file = await serveFile('./frontend/build/index.html');
     if (file) return file;
     return new Response('missing index.html', { status: 404 });
   }
 
-  // Try static from project root for any other asset
-  const staticFile = await serveFile(`.${path}`);
+  // Try static files from frontend/build/
+  const staticFile = await serveFile(`./frontend/build${path}`);
   if (staticFile) return staticFile;
+
+  // SPA fallback - serve index.html for any unknown route
+  const fallback = await serveFile('./frontend/build/index.html');
+  if (fallback) return fallback;
 
   return new Response('not found', { status: 404 });
 };
