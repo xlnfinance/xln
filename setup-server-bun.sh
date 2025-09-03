@@ -136,6 +136,7 @@ log_success "Systemd service created"
 log_info "7️⃣  Creating deployment script..."
 sudo -u $ACTUAL_USER cat > "$XLN_DIR/deploy.sh" << 'EOF'
 #!/bin/bash
+# XLN Deployment Script - Lessons learned from Vultr deployment
 set -e
 
 echo "🚀 Deploying XLN (Pure Bun)..."
@@ -152,6 +153,11 @@ echo "📦 Installing dependencies..."
 export PATH="$HOME/.bun/bin:$PATH"
 bun install
 
+# CRITICAL: Build server.js with bundled dependencies for browser
+echo "🔧 Building server.js with bundled dependencies..."
+mkdir -p frontend/static
+bun build src/server.ts --target browser --outfile frontend/static/server.js --bundle
+
 # Build frontend with Bun
 echo "🏗️  Building frontend..."
 cd frontend
@@ -159,15 +165,34 @@ bun install
 bun run build
 cd ..
 
-# Restart systemd service
-echo "🔄 Restarting XLN service..."
-sudo systemctl restart xln
+# CRITICAL: Copy bundled server.js to build directory
+echo "📋 Copying bundled server.js to build directory..."
+cp frontend/static/server.js frontend/build/server.js
+
+# Kill any existing background processes
+echo "🛑 Stopping existing server processes..."
+pkill -f "bun run serve" || true
+
+# Start server in background (don't use systemd - it was problematic)
+echo "🚀 Starting XLN server in background..."
+mkdir -p logs
+nohup bun run serve.ts > logs/xln.log 2>&1 &
+
+# Wait for server to start
+sleep 3
+
+# Test if server is responding
+if curl -s http://localhost:8080/healthz > /dev/null; then
+    echo "✅ Server is responding!"
+else
+    echo "⚠️  Server might still be starting, checking logs..."
+    tail -5 logs/xln.log
+fi
 
 echo "✅ Deployment complete!"
 echo "🌐 XLN running at: http://$(curl -s ifconfig.me 2>/dev/null || echo 'YOUR_SERVER_IP')"
-
-# Show status
-sudo systemctl status xln --no-pager -l
+echo "📊 Check status: tail -f logs/xln.log"
+echo "📊 Check processes: ps aux | grep bun"
 EOF
 
 chmod +x "$XLN_DIR/deploy.sh"
