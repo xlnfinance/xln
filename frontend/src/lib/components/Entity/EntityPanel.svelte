@@ -42,6 +42,7 @@
 
   // Reactive component states
   $: consensusExpanded = $settings.componentStates[`consensus-${tab.id}`] ?? true;
+  $: reservesExpanded = $settings.componentStates[`reserves-${tab.id}`] ?? false;
   $: chatExpanded = $settings.componentStates[`chat-${tab.id}`] ?? true;
   $: proposalsExpanded = $settings.componentStates[`proposals-${tab.id}`] ?? false;
   $: historyExpanded = $settings.componentStates[`history-${tab.id}`] ?? false;
@@ -49,6 +50,45 @@
 
   function toggleComponent(componentId: string) {
     settingsOperations.toggleComponentState(componentId);
+  }
+
+  // 💰 Financial calculation functions
+  
+  // Mock asset prices for demo (in real system, fetch from oracle/API)
+  const assetPrices: Record<string, number> = {
+    'ETH': 2500,      // $2,500 per ETH
+    'USDT': 1,        // $1 per USDT
+    'USDC': 1,        // $1 per USDC  
+    'ACME-SHARES': 15.50, // $15.50 per ACME share
+    'BTC-SHARES': 45000   // $45,000 per BTC share
+  };
+
+  function formatAssetDisplay(balance: any): string {
+    const divisor = BigInt(10) ** BigInt(balance.decimals);
+    const wholePart = balance.amount / divisor;
+    const fractionalPart = balance.amount % divisor;
+    
+    if (fractionalPart === 0n) {
+      return `${wholePart} ${balance.symbol}`;
+    }
+    
+    const fractionalStr = fractionalPart.toString().padStart(balance.decimals, '0');
+    return `${wholePart}.${fractionalStr} ${balance.symbol}`;
+  }
+
+  function getAssetValue(balance: any): number {
+    const divisor = BigInt(10) ** BigInt(balance.decimals);
+    const amount = Number(balance.amount) / Number(divisor);
+    const price = assetPrices[balance.symbol] || 0;
+    return amount * price;
+  }
+
+  function calculateTotalNetworth(reserves: Map<string, any>): number {
+    let total = 0;
+    for (const [symbol, balance] of reserves.entries()) {
+      total += getAssetValue(balance);
+    }
+    return total;
   }
 
   // Handle entity selection from dropdown
@@ -159,6 +199,66 @@
       style="max-height: 200px;"
     >
       <ConsensusState {replica} />
+    </div>
+  </div>
+
+  <!-- Reserves Component -->
+  <div class="panel-component" id="reserves-{tab.id}">
+    <div 
+      class="component-header" 
+      class:collapsed={!reservesExpanded}
+      on:click={() => toggleComponent(`reserves-${tab.id}`)}
+      role="button"
+      tabindex="0"
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`reserves-${tab.id}`)}
+    >
+      <div class="component-title">
+        <span>💰</span>
+        <span>Reserves</span>
+      </div>
+      <div class="component-toggle">▼</div>
+    </div>
+    <div 
+      class="component-content" 
+      class:collapsed={!reservesExpanded}
+      style="max-height: 300px;"
+    >
+      {#if replica?.state?.reserves?.size > 0}
+        <div class="reserves-container">
+          <!-- Portfolio Summary -->
+          <div class="portfolio-summary">
+            <strong>Portfolio Value: ${calculateTotalNetworth(replica.state.reserves).toFixed(2)}</strong>
+          </div>
+          
+          <!-- Asset List with Portfolio Bars -->
+          {#each Array.from(replica.state.reserves.entries()) as [symbol, balance]}
+            {@const assetValue = getAssetValue(balance)}
+            {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
+            {@const percentage = totalNetworth > 0 ? (assetValue / totalNetworth) * 100 : 0}
+            
+            <div class="asset-row">
+              <div class="asset-info">
+                <span class="asset-symbol">{balance.symbol}</span>
+                <span class="asset-amount">{formatAssetDisplay(balance)}</span>
+                <span class="asset-value">${assetValue.toFixed(2)}</span>
+              </div>
+              
+              <!-- Green portfolio bar showing percentage -->
+              <div class="portfolio-bar-container">
+                <div class="portfolio-bar">
+                  <div 
+                    class="portfolio-fill" 
+                    style="width: {percentage}%"
+                  ></div>
+                </div>
+                <span class="asset-percentage">{percentage.toFixed(1)}%</span>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="empty-state">No reserves yet - deposit assets via Depository.sol</p>
+      {/if}
     </div>
   </div>
 
@@ -434,5 +534,94 @@
 
   .entity-history-panel {
     background: #1e1e1e;
+  }
+
+  /* 💰 Reserves Component Styles */
+  .reserves-container {
+    padding: 10px 0;
+  }
+
+  .portfolio-summary {
+    margin-bottom: 15px;
+    padding: 8px 12px;
+    background: #333;
+    border-radius: 4px;
+    border-left: 3px solid #00ff88;
+  }
+
+  .portfolio-summary strong {
+    color: #00ff88;
+    font-size: 1.1em;
+  }
+
+  .asset-row {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: #2a2a2a;
+    border-radius: 4px;
+    border: 1px solid #3e3e3e;
+  }
+
+  .asset-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .asset-symbol {
+    font-weight: bold;
+    color: #ffffff;
+    font-family: 'Courier New', monospace;
+  }
+
+  .asset-amount {
+    color: #d4d4d4;
+    font-family: 'Courier New', monospace;
+  }
+
+  .asset-value {
+    color: #00ff88;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+  }
+
+  .portfolio-bar-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .portfolio-bar {
+    flex: 1;
+    height: 8px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #3e3e3e;
+  }
+
+  .portfolio-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00ff88, #00cc66);
+    transition: width 0.3s ease;
+    border-radius: 3px;
+  }
+
+  .asset-percentage {
+    color: #00ff88;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85em;
+    min-width: 45px;
+    text-align: right;
+  }
+
+  .empty-state {
+    color: #777;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
   }
 </style>
