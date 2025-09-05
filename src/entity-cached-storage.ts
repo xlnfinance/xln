@@ -2,134 +2,152 @@ import { EntityStorage } from './types.js';
 import { createMPTStorage } from './entity-mpt.js';
 import { DEBUG } from './utils.js';
 
+// Extended interface for cached storage with additional utility methods
+interface CachedEntityStorageInterface extends EntityStorage {
+  getCacheStats(): {
+    hits: number;
+    misses: number;
+    writes: number;
+    hitRate: string;
+    cacheSize: number;
+    indexCacheSize: number;
+  };
+  resetCacheStats(): void;
+  invalidateCache(): void;
+}
+
 // LRU Cache implementation for entity storage
-class LRUCache<T> {
-  private cache = new Map<string, T>();
-  private maxSize: number;
+function createLRUCache<T>(maxSize = 1000) {
+  const cache = new Map<string, T>();
 
-  constructor(maxSize = 1000) {
-    this.maxSize = maxSize;
-  }
-
-  get(key: string): T | undefined {
-    const value = this.cache.get(key);
+  function get(key: string): T | undefined {
+    const value = cache.get(key);
     if (value !== undefined) {
       // Move to end (most recently used)
-      this.cache.delete(key);
-      this.cache.set(key, value);
+      cache.delete(key);
+      cache.set(key, value);
     }
     return value;
   }
 
-  set(key: string, value: T): void {
+  function set(key: string, value: T): void {
     // Remove if already exists
-    if (this.cache.has(key)) {
-      this.cache.delete(key);
+    if (cache.has(key)) {
+      cache.delete(key);
     }
     // Evict least recently used if at capacity
-    else if (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value;
+    else if (cache.size >= maxSize) {
+      const firstKey = cache.keys().next().value;
       if (firstKey) {
-        this.cache.delete(firstKey);
+        cache.delete(firstKey);
       }
     }
 
-    this.cache.set(key, value);
+    cache.set(key, value);
   }
 
-  delete(key: string): boolean {
-    return this.cache.delete(key);
+  function deleteKey(key: string): boolean {
+    return cache.delete(key);
   }
 
-  clear(): void {
-    this.cache.clear();
+  function clear(): void {
+    cache.clear();
   }
 
-  size(): number {
-    return this.cache.size;
+  function size(): number {
+    return cache.size;
   }
+
+  // Expose internal cache for compatibility with existing code
+  function getInternalCache() {
+    return cache;
+  }
+
+  return {
+    get,
+    set,
+    delete: deleteKey,
+    clear,
+    size,
+    getInternalCache,
+  };
 }
 
-export class CachedEntityStorage implements EntityStorage {
-  private persistentStorage: EntityStorage;
-  private cache = new LRUCache<any>(2000); // Cache up to 2000 items
-  private indexCache = new LRUCache<string[]>(100); // Cache type indexes
-  private rootCache: string | null = null;
-  private cacheStats = {
+export function createCachedEntityStorage(persistentStorage: EntityStorage): CachedEntityStorageInterface {
+  const cache = createLRUCache<any>(2000); // Cache up to 2000 items
+  const indexCache = createLRUCache<string[]>(100); // Cache type indexes
+  let rootCache: string | null = null;
+  const cacheStats = {
     hits: 0,
     misses: 0,
     writes: 0,
   };
 
-  constructor(persistentStorage: EntityStorage) {
-    this.persistentStorage = persistentStorage;
-  }
-
-  async get<T>(type: string, key: string): Promise<T | undefined> {
+  async function get<T>(type: string, key: string): Promise<T | undefined> {
     const cacheKey = `${type}:${key}`;
 
     // Try cache first
-    const cached = this.cache.get(cacheKey);
+    const cached = cache.get(cacheKey);
     if (cached !== undefined) {
-      this.cacheStats.hits++;
+      cacheStats.hits++;
       // if (DEBUG) console.log(`🎯 Cache HIT for ${cacheKey}`);
       return cached as T;
     }
 
     // Cache miss - fetch from persistent storage
-    this.cacheStats.misses++;
-    const value = await this.persistentStorage.get<T>(type, key);
+    cacheStats.misses++;
+    const value = await persistentStorage.get<T>(type, key);
 
     if (value !== undefined) {
-      this.cache.set(cacheKey, value);
+      cache.set(cacheKey, value);
       // if (DEBUG) console.log(`💾 Cache MISS for ${cacheKey}, loaded from disk`);
     }
 
     return value;
   }
 
-  async set<T>(type: string, key: string, value: T): Promise<void> {
+  async function set<T>(type: string, key: string, value: T): Promise<void> {
     const cacheKey = `${type}:${key}`;
-    this.cacheStats.writes++;
+    cacheStats.writes++;
 
     // Write-through: update both cache and persistent storage
-    this.cache.set(cacheKey, value);
-    await this.persistentStorage.set(type, key, value);
+    cache.set(cacheKey, value);
+    await persistentStorage.set(type, key, value);
 
     // Invalidate root cache since state changed
-    this.rootCache = null;
+    rootCache = null;
 
     // Invalidate type index cache since we may have added a new key
-    this.indexCache.delete(type);
+    indexCache.delete(type);
 
     // if (DEBUG) console.log(`✍️  Write-through for ${cacheKey}`);
   }
 
-  async getRoot(): Promise<string> {
+  async function getRoot(): Promise<string> {
     // Cache root hash since it's frequently accessed during consensus
-    if (this.rootCache === null) {
-      this.rootCache = await this.persistentStorage.getRoot();
-      if (DEBUG) console.log(`🌳 Root cache miss, loaded: ${this.rootCache.slice(0, 16)}...`);
+    if (rootCache === null) {
+      rootCache = await persistentStorage.getRoot();
+      if (DEBUG) console.log(`🌳 Root cache miss, loaded: ${rootCache.slice(0, 16)}...`);
     }
-    return this.rootCache;
+    return rootCache;
   }
 
-  async getProof(type: string, key: string): Promise<any> {
+  async function getProof(type: string, key: string): Promise<any> {
     // Proofs are always fetched from persistent storage (no caching)
-    return this.persistentStorage.getProof(type, key);
+    return persistentStorage.getProof(type, key);
   }
 
-  async getAll<T>(type: string): Promise<T[]> {
+  async function getAll<T>(type: string): Promise<T[]> {
     // Check if we have the index cached
-    let keys = this.indexCache.get(type);
+    let keys = indexCache.get(type);
     if (!keys) {
       // Get all keys for this type from persistent storage
-      const allItems = await this.persistentStorage.getAll<T>(type);
+      const allItems = await persistentStorage.getAll<T>(type);
 
       // We need to extract keys somehow - let's fetch the index directly
       // This is a bit hacky but works with current MPT implementation
       const indexKey = `${type}:_index`;
-      const cachedIndex = this.cache.get(indexKey);
+      const cachedIndex = cache.get(indexKey);
       if (cachedIndex) {
         keys = cachedIndex as string[];
       } else {
@@ -141,56 +159,73 @@ export class CachedEntityStorage implements EntityStorage {
     // Fetch each item, utilizing cache
     const items: T[] = [];
     for (const key of keys) {
-      const val = await this.get<T>(type, key);
+      const val = await get<T>(type, key);
       if (val !== undefined) items.push(val);
     }
     return items;
   }
 
-  async clear(type: string): Promise<void> {
+  async function clear(type: string): Promise<void> {
     // Clear from persistent storage first
-    await this.persistentStorage.clear(type);
+    await persistentStorage.clear(type);
 
     // Clear cache entries for this type
     const keysToDelete: string[] = [];
-    for (const [cacheKey] of this.cache['cache']) {
+    for (const [cacheKey] of cache.getInternalCache()) {
       if (cacheKey.startsWith(`${type}:`)) {
         keysToDelete.push(cacheKey);
       }
     }
 
-    keysToDelete.forEach(key => this.cache.delete(key));
-    this.indexCache.delete(type);
-    this.rootCache = null; // Invalidate root
+    keysToDelete.forEach(key => cache.delete(key));
+    indexCache.delete(type);
+    rootCache = null; // Invalidate root
 
     // if (DEBUG) console.log(`🧹 Cleared cache for type: ${type}`);
   }
 
   // Utility methods for monitoring cache performance
-  getCacheStats() {
-    const hitRate = this.cacheStats.hits / (this.cacheStats.hits + this.cacheStats.misses) || 0;
+  function getCacheStats() {
+    const hitRate = cacheStats.hits / (cacheStats.hits + cacheStats.misses) || 0;
     return {
-      ...this.cacheStats,
+      ...cacheStats,
       hitRate: (hitRate * 100).toFixed(2) + '%',
-      cacheSize: this.cache.size(),
-      indexCacheSize: this.indexCache.size(),
+      cacheSize: cache.size(),
+      indexCacheSize: indexCache.size(),
     };
   }
 
-  resetCacheStats() {
-    this.cacheStats = { hits: 0, misses: 0, writes: 0 };
+  function resetCacheStats() {
+    cacheStats.hits = 0;
+    cacheStats.misses = 0;
+    cacheStats.writes = 0;
   }
 
   // Force cache invalidation (useful for debugging)
-  invalidateCache() {
-    this.cache.clear();
-    this.indexCache.clear();
-    this.rootCache = null;
+  function invalidateCache() {
+    cache.clear();
+    indexCache.clear();
+    rootCache = null;
     // if (DEBUG) console.log('🔄 Cache completely invalidated');
   }
+
+  return {
+    get,
+    set,
+    getRoot,
+    getProof,
+    getAll,
+    clear,
+    getCacheStats,
+    resetCacheStats,
+    invalidateCache,
+  };
 }
 
 export async function createCachedMPTStorage(path: string): Promise<EntityStorage> {
   const persistentStorage = await createMPTStorage(path);
-  return new CachedEntityStorage(persistentStorage);
+  return createCachedEntityStorage(persistentStorage);
 }
+
+// Backward compatibility: export CachedEntityStorage as an alias to createCachedEntityStorage
+export const CachedEntityStorage = createCachedEntityStorage;

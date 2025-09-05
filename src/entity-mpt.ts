@@ -2,14 +2,14 @@ import { MerklePatriciaTrie, createMerkleProof } from '@ethereumjs/mpt';
 import { bytesToHex, utf8ToBytes } from '@ethereumjs/util';
 import { EntityStorage } from './types.js';
 import { Level } from 'level';
-import { LevelDB } from './entity-leveldb.js';
+import { createLevelDB } from './entity-leveldb.js';
 import { encode as snapEncode, decode as snapDecode } from './snapshot-coder.js';
 
 export async function createMPTStorage(path: string): Promise<EntityStorage> {
   const leveldb = new Level(path, { keyEncoding: 'view', valueEncoding: 'view' });
   await leveldb.open();
   const trie = new MerklePatriciaTrie({
-    db: new LevelDB(leveldb as any),
+    db: createLevelDB(leveldb as any),
   });
   const indexKey = (type: string) => `${type}:_index`;
 

@@ -40,33 +40,23 @@ const getEncodings = (opts: EncodingOpts = {}) => {
  * LevelDB is a thin wrapper around the underlying levelup db,
  * corresponding to the {@link DB}
  */
-export class LevelDB<
+export function createLevelDB<
   TKey extends Uint8Array | string = Uint8Array | string,
   TValue extends Uint8Array | string | DBObject = Uint8Array | string | DBObject,
-> implements DB<TKey, TValue>
-{
-  _leveldb: AbstractLevel<string | Uint8Array, string | Uint8Array, string | Uint8Array>
+>(
+  leveldb?: AbstractLevel<string | Uint8Array, string | Uint8Array, string | Uint8Array>,
+): DB<TKey, TValue> {
+  const _leveldb = leveldb ?? (new MemoryLevel({ keyEncoding: 'view', valueEncoding: 'view' }) as unknown as AbstractLevel<string | Uint8Array, string | Uint8Array, string | Uint8Array>)
 
   /**
-   * Initialize a DB instance. If `leveldb` is not provided, DB
-   * defaults to an [in-memory store](https://github.com/Level/memdown).
-   * @param leveldb - An abstract-leveldown compliant store
+   * Get a value from the database
    */
-  constructor(
-    leveldb?: AbstractLevel<string | Uint8Array, string | Uint8Array, string | Uint8Array>,
-  ) {
-    this._leveldb = leveldb ?? (new MemoryLevel({ keyEncoding: 'view', valueEncoding: 'view' }) as unknown as AbstractLevel<string | Uint8Array, string | Uint8Array, string | Uint8Array>)
-  }
-
-  /**
-   * @inheritDoc
-   */
-  async get(key: TKey, opts?: EncodingOpts): Promise<TValue | undefined> {
+  async function get(key: TKey, opts?: EncodingOpts): Promise<TValue | undefined> {
     let value
     const encodings = getEncodings(opts)
 
     try {
-      value = await this._leveldb.get(key, encodings)
+      value = await _leveldb.get(key, encodings)
       if (value === null) return undefined
     } catch (error: any) {
       // https://github.com/Level/abstract-level/blob/915ad1317694d0ce8c580b5ab85d81e1e78a3137/abstract-level.js#L309
@@ -84,24 +74,24 @@ export class LevelDB<
   }
 
   /**
-   * @inheritDoc
+   * Put a value in the database
    */
-  async put(key: TKey, val: TValue, opts?: {}): Promise<void> {
+  async function put(key: TKey, val: TValue, opts?: {}): Promise<void> {
     const encodings = getEncodings(opts)
-    await this._leveldb.put(key, val, encodings)
+    await _leveldb.put(key, val, encodings)
   }
 
   /**
-   * @inheritDoc
+   * Delete a value from the database
    */
-  async del(key: TKey): Promise<void> {
-    await this._leveldb.del(key)
+  async function del(key: TKey): Promise<void> {
+    await _leveldb.del(key)
   }
 
   /**
-   * @inheritDoc
+   * Execute a batch of operations
    */
-  async batch(opStack: BatchDBOp<TKey, TValue>[]): Promise<void> {
+  async function batch(opStack: BatchDBOp<TKey, TValue>[]): Promise<void> {
     const levelOps: {
       keyEncoding: string
       valueEncoding: string
@@ -112,17 +102,29 @@ export class LevelDB<
     }
 
     // TODO: Investigate why as any is necessary
-    await this._leveldb.batch(levelOps as any)
+    await _leveldb.batch(levelOps as any)
   }
 
   /**
-   * @inheritDoc
+   * Create a shallow copy of the database
    */
-  shallowCopy(): DB<TKey, TValue> {
-    return new LevelDB<TKey, TValue>(this._leveldb)
+  function shallowCopy(): DB<TKey, TValue> {
+    return createLevelDB<TKey, TValue>(_leveldb)
   }
 
-  open() {
-    return this._leveldb.open()
+  /**
+   * Open the database
+   */
+  function open() {
+    return _leveldb.open()
+  }
+
+  return {
+    get,
+    put,
+    del,
+    batch,
+    shallowCopy,
+    open,
   }
 }
