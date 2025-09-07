@@ -2,10 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   // testDir is relative to this config file's directory
-  testDir: '.',
+  testDir: './e2e',
   timeout: 20000,
-  retries: 1,
-  outputDir: 'e2e/test-results',
+  // retries: 1,
+  outputDir: './e2e/test-results',
   use: {
     baseURL: 'http://localhost:8080',
     headless: process.env.HEADED !== 'true', // Headless by default, use HEADED=true for visual
@@ -21,5 +21,3 @@ export default defineConfig({
     },
   ],
 });
-
-
