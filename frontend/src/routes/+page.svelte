@@ -22,22 +22,22 @@
   onMount(async () => {
     try {
       console.log('🚀 Initializing XLN Svelte application...');
-      
+
       // Initialize settings first
       settingsOperations.initialize();
-      
+
       // Load tabs from storage
       tabOperations.loadFromStorage();
-      
+
       // Initialize default tabs if none exist
       tabOperations.initializeDefaultTabs();
-      
+
       // Initialize time machine
       timeOperations.initialize();
-      
+
       // Initialize XLN environment
       await initializeXLN();
-      
+
       console.log('✅ XLN Svelte application initialized successfully');
     } catch (err) {
       console.error('❌ Failed to initialize XLN application:', err);
@@ -52,7 +52,7 @@
 
 <main class="app">
   <AdminTopBar />
-  
+
   {#if $isLoading}
     <div class="loading-container">
       <div class="loading-spinner">🔄</div>
@@ -63,33 +63,42 @@
       <div class="error-icon">❌</div>
       <div class="error-text">Failed to load XLN Environment</div>
       <div class="error-details">{$error}</div>
-      <button class="retry-btn" on:click={() => initializeXLN()}>
-        Retry
-      </button>
+      <button class="retry-btn" on:click={() => initializeXLN()}> Retry </button>
     </div>
   {:else}
     <div class="main-content">
       <!-- Entity Panels Container -->
-      <div class="entity-panels-container" id="entityPanelsContainer" data-panel-count={$tabs.length}>
-        {#each $tabs as tab, index (tab.id)}
-          <EntityPanel {tab} isLast={index === $tabs.length - 1} />
-        {/each}
-      </div>
-
+      {#if $tabs.length > 0}
+        <div class="entity-panels-container" id="entityPanelsContainer" data-panel-count={$tabs.length}>
+          {#each $tabs as tab, index (tab.id)}
+            <EntityPanel {tab} isLast={index === $tabs.length - 1} />
+          {/each}
+        </div>
+      {/if}
       <!-- Transaction History & I/O Section -->
       <TransactionHistoryIO />
 
       <!-- Entity Formation/Jurisdictions Tabs -->
       <div class="actionable-tabs-container">
         <div class="tabs-header">
-          <button class="tab-button" class:active={activeTab === 'formation'} on:click={() => switchTab('formation')} id="formationTab">
+          <button
+            class="tab-button"
+            class:active={activeTab === 'formation'}
+            on:click={() => switchTab('formation')}
+            id="formationTab"
+          >
             🏗️ Entity Formation
           </button>
-          <button class="tab-button" class:active={activeTab === 'jurisdictions'} on:click={() => switchTab('jurisdictions')} id="jurisdictionsTab">
+          <button
+            class="tab-button"
+            class:active={activeTab === 'jurisdictions'}
+            on:click={() => switchTab('jurisdictions')}
+            id="jurisdictionsTab"
+          >
             🏛️ Jurisdictions
           </button>
         </div>
-        
+
         <div id="formationTabContent" class="tab-content" class:active={activeTab === 'formation'}>
           <EntityFormation />
         </div>
@@ -99,7 +108,7 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Time Machine -->
     <TimeMachine />
   {/if}
@@ -107,7 +116,13 @@
 
 <style>
   :global(body) {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family:
+      'Inter',
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      Roboto,
+      sans-serif;
     background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0f0f0f 100%);
     min-height: 100vh;
     color: #e8e8e8;
@@ -135,7 +150,8 @@
     padding: 0;
   }
 
-  .loading-container, .error-container {
+  .loading-container,
+  .error-container {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -238,28 +254,28 @@
   }
 
   /* Dynamic panel width based on number of panels */
-  .entity-panels-container[data-panel-count="1"] :global(.entity-panel) {
+  .entity-panels-container[data-panel-count='1'] :global(.entity-panel) {
     flex: 1;
     min-width: 100%;
   }
 
-  .entity-panels-container[data-panel-count="2"] :global(.entity-panel) {
+  .entity-panels-container[data-panel-count='2'] :global(.entity-panel) {
     flex: 1;
     min-width: 50%;
   }
 
-  .entity-panels-container[data-panel-count="3"] :global(.entity-panel) {
+  .entity-panels-container[data-panel-count='3'] :global(.entity-panel) {
     flex: 1;
     min-width: 33.333%;
   }
 
-  .entity-panels-container[data-panel-count="4"] :global(.entity-panel),
-  .entity-panels-container[data-panel-count="5"] :global(.entity-panel),
-  .entity-panels-container[data-panel-count="6"] :global(.entity-panel),
-  .entity-panels-container[data-panel-count="7"] :global(.entity-panel),
-  .entity-panels-container[data-panel-count="8"] :global(.entity-panel),
-  .entity-panels-container[data-panel-count="9"] :global(.entity-panel),
-  .entity-panels-container[data-panel-count="10"] :global(.entity-panel) {
+  .entity-panels-container[data-panel-count='4'] :global(.entity-panel),
+  .entity-panels-container[data-panel-count='5'] :global(.entity-panel),
+  .entity-panels-container[data-panel-count='6'] :global(.entity-panel),
+  .entity-panels-container[data-panel-count='7'] :global(.entity-panel),
+  .entity-panels-container[data-panel-count='8'] :global(.entity-panel),
+  .entity-panels-container[data-panel-count='9'] :global(.entity-panel),
+  .entity-panels-container[data-panel-count='10'] :global(.entity-panel) {
     flex: 0 0 25vw;
     min-width: 25vw;
   }
@@ -342,12 +358,22 @@
   }
 
   @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
