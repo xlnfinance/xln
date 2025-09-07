@@ -2274,7 +2274,7 @@ var init_abstract_coder = __esm(() => {
   };
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/_assert.js
+// node_modules/@noble/hashes/esm/_assert.js
 function number(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error(`Wrong positive integer: ${n}`);
@@ -2306,13 +2306,13 @@ function output(out, instance) {
 }
 var init__assert = () => {};
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/crypto.js
+// node_modules/@noble/hashes/esm/crypto.js
 var crypto2;
 var init_crypto = __esm(() => {
   crypto2 = typeof globalThis === "object" && "crypto" in globalThis ? globalThis.crypto : undefined;
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/hashes/esm/utils.js
 async function asyncLoop(iters, tick, cb) {
   let ts = Date.now();
   for (let i = 0;i < iters; i++) {
@@ -2391,7 +2391,7 @@ var init_utils2 = __esm(() => {
   toStr = {}.toString;
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/hmac.js
+// node_modules/@noble/hashes/esm/hmac.js
 var HMAC, hmac = (hash2, key, message) => new HMAC(hash2, key).update(message).digest();
 var init_hmac = __esm(() => {
   init__assert();
@@ -2460,7 +2460,7 @@ var init_hmac = __esm(() => {
   hmac.create = (hash2, key) => new HMAC(hash2, key);
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/pbkdf2.js
+// node_modules/@noble/hashes/esm/pbkdf2.js
 function pbkdf2Init(hash2, _password, _salt, _opts) {
   hash(hash2);
   const opts = checkOpts({ dkLen: 32, asyncTick: 10 }, _opts);
@@ -2510,7 +2510,7 @@ var init_pbkdf2 = __esm(() => {
   init_utils2();
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/_sha2.js
+// node_modules/@noble/hashes/esm/_sha2.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -2615,7 +2615,7 @@ var init__sha2 = __esm(() => {
   };
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/sha256.js
+// node_modules/@noble/hashes/esm/sha256.js
 var Chi = (a, b, c) => a & b ^ ~a & c, Maj = (a, b, c) => a & b ^ a & c ^ b & c, SHA256_K, IV, SHA256_W, SHA256, sha256;
 var init_sha256 = __esm(() => {
   init__sha2();
@@ -2769,7 +2769,7 @@ var init_sha256 = __esm(() => {
   sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256);
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/_u64.js
+// node_modules/@noble/hashes/esm/_u64.js
 function fromBig(n, le = false) {
   if (le)
     return { h: Number(n & U32_MASK64), l: Number(n >> _32n & U32_MASK64) };
@@ -2819,7 +2819,7 @@ var init__u64 = __esm(() => {
   _u64_default = u64;
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/sha512.js
+// node_modules/@noble/hashes/esm/sha512.js
 var SHA512_Kh, SHA512_Kl, SHA512_W_H, SHA512_W_L, SHA512, sha512;
 var init_sha512 = __esm(() => {
   init__sha2();
@@ -3100,7 +3100,7 @@ var init_hmac2 = __esm(() => {
   Object.freeze(computeHmac);
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/sha3.js
+// node_modules/@noble/hashes/esm/sha3.js
 function keccakP(s, rounds = 24) {
   const B = new Uint32Array(5 * 2);
   for (let round = 24 - rounds;round < 24; round++) {
@@ -3306,7 +3306,7 @@ var init_keccak = __esm(() => {
   Object.freeze(keccak256);
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/ripemd160.js
+// node_modules/@noble/hashes/esm/ripemd160.js
 function f(group, x, y, z) {
   if (group === 0)
     return x ^ y ^ z;
@@ -3481,7 +3481,7 @@ var init_random = __esm(() => {
   Object.freeze(randomBytes3);
 });
 
-// node_modules/ethers/node_modules/@noble/hashes/esm/scrypt.js
+// node_modules/@noble/hashes/esm/scrypt.js
 function XorAndSalsa(prev, pi, input, ii, out, oi) {
   let y00 = prev[pi++] ^ input[ii++], y01 = prev[pi++] ^ input[ii++];
   let y02 = prev[pi++] ^ input[ii++], y03 = prev[pi++] ^ input[ii++];
@@ -3750,7 +3750,7 @@ var init_sha2 = __esm(() => {
   Object.freeze(sha2562);
 });
 
-// node_modules/ethers/node_modules/@noble/curves/esm/abstract/utils.js
+// node_modules/@noble/curves/esm/abstract/utils.js
 var exports_utils = {};
 __export(exports_utils, {
   validateObject: () => validateObject,
@@ -3964,7 +3964,7 @@ var init_utils3 = __esm(() => {
   };
 });
 
-// node_modules/ethers/node_modules/@noble/curves/esm/abstract/modular.js
+// node_modules/@noble/curves/esm/abstract/modular.js
 function mod(a, b) {
   const result = a % b;
   return result >= _0n3 ? result : b + result;
@@ -4231,7 +4231,7 @@ var init_modular = __esm(() => {
   ];
 });
 
-// node_modules/ethers/node_modules/@noble/curves/esm/abstract/curve.js
+// node_modules/@noble/curves/esm/abstract/curve.js
 function wNAF(c, bits) {
   const constTimeNegate = (condition, item) => {
     const neg = item.negate();
@@ -4337,7 +4337,7 @@ var init_curve = __esm(() => {
   _1n4 = BigInt(1);
 });
 
-// node_modules/ethers/node_modules/@noble/curves/esm/abstract/weierstrass.js
+// node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validatePointOpts(curve) {
   const opts = validateBasic(curve);
   validateObject(opts, {
@@ -5068,7 +5068,7 @@ var init_weierstrass = __esm(() => {
   _4n2 = BigInt(4);
 });
 
-// node_modules/ethers/node_modules/@noble/curves/esm/_shortw_utils.js
+// node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash2) {
   return {
     hash: hash2,
@@ -5087,7 +5087,7 @@ var init__shortw_utils = __esm(() => {
   /*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) */
 });
 
-// node_modules/ethers/node_modules/@noble/curves/esm/secp256k1.js
+// node_modules/@noble/curves/esm/secp256k1.js
 function sqrtMod(y) {
   const P = secp256k1P;
   const _3n3 = BigInt(3), _6n = BigInt(6), _11n = BigInt(11), _22n = BigInt(22);
@@ -37930,7 +37930,7 @@ https://github.com/browserify/crypto-browserify`);
   crypto_default = crypto;
 });
 
-// node_modules/debug/node_modules/ms/index.js
+// node_modules/ms/index.js
 var require_ms = __commonJS((exports, module) => {
   var s = 1000;
   var m = s * 60;
@@ -38142,49 +38142,63 @@ var require_common3 = __commonJS((exports, module) => {
       createDebug.namespaces = namespaces;
       createDebug.names = [];
       createDebug.skips = [];
-      let i2;
-      const split3 = (typeof namespaces === "string" ? namespaces : "").split(/[\s,]+/);
-      const len2 = split3.length;
-      for (i2 = 0;i2 < len2; i2++) {
-        if (!split3[i2]) {
-          continue;
-        }
-        namespaces = split3[i2].replace(/\*/g, ".*?");
-        if (namespaces[0] === "-") {
-          createDebug.skips.push(new RegExp("^" + namespaces.slice(1) + "$"));
+      const split3 = (typeof namespaces === "string" ? namespaces : "").trim().replace(/\s+/g, ",").split(",").filter(Boolean);
+      for (const ns of split3) {
+        if (ns[0] === "-") {
+          createDebug.skips.push(ns.slice(1));
         } else {
-          createDebug.names.push(new RegExp("^" + namespaces + "$"));
+          createDebug.names.push(ns);
         }
       }
     }
+    function matchesTemplate(search, template) {
+      let searchIndex = 0;
+      let templateIndex = 0;
+      let starIndex = -1;
+      let matchIndex = 0;
+      while (searchIndex < search.length) {
+        if (templateIndex < template.length && (template[templateIndex] === search[searchIndex] || template[templateIndex] === "*")) {
+          if (template[templateIndex] === "*") {
+            starIndex = templateIndex;
+            matchIndex = searchIndex;
+            templateIndex++;
+          } else {
+            searchIndex++;
+            templateIndex++;
+          }
+        } else if (starIndex !== -1) {
+          templateIndex = starIndex + 1;
+          matchIndex++;
+          searchIndex = matchIndex;
+        } else {
+          return false;
+        }
+      }
+      while (templateIndex < template.length && template[templateIndex] === "*") {
+        templateIndex++;
+      }
+      return templateIndex === template.length;
+    }
     function disable() {
       const namespaces = [
-        ...createDebug.names.map(toNamespace),
-        ...createDebug.skips.map(toNamespace).map((namespace) => "-" + namespace)
+        ...createDebug.names,
+        ...createDebug.skips.map((namespace) => "-" + namespace)
       ].join(",");
       createDebug.enable("");
       return namespaces;
     }
     function enabled(name) {
-      if (name[name.length - 1] === "*") {
-        return true;
-      }
-      let i2;
-      let len2;
-      for (i2 = 0, len2 = createDebug.skips.length;i2 < len2; i2++) {
-        if (createDebug.skips[i2].test(name)) {
+      for (const skip of createDebug.skips) {
+        if (matchesTemplate(name, skip)) {
           return false;
         }
       }
-      for (i2 = 0, len2 = createDebug.names.length;i2 < len2; i2++) {
-        if (createDebug.names[i2].test(name)) {
+      for (const ns of createDebug.names) {
+        if (matchesTemplate(name, ns)) {
           return true;
         }
       }
       return false;
-    }
-    function toNamespace(regexp) {
-      return regexp.toString().substring(2, regexp.toString().length - 2).replace(/\.\*\?$/, "*");
     }
     function coerce(val) {
       if (val instanceof Error) {
@@ -38302,7 +38316,8 @@ var require_browser4 = __commonJS((exports, module) => {
     if (typeof navigator !== "undefined" && navigator.userAgent && navigator.userAgent.toLowerCase().match(/(edge|trident)\/(\d+)/)) {
       return false;
     }
-    return typeof document !== "undefined" && document.documentElement && document.documentElement.style && document.documentElement.style.WebkitAppearance || typeof window !== "undefined" && window.console && (window.console.firebug || window.console.exception && window.console.table) || typeof navigator !== "undefined" && navigator.userAgent && navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/) && parseInt(RegExp.$1, 10) >= 31 || typeof navigator !== "undefined" && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/);
+    let m;
+    return typeof document !== "undefined" && document.documentElement && document.documentElement.style && document.documentElement.style.WebkitAppearance || typeof window !== "undefined" && window.console && (window.console.firebug || window.console.exception && window.console.table) || typeof navigator !== "undefined" && navigator.userAgent && (m = navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/)) && parseInt(m[1], 10) >= 31 || typeof navigator !== "undefined" && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/);
   }
   function formatArgs(args) {
     args[0] = (this.useColors ? "%c" : "") + this.namespace + (this.useColors ? " %c" : " ") + args[0] + (this.useColors ? "%c " : " ") + "+" + module.exports.humanize(this.diff);
@@ -38337,7 +38352,7 @@ var require_browser4 = __commonJS((exports, module) => {
   function load() {
     let r;
     try {
-      r = exports.storage.getItem("debug");
+      r = exports.storage.getItem("debug") || exports.storage.getItem("DEBUG");
     } catch (error) {}
     if (!r && typeof process !== "undefined" && "env" in process) {
       r = process.env.DEBUG;
@@ -38572,7 +38587,7 @@ var init_utils5 = __esm(() => {
   };
 });
 
-// node_modules/level-supports/index.js
+// node_modules/browser-level/node_modules/abstract-level/node_modules/level-supports/index.js
 var require_level_supports = __commonJS((exports) => {
   exports.supports = function supports(...manifests) {
     const manifest = manifests.reduce((acc, m) => Object.assign(acc, m), {});
@@ -38998,7 +39013,7 @@ var require_catering = __commonJS((exports) => {
   };
 });
 
-// node_modules/abstract-level/lib/common.js
+// node_modules/browser-level/node_modules/abstract-level/lib/common.js
 var require_common5 = __commonJS((exports) => {
   exports.getCallback = function(options, callback) {
     return typeof options === "function" ? options : callback;
@@ -39014,7 +39029,7 @@ var require_common5 = __commonJS((exports) => {
   };
 });
 
-// node_modules/abstract-level/abstract-iterator.js
+// node_modules/browser-level/node_modules/abstract-level/abstract-iterator.js
 var require_abstract_iterator = __commonJS((exports) => {
   var { fromCallback } = require_catering();
   var ModuleError = require_module_error();
@@ -39433,7 +39448,7 @@ var require_abstract_iterator = __commonJS((exports) => {
   exports.AbstractValueIterator = AbstractValueIterator;
 });
 
-// node_modules/abstract-level/lib/default-kv-iterator.js
+// node_modules/browser-level/node_modules/abstract-level/lib/default-kv-iterator.js
 var require_default_kv_iterator = __commonJS((exports) => {
   var { AbstractKeyIterator, AbstractValueIterator } = require_abstract_iterator();
   var kIterator = Symbol("iterator");
@@ -39498,7 +39513,7 @@ var require_default_kv_iterator = __commonJS((exports) => {
   exports.DefaultValueIterator = DefaultValueIterator;
 });
 
-// node_modules/abstract-level/lib/deferred-iterator.js
+// node_modules/browser-level/node_modules/abstract-level/lib/deferred-iterator.js
 var require_deferred_iterator = __commonJS((exports) => {
   var { AbstractIterator, AbstractKeyIterator, AbstractValueIterator } = require_abstract_iterator();
   var ModuleError = require_module_error();
@@ -39593,7 +39608,7 @@ var require_deferred_iterator = __commonJS((exports) => {
   exports.DeferredValueIterator = DeferredValueIterator;
 });
 
-// node_modules/abstract-level/abstract-chained-batch.js
+// node_modules/browser-level/node_modules/abstract-level/abstract-chained-batch.js
 var require_abstract_chained_batch = __commonJS((exports) => {
   var { fromCallback } = require_catering();
   var ModuleError = require_module_error();
@@ -39733,7 +39748,7 @@ var require_abstract_chained_batch = __commonJS((exports) => {
   exports.AbstractChainedBatch = AbstractChainedBatch;
 });
 
-// node_modules/abstract-level/lib/default-chained-batch.js
+// node_modules/browser-level/node_modules/abstract-level/lib/default-chained-batch.js
 var require_default_chained_batch = __commonJS((exports) => {
   var { AbstractChainedBatch } = require_abstract_chained_batch();
   var ModuleError = require_module_error();
@@ -39771,7 +39786,7 @@ var require_default_chained_batch = __commonJS((exports) => {
   exports.DefaultChainedBatch = DefaultChainedBatch;
 });
 
-// node_modules/abstract-level/lib/range-options.js
+// node_modules/browser-level/node_modules/abstract-level/lib/range-options.js
 var require_range_options = __commonJS((exports, module) => {
   var ModuleError = require_module_error();
   var hasOwnProperty2 = Object.prototype.hasOwnProperty;
@@ -39813,7 +39828,7 @@ var require_queue_microtask = __commonJS((exports, module) => {
   }, 0));
 });
 
-// node_modules/abstract-level/lib/next-tick-browser.js
+// node_modules/browser-level/node_modules/abstract-level/lib/next-tick-browser.js
 var require_next_tick_browser2 = __commonJS((exports, module) => {
   var queueMicrotask2 = require_queue_microtask();
   module.exports = function(fn, ...args) {
@@ -39825,7 +39840,7 @@ var require_next_tick_browser2 = __commonJS((exports, module) => {
   };
 });
 
-// node_modules/abstract-level/lib/abstract-sublevel-iterator.js
+// node_modules/browser-level/node_modules/abstract-level/lib/abstract-sublevel-iterator.js
 var require_abstract_sublevel_iterator = __commonJS((exports) => {
   var { AbstractIterator, AbstractKeyIterator, AbstractValueIterator } = require_abstract_iterator();
   var kUnfix = Symbol("unfix");
@@ -39938,7 +39953,7 @@ var require_abstract_sublevel_iterator = __commonJS((exports) => {
   exports.AbstractSublevelValueIterator = AbstractSublevelValueIterator;
 });
 
-// node_modules/abstract-level/lib/abstract-sublevel.js
+// node_modules/browser-level/node_modules/abstract-level/lib/abstract-sublevel.js
 var require_abstract_sublevel = __commonJS((exports, module) => {
   var ModuleError = require_module_error();
   var { Buffer: Buffer4 } = (init_buffer(), __toCommonJS(exports_buffer)) || {};
@@ -40133,7 +40148,7 @@ var require_abstract_sublevel = __commonJS((exports, module) => {
   };
 });
 
-// node_modules/abstract-level/abstract-level.js
+// node_modules/browser-level/node_modules/abstract-level/abstract-level.js
 var require_abstract_level = __commonJS((exports) => {
   var { supports } = require_level_supports();
   var { Transcoder } = require_level_transcoder();
@@ -40771,7 +40786,7 @@ var require_abstract_level = __commonJS((exports) => {
   };
 });
 
-// node_modules/abstract-level/index.js
+// node_modules/browser-level/node_modules/abstract-level/index.js
 var require_abstract_level2 = __commonJS((exports) => {
   exports.AbstractLevel = require_abstract_level().AbstractLevel;
   exports.AbstractSublevel = require_abstract_level().AbstractSublevel;
@@ -41695,6 +41710,13 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
   }
   const entityOutbox = [];
   if (entityInput.entityTxs?.length) {
+    const voteTransactions = entityInput.entityTxs.filter((tx) => tx.type === "vote");
+    if (voteTransactions.length > 0) {
+      console.log(`\uD83D\uDDF3️ VOTE-MEMPOOL: ${entityReplica.signerId} receiving ${voteTransactions.length} vote transactions`);
+      voteTransactions.forEach((tx) => {
+        console.log(`\uD83D\uDDF3️ VOTE-TX:`, tx);
+      });
+    }
     if (entityReplica.signerId === "alice") {
       console.log(`\uD83D\uDD25 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
       console.log(`\uD83D\uDD25 ALICE-RECEIVES: Transaction types:`, entityInput.entityTxs.map((tx) => tx.type));
@@ -41725,7 +41747,7 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
   }
   if (entityInput.precommits?.size && entityInput.proposedFrame && !entityReplica.proposal) {
     const signers = Array.from(entityInput.precommits.keys());
-    const totalPower = calculateQuorumPower2(entityReplica.state.config, signers);
+    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
     if (totalPower >= entityReplica.state.config.threshold) {
       if (DEBUG)
         console.log(`    → Received commit notification with ${entityInput.precommits.size} signatures`);
@@ -41781,7 +41803,7 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
     if (DEBUG)
       console.log(`    → Collected ${entityInput.precommits.size} signatures (total: ${entityReplica.proposal.signatures.size})`);
     const signers = Array.from(entityReplica.proposal.signatures.keys());
-    const totalPower = calculateQuorumPower2(entityReplica.state.config, signers);
+    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
     if (!validateVotingPower(totalPower)) {
       log2.error(`❌ Invalid voting power calculation: ${totalPower}`);
       return entityOutbox;
@@ -41931,7 +41953,7 @@ var applyEntityInput = (env, entityReplica, entityInput) => {
 var applyEntityFrame = (env, entityState, entityTxs) => {
   return entityTxs.reduce((currentEntityState, entityTx) => applyEntityTx(env, currentEntityState, entityTx), entityState);
 };
-var calculateQuorumPower2 = (config, signers) => {
+var calculateQuorumPower = (config, signers) => {
   return signers.reduce((total, signerId) => {
     return total + (config.shares[signerId] || 0n);
   }, 0n);
@@ -43335,7 +43357,7 @@ var testSingleEOASignature = async () => {
     console.log("✅ Single EOA signature test passed!");
     return true;
   } catch (error) {
-    console.error("❌ Single EOA signature test failed:", error.message);
+    console.error("❌ Single EOA signature test failed:", error instanceof Error ? error.message : String(error));
     return false;
   }
 };
@@ -43380,7 +43402,7 @@ var testMultipleEOASignatures = async () => {
     console.log("✅ Multiple EOA signatures test passed!");
     return true;
   } catch (error) {
-    console.error("❌ Multiple EOA signatures test failed:", error.message);
+    console.error("❌ Multiple EOA signatures test failed:", error instanceof Error ? error.message : String(error));
     return false;
   }
 };
@@ -43428,7 +43450,7 @@ var testMixedHanko = async () => {
     console.log("ℹ️  Mixed Hanko test may fail due to entity verification - this is expected");
     return true;
   } catch (error) {
-    console.log("ℹ️  Mixed Hanko test failed as expected (entity verification):", error.message.substring(0, 100));
+    console.log("ℹ️  Mixed Hanko test failed as expected (entity verification):", error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true;
   }
 };
@@ -43447,7 +43469,7 @@ var testInvalidSignatures = async () => {
     console.error("❌ Invalid signatures test FAILED - should have reverted!");
     return false;
   } catch (error) {
-    console.log("✅ Invalid signatures correctly rejected:", error.message.substring(0, 100));
+    console.log("✅ Invalid signatures correctly rejected:", error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true;
   }
 };
@@ -43487,7 +43509,7 @@ var testWrongNonce = async () => {
     console.error("❌ Wrong nonce test FAILED - should have reverted!");
     return false;
   } catch (error) {
-    console.log("✅ Wrong nonce correctly rejected:", error.message.substring(0, 100));
+    console.log("✅ Wrong nonce correctly rejected:", error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true;
   }
 };
@@ -43524,7 +43546,7 @@ var testDomainSeparation = async () => {
     console.error("❌ Domain separation test FAILED - should have reverted!");
     return false;
   } catch (error) {
-    console.log("✅ Domain separation correctly prevented replay:", error.message.substring(0, 100));
+    console.log("✅ Domain separation correctly prevented replay:", error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true;
   }
 };
@@ -43570,7 +43592,7 @@ var testNonceProgression = async () => {
     console.log(`✅ Nonce progression test passed! New nonce: ${newNonce}`);
     return true;
   } catch (error) {
-    console.error("❌ Nonce progression test failed:", error.message);
+    console.error("❌ Nonce progression test failed:", error instanceof Error ? error.message : String(error));
     return false;
   }
 };
@@ -43706,7 +43728,7 @@ async function testABIEncoding() {
     console.log(`   - Sample: ${hankoData.slice(0, 100)}...`);
     return true;
   } catch (error) {
-    console.error("❌ ABI encoding failed:", error.message);
+    console.error("❌ ABI encoding failed:", error instanceof Error ? error.message : String(error));
     return false;
   }
 }
@@ -44134,7 +44156,10 @@ var deepCloneReplica = (replica) => {
         id2,
         { ...proposal, votes: cloneMap(proposal.votes) }
       ])),
-      config: replica.state.config
+      config: replica.state.config,
+      reserves: cloneMap(replica.state.reserves),
+      channels: cloneMap(replica.state.channels),
+      collaterals: cloneMap(replica.state.collaterals)
     },
     mempool: cloneArray(replica.mempool),
     proposal: replica.proposal ? {
@@ -44562,6 +44587,15 @@ var runDemoWrapper = async (env2) => {
     throw error;
   }
 };
+var createEmptyEnv = () => {
+  return {
+    replicas: new Map,
+    height: 0,
+    timestamp: Date.now(),
+    serverInput: { serverTxs: [], entityInputs: [] },
+    history: []
+  };
+};
 var processUntilEmpty = async (env2, inputs) => {
   let outputs = inputs || [];
   let iterationCount = 0;
@@ -44574,6 +44608,11 @@ var processUntilEmpty = async (env2, inputs) => {
     precommits: o.precommits?.size || 0,
     hasFrame: !!o.proposedFrame
   })));
+  outputs.forEach((output2, i2) => {
+    if (output2.entityTxs?.some((tx) => tx.type === "vote")) {
+      console.log(`\uD83D\uDDF3️ VOTE-DEBUG: Input ${i2 + 1} contains vote transactions:`, output2.entityTxs.filter((tx) => tx.type === "vote"));
+    }
+  });
   while (outputs.length > 0 && iterationCount < maxIterations) {
     iterationCount++;
     console.log(`\uD83D\uDD25 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
@@ -44637,6 +44676,7 @@ export {
   createProfileUpdateTx,
   createNumberedEntity,
   createLazyEntity,
+  createEmptyEnv,
   connectToEthereum,
   clearDatabaseAndHistory,
   clearDatabase,

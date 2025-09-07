@@ -92,8 +92,7 @@
 
       const voteValue = voteChoice === 'yes' ? 'yes' : voteChoice === 'no' ? 'no' : 'abstain';
       
-      // Direct processUntilEmpty for entityInputs (no serverTxs needed)
-      await xln.processUntilEmpty(env, [{
+      const voteInput = {
         entityId: tab.entityId,
         signerId: tab.signer,
         entityTxs: [{
@@ -105,7 +104,18 @@
             comment: voteComment.trim() || undefined
           }
         }]
-      }]);
+      };
+      
+      console.log('🗳️ FRONTEND-DEBUG: About to submit vote:', {
+        entityId: tab.entityId,
+        signerId: tab.signer,
+        proposalId: selectedProposalId,
+        choice: voteValue,
+        txType: 'vote'
+      });
+      
+      // Direct processUntilEmpty for entityInputs (no serverTxs needed)
+      await xln.processUntilEmpty(env, [voteInput]);
       
       console.log('✅ Vote submitted and processed successfully');
       selectedProposalId = '';

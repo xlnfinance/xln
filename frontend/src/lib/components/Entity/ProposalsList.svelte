@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { EntityReplica, Tab } from '../../types';
-  
+
   export let replica: EntityReplica | null;
   export let tab: Tab;
 
@@ -27,18 +27,18 @@
     const yesVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'yes');
     const noVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'no');
     const abstainVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'abstain');
-    
+
     const threshold = toNumber(config?.threshold || 1);
     const shares = config?.shares || {};
-    
+
     // Calculate total voting power of YES votes
     const yesVotingPower = yesVotes.reduce((total, [voter, _]) => {
       const voterShares = toNumber(shares[voter] || 0);
       return total + voterShares;
     }, 0);
-    
+
     const status = yesVotingPower >= threshold ? 'APPROVED' : 'PENDING';
-    
+
     return {
       yesCount: yesVotes.length,
       noCount: noVotes.length,
@@ -51,7 +51,7 @@
   }
 </script>
 
-<div class="scrollable-component">
+<div class="scrollable-component proposals-list">
   {#if replica && replica.state?.proposals?.size > 0}
     {#each Array.from(replica.state.proposals.entries()) as [propId, proposal]}
       {@const voteInfo = getVoteInfo(proposal, replica.state?.config)}
@@ -62,18 +62,18 @@
             {voteInfo.status}
           </div>
         </div>
-        
+
         <div class="proposal-meta">
           <span>By: {proposal.proposer || 'Unknown'}</span>
         </div>
-        
+
         <div class="voting-info">
           <div class="vote-counts">
             <span class="vote-yes">✅ {voteInfo.yesCount} yes</span>
             <span class="vote-no">❌ {voteInfo.noCount} no</span>
             <span class="vote-abstain">⚪ {voteInfo.abstainCount} abstain</span>
           </div>
-          
+
           <div class="threshold-info">
             <span>Voting Power: {voteInfo.yesVotingPower}/{voteInfo.threshold}</span>
             {#if voteInfo.status === 'PENDING'}
@@ -88,8 +88,8 @@
               {@const choice = getVoteChoice(voteData)}
               <div class="vote-item">
                 <span class="voter">{voter}:</span>
-                <span class="choice" class:yes={choice === 'yes'} 
-                      class:no={choice === 'no'} 
+                <span class="choice" class:yes={choice === 'yes'}
+                      class:no={choice === 'no'}
                       class:abstain={choice === 'abstain'}>
                   {choice.toUpperCase()}
                 </span>
