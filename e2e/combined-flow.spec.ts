@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import type { Env, EntityReplica } from '../src/types.js';
 
 async function setThreshold(page, value: number) {
   const slider = page.locator('#thresholdSlider');
@@ -311,8 +312,8 @@ test('ENTITY CREATION -> AUTOMATIC PANEL -> PROPOSAL CREATION', async ({ page })
 
   // Final verification
   const finalState = await page.evaluate(() => {
-    const env = (window as any).xlnEnv;
-    const replicas = Array.from(env.replicas.values());
+    const env: Env = (window as any).xlnEnv;
+    const replicas: EntityReplica[] = Array.from(env.replicas.values());
 
     return {
       height: env.height,
