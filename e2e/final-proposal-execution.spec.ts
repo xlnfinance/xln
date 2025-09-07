@@ -38,11 +38,6 @@ test('ALICE CREATES PROPOSAL → BOB VOTES → EXECUTED + COLLECTIVE MESSAGE', a
   await firstEntity.click();
   await page.waitForTimeout(300);
 
-  // Select alice as signer
-  // const signerDropdown = firstPanel.locator('.unified-dropdown').nth(1);
-  // await signerDropdown.click();
-  // await page.waitForTimeout(300);
-
   const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x0000000000000000000000000000000000000000000000000000000000000001"]').first();
   await aliceOption.click();
   await page.waitForTimeout(500);
@@ -101,15 +96,6 @@ test('ALICE CREATES PROPOSAL → BOB VOTES → EXECUTED + COLLECTIVE MESSAGE', a
   const bobEntityDropdown = secondPanel.locator('.unified-dropdown').first();
   await bobEntityDropdown.click();
   await page.waitForTimeout(300);
-
-  // const bobEntity = page.locator('#dropdownResults .dropdown-item').first();
-  // await bobEntity.click();
-  // await page.waitForTimeout(300);
-
-  // Select bob as signer
-  // const bobSignerDropdown = secondPanel.locator('.unified-dropdown').nth(1);
-  // await bobSignerDropdown.click();
-  // await page.waitForTimeout(300);
 
   const bobOption = secondPanel.locator('[data-value="Ethereum:bob:0x0000000000000000000000000000000000000000000000000000000000000001"]').first();
   await bobOption.click();

@@ -33,7 +33,8 @@
   $: {
     if (tab.entityId && tab.signer) {
       // Prefer time-aware replicas if available
-      const candidate = $visibleReplicas?.get?.(`${tab.entityId}:${tab.signer}`);
+      const replicaKey = `${tab.entityId}:${tab.signer}`;
+      const candidate = $visibleReplicas?.get?.(replicaKey);
       replica = candidate; // TODO: Fix getReplica call
     } else {
       replica = null;
@@ -223,7 +224,7 @@
       class:collapsed={!reservesExpanded}
       style="max-height: 300px;"
     >
-      {#if replica?.state?.reserves?.size > 0}
+      {#if replica?.state?.reserves && replica.state.reserves.size > 0}
         <div class="reserves-container">
           <!-- Portfolio Summary -->
           <div class="portfolio-summary">
@@ -278,7 +279,7 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
+    <div
       class="component-content"
       class:collapsed={!chatExpanded}
       style="max-height: 25vh;"

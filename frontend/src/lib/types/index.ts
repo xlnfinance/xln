@@ -18,6 +18,13 @@ export interface EntityReplica {
   blockHeight: number;
 }
 
+export interface AssetBalance {
+  symbol: string;
+  amount: bigint;
+  decimals: number;
+  contractAddress?: string;
+}
+
 export interface EntityState {
   height: number;
   timestamp: number;
@@ -25,6 +32,7 @@ export interface EntityState {
   messages: string[];
   proposals: Map<string, Proposal>;
   config: EntityConfig;
+  reserves: Map<string, AssetBalance>;
 }
 
 export interface EntityConfig {
