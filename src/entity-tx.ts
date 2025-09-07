@@ -3,10 +3,11 @@
  * Handles execution of individual entity transactions and proposals
  */
 
-import { 
-  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig, VoteData, AssetBalance 
+import {
+  EntityState, EntityTx, Proposal, ProposalAction, Env, ConsensusConfig, VoteData, AssetBalance
 } from './types.js';
 import { createHash, DEBUG, log } from './utils.js';
+import { calculateQuorumPower } from './entity-consensus.js';
 
 // === FINANCIAL HELPER FUNCTIONS ===
 
@@ -14,11 +15,11 @@ export const formatAssetAmount = (balance: AssetBalance): string => {
   const divisor = BigInt(10) ** BigInt(balance.decimals);
   const wholePart = balance.amount / divisor;
   const fractionalPart = balance.amount % divisor;
-  
+
   if (fractionalPart === 0n) {
     return `${wholePart} ${balance.symbol}`;
   }
-  
+
   const fractionalStr = fractionalPart.toString().padStart(balance.decimals, '0');
   return `${wholePart}.${fractionalStr} ${balance.symbol}`;
 };
@@ -95,19 +96,19 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
-      
+
       // SECURITY: Validate message content
       if (!validateMessage(message)) {
         log.error(`❌ Invalid chat message from ${from}`);
         return entityState; // Return unchanged state
       }
-      
+
       const currentNonce = entityState.nonces.get(from) || 0;
-      
+
       // SECURITY: For now, we auto-increment nonces but should validate them
       // TODO: Add explicit nonce in transaction data and validate
       const expectedNonce = currentNonce + 1;
-      
+
       // Create new state (immutable at transaction level)
       const newEntityState = {
         ...entityState,
@@ -119,24 +120,24 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
         channels: new Map(entityState.channels),
         collaterals: new Map(entityState.collaterals)
       };
-      
+
       newEntityState.nonces.set(from, expectedNonce);
       newEntityState.messages.push(`${from}: ${message}`);
-      
+
       // Limit messages to 10 maximum
       if (newEntityState.messages.length > 10) {
         newEntityState.messages.shift(); // Remove oldest message
       }
-      
+
       return newEntityState;
     }
-  
+
   if (entityTx.type === 'propose') {
     const { action, proposer } = entityTx.data;
     const proposalId = generateProposalId(action, proposer, entityState);
-    
+
     if (DEBUG) console.log(`    📝 Creating proposal ${proposalId} by ${proposer}: ${action.data.message}`);
-    
+
     const proposal: Proposal = {
       id: proposalId,
       proposer,
@@ -145,11 +146,11 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       status: 'pending',
       created: entityState.timestamp // Use deterministic entity timestamp
     };
-    
+
     // Check if proposer has enough voting power to execute immediately
     const proposerPower = entityState.config.shares[proposer] || BigInt(0);
     const shouldExecuteImmediately = proposerPower >= entityState.config.threshold;
-    
+
     let newEntityState = {
       ...entityState,
       nonces: new Map(entityState.nonces),
@@ -160,7 +161,7 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       channels: new Map(entityState.channels),
       collaterals: new Map(entityState.collaterals)
     };
-    
+
     if (shouldExecuteImmediately) {
       proposal.status = 'executed';
       newEntityState = executeProposal(newEntityState, proposal);
@@ -168,26 +169,26 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
     } else {
       if (DEBUG) console.log(`    ⏳ Proposal pending votes - proposer has ${proposerPower} < ${entityState.config.threshold} threshold`);
     }
-    
+
     newEntityState.proposals.set(proposalId, proposal);
     return newEntityState;
   }
-  
+
   if (entityTx.type === 'vote') {
     console.log(`🗳️ PROCESSING VOTE: entityTx.data=`, entityTx.data);
     const { proposalId, voter, choice, comment } = entityTx.data;
     const proposal = entityState.proposals.get(proposalId);
-    
+
     console.log(`🗳️ Vote lookup: proposalId=${proposalId}, found=${!!proposal}, status=${proposal?.status}`);
     console.log(`🗳️ Available proposals:`, Array.from(entityState.proposals.keys()));
-    
+
     if (!proposal || proposal.status !== 'pending') {
       console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
       return entityState;
     }
-    
+
     console.log(`    🗳️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
-    
+
     const newEntityState = {
       ...entityState,
       nonces: new Map(entityState.nonces),
@@ -198,7 +199,7 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       channels: new Map(entityState.channels),
       collaterals: new Map(entityState.collaterals)
     };
-    
+
     const updatedProposal = {
       ...proposal,
       votes: new Map(proposal.votes)
@@ -206,7 +207,7 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
     // Store vote with comment if provided
     const voteData = comment ? { choice, comment } : choice;
     updatedProposal.votes.set(voter, voteData);
-    
+
     // Calculate voting power for 'yes' votes
     const yesVoters = Array.from(updatedProposal.votes.entries())
       .filter(([_, voteData]) => {
@@ -214,15 +215,15 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
         return vote === 'yes';
       })
       .map(([voter, _]) => voter);
-    
+
     const totalYesPower = calculateQuorumPower(entityState.config, yesVoters);
-    
+
     if (DEBUG) {
       const totalShares = Object.values(entityState.config.shares).reduce((sum, val) => sum + val, BigInt(0));
       const percentage = ((Number(totalYesPower) / Number(entityState.config.threshold)) * 100).toFixed(1);
       console.log(`    🔍 Proposal votes: ${totalYesPower} / ${totalShares} [${percentage}% threshold${Number(totalYesPower) >= Number(entityState.config.threshold) ? '+' : ''}]`);
     }
-    
+
     // Check if threshold reached
     if (totalYesPower >= entityState.config.threshold) {
       updatedProposal.status = 'executed';
@@ -230,26 +231,26 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       executedState.proposals.set(proposalId, updatedProposal);
       return executedState;
     }
-    
+
     newEntityState.proposals.set(proposalId, updatedProposal);
     return newEntityState;
   }
-  
+
   if (entityTx.type === 'profile-update') {
     // Profile updates are processed via consensus but don't change entity state
     // The actual profile update happens in the gossip layer after consensus
     if (DEBUG) console.log(`    🏷️ Profile update transaction processed (gossip layer will handle storage)`);
     return entityState; // State unchanged, profile update handled separately
   }
-  
+
   if (entityTx.type === 'j_event') {
     const { from, event, observedAt, blockNumber, transactionHash } = entityTx.data;
-    
+
     if (DEBUG) {
       console.log(`    🔭 J-EVENT: ${from} observed ${event.type} at block ${blockNumber}`);
       console.log(`    🔭 J-EVENT-DATA:`, event.data);
     }
-    
+
     // Create new state to add j-event observation
     const newEntityState = {
       ...entityState,
@@ -261,28 +262,28 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       channels: new Map(entityState.channels),
       collaterals: new Map(entityState.collaterals)
     };
-    
+
     // Increment nonce for the observer
     const currentNonce = newEntityState.nonces.get(from) || 0;
     newEntityState.nonces.set(from, currentNonce + 1);
-    
+
     // Add j-event as a message (for now - later this could trigger more complex logic)
     const jEventMessage = `${from} observed j-event: ${event.type} (block ${blockNumber}, tx ${transactionHash.slice(0,10)}...)`;
     newEntityState.messages.push(jEventMessage);
-    
+
     // Limit messages to 10 maximum
     if (newEntityState.messages.length > 10) {
       newEntityState.messages.shift();
     }
-    
+
     // TODO: In the future, j-events could trigger:
     // - Automatic proposals based on jurisdiction events
-    // - State updates based on confirmed external actions  
+    // - State updates based on confirmed external actions
     // - Consensus on what external events were observed
-    
+
     return newEntityState;
   }
-  
+
   return entityState;
   } catch (error) {
     log.error(`❌ Transaction execution error: ${error}`);
@@ -302,7 +303,7 @@ export const generateProposalId = (action: ProposalAction, proposer: string, ent
     proposer,
     timestamp: entityState.timestamp // Deterministic across all validators
   });
-  
+
   const hash = createHash('sha256').update(proposalData).digest('hex');
   return `prop_${hash.slice(0, 12)}`;
 };
@@ -311,14 +312,14 @@ export const executeProposal = (entityState: EntityState, proposal: Proposal): E
   if (proposal.action.type === 'collective_message') {
     const message = `[COLLECTIVE] ${proposal.action.data.message}`;
     if (DEBUG) console.log(`    🏛️  Executing collective proposal: "${message}"`);
-    
+
     const newMessages = [...entityState.messages, message];
-    
+
     // Limit messages to 10 maximum
     if (newMessages.length > 10) {
       newMessages.shift(); // Remove oldest message
     }
-    
+
     return {
       ...entityState,
       messages: newMessages

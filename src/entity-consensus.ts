@@ -213,6 +213,15 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
   
   // Add transactions to mempool (mutable for performance)
   if (entityInput.entityTxs?.length) {
+    // DEBUG: Track vote transactions specifically
+    const voteTransactions = entityInput.entityTxs.filter(tx => tx.type === 'vote');
+    if (voteTransactions.length > 0) {
+      console.log(`🗳️ VOTE-MEMPOOL: ${entityReplica.signerId} receiving ${voteTransactions.length} vote transactions`);
+      voteTransactions.forEach(tx => {
+        console.log(`🗳️ VOTE-TX:`, tx);
+      });
+    }
+    
     if (entityReplica.signerId === 'alice') {
       console.log(`🔥 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
       console.log(`🔥 ALICE-RECEIVES: Transaction types:`, entityInput.entityTxs.map(tx => tx.type));

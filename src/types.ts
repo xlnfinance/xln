@@ -46,7 +46,8 @@ export interface Proposal {
   id: string; // hash of the proposal
   proposer: string;
   action: ProposalAction;
-  votes: Map<string, 'yes' | 'no' | 'abstain'>;
+  // TODO: refactor votes to use VoteData
+  votes: Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string }>;
   status: 'pending' | 'executed' | 'rejected';
   created: number; // entity timestamp when proposal was created (deterministic)
 }
@@ -66,7 +67,7 @@ export interface VoteData {
 }
 
 export interface EntityTx {
-  type: 'chat' | 'propose' | 'vote' | 'profile-update' | 'j_event' | 
+  type: 'chat' | 'propose' | 'vote' | 'profile-update' | 'j_event' |
         'deposit' | 'withdraw' | 'channel_open' | 'channel_update' | 'channel_close' |
         'transfer' | 'collateral_lock' | 'collateral_unlock';
   data: any;
@@ -96,7 +97,7 @@ export interface EntityState {
   messages: string[];
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
-  
+
   // 💰 NEW: Financial state
   reserves: Map<string, AssetBalance>;    // symbol -> balance ("ETH" -> {amount: 10n, decimals: 18})
   channels: Map<string, ChannelState>;    // counterpartyId -> channel state
@@ -143,7 +144,7 @@ export interface EnvSnapshot {
 export type EntityType = 'lazy' | 'numbered' | 'named';
 
 // Constants
-export const ENC = 'hex' as const; 
+export const ENC = 'hex' as const;
 
 // === HANKO BYTES SYSTEM (Final Design) ===
 export interface HankoBytes {
@@ -157,6 +158,7 @@ export interface HankoClaim {
   entityIndexes: number[];
   weights: number[];
   threshold: number;
+  expectedQuorumHash: Buffer;
 }
 
 export interface HankoVerificationResult {
@@ -226,4 +228,4 @@ export interface NameSearchResult {
   name: string;
   avatar: string;
   relevance: number; // Search relevance score 0-1
-} 
+}

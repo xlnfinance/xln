@@ -1,9 +1,9 @@
 /**
  * J-Machine Event Watcher
- * 
+ *
  * MVP implementation that watches for jurisdiction events (EntityProvider.sol, Depository.sol)
  * and automatically submits them to the corresponding entity machines.
- * 
+ *
  * This enables the j-machine ↔ e-machine event flow where:
  * - All signers listen to their jurisdiction locally
  * - When they see new events, they make entity transactions about what they observed
@@ -62,15 +62,15 @@ export class JEventWatcher {
   constructor(config: WatcherConfig) {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
-    
+
     this.entityProviderContract = new ethers.Contract(
       config.entityProviderAddress,
       this.entityProviderABI,
       this.provider
     );
-    
+
     this.depositoryContract = new ethers.Contract(
-      config.depositoryAddress, 
+      config.depositoryAddress,
       this.depositoryABI,
       this.provider
     );
@@ -87,7 +87,7 @@ export class JEventWatcher {
       privateKey,
       entityIds
     });
-    
+
     if (DEBUG) {
       console.log(`🔭 J-WATCHER: Added signer ${signerId} monitoring entities: ${entityIds.join(', ')}`);
     }
@@ -165,7 +165,7 @@ export class JEventWatcher {
     this.depositoryContract.on('ControlSharesReceived', (entityProvider, fromEntity, tokenId, amount, data, event) => {
       // Extract entity number from tokenId (control tokens use entity number directly)
       const entityNumber = this.extractEntityNumberFromTokenId(Number(tokenId));
-      
+
       this.handleJurisdictionEvent({
         type: 'shares_received',
         blockNumber: event.blockNumber,
@@ -182,7 +182,7 @@ export class JEventWatcher {
   private async processHistoricalEvents(env: Env): Promise<void> {
     try {
       const currentBlock = await this.provider.getBlockNumber();
-      
+
       if (this.lastProcessedBlock >= currentBlock) {
         if (DEBUG) console.log('🔭 J-WATCHER: No new blocks to process');
         return;
@@ -194,7 +194,7 @@ export class JEventWatcher {
       const batchSize = 1000;
       for (let fromBlock = this.lastProcessedBlock + 1; fromBlock <= currentBlock; fromBlock += batchSize) {
         const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
-        
+
         await this.processBlockRange(fromBlock, toBlock, env);
       }
 
@@ -211,8 +211,8 @@ export class JEventWatcher {
     try {
       // Get all relevant events from both contracts
       const [epEvents, depEvents] = await Promise.all([
-        this.entityProviderContract.queryFilter({}, fromBlock, toBlock),
-        this.depositoryContract.queryFilter({}, fromBlock, toBlock)
+        this.entityProviderContract.queryFilter("", fromBlock, toBlock),
+        this.depositoryContract.queryFilter("", fromBlock, toBlock)
       ]);
 
       // Process events in chronological order
@@ -397,6 +397,6 @@ export async function setupJEventWatcher(env: Env, rpcUrl: string, entityProvide
   watcher.addSigner('bob', 'bob-private-key', ['1', '2']);
 
   await watcher.startWatching(env);
-  
+
   return watcher;
 }
