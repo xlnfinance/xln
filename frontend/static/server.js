@@ -42615,6 +42615,7 @@ var runDemo = async (env) => {
     })),
     entityInputs: []
   });
+  const signerReserves = new Map;
   console.log("\uD83D\uDCB0 Adding demo financial reserves to entities...");
   const aliceChatReplica = env.replicas.get(`${chatEntityId}:alice`);
   if (aliceChatReplica) {
@@ -42622,6 +42623,7 @@ var runDemo = async (env) => {
     addToReserves(aliceChatReplica.state.reserves, "USDT", 23000000n, 6);
     addToReserves(aliceChatReplica.state.reserves, "ACME-SHARES", 1235n, 0);
     console.log(`\uD83D\uDCB0 Alice reserves: 10 ETH, 23 USDT, 1235 ACME-SHARES`);
+    signerReserves.set("alice", new Map(aliceChatReplica.state.reserves));
   }
   const bobChatReplica = env.replicas.get(`${chatEntityId}:bob`);
   if (bobChatReplica) {
@@ -42629,6 +42631,7 @@ var runDemo = async (env) => {
     addToReserves(bobChatReplica.state.reserves, "USDC", 50000000n, 6);
     addToReserves(bobChatReplica.state.reserves, "BTC-SHARES", 100n, 8);
     console.log(`\uD83D\uDCB0 Bob reserves: 5 ETH, 50 USDC, 1.00000000 BTC-SHARES`);
+    signerReserves.set("bob", new Map(bobChatReplica.state.reserves));
   }
   console.log(`
 \uD83D\uDCCB TEST 2: Trading Entity - Numbered Entity with Jurisdiction`);
@@ -42807,6 +42810,18 @@ var runDemo = async (env) => {
       { type: "propose", data: { action: { type: "collective_message", data: { message: "Critical governance: Emergency protocol activation" } }, proposer: "eve" } }
     ]
   }]);
+  console.log(`
+\uD83D\uDCB0 Restoring signer-specific reserves after consensus...`);
+  const finalAliceReplica = env.replicas.get(`${chatEntityId}:alice`);
+  if (finalAliceReplica && signerReserves.has("alice")) {
+    finalAliceReplica.state.reserves = signerReserves.get("alice");
+    console.log(`✅ Restored Alice's reserves: 10 ETH, 23 USDT, 1235 ACME-SHARES`);
+  }
+  const finalBobReplica = env.replicas.get(`${chatEntityId}:bob`);
+  if (finalBobReplica && signerReserves.has("bob")) {
+    finalBobReplica.state.reserves = signerReserves.get("bob");
+    console.log(`✅ Restored Bob's reserves: 5 ETH, 50 USDC, 100 BTC-SHARES`);
+  }
   if (DEBUG) {
     console.log(`
 \uD83C\uDFAF === FINAL VERIFICATION ===`);

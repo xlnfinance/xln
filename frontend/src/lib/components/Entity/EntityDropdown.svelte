@@ -38,7 +38,7 @@
 
   function populateDropdown() {
     if (!dropdownContent) return;
-    
+
     dropdownContent.innerHTML = `
       <div class="dropdown-search-container">
         <input type="text" class="dropdown-search-input" placeholder="🔍 Search jurisdictions, signers, entities..." />
@@ -56,7 +56,7 @@
         const target = e.target as HTMLInputElement;
         updateDropdownResults(resultsContainer, target.value);
       });
-      
+
       searchInput.addEventListener('click', (e) => {
         e.stopPropagation();
       });
@@ -89,7 +89,7 @@
   function renderSignerFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, searchTerm: string) {
     jurisdictions.forEach((jurisdiction, jIndex) => {
       // Get replicas for this jurisdiction
-      const replicasArray = Array.from($replicas.values()).filter(replica => 
+      const replicasArray = Array.from($replicas.values()).filter(replica =>
         replica.state?.config?.jurisdiction?.name === jurisdiction.name
       );
 
@@ -107,10 +107,10 @@
 
       // Add jurisdiction header
       const jurisdictionItem = createDropdownTreeItem(
-        `🏛️ ${jurisdiction.name}`, 
-        '', 
-        0, 
-        false, 
+        `🏛️ ${jurisdiction.name}`,
+        '',
+        0,
+        false,
         false,
         searchTerm
       );
@@ -124,10 +124,10 @@
 
         // Add signer
         const signerItem = createDropdownTreeItem(
-          `👤 ${signerId}`, 
-          '', 
-          1, 
-          false, 
+          `👤 ${signerId}`,
+          '',
+          1,
+          false,
           isLastSigner,
           searchTerm
         );
@@ -137,16 +137,16 @@
         signerEntities.forEach((replica, eIndex) => {
           const isLastEntity = eIndex === signerEntities.length - 1;
           const entityDisplay = replica.entityId.slice(-4);
-          
+
           const entityItem = createDropdownTreeItem(
-            `🏢 ${entityDisplay}`, 
-            `${jurisdiction.name}:${signerId}:${replica.entityId}`, 
-            2, 
-            true, 
+            `🏢 ${entityDisplay}`,
+            `${jurisdiction.name}:${signerId}:${replica.entityId}`,
+            2,
+            true,
             isLastEntity && isLastSigner,
             searchTerm
           );
-          
+
           entityItem.addEventListener('click', () => selectEntity(jurisdiction.name, signerId, replica.entityId));
           resultsContainer.appendChild(entityItem);
         });
@@ -158,7 +158,7 @@
     jurisdictions.forEach((jurisdiction, jIndex) => {
       // Get replicas for this jurisdiction (use time-aware replicas)
       const currentReplicas = $visibleReplicas || $replicas;
-      const replicasArray = Array.from(currentReplicas.values()).filter(replica => 
+      const replicasArray = Array.from(currentReplicas.values()).filter(replica =>
         replica.state?.config?.jurisdiction?.name === jurisdiction.name
       );
 
@@ -176,10 +176,10 @@
 
       // Add jurisdiction header
       const jurisdictionItem = createDropdownTreeItem(
-        `🏛️ ${jurisdiction.name}`, 
-        '', 
-        0, 
-        false, 
+        `🏛️ ${jurisdiction.name}`,
+        '',
+        0,
+        false,
         false,
         searchTerm
       );
@@ -194,10 +194,10 @@
 
         // Add entity
         const entityItem = createDropdownTreeItem(
-          `🏢 ${entityDisplay} (${entitySigners.length} signers)`, 
-          '', 
-          1, 
-          false, 
+          `🏢 ${entityDisplay} (${entitySigners.length} signers)`,
+          '',
+          1,
+          false,
           isLastEntity,
           searchTerm
         );
@@ -206,16 +206,16 @@
         // Add signers for this entity
         entitySigners.forEach((replica, sIndex) => {
           const isLastSigner = sIndex === entitySigners.length - 1;
-          
+
           const signerItem = createDropdownTreeItem(
-            `👤 ${replica.signerId}`, 
-            `${jurisdiction.name}:${replica.signerId}:${replica.entityId}`, 
-            2, 
-            true, 
+            `👤 ${replica.signerId}`,
+            `${jurisdiction.name}:${replica.signerId}:${replica.entityId}`,
+            2,
+            true,
             isLastSigner && isLastEntity,
             searchTerm
           );
-          
+
           signerItem.addEventListener('click', () => selectEntity(jurisdiction.name, replica.signerId, replica.entityId));
           resultsContainer.appendChild(signerItem);
         });
@@ -226,7 +226,7 @@
   function createDropdownTreeItem(text: string, value: string, level: number, isSelectable: boolean, isLast: boolean, searchTerm: string): HTMLDivElement {
     const item = document.createElement('div');
     item.className = `dropdown-item ${level > 0 ? `indent-${level}` : ''}`;
-    
+
     // Create ASCII tree structure
     let prefix = '';
     if (level === 1) {
@@ -234,12 +234,12 @@
     } else if (level === 2) {
       prefix = '│  └─ ';
     }
-    
+
     item.innerHTML = `
       <span class="tree-prefix" style="color: #666; font-family: monospace;">${prefix}</span>
       <span class="item-text">${text}</span>
     `;
-    
+
     if (isSelectable) {
       item.style.cursor = 'pointer';
       item.dataset.value = value;
@@ -252,7 +252,7 @@
     if (searchTerm && text.toLowerCase().includes(searchTerm.toLowerCase())) {
       highlightSearchTerm(item, searchTerm);
     }
-    
+
     return item;
   }
 
@@ -272,7 +272,7 @@
       signer: signerId,
       entityId
     });
-    
+
     isOpen = false;
   }
 
@@ -362,22 +362,22 @@
     left: 0;
     margin-top: 4px;
   }
-  
+
   /* Dark theme scrollbar */
   .unified-dropdown-content::-webkit-scrollbar {
     width: 8px;
   }
-  
+
   .unified-dropdown-content::-webkit-scrollbar-track {
     background: #1e1e1e;
     border-radius: 4px;
   }
-  
+
   .unified-dropdown-content::-webkit-scrollbar-thumb {
     background: #555;
     border-radius: 4px;
   }
-  
+
   .unified-dropdown-content::-webkit-scrollbar-thumb:hover {
     background: #666;
   }
