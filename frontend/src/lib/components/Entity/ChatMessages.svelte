@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { EntityReplica, Tab } from '../../types';
-  
+
   export let replica: EntityReplica | null;
   export let tab: Tab;
 </script>
 
-<div class="scrollable-component">
+<div class="scrollable-component chat-messages" id="chat-content-{tab.id}">
   {#if replica && replica.state?.messages?.length > 0}
     {#each replica.state.messages as message, index}
       <div class="chat-message">

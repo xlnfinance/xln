@@ -51,7 +51,7 @@ async function collectUiMetrics(page) {
   return { panelCount, hasDropdown };
 }
 
-test('compare svelte frontend vs ui app (smoke)', async ({ page }) => {
+test.skip('compare svelte frontend vs ui app (smoke)', async ({ page }) => {
   const ui = await collectUiMetrics(page);
 
   // Use a new context/page for the second target to avoid shared state

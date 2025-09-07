@@ -5,7 +5,7 @@
   import { visibleReplicas } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
-  
+
   // Simple HTML escape (moved from deleted utils)
   function escapeHtml(unsafe: string): string {
     return unsafe
@@ -53,12 +53,12 @@
   }
 
   // 💰 Financial calculation functions
-  
+
   // Mock asset prices for demo (in real system, fetch from oracle/API)
   const assetPrices: Record<string, number> = {
     'ETH': 2500,      // $2,500 per ETH
     'USDT': 1,        // $1 per USDT
-    'USDC': 1,        // $1 per USDC  
+    'USDC': 1,        // $1 per USDC
     'ACME-SHARES': 15.50, // $15.50 per ACME share
     'BTC-SHARES': 45000   // $45,000 per BTC share
   };
@@ -67,11 +67,11 @@
     const divisor = BigInt(10) ** BigInt(balance.decimals);
     const wholePart = balance.amount / divisor;
     const fractionalPart = balance.amount % divisor;
-    
+
     if (fractionalPart === 0n) {
       return `${wholePart} ${balance.symbol}`;
     }
-    
+
     const fractionalStr = fractionalPart.toString().padStart(balance.decimals, '0');
     return `${wholePart}.${fractionalStr} ${balance.symbol}`;
   }
@@ -94,7 +94,7 @@
   // Handle entity selection from dropdown
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signer, entityId } = event.detail;
-    
+
     tabOperations.updateTab(tab.id, {
       jurisdiction,
       signer,
@@ -118,7 +118,7 @@
     const allTabs = tabOperations.getActiveTab();
     // Show close button if more than 1 tab exists
     // This will be updated reactively through the parent
-    
+
     // Listen for time machine changes (like old index.html)
     const handleTimeChanged = (event: CustomEvent) => {
       console.log('🕰️ EntityPanel received time change event:', event.detail.timeIndex);
@@ -129,9 +129,9 @@
         console.log(`🔄 Panel ${tab.id} updating for time index:`, event.detail.timeIndex);
       }
     };
-    
+
     window.addEventListener('timeChanged', handleTimeChanged as EventListener);
-    
+
     return () => {
       window.removeEventListener('timeChanged', handleTimeChanged as EventListener);
     };
@@ -140,8 +140,8 @@
 
 <div class="entity-panel" data-panel-id={tab.id}>
   <div class="panel-header">
-    <EntityDropdown 
-      {tab} 
+    <EntityDropdown
+      {tab}
       on:entitySelect={handleEntitySelect}
     />
     <div class="panel-header-controls">
@@ -157,7 +157,7 @@
       {/if}
     </div>
   </div>
-  
+
   {#if !tab.entityId || !tab.signer}
     <!-- Empty State: No Entity Selected -->
     <div class="empty-panel-state">
@@ -176,11 +176,11 @@
   {:else}
     <!-- Entity Profile Section -->
     <EntityProfile {replica} {tab} />
-    
+
     <!-- Consensus State Component -->
   <div class="panel-component" id="consensus-{tab.id}">
-    <div 
-      class="component-header" 
+    <div
+      class="component-header"
       class:collapsed={!consensusExpanded}
       on:click={() => toggleComponent(`consensus-${tab.id}`)}
       role="button"
@@ -193,8 +193,8 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
-      class="component-content" 
+    <div
+      class="component-content"
       class:collapsed={!consensusExpanded}
       style="max-height: 200px;"
     >
@@ -204,8 +204,8 @@
 
   <!-- Reserves Component -->
   <div class="panel-component" id="reserves-{tab.id}">
-    <div 
-      class="component-header" 
+    <div
+      class="component-header"
       class:collapsed={!reservesExpanded}
       on:click={() => toggleComponent(`reserves-${tab.id}`)}
       role="button"
@@ -218,8 +218,8 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
-      class="component-content" 
+    <div
+      class="component-content"
       class:collapsed={!reservesExpanded}
       style="max-height: 300px;"
     >
@@ -229,25 +229,25 @@
           <div class="portfolio-summary">
             <strong>Portfolio Value: ${calculateTotalNetworth(replica.state.reserves).toFixed(2)}</strong>
           </div>
-          
+
           <!-- Asset List with Portfolio Bars -->
           {#each Array.from(replica.state.reserves.entries()) as [symbol, balance]}
             {@const assetValue = getAssetValue(balance)}
             {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
             {@const percentage = totalNetworth > 0 ? (assetValue / totalNetworth) * 100 : 0}
-            
+
             <div class="asset-row">
               <div class="asset-info">
                 <span class="asset-symbol">{balance.symbol}</span>
                 <span class="asset-amount">{formatAssetDisplay(balance)}</span>
                 <span class="asset-value">${assetValue.toFixed(2)}</span>
               </div>
-              
+
               <!-- Green portfolio bar showing percentage -->
               <div class="portfolio-bar-container">
                 <div class="portfolio-bar">
-                  <div 
-                    class="portfolio-fill" 
+                  <div
+                    class="portfolio-fill"
                     style="width: {percentage}%"
                   ></div>
                 </div>
@@ -264,7 +264,7 @@
 
   <!-- Chat Component -->
   <div class="panel-component" id="chat-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!chatExpanded}
       on:click={() => toggleComponent(`chat-${tab.id}`)}
@@ -289,7 +289,7 @@
 
   <!-- Proposals Component -->
   <div class="panel-component" id="proposals-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!proposalsExpanded}
       on:click={() => toggleComponent(`proposals-${tab.id}`)}
@@ -303,7 +303,7 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
+    <div
       class="component-content"
       class:collapsed={!proposalsExpanded}
       style="max-height: 25vh;"
@@ -314,7 +314,7 @@
 
   <!-- Transaction History Component -->
   <div class="panel-component entity-history-panel" id="history-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!historyExpanded}
       on:click={() => toggleComponent(`history-${tab.id}`)}
@@ -328,7 +328,7 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
+    <div
       class="component-content"
       class:collapsed={!historyExpanded}
       style="max-height: 40vh;"
@@ -339,7 +339,7 @@
 
   <!-- Controls Component -->
   <div class="panel-component" id="controls-{tab.id}">
-    <div 
+    <div
       class="component-header"
       class:collapsed={!controlsExpanded}
       on:click={() => toggleComponent(`controls-${tab.id}`)}
@@ -353,7 +353,7 @@
       </div>
       <div class="component-toggle">▼</div>
     </div>
-    <div 
+    <div
       class="component-content"
       class:collapsed={!controlsExpanded}
       style="max-height: 400px;"

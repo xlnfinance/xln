@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import type { Env, EntityReplica } from '../src/types.js';
 
 async function setThreshold(page, value: number) {
@@ -19,7 +19,7 @@ async function pickSignerInRow(page, rowIndex: number, signerText: string) {
   await select.selectOption(signerText);
 }
 
-async function selectSignerIndexAndFirstEntity(page, signerIndex: number) {
+async function selectSignerIndexAndFirstEntity(page: Page, signerIndex: number) {
   // Click the first entity dropdown
   const entityDropdown = page.locator('.unified-dropdown').first();
   await entityDropdown.click();
