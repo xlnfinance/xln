@@ -31,6 +31,9 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
   const firstValidatorSelect = page.locator('.validator-name').first();
   await firstValidatorSelect.selectOption('alice');
 
+  await page.getByRole('button', { name: '➕ Add Validator' }).click();
+  await page.getByRole('combobox').nth(3).selectOption('bob');
+
   // Ensure threshold is 1
   const threshold = page.locator('#thresholdSlider');
   await threshold.evaluate((el: HTMLInputElement) => {
@@ -44,7 +47,7 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
   await createBtn.click();
 
   // Wait for entity creation to complete
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(1000);
 
   // Verify in the app state that new replicas were imported
   // For a single validator, we expect at least +1 replica
@@ -56,18 +59,18 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
     beforeCount,
     { timeout: 30000 }
   );
-  
+
   const afterCount = await page.evaluate(() => {
     const env = (window as any).xlnEnv;
     return env ? env.replicas.size : 0;
   });
-  
+
   console.log(`✅ Entity creation test: replicas before=${beforeCount}, after=${afterCount}`);
   expect(afterCount).toBeGreaterThan(beforeCount);
 
   // Visual confirmation: take a screenshot for verification
-  await page.screenshot({ path: 'entity-created.png', fullPage: true });
-  
+  await page.screenshot({ path: 'e2e/screenshots/entity-created.png', fullPage: true });
+
   // Hold the final frame a bit so the video isn't 0:00
   await page.waitForTimeout(1000);
 });
