@@ -157,7 +157,7 @@ async function testABIEncoding() {
     
     return true;
   } catch (error) {
-    console.error('❌ ABI encoding failed:', error.message);
+    console.error('❌ ABI encoding failed:', error instanceof Error ? error.message : String(error));
     return false;
   }
 }

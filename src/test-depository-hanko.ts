@@ -167,7 +167,7 @@ const testSingleEOASignature = async () => {
     console.log('✅ Single EOA signature test passed!');
     return true;
   } catch (error) {
-    console.error('❌ Single EOA signature test failed:', error.message);
+    console.error('❌ Single EOA signature test failed:', error instanceof Error ? error.message : String(error));
     return false;
   }
 };
@@ -229,7 +229,7 @@ const testMultipleEOASignatures = async () => {
     console.log('✅ Multiple EOA signatures test passed!');
     return true;
   } catch (error) {
-    console.error('❌ Multiple EOA signatures test failed:', error.message);
+    console.error('❌ Multiple EOA signatures test failed:', error instanceof Error ? error.message : String(error));
     return false;
   }
 };
@@ -296,7 +296,7 @@ const testMixedHanko = async () => {
     console.log('ℹ️  Mixed Hanko test may fail due to entity verification - this is expected');
     return true;
   } catch (error) {
-    console.log('ℹ️  Mixed Hanko test failed as expected (entity verification):', error.message.substring(0, 100));
+    console.log('ℹ️  Mixed Hanko test failed as expected (entity verification):', error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true; // Expected failure
   }
 };
@@ -330,7 +330,7 @@ const testInvalidSignatures = async () => {
     console.error('❌ Invalid signatures test FAILED - should have reverted!');
     return false;
   } catch (error) {
-    console.log('✅ Invalid signatures correctly rejected:', error.message.substring(0, 100));
+    console.log('✅ Invalid signatures correctly rejected:', error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true;
   }
 };
@@ -387,7 +387,7 @@ const testWrongNonce = async () => {
     console.error('❌ Wrong nonce test FAILED - should have reverted!');
     return false;
   } catch (error) {
-    console.log('✅ Wrong nonce correctly rejected:', error.message.substring(0, 100));
+    console.log('✅ Wrong nonce correctly rejected:', error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true;
   }
 };
@@ -441,7 +441,7 @@ const testDomainSeparation = async () => {
     console.error('❌ Domain separation test FAILED - should have reverted!');
     return false;
   } catch (error) {
-    console.log('✅ Domain separation correctly prevented replay:', error.message.substring(0, 100));
+    console.log('✅ Domain separation correctly prevented replay:', error instanceof Error ? error.message.substring(0, 100) : String(error).substring(0, 100));
     return true;
   }
 };
@@ -508,7 +508,7 @@ const testNonceProgression = async () => {
     console.log(`✅ Nonce progression test passed! New nonce: ${newNonce}`);
     return true;
   } catch (error) {
-    console.error('❌ Nonce progression test failed:', error.message);
+    console.error('❌ Nonce progression test failed:', error instanceof Error ? error.message : String(error));
     return false;
   }
 };

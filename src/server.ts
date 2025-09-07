@@ -97,7 +97,11 @@ const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
           { ...proposal, votes: cloneMap(proposal.votes) }
         ])
       ),
-      config: replica.state.config
+      config: replica.state.config,
+      // 💰 Clone financial state
+      reserves: cloneMap(replica.state.reserves),
+      channels: cloneMap(replica.state.channels),
+      collaterals: cloneMap(replica.state.collaterals)
     },
     mempool: cloneArray(replica.mempool),
     proposal: replica.proposal ? {
@@ -692,6 +696,17 @@ const runDemoWrapper = async (env: any): Promise<any> => {
   }
 };
 
+// === ENVIRONMENT UTILITIES ===
+export const createEmptyEnv = (): Env => {
+  return {
+    replicas: new Map(),
+    height: 0,
+    timestamp: Date.now(),
+    serverInput: { serverTxs: [], entityInputs: [] },
+    history: []
+  };
+};
+
 // === CONSENSUS PROCESSING UTILITIES ===
 export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   let outputs = inputs || [];
@@ -706,6 +721,13 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
     precommits: o.precommits?.size || 0,
     hasFrame: !!o.proposedFrame
   })));
+  
+  // DEBUG: Log transaction details for vote transactions
+  outputs.forEach((output, i) => {
+    if (output.entityTxs?.some(tx => tx.type === 'vote')) {
+      console.log(`🗳️ VOTE-DEBUG: Input ${i+1} contains vote transactions:`, output.entityTxs.filter(tx => tx.type === 'vote'));
+    }
+  });
   
   while (outputs.length > 0 && iterationCount < maxIterations) {
     iterationCount++;

@@ -11,20 +11,25 @@ if (typeof global === 'undefined') {
   (globalThis as any).global = globalThis;
 }
 
-
+// Extend Window interface to include custom properties
+declare global {
+  interface Window {
+    reinitializeAfterClear?: () => void;
+  }
+}
 
 // Environment detection and compatibility layer
 export const isBrowser = typeof window !== 'undefined';
 
 // Simplified crypto compatibility
-export const createHash = isBrowser ? 
+export const createHash = isBrowser ?
   (algorithm: string) => ({
     update: (data: string) => ({
       digest: (encoding?: string) => {
         // Create proper 32-byte hash for browser demo using Web Crypto API
         const encoder = new TextEncoder();
         const dataBuffer = encoder.encode(data);
-        
+
         // Simple deterministic hash that produces 32 bytes
         let hash = 0;
         for (let i = 0; i < data.length; i++) {
@@ -32,11 +37,11 @@ export const createHash = isBrowser ?
           hash = ((hash << 5) - hash) + char;
           hash = hash & hash; // Convert to 32bit integer
         }
-        
+
         // Create a 32-byte buffer by repeating and expanding the hash
         const baseHash = Math.abs(hash).toString(16).padStart(8, '0');
         const fullHash = (baseHash + baseHash + baseHash + baseHash).slice(0, 64); // 32 bytes = 64 hex chars
-        
+
         if (encoding === 'hex') {
           return fullHash;
         } else {
@@ -87,8 +92,8 @@ if (isBrowser) {
 
 // Debug compatibility
 const createDebug = (namespace: string) => {
-  const shouldLog = namespace.includes('state') || namespace.includes('tx') || 
-                   namespace.includes('block') || namespace.includes('error') || 
+  const shouldLog = namespace.includes('state') || namespace.includes('tx') ||
+                   namespace.includes('block') || namespace.includes('error') ||
                    namespace.includes('diff') || namespace.includes('info');
   return shouldLog ? console.log.bind(console, `[${namespace}]`) : () => {};
 };
@@ -106,7 +111,7 @@ export const log = {
 };
 
 // Hash utility function
-export const hash = (data: Buffer | string): Buffer => 
+export const hash = (data: Buffer | string): Buffer =>
   createHash('sha256').update(data.toString()).digest();
 
 // Global debug flag
@@ -115,7 +120,7 @@ export let DEBUG = true;
 // Function to clear the database and reset in-memory history
 export const clearDatabase = async (db?: any) => {
   console.log('Clearing database and resetting history...');
-  
+
   if (db) {
     // High-level: Use the provided database instance (Level polyfill)
     await db.clear();
@@ -125,7 +130,7 @@ export const clearDatabase = async (db?: any) => {
     if (typeof indexedDB !== 'undefined') {
       // Browser: Clear IndexedDB with the same name that Level polyfill uses
       const dbNames = ['db', 'level-js-db', 'level-db']; // Common Level.js database names
-      
+
       try {
         // Clear all possible database names that Level.js might use
         const clearPromises = dbNames.map(dbName => {
@@ -145,11 +150,12 @@ export const clearDatabase = async (db?: any) => {
             };
           });
         });
-        
+
         await Promise.all(clearPromises);
         console.log('✅ All databases cleared, re-initializing...');
-        
+
         // Trigger re-initialization instead of page reload
+        // TODO: delete deprecated reinitializeAfterClear
         if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
           window.reinitializeAfterClear();
         }
@@ -200,7 +206,7 @@ export const getEntityDisplayInfo = (entityId: string): { name: string, avatar: 
   } else {
     return {
       name: entityId,
-      avatar: generateEntityAvatar(entityId), 
+      avatar: generateEntityAvatar(entityId),
       type: 'lazy'
     };
   }
@@ -217,7 +223,7 @@ export const DEMO_SIGNERS = {
     address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
   },
   'bob': {
-    name: 'bob.eth', 
+    name: 'bob.eth',
     address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
   },
   'carol': {
@@ -229,7 +235,7 @@ export const DEMO_SIGNERS = {
     address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65'
   },
   'eve': {
-    name: 'eve.eth', 
+    name: 'eve.eth',
     address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc'
   }
 };
@@ -305,7 +311,7 @@ export const generateEntityAvatar = (entityId: string): string => {
 
 /**
  * Generate identicon avatar for signer
- * @param signerId - The signer ID to generate avatar for  
+ * @param signerId - The signer ID to generate avatar for
  * @returns Base64 encoded SVG avatar
  */
 export const generateSignerAvatar = (signerId: string): string => {
@@ -331,16 +337,16 @@ const generateFallbackAvatar = (seed: string): string => {
   for (let i = 0; i < seed.length; i++) {
     hash = ((hash << 5) - hash + seed.charCodeAt(i)) & 0xffffffff;
   }
-  
+
   // Generate HSL color
   const hue = Math.abs(hash) % 360;
   const saturation = 70;
   const lightness = 50;
-  
+
   const svg = `<svg width="32" height="32" xmlns="http://www.w3.org/2000/svg">
     <circle cx="16" cy="16" r="16" fill="hsl(${hue}, ${saturation}%, ${lightness}%)"/>
   </svg>`;
-  
+
   const base64 = Buffer.from(svg).toString('base64');
   return `data:image/svg+xml;base64,${base64}`;
-}; 
+};
