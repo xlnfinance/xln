@@ -1,10 +1,15 @@
 #!/bin/bash
 
+set -e
+
+# Resolve paths relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 echo "🔄 Resetting XLN Networks and Redeploying Contracts..."
 
 # Stop existing networks
 echo "1️⃣ Stopping existing networks..."
-./stop-networks.sh
+"$SCRIPT_DIR/stop-networks.sh"
 
 # Clean up old data
 echo ""
@@ -18,7 +23,7 @@ echo "✅ Cleanup complete"
 # Start fresh networks  
 echo ""
 echo "3️⃣ Starting fresh networks..."
-./start-networks.sh
+"$SCRIPT_DIR/start-networks.sh"
 
 # Wait for networks to stabilize
 echo ""
@@ -28,7 +33,7 @@ sleep 5
 # Deploy contracts using dedicated script
 echo ""
 echo "5️⃣ Deploying contracts..."
-./deploy-contracts.sh
+"$SCRIPT_DIR/deploy-contracts.sh"
 
 if [ $? -eq 0 ]; then
     echo ""

@@ -1,9 +1,18 @@
 #!/bin/bash
 
+set -e
+
 echo "🚀 Starting XLN Demo Networks..."
 
+# Resolve paths relative to this script to be robust in any CWD
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$SCRIPT_DIR"
+LOG_DIR="$ROOT_DIR/logs"
+PIDS_DIR="$ROOT_DIR/pids"
+CONTRACTS_DIR="$ROOT_DIR/contracts"
+
 # Create directories for logs and pids first
-mkdir -p logs pids
+mkdir -p "$LOG_DIR" "$PIDS_DIR"
 
 # Kill any existing hardhat nodes
 pkill -f "hardhat node" 2>/dev/null || true
@@ -13,18 +22,16 @@ sleep 1
 
 # Start three hardhat nodes in background
 echo "📡 Starting Ethereum Network (port 8545)..."
-cd contracts && npx hardhat node --port 8545 --hostname 127.0.0.1 > ../logs/ethereum-8545.log 2>&1 &
-echo "$!" > ../pids/ethereum.pid
+(cd "$CONTRACTS_DIR" && npx hardhat node --port 8545 --hostname 127.0.0.1 > "$LOG_DIR/ethereum-8545.log" 2>&1 &)
+echo "$!" > "$PIDS_DIR/ethereum.pid"
 
 echo "📡 Starting Polygon Network (port 8546)..."
-cd contracts && npx hardhat node --port 8546 --hostname 127.0.0.1 > ../logs/polygon-8546.log 2>&1 &
-echo "$!" > ../pids/polygon.pid
+(cd "$CONTRACTS_DIR" && npx hardhat node --port 8546 --hostname 127.0.0.1 > "$LOG_DIR/polygon-8546.log" 2>&1 &)
+echo "$!" > "$PIDS_DIR/polygon.pid"
 
 echo "📡 Starting Arbitrum Network (port 8547)..."
-cd contracts && npx hardhat node --port 8547 --hostname 127.0.0.1 > ../logs/arbitrum-8547.log 2>&1 &
-echo "$!" > ../pids/arbitrum.pid
-
-cd ..
+(cd "$CONTRACTS_DIR" && npx hardhat node --port 8547 --hostname 127.0.0.1 > "$LOG_DIR/arbitrum-8547.log" 2>&1 &)
+echo "$!" > "$PIDS_DIR/arbitrum.pid"
 
 echo "⏳ Waiting for networks to start..."
 sleep 3
