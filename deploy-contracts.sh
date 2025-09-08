@@ -1,9 +1,17 @@
 #!/bin/bash
 
+set -e
+
+# Resolve paths relative to this script to be robust in CI
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$SCRIPT_DIR"
+LOG_DIR="$ROOT_DIR/logs"
+CONTRACTS_DIR="$ROOT_DIR/contracts"
+
 echo "📝 Deploying EntityProvider contracts to all networks..."
 
 # Create deployment log directory
-mkdir -p logs
+mkdir -p "$LOG_DIR"
 
 # Network configurations (using simple variables instead of associative arrays)
 NETWORK_8545="Ethereum"
@@ -41,7 +49,7 @@ deploy_to_network() {
         return 1
     fi
     
-    cd contracts
+    cd "$CONTRACTS_DIR"
     
     # Deploy both EntityProvider and Depository
     echo "   🔧 Deploying EntityProvider..."
@@ -49,7 +57,7 @@ deploy_to_network() {
                          --network "$network_config" 2>&1)
     
     local entityprovider_status=$?
-    echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log"
+    echo "$entityprovider_output" > "$LOG_DIR/deploy-entityprovider-$port.log"
     
     if [ $entityprovider_status -eq 0 ] && echo "$entityprovider_output" | grep -q "DEPLOYED_ADDRESS="; then
         # Extract EntityProvider address
@@ -58,7 +66,7 @@ deploy_to_network() {
     else
         echo "   ❌ EntityProvider deployment failed"
         echo "$entityprovider_output"
-        cd ..
+        cd "$ROOT_DIR"
         return 1
     fi
     
@@ -67,7 +75,7 @@ deploy_to_network() {
                          --network "$network_config" 2>&1)
     
     local depository_status=$?
-    echo "$depository_output" > "../logs/deploy-depository-$port.log"
+    echo "$depository_output" > "$LOG_DIR/deploy-depository-$port.log"
     
     if [ $depository_status -eq 0 ]; then
         # Extract final address from Hardhat Ignition output (last line with 0x address)

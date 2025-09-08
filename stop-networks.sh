@@ -1,5 +1,11 @@
 #!/bin/bash
 
+set -e
+
+# Resolve paths relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIDS_DIR="$SCRIPT_DIR/pids"
+
 echo "🛑 Stopping XLN Demo Networks..."
 
 # Kill hardhat processes
@@ -7,8 +13,8 @@ echo "🔄 Terminating hardhat nodes..."
 pkill -f "hardhat node" 2>/dev/null || true
 
 # Clean up PID files
-if [ -d "pids" ]; then
-    rm -f pids/*.pid
+if [ -d "$PIDS_DIR" ]; then
+    rm -f "$PIDS_DIR"/*.pid
     echo "🧹 Cleaned up PID files"
 fi
 
@@ -24,4 +30,4 @@ fi
 
 echo ""
 echo "🏁 All XLN networks have been stopped"
-echo "💡 Use './start-networks.sh' to restart networks" 
+echo "💡 Use './start-networks.sh' to restart networks"
