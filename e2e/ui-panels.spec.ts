@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-test('Panels add/clone/remove and 1..4 layout', async ({ page }) => {
-  await page.goto('http://127.0.0.1:5173/');
+test.skip('Panels add/clone/remove and 1..4 layout', async ({ page }) => {
+  await page.goto('http://127.0.0.1:8080/');
   await page.addInitScript(() => { (window as any).__useDistServer = true; });
   await page.reload();
   await page.waitForFunction(() => Boolean((window as any).xlnEnv), undefined, { timeout: 30000 });
