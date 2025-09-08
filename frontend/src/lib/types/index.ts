@@ -186,3 +186,22 @@ export interface EntityInfo {
   type: 'lazy' | 'numbered' | 'named';
   boardHash: string;
 }
+
+export interface ServerFrame {
+  frameIndex: number;
+  snapshot: Snapshot;
+  inputs: EntityInput[];
+  outputs: EntityOutput[];
+  imports: ServerTx[];
+  serverTxs: ServerTx[];
+  timestamp: number;
+  hasActivity: boolean;
+}
+
+export interface BankingTransaction {
+  type: 'input' | 'output' | 'import';
+  icon: string;
+  primaryInfo: string;
+  secondaryInfo: string;
+  amount: string;
+}

@@ -45,7 +45,7 @@
     const target = event.target as HTMLInputElement;
     const value = parseInt(target.value);
     const maxMeaningfulIndex = $timeState.maxTimeIndex;
-    
+
     if (value > maxMeaningfulIndex) {
       timeOperations.goToLive();
     } else {
@@ -74,7 +74,7 @@
     // Only activate when not typing in inputs
     if (event.target && (event.target as HTMLElement).tagName === 'INPUT') return;
     if (event.target && (event.target as HTMLElement).tagName === 'TEXTAREA') return;
-    
+
     switch(event.key) {
       case 'ArrowLeft':
         event.preventDefault();
@@ -123,10 +123,11 @@
     </div>
   </div>
   <div class="time-slider-container" style="--progress: {progressPercent}%">
-    <input 
-      type="range" 
-      class="time-slider" 
-      min="0" 
+    <input
+      type="range"
+      id="timeSlider"
+      class="time-slider"
+      min="0"
       max={$timeState.maxTimeIndex + 1}
       value={sliderValue}
       disabled={$history.length === 0}
@@ -258,10 +259,10 @@
     width: 100%;
     height: 4px;
     border-radius: 2px;
-    background: linear-gradient(90deg, 
-        #007acc 0%, 
-        #00ff88 var(--progress), 
-        #404040 var(--progress), 
+    background: linear-gradient(90deg,
+        #007acc 0%,
+        #00ff88 var(--progress),
+        #404040 var(--progress),
         #555 100%);
     outline: none;
     -webkit-appearance: none;
