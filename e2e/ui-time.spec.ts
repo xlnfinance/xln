@@ -1,25 +1,24 @@
 import { test, expect } from '@playwright/test';
 
 test('Time machine step controls and slider mapping', async ({ page }) => {
-  await page.goto('http://127.0.0.1:5173/');
-  await page.addInitScript(() => { (window as any).__useDistServer = true; });
+  await page.goto('http://127.0.0.1:8080/');
+  await page.addInitScript(() => {
+    (window as any).__useDistServer = true;
+  });
   await page.reload();
   await page.waitForFunction(() => Boolean((window as any).xlnEnv), undefined, { timeout: 30000 });
 
-  // Ensure some history: send a couple of chats
-  // open dropdown and select first entity if any exists; otherwise create one quickly
-  const hasReplicas = await page.evaluate(() => (window as any).xlnEnv?.replicas?.size > 0);
-  if (!hasReplicas) {
-    // create a quick lazy entity
-    await page.locator('#entityNameInput').fill('TimeTest');
-    await page.getByRole('button', { name: '➕ Add New Validator' }).click();
-    const rows = page.locator('#validatorsList .validator-row');
-    await rows.nth(0).locator('input').first().fill('alice');
-    await rows.nth(1).locator('input').first().fill('bob');
-    await page.getByRole('button', { name: 'Create Entity' }).click();
-  }
+  // create a quick lazy entity
+  await page.locator('#entityNameInput').fill('TimeTest');
+  await page.getByRole('button', { name: '➕ Add Validator' }).click();
+  await page.getByRole('combobox').nth(2).selectOption('alice');
+  await page.getByRole('combobox').nth(3).selectOption('bob');
+  await page.getByRole('button', { name: 'Create Entity' }).click();
 
   await page.waitForFunction(() => (window as any).xlnEnv?.replicas?.size > 0, undefined, { timeout: 10000 });
+
+  await expect(page.locator('.entity-panels-container').first()).toBeVisible();
+
   // bind first panel to first replica
   const firstPanel = page.locator('#entityPanelsContainer .entity-panel').first();
   await firstPanel.scrollIntoViewIfNeeded();
@@ -27,10 +26,12 @@ test('Time machine step controls and slider mapping', async ({ page }) => {
   await firstPanel.locator('.unified-dropdown-content .dropdown-item.indent-2').first().click({ force: true });
 
   // produce two history frames via chat + propose
-  await page.locator('#entityPanelsContainer .entity-panel').first().locator('textarea').fill('hi1');
-  await page.getByRole('button', { name: 'Send Message' }).first().click();
-  await page.locator('#entityPanelsContainer .entity-panel').first().locator('textarea').fill('hi2');
-  await page.getByRole('button', { name: 'Propose' }).first().click();
+  await firstPanel.getByRole('button', { name: '⚙️ Controls ▼' }).click();
+  await expect(firstPanel.locator('.controls-section').first()).toBeVisible();
+  await firstPanel.locator('textarea').fill('hi1');
+  await firstPanel.getByRole('button', { name: 'Send Message' }).first().click();
+  await firstPanel.locator('textarea').fill('hi2');
+  await firstPanel.getByRole('button', { name: 'Send Message' }).first().click();
 
   await page.waitForTimeout(500);
 
@@ -39,13 +40,14 @@ test('Time machine step controls and slider mapping', async ({ page }) => {
   await slider.focus();
   await slider.fill('0');
   await page.waitForTimeout(50);
+
+  await firstPanel.getByRole('button', { name: '🗂️ History ▼' }).click();
+  await expect(firstPanel.locator('.transaction-history')).toBeVisible();
   // label should show Frame 1 /
-  await expect(page.locator('.time-display')).toContainText('Frame 1');
+  await expect(firstPanel.locator('.transaction-history .current-frame')).toContainText('Frame 0');
 
   // step forward updates frame or moves to live
-  await page.getByTitle('Forward').click();
+  await page.getByTitle('Step Forward (→ arrow)').click();
   await page.waitForTimeout(50);
-  await expect(page.locator('.time-display')).not.toHaveText('Frame 1', { timeout: 2000 });
+  await expect(firstPanel.locator('.transaction-history .current-frame')).not.toHaveText('Frame 1', { timeout: 2000 });
 });
-
-
