@@ -4,6 +4,7 @@ export default defineConfig({
   // testDir is relative to this config file's directory
   testDir: './e2e',
   timeout: 20000,
+  workers: 1,
   // retries: 1,
   outputDir: './e2e/test-results',
   use: {
