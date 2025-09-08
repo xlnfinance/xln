@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Tab, EntityReplica } from '../../types';
-  import { getXLN, replicas } from '../../stores/xlnStore';
-  import { visibleReplicas } from '../../stores/timeStore';
+  import { getXLN, replicas, history } from '../../stores/xlnStore';
+  import { visibleReplicas, currentTimeIndex } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
 
@@ -20,7 +20,7 @@
   import ConsensusState from './ConsensusState.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import ProposalsList from './ProposalsList.svelte';
-  import TransactionHistory from './TransactionHistory.svelte';
+  import TransactionHistory from './TransactionHistory/index.svelte';
   import ControlsPanel from './ControlsPanel.svelte';
 
   export let tab: Tab;
@@ -332,9 +332,9 @@
     <div
       class="component-content"
       class:collapsed={!historyExpanded}
-      style="max-height: 40vh;"
+      style="max-height: 50vh;"
     >
-      <TransactionHistory {replica} {tab} />
+      <TransactionHistory {replica} {tab} serverHistory={$history} currentTimeIndex={$currentTimeIndex} />
     </div>
   </div>
 
