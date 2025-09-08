@@ -4,7 +4,7 @@ test('Svelte UI: creates a lazy entity via Formation', async ({ page }) => {
   page.on('console', (msg) => console.log('UI console:', msg.type(), msg.text()));
   page.on('pageerror', (err) => console.log('UI pageerror:', err.message));
   page.on('requestfailed', (req) => console.log('UI requestfailed:', req.url(), req.failure()?.errorText));
-  await page.goto('http://127.0.0.1:5173/');
+  await page.goto('http://127.0.0.1:8080/');
 
   // Enable runtime server import and env init via UI helper flag
   await page.addInitScript(() => { (window as any).__useDistServer = true; });
@@ -15,16 +15,16 @@ test('Svelte UI: creates a lazy entity via Formation', async ({ page }) => {
   // Set name and threshold
   const name = `SvelteEntity_${Date.now()}`;
   await page.locator('#entityNameInput').fill(name);
+
+  // Add a second validator and set signer names
+  await page.getByRole('button', { name: '➕ Add Validator' }).click();
+  await page.getByRole('combobox').nth(2).selectOption('alice');
+  await page.getByRole('combobox').nth(3).selectOption('bob');
+
   await page.locator('#thresholdSlider').evaluate((el: HTMLInputElement) => {
     el.value = '1';
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
-
-  // Add a second validator and set signer names
-  await page.getByRole('button', { name: '➕ Add New Validator' }).click();
-  const rows = page.locator('#validatorsList .validator-row');
-  await rows.nth(0).locator('input').first().fill('alice');
-  await rows.nth(1).locator('input').first().fill('bob');
 
   // Snapshot replicas before
   const beforeCount = await page.evaluate(() => (window as any).xlnEnv?.replicas?.size ?? 0);
@@ -39,6 +39,8 @@ test('Svelte UI: creates a lazy entity via Formation', async ({ page }) => {
 
   // Hold for video clarity
   await page.waitForTimeout(2000);
+
+  await expect(page.locator('.entity-panels-container').first()).toBeVisible();
 });
 
 
