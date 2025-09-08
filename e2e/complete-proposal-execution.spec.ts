@@ -158,7 +158,7 @@ test('ALICE CREATES PROPOSAL → BOB VOTES → PROPOSAL EXECUTED + COLLECTIVE ME
 
   // Check proposal shows as PENDING with 1 vote (Alice auto-voted)
   await expect(firstPanel.locator('.proposal-item')).toBeVisible();
-  await expect(firstPanel.locator('text=' + proposalTitle)).toBeVisible();
+  await expect(firstPanel.locator('#proposals-tab-1').getByText(proposalTitle)).toBeVisible();
   await expect(firstPanel.locator('#proposals-tab-1').getByText('PENDING')).toBeVisible();
 
   await page.screenshot({ path: 'e2e/screenshots/execution-07-proposal-pending.png', fullPage: true });
