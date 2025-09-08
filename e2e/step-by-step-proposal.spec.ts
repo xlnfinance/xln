@@ -131,7 +131,7 @@ test('0 PANELS → CREATE ALICE,BOB ENTITY → 2 PANELS → PROPOSALS', async ({
 
   // Check proposal is visible
   await expect(alicePanel.locator('.proposal-item')).toBeVisible();
-  await expect(alicePanel.locator('text=Q4 Budget Decision')).toBeVisible();
+  await expect(alicePanel.locator('#proposals-tab-1').getByText('Q4 Budget Decision: Approve $')).toBeVisible();
 
   await page.screenshot({ path: 'e2e/screenshots/step-07-proposal-visible.png', fullPage: true });
   console.log('📸 Screenshot: Proposal visible in UI');

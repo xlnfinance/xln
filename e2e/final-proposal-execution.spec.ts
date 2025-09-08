@@ -80,7 +80,8 @@ test('ALICE CREATES PROPOSAL → BOB VOTES → EXECUTED + COLLECTIVE MESSAGE', a
   await page.waitForTimeout(300);
 
   await expect(firstPanel.locator('.proposal-item')).toBeVisible();
-  await expect(firstPanel.locator('text=' + proposalTitle)).toBeVisible();
+  await page.pause();
+  await expect(firstPanel.locator('#proposals-tab-1').getByText('Executive Budget Decision:')).toBeVisible();
   await expect(firstPanel.getByText('PENDING')).toBeVisible();
 
   await page.screenshot({ path: 'e2e/screenshots/final-06-proposal-visible.png', fullPage: true });
