@@ -276,8 +276,6 @@ test('ENTITY CREATION -> AUTOMATIC PANEL -> PROPOSAL CREATION', async ({ page })
   await selectSignerIndexAndFirstEntity(page, 1); // bob index
   await page.waitForTimeout(500);
 
-  // await page.pause();
-
   // Unfold controls for bob if needed
   await page.locator('#controls-tab-2').getByRole('button', { name: '⚙️ Controls ▼' }).click();
   await page.waitForTimeout(200);
@@ -301,8 +299,6 @@ test('ENTITY CREATION -> AUTOMATIC PANEL -> PROPOSAL CREATION', async ({ page })
   // 4) Screenshot after bob voted
   await page.screenshot({ path: 'e2e/screenshots/step-4-bob-voted.png', fullPage: true });
   console.log('📸 Screenshot: Bob voted');
-
-  // await page.pause();
 
   // Check final proposal state
   await page.locator('#proposals-tab-2').getByRole('button', { name: '📋 Proposals ▼' }).click();

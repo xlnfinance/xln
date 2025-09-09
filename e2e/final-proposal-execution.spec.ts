@@ -80,7 +80,6 @@ test('ALICE CREATES PROPOSAL → BOB VOTES → EXECUTED + COLLECTIVE MESSAGE', a
   await page.waitForTimeout(300);
 
   await expect(firstPanel.locator('.proposal-item')).toBeVisible();
-  await page.pause();
   await expect(firstPanel.locator('#proposals-tab-1').getByText('Executive Budget Decision:')).toBeVisible();
   await expect(firstPanel.getByText('PENDING')).toBeVisible();
 

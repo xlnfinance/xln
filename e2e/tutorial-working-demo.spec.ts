@@ -174,8 +174,6 @@ test('🎯 Working Demo: Alice Entity + Alice+Bob Multi-Sig (Full Screenshots & 
   // Find and click Entity tab to switch to panels view
   const entityPanels = page.locator('.entity-panels-container').first();
 
-  await page.pause();
-
   await expect(entityPanels).toBeVisible();
 
   console.log('✅ Switched to Entity panels view');

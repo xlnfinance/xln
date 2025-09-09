@@ -208,7 +208,6 @@ test('CREATE ENTITY -> PROPOSAL -> VOTING WORKFLOW', async ({ page }) => {
   // Check for collective message
   const chatMessages = firstPanel.locator('.chat-messages');
   expect(chatMessages).toBeVisible();
-  await page.pause();
 
   // Verify collective message appears
   await expect(chatMessages).toContainText('[COLLECTIVE]');
