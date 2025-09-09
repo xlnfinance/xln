@@ -1,116 +1,150 @@
-XLN Protocol — Summary
+# XLN Protocol
 
-Core Concepts
+## Core Concepts
 
-XLN is a sovereign Layer2 for EVM, designed around two primitives:
-	1.	Reserves — liquid balances held directly in the jurisdiction machine (J).
-	2.	Reserve-credit accounts (channels) — bilateral credit contracts between entities, backed by collateral + deltas.
+XLN is a **sovereign Layer2 for EVM**, designed around two primitives:
+
+1. **Reserves** — liquid balances held directly in the jurisdiction machine (J).
+2. **Reserve-credit accounts (channels)** — bilateral credit contracts between entities, backed by **collateral**, **ondelta**, and **offdelta**.
 
 Every channel for a given asset is defined by three numbers:
-	•	Deposit (Collateral) — the locked base amount in the jurisdiction.
-	•	LedgerShift (ondelta) — a public shift recorded in J, changed by cooperative settle.
-	•	PrivateShift (offdelta) — a private shift stored in AccountProof, changed by subcontracts.
+
+- **Collateral** — the locked base amount in the jurisdiction.
+- **ondelta** — a *public shift* stored in J, updated by cooperative settle.
+- **offdelta** — a *private shift* stored in AccountProof, updated off-chain.
 
 The invariant:
 
 Δ = ondelta + offdelta
 
+---
 
-⸻
+## External Token Flow
 
-AccountProof
+1. **Deposit into Reserve**  
+   A user deposits external tokens (e.g., USDT) into the jurisdiction.  
 
-An AccountProof is the signed canonical state of a bilateral account:
+reserves[entity][token] += amount
 
-[Left, Right, Seq, DeltaList, Subcontracts, Signature]
+2. **Move Reserve → Collateral**  
+The entity transfers tokens from its reserve into a channel with a counterparty.  
+- The tokens become **collateral** in the channel.  
+- By default, new collateral is attributed to the right side.  
+- If the depositor is the left side, `ondelta += amount` to shift part of collateral allocation left.
+```
+reserves[left][token] -= amount
+collaterals[left][right][token].collateral += amount
+if depositor == left:
+collaterals[left][right][token].ondelta += amount
+```
+---
 
-	•	DeltaList: asset deltas (offdelta).
-	•	Subcontracts: optional executable logic (HTLC, Swap, CDS, etc.).
-	•	Signature: canonical signature by both sides.
-Both parties hold the same canonical proof copy.
+## Off-Chain Payments in AccountProof
 
-⸻
+1. **Proof Creation**  
+- The sender (Alice) prepares a new **AccountProof** for channel (Alice, Hub).  
+- She increments the sequence number and updates offdelta:  
+  ```
+  offdelta[token] -= amount
+  ```
+- The proof may include subcontracts (e.g., HTLC, Swap).  
+- Alice signs and sends the proof to Hub.
 
-Dispute and Delta Derivation
+2. **Proof Acceptance**  
+- Hub verifies Alice’s signature, sequence, and credit limits.  
+- Hub stores the canonical AccountProof.  
+- Both sides now hold the same proof; **no on-chain update is needed**.
 
-When a dispute is triggered, the jurisdiction machine runs the following pipeline:
-	1.	Sum Deltas
-For each asset:
+3. **Routing**  
+- Hub can immediately forward the payment using its own channel (Hub, Bob), creating another AccountProof.  
+- This enables multi-hop routing without touching jurisdiction.
 
-Δ = ondelta (public) + offdelta (from AccountProof)
+---
 
+## Cooperative Settle
 
-	2.	Execute Subcontracts
-Δ values are passed through the external Subcontract array, with inputs (arguments, deadlines, secrets, swap ratios, etc.).
-The subcontract provider returns a modified DeltaList, producing the final effective Δ.
-	3.	Split Collateral
-With the final Δ values:
-	•	If 0 ≤ Δ ≤ deposit: left receives Δ, right receives (deposit − Δ).
-	•	If Δ > deposit: left takes full deposit, surplus becomes debt of right.
-	•	If Δ < 0: right takes full deposit, surplus becomes debt of left.
-	4.	Debt Enforcement
-Debt is first covered from reserves. If reserves are insufficient, it is added to the entity’s active debt list.
+At any time, both parties can jointly update their state on-chain:
 
-This ensures mechanical, deterministic settlement without third-party trust.
+1. **Prepare Settle**  
+Both sign a batch of diffs:
+- `leftReserveDiff`
+- `rightReserveDiff`
+- `collateralDiff`
+- `ondeltaDiff`
 
-⸻
+2. **Invariant**  
 
-Asset Flow
-	1.	From Jurisdiction Reserve
-Assets are first deposited into reserves (reserves[entity][asset]).
-	2.	From Reserve to Collateral
-Entities can transfer reserves into channel collateral (collaterals[left][right][asset]).
-	•	By default, new collateral is attributed to the right.
-	•	If the depositor is left, ondelta is increased by the deposit amount (shifting allocation left).
-	3.	Cooperative Settle
-Both parties can jointly sign a settle transaction to update reserves, collateral, and ondelta atomically.
-The invariant leftDiff + rightDiff + collateralDiff == 0 ensures conservation.
+leftReserveDiff + rightReserveDiff + collateralDiff == 0
 
-⸻
+3. **Apply**  
+- Reserves, collateral, and ondelta are updated atomically in J.  
+- Old AccountProofs remain valid; only the public base has shifted.
 
-Event Propagation
-	•	Jurisdiction Machine (J) emits events for deposits, withdrawals, disputes, and finalizations.
-	•	Entity Machines (E) subscribe to J events to update their internal state.
-	•	Entities gossip AccountProofs between each other, ensuring canonical sequence numbers (seq).
+---
 
-Thus, entities always track both on-chain public state (ondelta + reserves) and off-chain private state (AccountProof).
+## Dispute and Delta Derivation
 
-⸻
+When cooperation fails, either side can trigger a dispute:
 
-First Payment Flow (Happy Path)
-	1.	Initial Channel
-Alice and Hub (H1) open a USDT channel with:
+1. **Submit Proof**  
+Submit the latest signed AccountProof to J.
 
-deposit = 100, ondelta = 0, offdelta = 0
+2. **Sum Deltas**  
+For each token:
 
+Δ = ondelta (public in J) + offdelta (from AccountProof)
 
-	2.	Alice Sends 30 USDT
-	•	Alice builds an AccountProof: offdelta[USDT] = -30.
-	•	She signs and sends it to Hub.
-	•	Hub verifies signature, credit limit, and stores the proof.
-	3.	Routing
-	•	Hub immediately uses its own channel (H1 → Bob) to forward +30.
-	•	This creates a second proof in the (H1, Bob) channel.
-	4.	State After Payment
-	•	Both Alice and Hub hold the same updated proof for (Alice, H1).
-	•	No settlement with jurisdiction required.
-	•	Reserves and deposits remain untouched until either cooperative settle or dispute.
+3. **Execute Subcontracts**  
+The DeltaList is passed through the array of external subcontracts with all arguments.  
+The subcontract provider returns a **modified DeltaList**.
 
-⸻
+4. **Split Collateral**  
+Using the final Δ:
+- If `0 ≤ Δ ≤ collateral`: left gets Δ, right gets (collateral − Δ).
+- If `Δ > collateral`: left gets full collateral, surplus becomes **debt of right**.
+- If `Δ < 0`: right gets full collateral, surplus becomes **debt of left**.
 
-Key Properties
-	•	Unicast DeFi — all payments are bilateral, no global sequencer.
-	•	Billions+ TPS — parallel channels scale unbounded.
-	•	Zero DA risk — no dependence on external data storage.
-	•	Fully sovereign exits — any user can exit with just their AccountProof.
-	•	Programmable subcontracts — advanced logic (HTLC, swaps, derivatives) run off-chain, enforced on dispute.
-	•	Simple as banking — user balances are derived from (deposit, ondelta, offdelta) transparently.
+5. **Debt Enforcement**  
+- Debt is first paid from reserves.  
+- If reserves are insufficient, it is recorded in the entity’s debt list.
 
-⸻
+---
 
-📌 This structure makes XLN mathematically minimal:
-	•	One deposit
-	•	Two deltas
-	•	One invariant equation
+## First Payment Example
 
-From this, all forms of payments, credit, swaps, and disputes are derived.
+1. **Channel Setup**  
+- Alice deposits 100 USDT.  
+- Reserve(Alice) = 100.  
+- She moves 100 into collateral with Hub:  
+  ```
+  collateral = 100, ondelta = 0, offdelta = 0
+  ```
+
+2. **Payment of 30 USDT**  
+- Alice creates AccountProof#1 with `offdelta = -30`.  
+- Alice signs and sends it to Hub.  
+- Hub accepts; both now hold canonical proof.
+
+3. **State After Payment**  
+- No on-chain action has occurred.  
+- Jurisdiction still shows: `collateral = 100, ondelta = 0`.  
+- AccountProof offdelta = −30 represents Alice’s transfer.  
+
+4. **Optional Settle**  
+- Alice and Hub can later settle on-chain, moving balances.  
+
+5. **Dispute Path**  
+- If Hub disappears, Alice submits AccountProof#1.  
+- J computes Δ = ondelta (0) + offdelta (−30) = −30.  
+- J splits collateral: right (Hub) takes 30, left (Alice) keeps 70.
+
+---
+
+## Key Properties
+
+- **Unicast DeFi** — payments are bilateral, no global sequencer.  
+- **Billions+ TPS** — unbounded scalability across parallel channels.  
+- **Zero DA risk** — no external data availability assumptions.  
+- **Sovereign exits** — any party can exit with AccountProof.  
+- **Programmable subcontracts** — HTLCs, swaps, derivatives.  
+- **Simple as banking** — user balances are derived from `(collateral, ondelta, offdelta)`.
