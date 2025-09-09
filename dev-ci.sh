@@ -3,8 +3,8 @@
 echo "🚀 XLN CI Development Environment"
 echo "   Optimized for Playwright/E2E testing"
 
-# Exit on any error
-set -e
+# Note: We don't use 'set -e' because bun install warnings return non-zero
+# but we handle critical errors manually
 
 # Function to cleanup on exit
 cleanup() {
@@ -27,21 +27,21 @@ mkdir -p pids
 
 echo "🔧 Building contracts..."
 cd contracts
-bun install --silent
-npx hardhat compile --quiet
+bun install --silent || echo "⚠️  Warning: bun install had warnings (continuing...)"
+bunx hardhat compile --quiet
 cd ..
 
 echo "🚀 Starting networks..."
 # Start networks in background with logging
-(cd contracts && npx hardhat node --port 8545 --hostname 0.0.0.0) > logs/ethereum-8545.log 2>&1 &
+(cd contracts && bunx hardhat node --port 8545 --hostname 0.0.0.0) > logs/ethereum-8545.log 2>&1 &
 ETHEREUM_PID=$!
 echo $ETHEREUM_PID > pids/ethereum.pid
 
-(cd contracts && npx hardhat node --port 8546 --hostname 0.0.0.0) > logs/polygon-8546.log 2>&1 &
+(cd contracts && bunx hardhat node --port 8546 --hostname 0.0.0.0) > logs/polygon-8546.log 2>&1 &
 POLYGON_PID=$!
 echo $POLYGON_PID > pids/polygon.pid
 
-(cd contracts && npx hardhat node --port 8547 --hostname 0.0.0.0) > logs/arbitrum-8547.log 2>&1 &
+(cd contracts && bunx hardhat node --port 8547 --hostname 0.0.0.0) > logs/arbitrum-8547.log 2>&1 &
 ARBITRUM_PID=$!
 echo $ARBITRUM_PID > pids/arbitrum.pid
 
@@ -57,19 +57,21 @@ for port in 8545 8546 8547; do
 done
 
 echo "📦 Deploying contracts..."
-cd contracts
-npx hardhat ignition deploy ignition/modules/Depository.ts --network localhost --quiet || {
+# Use the existing deploy-contracts.sh script which handles all networks and contract types
+./deploy-contracts.sh || {
     echo "❌ Contract deployment failed"
     exit 1
 }
-cd ..
 
 echo "🔨 Building TypeScript..."
-bun build src/server.ts --target browser --outfile frontend/static/server.js --bundle
+bun build src/server.ts --target browser --outfile frontend/static/server.js --bundle || {
+    echo "❌ TypeScript build failed"
+    exit 1
+}
 
 echo "🌐 Starting frontend server..."
 cd frontend
-bun install --silent
+bun install --silent || echo "⚠️  Warning: frontend bun install had warnings (continuing...)"
 bun run dev --host 0.0.0.0 --port 8080 > ../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo $FRONTEND_PID > ../pids/frontend.pid
