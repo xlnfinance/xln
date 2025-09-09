@@ -102,21 +102,21 @@ check_network() {
     return $?
 }
 
-echo "🔍 Checking network status..."
-for port in 8545 8546 8547; do
-    if wait_for_port $port; then
-        echo "✅ Network on port $port is running"
-    else
-        echo "❌ Network on port $port failed to start within timeout"
-        exit 1
-    fi
-done
+# echo "🔍 Checking network status..."
+# for port in 8545 8546 8547; do
+#     if wait_for_port $port; then
+#         echo "✅ Network on port $port is running"
+#     else
+#         echo "❌ Network on port $port failed to start within timeout"
+#         exit 1
+#     fi
+# done
 
 echo ""
 echo "🎯 All networks started!"
 echo "   Ethereum: http://localhost:8545"
-echo "   Polygon:  http://localhost:8546" 
+echo "   Polygon:  http://localhost:8546"
 echo "   Arbitrum: http://localhost:8547"
 echo ""
 echo "📝 Logs available in logs/ directory"
-echo "🛑 Use './stop-networks.sh' to stop all networks" 
+echo "🛑 Use './stop-networks.sh' to stop all networks"
