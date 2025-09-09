@@ -1,15 +1,10 @@
 #!/bin/bash
 
-set -e
-
-# Resolve paths relative to this script
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 echo "🔄 Resetting XLN Networks and Redeploying Contracts..."
 
 # Stop existing networks
 echo "1️⃣ Stopping existing networks..."
-"$SCRIPT_DIR/stop-networks.sh"
+./stop-networks.sh
 
 # Clean up old data
 echo ""
@@ -20,10 +15,10 @@ rm -rf logs/*.log 2>/dev/null || true
 rm -rf db 2>/dev/null || true
 echo "✅ Cleanup complete"
 
-# Start fresh networks  
+# Start fresh networks
 echo ""
 echo "3️⃣ Starting fresh networks..."
-"$SCRIPT_DIR/start-networks.sh"
+./start-networks.sh
 
 # Wait for networks to stabilize
 echo ""
@@ -33,7 +28,7 @@ sleep 5
 # Deploy contracts using dedicated script
 echo ""
 echo "5️⃣ Deploying contracts..."
-"$SCRIPT_DIR/deploy-contracts.sh"
+./deploy-contracts.sh
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -44,7 +39,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🚀 Next steps:"
     echo "   • Run: bun run src/server.ts"
-    echo "   • Open: index.html" 
+    echo "   • Open: index.html"
     echo "   • Test: Create entities and check Jurisdictions tab"
     echo ""
     echo "📝 View logs: ls -la logs/"
