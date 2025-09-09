@@ -22,19 +22,32 @@ sleep 1
 
 # Start three hardhat nodes in background
 echo "📡 Starting Ethereum Network (port 8545)..."
-(cd "$CONTRACTS_DIR" && npx hardhat node --port 8545 --hostname 127.0.0.1 > "$LOG_DIR/ethereum-8545.log" 2>&1 &)
+(cd "$CONTRACTS_DIR" && bun install >/dev/null 2>&1 || true)
+(cd "$CONTRACTS_DIR" && bunx hardhat node --port 8545 --hostname 127.0.0.1 > "$LOG_DIR/ethereum-8545.log" 2>&1 &)
 echo "$!" > "$PIDS_DIR/ethereum.pid"
 
 echo "📡 Starting Polygon Network (port 8546)..."
-(cd "$CONTRACTS_DIR" && npx hardhat node --port 8546 --hostname 127.0.0.1 > "$LOG_DIR/polygon-8546.log" 2>&1 &)
+(cd "$CONTRACTS_DIR" && bunx hardhat node --port 8546 --hostname 127.0.0.1 > "$LOG_DIR/polygon-8546.log" 2>&1 &)
 echo "$!" > "$PIDS_DIR/polygon.pid"
 
 echo "📡 Starting Arbitrum Network (port 8547)..."
-(cd "$CONTRACTS_DIR" && npx hardhat node --port 8547 --hostname 127.0.0.1 > "$LOG_DIR/arbitrum-8547.log" 2>&1 &)
+(cd "$CONTRACTS_DIR" && bunx hardhat node --port 8547 --hostname 127.0.0.1 > "$LOG_DIR/arbitrum-8547.log" 2>&1 &)
 echo "$!" > "$PIDS_DIR/arbitrum.pid"
 
 echo "⏳ Waiting for networks to start..."
-sleep 3
+
+wait_for_port() {
+  local port=$1
+  local timeout=60
+  while [ $timeout -gt 0 ]; do
+    if check_network "$port"; then
+      return 0
+    fi
+    sleep 1
+    timeout=$((timeout-1))
+  done
+  return 1
+}
 
 # Check if networks are responding
 check_network() {
@@ -46,10 +59,11 @@ check_network() {
 
 echo "🔍 Checking network status..."
 for port in 8545 8546 8547; do
-    if check_network $port; then
+    if wait_for_port $port; then
         echo "✅ Network on port $port is running"
     else
-        echo "❌ Network on port $port failed to start"
+        echo "❌ Network on port $port failed to start within timeout"
+        exit 1
     fi
 done
 
