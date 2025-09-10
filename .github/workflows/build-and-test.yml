@@ -187,7 +187,7 @@ jobs:
           fi
 
       - name: Run E2E tests
-        run: bun run test:e2e
+        run: bun run test:e2e --reporter=list,github,html,json
         env:
           CI: true
 
@@ -214,7 +214,7 @@ jobs:
         if: failure()
         with:
           name: e2e-test-results
-          path: test-results/
+          path: e2e/test-results/
           retention-days: 7
 
       - name: Upload Playwright report
@@ -222,5 +222,5 @@ jobs:
         if: always()
         with:
           name: playwright-report
-          path: playwright-report/
+          path: e2e/playwright-report/
           retention-days: 7

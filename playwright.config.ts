@@ -2,6 +2,12 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   // testDir is relative to this config file's directory
+    reporter: [
+    ['list'], // nice, minimal output in CI logs
+    ['github'], // adds inline annotations to PRs & Actions logs
+    ['html', { outputFolder: 'e2e/playwright-report', open: 'never' }], // artifact
+    ['json', { outputFile: 'e2e/test-results/report.json' }], // optional, for parsing
+  ],
   testDir: './e2e',
   timeout: 20000,
   workers: 1,
