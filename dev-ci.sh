@@ -57,7 +57,10 @@ for port in 8545 8546 8547; do
 done
 
 echo "📦 Deploying contracts..."
-# Use the existing deploy-contracts.sh script which handles all networks and contract types
+if [ ! -x ./deploy-contracts.sh ]; then
+    echo "❌ ./deploy-contracts.sh not found or not executable"
+    exit 1
+fi
 ./deploy-contracts.sh || {
     echo "❌ Contract deployment failed"
     exit 1
