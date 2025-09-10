@@ -85,16 +85,6 @@ ARBITRUM_PID=$!
 echo $ARBITRUM_PID > pids/arbitrum.pid
 
 echo "⏳ Waiting for networks to initialize..."
-sleep 8
-
-# Check if networks are responding
-for port in 8545 8546 8547; do
-    if ! curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' http://localhost:$port > /dev/null; then
-        echo "❌ Network on port $port failed to start"
-        exit 1
-    fi
-done
-echo "⏳ Waiting for networks to initialize..."
 # give processes a head start then actively wait per-port
 sleep 4
 
