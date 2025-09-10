@@ -15,9 +15,48 @@ cleanup() {
     pkill -f "bunx serve" 2>/dev/null || true
     exit 0
 }
+# Function to cleanup on exit
+cleanup() {
+    echo ""
+    echo "🛑 Stopping CI services..."
+    # Kill known pids written to pids/ first
+    if [ -d pids ]; then
+        for f in pids/*.pid; do
+            [ -f "$f" ] || continue
+            pid=$(cat "$f" 2>/dev/null || true)
+            if [ -n "$pid" ]; then
+                kill "$pid" 2>/dev/null || true
+            fi
+            rm -f "$f" || true
+        done
+    fi
+    pkill -f "hardhat node" 2>/dev/null || true
+    pkill -f "bun.*server" 2>/dev/null || true
+    pkill -f "bunx serve" 2>/dev/null || true
+}
 
 # Set up signal handlers
 trap cleanup SIGINT SIGTERM
+
+# Parse optional arguments
+RUN_CMD="${RUN_CMD:-}"
+while (( "$#" )); do
+    case "$1" in
+        --run)
+            shift
+            RUN_CMD="$1"
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--run \"command\"]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            exit 1
+            ;;
+    esac
+done
 
 # Create necessary directories
 mkdir -p dist
@@ -55,7 +94,31 @@ for port in 8545 8546 8547; do
         exit 1
     fi
 done
+echo "⏳ Waiting for networks to initialize..."
+# give processes a head start then actively wait per-port
+sleep 4
 
+# Check if networks are responding (retry up to 60s per port)
+for port in 8545 8546 8547; do
+    timeout=60
+    echo "Checking RPC on port $port..."
+    until curl -s -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' "http://localhost:$port" > /dev/null 2>&1; do
+        timeout=$((timeout-3))
+        if [ $timeout -le 0 ]; then
+            echo "❌ Network on port $port failed to start"
+            echo "--- Last 200 lines of logs for port $port ---"
+            case $port in
+                8545) tail -n 200 logs/ethereum-8545.log || true ;;
+                8546) tail -n 200 logs/polygon-8546.log || true ;;
+                8547) tail -n 200 logs/arbitrum-8547.log || true ;;
+            esac
+            cleanup
+            exit 1
+        fi
+        sleep 3
+    done
+    echo "✅ RPC responding on port $port"
+done
 echo "📦 Deploying contracts..."
 if [ ! -x ./deploy-contracts.sh ]; then
     echo "❌ ./deploy-contracts.sh not found or not executable"
@@ -94,6 +157,7 @@ done
 if [ $timeout -le 0 ]; then
     echo "❌ Frontend failed to start within 60 seconds"
     cat logs/frontend.log || true
+    cleanup
     exit 1
 fi
 
@@ -105,8 +169,19 @@ echo ""
 
 # In CI mode, don't wait - let the script exit successfully
 # The services will continue running in background
+if [ -n "$RUN_CMD" ]; then
+    echo "🧪 Running command while services are up: $RUN_CMD"
+    # run the command in the same shell so child processes stay alive
+    eval "$RUN_CMD"
+    rc=$?
+    echo "Command exited with status $rc"
+    cleanup
+    exit $rc
+fi
+
+# If running in CI but no RUN_CMD requested, keep compatibility with older behaviour:
 if [ "$CI" = "true" ]; then
-    echo "🤖 CI mode detected - services started successfully"
+    echo "🤖 CI mode detected - services started successfully (no run command provided)"
     exit 0
 fi
 
