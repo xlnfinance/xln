@@ -25,11 +25,11 @@ mkdir -p frontend/static
 mkdir -p logs
 mkdir -p pids
 
-echo "🔧 Building contracts..."
-cd contracts
-bun install --silent || echo "⚠️  Warning: bun install had warnings (continuing...)"
-bunx hardhat compile --quiet
-cd ..
+# echo "🔧 Building contracts..."
+# cd contracts
+# bun install --silent || echo "⚠️  Warning: bun install had warnings (continuing...)"
+# bunx hardhat compile --quiet
+# cd ..
 
 echo "🚀 Starting networks..."
 # Start networks in background with logging

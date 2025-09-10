@@ -2,9 +2,9 @@ name: build-and-test
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 concurrency:
   group: build-and-test-${{ github.ref }}
@@ -114,6 +114,7 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [build-xln, frontend-build, contracts-test]
     steps:
       - name: Checkout
@@ -163,7 +164,7 @@ jobs:
 
       - name: Start dev server in background
         run: |
-          bun run dev:ci &
+          ./dev-ci.sh &
           echo $! > dev_server.pid
           echo "Dev server started with PID: $(cat dev_server.pid)"
 
@@ -223,5 +224,3 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
-
-
