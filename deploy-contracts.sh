@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -u
+set -o pipefail
 IFS=$'\n\t'
 
 echo "📝 Deploying EntityProvider contracts to all networks..."

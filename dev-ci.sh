@@ -10,15 +10,6 @@ echo "   Optimized for Playwright/E2E testing"
 cleanup() {
     echo ""
     echo "🛑 Stopping CI services..."
-    pkill -f "hardhat node" 2>/dev/null || true
-    pkill -f "bun.*server" 2>/dev/null || true
-    pkill -f "bunx serve" 2>/dev/null || true
-    exit 0
-}
-# Function to cleanup on exit
-cleanup() {
-    echo ""
-    echo "🛑 Stopping CI services..."
     # Kill known pids written to pids/ first
     if [ -d pids ]; then
         for f in pids/*.pid; do
@@ -114,10 +105,18 @@ if [ ! -x ./deploy-contracts.sh ]; then
     echo "❌ ./deploy-contracts.sh not found or not executable"
     exit 1
 fi
-./deploy-contracts.sh || {
-    echo "❌ Contract deployment failed"
-    exit 1
-}
+
+set -x
+bash ./deploy-contracts.sh
+DEPLOY_RC=$?
+set +x
+
+if [ $DEPLOY_RC -ne 0 ]; then
+  echo "❌ Contract deployment failed (rc=$DEPLOY_RC)"
+  # helpful logs:
+  tail -n 200 logs/* 2>/dev/null || true
+  exit $DEPLOY_RC
+fi
 
 echo "🔨 Building TypeScript..."
 bun build src/server.ts --target browser --outfile frontend/static/server.js --bundle || {
