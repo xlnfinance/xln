@@ -244,45 +244,140 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
   }
 
   if (entityTx.type === 'j_event') {
+    console.log(`🚨 PROCESSING J-EVENT: entityTx.data=`, entityTx.data);
     const { from, event, observedAt, blockNumber, transactionHash } = entityTx.data;
 
     if (DEBUG) {
       console.log(`    🔭 J-EVENT: ${from} observed ${event.type} at block ${blockNumber}`);
-      console.log(`    🔭 J-EVENT-DATA:`, event.data);
+      console.log(`    🔭 J-EVENT-DATA:`, entityTx.data);
     }
 
-    // Create new state to add j-event observation
-    const newEntityState = {
-      ...entityState,
-      messages: [...entityState.messages],
-      nonces: new Map(entityState.nonces),
-      proposals: new Map(entityState.proposals),
-      // 💰 Clone financial state
-      reserves: new Map(entityState.reserves),
-      channels: new Map(entityState.channels),
-      collaterals: new Map(entityState.collaterals)
-    };
+    const isSingleSig = entityState.config.mode === 'proposer-based' && entityState.config.threshold === 1n;
 
-    // Increment nonce for the observer
-    const currentNonce = newEntityState.nonces.get(from) || 0;
-    newEntityState.nonces.set(from, currentNonce + 1);
+    if (isSingleSig) {
+      // === INSTANT EXECUTION ===
+      const newEntityState = {
+        ...entityState,
+        messages: [...entityState.messages],
+        nonces: new Map(entityState.nonces),
+        proposals: new Map(entityState.proposals),
+        reserves: new Map(entityState.reserves),
+        channels: new Map(entityState.channels),
+        collaterals: new Map(entityState.collaterals),
+      };
 
-    // Add j-event as a message (for now - later this could trigger more complex logic)
-    const jEventMessage = `${from} observed j-event: ${event.type} (block ${blockNumber}, tx ${transactionHash.slice(0,10)}...)`;
-    newEntityState.messages.push(jEventMessage);
+      newEntityState.messages.push(
+        `${from} observed j-event: ${event.type} (block ${blockNumber}, tx ${transactionHash.slice(0, 10)}...)`
+      );
 
-    // Limit messages to 10 maximum
-    if (newEntityState.messages.length > 10) {
-      newEntityState.messages.shift();
+      switch (event.type) {
+        // --- Depository.sol ---
+        case "reserveToReserve":
+          console.log(`    🔄 Executing reserveToReserve: ${event.data.amount} ${event.data.asset}`);
+          subtractFromReserves(newEntityState.reserves, event.data.asset, BigInt(event.data.amount));
+          addToReserves(newEntityState.reserves, event.data.asset, BigInt(event.data.amount), event.data.decimals || 18);
+          break;
+
+        case "TransferReserveToCollateral":
+          subtractFromReserves(newEntityState.reserves, `token-${event.data.tokenId}`, BigInt(event.data.amount));
+          addToReserves(newEntityState.collaterals, `token-${event.data.tokenId}`, BigInt(event.data.collateral), 18);
+          break;
+
+        case "DisputeStarted":
+          const peer = event.data.peer;
+          const channelKey = peer;
+
+          const existingChannel = newEntityState.channels.get(channelKey) || {
+            counterparty: peer,
+            myBalance: 0n,
+            theirBalance: 0n,
+            collateral: [],
+            nonce: 0,
+            isActive: true,
+            lastUpdate: observedAt,
+          };
+
+          // TODO: Handle dispute state in channel (not yet implemented in ChannelState)
+          // For now, just log the dispute start
+          // In a full implementation, you'd update the channel state to reflect the dispute
+          // e.g.,
+          // newEntityState.channels.set(channelKey, {
+          //   ...existingChannel,
+          //   dispute: {
+          //     nonce: event.data.disputeNonce,
+          //     startedAt: observedAt,
+          //     initialArguments: event.data.initialArguments,
+          //   },
+          //   lastUpdate: observedAt,
+          // });
+
+          newEntityState.messages.push(`⚡ Dispute started with ${peer} (nonce=${event.data.disputeNonce})`);
+          break;
+
+        case "CooperativeClose":
+          newEntityState.channels.delete(event.data.peer);
+          break;
+
+        case "ControlSharesReceived":
+          addToReserves(newEntityState.reserves, event.data.tokenId, BigInt(event.data.amount), event.data.decimals || 0);
+          break;
+
+        case "ControlSharesTransferred":
+          subtractFromReserves(newEntityState.reserves, `share-${event.data.internalTokenId}`, BigInt(event.data.amount));
+          addToReserves(newEntityState.reserves, `share-${event.data.internalTokenId}`, BigInt(event.data.amount), 0);
+          break;
+
+        // --- EntityProvider.sol ---
+        case "GovernanceEnabled":
+          addToReserves(newEntityState.reserves, `control-${event.data.controlTokenId}`, BigInt(1e15), 0);
+          addToReserves(newEntityState.reserves, `dividend-${event.data.dividendTokenId}`, BigInt(1e15), 0);
+          break;
+
+        case "ControlSharesReleased":
+          subtractFromReserves(newEntityState.reserves, `control-${event.data.entityId}`, BigInt(event.data.controlAmount));
+          subtractFromReserves(newEntityState.reserves, `dividend-${event.data.entityId}`, BigInt(event.data.dividendAmount));
+          break;
+
+        default:
+          newEntityState.messages.push(`⚠️ Unhandled j-event type: ${event.type}`);
+      }
+
+      return newEntityState;
+    } else {
+      console.log(`    🏛️  Multi-sig entity - wrapping j_event as proposal for voting`);
+      // === MULTI-SIG ENTITY: WRAP AS PROPOSAL ===
+      const action: ProposalAction = {
+        type: 'collective_message',
+        data: {
+          message: `${from} proposed j-event: ${event.type} (block ${blockNumber}, tx ${transactionHash.slice(0,10)}...)`
+        }
+      };
+      const proposalId = generateProposalId(action, from, entityState);
+      const proposal: Proposal = {
+        id: proposalId,
+        proposer: from,
+        action,
+        votes: new Map([[from, 'yes']]),
+        status: 'pending',
+        created: observedAt,
+      };
+
+      const newProposals = new Map(entityState.proposals);
+      newProposals.set(proposalId, proposal);
+
+      return {
+        ...entityState,
+        proposals: newProposals,
+        messages: [...entityState.messages, `${from} proposed j-event: ${event.type}`],
+      };
     }
-
-    // TODO: In the future, j-events could trigger:
-    // - Automatic proposals based on jurisdiction events
-    // - State updates based on confirmed external actions
-    // - Consensus on what external events were observed
-
-    return newEntityState;
   }
+
+
+  // TODO: In the future, j-events could trigger:
+  // - Automatic proposals based on jurisdiction events
+  // - State updates based on confirmed external actions
+  // - Consensus on what external events were observed
 
   return entityState;
   } catch (error) {
