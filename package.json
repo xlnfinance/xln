@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "./dev-full.sh",
+    "dev:ci": "./dev-ci.sh",
     "serve": "bun run serve.ts",
     "serve:dev": "bun build src/server.ts --target browser --outfile dist/server.js --bundle && bun run serve.ts",
     "notify:done": "bash ./scripts/notify.sh 'Task complete' 'XLN Agent' 'All done'",

@@ -1,4 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -u
+set -o pipefail
+IFS=$'\n\t'
 
 echo "📝 Deploying EntityProvider contracts to all networks..."
 
@@ -33,11 +36,22 @@ deploy_to_network() {
     echo ""
     echo "🔄 Deploying to $network_name (port $port)..."
 
-    # Check if network is available
-    if ! curl -s -X POST -H "Content-Type: application/json" \
-         --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-         "$rpc_url" > /dev/null 2>&1; then
-        echo "   ❌ Network not available at $rpc_url"
+    # Check if network is available, retry for up to 30s
+    local tries=0
+    local max_tries=10
+    local ok=1
+    while [ $tries -lt $max_tries ]; do
+        if curl -s -X POST -H "Content-Type: application/json" \
+             --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+             "$rpc_url" > /dev/null 2>&1; then
+            ok=0
+            break
+        fi
+        tries=$((tries+1))
+        sleep 3
+    done
+    if [ $ok -ne 0 ]; then
+        echo "   ❌ Network not available at $rpc_url after $((max_tries*3))s"
         return 1
     fi
 
@@ -45,44 +59,43 @@ deploy_to_network() {
 
     # Deploy both EntityProvider and Depository
     echo "   🔧 Deploying EntityProvider..."
-    local entityprovider_output=$(bunx hardhat run scripts/deploy-entity-provider.cjs \
-                         --network "$network_config" 2>&1)
-
-    local entityprovider_status=$?
-    echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log"
-
-    if [ $entityprovider_status -eq 0 ] && echo "$entityprovider_output" | grep -q "DEPLOYED_ADDRESS="; then
-        # Extract EntityProvider address
-        local entityprovider_address=$(echo "$entityprovider_output" | grep "DEPLOYED_ADDRESS=" | cut -d'=' -f2)
-        echo "   ✅ EntityProvider: $entityprovider_address"
-    else
+    # Run deployment and capture logs
+    if ! entityprovider_output=$(bunx hardhat run scripts/deploy-entity-provider.cjs --network "$network_config" 2>&1); then
         echo "   ❌ EntityProvider deployment failed"
         echo "$entityprovider_output"
+        echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log"
         cd ..
         return 1
     fi
+    echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log"
 
-    echo "   🔧 Deploying Depository..."
-    local depository_output=$(echo "y" | bunx hardhat ignition deploy ignition/modules/Depository.cjs \
-                         --network "$network_config" 2>&1)
-
-    local depository_status=$?
-    echo "$depository_output" > "../logs/deploy-depository-$port.log"
-
-    if [ $depository_status -eq 0 ]; then
-        # Extract final address from Hardhat Ignition output (last line with 0x address)
-        local depository_address=$(echo "$depository_output" | grep -o '0x[a-fA-F0-9]\{40\}' | tail -1)
-        if [ -n "$depository_address" ]; then
-            echo "   ✅ Depository: $depository_address"
-        else
-            echo "   ❌ Could not extract Depository address"
-            return 1
-        fi
-    else
-        echo "   ❌ Depository deployment failed"
-        echo "$depository_output"
+    if ! echo "$entityprovider_output" | grep -q "DEPLOYED_ADDRESS="; then
+        echo "   ❌ EntityProvider deployment did not return DEPLOYED_ADDRESS"
+        cd ..
         return 1
     fi
+    # Extract EntityProvider address
+    local entityprovider_address
+    entityprovider_address=$(echo "$entityprovider_output" | grep "DEPLOYED_ADDRESS=" | cut -d'=' -f2)
+    echo "   ✅ EntityProvider: $entityprovider_address"
+
+    echo "   🔧 Deploying Depository..."
+    # Deploy Depository using ignition; accept prompts if any
+    if ! depository_output=$(printf "y\n" | bunx hardhat ignition deploy ignition/modules/Depository.cjs --network "$network_config" 2>&1); then
+        echo "   ❌ Depository deployment failed"
+        echo "$depository_output"
+        echo "$depository_output" > "../logs/deploy-depository-$port.log"
+        return 1
+    fi
+    echo "$depository_output" > "../logs/deploy-depository-$port.log"
+    # Extract final address from Hardhat Ignition output (last line with 0x address)
+    local depository_address
+    depository_address=$(echo "$depository_output" | grep -o '0x[a-fA-F0-9]\{40\}' | tail -1 || true)
+    if [ -z "$depository_address" ]; then
+        echo "   ❌ Could not extract Depository address"
+        return 1
+    fi
+    echo "   ✅ Depository: $depository_address"
 
     # Store both addresses in variables for later use
     case $port in
