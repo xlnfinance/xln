@@ -7,7 +7,7 @@ import {
   ConsensusConfig, EntityInput, EntityTx, EntityState, ProposedEntityFrame,
   EntityReplica, Env, JurisdictionConfig, Proposal
 } from './types.js';
-import { applyEntityTx } from './entity-tx.js';
+import { applyEntityTx } from './entity-tx';
 import { log, DEBUG, formatEntityDisplay, formatSignerDisplay } from './utils.js';
 
 // === SECURITY VALIDATION ===

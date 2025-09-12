@@ -9,7 +9,6 @@ import { generateLazyEntityId, generateNumberedEntityId } from './entity-factory
 import { registerNumberedEntityOnChain, getJurisdictionByAddress } from './evm.js';
 import { applyServerInput, processUntilEmpty } from './server.js';
 import { formatEntityDisplay, formatSignerDisplay } from './utils.js';
-import { addToReserves } from './entity-tx.js';
 
 // Exact 1:1 copy of runDemo function from server.ts
 const runDemo = async (env: Env): Promise<Env> => {

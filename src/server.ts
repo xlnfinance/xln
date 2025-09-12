@@ -1,11 +1,11 @@
 // for regular use > bun run src/server.ts
-// for debugging > bun repl 
-// await import('./debug.js'); 
+// for debugging > bun repl
+// await import('./debug.js');
 
 // Import utilities and types
 import { isBrowser, log, hash, DEBUG, clearDatabase, createHash, formatEntityDisplay, formatSignerDisplay, generateEntityAvatar, generateSignerAvatar, getEntityDisplayInfo, getSignerDisplayInfo } from './utils.js';
-import { 
-  Env, EnvSnapshot, EntityInput, EntityReplica, EntityState, EntityTx, 
+import {
+  Env, EnvSnapshot, EntityInput, EntityReplica, EntityState, EntityTx,
   ServerInput, ServerTx, ProposedEntityFrame, Proposal, ProposalAction,
   ConsensusConfig, JurisdictionConfig, ENC
 } from './types.js';
@@ -15,13 +15,13 @@ import {
   generateNamedEntityId, detectEntityType, extractNumberFromEntityId,
   encodeBoard, hashBoard, isEntityRegistered
 } from './entity-factory.js';
-import { 
-  applyEntityInput, applyEntityFrame, calculateQuorumPower, 
+import {
+  applyEntityInput, applyEntityFrame, calculateQuorumPower,
   sortSignatures, mergeEntityInputs, getEntityStateSummary
 } from './entity-consensus.js';
-import { applyEntityTx, generateProposalId, executeProposal } from './entity-tx.js';
+import { applyEntityTx, generateProposalId, executeProposal } from './entity-tx';
 
-import { 
+import {
   registerNumberedEntityOnChain, assignNameOnChain, getEntityInfoFromChain, getNextEntityNumber, transferNameBetweenEntities, connectToEthereum,
   getJurisdictions, getAvailableJurisdictions, getJurisdictionByAddress
 } from './evm.js';
@@ -48,8 +48,8 @@ import fs from 'fs';
 
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
-const db: Level<Buffer, Buffer> = new Level('db', { 
-  valueEncoding: 'buffer', 
+const db: Level<Buffer, Buffer> = new Level('db', {
+  valueEncoding: 'buffer',
   keyEncoding: 'binary'
 });
 
@@ -82,7 +82,7 @@ const notifyEnvChange = (env: Env) => {
 const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
   const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
   const cloneArray = <T>(arr: T[]) => [...arr];
-  
+
   return {
     entityId: replica.entityId,
     signerId: replica.signerId,
@@ -145,7 +145,7 @@ const captureSnapshot = async (env: Env, serverInput: ServerInput, serverOutputs
     })),
     description
   };
-  
+
   env.history = env.history || [];
   env.history.push(snapshot);
 
@@ -155,9 +155,9 @@ const captureSnapshot = async (env: Env, serverInput: ServerInput, serverOutputs
     const batch = db.batch();
     batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
     batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-    
+
     await batch.write();
-    
+
     if (DEBUG) {
       console.log(`💾 Snapshot ${snapshot.height} saved to IndexedDB successfully`);
     }
@@ -165,7 +165,7 @@ const captureSnapshot = async (env: Env, serverInput: ServerInput, serverOutputs
     console.error(`❌ Failed to save snapshot ${snapshot.height} to IndexedDB:`, error);
     throw error;
   }
-  
+
   if (DEBUG) {
     console.log(`📸 Snapshot captured: "${description}" (${env.history.length} total)`);
     if (serverInput.serverTxs.length > 0) {
@@ -199,7 +199,7 @@ const captureSnapshot = async (env: Env, serverInput: ServerInput, serverOutputs
 
 const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ entityOutbox: EntityInput[], mergedInputs: EntityInput[] }> => {
   const startTime = Date.now();
-  
+
   try {
     // SECURITY: Validate server input
     if (!serverInput) {
@@ -214,7 +214,7 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
       log.error(`❌ Invalid entityInputs: expected array, got ${typeof serverInput.entityInputs}`);
       return { entityOutbox: [], mergedInputs: [] };
     }
-    
+
     // SECURITY: Resource limits
     if (serverInput.serverTxs.length > 1000) {
       log.error(`❌ Too many server transactions: ${serverInput.serverTxs.length} > 1000`);
@@ -224,15 +224,15 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
       log.error(`❌ Too many entity inputs: ${serverInput.entityInputs.length} > 10000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
-    
+
     // Merge new serverInput into env.serverInput
     env.serverInput.serverTxs.push(...serverInput.serverTxs);
     env.serverInput.entityInputs.push(...serverInput.entityInputs);
-    
+
     // Merge all entityInputs in env.serverInput
     const mergedInputs = mergeEntityInputs(env.serverInput.entityInputs);
     const entityOutbox: EntityInput[] = [];
-  
+
     if (DEBUG) {
       console.log(`\n=== TICK ${env.height} ===`);
       console.log(`Server inputs: ${serverInput.serverTxs.length} new serverTxs, ${serverInput.entityInputs.length} new entityInputs`);
@@ -248,13 +248,13 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
         });
       }
     }
-    
+
     // Process server transactions (replica imports) from env.serverInput
     console.log(`🔍 REPLICA-DEBUG: Processing ${env.serverInput.serverTxs.length} serverTxs, current replicas: ${env.replicas.size}`);
     env.serverInput.serverTxs.forEach(serverTx => {
       if (serverTx.type === 'importReplica') {
         if (DEBUG) console.log(`Importing replica Entity #${formatEntityDisplay(serverTx.entityId)}:${formatSignerDisplay(serverTx.signerId)} (proposer: ${serverTx.data.isProposer})`);
-        
+
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
         env.replicas.set(replicaKey, {
           entityId: serverTx.entityId,
@@ -278,12 +278,12 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
       }
     });
     console.log(`🔍 REPLICA-DEBUG: After processing serverTxs, total replicas: ${env.replicas.size}`);
-    
+
     // Process entity inputs
     mergedInputs.forEach(entityInput => {
       const replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
       const entityReplica = env.replicas.get(replicaKey);
-      
+
       if (entityReplica) {
         if (DEBUG) {
           console.log(`Processing input for ${replicaKey}:`);
@@ -291,16 +291,16 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
           if (entityInput.proposedFrame) console.log(`  → Proposed frame: ${entityInput.proposedFrame.hash}`);
           if (entityInput.precommits?.size) console.log(`  → ${entityInput.precommits.size} precommits`);
         }
-        
+
         const entityOutputs = applyEntityInput(env, entityReplica, entityInput);
         entityOutbox.push(...entityOutputs);
       }
     });
-    
+
     // Update env (mutable)
     env.height++;
     env.timestamp = Date.now();
-    
+
     // Capture snapshot BEFORE clearing (to show what was actually processed)
     // Use merged inputs to avoid showing intermediate gossip messages in UI
     const inputDescription = `Tick ${env.height - 1}: ${env.serverInput.serverTxs.length} serverTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
@@ -308,32 +308,32 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
       serverTxs: [...env.serverInput.serverTxs],
       entityInputs: [...mergedInputs] // Use merged inputs instead of raw inputs
     };
-    
+
     // Clear processed data from env.serverInput
     env.serverInput.serverTxs.length = 0;
     env.serverInput.entityInputs.length = 0;
-    
+
     // Capture snapshot with the actual processed input and outputs
     await captureSnapshot(env, processedInput, entityOutbox, inputDescription);
-    
+
     // Notify Svelte about environment changes
     console.log(`🔍 REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env.replicas.size}`);
     console.log(`🔍 REPLICA-DEBUG: Replica keys:`, Array.from(env.replicas.keys()));
-    
+
     // Compare old vs new entities
-    const oldEntityKeys = Array.from(env.replicas.keys()).filter(key => 
+    const oldEntityKeys = Array.from(env.replicas.keys()).filter(key =>
       key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') ||
       key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:')
     );
-    const newEntityKeys = Array.from(env.replicas.keys()).filter(key => 
+    const newEntityKeys = Array.from(env.replicas.keys()).filter(key =>
       !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') &&
       !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:') &&
       !key.startsWith('0x57e360b00f393ea6d898d6119f71db49241be80aec0fbdecf6358b0103d43a31:')
     );
-    
+
     console.log(`🔍 OLD-ENTITY-DEBUG: ${oldEntityKeys.length} old entities:`, oldEntityKeys.slice(0, 2));
     console.log(`🔍 NEW-ENTITY-DEBUG: ${newEntityKeys.length} new entities:`, newEntityKeys.slice(0, 2));
-    
+
     if (oldEntityKeys.length > 0 && newEntityKeys.length > 0) {
       const oldReplica = env.replicas.get(oldEntityKeys[0]);
       const newReplica = env.replicas.get(newEntityKeys[0]);
@@ -350,9 +350,9 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
         jurisdictionName: newReplica?.state?.config?.jurisdiction?.name
       });
     }
-    
+
     notifyEnvChange(env);
-    
+
     if (DEBUG && entityOutbox.length > 0) {
       console.log(`📤 Outputs: ${entityOutbox.length} messages`);
       entityOutbox.forEach((output, i) => {
@@ -361,7 +361,7 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
     } else if (DEBUG && entityOutbox.length === 0) {
       console.log(`📤 No outputs generated`);
     }
-    
+
     if (DEBUG) {
       console.log(`Replica states:`);
       env.replicas.forEach((replica, key) => {
@@ -371,13 +371,13 @@ const applyServerInput = async (env: Env, serverInput: ServerInput): Promise<{ e
         console.log(`  Entity #${entityDisplay}:${signerDisplay}: mempool=${replica.mempool.length}, messages=${replica.state.messages.length}, proposal=${replica.proposal ? '✓' : '✗'}`);
       });
     }
-    
+
     // Performance logging
     const endTime = Date.now();
     if (DEBUG) {
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
     }
-    
+
     return { entityOutbox, mergedInputs };
   } catch (error) {
     log.error(`❌ Error processing server input:`, error);
@@ -407,13 +407,13 @@ const main = async (): Promise<Env> => {
 
     const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
-    
+
     console.log(`📊 Found latest height: ${latestHeight}, loading ${latestHeight + 1} snapshots...`);
 
     // Load snapshots starting from 1 (height 0 is initial state, no snapshot saved)
     console.log(`📥 Loading snapshots: 1 to ${latestHeight}...`);
     const snapshots = [];
-    
+
     // Start from 1 since height 0 is initial state with no snapshot
     for (let i = 1; i <= latestHeight; i++) {
       try {
@@ -426,12 +426,12 @@ const main = async (): Promise<Env> => {
         console.warn(`⚠️ Snapshot ${i} missing, continuing with available data...`);
       }
     }
-    
+
     if (snapshots.length === 0) {
       console.log(`📦 No snapshots found (latestHeight: ${latestHeight}), using fresh environment`);
       throw new Error('LEVEL_NOT_FOUND');
     }
-    
+
     console.log(`📊 Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
     env.history = snapshots;
 
@@ -480,11 +480,11 @@ const main = async (): Promise<Env> => {
     // Add hanko demo to the main execution
     console.log('\n🖋️  Testing Complete Hanko Implementation...');
     await demoCompleteHanko();
-    
+
     // 🧪 Run basic Hanko functionality tests first
     console.log('\n🧪 Running basic Hanko functionality tests...');
     await runBasicHankoTests();
-    
+
     // 🧪 Run comprehensive Depository-Hanko integration tests
     console.log('\n🧪 Running comprehensive Depository-Hanko integration tests...');
     try {
@@ -512,10 +512,10 @@ const getCurrentHistoryIndex = () => (env.history || []).length - 1;
 // Server-specific clearDatabase that also resets history
 const clearDatabaseAndHistory = async () => {
   console.log('🗑️ Clearing database and resetting server history...');
-  
+
   // Clear the Level database
   await clearDatabase(db);
-  
+
   // Reset the server environment to initial state (including history)
   env = {
     replicas: new Map(),
@@ -524,22 +524,22 @@ const clearDatabaseAndHistory = async () => {
     serverInput: { serverTxs: [], entityInputs: [] },
     history: []
   };
-  
+
   console.log('✅ Database and server history cleared');
 };
 
-export { 
-  runDemo, 
+export {
+  runDemo,
   runDemoWrapper,
-  applyServerInput, 
-  main, 
-  getHistory, 
-  getSnapshot, 
-  getCurrentHistoryIndex, 
+  applyServerInput,
+  main,
+  getHistory,
+  getSnapshot,
+  getCurrentHistoryIndex,
   clearDatabase,
-  clearDatabaseAndHistory, 
-  getAvailableJurisdictions, 
-  getJurisdictionByAddress, 
+  clearDatabaseAndHistory,
+  getAvailableJurisdictions,
+  getJurisdictionByAddress,
   demoCompleteHanko,
 
   // Entity creation functions
@@ -586,12 +586,12 @@ if (!isBrowser) {
     if (env) {
       // Check if demo should run automatically (can be disabled with NO_DEMO=1)
       const noDemoFlag = process.env.NO_DEMO === '1' || process.argv.includes('--no-demo');
-      
+
       if (!noDemoFlag) {
         console.log('✅ Node.js environment initialized. Running demo for local testing...');
         console.log('💡 To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag');
         await runDemo(env);
-        
+
         // Add a small delay to ensure demo completes before verification
         setTimeout(async () => {
           await verifyJurisdictionRegistrations();
@@ -610,24 +610,24 @@ if (!isBrowser) {
 const verifyJurisdictionRegistrations = async () => {
   console.log('\n🔍 === JURISDICTION VERIFICATION ===');
   console.log('📋 Verifying entity registrations across all jurisdictions...\n');
-  
+
   const jurisdictions = await getAvailableJurisdictions();
-  
+
   for (const jurisdiction of jurisdictions) {
     try {
       console.log(`🏛️ ${jurisdiction.name}:`);
       console.log(`   📡 RPC: ${jurisdiction.address}`);
       console.log(`   📄 Contract: ${jurisdiction.entityProviderAddress}`);
-      
+
       // Connect to this jurisdiction's network
       const { entityProvider } = await connectToEthereum(jurisdiction);
-      
+
       // Get next entity number (indicates how many are registered)
       const nextNumber = await entityProvider.nextNumber();
       const registeredCount = Number(nextNumber) - 1;
-      
+
       console.log(`   📊 Registered Entities: ${registeredCount}`);
-      
+
       // Read registered entities
       if (registeredCount > 0) {
         console.log(`   📝 Entity Details:`);
@@ -641,15 +641,15 @@ const verifyJurisdictionRegistrations = async () => {
           }
         }
       }
-      
+
       console.log('');
-      
+
     } catch (error) {
       console.error(`   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
       console.log('');
     }
   }
-  
+
   console.log('✅ Jurisdiction verification complete!\n');
 };
 
@@ -659,7 +659,7 @@ const demoCompleteHanko = async (): Promise<void> => {
   try {
     // Check if running in browser environment
     const isBrowser = typeof window !== 'undefined';
-    
+
     if (isBrowser) {
       console.log('🎯 Browser environment detected - running simplified Hanko demo...');
       console.log('✅ Basic signature verification available');
@@ -667,7 +667,7 @@ const demoCompleteHanko = async (): Promise<void> => {
       console.log('✅ Hanko browser demo completed!');
       return;
     }
-    
+
     console.log('🎯 Running complete Hanko test suite...');
     await runCompleteHankoTests();
     console.log('✅ Complete Hanko tests passed!');
@@ -682,13 +682,13 @@ const runDemoWrapper = async (env: any): Promise<any> => {
   try {
     console.log('🚀 Starting XLN Consensus Demo...');
     console.log('📊 This will demonstrate entity creation, consensus, and message passing');
-    
+
     const result = await runDemo(env);
-    
+
     console.log('✅ XLN Demo completed successfully!');
     console.log('🎯 Check the entity cards above to see the results');
     console.log('🕰️ Use the time machine to replay the consensus steps');
-    
+
     return result;
   } catch (error) {
     console.error('❌ XLN Demo failed:', error);
@@ -712,7 +712,7 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   let outputs = inputs || [];
   let iterationCount = 0;
   const maxIterations = 10; // Safety limit
-  
+
   console.log('🔥 PROCESS-CASCADE: Starting with', outputs.length, 'initial outputs');
   console.log('🔥 PROCESS-CASCADE: Initial outputs:', outputs.map(o => ({
     entityId: o.entityId.slice(0,8) + '...',
@@ -721,21 +721,21 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
     precommits: o.precommits?.size || 0,
     hasFrame: !!o.proposedFrame
   })));
-  
+
   // DEBUG: Log transaction details for vote transactions
   outputs.forEach((output, i) => {
     if (output.entityTxs?.some(tx => tx.type === 'vote')) {
       console.log(`🗳️ VOTE-DEBUG: Input ${i+1} contains vote transactions:`, output.entityTxs.filter(tx => tx.type === 'vote'));
     }
   });
-  
+
   while (outputs.length > 0 && iterationCount < maxIterations) {
     iterationCount++;
     console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
-    
+
     const result = await applyServerInput(env, { serverTxs: [], entityInputs: outputs });
     outputs = result.entityOutbox;
-    
+
     console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} generated ${outputs.length} new outputs`);
     if (outputs.length > 0) {
       console.log('🔥 PROCESS-CASCADE: New outputs:', outputs.map(o => ({
@@ -747,13 +747,13 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
       })));
     }
   }
-  
+
   if (iterationCount >= maxIterations) {
     console.warn('⚠️ processUntilEmpty reached maximum iterations');
   } else {
     console.log(`🔥 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
   }
-  
+
   return env;
 };
 
