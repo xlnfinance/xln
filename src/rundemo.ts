@@ -55,65 +55,6 @@ const runDemo = async (env: Env): Promise<Env> => {
     entityInputs: [],
   });
 
-  // Store signer-specific reserves before consensus overwrites them
-  const signerReserves = new Map<string, Map<string, AssetBalance>>();
-
-  // 💰 Add demo financial data - simulate Depository.sol reserves
-  console.log('💰 Adding demo financial reserves to entities...');
-
-  // Add reserves to Alice in chat entity (CompanyA example)
-  // await applyServerInput(env, {
-  //   serverTxs: [],
-  //   entityInputs: [
-  //     {
-  //       entityId: chatEntityId, // ID сущности Alice
-  //       signerId: 'alice', // источник (наблюдатель/валидатор/подписант)
-  //       entityTxs: [
-  //         {
-  //           type: 'j_event',
-  //           data: {
-  //             from: 'alice',
-  //             event: {
-  //               type: 'reserveToReserve',
-  //               data: {
-  //                 asset: 'ETH',
-  //                 amount: '10000000000000000000', // 10 ETH
-  //                 from: 'alice',
-  //               },
-  //             },
-  //             observedAt: Date.now(),
-  //             blockNumber: 1,
-  //             transactionHash: '0xDEMO',
-  //           },
-  //         },
-  //       ],
-  //     },
-  //   ],
-  // });
-
-  // const aliceChatReplica = env.replicas.get(`${chatEntityId}:alice`);
-  // if (aliceChatReplica) {
-  //   addToReserves(aliceChatReplica.state.reserves, 'ETH', 10000000000000000000n, 18); // 10 ETH
-  //   addToReserves(aliceChatReplica.state.reserves, 'USDT', 23000000n, 6); // 23 USDT
-  //   addToReserves(aliceChatReplica.state.reserves, 'ACME-SHARES', 1235n, 0); // 1235 shares
-  //   console.log(`💰 Alice reserves: 10 ETH, 23 USDT, 1235 ACME-SHARES`);
-
-  //   // // Store Alice's reserves
-  //   // signerReserves.set('alice', new Map(aliceChatReplica.state.reserves));
-  // }
-
-  // Add different reserves to Bob (different portfolio)
-  // const bobChatReplica = env.replicas.get(`${chatEntityId}:bob`);
-  // if (bobChatReplica) {
-  //   addToReserves(bobChatReplica.state.reserves, 'ETH', 5000000000000000000n, 18); // 5 ETH
-  //   addToReserves(bobChatReplica.state.reserves, 'USDC', 50000000n, 6); // 50 USDC
-  //   addToReserves(bobChatReplica.state.reserves, 'BTC-SHARES', 100n, 8); // 1.00000000 BTC shares
-  //   console.log(`💰 Bob reserves: 5 ETH, 50 USDC, 1.00000000 BTC-SHARES`);
-
-  //   // // Store Bob's reserves
-  //   // signerReserves.set('bob', new Map(bobChatReplica.state.reserves));
-  // }
-
   // === TEST 2: Trading Entity - NUMBERED ENTITY (Weighted Voting) ===
   console.log('\n📋 TEST 2: Trading Entity - Numbered Entity with Jurisdiction');
   const tradingValidators = ['alice', 'bob', 'carol', 'david'];
