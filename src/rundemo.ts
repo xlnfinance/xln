@@ -236,6 +236,9 @@ const runDemo = async (env: Env): Promise<Env> => {
   });
 
 
+  // === Minting to single signer entity alice ===
+  console.log('\n💰 Minting to single signer entity alice...');
+
   await applyServerInput(env, {
     serverTxs: [],
     entityInputs: [
@@ -251,7 +254,7 @@ const runDemo = async (env: Env): Promise<Env> => {
                 type: 'reserveToReserve',
                 data: {
                   asset: 'ETH',
-                  amount: '10000000000000000000', // 10 ETH
+                  amount: '11000000000000000000', // 10 ETH
                   from: 'alice',
                   decimals: 18,
                 },
@@ -309,6 +312,9 @@ const runDemo = async (env: Env): Promise<Env> => {
     },
   ]);
 
+  // === Minting to single signer entity bob ===
+  console.log('\n💰 Minting to single signer entity bob...');
+
   await applyServerInput(env, {
     serverTxs: [],
     entityInputs: [
@@ -324,7 +330,7 @@ const runDemo = async (env: Env): Promise<Env> => {
                 type: 'reserveToReserve',
                 data: {
                   asset: 'ETH',
-                  amount: '5000000000000000000', // 5 ETH
+                  amount: '4000000000000000000', // 5 ETH
                   from: 'bob',
                   decimals: 18,
                 },
@@ -553,22 +559,66 @@ const runDemo = async (env: Env): Promise<Env> => {
     },
   ]);
 
-  // === RESTORE SIGNER-SPECIFIC RESERVES AFTER CONSENSUS ===
-  console.log('\n💰 Restoring signer-specific reserves after consensus...');
+  // === TRANSFER BETWEEN ENTITIES ===
+  console.log('\n💰 Transfer between entities...');
 
-  // // Restore Alice's reserves
-  // const finalAliceReplica = env.replicas.get(`${chatEntityId}:alice`);
-  // if (finalAliceReplica && signerReserves.has('alice')) {
-  //   finalAliceReplica.state.reserves = signerReserves.get('alice')!;
-  //   console.log(`✅ Restored Alice's reserves: 10 ETH, 23 USDT, 1235 ACME-SHARES`);
-  // }
-
-  // // Restore Bob's reserves
-  // const finalBobReplica = env.replicas.get(`${chatEntityId}:bob`);
-  // if (finalBobReplica && signerReserves.has('bob')) {
-  //   finalBobReplica.state.reserves = signerReserves.get('bob')!;
-  //   console.log(`✅ Restored Bob's reserves: 5 ETH, 50 USDC, 100 BTC-SHARES`);
-  // }
+  await applyServerInput(env, {
+    serverTxs: [],
+    entityInputs: [
+      {
+        // Alice signs and sees debit
+        entityId: aliceSingleEntityId,
+        signerId: 'alice',
+        entityTxs: [
+          {
+            type: 'j_event',
+            data: {
+              from: 'alice',
+              event: {
+                type: 'reserveToReserve',
+                data: {
+                  asset: 'ETH',
+                  amount: '1000000000000000000', // 1 ETH
+                  from: 'alice',
+                  to: 'bob',
+                  decimals: 18,
+                },
+              },
+              observedAt: Date.now(),
+              blockNumber: 1,
+              transactionHash: '0xTRANSFER1ETH',
+            },
+          },
+        ],
+      },
+      {
+        // Bob sees credit
+        entityId: bobSingleEntityId,
+        signerId: 'bob',
+        entityTxs: [
+          {
+            type: 'j_event',
+            data: {
+              from: 'bob', // alice initiated the transfer
+              event: {
+                type: 'reserveToReserve',
+                data: {
+                  asset: 'ETH',
+                  amount: '1000000000000000000', // 1 ETH
+                  from: 'alice',
+                  to: 'bob',
+                  decimals: 18,
+                },
+              },
+              observedAt: Date.now(),
+              blockNumber: 1,
+              transactionHash: '0xTRANSFER1ETH',
+            },
+          },
+        ],
+      },
+    ],
+  });
 
   // === FINAL VERIFICATION ===
   if (DEBUG) {
