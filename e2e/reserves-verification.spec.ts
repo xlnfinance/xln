@@ -25,11 +25,11 @@ test.describe('Entity Reserves Verification', () => {
     await firstEntity.click();
     await page.waitForTimeout(300);
 
-    const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x0000000000000000000000000000000000000000000000000000000000000001"]').first();
+    const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803"]').first();
     await aliceOption.click();
     await page.waitForTimeout(500);
 
-    await expect(firstPanel.getByText('Entity 0001')).toBeVisible();
+    await expect(firstPanel.getByText('Entity 4803')).toBeVisible();
     await expect(firstPanel.getByText('Signer: alice')).toBeVisible();
 
     // Find and expand the Reserves section
@@ -105,7 +105,7 @@ test.describe('Entity Reserves Verification', () => {
     await entityDropdown.click();
     await page.waitForTimeout(300);
 
-    const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x0000000000000000000000000000000000000000000000000000000000000001"]').first();
+    const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803"]').first();
     await aliceOption.click();
     await page.waitForTimeout(500);
 
@@ -124,7 +124,7 @@ test.describe('Entity Reserves Verification', () => {
     await entityDropdown.click();
     await page.waitForTimeout(300);
 
-    const bobOption = firstPanel.locator('[data-value="Ethereum:bob:0x0000000000000000000000000000000000000000000000000000000000000001"]').first();
+    const bobOption = firstPanel.locator('[data-value="Ethereum:bob:0x37214fa5196f5bba427e84b86e317c1b1829fe5010069dce10cd795cbc48dd66"]').first();
     await bobOption.click();
     await page.waitForTimeout(500);
 

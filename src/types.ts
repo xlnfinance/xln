@@ -66,12 +66,43 @@ export interface VoteData {
   comment?: string;
 }
 
-export interface EntityTx {
-  type: 'chat' | 'propose' | 'vote' | 'profile-update' | 'j_event' |
-        'deposit' | 'withdraw' | 'channel_open' | 'channel_update' | 'channel_close' |
-        'transfer' | 'collateral_lock' | 'collateral_unlock';
-  data: any;
+
+/**
+ * Jurisdiction event data for j_event transactions
+ * Flattened structure (no nested event object)
+ */
+export interface JurisdictionEventData {
+  from: string;
+  event: {
+    type: string;  // e.g. "reserveToReserve", "GovernanceEnabled"
+    data: any;
+  };
+  observedAt: number;
+  blockNumber: number;
+  transactionHash: string;
 }
+
+export type EntityTx =
+  | {
+      type: 'chat';
+      data: { from: string; message: string };
+    }
+  | {
+      type: 'propose';
+      data: { action: ProposalAction; proposer: string };
+    }
+  | {
+      type: 'vote';
+      data: { proposalId: string; voter: string; choice: 'yes' | 'no'; comment?: string };
+    }
+  | {
+      type: 'profile-update';
+      data: { profile: any }; // replace with concrete profile type if available
+    }
+  | {
+      type: 'j_event';
+      data: JurisdictionEventData;
+    };
 
 export interface AssetBalance {
   symbol: string;        // "ETH", "USDT", "ACME-SHARES"

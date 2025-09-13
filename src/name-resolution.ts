@@ -1,6 +1,6 @@
 /**
  * Name Resolution & Profile Management System
- * 
+ *
  * Combines basic name registry with gossip layer for profile storage.
  * Includes autocomplete functionality and hanko-signed profile updates.
  */
@@ -18,14 +18,14 @@ export const storeProfile = async (db: any, profile: EntityProfile): Promise<voi
     console.warn('Database not available for profile storage');
     return;
   }
-  
+
   try {
     // Store profile
     await db.put(`profile:${profile.entityId}`, JSON.stringify(profile));
-    
+
     // Update name index for autocomplete
     await updateNameIndex(db, profile.name, profile.entityId);
-    
+
     console.log(`📝 Stored profile for ${profile.name} (${formatEntityDisplay(profile.entityId)})`);
   } catch (error) {
     console.error('Error storing profile:', error);
@@ -37,7 +37,7 @@ export const storeProfile = async (db: any, profile: EntityProfile): Promise<voi
  */
 export const getProfile = async (db: any, entityId: string): Promise<EntityProfile | null> => {
   if (!db) return null;
-  
+
   try {
     const data = await db.get(`profile:${entityId}`);
     return JSON.parse(data) as EntityProfile;
@@ -60,10 +60,10 @@ const updateNameIndex = async (db: any, name: string, entityId: string): Promise
     } catch {
       // Index doesn't exist yet
     }
-    
+
     // Update index
     nameIndex[name.toLowerCase()] = entityId;
-    
+
     // Store updated index
     await db.put('name-index', JSON.stringify(nameIndex));
   } catch (error) {
@@ -78,15 +78,15 @@ const updateNameIndex = async (db: any, name: string, entityId: string): Promise
  */
 export const searchEntityNames = async (db: any, query: string, limit: number = 10): Promise<NameSearchResult[]> => {
   if (!db || !query.trim()) return [];
-  
+
   try {
     // Get name index
     const data = await db.get('name-index');
     const nameIndex: NameIndex = JSON.parse(data);
-    
+
     const queryLower = query.toLowerCase();
     const results: NameSearchResult[] = [];
-    
+
     // Search through names
     for (const [name, entityId] of Object.entries(nameIndex)) {
       if (name.includes(queryLower)) {
@@ -97,11 +97,11 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
         } else if (name.includes(queryLower)) {
           relevance = 0.7; // Contains query
         }
-        
+
         // Get avatar (generated or custom)
         const profile = await getProfile(db, entityId);
         const avatar = profile?.avatar || generateEntityAvatar(entityId);
-        
+
         results.push({
           entityId,
           name: profile?.name || formatEntityDisplay(entityId),
@@ -110,7 +110,7 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
         });
       }
     }
-    
+
     // Sort by relevance and name
     results.sort((a, b) => {
       if (a.relevance !== b.relevance) {
@@ -118,7 +118,7 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
       }
       return a.name.localeCompare(b.name); // Alphabetical
     });
-    
+
     return results.slice(0, limit);
   } catch (error) {
     console.error('Error searching entity names:', error);
@@ -133,24 +133,24 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
  */
 export const createProfileUpdateTx = (updates: ProfileUpdateTx): EntityTx => {
   return {
-    type: 'profile-update',
-    data: updates
-  };
+    type: 'profile-update' as const,
+    data: updates as any
+  } as EntityTx;
 };
 
 /**
  * Process profile update transaction
  */
 export const processProfileUpdate = async (
-  db: any, 
-  entityId: string, 
+  db: any,
+  entityId: string,
   updates: ProfileUpdateTx,
   hankoSignature: string
 ): Promise<void> => {
   try {
     // Get existing profile or create new one
     let profile = await getProfile(db, entityId);
-    
+
     if (!profile) {
       // Create new profile with defaults
       profile = {
@@ -160,20 +160,20 @@ export const processProfileUpdate = async (
         hankoSignature
       };
     }
-    
+
     // Apply updates
     if (updates.name !== undefined) profile.name = updates.name;
     if (updates.avatar !== undefined) profile.avatar = updates.avatar;
     if (updates.bio !== undefined) profile.bio = updates.bio;
     if (updates.website !== undefined) profile.website = updates.website;
-    
+
     // Update metadata
     profile.lastUpdated = Date.now();
     profile.hankoSignature = hankoSignature;
-    
+
     // Store updated profile
     await storeProfile(db, profile);
-    
+
     console.log(`✅ Updated profile for ${profile.name} (${formatEntityDisplay(entityId)})`);
   } catch (error) {
     console.error('Error processing profile update:', error);
