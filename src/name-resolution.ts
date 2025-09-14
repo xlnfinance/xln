@@ -5,8 +5,8 @@
  * Includes autocomplete functionality and hanko-signed profile updates.
  */
 
-import { EntityProfile, NameIndex, NameSearchResult, ProfileUpdateTx, EntityTx, Env } from './types.js';
-import { formatEntityDisplay, generateEntityAvatar } from './utils.js';
+import { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
+import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
 // === PROFILE STORAGE ===
 
@@ -106,7 +106,7 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
           entityId,
           name: profile?.name || formatEntityDisplay(entityId),
           avatar,
-          relevance
+          relevance,
         });
       }
     }
@@ -134,7 +134,7 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
 export const createProfileUpdateTx = (updates: ProfileUpdateTx): EntityTx => {
   return {
     type: 'profile-update' as const,
-    data: updates as any
+    data: updates as any,
   } as EntityTx;
 };
 
@@ -145,7 +145,7 @@ export const processProfileUpdate = async (
   db: any,
   entityId: string,
   updates: ProfileUpdateTx,
-  hankoSignature: string
+  hankoSignature: string,
 ): Promise<void> => {
   try {
     // Get existing profile or create new one
@@ -157,7 +157,7 @@ export const processProfileUpdate = async (
         entityId,
         name: formatEntityDisplay(entityId), // Default to formatted entity ID
         lastUpdated: Date.now(),
-        hankoSignature
+        hankoSignature,
       };
     }
 
@@ -192,10 +192,10 @@ export const resolveEntityName = async (db: any, entityId: string): Promise<stri
 /**
  * Get entity display info (name + avatar)
  */
-export const getEntityDisplayInfo = async (db: any, entityId: string): Promise<{ name: string, avatar: string }> => {
+export const getEntityDisplayInfo = async (db: any, entityId: string): Promise<{ name: string; avatar: string }> => {
   const profile = await getProfile(db, entityId);
   return {
     name: profile?.name || formatEntityDisplay(entityId),
-    avatar: profile?.avatar || generateEntityAvatar(entityId)
+    avatar: profile?.avatar || generateEntityAvatar(entityId),
   };
 };

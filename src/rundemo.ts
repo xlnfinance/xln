@@ -3,12 +3,12 @@
  * Exact 1:1 copy of runDemo function from server.ts
  */
 
-import { DEBUG } from './utils.js';
-import { Env, EntityInput, ConsensusConfig, EntityTx, EntityReplica, Proposal, AssetBalance } from './types.js';
-import { generateLazyEntityId, generateNumberedEntityId } from './entity-factory.js';
-import { registerNumberedEntityOnChain, getJurisdictionByAddress } from './evm.js';
-import { applyServerInput, processUntilEmpty } from './server.js';
-import { formatEntityDisplay, formatSignerDisplay } from './utils.js';
+import { generateLazyEntityId, generateNumberedEntityId } from './entity-factory';
+import { getJurisdictionByAddress, registerNumberedEntityOnChain } from './evm';
+import { applyServerInput, processUntilEmpty } from './server';
+import { ConsensusConfig, EntityInput, EntityReplica, EntityTx, Env, Proposal } from './types';
+import { DEBUG } from './utils';
+import { formatEntityDisplay, formatSignerDisplay } from './utils';
 
 // Exact 1:1 copy of runDemo function from server.ts
 const runDemo = async (env: Env): Promise<Env> => {
@@ -174,7 +174,6 @@ const runDemo = async (env: Env): Promise<Env> => {
     ],
     entityInputs: [],
   });
-
 
   // === Minting to single signer entity alice ===
   console.log('\n💰 Minting to single signer entity alice...');
@@ -605,7 +604,7 @@ const runDemo = async (env: Env): Promise<Env> => {
         if (replica.state.proposals.size > 0) {
           console.log(`     Proposals:`);
           replica.state.proposals.forEach((proposal, id) => {
-            const yesVotes = Array.from(proposal.votes.values()).filter((vote) => vote === 'yes').length;
+            const yesVotes = Array.from(proposal.votes.values()).filter(vote => vote === 'yes').length;
             const totalVotes = proposal.votes.size;
             console.log(`       ${id} by ${proposal.proposer} [${proposal.status}] ${yesVotes}/${totalVotes} votes`);
             console.log(`         Action: ${proposal.action.data.message}`);
@@ -618,12 +617,12 @@ const runDemo = async (env: Env): Promise<Env> => {
       // Verify consensus within entity (messages and proposals)
       const firstMessages = allMessages[0];
       const messagesConsensus = allMessages.every(
-        (messages) => messages.length === firstMessages.length && messages.every((msg, i) => msg === firstMessages[i]),
+        messages => messages.length === firstMessages.length && messages.every((msg, i) => msg === firstMessages[i]),
       );
 
       const firstProposals = allProposals[0];
       const proposalsConsensus = allProposals.every(
-        (proposals) =>
+        proposals =>
           proposals.length === firstProposals.length &&
           proposals.every(
             (prop, i) =>
@@ -657,7 +656,7 @@ const runDemo = async (env: Env): Promise<Env> => {
 
     // Show mode distribution
     const modeCount = new Map<string, number>();
-    env.replicas.forEach((replica) => {
+    env.replicas.forEach(replica => {
       const mode = replica.state.config.mode;
       modeCount.set(mode, (modeCount.get(mode) || 0) + 1);
     });

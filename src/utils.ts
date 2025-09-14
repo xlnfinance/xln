@@ -3,8 +3,9 @@
  * Platform detection, crypto polyfills, logging, and helper functions
  */
 
-import { extractNumberFromEntityId } from './entity-factory.js';
 import { toSvg } from 'jdenticon';
+
+import { extractNumberFromEntityId } from './entity-factory';
 
 // Global polyfills for browser compatibility
 if (typeof global === 'undefined') {
@@ -22,48 +23,50 @@ declare global {
 export const isBrowser = typeof window !== 'undefined';
 
 // Simplified crypto compatibility
-export const createHash = isBrowser ?
-  (algorithm: string) => ({
-    update: (data: string) => ({
-      digest: (encoding?: string) => {
-        // Create proper 32-byte hash for browser demo using Web Crypto API
-        const encoder = new TextEncoder();
-        const dataBuffer = encoder.encode(data);
+export const createHash = isBrowser
+  ? (algorithm: string) => ({
+      update: (data: string) => ({
+        digest: (encoding?: string) => {
+          // Create proper 32-byte hash for browser demo using Web Crypto API
+          const encoder = new TextEncoder();
+          const dataBuffer = encoder.encode(data);
 
-        // Simple deterministic hash that produces 32 bytes
-        let hash = 0;
-        for (let i = 0; i < data.length; i++) {
-          const char = data.charCodeAt(i);
-          hash = ((hash << 5) - hash) + char;
-          hash = hash & hash; // Convert to 32bit integer
-        }
-
-        // Create a 32-byte buffer by repeating and expanding the hash
-        const baseHash = Math.abs(hash).toString(16).padStart(8, '0');
-        const fullHash = (baseHash + baseHash + baseHash + baseHash).slice(0, 64); // 32 bytes = 64 hex chars
-
-        if (encoding === 'hex') {
-          return fullHash;
-        } else {
-          // Return as Buffer (Uint8Array)
-          const bytes = new Uint8Array(32);
-          for (let i = 0; i < 32; i++) {
-            bytes[i] = parseInt(fullHash.substr(i * 2, 2), 16);
+          // Simple deterministic hash that produces 32 bytes
+          let hash = 0;
+          for (let i = 0; i < data.length; i++) {
+            const char = data.charCodeAt(i);
+            hash = (hash << 5) - hash + char;
+            hash = hash & hash; // Convert to 32bit integer
           }
-          return Buffer.from(bytes);
-        }
-      }
-    })
-  }) :
-  require('crypto').createHash;
 
-export const randomBytes = isBrowser ?
-  (size: number): Uint8Array => {
-    const array = new Uint8Array(size);
-    crypto.getRandomValues(array);
-    return array;
-  } :
-  require('crypto').randomBytes;
+          // Create a 32-byte buffer by repeating and expanding the hash
+          const baseHash = Math.abs(hash).toString(16).padStart(8, '0');
+          const fullHash = (baseHash + baseHash + baseHash + baseHash).slice(0, 64); // 32 bytes = 64 hex chars
+
+          if (encoding === 'hex') {
+            return fullHash;
+          } else {
+            // Return as Buffer (Uint8Array)
+            const bytes = new Uint8Array(32);
+            for (let i = 0; i < 32; i++) {
+              bytes[i] = parseInt(fullHash.substr(i * 2, 2), 16);
+            }
+            return Buffer.from(bytes);
+          }
+        },
+      }),
+    })
+  : // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('crypto').createHash;
+
+export const randomBytes = isBrowser
+  ? (size: number): Uint8Array => {
+      const array = new Uint8Array(size);
+      crypto.getRandomValues(array);
+      return array;
+    }
+  : // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('crypto').randomBytes;
 
 // Simplified Buffer polyfill for browser
 const getBuffer = () => {
@@ -74,9 +77,10 @@ const getBuffer = () => {
           return new TextEncoder().encode(data);
         }
         return new Uint8Array(data);
-      }
+      },
     };
   }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('buffer').Buffer;
 };
 
@@ -84,7 +88,7 @@ export const Buffer = getBuffer();
 
 // Browser polyfill for Uint8Array.toString()
 if (isBrowser) {
-  (Uint8Array.prototype as any).toString = function(encoding: string = 'utf8') {
+  (Uint8Array.prototype as any).toString = function (encoding: string = 'utf8') {
     return new TextDecoder().decode(this);
   };
   (window as any).Buffer = Buffer;
@@ -92,12 +96,16 @@ if (isBrowser) {
 
 // Debug compatibility
 const createDebug = (namespace: string) => {
-  const shouldLog = namespace.includes('state') || namespace.includes('tx') ||
-                   namespace.includes('block') || namespace.includes('error') ||
-                   namespace.includes('diff') || namespace.includes('info');
+  const shouldLog =
+    namespace.includes('state') ||
+    namespace.includes('tx') ||
+    namespace.includes('block') ||
+    namespace.includes('error') ||
+    namespace.includes('diff') ||
+    namespace.includes('info');
   return shouldLog ? console.log.bind(console, `[${namespace}]`) : () => {};
 };
-
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const debug = isBrowser ? createDebug : require('debug');
 
 // Configure debug logging with functional approach
@@ -107,15 +115,18 @@ export const log = {
   block: debug('block:🟢'),
   error: debug('error:🔴'),
   diff: debug('diff:🟣'),
-  info: debug('info:ℹ️')
+  info: debug('info:ℹ️'),
 };
 
 // Hash utility function
-export const hash = (data: Buffer | string): Buffer =>
-  createHash('sha256').update(data.toString()).digest();
+export const hash = (data: Buffer | string): Buffer => {
+  const result = createHash('sha256').update(data.toString()).digest();
+  // Ensure we always return a Buffer, regardless of what digest() returns
+  return Buffer.from(result as any);
+};
 
 // Global debug flag
-export let DEBUG = true;
+export const DEBUG = true;
 
 // Function to clear the database and reset in-memory history
 export const clearDatabase = async (db?: any) => {
@@ -134,7 +145,7 @@ export const clearDatabase = async (db?: any) => {
       try {
         // Clear all possible database names that Level.js might use
         const clearPromises = dbNames.map(dbName => {
-          return new Promise<void>((resolve) => {
+          return new Promise<void>(resolve => {
             const deleteReq = indexedDB.deleteDatabase(dbName);
             deleteReq.onsuccess = () => {
               console.log(`✅ Cleared IndexedDB: ${dbName}`);
@@ -195,19 +206,19 @@ export const formatEntityDisplay = (entityId: string): string => {
  * @param entityId - The entity ID
  * @returns Object with display name and avatar
  */
-export const getEntityDisplayInfo = (entityId: string): { name: string, avatar: string, type: 'numbered' | 'lazy' } => {
+export const getEntityDisplayInfo = (entityId: string): { name: string; avatar: string; type: 'numbered' | 'lazy' } => {
   const number = extractNumberFromEntityId(entityId);
   if (number !== null) {
     return {
       name: `Entity #${number}`,
       avatar: generateEntityAvatar(entityId),
-      type: 'numbered'
+      type: 'numbered',
     };
   } else {
     return {
       name: entityId,
       avatar: generateEntityAvatar(entityId),
-      type: 'lazy'
+      type: 'lazy',
     };
   }
 };
@@ -218,26 +229,26 @@ export const getEntityDisplayInfo = (entityId: string): { name: string, avatar: 
  * Demo signer mappings (using Hardhat default addresses)
  */
 export const DEMO_SIGNERS = {
-  'alice': {
+  alice: {
     name: 'alice.eth',
-    address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+    address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
   },
-  'bob': {
+  bob: {
     name: 'bob.eth',
-    address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+    address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
   },
-  'carol': {
+  carol: {
     name: 'carol.eth',
-    address: '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+    address: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
   },
-  'david': {
+  david: {
     name: 'david.eth',
-    address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65'
+    address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
   },
-  'eve': {
+  eve: {
     name: 'eve.eth',
-    address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc'
-  }
+    address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
+  },
 };
 
 /**
@@ -260,19 +271,19 @@ export const formatSignerDisplay = (signerId: string): string => {
  * @param signerId - The signer ID to format
  * @returns Object with display name and address
  */
-export const getSignerDisplayInfo = (signerId: string): { name: string, address: string, avatar: string } => {
+export const getSignerDisplayInfo = (signerId: string): { name: string; address: string; avatar: string } => {
   const signerInfo = DEMO_SIGNERS[signerId as keyof typeof DEMO_SIGNERS];
   if (signerInfo) {
     return {
       name: signerInfo.name,
       address: signerInfo.address,
-      avatar: generateSignerAvatar(signerId)
+      avatar: generateSignerAvatar(signerId),
     };
   }
   return {
     name: signerId,
     address: signerId,
-    avatar: generateSignerAvatar(signerId)
+    avatar: generateSignerAvatar(signerId),
   };
 };
 
