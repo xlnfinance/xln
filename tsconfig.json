@@ -7,6 +7,8 @@
     "outDir": "./dist",
     "strict": true,
     "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "typeRoots": ["./node_modules/@types", "./types"],
     "types": []
