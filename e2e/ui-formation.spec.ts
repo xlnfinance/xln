@@ -1,13 +1,15 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test('Svelte UI: creates a lazy entity via Formation', async ({ page }) => {
-  page.on('console', (msg) => console.log('UI console:', msg.type(), msg.text()));
-  page.on('pageerror', (err) => console.log('UI pageerror:', err.message));
-  page.on('requestfailed', (req) => console.log('UI requestfailed:', req.url(), req.failure()?.errorText));
+  page.on('console', msg => console.log('UI console:', msg.type(), msg.text()));
+  page.on('pageerror', err => console.log('UI pageerror:', err.message));
+  page.on('requestfailed', req => console.log('UI requestfailed:', req.url(), req.failure()?.errorText));
   await page.goto('http://127.0.0.1:8080/');
 
   // Enable runtime server import and env init via UI helper flag
-  await page.addInitScript(() => { (window as any).__useDistServer = true; });
+  await page.addInitScript(() => {
+    (window as any).__useDistServer = true;
+  });
   // Reload to apply the flag
   await page.reload();
   await page.waitForFunction(() => Boolean((window as any).xlnEnv), undefined, { timeout: 30000 });
@@ -32,15 +34,17 @@ test('Svelte UI: creates a lazy entity via Formation', async ({ page }) => {
   await page.getByRole('button', { name: 'Create Entity' }).click();
 
   // Wait for increase
-  await page.waitForFunction((prev) => {
-    const env = (window as any).xlnEnv;
-    return env && env.replicas && env.replicas.size > prev;
-  }, beforeCount, { timeout: 30000 });
+  await page.waitForFunction(
+    prev => {
+      const env = (window as any).xlnEnv;
+      return env && env.replicas && env.replicas.size > prev;
+    },
+    beforeCount,
+    { timeout: 30000 },
+  );
 
   // Hold for video clarity
   await page.waitForTimeout(2000);
 
   await expect(page.locator('.entity-panels-container').first()).toBeVisible();
 });
-
-

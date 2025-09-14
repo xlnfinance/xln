@@ -1,5 +1,6 @@
-import { test, expect } from '@playwright/test';
-import type { XLNEnvironment, EntityReplica, Proposal } from '../frontend/src/lib/types/index.js';
+import { expect, test } from '@playwright/test';
+
+import type { EntityReplica, Proposal, XLNEnvironment } from '../frontend/src/lib/types/index.js';
 
 test.describe('Simple Proposal Verification', () => {
   test('VERIFY: Proposal creation adds to backend state', async ({ page }) => {
@@ -42,7 +43,9 @@ test.describe('Simple Proposal Verification', () => {
     await firstEntity.click();
     await page.waitForTimeout(300);
 
-    const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x0000000000000000000000000000000000000000000000000000000000000001"]').first();
+    const aliceOption = firstPanel
+      .locator('[data-value="Ethereum:alice:0x0000000000000000000000000000000000000000000000000000000000000001"]')
+      .first();
     await aliceOption.click();
     await page.waitForTimeout(500);
 
@@ -55,8 +58,14 @@ test.describe('Simple Proposal Verification', () => {
     await page.waitForTimeout(200);
 
     // Fill and submit proposal
-    await page.locator('#controls-tab-1').getByRole('textbox', { name: 'Enter proposal title...' }).fill('Backend Test Proposal');
-    await page.locator('#controls-tab-1').getByRole('textbox', { name: 'Enter proposal description...' }).fill('Testing backend state');
+    await page
+      .locator('#controls-tab-1')
+      .getByRole('textbox', { name: 'Enter proposal title...' })
+      .fill('Backend Test Proposal');
+    await page
+      .locator('#controls-tab-1')
+      .getByRole('textbox', { name: 'Enter proposal description...' })
+      .fill('Testing backend state');
 
     await page.locator('#controls-tab-1').getByRole('button', { name: 'Create Proposal' }).click();
     await page.waitForTimeout(1000);
@@ -101,7 +110,7 @@ test.describe('Simple Proposal Verification', () => {
     // Verify proposal was created
     expect(afterProposals.totalProposals).toBeGreaterThan(beforeProposals.totalProposals);
 
-    const newProposal = afterProposals.proposals.find((p) => p.title === 'Backend Test Proposal: Testing backend state');
+    const newProposal = afterProposals.proposals.find(p => p.title === 'Backend Test Proposal: Testing backend state');
     expect(newProposal).toBeDefined();
 
     console.log('✅ SUCCESS: Proposal created in backend!');
