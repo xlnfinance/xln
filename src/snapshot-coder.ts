@@ -32,17 +32,17 @@ let sha256: any = null;
 // Lazy initialization function for msgpack
 const initMsgpack = async () => {
   if (packr) return packr; // Already initialized
-  
+
   try {
     const { Packr } = await import('msgpackr');
     const { createHash } = await import('./utils.js');
-    
+
     sha256 = (data: Buffer): Buffer => createHash('sha256').update(data).digest();
-    
+
     packr = new Packr({
       structures: [[BigInt, (value: bigint) => value.toString(), (str: string) => BigInt(str)]],
     });
-    
+
     return packr;
   } catch (error) {
     console.warn('Failed to load msgpack dependencies:', error);
@@ -84,7 +84,7 @@ function deterministicDeepSort(obj: any): any {
 function reconstructMaps(obj: any): any {
   if (Array.isArray(obj)) {
     // Check if it's a key-value pair array that should be a Map
-    const isMapArray = obj.every((item) => Array.isArray(item) && item.length === 2);
+    const isMapArray = obj.every(item => Array.isArray(item) && item.length === 2);
     if (isMapArray) {
       return new Map(obj.map(([k, v]) => [k, reconstructMaps(v)]));
     }
@@ -142,19 +142,19 @@ export const decode = (buffer: Buffer): any => {
 export const encodeAsync = async (data: any): Promise<Buffer> => {
   if (USE_MSGPACK) {
     const packrInstance = await initMsgpack();
-    
+
     // Msgpack encoding with integrity hashing
     const sortedReplicas = deterministicDeepSort(data.replicas || new Map());
     const serializedReplicas = packrInstance.pack(sortedReplicas);
     const hashOfReplicas = sha256(serializedReplicas);
-    
+
     const snapshotTuple: SnapshotTuple = [
       data.height || 0,
       deterministicDeepSort(data.serverInput || {}),
       hashOfReplicas,
       sortedReplicas,
     ];
-   
+
     return packrInstance.pack(snapshotTuple);
   } else {
     // Fallback to sync JSON encoding
@@ -168,7 +168,7 @@ export const encodeAsync = async (data: any): Promise<Buffer> => {
 export const decodeAsync = async (buffer: Buffer): Promise<any> => {
   if (USE_MSGPACK) {
     const packrInstance = await initMsgpack();
-    
+
     // Msgpack decoding with integrity verification
     const decodedTuple = packrInstance.unpack(buffer) as SnapshotTuple;
 
@@ -177,7 +177,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
     }
 
     const [height, serverInput, hashOfReplicas, sortedReplicas] = decodedTuple;
-  
+
     // Security/Integrity Check: Verify the hash of the replicas.
     const serializedReplicas = packrInstance.pack(sortedReplicas);
     const calculatedHash = sha256(serializedReplicas);
@@ -187,14 +187,14 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
 
     // Reconstruct the original object, converting sorted arrays back to Maps.
     const replicas = reconstructMaps(sortedReplicas);
-  
+
     return {
-        height,
-        serverInput: reconstructMaps(serverInput),
-        replicas,
-        // Add timestamp for compatibility
-        timestamp: Date.now()
-      };
+      height,
+      serverInput: reconstructMaps(serverInput),
+      replicas,
+      // Add timestamp for compatibility
+      timestamp: Date.now(),
+    };
   } else {
     // Fallback to sync JSON decoding
     return decode(buffer);

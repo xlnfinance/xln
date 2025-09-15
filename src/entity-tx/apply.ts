@@ -1,10 +1,10 @@
-import { Env, EntityState, EntityTx, Proposal } from '../types.js';
-import { validateMessage } from './validation.js';
-import { generateProposalId, executeProposal } from './proposals.js';
-import { calculateQuorumPower } from '../entity-consensus.js';
-import { addToReserves, subtractFromReserves } from './financial.js';
-import { handleJEvent } from './j-events.js';
-import { DEBUG, log } from '../utils.js';
+import { calculateQuorumPower } from '../entity-consensus';
+import { EntityState, EntityTx, Env, Proposal } from '../types';
+import { DEBUG, log } from '../utils';
+import { addToReserves, subtractFromReserves } from './financial';
+import { handleJEvent } from './j-events';
+import { executeProposal, generateProposalId } from './proposals';
+import { validateMessage } from './validation';
 
 export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: EntityTx): EntityState => {
   console.log(`🚨 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, entityTx.data);

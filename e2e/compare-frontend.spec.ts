@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test';
+import { expect, Page, test } from '@playwright/test';
 
-async function collectLegacyMetrics(page) {
+async function collectLegacyMetrics(page: Page) {
   // Try root first, then explicit legacy copy as fallback
   for (const path of ['/', '/index%20copy.html']) {
     await page.goto(`http://localhost:8080${path}`);
@@ -17,36 +17,66 @@ async function collectLegacyMetrics(page) {
     }
   }
 
-  const panelCount = await page.locator('.entity-panel').count().catch(() => 0);
-  const hasTimeBtns = await page.locator('.time-btn-compact').first().isVisible().catch(() => false);
-  const hasLiveBtn = await page.getByRole('button', { name: /LIVE/ }).isVisible().catch(() => false);
+  const panelCount = await page
+    .locator('.entity-panel')
+    .count()
+    .catch(() => 0);
+  const hasTimeBtns = await page
+    .locator('.time-btn-compact')
+    .first()
+    .isVisible()
+    .catch(() => false);
+  const hasLiveBtn = await page
+    .getByRole('button', { name: /LIVE/ })
+    .isVisible()
+    .catch(() => false);
 
   await page.screenshot({ path: 'e2e/test-results/legacy-ui.png', fullPage: true });
   return { panelCount, hasTimeBtns, hasLiveBtn };
 }
 
-async function collectSvelteMetrics(page) {
+async function collectSvelteMetrics(page: Page) {
   await page.goto('http://127.0.0.1:5174/');
   // Svelte app signal: container and at least one panel
   await expect(page.locator('.entity-panels-container')).toBeVisible({ timeout: 20000 });
-  const panelCount = await page.locator('.entity-panel').count().catch(() => 0);
+  const panelCount = await page
+    .locator('.entity-panel')
+    .count()
+    .catch(() => 0);
 
   // Tabs and controls signals
-  const hasFormationTab = await page.locator('#formationTab').isVisible().catch(() => false);
-  const hasJurisdictionsTab = await page.locator('#jurisdictionsTab').isVisible().catch(() => false);
-  const hasComponentHeaders = (await page.locator('.component-header').count().catch(() => 0)) > 0;
+  const hasFormationTab = await page
+    .locator('#formationTab')
+    .isVisible()
+    .catch(() => false);
+  const hasJurisdictionsTab = await page
+    .locator('#jurisdictionsTab')
+    .isVisible()
+    .catch(() => false);
+  const hasComponentHeaders =
+    (await page
+      .locator('.component-header')
+      .count()
+      .catch(() => 0)) > 0;
 
   await page.screenshot({ path: 'e2e/test-results/svelte-ui.png', fullPage: true });
   return { panelCount, hasFormationTab, hasJurisdictionsTab, hasComponentHeaders };
 }
 
-async function collectUiMetrics(page) {
+async function collectUiMetrics(page: Page) {
   await page.goto('http://localhost:5173/');
   // Panels page elements
   const panelsHeader = page.getByText('👁️ Panels', { exact: false });
   await expect(panelsHeader).toBeVisible({ timeout: 15000 });
-  const panelCount = await page.locator('.entity-panel').count().catch(() => 0);
-  const hasDropdown = await page.locator('.unified-dropdown-btn').first().isVisible().catch(() => false);
+  const panelCount = await page
+    .locator('.entity-panel')
+    .count()
+    .catch(() => 0);
+  const hasDropdown = await page
+    .locator('.unified-dropdown-btn')
+    .first()
+    .isVisible()
+    .catch(() => false);
   await page.screenshot({ path: 'e2e/test-results/ui-app.png', fullPage: true });
   return { panelCount, hasDropdown };
 }
@@ -55,7 +85,10 @@ test.skip('compare svelte frontend vs ui app (smoke)', async ({ page }) => {
   const ui = await collectUiMetrics(page);
 
   // Use a new context/page for the second target to avoid shared state
-  const context2 = await page.context().browser()?.newContext({ viewport: { width: 1920, height: 1080 } });
+  const context2 = await page
+    .context()
+    .browser()
+    ?.newContext({ viewport: { width: 1920, height: 1080 } });
   const page2 = await context2!.newPage();
   const svelte = await collectSvelteMetrics(page2);
 
@@ -78,5 +111,3 @@ test.skip('compare svelte frontend vs ui app (smoke)', async ({ page }) => {
 
   await context2!.close();
 });
-
-

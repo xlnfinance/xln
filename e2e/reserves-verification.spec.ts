@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test.describe('Entity Reserves Verification', () => {
   test('should display entity reserves with portfolio bars after demo', async ({ page }) => {
@@ -25,7 +25,9 @@ test.describe('Entity Reserves Verification', () => {
     await firstEntity.click();
     await page.waitForTimeout(300);
 
-    const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803"]').first();
+    const aliceOption = firstPanel
+      .locator('[data-value="Ethereum:alice:0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803"]')
+      .first();
     await aliceOption.click();
     await page.waitForTimeout(500);
 
@@ -33,7 +35,7 @@ test.describe('Entity Reserves Verification', () => {
     await expect(firstPanel.getByText('Signer: alice')).toBeVisible();
 
     // Find and expand the Reserves section
-    const reservesHeader = page.getByRole('button', { name: '💰 Reserves ▼' })
+    const reservesHeader = page.getByRole('button', { name: '💰 Reserves ▼' });
     await expect(reservesHeader).toBeVisible();
 
     // Click to expand reserves
@@ -105,7 +107,9 @@ test.describe('Entity Reserves Verification', () => {
     await entityDropdown.click();
     await page.waitForTimeout(300);
 
-    const aliceOption = firstPanel.locator('[data-value="Ethereum:alice:0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803"]').first();
+    const aliceOption = firstPanel
+      .locator('[data-value="Ethereum:alice:0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803"]')
+      .first();
     await aliceOption.click();
     await page.waitForTimeout(500);
 
@@ -124,7 +128,9 @@ test.describe('Entity Reserves Verification', () => {
     await entityDropdown.click();
     await page.waitForTimeout(300);
 
-    const bobOption = firstPanel.locator('[data-value="Ethereum:bob:0x37214fa5196f5bba427e84b86e317c1b1829fe5010069dce10cd795cbc48dd66"]').first();
+    const bobOption = firstPanel
+      .locator('[data-value="Ethereum:bob:0x37214fa5196f5bba427e84b86e317c1b1829fe5010069dce10cd795cbc48dd66"]')
+      .first();
     await bobOption.click();
     await page.waitForTimeout(500);
 
@@ -179,7 +185,9 @@ test.describe('Entity Reserves Verification', () => {
 
     // Should show empty state
     await expect(firstPanel.locator('#reserves-tab-1 .empty-state')).toBeVisible();
-    await expect(firstPanel.locator('#reserves-tab-1 .empty-state')).toContainText('No reserves yet - deposit assets via Depository.sol');
+    await expect(firstPanel.locator('#reserves-tab-1 .empty-state')).toContainText(
+      'No reserves yet - deposit assets via Depository.sol',
+    );
 
     await page.screenshot({ path: 'e2e/screenshots/reserves-empty-state.png' });
   });

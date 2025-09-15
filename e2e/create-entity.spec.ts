@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test('creates a new lazy entity via formation panel', async ({ page }) => {
   await page.goto('/');
@@ -52,12 +52,12 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
   // Verify in the app state that new replicas were imported
   // For a single validator, we expect at least +1 replica
   await page.waitForFunction(
-    (prev) => {
+    prev => {
       const env = (window as any).xlnEnv;
       return env && env.replicas && env.replicas.size > prev;
     },
     beforeCount,
-    { timeout: 30000 }
+    { timeout: 30000 },
   );
 
   const afterCount = await page.evaluate(() => {
@@ -74,5 +74,3 @@ test('creates a new lazy entity via formation panel', async ({ page }) => {
   // Hold the final frame a bit so the video isn't 0:00
   await page.waitForTimeout(1000);
 });
-
-

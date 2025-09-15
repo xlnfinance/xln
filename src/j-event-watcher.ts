@@ -11,6 +11,7 @@
  */
 
 import { ethers } from 'ethers';
+
 import type { EntityTx, Env } from './types.js';
 
 // Debug flag for logging
@@ -50,13 +51,13 @@ export class JEventWatcher {
 
   // Contract ABIs (minimal for events we care about)
   private entityProviderABI = [
-    "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
-    "event ControlSharesReleased(bytes32 indexed entityId, address indexed depository, uint256 controlAmount, uint256 dividendAmount, string purpose)",
-    "event NameAssigned(string indexed name, uint256 indexed entityNumber)"
+    'event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)',
+    'event ControlSharesReleased(bytes32 indexed entityId, address indexed depository, uint256 controlAmount, uint256 dividendAmount, string purpose)',
+    'event NameAssigned(string indexed name, uint256 indexed entityNumber)',
   ];
 
   private depositoryABI = [
-    "event ControlSharesReceived(address indexed entityProvider, address indexed fromEntity, uint256 indexed tokenId, uint256 amount, bytes data)"
+    'event ControlSharesReceived(address indexed entityProvider, address indexed fromEntity, uint256 indexed tokenId, uint256 amount, bytes data)',
   ];
 
   constructor(config: WatcherConfig) {
@@ -66,14 +67,10 @@ export class JEventWatcher {
     this.entityProviderContract = new ethers.Contract(
       config.entityProviderAddress,
       this.entityProviderABI,
-      this.provider
+      this.provider,
     );
 
-    this.depositoryContract = new ethers.Contract(
-      config.depositoryAddress,
-      this.depositoryABI,
-      this.provider
-    );
+    this.depositoryContract = new ethers.Contract(config.depositoryAddress, this.depositoryABI, this.provider);
 
     this.lastProcessedBlock = config.startBlock || 0;
   }
@@ -85,7 +82,7 @@ export class JEventWatcher {
     this.signers.set(signerId, {
       signerId,
       privateKey,
-      entityIds
+      entityIds,
     });
 
     if (DEBUG) {
@@ -130,35 +127,47 @@ export class JEventWatcher {
   private setupEventListeners(env: Env): void {
     // EntityProvider events
     this.entityProviderContract.on('EntityRegistered', (entityId, entityNumber, boardHash, event) => {
-      this.handleJurisdictionEvent({
-        type: 'entity_registered',
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityId: entityId.toString(),
-        entityNumber: Number(entityNumber),
-        data: { boardHash }
-      }, env);
+      this.handleJurisdictionEvent(
+        {
+          type: 'entity_registered',
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash,
+          entityId: entityId.toString(),
+          entityNumber: Number(entityNumber),
+          data: { boardHash },
+        },
+        env,
+      );
     });
 
-    this.entityProviderContract.on('ControlSharesReleased', (entityId, depository, controlAmount, dividendAmount, purpose, event) => {
-      this.handleJurisdictionEvent({
-        type: 'control_shares_released',
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityId: entityId.toString(),
-        entityNumber: Number(entityId), // entityId is the number for registered entities
-        data: { depository, controlAmount, dividendAmount, purpose }
-      }, env);
-    });
+    this.entityProviderContract.on(
+      'ControlSharesReleased',
+      (entityId, depository, controlAmount, dividendAmount, purpose, event) => {
+        this.handleJurisdictionEvent(
+          {
+            type: 'control_shares_released',
+            blockNumber: event.blockNumber,
+            transactionHash: event.transactionHash,
+            entityId: entityId.toString(),
+            entityNumber: Number(entityId), // entityId is the number for registered entities
+            data: { depository, controlAmount, dividendAmount, purpose },
+          },
+          env,
+        );
+      },
+    );
 
     this.entityProviderContract.on('NameAssigned', (name, entityNumber, event) => {
-      this.handleJurisdictionEvent({
-        type: 'name_assigned',
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityNumber: Number(entityNumber),
-        data: { name }
-      }, env);
+      this.handleJurisdictionEvent(
+        {
+          type: 'name_assigned',
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash,
+          entityNumber: Number(entityNumber),
+          data: { name },
+        },
+        env,
+      );
     });
 
     // Depository events
@@ -166,13 +175,16 @@ export class JEventWatcher {
       // Extract entity number from tokenId (control tokens use entity number directly)
       const entityNumber = this.extractEntityNumberFromTokenId(Number(tokenId));
 
-      this.handleJurisdictionEvent({
-        type: 'shares_received',
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityNumber: entityNumber,
-        data: { entityProvider, fromEntity, tokenId, amount, data }
-      }, env);
+      this.handleJurisdictionEvent(
+        {
+          type: 'shares_received',
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash,
+          entityNumber: entityNumber,
+          data: { entityProvider, fromEntity, tokenId, amount, data },
+        },
+        env,
+      );
     });
   }
 
@@ -211,8 +223,8 @@ export class JEventWatcher {
     try {
       // Get all relevant events from both contracts
       const [epEvents, depEvents] = await Promise.all([
-        this.entityProviderContract.queryFilter("", fromBlock, toBlock),
-        this.depositoryContract.queryFilter("", fromBlock, toBlock)
+        this.entityProviderContract.queryFilter('', fromBlock, toBlock),
+        this.depositoryContract.queryFilter('', fromBlock, toBlock),
       ]);
 
       // Process events in chronological order
@@ -226,7 +238,6 @@ export class JEventWatcher {
       for (const event of allEvents) {
         await this.processContractEvent(event, env);
       }
-
     } catch (error) {
       console.error(`🔭 J-WATCHER: Error processing blocks ${fromBlock}-${toBlock}:`, error);
     }
@@ -247,7 +258,7 @@ export class JEventWatcher {
             transactionHash: event.transactionHash,
             entityId: event.args.entityId.toString(),
             entityNumber: Number(event.args.entityNumber),
-            data: { boardHash: event.args.boardHash }
+            data: { boardHash: event.args.boardHash },
           };
           break;
 
@@ -262,8 +273,8 @@ export class JEventWatcher {
               depository: event.args.depository,
               controlAmount: event.args.controlAmount.toString(),
               dividendAmount: event.args.dividendAmount.toString(),
-              purpose: event.args.purpose
-            }
+              purpose: event.args.purpose,
+            },
           };
           break;
 
@@ -273,11 +284,11 @@ export class JEventWatcher {
             blockNumber: event.blockNumber,
             transactionHash: event.transactionHash,
             entityNumber: Number(event.args.entityNumber),
-            data: { name: event.args.name }
+            data: { name: event.args.name },
           };
           break;
 
-        case 'ControlSharesReceived':
+        case 'ControlSharesReceived': {
           const entityNumber = this.extractEntityNumberFromTokenId(Number(event.args.tokenId));
           jurisdictionEvent = {
             type: 'shares_received',
@@ -289,17 +300,17 @@ export class JEventWatcher {
               fromEntity: event.args.fromEntity,
               tokenId: event.args.tokenId.toString(),
               amount: event.args.amount.toString(),
-              data: event.args.data
-            }
+              data: event.args.data,
+            },
           };
           break;
+        }
 
         default:
           return; // Skip unknown events
       }
 
       this.handleJurisdictionEvent(jurisdictionEvent, env);
-
     } catch (error) {
       console.error('🔭 J-WATCHER: Error processing contract event:', error);
     }
@@ -334,8 +345,8 @@ export class JEventWatcher {
           event: jEvent,
           observedAt: Date.now(),
           blockNumber: jEvent.blockNumber,
-          transactionHash: jEvent.transactionHash
-        }
+          transactionHash: jEvent.transactionHash,
+        },
       };
 
       // Submit to entity via server input
@@ -343,7 +354,7 @@ export class JEventWatcher {
         env.serverInput.entityInputs.push({
           entityId: jEvent.entityNumber.toString(),
           signerId: signer.signerId,
-          entityTxs: [entityTx]
+          entityTxs: [entityTx],
         });
 
         if (DEBUG) {
@@ -359,7 +370,7 @@ export class JEventWatcher {
    */
   private extractEntityNumberFromTokenId(tokenId: number): number {
     // Remove the high bit if set (dividend token)
-    return tokenId & 0x7FFFFFFF;
+    return tokenId & 0x7fffffff;
   }
 
   /**
@@ -369,7 +380,7 @@ export class JEventWatcher {
     return {
       isWatching: this.isWatching,
       lastProcessedBlock: this.lastProcessedBlock,
-      signerCount: this.signers.size
+      signerCount: this.signers.size,
     };
   }
 }
@@ -384,12 +395,17 @@ export function createJEventWatcher(config: WatcherConfig): JEventWatcher {
 /**
  * Helper function to set up watcher with common configuration
  */
-export async function setupJEventWatcher(env: Env, rpcUrl: string, entityProviderAddr: string, depositoryAddr: string): Promise<JEventWatcher> {
+export async function setupJEventWatcher(
+  env: Env,
+  rpcUrl: string,
+  entityProviderAddr: string,
+  depositoryAddr: string,
+): Promise<JEventWatcher> {
   const watcher = createJEventWatcher({
     rpcUrl,
     entityProviderAddress: entityProviderAddr,
     depositoryAddress: depositoryAddr,
-    startBlock: 0 // Start from genesis, or could be configured
+    startBlock: 0, // Start from genesis, or could be configured
   });
 
   // Add example signers (would be configured per deployment)

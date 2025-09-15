@@ -1,6 +1,6 @@
-import { EntityState, Proposal, ProposalAction } from '../types.js';
-import { createHash, DEBUG } from '../utils.js';
-import { calculateQuorumPower } from '../entity-consensus.js';
+import { calculateQuorumPower } from '../entity-consensus';
+import { EntityState, Proposal, ProposalAction } from '../types';
+import { createHash, DEBUG } from '../utils';
 
 export const generateProposalId = (action: ProposalAction, proposer: string, entityState: EntityState): string => {
   const proposalData = JSON.stringify({

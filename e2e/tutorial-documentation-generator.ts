@@ -2,13 +2,13 @@
 
 /**
  * 🎯 TUTORIAL DOCUMENTATION GENERATOR
- * 
+ *
  * Automatically generates beautiful tutorial documentation from E2E test scenarios.
  * This ensures tutorials stay in sync with actual working code.
  */
 
-import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 
 interface TutorialStep {
   number: number;
@@ -39,11 +39,11 @@ class TutorialDocGenerator {
   private findTutorialSpecs() {
     const e2eDir = 'e2e';
     const files = readdirSync(e2eDir);
-    
+
     this.tutorialSpecs = files
       .filter(file => file.includes('tutorial') && file.endsWith('.spec.ts'))
       .map(file => join(e2eDir, file));
-    
+
     console.log(`📁 Found ${this.tutorialSpecs.length} tutorial specs:`, this.tutorialSpecs);
   }
 
@@ -56,16 +56,16 @@ class TutorialDocGenerator {
 
     // Generate index page
     await this.generateTutorialIndex();
-    
+
     console.log('✅ Tutorial documentation generated successfully!');
   }
 
   private async generateTutorialFromSpec(specPath: string) {
     console.log(`📖 Processing: ${specPath}`);
-    
+
     const content = readFileSync(specPath, 'utf-8');
     const tutorials = this.extractTutorialsFromSpec(content, specPath);
-    
+
     for (const tutorial of tutorials) {
       await this.generateMarkdownFile(tutorial, specPath);
     }
@@ -73,10 +73,10 @@ class TutorialDocGenerator {
 
   private extractTutorialsFromSpec(content: string, specPath: string): Tutorial[] {
     const tutorials: Tutorial[] = [];
-    
+
     // Extract test cases that are tutorials
     const testMatches = content.match(/test\(['"`]([^'"`]*tutorial[^'"`]*)['"``]\s*,\s*async.*?\{([\s\S]*?)\}\);/gi);
-    
+
     if (!testMatches) return tutorials;
 
     for (const testMatch of testMatches) {
@@ -95,11 +95,11 @@ class TutorialDocGenerator {
     if (!titleMatch) return null;
 
     const title = titleMatch[1].replace(/🎯|🚀|📖/g, '').trim();
-    
+
     // Extract difficulty and time from title/comments
     let difficulty: 'beginner' | 'intermediate' | 'advanced' = 'beginner';
     let estimatedTime = '5 minutes';
-    
+
     if (title.toLowerCase().includes('complete') || title.toLowerCase().includes('advanced')) {
       difficulty = 'advanced';
       estimatedTime = '15 minutes';
@@ -110,21 +110,22 @@ class TutorialDocGenerator {
 
     // Extract tutorial steps
     const steps = this.extractTutorialSteps(testContent);
-    
+
     // Extract description from comments
     const descriptionMatch = testContent.match(/\/\*\*[\s\S]*?\*\//);
     let description = 'Learn the XLN workflow step by step.';
-    
+
     if (descriptionMatch) {
-      description = descriptionMatch[0]
-        .replace(/\/\*\*|\*\//g, '')
-        .replace(/\*\s?/g, '')
-        .trim()
-        .split('\n')
-        .slice(1) // Skip first line (usually title)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .substring(0, 200) + '...';
+      description =
+        descriptionMatch[0]
+          .replace(/\/\*\*|\*\//g, '')
+          .replace(/\*\s?/g, '')
+          .trim()
+          .split('\n')
+          .slice(1) // Skip first line (usually title)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .substring(0, 200) + '...';
     }
 
     return {
@@ -132,16 +133,16 @@ class TutorialDocGenerator {
       description,
       difficulty,
       estimatedTime,
-      steps
+      steps,
     };
   }
 
   private extractTutorialSteps(testContent: string): TutorialStep[] {
     const steps: TutorialStep[] = [];
-    
+
     // Find all tutorial.runStep calls
     const stepMatches = testContent.match(/await\s+tutorial\.runStep\(\{([\s\S]*?)\}\s*,\s*(\d+)\);/g);
-    
+
     if (!stepMatches) return steps;
 
     for (const stepMatch of stepMatches) {
@@ -165,7 +166,7 @@ class TutorialDocGenerator {
     if (!titleMatch) return null;
     const title = titleMatch[1];
 
-    // Extract description  
+    // Extract description
     const descMatch = stepContent.match(/description:\s*["'`]([^"'`]*)["'`]/);
     const description = descMatch ? descMatch[1] : '';
 
@@ -181,22 +182,22 @@ class TutorialDocGenerator {
       title,
       description,
       explanation,
-      screenshotPath
+      screenshotPath,
     };
   }
 
   private async generateMarkdownFile(tutorial: Tutorial, specPath: string) {
     const fileName = tutorial.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.md';
     const filePath = join(this.outputDir, fileName);
-    
+
     const markdown = this.generateTutorialMarkdown(tutorial, specPath);
-    
+
     // Ensure output directory exists
     const outputDirPath = dirname(filePath);
     if (!existsSync(outputDirPath)) {
       await import('fs').then(fs => fs.mkdirSync(outputDirPath, { recursive: true }));
     }
-    
+
     writeFileSync(filePath, markdown);
     console.log(`✅ Generated: ${filePath}`);
   }
@@ -204,14 +205,14 @@ class TutorialDocGenerator {
   private generateTutorialMarkdown(tutorial: Tutorial, specPath: string): string {
     const difficultyEmoji = {
       beginner: '🟢',
-      intermediate: '🟡', 
-      advanced: '🔴'
+      intermediate: '🟡',
+      advanced: '🔴',
     };
 
     return `# ${tutorial.title}
 
-${difficultyEmoji[tutorial.difficulty]} **Difficulty:** ${tutorial.difficulty.charAt(0).toUpperCase() + tutorial.difficulty.slice(1)}  
-⏱️ **Estimated Time:** ${tutorial.estimatedTime}  
+${difficultyEmoji[tutorial.difficulty]} **Difficulty:** ${tutorial.difficulty.charAt(0).toUpperCase() + tutorial.difficulty.slice(1)}
+⏱️ **Estimated Time:** ${tutorial.estimatedTime}
 🧪 **Test Source:** \`${specPath}\`
 
 ## Overview
@@ -281,7 +282,7 @@ ${step.description}`;
 
   private async generateTutorialIndex() {
     const indexPath = join(this.outputDir, 'README.md');
-    
+
     const indexContent = `# XLN Tutorials
 
 Welcome to XLN interactive tutorials! These guides are automatically generated from our E2E test suite, ensuring every step is validated and works correctly.
@@ -293,7 +294,7 @@ Welcome to XLN interactive tutorials! These guides are automatically generated f
 - [Quick Start: Simple Entity Creation](./quick-start-simple-entity-creation.md) - Get started in under 2 minutes
 - [Basic Entity Operations](./basic-entity-operations.md) - Learn fundamental entity interactions
 
-### 🟡 Intermediate  
+### 🟡 Intermediate
 
 - [Complete Entity & Channel Workflow](./complete-entity-channel-workflow.md) - Full end-to-end workflow
 - [Multi-Signature Governance](./multi-signature-governance.md) - Democratic decision making
@@ -305,10 +306,10 @@ Welcome to XLN interactive tutorials! These guides are automatically generated f
 
 ## How These Tutorials Work
 
-🎯 **Dual Purpose**: Each tutorial serves as both documentation and automated testing  
-🔄 **Always Current**: Generated from working E2E tests, never outdated  
-📸 **Visual Guide**: Screenshots from actual test runs  
-⚡ **Interactive**: Run \`npm run tutorial\` to follow along automatically  
+🎯 **Dual Purpose**: Each tutorial serves as both documentation and automated testing
+🔄 **Always Current**: Generated from working E2E tests, never outdated
+📸 **Visual Guide**: Screenshots from actual test runs
+⚡ **Interactive**: Run \`npm run tutorial\` to follow along automatically
 
 ## Running Tutorials Interactively
 
@@ -345,7 +346,7 @@ This ensures tutorials never go stale and always reflect the current working sys
 }
 
 // CLI execution
-if (import.meta.main) {
+if ((import.meta as any).main) {
   const generator = new TutorialDocGenerator();
   await generator.generateAllTutorials();
 }

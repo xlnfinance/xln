@@ -2,13 +2,13 @@
  * Simple runner for Hanko tests
  */
 
-import { runBasicHankoTests } from './test-hanko-basic.js';
+import { runBasicHankoTests } from './test-hanko-basic';
 
 async function main() {
   console.log('🚀 Starting Hanko Tests...\n');
-  
+
   const success = await runBasicHankoTests();
-  
+
   if (success) {
     console.log('\n✅ ALL HANKO TESTS PASSED!');
     console.log('🎯 Summary:');
@@ -25,7 +25,7 @@ async function main() {
   } else {
     console.log('\n❌ SOME TESTS FAILED!');
   }
-  
+
   if (typeof process !== 'undefined') {
     process.exit(success ? 0 : 1);
   }

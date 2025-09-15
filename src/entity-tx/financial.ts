@@ -1,4 +1,4 @@
-import { AssetBalance } from '../types.js';
+import { AssetBalance } from '../types';
 
 // Financial helpers: formatAssetAmount, addToReserves, subtractFromReserves
 export const formatAssetAmount = (balance: AssetBalance): string => {

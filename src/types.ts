@@ -66,7 +66,6 @@ export interface VoteData {
   comment?: string;
 }
 
-
 /**
  * Jurisdiction event data for j_event transactions
  * Flattened structure (no nested event object)
@@ -74,7 +73,7 @@ export interface VoteData {
 export interface JurisdictionEventData {
   from: string;
   event: {
-    type: string;  // e.g. "reserveToReserve", "GovernanceEnabled"
+    type: string; // e.g. "reserveToReserve", "GovernanceEnabled"
     data: any;
   };
   observedAt: number;
@@ -105,20 +104,20 @@ export type EntityTx =
     };
 
 export interface AssetBalance {
-  symbol: string;        // "ETH", "USDT", "ACME-SHARES"
-  amount: bigint;        // Balance in smallest unit (wei, cents, shares)
-  decimals: number;      // For display (18 for ETH, 6 for USDT, 0 for shares)
+  symbol: string; // "ETH", "USDT", "ACME-SHARES"
+  amount: bigint; // Balance in smallest unit (wei, cents, shares)
+  decimals: number; // For display (18 for ETH, 6 for USDT, 0 for shares)
   contractAddress?: string; // For ERC20 tokens
 }
 
 export interface ChannelState {
-  counterparty: string;     // Other entity's address
-  myBalance: bigint;        // My balance in this channel
-  theirBalance: bigint;     // Their balance in this channel
+  counterparty: string; // Other entity's address
+  myBalance: bigint; // My balance in this channel
+  theirBalance: bigint; // Their balance in this channel
   collateral: AssetBalance[]; // Assets locked as collateral
-  nonce: number;           // Channel nonce for updates
-  isActive: boolean;       // Channel status
-  lastUpdate: number;      // Timestamp of last update
+  nonce: number; // Channel nonce for updates
+  isActive: boolean; // Channel status
+  lastUpdate: number; // Timestamp of last update
 }
 
 export interface EntityState {
@@ -130,8 +129,8 @@ export interface EntityState {
   config: ConsensusConfig;
 
   // 💰 NEW: Financial state
-  reserves: Map<string, AssetBalance>;    // symbol -> balance ("ETH" -> {amount: 10n, decimals: 18})
-  channels: Map<string, ChannelState>;    // counterpartyId -> channel state
+  reserves: Map<string, AssetBalance>; // symbol -> balance ("ETH" -> {amount: 10n, decimals: 18})
+  channels: Map<string, ChannelState>; // counterpartyId -> channel state
   collaterals: Map<string, AssetBalance>; // Total assets locked in channels
 }
 
@@ -179,9 +178,9 @@ export const ENC = 'hex' as const;
 
 // === HANKO BYTES SYSTEM (Final Design) ===
 export interface HankoBytes {
-  placeholders: Buffer[];    // Entity IDs that failed to sign (index 0..N-1)
-  packedSignatures: Buffer;  // EOA signatures → yesEntities (index N..M-1)
-  claims: HankoClaim[];      // Entity claims to verify (index M..∞)
+  placeholders: Buffer[]; // Entity IDs that failed to sign (index 0..N-1)
+  packedSignatures: Buffer; // EOA signatures → yesEntities (index N..M-1)
+  claims: HankoClaim[]; // Entity claims to verify (index M..∞)
 }
 
 export interface HankoClaim {
@@ -226,11 +225,11 @@ export interface HankoContext {
  */
 export interface EntityProfile {
   entityId: string;
-  name: string;          // Human-readable name e.g., "Alice Corp", "Bob's DAO"
-  avatar?: string;       // Custom avatar URL (fallback to generated identicon)
-  bio?: string;          // Short description
-  website?: string;      // Optional website URL
-  lastUpdated: number;   // Timestamp of last update
+  name: string; // Human-readable name e.g., "Alice Corp", "Bob's DAO"
+  avatar?: string; // Custom avatar URL (fallback to generated identicon)
+  bio?: string; // Short description
+  website?: string; // Optional website URL
+  lastUpdated: number; // Timestamp of last update
   hankoSignature: string; // Signature proving entity ownership
 }
 

@@ -4,49 +4,48 @@
  */
 
 import { ethers } from 'ethers';
-import path from 'path';
 import fs from 'fs';
-import { JurisdictionConfig, ConsensusConfig } from './types.js';
-import { DEBUG, isBrowser } from './utils.js';
-import { encodeBoard, hashBoard, detectEntityType, extractNumberFromEntityId } from './entity-factory.js';
+import path from 'path';
+
+import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
+import { ConsensusConfig, JurisdictionConfig } from './types';
+import { DEBUG, isBrowser } from './utils';
 
 // === ETHEREUM INTEGRATION ===
 
-
 // Load contract configuration directly in jurisdiction generation
 export const ENTITY_PROVIDER_ABI = [
-  "function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)",
-  "function assignName(string memory name, uint256 entityNumber) external",
-  "function transferName(string memory name, uint256 newEntityNumber) external",
-  "function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))",
-  "function nameToNumber(string memory name) external view returns (uint256)",
-  "function numberToName(uint256 entityNumber) external view returns (string memory)",
-  "function nextNumber() external view returns (uint256)",
+  'function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)',
+  'function assignName(string memory name, uint256 entityNumber) external',
+  'function transferName(string memory name, uint256 newEntityNumber) external',
+  'function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))',
+  'function nameToNumber(string memory name) external view returns (uint256)',
+  'function numberToName(uint256 entityNumber) external view returns (string memory)',
+  'function nextNumber() external view returns (uint256)',
   // Governance functions (governance is auto-setup on entity registration)
-  "function getTokenIds(uint256 entityNumber) external pure returns (uint256 controlTokenId, uint256 dividendTokenId)",
-  "function getGovernanceInfo(uint256 entityNumber) external view returns (uint256 controlTokenId, uint256 dividendTokenId, uint256 controlSupply, uint256 dividendSupply, bool hasActiveProposal, bytes32 articlesHash)",
-  "function balanceOf(address account, uint256 id) external view returns (uint256)",
-  "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external",
+  'function getTokenIds(uint256 entityNumber) external pure returns (uint256 controlTokenId, uint256 dividendTokenId)',
+  'function getGovernanceInfo(uint256 entityNumber) external view returns (uint256 controlTokenId, uint256 dividendTokenId, uint256 controlSupply, uint256 dividendSupply, bool hasActiveProposal, bytes32 articlesHash)',
+  'function balanceOf(address account, uint256 id) external view returns (uint256)',
+  'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external',
   // Events
-  "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
-  "event NameAssigned(string indexed name, uint256 indexed entityNumber)",
-  "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)",
-  "event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)"
-]; 
-
+  'event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)',
+  'event NameAssigned(string indexed name, uint256 indexed entityNumber)',
+  'event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)',
+  'event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)',
+];
 
 export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
   try {
     // Connect to specified RPC node
     const provider = new ethers.JsonRpcProvider(jurisdiction.address);
-    
+
     // Use first account for testing (Hardhat account #0)
     const signer = await provider.getSigner(0);
-    
+
     // Create contract instances
     const entityProvider = new ethers.Contract(jurisdiction.entityProviderAddress, ENTITY_PROVIDER_ABI, signer);
     const depository = new ethers.Contract(jurisdiction.depositoryAddress, [], signer); // Add depository ABI later if needed
-    
+
     return { provider, signer, entityProvider, depository };
   } catch (error) {
     console.error(`Failed to connect to ${jurisdiction.name} at ${jurisdiction.address}:`, error);
@@ -56,22 +55,25 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
 
 // Note: setupGovernance is no longer needed - governance is automatically created on entity registration
 
-export const registerNumberedEntityOnChain = async (config: ConsensusConfig, name: string): Promise<{txHash: string, entityNumber: number}> => {
+export const registerNumberedEntityOnChain = async (
+  config: ConsensusConfig,
+  name: string,
+): Promise<{ txHash: string; entityNumber: number }> => {
   if (!config.jurisdiction) {
-    throw new Error("Jurisdiction required for on-chain registration");
+    throw new Error('Jurisdiction required for on-chain registration');
   }
-  
+
   try {
     const { entityProvider } = await connectToEthereum(config.jurisdiction);
-    
+
     const encodedBoard = encodeBoard(config);
     const boardHash = hashBoard(encodedBoard);
-    
+
     if (DEBUG) console.log(`🏛️ Registering numbered entity "${name}" on chain`);
     if (DEBUG) console.log(`   Jurisdiction: ${config.jurisdiction.name}`);
     if (DEBUG) console.log(`   EntityProvider: ${config.jurisdiction.entityProviderAddress}`);
     if (DEBUG) console.log(`   Board Hash: ${boardHash}`);
-    
+
     // Test connection by calling nextNumber()
     try {
       const nextNumber = await entityProvider.nextNumber();
@@ -79,20 +81,20 @@ export const registerNumberedEntityOnChain = async (config: ConsensusConfig, nam
     } catch (error) {
       throw new Error(`Failed to call nextNumber(): ${error}`);
     }
-    
+
     // Call the smart contract
     const tx = await entityProvider.registerNumberedEntity(boardHash);
     if (DEBUG) console.log(`   📤 Transaction sent: ${tx.hash}`);
-    
+
     // Wait for confirmation
     const receipt = await tx.wait();
     if (DEBUG) console.log(`   ✅ Transaction confirmed in block ${receipt.blockNumber}`);
-    
+
     // Check if transaction reverted
     if (receipt.status === 0) {
       throw new Error(`Transaction reverted! Hash: ${tx.hash}`);
     }
-    
+
     // Debug: log all events in receipt
     if (DEBUG) {
       console.log(`   📋 Receipt logs count: ${receipt.logs.length}`);
@@ -105,7 +107,7 @@ export const registerNumberedEntityOnChain = async (config: ConsensusConfig, nam
         }
       });
     }
-    
+
     // Extract entity number from event logs
     const event = receipt.logs.find((log: any) => {
       try {
@@ -115,78 +117,82 @@ export const registerNumberedEntityOnChain = async (config: ConsensusConfig, nam
         return false;
       }
     });
-    
+
     if (!event) {
       throw new Error('EntityRegistered event not found in transaction logs');
     }
-    
+
     const parsedEvent = entityProvider.interface.parseLog(event);
     const entityId = parsedEvent?.args[0];
     const entityNumber = Number(parsedEvent?.args[1]);
-    
+
     if (DEBUG) console.log(`✅ Numbered entity registered!`);
     if (DEBUG) console.log(`   TX: ${tx.hash}`);
     if (DEBUG) console.log(`   Entity Number: ${entityNumber}`);
-    
+
     return { txHash: tx.hash, entityNumber };
-    
   } catch (error) {
     console.error('❌ Blockchain registration failed:', error);
     throw error;
   }
 };
 
-
-export const assignNameOnChain = async (name: string, entityNumber: number, jurisdiction: JurisdictionConfig): Promise<{txHash: string}> => {
+export const assignNameOnChain = async (
+  name: string,
+  entityNumber: number,
+  jurisdiction: JurisdictionConfig,
+): Promise<{ txHash: string }> => {
   try {
     const { entityProvider } = await connectToEthereum(jurisdiction);
-    
+
     if (DEBUG) console.log(`🏷️  Assigning name "${name}" to entity #${entityNumber}`);
-    
+
     // Call the smart contract (admin only)
     const tx = await entityProvider.assignName(name, entityNumber);
     if (DEBUG) console.log(`   📤 Transaction sent: ${tx.hash}`);
-    
+
     // Wait for confirmation
     const receipt = await tx.wait();
     if (DEBUG) console.log(`   ✅ Transaction confirmed in block ${receipt.blockNumber}`);
-    
+
     // Check if transaction reverted
     if (receipt.status === 0) {
       throw new Error(`Transaction reverted! Hash: ${tx.hash}`);
     }
-    
+
     if (DEBUG) console.log(`✅ Name assigned successfully!`);
     if (DEBUG) console.log(`   TX: ${tx.hash}`);
-    
+
     return { txHash: tx.hash };
-    
   } catch (error) {
     console.error('❌ Name assignment failed:', error);
     throw error;
   }
 };
 
-export const getEntityInfoFromChain = async (entityId: string, jurisdiction: JurisdictionConfig): Promise<{exists: boolean, entityNumber?: number, name?: string}> => {
+export const getEntityInfoFromChain = async (
+  entityId: string,
+  jurisdiction: JurisdictionConfig,
+): Promise<{ exists: boolean; entityNumber?: number; name?: string }> => {
   try {
     const { entityProvider } = await connectToEthereum(jurisdiction);
-    
+
     // Try to get entity info
     const entityInfo = await entityProvider.entities(entityId);
-    
+
     if (entityInfo.status === 0) {
       return { exists: false };
     }
-    
+
     // For numbered entities, get the number and name
     const entityType = detectEntityType(entityId);
     let entityNumber: number | undefined;
     let name: string | undefined;
-    
-         if (entityType === 'numbered') {
-       const extractedNumber = extractNumberFromEntityId(entityId);
-       if (extractedNumber !== null) {
-         entityNumber = extractedNumber;
+
+    if (entityType === 'numbered') {
+      const extractedNumber = extractNumberFromEntityId(entityId);
+      if (extractedNumber !== null) {
+        entityNumber = extractedNumber;
         try {
           const retrievedName = await entityProvider.numberToName(entityNumber);
           name = retrievedName || undefined;
@@ -195,9 +201,8 @@ export const getEntityInfoFromChain = async (entityId: string, jurisdiction: Jur
         }
       }
     }
-    
+
     return { exists: true, entityNumber, name };
-    
   } catch (error) {
     console.error('❌ Failed to get entity info from chain:', error);
     return { exists: false };
@@ -209,30 +214,35 @@ export const getNextEntityNumber = async (jurisdiction: JurisdictionConfig): Pro
     if (!jurisdiction) {
       throw new Error('Jurisdiction parameter is required');
     }
-    
+
     if (!jurisdiction.name || !jurisdiction.address || !jurisdiction.entityProviderAddress) {
       throw new Error('Jurisdiction object is missing required properties (name, address, entityProviderAddress)');
     }
-    
+
     const { entityProvider } = await connectToEthereum(jurisdiction);
-    
-    if (DEBUG) console.log(`🔍 Fetching next entity number from ${jurisdiction.entityProviderAddress} (${jurisdiction.name})`);
-    
+
+    if (DEBUG)
+      console.log(`🔍 Fetching next entity number from ${jurisdiction.entityProviderAddress} (${jurisdiction.name})`);
+
     const nextNumber = await entityProvider.nextNumber();
     const result = Number(nextNumber);
-    
+
     if (DEBUG) console.log(`🔢 Next entity number: ${result}`);
     return result;
-    
   } catch (error) {
     console.error('❌ Failed to get next entity number:', error);
     throw error;
   }
 };
 
-export const transferNameBetweenEntities = async (name: string, fromNumber: number, toNumber: number, jurisdiction: JurisdictionConfig): Promise<string> => {
+export const transferNameBetweenEntities = async (
+  name: string,
+  fromNumber: number,
+  toNumber: number,
+  jurisdiction: JurisdictionConfig,
+): Promise<string> => {
   if (DEBUG) console.log(`🔄 Transferring name "${name}" from #${fromNumber} to #${toNumber}`);
-  
+
   // TODO: Implement real blockchain name transfer
   throw new Error('Name transfer not implemented - requires blockchain integration');
 };
@@ -242,10 +252,10 @@ export const transferNameBetweenEntities = async (name: string, fromNumber: numb
 // Load contract configuration and generate jurisdictions
 export const generateJurisdictions = async (): Promise<Map<string, JurisdictionConfig>> => {
   const jurisdictions = new Map<string, JurisdictionConfig>();
-  
+
   try {
     let config: any;
-    
+
     if (!isBrowser && typeof process !== 'undefined') {
       // Node.js environment - read file directly
       const configPath = path.join(process.cwd(), 'jurisdictions.json');
@@ -261,9 +271,9 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       config = await response.json();
       console.log('✅ Loaded jurisdictions from server');
     }
-    
+
     const jurisdictionData = config.jurisdictions;
-    
+
     // Build jurisdictions from loaded config
     for (const [key, data] of Object.entries(jurisdictionData)) {
       const jData = data as any;
@@ -272,13 +282,13 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         name: jData.name,
         entityProviderAddress: jData.contracts.entityProvider,
         depositoryAddress: jData.contracts.depository,
-        chainId: jData.chainId
+        chainId: jData.chainId,
       });
     }
   } catch (error) {
     console.error('❌ Failed to load jurisdictions:', error);
   }
-  
+
   return jurisdictions;
 };
 
@@ -300,4 +310,3 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
   const jurisdictions = await getJurisdictions();
   return jurisdictions.get(address);
 };
-
