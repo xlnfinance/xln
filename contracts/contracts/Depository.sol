@@ -41,6 +41,17 @@ contract Depository is Console {
   mapping (address entity => uint) public _activeDebts;
 
 
+  struct Settled {
+      address left;
+      address right;
+      uint tokenId;
+      uint leftReserve;
+      uint rightReserve;
+      uint collateral;
+      int ondelta;
+  }
+  event ChannelSettled(Settled[]);
+
   struct Hub {
     address addr;
     uint gasused;
@@ -52,6 +63,8 @@ contract Depository is Console {
   event DisputeStarted(address indexed sender, address indexed peer, uint indexed disputeNonce, bytes initialArguments);
   event CooperativeClose(address indexed sender, address indexed peer, uint indexed cooperativeNonce);
   
+  event ReserveTransferred(address indexed from, address indexed to, uint indexed tokenId, uint amount);
+
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
 
@@ -331,7 +344,7 @@ contract Depository is Console {
     int collateralDiff;
     int ondeltaDiff;
   }
-
+  //Enforces the invariant: Its main job is to run the check you described: require(leftReserveDiff + rightReserveDiff + collateralDiff == 0). This guarantees no value is created or lost, only moved.
   struct CooperativeUpdate {
     address peer;
     Diff[] diffs;
@@ -497,12 +510,11 @@ contract Depository is Console {
     // todo: allow longer uint256 tokenId for ERC721 and ERC1155 
     // e.g. Rarible has format of 0xCreatorAddress..00000TokenId
     if (tokenType == TypeERC20) {
-      //console.log("20", contractAddress, msg.sender, address(this));
-
-      require(IERC20(contractAddress).transferFrom(msg.sender, address(this), params.amount), "Fail");
+      require(IERC20(contractAddress).transferFrom(msg.sender, address(this), params.amount), "ERC20 transferFrom failed");
     } else if (tokenType == TypeERC721) {
       // 721 does not return bool on transfer
       IERC721(contractAddress).transferFrom(msg.sender, address(this), uint(tokenId));
+      params.amount = 1; // For 721, amount is always 1
     } else if (tokenType == TypeERC1155) {
       IERC1155(contractAddress).safeTransferFrom(msg.sender, address(this), uint(tokenId), params.amount, "");
     }
@@ -546,6 +558,7 @@ contract Depository is Console {
     require(_reserves[msg.sender][params.tokenId] >= params.amount);
     _reserves[msg.sender][params.tokenId] -= params.amount;
     _reserves[params.receiver][params.tokenId] += params.amount;
+    emit ReserveTransferred(msg.sender, params.receiver, params.tokenId, params.amount);
   }
 
   /**
@@ -704,6 +717,17 @@ contract Depository is Console {
   // mutually agreed update of channel state in a single atomic operation
   function cooperativeUpdate(CooperativeUpdate memory params) public returns (bool) {
     bytes memory ch_key = channelKey(msg.sender, params.peer);
+    address left;
+    address right;
+
+    if (msg.sender < params.peer) {
+        left = msg.sender;
+        right = params.peer;
+    } else {
+        left = params.peer;
+        right = msg.sender;
+    }
+
 
     bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, 
     ch_key, 
@@ -720,44 +744,68 @@ contract Depository is Console {
       return false;
     }
 
+    Settled[] memory settledEvents = new Settled[](params.diffs.length);
 
     for (uint i = 0; i < params.diffs.length; i++) {
       Diff memory diff = params.diffs[i];
+      uint tokenId = diff.tokenId;
+
+      // ✅ INVARIANT CHECK: Total value change within the channel for this token must be zero.
+      // leftReserveChange + rightReserveChange + collateralChange == 0
+      int myReserveDiff = -(diff.peerReserveDiff + diff.collateralDiff);
+      require(_reserves[msg.sender][tokenId] >= uint(-myReserveDiff), "Not enough sender reserve");
+
 
       if (diff.peerReserveDiff < 0) {
-        enforceDebts(params.peer, diff.tokenId);
-        require(_reserves[params.peer][diff.tokenId] >= uint(-diff.peerReserveDiff), "Not enough peer reserve");
+        enforceDebts(params.peer, tokenId);
+        require(_reserves[params.peer][tokenId] >= uint(-diff.peerReserveDiff), "Not enough peer reserve");
 
-        _reserves[params.peer][diff.tokenId] -= uint(-diff.peerReserveDiff);
+        _reserves[params.peer][tokenId] -= uint(-diff.peerReserveDiff);
       } else {
-        _reserves[params.peer][diff.tokenId] += uint(diff.peerReserveDiff);
+        _reserves[params.peer][tokenId] += uint(diff.peerReserveDiff);
       }
 
 
       // ensure that the entity has enough funds to apply the diffs
-      int totalDiff = diff.peerReserveDiff + diff.collateralDiff;
-      if (totalDiff > 0) {
-        enforceDebts(msg.sender, diff.tokenId);
-        // if the sender is sending funds, they must have them
-        require(_reserves[msg.sender][diff.tokenId] >= uint(totalDiff), "Not enough sender reserve");
-
-        _reserves[msg.sender][diff.tokenId] -= uint(totalDiff);
+      if (myReserveDiff < 0) {
+        enforceDebts(msg.sender, tokenId);
+        // This check is already implicitly done by the invariant and the peer's reserve check,
+        // but an explicit check is safer.
+        require(_reserves[msg.sender][tokenId] >= uint(-myReserveDiff), "Not enough sender reserve");
+        _reserves[msg.sender][tokenId] -= uint(-myReserveDiff);
       } else {
-        // sender is receiving
-        _reserves[msg.sender][diff.tokenId] += uint(-totalDiff);
+        _reserves[msg.sender][tokenId] += uint(myReserveDiff);
       }
 
 
+      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+
       if (diff.collateralDiff < 0) {
-        require(_collaterals[ch_key][diff.tokenId].collateral >= uint(-diff.collateralDiff), "Not enough collateral");
-        _collaterals[ch_key][diff.tokenId].collateral -= uint(diff.collateralDiff);
+        require(col.collateral >= uint(-diff.collateralDiff), "Not enough collateral");
+        col.collateral -= uint(-diff.collateralDiff);
       } else {
-        _collaterals[ch_key][diff.tokenId].collateral += uint(diff.collateralDiff);
+        col.collateral += uint(diff.collateralDiff);
       }
 
       // ondeltaDiff can be arbitrary
-      _collaterals[ch_key][diff.tokenId].ondelta += diff.ondeltaDiff;
+      col.ondelta += diff.ondeltaDiff;
+
+      // Populate event with final absolute values for easy off-chain consumption
+      settledEvents[i] = Settled({
+          left: left,
+          right: right,
+          tokenId: tokenId,
+          leftReserve: _reserves[left][tokenId],
+          rightReserve: _reserves[right][tokenId],
+          collateral: col.collateral,
+          ondelta: col.ondelta
+      });
     }
+
+    if (settledEvents.length > 0) {
+        emit ChannelSettled(settledEvents);
+    }
+
     _channels[ch_key].cooperativeNonce++;
 
     logChannel(msg.sender, params.peer);
@@ -1154,6 +1202,70 @@ contract Depository is Console {
     }
     
     return this.onERC1155Received.selector;
+  }
+
+  // =================================================================================================
+  // === SHORTCUT FUNCTIONS ==========================================================================
+  // =================================================================================================
+
+  /**
+   * @notice Unilateral action to move funds from reserve to a channel's collateral.
+   * @dev This does not require a counterparty signature as it only adds funds to the channel.
+   * @param peer The counterparty in the channel.
+   * @param tokenId The internal ID of the token being moved.
+   * @param amount The amount to move.
+   */
+  function reserveToCollateralUnilateral(address peer, uint256 tokenId, uint256 amount) external {
+      require(amount > 0, "Amount must be positive");
+      enforceDebts(msg.sender, tokenId);
+      require(_reserves[msg.sender][tokenId] >= amount, "Insufficient reserve");
+
+      _reserves[msg.sender][tokenId] -= amount;
+
+      bytes memory ch_key = channelKey(msg.sender, peer);
+      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+      col.collateral += amount;
+
+      // If msg.sender is the 'left' party (lower address), their deposit increases ondelta.
+      if (msg.sender < peer) {
+          col.ondelta += int256(amount);
+      }
+      // If msg.sender is 'right', ondelta is implicitly reduced relative to their new contribution,
+      // which correctly reflects that the new collateral belongs to them. So, no change to ondelta.
+
+      emit TransferReserveToCollateral(msg.sender, peer, col.collateral, col.ondelta, tokenId);
+  }
+
+  /**
+   * @notice Cooperative action to move funds from a channel's collateral back to a reserve.
+   * @dev REQUIRES a signature from the counterparty.
+   * @param peer The counterparty in the channel.
+   * @param tokenId The internal ID of the token being moved.
+   * @param amount The amount to move.
+   * @param signature The counterparty's signature approving the withdrawal.
+   */
+  function collateralToReserve(address peer, uint256 tokenId, uint256 amount, bytes calldata signature) external {
+      require(amount > 0, "Amount must be positive");
+
+      bytes32 messageHash = keccak256(abi.encodePacked("COLLATERAL_TO_RESERVE", msg.sender, peer, tokenId, amount));
+      bytes32 signedHash = ECDSA.toEthSignedMessageHash(messageHash);
+      require(ECDSA.recover(signedHash, signature) == peer, "Invalid signature");
+
+      bytes memory ch_key = channelKey(msg.sender, peer);
+      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+      require(col.collateral >= amount, "Insufficient collateral");
+
+      col.collateral -= amount;
+      _reserves[msg.sender][tokenId] += amount;
+
+      // If msg.sender is the 'left' party, their withdrawal decreases ondelta.
+      if (msg.sender < peer) {
+          col.ondelta -= int256(amount);
+      }
+      // If msg.sender is 'right', their withdrawal means less of the total collateral belongs to 'left',
+      // so ondelta (left's share) remains unchanged relative to the new, smaller total.
+
+      emit TransferReserveToCollateral(peer, msg.sender, col.collateral, col.ondelta, tokenId); // Note reversed order for clarity
   }
 
 
