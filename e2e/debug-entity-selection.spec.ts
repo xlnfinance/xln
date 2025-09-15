@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test('DEBUG: Entity Selection State', async ({ page }) => {
   console.log('🔍 Debugging entity selection...');
@@ -10,7 +10,7 @@ test('DEBUG: Entity Selection State', async ({ page }) => {
   // Quick entity creation
   await page.locator('text=Formation').click();
   await page.fill('#entityNameInput', 'Debug Entity');
-  
+
   const firstValidatorSelect = page.locator('.validator-name').first();
   await firstValidatorSelect.selectOption('alice');
 
@@ -48,7 +48,7 @@ test('DEBUG: Entity Selection State', async ({ page }) => {
       return {
         hasTabElement: !!tabElement,
         panelId: tabElement?.getAttribute('data-panel-id'),
-        textContent: tabElement?.textContent?.substring(0, 200)
+        textContent: tabElement?.textContent?.substring(0, 200),
       };
     });
 
@@ -58,7 +58,7 @@ test('DEBUG: Entity Selection State', async ({ page }) => {
     console.log('🎯 Attempting entity selection...');
 
     const entityDropdown = firstPanel.locator('.unified-dropdown').first();
-    if (await entityDropdown.count() > 0) {
+    if ((await entityDropdown.count()) > 0) {
       await entityDropdown.click();
       await page.waitForTimeout(500);
 
@@ -71,7 +71,7 @@ test('DEBUG: Entity Selection State', async ({ page }) => {
 
         // Try signer selection
         const signerDropdown = firstPanel.locator('.unified-dropdown').nth(1);
-        if (await signerDropdown.count() > 0) {
+        if ((await signerDropdown.count()) > 0) {
           await signerDropdown.click();
           await page.waitForTimeout(500);
 
@@ -84,7 +84,10 @@ test('DEBUG: Entity Selection State', async ({ page }) => {
 
             // Check state after selection
             const afterEmptyState = await firstPanel.locator('.empty-panel-state').count();
-            const afterControlsHeader = await firstPanel.locator('.component-header').filter({ hasText: 'Controls' }).count();
+            const afterControlsHeader = await firstPanel
+              .locator('.component-header')
+              .filter({ hasText: 'Controls' })
+              .count();
 
             console.log(`📊 After selection - Empty state: ${afterEmptyState}`);
             console.log(`📊 After selection - Controls header: ${afterControlsHeader}`);

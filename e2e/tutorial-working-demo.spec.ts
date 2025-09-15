@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, Page, test } from '@playwright/test';
 
 /**
  * 🎯 COMPLETE XLN TUTORIAL - VERIFIED WORKING DEMO
@@ -17,7 +17,7 @@ import { test, expect } from '@playwright/test';
 
 // === HELPER FUNCTIONS ===
 
-async function takeStepScreenshot(page: any, stepName: string, stepNumber: number) {
+async function takeStepScreenshot(page: Page, stepName: string, stepNumber: number) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `step-${stepNumber.toString().padStart(2, '0')}-${stepName.toLowerCase().replace(/\s+/g, '-')}-${timestamp}.png`;
   const screenshotPath = `test-results/screenshots/${filename}`;
@@ -28,7 +28,7 @@ async function takeStepScreenshot(page: any, stepName: string, stepNumber: numbe
   console.log(`📸 Screenshot saved: ${screenshotPath}`);
 }
 
-async function waitForXLNEnvironment(page: any) {
+async function waitForXLNEnvironment(page: Page) {
   console.log('⏳ Waiting for XLN environment to load...');
 
   // Wait for the page to be fully loaded
@@ -43,7 +43,7 @@ async function waitForXLNEnvironment(page: any) {
   console.log('✅ XLN environment loaded successfully');
 }
 
-async function setThreshold(page: any, value: number) {
+async function setThreshold(page: Page, value: number) {
   const slider = page.locator('#thresholdSlider');
   await slider.evaluate((el: HTMLInputElement, v: number) => {
     el.value = String(v);
@@ -51,11 +51,11 @@ async function setThreshold(page: any, value: number) {
   }, value);
 }
 
-async function addValidator(page: any) {
+async function addValidator(page: Page) {
   await page.getByRole('button', { name: '➕ Add Validator' }).click();
 }
 
-async function pickSignerInRow(page: any, rowIndex: number, signerText: string) {
+async function pickSignerInRow(page: Page, rowIndex: number, signerText: string) {
   const row = page.locator('.validator-row').nth(rowIndex);
   const validatorSelect = row.locator('.validator-name');
   await validatorSelect.selectOption(signerText);

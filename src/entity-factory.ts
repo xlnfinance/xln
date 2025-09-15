@@ -4,17 +4,19 @@
  */
 
 import { ethers } from 'ethers';
-import { ConsensusConfig, JurisdictionConfig, EntityType } from './types.js';
-import { hash, DEBUG } from './utils.js';
+
+import { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
+import { DEBUG, hash } from './utils';
 
 // Extend globalThis to include our entity counter
 declare global {
+  // eslint-disable-next-line no-var
   var _entityCounter: number | undefined;
 }
 
 // Entity encoding utilities
 export const encodeBoard = (config: ConsensusConfig): string => {
-  const delegates = config.validators.map((validator) => ({
+  const delegates = config.validators.map(validator => ({
     entityId: validator, // For EOA addresses (20 bytes)
     votingPower: Number(config.shares[validator] || 1n),
   }));
@@ -42,7 +44,7 @@ export const generateLazyEntityId = (
 
   // Handle both formats: array of objects or array of strings (assume weight=1)
   if (typeof validators[0] === 'string') {
-    validatorData = (validators as string[]).map((name) => ({ name, weight: 1 }));
+    validatorData = (validators as string[]).map(name => ({ name, weight: 1 }));
   } else {
     validatorData = validators as { name: string; weight: number }[];
   }
@@ -161,7 +163,7 @@ export const createLazyEntity = (
   if (DEBUG) console.log(`   🆓 FREE - No gas required`);
 
   const shares: { [validatorId: string]: bigint } = {};
-  validators.forEach((validator) => {
+  validators.forEach(validator => {
     shares[validator] = 1n; // Equal voting power for simplicity
   });
 
@@ -210,7 +212,7 @@ export const createNumberedEntity = async (
   if (DEBUG) console.log(`   EntityID: ${entityId}`);
 
   const shares: { [validatorId: string]: bigint } = {};
-  validators.forEach((validator) => {
+  validators.forEach(validator => {
     shares[validator] = 1n;
   });
 

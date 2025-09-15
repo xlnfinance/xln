@@ -1,7 +1,7 @@
-import { EntityState, ProposalAction, Proposal } from '../types.js';
-import { addToReserves, subtractFromReserves } from './financial.js';
-import { generateProposalId } from './proposals.js';
-import { DEBUG } from '../utils.js';
+import { EntityState, Proposal, ProposalAction } from '../types';
+import { DEBUG } from '../utils';
+import { addToReserves, subtractFromReserves } from './financial';
+import { generateProposalId } from './proposals';
 
 export const handleJEvent = (entityState: EntityState, entityTxData: any): EntityState => {
   const { from, event, observedAt, blockNumber, transactionHash } = entityTxData;

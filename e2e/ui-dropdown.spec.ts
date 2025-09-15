@@ -1,8 +1,10 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test('Unified dropdown selects entity', async ({ page }) => {
   await page.goto('http://127.0.0.1:8080/');
-  await page.addInitScript(() => { (window as any).__useDistServer = true; });
+  await page.addInitScript(() => {
+    (window as any).__useDistServer = true;
+  });
   await page.reload();
   await page.waitForFunction(() => Boolean((window as any).xlnEnv), undefined, { timeout: 30000 });
 
@@ -19,11 +21,18 @@ test('Unified dropdown selects entity', async ({ page }) => {
   // Open dropdown in first panel
   await page.locator('#entityPanelsContainer .entity-panel').first().locator('.unified-dropdown-btn').click();
   // Click the first selectable entity row
-  await page.locator('#entityPanelsContainer .entity-panel').first().locator('.unified-dropdown-content .dropdown-item.indent-2').first().click();
+  await page
+    .locator('#entityPanelsContainer .entity-panel')
+    .first()
+    .locator('.unified-dropdown-content .dropdown-item.indent-2')
+    .first()
+    .click();
 
   // Verify selection reflected in header text
-  const text = await page.locator('#entityPanelsContainer .entity-panel').first().locator('.dropdown-text').textContent();
+  const text = await page
+    .locator('#entityPanelsContainer .entity-panel')
+    .first()
+    .locator('.dropdown-text')
+    .textContent();
   expect(text || '').toContain('→');
 });
-
-

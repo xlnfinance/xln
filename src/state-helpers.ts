@@ -3,16 +3,16 @@
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import { EntityReplica, Env, EnvSnapshot, ServerInput, EntityInput } from './types.js';
-import { encode } from './snapshot-coder.js';
-import { DEBUG } from './utils.js';
+import { encode } from './snapshot-coder';
+import { EntityInput, EntityReplica, Env, EnvSnapshot, ServerInput } from './types';
+import { DEBUG } from './utils';
 
 // === SNAPSHOT UTILITIES ===
 
 export const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
   const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
   const cloneArray = <T>(arr: T[]) => [...arr];
-  
+
   return {
     entityId: replica.entityId,
     signerId: replica.signerId,
@@ -24,65 +24,66 @@ export const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
       proposals: new Map(
         Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
           id,
-          { ...proposal, votes: cloneMap(proposal.votes) }
-        ])
+          { ...proposal, votes: cloneMap(proposal.votes) },
+        ]),
       ),
       config: replica.state.config,
       // 💰 Clone financial state
       reserves: cloneMap(replica.state.reserves),
       channels: cloneMap(replica.state.channels),
-      collaterals: cloneMap(replica.state.collaterals)
+      collaterals: cloneMap(replica.state.collaterals),
     },
     mempool: cloneArray(replica.mempool),
-    proposal: replica.proposal ? {
-      height: replica.proposal.height,
-      txs: cloneArray(replica.proposal.txs),
-      hash: replica.proposal.hash,
-      newState: replica.proposal.newState,
-      signatures: cloneMap(replica.proposal.signatures)
-    } : undefined,
-    lockedFrame: replica.lockedFrame ? {
-      height: replica.lockedFrame.height,
-      txs: cloneArray(replica.lockedFrame.txs),
-      hash: replica.lockedFrame.hash,
-      newState: replica.lockedFrame.newState,
-      signatures: cloneMap(replica.lockedFrame.signatures)
-    } : undefined,
-    isProposer: replica.isProposer
+    proposal: replica.proposal
+      ? {
+          height: replica.proposal.height,
+          txs: cloneArray(replica.proposal.txs),
+          hash: replica.proposal.hash,
+          newState: replica.proposal.newState,
+          signatures: cloneMap(replica.proposal.signatures),
+        }
+      : undefined,
+    lockedFrame: replica.lockedFrame
+      ? {
+          height: replica.lockedFrame.height,
+          txs: cloneArray(replica.lockedFrame.txs),
+          hash: replica.lockedFrame.hash,
+          newState: replica.lockedFrame.newState,
+          signatures: cloneMap(replica.lockedFrame.signatures),
+        }
+      : undefined,
+    isProposer: replica.isProposer,
   };
 };
 
 export const captureSnapshot = (
-  env: Env, 
-  envHistory: EnvSnapshot[], 
-  db: any, 
-  serverInput: ServerInput, 
-  serverOutputs: EntityInput[], 
-  description: string
+  env: Env,
+  envHistory: EnvSnapshot[],
+  db: any,
+  serverInput: ServerInput,
+  serverOutputs: EntityInput[],
+  description: string,
 ): void => {
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
-    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [
-      key,
-      deepCloneReplica(replica)
-    ])),
+    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [key, deepCloneReplica(replica)])),
     serverInput: {
       serverTxs: [...serverInput.serverTxs],
       entityInputs: serverInput.entityInputs.map(input => ({
         ...input,
         entityTxs: input.entityTxs ? [...input.entityTxs] : undefined,
-        precommits: input.precommits ? new Map(input.precommits) : undefined
-      }))
+        precommits: input.precommits ? new Map(input.precommits) : undefined,
+      })),
     },
     serverOutputs: serverOutputs.map(output => ({
       ...output,
       entityTxs: output.entityTxs ? [...output.entityTxs] : undefined,
-      precommits: output.precommits ? new Map(output.precommits) : undefined
+      precommits: output.precommits ? new Map(output.precommits) : undefined,
     })),
-    description
+    description,
   };
-  
+
   envHistory.push(snapshot);
 
   // --- PERSISTENCE WITH BATCH OPERATIONS ---
@@ -90,15 +91,17 @@ export const captureSnapshot = (
   const batch = db.batch();
   batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
   batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-  
+
   batch.write();
-  
+
   if (DEBUG) {
     console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);
     if (serverInput.serverTxs.length > 0) {
       console.log(`    🖥️  ServerTxs: ${serverInput.serverTxs.length}`);
       serverInput.serverTxs.forEach((tx, i) => {
-        console.log(`      ${i+1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`);
+        console.log(
+          `      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`,
+        );
       });
     }
     if (serverInput.entityInputs.length > 0) {
@@ -107,9 +110,9 @@ export const captureSnapshot = (
         const parts = [];
         if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
         if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
-        if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0,10)}...`);
-        console.log(`      ${i+1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
+        if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
+        console.log(`      ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
       });
     }
   }
-}; 
+};

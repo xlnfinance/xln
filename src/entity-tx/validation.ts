@@ -1,5 +1,5 @@
 // Security validation helpers: validateNonce, validateMessage
-import { log } from '../utils.js';
+import { log } from '../utils';
 
 export const validateNonce = (currentNonce: number, expectedNonce: number, from: string): boolean => {
   try {
