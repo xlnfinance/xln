@@ -13,9 +13,25 @@
   let voteChoice = '';
   let voteComment = '';
 
+  // State for J-tx (reserve-to-reserve)
+  let jtxRecipient = '';
+  let jtxAmount = 0;
+  let jtxTokenId = '';
+
+
   // Get proposals for voting
   $: proposals = replica?.state?.proposals ? 
     Array.from(replica.state.proposals.entries()).map(([id, proposal]) => ({ id, ...proposal })) : [];
+
+  // Get available tokens for sending
+  $: availableTokens = replica?.state?.reserves
+    ? Array.from(replica.state.reserves.entries()).map(([id, reserve]) => ({
+        id: id,
+        name: reserve.name || `Token #${id}`,
+        amount: reserve.amount
+      }))
+    : [];
+
 
   async function submitChatMessage() {
     if (!tab.entityId || !tab.signer || !message.trim()) return;
@@ -126,6 +142,76 @@
       alert(`Failed to submit vote: ${error.message}`);
     }
   }
+
+  function resolveRecipient(recipient: string): string {
+    // Check if it's a simple number (entity number)
+    if (/^\d+$/.test(recipient)) {
+      const entityNumber = BigInt(recipient);
+      const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
+      // Convert bytes32 entityId to a 20-byte address
+      return '0x' + entityId.slice(26);
+    }
+    // Assume it's already an address
+    // TODO: Add proper address validation (e.g., using ethers.js)
+    return recipient;
+  }
+
+  async function submitJtx() {
+    if (!tab.entityId || !tab.signer || !jtxRecipient.trim() || !jtxAmount || !jtxTokenId) {
+      alert('Please fill in all fields for the transfer.');
+      return;
+    }
+
+    const recipientAddress = resolveRecipient(jtxRecipient.trim());
+    const tokenIdNum = Number(jtxTokenId);
+    
+    if (isNaN(tokenIdNum)) {
+      alert('Invalid token selected.');
+      return;
+    }
+    if (jtxAmount <= 0) {
+      alert('Amount must be greater than zero.');
+      return;
+    }
+
+    try {
+      const xln = await getXLN();
+      const env = $xlnEnvironment;
+      if (!env) throw new Error('XLN environment not ready');
+
+      const batch = {
+        reserveToReserve: [{
+          receiver: recipientAddress,
+          tokenId: tokenIdNum,
+          amount: jtxAmount,
+        }],
+        // Ensure other batch arrays are empty to avoid errors
+        reserveToExternalToken: [],
+        externalTokenToReserve: [],
+        reserveToCollateral: [],
+        cooperativeUpdate: [],
+        cooperativeDisputeProof: [],
+        initialDisputeProof: [],
+        finalDisputeProof: [],
+        flashloans: [],
+        hub_id: 0,
+      };
+
+      // This is the actual call to the Depository contract via the XLN library
+      await xln.depositoryProcessBatch(env, tab.signer, batch);
+      
+      console.log('💸 J-tx sent successfully to', recipientAddress);
+      
+      // Reset form
+      jtxRecipient = '';
+      jtxAmount = 0;
+      jtxTokenId = '';
+
+    } catch (error) {
+      console.error('Failed to send J-tx:', error);
+      alert(`Failed to send J-tx: ${error.message}`);
+    }
+  }
 </script>
 
 <div class="controls-section">
@@ -196,6 +282,26 @@
       </div>
       <button class="form-button" on:click={submitVote}>Submit Vote</button>
     
+    {:else if selectedAction === 'jtx'}
+      <div class="form-group">
+        <label class="form-label">Recipient Address:</label>
+        <input class="form-input" type="text" bind:value={jtxRecipient} placeholder="Enter recipient's entity ID or address..." />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Token:</label>
+        <select class="form-input" bind:value={jtxTokenId}>
+          <option value="">Select a token...</option>
+          {#each availableTokens as token}
+            <option value={token.id}>{token.name} (Balance: {token.amount})</option>
+          {/each}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Amount:</label>
+        <input class="form-input" type="number" bind:value={jtxAmount} placeholder="0.0" />
+      </div>
+      <button class="form-button" on:click={submitJtx}>Send Transfer</button>
+
     {:else}
       <div class="form-group">
         <label class="form-label">Action:</label>

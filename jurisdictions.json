@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastUpdated": "2025-09-03T14:20:59Z",
+  "lastUpdated": "2025-09-15T22:37:24Z",
   "jurisdictions": {
     "ethereum": {
       "name": "Ethereum",
@@ -17,7 +17,7 @@
     "polygon": {
       "name": "Polygon",
       "chainId": 1337,
-      "rpc": "http://localhost:8546", 
+      "rpc": "http://localhost:8546",
       "contracts": {
         "entityProvider": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
         "depository": "0x0165878A594ca255338adfa4d48449f69242Eb8F"

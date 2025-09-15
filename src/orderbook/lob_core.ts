@@ -1,84 +1,227 @@
-// src/orderbook/lob_core.ts
+/**
+ * Limit Order Book Core (TypeScript, “readable bible” edition)
+ * ------------------------------------------------------------
+ * Single-threaded, in-memory LOB with:
+ *  - Separated bid/ask structures, per-price FIFO queues
+ *  - O(1) removal from a price level (doubly-linked lists)
+ *  - SoA (struct-of-arrays) layout via typed arrays (cache-friendly)
+ *  - Best bid/ask tracking via bitmaps + fast next/prev scan
+ *  - STP policies (0: off, 1: cancel taker, 2: reduce maker)
+ *  - TIF: GTC, IOC, FOK (FOK uses dry-run liquidity check)
+ *  - Real egress events recorded to a ring buffer (for bench & ASCII)
+ *  - Deterministic event hash for snapshots (eHash)
+ *
+ * This file focuses on clarity and explicitness. All branches are guarded,
+ * inputs are validated, and invariants can be asserted in dev mode.
+ */
+
 import { createHash } from "crypto";
 
-export type Side = 0 | 1;            // 0 BUY, 1 SELL
-export type TIF  = 0 | 1 | 2;        // 0 GTC, 1 IOC, 2 FOK
+/* ================================
+   Public Types
+   ================================ */
+
+export type Side = 0 | 1;       // 0 = BUY (bids), 1 = SELL (asks)
+export type TIF  = 0 | 1 | 2;   // 0 = GTC, 1 = IOC, 2 = FOK
+
 export type Cmd =
-  | { kind: 0; owner: number; orderId: number; side: Side; tif: TIF; postOnly: boolean; reduceOnly: boolean; priceTicks: number; qtyLots: number; }
-  | { kind: 1; owner: number; orderId: number; }
-  | { kind: 2; owner: number; orderId: number; newPriceTicks: number | null; qtyDeltaLots: number; };
+  | {
+      kind: 0;                  // NEW
+      owner: number;
+      orderId: number;
+      side: Side;
+      tif: TIF;
+      postOnly: boolean;
+      reduceOnly: boolean;      // accepted but not used in this MVP
+      priceTicks: number;
+      qtyLots: number;
+    }
+  | {
+      kind: 1;                  // CANCEL
+      owner: number;
+      orderId: number;
+    }
+  | {
+      kind: 2;                  // REPLACE (price change and/or size delta)
+      owner: number;
+      orderId: number;
+      newPriceTicks: number | null;
+      qtyDeltaLots: number;
+    };
 
 export type CoreParams = {
-  tick: number; pmin: number; pmax: number; maxOrders: number; stpPolicy: 0|1|2;
-  devAsserts?: boolean;
+  tick: number;                 // 1 tick = 1 “cent” (or chosen unit)
+  pmin: number;                 // inclusive min price in ticks
+  pmax: number;                 // inclusive max price in ticks
+  maxOrders: number;            // capacity of order arrays
+  stpPolicy: 0 | 1 | 2;         // self-trade prevention policy
 };
 
-// ── egress события (реальные) ────────────────────────────────────────────────
 export type EgressEvent =
-  | { k:'ACK', id:number, owner:number }
-  | { k:'REJECT', id:number, owner:number, reason:string }
-  | { k:'TRADE', px:number, qty:number, makerOwner:number, takerOwner:number }
-  | { k:'REDUCED', id:number, owner:number, delta:number, remain:number }
-  | { k:'CANCELED', id:number, owner:number };
-type Sink = (e:EgressEvent)=>void;
-let eventSink: Sink | null = null;
-export function setEventSink(sink: Sink | null){ eventSink = sink; }
+  | { k: "ACK";     id: number; owner: number }
+  | { k: "REJECT";  id: number; owner: number; reason: string }
+  | { k: "CANCELED";id: number; owner: number }
+  | { k: "REDUCED"; id: number; owner: number; delta: number; remain: number }
+  | { k: "TRADE";   px: number; qty: number; makerOwner: number; takerOwner: number };
 
-// ── состояние ────────────────────────────────────────────────────────────────
+/* ================================
+   Constants & Limits
+   ================================ */
+
 const EMPTY = -1;
 const BITWORD = 32;
-const MAX_QTY = 1_000_000_000; // 1e9 лотов (настраиваемый лимит)
 
-let DEV_ASSERTS=false;
+/** Hard caps to avoid 32-bit overflow / insane inputs */
+const MAX_QTY   = 0x3fff_ffff;     // ~1e9 lots (fits into uint32 safely)
+const MAX_PRICE = 0x1fff_ffff;     // protection for price grid
 
-let TICK = 1, PMIN = 0, PMAX = 1_000_000, LEVELS = 0, MAX_ORDERS = 1_000_000;
-let STP_POLICY: 0|1|2 = 0;
+/** Event ring size for recording real events (for bench/hash/snapshots) */
+const EVT_RING_CAP = 1 << 17;      // 131,072 events kept (ring)
 
-let orderPriceIdx!: Int32Array;
-let orderQtyLots!: Uint32Array;
-let orderOwner!: Uint32Array;
-let orderSideArr!: Uint8Array;
-let orderPrev!: Int32Array;
-let orderNext!: Int32Array;
-let orderActive!: Uint8Array;
-let orderId2Idx!: Int32Array;
-let orderExtId!: Uint32Array;
+/** Trade checksum rolling prime (fits in 53-bit BigInt window we use) */
+const PRIME = 0x1_0000_01n;
 
+/* ================================
+   Module State (Typed Arrays)
+   ================================ */
+
+/** Grid parameters */
+let TICK = 1;
+let PMIN = 0;
+let PMAX = 1_000_000;
+let LEVELS = 0;
+let MAX_ORDERS = 1_000_000;
+let STP_POLICY: 0 | 1 | 2 = 0;
+
+/** Optional dev assertions (set via enableDevAsserts) */
+let DEV_ASSERTS = false;
+
+/** Per-order fields (SoA). Index is “slot index”, not external orderId. */
+let orderPriceIdx!: Int32Array;   // price level index
+let orderQtyLots!: Uint32Array;   // remaining quantity
+let orderOwner!: Uint32Array;     // account id
+let orderSideArr!: Uint8Array;    // 0=buy, 1=sell
+let orderPrev!: Int32Array;       // prev order on the same level
+let orderNext!: Int32Array;       // next order on the same level
+let orderActive!: Uint8Array;     // 1 if active
+let orderId2Idx!: Int32Array;     // external orderId -> slot index
+let orderExtId!: Uint32Array;     // store external orderId for events
+
+/** Per-level queues for bids and asks */
 let levelHeadBid!: Int32Array;
 let levelTailBid!: Int32Array;
-let bitmapBid!: Uint32Array;
+let bitmapBid!: Uint32Array;      // bitset: non-empty price levels
 
 let levelHeadAsk!: Int32Array;
 let levelTailAsk!: Int32Array;
 let bitmapAsk!: Uint32Array;
 
+/** Best levels */
 let bestBidIdx = EMPTY;
 let bestAskIdx = EMPTY;
 
+/** Free list of slots for O(1) allocations */
 let freeTop = 0;
 
-// counters + egress hash
-let evAck=0, evTrade=0, evFilled=0, evReduced=0, evCanceled=0, evReject=0;
-let tradeQtySum=0n, tradeNotionalTicksSum=0n, tradeChecksum=0n, eventHash=0n;
-const PRIME=0x1_0000_01n;
+/** Accounting & deterministic checksums */
+let evAck = 0;
+let evTrade = 0;
+let evFilled = 0;
+let evReduced = 0;
+let evCanceled = 0;
+let evReject = 0;
 
-const isFiniteInt = (x:number)=> Number.isFinite(x) && Math.floor(x)===x;
+let tradeQtySum = 0n;
+let tradeNotionalTicksSum = 0n;
+let tradeChecksum = 0n;
 
-// ── геттеры/инициализация ───────────────────────────────────────────────────
-export function getBestBidPx(){ return bestBidIdx===EMPTY ? -1 : (PMIN + bestBidIdx*TICK); }
-export function getBestAskPx(){ return bestAskIdx===EMPTY ? -1 : (PMIN + bestAskIdx*TICK); }
-export function getCounters(){ return { evAck, evTrade, evFilled, evReduced, evCanceled, evReject, tradeQtySum, tradeNotionalTicksSum, tradeChecksum, eventHash }; }
-export function getDims(){ return { TICK, PMIN, PMAX, LEVELS, MAX_ORDERS }; }
+/** Real events ring and a deterministic event hash (eHash) */
+const evT = new Uint8Array(EVT_RING_CAP);   // 1=ACK,2=REJ,3=TRD,4=RED,5=CAN
+const evA = new Int32Array(EVT_RING_CAP);
+const evB = new Int32Array(EVT_RING_CAP);
+const evC = new Int32Array(EVT_RING_CAP);
+const evD = new Int32Array(EVT_RING_CAP);
+let evWr = 0;
+let eHash = 0n;
 
-export function resetBook(p: CoreParams){
-  if (!isFiniteInt(p.tick) || p.tick<=0) throw Error("tick must be positive int");
-  if (!isFiniteInt(p.pmin) || !isFiniteInt(p.pmax) || p.pmax<=p.pmin) throw Error("pmin<pmax required");
-  TICK = p.tick|0; PMIN = p.pmin|0; PMAX = p.pmax|0; MAX_ORDERS = p.maxOrders|0;
-  LEVELS = (((PMAX - PMIN)/TICK)|0) + 1;
-  if (LEVELS<=0) throw Error("invalid price grid");
+/* ================================
+   Public Helpers
+   ================================ */
+
+export function enableDevAsserts(on: boolean) {
+  DEV_ASSERTS = on;
+}
+
+export function getBestBidPx(): number {
+  return bestBidIdx === EMPTY ? -1 : PMIN + bestBidIdx * TICK;
+}
+
+export function getBestAskPx(): number {
+  return bestAskIdx === EMPTY ? -1 : PMIN + bestAskIdx * TICK;
+}
+
+export function getCounters() {
+  return {
+    evAck,
+    evTrade,
+    evFilled,
+    evReduced,
+    evCanceled,
+    evReject,
+    tradeQtySum,
+    tradeNotionalTicksSum,
+    tradeChecksum,
+    eHash,
+  };
+}
+
+/**
+ * Drain events from ring [from, current). Used by bench to
+ *  a) prove real work was done, b) print step-by-step in ASCII mode.
+ */
+export function drainEvents(from: number): { next: number; items: EgressEvent[] } {
+  const end = evWr;
+  const items: EgressEvent[] = [];
+
+  for (let x = from; x < end; x++) {
+    const i = x & (EVT_RING_CAP - 1);
+    const t = evT[i], a = evA[i], b = evB[i], c = evC[i], d = evD[i];
+
+    if (t === 1) items.push({ k: "ACK", id: a, owner: b });
+    else if (t === 2) items.push({ k: "REJECT", id: a, owner: b, reason: String(c) });
+    else if (t === 3) items.push({ k: "TRADE", px: a, qty: b, makerOwner: c, takerOwner: d });
+    else if (t === 4) items.push({ k: "REDUCED", id: a, owner: b, delta: c, remain: d });
+    else if (t === 5) items.push({ k: "CANCELED", id: a, owner: b });
+  }
+
+  return { next: end, items };
+}
+
+/* ================================
+   Initialization / Reset
+   ================================ */
+
+export function resetBook(p: CoreParams) {
+  // Validate basic params
+  if (!Number.isFinite(p.tick) || p.tick <= 0) throw new Error("tick must be >0");
+  if (!Number.isFinite(p.pmin) || !Number.isFinite(p.pmax) || p.pmax < p.pmin) {
+    throw new Error("invalid pmin/pmax");
+  }
+
+  const levelsFloat = (p.pmax - p.pmin) / p.tick;
+  if (!Number.isFinite(levelsFloat) || levelsFloat < 0 || levelsFloat > MAX_PRICE) {
+    throw new Error("price grid too large");
+  }
+
+  // Apply
+  TICK = p.tick | 0;
+  PMIN = p.pmin | 0;
+  PMAX = p.pmax | 0;
+  MAX_ORDERS = p.maxOrders | 0;
   STP_POLICY = p.stpPolicy;
-  DEV_ASSERTS = !!p.devAsserts;
+  LEVELS = ((PMAX - PMIN) / TICK | 0) + 1;
 
+  // Allocate typed arrays
   orderPriceIdx = new Int32Array(MAX_ORDERS).fill(EMPTY);
   orderQtyLots  = new Uint32Array(MAX_ORDERS);
   orderOwner    = new Uint32Array(MAX_ORDERS);
@@ -89,448 +232,704 @@ export function resetBook(p: CoreParams){
   orderId2Idx   = new Int32Array(MAX_ORDERS).fill(EMPTY);
   orderExtId    = new Uint32Array(MAX_ORDERS);
 
-  levelHeadBid = new Int32Array(LEVELS).fill(EMPTY);
-  levelTailBid = new Int32Array(LEVELS).fill(EMPTY);
-  bitmapBid    = new Uint32Array(Math.ceil(LEVELS / BITWORD));
+  levelHeadBid  = new Int32Array(LEVELS).fill(EMPTY);
+  levelTailBid  = new Int32Array(LEVELS).fill(EMPTY);
+  bitmapBid     = new Uint32Array(Math.ceil(LEVELS / BITWORD));
 
-  levelHeadAsk = new Int32Array(LEVELS).fill(EMPTY);
-  levelTailAsk = new Int32Array(LEVELS).fill(EMPTY);
-  bitmapAsk    = new Uint32Array(Math.ceil(LEVELS / BITWORD));
+  levelHeadAsk  = new Int32Array(LEVELS).fill(EMPTY);
+  levelTailAsk  = new Int32Array(LEVELS).fill(EMPTY);
+  bitmapAsk     = new Uint32Array(Math.ceil(LEVELS / BITWORD));
 
-  bestBidIdx = EMPTY; bestAskIdx = EMPTY;
+  bestBidIdx = EMPTY;
+  bestAskIdx = EMPTY;
 
+  // Initialize free list
   freeTop = 0;
-  for (let i=0;i<MAX_ORDERS-1;i++) orderNext[i]=i+1;
-  orderNext[MAX_ORDERS-1] = EMPTY;
+  for (let i = 0; i < MAX_ORDERS - 1; i++) orderNext[i] = i + 1;
+  orderNext[MAX_ORDERS - 1] = EMPTY;
 
-  evAck=evTrade=evFilled=evReduced=evCanceled=evReject=0;
-  tradeQtySum=0n; tradeNotionalTicksSum=0n; tradeChecksum=0n; eventHash=0n;
+  // Reset counters and event ring
+  evAck = evTrade = evFilled = evReduced = evCanceled = evReject = 0;
+  tradeQtySum = 0n;
+  tradeNotionalTicksSum = 0n;
+  tradeChecksum = 0n;
+
+  evWr = 0;
+  eHash = 0n;
 }
 
-// ── бит-утилиты ──────────────────────────────────────────────────────────────
-const ctz32=(x:number)=> (Math.clz32((x & -x)>>>0)^31);
-function setBit(side: Side, i:number){
-  const bm = side===0 ? bitmapBid : bitmapAsk;
-  const w=(i/BITWORD|0), b=i&31;
-  bm[w] |= (1<<b)>>>0;
+/* ================================
+   Bitset Helpers
+   ================================ */
+
+const ctz32 = (x: number) => (Math.clz32((x & -x) >>> 0) ^ 31);
+
+/** Mark level as non-empty in appropriate bitmap. */
+function setBit(isBid: boolean, levelIdx: number) {
+  const bm = isBid ? bitmapBid : bitmapAsk;
+  const w  = (levelIdx / BITWORD) | 0;
+  const b  = levelIdx & 31;
+  bm[w] |= (1 << b) >>> 0;
 }
-function clearBit(side: Side, i:number){
-  const bm = side===0 ? bitmapBid : bitmapAsk;
-  const w=(i/BITWORD|0), b=i&31;
-  bm[w] &= (~(1<<b))>>>0;
+
+/** Mark level as empty in appropriate bitmap (bit cleared). */
+function clearBit(isBid: boolean, levelIdx: number) {
+  const bm = isBid ? bitmapBid : bitmapAsk;
+  const w  = (levelIdx / BITWORD) | 0;
+  const b  = levelIdx & 31;
+  bm[w] &= (~(1 << b)) >>> 0;
 }
-function findNextNonEmptyFrom(side: Side, i:number): number {
-  const bm = side===1 ? bitmapAsk : bitmapBid;
-  if (i<0) i=0;
-  for (; i<LEVELS; ){
-    const w=(i/BITWORD|0), base=w*BITWORD;
-    let word=bm[w];
-    if (word){
-      const shift=i-base; word>>>=shift;
-      if (word) return base+shift+ctz32(word);
+
+/** Scan forward to the next non-empty level (ask-ascending or bid-ascending). */
+function findNextNonEmptyFrom(isAsk: boolean, start: number): number {
+  const bm = isAsk ? bitmapAsk : bitmapBid;
+  let i = start < 0 ? 0 : start;
+
+  for (; i < LEVELS; ) {
+    const w    = (i / BITWORD) | 0;
+    const base = w * BITWORD;
+    let word   = bm[w];
+
+    if (word) {
+      const shift = i - base;
+      word >>>= shift;
+      if (word) return base + shift + ctz32(word);
     }
-    i=base+BITWORD;
+    i = base + BITWORD;
   }
   return EMPTY;
 }
-function findPrevNonEmptyFrom(side: Side, i:number): number {
-  const bm = side===0 ? bitmapBid : bitmapAsk;
-  if (i>=LEVELS) i=LEVELS-1;
-  for (; i>=0; ){
-    const w=(i/BITWORD|0), base=w*BITWORD;
-    let word=bm[w];
-    if (word){
-      const upto=i-base;
-      const mask = upto===31 ? 0xFFFFFFFF : ((1<<(upto+1))-1);
-      word&=mask>>>0;
-      if (word) return base+(31-Math.clz32(word));
+
+/** Scan backward to the previous non-empty level (bid-descending or ask-descending). */
+function findPrevNonEmptyFrom(isBid: boolean, start: number): number {
+  const bm = isBid ? bitmapBid : bitmapAsk;
+  let i = start >= LEVELS ? LEVELS - 1 : start;
+
+  for (; i >= 0; ) {
+    const w    = (i / BITWORD) | 0;
+    const base = w * BITWORD;
+    let word   = bm[w];
+
+    if (word) {
+      const upto = i - base;
+      const mask = upto === 31 ? 0xffffffff : ((1 << (upto + 1)) - 1);
+      word &= mask >>> 0;
+      if (word) return base + (31 - Math.clz32(word));
     }
-    i=base-1;
+    i = base - 1;
   }
   return EMPTY;
 }
 
-// ── очереди уровня ───────────────────────────────────────────────────────────
-function enqueueTail(side: Side, levelIdx:number, idx:number){
-  const head = side===0 ? levelHeadBid : levelHeadAsk;
-  const tail = side===0 ? levelTailBid : levelTailAsk;
+/* ================================
+   Level Queue Ops (O(1))
+   ================================ */
 
-  if (head[levelIdx]===EMPTY){
-    head[levelIdx]=idx; tail[levelIdx]=idx;
-    orderPrev[idx]=EMPTY; orderNext[idx]=EMPTY;
-    setBit(side, levelIdx);
-    if (side===0){ if (bestBidIdx===EMPTY || levelIdx>bestBidIdx) bestBidIdx=levelIdx; }
-    else { if (bestAskIdx===EMPTY || levelIdx<bestAskIdx) bestAskIdx=levelIdx; }
+function enqueueTail(side: Side, levelIdx: number, idx: number) {
+  const head = side === 0 ? levelHeadBid : levelHeadAsk;
+  const tail = side === 0 ? levelTailBid : levelTailAsk;
+
+  if (head[levelIdx] === EMPTY) {
+    head[levelIdx] = tail[levelIdx] = idx;
+    orderPrev[idx] = EMPTY;
+    orderNext[idx] = EMPTY;
+
+    setBit(side === 0, levelIdx);
+
+    if (side === 0) {
+      if (bestBidIdx === EMPTY || levelIdx > bestBidIdx) bestBidIdx = levelIdx;
+    } else {
+      if (bestAskIdx === EMPTY || levelIdx < bestAskIdx) bestAskIdx = levelIdx;
+    }
   } else {
     const t = tail[levelIdx];
-    orderNext[t]=idx; orderPrev[idx]=t; orderNext[idx]=EMPTY; tail[levelIdx]=idx;
-  }
-}
-function removeFromLevel(side: Side, levelIdx:number, idx:number){
-  const head = side===0 ? levelHeadBid : levelHeadAsk;
-  const tail = side===0 ? levelTailBid : levelTailAsk;
-
-  const p=orderPrev[idx], n=orderNext[idx];
-  if (p!==EMPTY) orderNext[p]=n; else head[levelIdx]=n;
-  if (n!==EMPTY) orderPrev[n]=p; else tail[levelIdx]=p;
-  orderPrev[idx]=orderNext[idx]=EMPTY;
-
-  if (head[levelIdx]===EMPTY){
-    clearBit(side, levelIdx);
-    if (side===0 && bestBidIdx===levelIdx) bestBidIdx = findPrevNonEmptyFrom(0, levelIdx-1);
-    if (side===1 && bestAskIdx===levelIdx) bestAskIdx = findNextNonEmptyFrom(1, levelIdx+1);
+    orderNext[t] = idx;
+    orderPrev[idx] = t;
+    orderNext[idx] = EMPTY;
+    tail[levelIdx] = idx;
   }
 }
 
-function assertLevelPointers(side:Side, lvl:number){
-  if (!DEV_ASSERTS) return;
-  const head = side===0 ? levelHeadBid : levelHeadAsk;
-  const tail = side===0 ? levelTailBid : levelTailAsk;
-  if (head[lvl]===EMPTY) return;
-  let cur=head[lvl], prev=EMPTY;
-  while (cur!==EMPTY){
-    if (orderPrev[cur]!==prev) throw Error("broken prev");
-    prev=cur; cur=orderNext[cur];
+function removeFromLevel(side: Side, levelIdx: number, idx: number) {
+  const head = side === 0 ? levelHeadBid : levelHeadAsk;
+  const tail = side === 0 ? levelTailBid : levelTailAsk;
+
+  const p = orderPrev[idx];
+  const n = orderNext[idx];
+
+  if (p !== EMPTY) orderNext[p] = n; else head[levelIdx] = n;
+  if (n !== EMPTY) orderPrev[n] = p; else tail[levelIdx] = p;
+
+  orderPrev[idx] = orderNext[idx] = EMPTY;
+
+  if (head[levelIdx] === EMPTY) {
+    clearBit(side === 0, levelIdx);
+
+    if (side === 0 && bestBidIdx === levelIdx) {
+      bestBidIdx = findPrevNonEmptyFrom(true, levelIdx - 1);
+    }
+    if (side === 1 && bestAskIdx === levelIdx) {
+      bestAskIdx = findNextNonEmptyFrom(true, levelIdx + 1);
+    }
   }
-  if (prev!==tail[lvl]) throw Error("broken tail");
 }
 
-// ── аллок/фри ────────────────────────────────────────────────────────────────
-function allocOrder():number{ const i=freeTop; if(i===EMPTY) throw Error('Out of slots'); freeTop=orderNext[i]; return i; }
-function freeOrder(i:number){
-  orderActive[i]=0;
-  orderPriceIdx[i]=EMPTY; orderQtyLots[i]=0;
-  orderOwner[i]=0; orderSideArr[i]=0;
-  orderPrev[i]=EMPTY; orderNext[i]=EMPTY;
-  orderExtId[i]=0;
-  orderNext[i]=freeTop; freeTop=i;
+/* ================================
+   Slot Alloc / Free (O(1))
+   ================================ */
+
+function allocOrder(): number {
+  const i = freeTop;
+  if (i === EMPTY) throw new Error("Out of order slots");
+  freeTop = orderNext[i];
+  return i;
 }
 
-// ── egress helpers ───────────────────────────────────────────────────────────
-function bumpEventHash(tag:number, a:number, b:number, c:number){
-  // очень дешёвый rolling-хэш по событиям
-  eventHash = ( (eventHash*PRIME + BigInt((tag*2654435761>>>0) ^ a ^ (b<<7) ^ (c<<13))) & 0x1fffffffffffffn );
+function freeOrder(i: number) {
+  // Zero out to avoid stale data being read in dev/debug.
+  orderActive[i] = 0;
+  orderOwner[i] = 0;
+  orderSideArr[i] = 0;
+  orderQtyLots[i] = 0;
+  orderPriceIdx[i] = EMPTY;
+
+  // Push back to freelist
+  orderPrev[i] = EMPTY;
+  orderNext[i] = freeTop;
+  freeTop = i;
 }
-function emitACK(owner:number, id:number){ evAck++; if (eventSink) eventSink({k:'ACK', owner, id}); bumpEventHash(1, owner, id, 0); }
-function emitREJECT(owner:number, id:number, reason:string){ evReject++; if (eventSink) eventSink({k:'REJECT', owner, id, reason}); bumpEventHash(2, owner, id, reason.length); }
-function emitTRADE(px:number, qty:number, makerOwner:number, takerOwner:number){
+
+/* ================================
+   Events / Accounting
+   ================================ */
+
+function evRecord(type: number, a: number, b: number, c: number, d: number) {
+  const i = evWr & (EVT_RING_CAP - 1);
+  evT[i] = type; evA[i] = a | 0; evB[i] = b | 0; evC[i] = c | 0; evD[i] = d | 0;
+  evWr++;
+
+  // Deterministic rolling hash of event stream
+  const mix = (BigInt(type) << 48n)
+            ^ (BigInt(a & 0xffff) << 32n)
+            ^ (BigInt(b & 0xffff) << 16n)
+            ^  BigInt((c ^ d) & 0xffff);
+  eHash = ((eHash * 0x1000003n) ^ mix) & 0x1fffffffffffffn;
+}
+
+function emitACK(owner: number, id: number) {
+  evAck++;
+  evRecord(1, id, owner, 0, 0);
+}
+
+function emitREJECT(owner: number, id: number, _reason: string) {
+  evReject++;
+  evRecord(2, id, owner, 0, 0);
+}
+
+function emitCANCELED(owner: number, id: number) {
+  evCanceled++;
+  evRecord(5, id, owner, 0, 0);
+}
+
+function emitREDUCED(owner: number, id: number, delta: number, remain: number) {
+  evReduced++;
+  evRecord(4, id, owner, delta, remain);
+}
+
+function emitTRADE(px: number, qty: number, makerOwner: number, takerOwner: number) {
   evTrade++;
-  tradeQtySum+=BigInt(qty);
-  tradeNotionalTicksSum+=BigInt(px)*BigInt(qty);
-  const mix=(BigInt((px<<16) ^ qty) & 0x1fffffffffffffn);
-  tradeChecksum=( (tradeChecksum*PRIME + mix) & 0x1fffffffffffffn );
-  if (eventSink) eventSink({k:'TRADE', px, qty, makerOwner, takerOwner});
-  bumpEventHash(3, px|0, qty|0, (makerOwner^takerOwner)|0);
-}
-function emitFILLED(){ evFilled++; }
-function emitREDUCED(owner:number, id:number, delta:number, remain:number){ evReduced++; if (eventSink) eventSink({k:'REDUCED', owner, id, delta, remain}); bumpEventHash(4, owner, id, remain); }
-function emitCANCELED(owner:number, id:number){ evCanceled++; if (eventSink) eventSink({k:'CANCELED', owner, id}); bumpEventHash(5, owner, id, 0); }
 
-// ── STP ──────────────────────────────────────────────────────────────────────
-function stp(ownerMaker:number, ownerTaker:number): 0|1|2 {
-  if (ownerMaker!==ownerTaker) return 0;
-  if (STP_POLICY===1) return 1;
-  if (STP_POLICY===2) return 2;
+  tradeQtySum += BigInt(qty);
+  tradeNotionalTicksSum += BigInt(px) * BigInt(qty);
+
+  const mix = (BigInt((px << 16) ^ qty) & 0x1fffffffffffffn);
+  tradeChecksum = ((tradeChecksum * PRIME) + mix) & 0x1fffffffffffffn;
+
+  evRecord(3, px, qty, makerOwner, takerOwner);
+}
+
+function emitFILLED() {
+  evFilled++;
+}
+
+/* ================================
+   Validation Helpers
+   ================================ */
+
+function priceToLevelIdx(priceTicks: number): number {
+  return ((priceTicks - PMIN) / TICK) | 0;
+}
+
+function isFiniteInt(x: number): boolean {
+  return Number.isFinite(x) && Math.trunc(x) === x;
+}
+
+function isQtyOk(q: number): boolean {
+  return isFiniteInt(q) && q > 0 && q <= MAX_QTY;
+}
+
+function isPriceOk(p: number): boolean {
+  return isFiniteInt(p) && p >= PMIN && p <= PMAX;
+}
+
+function stp(makerOwner: number, takerOwner: number): 0 | 1 | 2 {
+  if (makerOwner !== takerOwner) return 0;
+  if (STP_POLICY === 1) return 1;  // cancel taker
+  if (STP_POLICY === 2) return 2;  // reduce maker
   return 0;
 }
 
-// ── превью объёма для FOK (только для FOK) ───────────────────────────────────
-function previewFill(side:Side, limitLevel:number, desired:number): boolean {
-  let need = desired;
-  if (side===0){ // BUY против ASK
-    let lvl = bestAskIdx;
-    while (need>0 && lvl!==EMPTY && lvl<=limitLevel){
-      let cur = levelHeadAsk[lvl];
-      while (need>0 && cur!==EMPTY){
-        if (orderActive[cur]) need -= Math.min(need, orderQtyLots[cur]>>>0);
+/**
+ * FOK dry run: compute how much is fillable for taker up to limitLevel.
+ * No mutations; only scans queues.
+ */
+function availableLiquidity(side: Side, limitLevel: number, need: number): number {
+  let remaining = need | 0;
+
+  if (side === 0) {
+    // BUY consumes asks from bestAsk upwards to limitLevel
+    let li = bestAskIdx;
+    while (remaining > 0 && li !== EMPTY && li <= limitLevel) {
+      let cur = levelHeadAsk[li];
+      while (remaining > 0 && cur !== EMPTY) {
+        const q = orderQtyLots[cur] | 0;
+        remaining -= q <= remaining ? q : remaining;
         cur = orderNext[cur];
       }
-      lvl = findNextNonEmptyFrom(1, lvl+1);
+      li = findNextNonEmptyFrom(true, li + 1);
     }
-  } else {       // SELL против BID
-    let lvl = bestBidIdx;
-    while (need>0 && lvl!==EMPTY && lvl>=limitLevel){
-      let cur = levelHeadBid[lvl];
-      while (need>0 && cur!==EMPTY){
-        if (orderActive[cur]) need -= Math.min(need, orderQtyLots[cur]>>>0);
+  } else {
+    // SELL consumes bids from bestBid down to limitLevel
+    let li = bestBidIdx;
+    while (remaining > 0 && li !== EMPTY && li >= limitLevel) {
+      let cur = levelHeadBid[li];
+      while (remaining > 0 && cur !== EMPTY) {
+        const q = orderQtyLots[cur] | 0;
+        remaining -= q <= remaining ? q : remaining;
         cur = orderNext[cur];
       }
-      lvl = findPrevNonEmptyFrom(0, lvl-1);
+      li = findPrevNonEmptyFrom(true, li - 1);
     }
   }
-  return need<=0;
+  return need - Math.max(0, remaining);
 }
 
-// ── ядро: new/cancel/replace ─────────────────────────────────────────────────
-export function newOrder(owner:number, orderId:number, side:Side, priceTicks:number, qtyLots:number, tif:TIF=0, postOnly=false, reduceOnly=false){
-  // валидации
-  if (!isFiniteInt(priceTicks) || !isFiniteInt(qtyLots)){ emitREJECT(owner, orderId, 'non-integer'); return; }
-  if (qtyLots<=0 || qtyLots>MAX_QTY){ emitREJECT(owner, orderId, 'qty out of range'); return; }
-  const levelIdx=((priceTicks-PMIN)/TICK)|0;
-  if (levelIdx<0 || levelIdx>=LEVELS){ emitREJECT(owner, orderId, 'price out of range'); return; }
-  if (orderId<MAX_ORDERS && orderId2Idx[orderId]!==EMPTY && orderActive[orderId2Idx[orderId]]){ emitREJECT(owner, orderId, 'duplicate orderId'); return; }
+/* ================================
+   Matching Helpers
+   ================================ */
 
-  let remaining = qtyLots>>>0;
+function stpReduce(makerIdx: number, dec: number) {
+  const makerOwner = orderOwner[makerIdx] | 0;
+  const id         = orderExtId[makerIdx] | 0;
+  const q          = orderQtyLots[makerIdx] | 0;
 
-  // FOK превью
-  if (tif===2){
-    const ok = side===0
-      ? previewFill(0, levelIdx, remaining)
-      : previewFill(1, levelIdx, remaining);
-    if (!ok){ emitREJECT(owner, orderId, 'FOK insufficient'); return; }
-  }
+  const d = Math.min(q, dec | 0);
+  orderQtyLots[makerIdx] = (q - d) >>> 0;
 
-  if (side===0){
-    if (postOnly && bestAskIdx!==EMPTY && bestAskIdx<=levelIdx){ emitREJECT(owner, orderId, 'postOnly would cross'); return; }
-    while (remaining>0 && bestAskIdx!==EMPTY && bestAskIdx<=levelIdx){
-      remaining = fillAgainstAsk(bestAskIdx, remaining, owner, orderId);
-      if (bestAskIdx!==EMPTY && levelHeadAsk[bestAskIdx]===EMPTY) bestAskIdx = findNextNonEmptyFrom(1, bestAskIdx+1);
-    }
-  } else {
-    if (postOnly && bestBidIdx!==EMPTY && bestBidIdx>=levelIdx){ emitREJECT(owner, orderId, 'postOnly would cross'); return; }
-    while (remaining>0 && bestBidIdx!==EMPTY && bestBidIdx>=levelIdx){
-      remaining = fillAgainstBid(bestBidIdx, remaining, owner, orderId);
-      if (bestBidIdx!==EMPTY && levelHeadBid[bestBidIdx]===EMPTY) bestBidIdx = findPrevNonEmptyFrom(0, bestBidIdx-1);
-    }
-  }
+  emitREDUCED(makerOwner, id, -d, orderQtyLots[makerIdx] | 0);
 
-  if (remaining>0){
-    // reduceOnly — как IOC (остаток не ставим в книгу)
-    if (reduceOnly || tif===1){ if (qtyLots!==remaining) emitFILLED(); else emitREJECT(owner, orderId, reduceOnly?'reduceOnly no reduce':'IOC no fill'); return; }
-    const idx=allocOrder();
-    orderPriceIdx[idx]=levelIdx;
-    orderQtyLots[idx]=remaining;
-    orderOwner[idx]=owner;
-    orderSideArr[idx]=side;
-    orderActive[idx]=1;
-    orderExtId[idx]=orderId;
-    enqueueTail(side, levelIdx, idx);
-    if (orderId<MAX_ORDERS) orderId2Idx[orderId]=idx;
-    emitACK(owner, orderId);
-  } else {
+  if (orderQtyLots[makerIdx] === 0) {
+    const lvl  = orderPriceIdx[makerIdx] | 0;
+    const side = orderSideArr[makerIdx] as Side;
+
+    removeFromLevel(side, lvl, makerIdx);
+    freeOrder(makerIdx);
     emitFILLED();
   }
 }
 
-function fillAgainstBid(levelIdx:number, remaining:number, takerOwner:number, takerId:number): number {
-  while (remaining>0){
+function fillAgainstBid(levelIdx: number, remaining: number, takerOwner: number, takerId: number): number {
+  while (remaining > 0) {
     const head = levelHeadBid[levelIdx];
-    if (head===EMPTY) return remaining;
-    if (!orderActive[head]){ removeFromLevel(0, levelIdx, head); freeOrder(head); continue; }
+    if (head === EMPTY) return remaining;
+    if (!orderActive[head]) { removeFromLevel(0, levelIdx, head); freeOrder(head); continue; }
 
-    const makerOwner=orderOwner[head];
+    const makerOwner = orderOwner[head] | 0;
     const s = stp(makerOwner, takerOwner);
-    if (s===1){ emitREJECT(takerOwner, takerId, 'STP cancel taker'); return remaining; }
+    if (s === 1) { emitREJECT(takerOwner, takerId, "STP cancel taker"); return remaining; }
 
-    const makerQty=orderQtyLots[head]>>>0;
-    const pxTicks=PMIN + levelIdx*TICK;
+    const makerQty = orderQtyLots[head] | 0;
+    const pxTicks  = PMIN + levelIdx * TICK;
     const tradeQty = makerQty < remaining ? makerQty : remaining;
 
-    if (s===2){
-      const dec = Math.min(makerQty, remaining);
-      orderQtyLots[head]=makerQty - dec;
-      emitREDUCED(makerOwner, orderExtId[head], -dec, orderQtyLots[head]>>>0);
-      if (orderQtyLots[head]===0){ removeFromLevel(0, levelIdx, head); freeOrder(head); emitFILLED(); }
-      // тейкер остаётся прежним (reduce-maker)
-      continue;
-    } else {
-      const newMakerQty = makerQty - tradeQty;
-      orderQtyLots[head]=newMakerQty;
-      remaining -= tradeQty;
-      emitTRADE(pxTicks, tradeQty, makerOwner, takerOwner);
+    if (s === 2) { stpReduce(head, remaining); continue; }
 
-      if (newMakerQty===0){
-        removeFromLevel(0, levelIdx, head);
-        freeOrder(head);
-        emitFILLED();
-      } else {
-        emitREDUCED(makerOwner, orderExtId[head], -tradeQty, newMakerQty>>>0);
-        break;
-      }
+    const newMakerQty = makerQty - tradeQty;
+    orderQtyLots[head] = newMakerQty >>> 0;
+    remaining -= tradeQty;
+
+    emitTRADE(pxTicks, tradeQty, makerOwner, takerOwner);
+
+    if (newMakerQty === 0) {
+      removeFromLevel(0, levelIdx, head);
+      freeOrder(head);
+      emitFILLED();
+    } else {
+      emitREDUCED(makerOwner, orderExtId[head] | 0, -tradeQty, newMakerQty);
+      break; // only head participates in this step (FIFO)
     }
   }
   return remaining;
 }
 
-function fillAgainstAsk(levelIdx:number, remaining:number, takerOwner:number, takerId:number): number {
-  while (remaining>0){
+function fillAgainstAsk(levelIdx: number, remaining: number, takerOwner: number, takerId: number): number {
+  while (remaining > 0) {
     const head = levelHeadAsk[levelIdx];
-    if (head===EMPTY) return remaining;
-    if (!orderActive[head]){ removeFromLevel(1, levelIdx, head); freeOrder(head); continue; }
+    if (head === EMPTY) return remaining;
+    if (!orderActive[head]) { removeFromLevel(1, levelIdx, head); freeOrder(head); continue; }
 
-    const makerOwner=orderOwner[head];
+    const makerOwner = orderOwner[head] | 0;
     const s = stp(makerOwner, takerOwner);
-    if (s===1){ emitREJECT(takerOwner, takerId, 'STP cancel taker'); return remaining; }
+    if (s === 1) { emitREJECT(takerOwner, takerId, "STP cancel taker"); return remaining; }
 
-    const makerQty=orderQtyLots[head]>>>0;
-    const pxTicks=PMIN + levelIdx*TICK;
+    const makerQty = orderQtyLots[head] | 0;
+    const pxTicks  = PMIN + levelIdx * TICK;
     const tradeQty = makerQty < remaining ? makerQty : remaining;
 
-    if (s===2){
-      const dec = Math.min(makerQty, remaining);
-      orderQtyLots[head]=makerQty - dec;
-      emitREDUCED(makerOwner, orderExtId[head], -dec, orderQtyLots[head]>>>0);
-      if (orderQtyLots[head]===0){ removeFromLevel(1, levelIdx, head); freeOrder(head); emitFILLED(); }
-      continue;
-    } else {
-      const newMakerQty = makerQty - tradeQty;
-      orderQtyLots[head]=newMakerQty;
-      remaining -= tradeQty;
-      emitTRADE(pxTicks, tradeQty, makerOwner, takerOwner);
+    if (s === 2) { stpReduce(head, remaining); continue; }
 
-      if (newMakerQty===0){
-        removeFromLevel(1, levelIdx, head);
-        freeOrder(head);
-        emitFILLED();
-      } else {
-        emitREDUCED(makerOwner, orderExtId[head], -tradeQty, newMakerQty>>>0);
-        break;
-      }
+    const newMakerQty = makerQty - tradeQty;
+    orderQtyLots[head] = newMakerQty >>> 0;
+    remaining -= tradeQty;
+
+    emitTRADE(pxTicks, tradeQty, makerOwner, takerOwner);
+
+    if (newMakerQty === 0) {
+      removeFromLevel(1, levelIdx, head);
+      freeOrder(head);
+      emitFILLED();
+    } else {
+      emitREDUCED(makerOwner, orderExtId[head] | 0, -tradeQty, newMakerQty);
+      break; // FIFO
     }
   }
   return remaining;
 }
 
-export function cancel(owner:number, orderId:number){
-  const idx = (orderId<MAX_ORDERS)? orderId2Idx[orderId] : EMPTY;
-  if (idx===EMPTY || !orderActive[idx]){ emitREJECT(owner, orderId, 'not found'); return; }
-  const lvl = orderPriceIdx[idx];
-  const s   = orderSideArr[idx] as Side;
-  removeFromLevel(s, lvl, idx);
-  const oOwner = orderOwner[idx], oExt = orderExtId[idx];
+/* ================================
+   Public Core API
+   ================================ */
+
+export function newOrder(
+  owner: number,
+  orderId: number,
+  side: Side,
+  priceTicks: number,
+  qtyLots: number,
+  tif: TIF = 0,
+  postOnly = false,
+  _reduceOnly = false
+) {
+  // Input validation
+  if (!isFiniteInt(owner)) { emitREJECT(owner, orderId, "bad owner"); return; }
+  if (!isFiniteInt(orderId)) { emitREJECT(owner, orderId, "bad id"); return; }
+  if (!isQtyOk(qtyLots)) { emitREJECT(owner, orderId, "qty bad"); return; }
+  if (!isPriceOk(priceTicks)) { emitREJECT(owner, orderId, "price bad"); return; }
+  if (orderId >= MAX_ORDERS) { emitREJECT(owner, orderId, "id too large"); return; }
+  if (orderId2Idx[orderId] !== EMPTY && orderActive[orderId2Idx[orderId]]) {
+    emitREJECT(owner, orderId, "dup id"); return;
+  }
+
+  const levelIdx = priceToLevelIdx(priceTicks);
+  let remaining  = qtyLots | 0;
+
+  // FOK check (dry-run)
+  if (tif === 2) {
+    const fillable = availableLiquidity(side, levelIdx, remaining);
+    if (fillable < remaining) { emitREJECT(owner, orderId, "FOK no fill"); return; }
+  }
+
+  // Crossing phase
+  if (side === 0) {
+    if (postOnly && bestAskIdx !== EMPTY && bestAskIdx <= levelIdx) {
+      emitREJECT(owner, orderId, "postOnly would cross"); return;
+    }
+    while (remaining > 0 && bestAskIdx !== EMPTY && bestAskIdx <= levelIdx) {
+      remaining = fillAgainstAsk(bestAskIdx, remaining, owner, orderId);
+      if (bestAskIdx !== EMPTY && levelHeadAsk[bestAskIdx] === EMPTY) {
+        bestAskIdx = findNextNonEmptyFrom(true, bestAskIdx + 1);
+      }
+    }
+  } else {
+    if (postOnly && bestBidIdx !== EMPTY && bestBidIdx >= levelIdx) {
+      emitREJECT(owner, orderId, "postOnly would cross"); return;
+    }
+    while (remaining > 0 && bestBidIdx !== EMPTY && bestBidIdx >= levelIdx) {
+      remaining = fillAgainstBid(bestBidIdx, remaining, owner, orderId);
+      if (bestBidIdx !== EMPTY && levelHeadBid[bestBidIdx] === EMPTY) {
+        bestBidIdx = findPrevNonEmptyFrom(true, bestBidIdx - 1);
+      }
+    }
+  }
+
+  // Posting phase
+  if (remaining > 0) {
+    if (tif === 1) { // IOC
+      if (qtyLots !== remaining) emitFILLED(); else emitREJECT(owner, orderId, "IOC no fill");
+      return;
+    }
+
+    const idx = allocOrder();
+    orderPriceIdx[idx] = levelIdx;
+    orderQtyLots[idx]  = remaining >>> 0;
+    orderOwner[idx]    = owner >>> 0;
+    orderSideArr[idx]  = side;
+    orderActive[idx]   = 1;
+    orderExtId[idx]    = orderId >>> 0;
+
+    enqueueTail(side, levelIdx, idx);
+    orderId2Idx[orderId] = idx;
+
+    emitACK(owner, orderId);
+  } else {
+    emitFILLED(); // fully executed while crossing
+  }
+}
+
+export function cancel(owner: number, orderId: number) {
+  if (!isFiniteInt(orderId) || orderId >= MAX_ORDERS) { emitREJECT(owner, orderId, "bad id"); return; }
+
+  const idx = orderId2Idx[orderId];
+  if (idx === EMPTY || !orderActive[idx]) { emitREJECT(owner, orderId, "not found"); return; }
+
+  const lvl  = orderPriceIdx[idx] | 0;
+  const side = orderSideArr[idx] as Side;
+  const o    = orderOwner[idx] | 0;
+  const id   = orderExtId[idx] | 0;
+
+  removeFromLevel(side, lvl, idx);
   freeOrder(idx);
-  orderId2Idx[orderId]=EMPTY;
-  emitCANCELED(oOwner, oExt);
+  orderId2Idx[orderId] = EMPTY;
+
+  emitCANCELED(o, id);
 }
 
-export function replace(owner:number, orderId:number, newPriceTicks:number|null, qtyDeltaLots:number){
-  const idx = (orderId<MAX_ORDERS)? orderId2Idx[orderId] : EMPTY;
-  if (idx===EMPTY || !orderActive[idx]){ emitREJECT(owner, orderId, 'not found'); return; }
-  if (!isFiniteInt(qtyDeltaLots)){ emitREJECT(owner, orderId, 'bad delta'); return; }
+export function replace(
+  owner: number,
+  orderId: number,
+  newPriceTicks: number | null,
+  qtyDeltaLots: number
+) {
+  if (!isFiniteInt(orderId) || orderId >= MAX_ORDERS) { emitREJECT(owner, orderId, "bad id"); return; }
 
-  const curQty = orderQtyLots[idx]>>>0;
-  const wantQty = curQty + qtyDeltaLots;
-  if (wantQty<=0){ // cancel
-    const lvl=orderPriceIdx[idx];
-    const s  = orderSideArr[idx] as Side;
-    removeFromLevel(s, lvl, idx); const oOwner=orderOwner[idx], oExt=orderExtId[idx]; freeOrder(idx); orderId2Idx[orderId]=EMPTY; emitCANCELED(oOwner, oExt); return;
-  }
-  if (wantQty>MAX_QTY){ emitREJECT(owner, orderId, 'qty overflow'); return; }
-
-  let targetLevelIdx = orderPriceIdx[idx];
-  let changed=false;
-
-  if (newPriceTicks!==null){
-    if (!isFiniteInt(newPriceTicks)){ emitREJECT(owner, orderId, 'bad price'); return; }
-    const li=((newPriceTicks-PMIN)/TICK|0);
-    if (li<0 || li>=LEVELS){ emitREJECT(owner, orderId, 'price out of range'); return; }
-    if (li!==targetLevelIdx){ targetLevelIdx=li; changed=true; }
-  }
-  if (qtyDeltaLots>0) changed=true;
-
-  if (!changed){
-    orderQtyLots[idx]=wantQty>>>0; emitREDUCED(orderOwner[idx], orderExtId[idx], qtyDeltaLots, wantQty>>>0); return;
+  const idx = orderId2Idx[orderId];
+  if (idx === EMPTY || !orderActive[idx]) { emitREJECT(owner, orderId, "not found"); return; }
+  if (!Number.isFinite(qtyDeltaLots) || Math.trunc(qtyDeltaLots) !== qtyDeltaLots) {
+    emitREJECT(owner, orderId, "bad delta"); return;
   }
 
-  const prevLevel = orderPriceIdx[idx];
-  const s = orderSideArr[idx] as Side;
-  removeFromLevel(s, prevLevel, idx);
-  orderPriceIdx[idx]=targetLevelIdx;
-  orderQtyLots[idx]=wantQty>>>0;
-  enqueueTail(s, targetLevelIdx, idx);
-  emitACK(orderOwner[idx], orderExtId[idx]);
-  if (DEV_ASSERTS){ assertLevelPointers(s, targetLevelIdx); }
+  const curQty  = orderQtyLots[idx] | 0;
+  let   wantQty = curQty + (qtyDeltaLots | 0);
+  if (wantQty < 0 || wantQty > MAX_QTY) { emitREJECT(owner, orderId, "qty overflow"); return; }
+
+  let targetLevelIdx = orderPriceIdx[idx] | 0;
+  let changed = false;
+
+  if (newPriceTicks !== null) {
+    if (!isPriceOk(newPriceTicks)) { emitREJECT(owner, orderId, "price bad"); return; }
+    const li = priceToLevelIdx(newPriceTicks);
+    if (li !== targetLevelIdx) { targetLevelIdx = li; changed = true; }
+  }
+
+  if (qtyDeltaLots > 0) changed = true;
+
+  const side = orderSideArr[idx] as Side;
+
+  if (wantQty === 0) {
+    // Equivalent to cancel
+    const o = orderOwner[idx] | 0;
+    const id= orderExtId[idx] | 0;
+    removeFromLevel(side, orderPriceIdx[idx] | 0, idx);
+    freeOrder(idx);
+    orderId2Idx[orderId] = EMPTY;
+    emitCANCELED(o, id);
+    return;
+  }
+
+  if (!changed) {
+    // Only size-down or no-op: keep priority
+    orderQtyLots[idx] = wantQty >>> 0;
+    emitREDUCED(orderOwner[idx] | 0, orderExtId[idx] | 0, qtyDeltaLots | 0, wantQty | 0);
+    return;
+  }
+
+  // Price change and/or size-up: lose priority → re-enqueue at tail
+  removeFromLevel(side, orderPriceIdx[idx] | 0, idx);
+  orderPriceIdx[idx] = targetLevelIdx;
+  orderQtyLots[idx]  = wantQty >>> 0;
+  enqueueTail(side, targetLevelIdx, idx);
+  emitACK(orderOwner[idx] | 0, orderExtId[idx] | 0);
 }
 
-// ── API wrapper ──────────────────────────────────────────────────────────────
-export function applyCommand(c: Cmd){
-  if (c.kind===0) newOrder(c.owner, c.orderId, c.side, c.priceTicks, c.qtyLots, c.tif, c.postOnly, c.reduceOnly);
-  else if (c.kind===1) cancel(c.owner, c.orderId);
-  else replace(c.owner, c.orderId, c.newPriceTicks, c.qtyDeltaLots);
+/** Generic command router (useful when driving from a queue). */
+export function applyCommand(c: Cmd) {
+  if (c.kind === 0) {
+    newOrder(c.owner, c.orderId, c.side, c.priceTicks, c.qtyLots, c.tif, c.postOnly, c.reduceOnly);
+  } else if (c.kind === 1) {
+    cancel(c.owner, c.orderId);
+  } else {
+    replace(c.owner, c.orderId, c.newPriceTicks, c.qtyDeltaLots);
+  }
 }
 
-// ── снапшоты/хэш ─────────────────────────────────────────────────────────────
+/* ================================
+   Snapshots & ASCII Rendering
+   ================================ */
+
 export function computeStateHash(): string {
-  const h=createHash('sha256');
+  // Hash the raw arrays + counters for a deterministic snapshot hash
+  const h = createHash("sha256");
+
   h.update(new Uint8Array(orderActive.buffer));
   h.update(new Uint8Array(orderPriceIdx.buffer));
   h.update(new Uint8Array(orderQtyLots.buffer));
+
   h.update(new Uint8Array(levelHeadBid.buffer));
   h.update(new Uint8Array(levelTailBid.buffer));
   h.update(new Uint8Array(bitmapBid.buffer));
+
   h.update(new Uint8Array(levelHeadAsk.buffer));
   h.update(new Uint8Array(levelTailAsk.buffer));
   h.update(new Uint8Array(bitmapAsk.buffer));
-  const t = Buffer.from(JSON.stringify(getCountersCompact()));
-  h.update(t);
-  return h.digest('hex');
+
+  const c = getCounters();
+  h.update(Buffer.from(JSON.stringify({
+    evAck: c.evAck,
+    evTrade: c.evTrade,
+    evFilled: c.evFilled,
+    evReduced: c.evReduced,
+    evCanceled: c.evCanceled,
+    evReject: c.evReject,
+    tQty: c.tradeQtySum.toString(),
+    tNotional: c.tradeNotionalTicksSum.toString(),
+    tChk: c.tradeChecksum.toString(),
+    eHash: c.eHash.toString(),
+  })));
+
+  return h.digest("hex");
 }
-function getCountersCompact(){
-  return {
-    evAck, evTrade, evFilled, evReduced, evCanceled, evReject,
-    tradeQtySum: tradeQtySum.toString(),
-    tradeNotionalTicksSum: tradeNotionalTicksSum.toString(),
-    tradeChecksum: tradeChecksum.toString(),
-    eventHash: eventHash.toString()
-  };
-}
-export function snapshotLine(seed:number, ops:number){
+
+export function snapshotLine(seed: number, ops: number) {
   const rs = restingSummary();
   const c  = getCounters();
   return [
-    `seed:${seed}`, `ops:${ops}`,
-    `ack:${c.evAck}`, `trade:${c.evTrade}`, `filled:${c.evFilled}`, `reduced:${c.evReduced}`, `canceled:${c.evCanceled}`, `reject:${c.evReject}`,
-    `tQty:${c.tradeQtySum.toString()}`, `tNotional:${c.tradeNotionalTicksSum.toString()}`, `tChk:${c.tradeChecksum.toString()}`, `eHash:${c.eventHash.toString()}`,
-    `restCnt:${rs.restingCount}`, `restLots:${rs.restingLots}`, `bb:${rs.bestBidPx}`, `ba:${rs.bestAskPx}`
-  ].join('|');
+    `seed:${seed}`,
+    `ops:${ops}`,
+    `ack:${c.evAck}`,
+    `trade:${c.evTrade}`,
+    `filled:${c.evFilled}`,
+    `reduced:${c.evReduced}`,
+    `canceled:${c.evCanceled}`,
+    `reject:${c.evReject}`,
+    `tQty:${c.tradeQtySum.toString()}`,
+    `tNotional:${c.tradeNotionalTicksSum.toString()}`,
+    `tChk:${c.tradeChecksum.toString()}`,
+    `eHash:${c.eHash.toString()}`,
+    `restCnt:${rs.restingCount}`,
+    `restLots:${rs.restingLots}`,
+    `bb:${rs.bestBidPx}`,
+    `ba:${rs.bestAskPx}`,
+  ].join("|");
 }
-export function restingSummary(){
-  let restingCount=0; let restingLots=0n;
-  for (let lvl=0; lvl<LEVELS; lvl++){
+
+export function restingSummary() {
+  let restingCount = 0;
+  let restingLots  = 0n;
+
+  for (let lvl = 0; lvl < LEVELS; lvl++) {
     let curB = levelHeadBid[lvl];
-    while (curB!==EMPTY){ if (orderActive[curB]){ restingCount++; restingLots+=BigInt(orderQtyLots[curB]); } curB=orderNext[curB]; }
+    while (curB !== EMPTY) {
+      if (orderActive[curB]) { restingCount++; restingLots += BigInt(orderQtyLots[curB]); }
+      curB = orderNext[curB];
+    }
     let curA = levelHeadAsk[lvl];
-    while (curA!==EMPTY){ if (orderActive[curA]){ restingCount++; restingLots+=BigInt(orderQtyLots[curA]); } curA=orderNext[curA]; }
+    while (curA !== EMPTY) {
+      if (orderActive[curA]) { restingCount++; restingLots += BigInt(orderQtyLots[curA]); }
+      curA = orderNext[curA];
+    }
   }
-  return { restingCount, restingLots: restingLots.toString(), bestBidPx: getBestBidPx(), bestAskPx: getBestAskPx() };
+
+  return {
+    restingCount,
+    restingLots: restingLots.toString(),
+    bestBidPx: getBestBidPx(),
+    bestAskPx: getBestAskPx(),
+  };
 }
 
-// ── ASCII: без агрегации, qty@owner; выравнивание до раскраски ──────────────
-export function renderAscii(depth=10, perLevelOrders=10): string {
+/**
+ * ASCII snapshot of the top-of-book (depth rows),
+ * with per-level individual orders listed as "qty@owner,qty@owner,...".
+ */
+export function renderAscii(depth = 10, perLevelOrders = 10, lineWidth = 54): string {
   const rows: string[] = [];
-  const pad = (s:string,n:number)=> (s.length>=n? s : " ".repeat(n-s.length)+s);
+  const BOLD="\x1b[1m", DIM="\x1b[2m", RESET="\x1b[0m";
+  const GREEN="\x1b[32m", RED="\x1b[31m";
 
-  const buildSide = (side:Side, start:number, iter:(i:number)=>number, cmp:(i:number)=>boolean) => {
-    const out: {px:number;orders:string[]}[] = [];
-    let idx = start;
-    while (idx!==EMPTY && cmp(idx) && out.length<depth){
-      let cur = side===0 ? levelHeadBid[idx] : levelHeadAsk[idx];
-      const parts:string[]=[];
-      let count=0;
-      while (cur!==EMPTY && count<perLevelOrders){
-        if (orderActive[cur]){ parts.push(`${orderQtyLots[cur]}@${orderOwner[cur]}`); count++; }
-        cur=orderNext[cur];
-      }
-      if (parts.length>0) out.push({px: PMIN+idx*TICK, orders: parts});
-      idx = iter(idx);
+  const pad = (s: string, n: number) => (s.length >= n ? s : " ".repeat(n - s.length) + s);
+  const wrapList = (s: string, width: number): string[] => {
+    if (s.length <= width) return [s];
+    const out: string[] = [];
+    let i = 0;
+    while (i < s.length) {
+      out.push(s.slice(i, i + width));
+      i += width;
     }
     return out;
   };
 
-  const bids = buildSide(0, bestBidIdx, i=>findPrevNonEmptyFrom(0, i-1), _=>true);
-  const asks = buildSide(1, bestAskIdx, i=>findNextNonEmptyFrom(1, i+1), _=>true);
-
-  const BOLD = "\x1b[1m", DIM="\x1b[2m", RESET="\x1b[0m";
-  const GREEN="\x1b[32m", RED="\x1b[31m";
-
-  const widthPx=8, widthStr=56;
-  rows.push(`${BOLD}       BID (qty@owner)              |            ASK (qty@owner)      ${RESET}`);
-  rows.push(`${DIM}     PX         ORDERS              |        PX         ORDERS        ${RESET}`);
-  for (let i=0;i<depth;i++){
-    const b=bids[i]; const a=asks[i];
-    const bL = b ? `${pad(String(b.px),widthPx)} ${pad(b.orders.join(","),widthStr)}` : `${" ".repeat(widthPx)} ${" ".repeat(widthStr)}`;
-    const aR = a ? `${pad(String(a.px),widthPx)} ${pad(a.orders.join(","),widthStr)}` : `${" ".repeat(widthPx)} ${" ".repeat(widthStr)}`;
-    rows.push(`${GREEN}${bL}${RESET} | ${RED}${aR}${RESET}`);
+  // collect bids (desc)
+  const bids: { px: number; lines: string[] }[] = [];
+  {
+    let idx = bestBidIdx;
+    while (idx !== EMPTY && bids.length < depth) {
+      let cur = levelHeadBid[idx];
+      const parts: string[] = [];
+      let count = 0;
+      while (cur !== EMPTY && count < perLevelOrders) {
+        if (orderActive[cur]) { parts.push(`${orderQtyLots[cur]}@${orderOwner[cur]}`); count++; }
+        cur = orderNext[cur];
+      }
+      if (parts.length) bids.push({ px: PMIN + idx * TICK, lines: wrapList(parts.join(","), lineWidth) });
+      idx = findPrevNonEmptyFrom(true, idx - 1);
+    }
   }
+
+  // collect asks (asc)
+  const asks: { px: number; lines: string[] }[] = [];
+  {
+    let idx = bestAskIdx;
+    while (idx !== EMPTY && asks.length < depth) {
+      let cur = levelHeadAsk[idx];
+      const parts: string[] = [];
+      let count = 0;
+      while (cur !== EMPTY && count < perLevelOrders) {
+        if (orderActive[cur]) { parts.push(`${orderQtyLots[cur]}@${orderOwner[cur]}`); count++; }
+        cur = orderNext[cur];
+      }
+      if (parts.length) asks.push({ px: PMIN + idx * TICK, lines: wrapList(parts.join(","), lineWidth) });
+      idx = findNextNonEmptyFrom(true, idx + 1);
+    }
+  }
+
+  const widthPx = 8;
+  rows.push(`${BOLD}        BID (qty@owner)             |            ASK (qty@owner)      ${RESET}`);
+  rows.push(`${DIM}     PX         ORDERS              |        PX         ORDERS        ${RESET}`);
+
+  for (let i = 0; i < depth; i++) {
+    const b = bids[i]; const a = asks[i];
+    const maxLines = Math.max(b?.lines.length ?? 0, a?.lines.length ?? 0) || 1;
+
+    for (let k = 0; k < maxLines; k++) {
+      const bPx  = k === 0 && b ? pad(String(b.px), widthPx) : " ".repeat(widthPx);
+      const aPx  = k === 0 && a ? pad(String(a.px), widthPx) : " ".repeat(widthPx);
+      const bTxt = b && b.lines[k] ? b.lines[k] : "";
+      const aTxt = a && a.lines[k] ? a.lines[k] : "";
+      const L = `${bPx} ${pad(bTxt, lineWidth)}`;
+      const R = `${aPx} ${pad(aTxt, lineWidth)}`;
+      rows.push(`${GREEN}${L}${RESET} | ${RED}${R}${RESET}`);
+    }
+  }
+
   return rows.join("\n");
 }
