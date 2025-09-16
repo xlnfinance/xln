@@ -162,27 +162,53 @@ jobs:
       - name: Build contracts for E2E
         run: bun run env:build
 
-      - name: Start dev server in background
+      - name: Start dev server and wait for readiness
         run: |
-          ./dev-ci.sh &
-          echo $! > dev_server.pid
-          echo "Dev server started with PID: $(cat dev_server.pid)"
-
-      - name: Wait for dev server to be ready
-        run: |
-          echo "Waiting for dev server to start..."
-          timeout=180
+          # Start dev-ci.sh and capture both PID and output
+          ./dev-ci.sh > dev_server_output.log 2>&1 &
+          DEV_SERVER_PID=$!
+          echo $DEV_SERVER_PID > dev_server.pid
+          echo "Dev server started with PID: $DEV_SERVER_PID"
+          
+          # Give dev-ci.sh time to complete its startup sequence
+          echo "Waiting for dev server to complete startup..."
+          timeout=240  # Increased timeout for CI environment
+          startup_complete=false
+          
           while [ $timeout -gt 0 ]; do
+            # Check if dev-ci.sh process is still running
+            if ! kill -0 $DEV_SERVER_PID 2>/dev/null; then
+              echo "⚠️ Dev server process has exited unexpectedly"
+              echo "=== Dev server output ==="
+              cat dev_server_output.log || true
+              exit 1
+            fi
+            
+            # Check if frontend server is responding
             if curl -f http://localhost:8080 > /dev/null 2>&1; then
               echo "✅ Dev server is ready on port 8080!"
+              startup_complete=true
               break
             fi
+            
+            # Show progress and any recent output
             echo "Waiting for server... ($timeout seconds left)"
-            sleep 3
-            timeout=$((timeout-3))
+            if [ -f dev_server_output.log ]; then
+              echo "--- Recent dev server output (last 10 lines) ---"
+              tail -n 10 dev_server_output.log || true
+              echo "--- End recent output ---"
+            fi
+            
+            sleep 5
+            timeout=$((timeout-5))
           done
-          if [ $timeout -le 0 ]; then
-            echo "❌ Dev server failed to start within 180 seconds"
+          
+          if [ "$startup_complete" != "true" ]; then
+            echo "❌ Dev server failed to start within 240 seconds"
+            echo "=== Full dev server output ==="
+            cat dev_server_output.log || true
+            echo "=== Process status ==="
+            ps aux | grep -E "(hardhat|bun|vite)" || true
             exit 1
           fi
 
