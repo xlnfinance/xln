@@ -57,17 +57,29 @@ deploy_to_network() {
 
     cd contracts
 
+    # Ensure logs directory exists
+    mkdir -p ../logs
+
+    # Verify script exists before attempting deployment
+    if [ ! -f "scripts/deploy-entity-provider.cjs" ]; then
+        echo "   ❌ scripts/deploy-entity-provider.cjs not found in $(pwd)"
+        echo "   📂 Contents of scripts directory:"
+        ls -la scripts/ || echo "   scripts/ directory not found"
+        cd ..
+        return 1
+    fi
+
     # Deploy both EntityProvider and Depository
     echo "   🔧 Deploying EntityProvider..."
     # Run deployment and capture logs
     if ! entityprovider_output=$(bunx hardhat run scripts/deploy-entity-provider.cjs --network "$network_config" 2>&1); then
         echo "   ❌ EntityProvider deployment failed"
         echo "$entityprovider_output"
-        echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log"
+        echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log" 2>/dev/null || true
         cd ..
         return 1
     fi
-    echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log"
+    echo "$entityprovider_output" > "../logs/deploy-entityprovider-$port.log" 2>/dev/null || true
 
     if ! echo "$entityprovider_output" | grep -q "DEPLOYED_ADDRESS="; then
         echo "   ❌ EntityProvider deployment did not return DEPLOYED_ADDRESS"
@@ -84,10 +96,11 @@ deploy_to_network() {
     if ! depository_output=$(printf "y\n" | bunx hardhat ignition deploy ignition/modules/Depository.cjs --network "$network_config" 2>&1); then
         echo "   ❌ Depository deployment failed"
         echo "$depository_output"
-        echo "$depository_output" > "../logs/deploy-depository-$port.log"
+        echo "$depository_output" > "../logs/deploy-depository-$port.log" 2>/dev/null || true
+        cd ..
         return 1
     fi
-    echo "$depository_output" > "../logs/deploy-depository-$port.log"
+    echo "$depository_output" > "../logs/deploy-depository-$port.log" 2>/dev/null || true
     # Extract final address from Hardhat Ignition output (last line with 0x address)
     local depository_address
     depository_address=$(echo "$depository_output" | grep -o '0x[a-fA-F0-9]\{40\}' | tail -1 || true)
