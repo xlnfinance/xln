@@ -160,7 +160,10 @@ jobs:
             ${{ runner.os }}-contracts-
 
       - name: Build contracts for E2E
-        run: bun run env:build
+        run: |
+          bun run env:build
+          # Clear any existing deployment cache to avoid reconciliation issues in CI
+          rm -rf contracts/ignition/deployments/chain-* || true
 
       - name: Start dev server and wait for readiness
         run: |
