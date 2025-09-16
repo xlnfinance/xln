@@ -167,49 +167,39 @@ jobs:
 
       - name: Start dev server and wait for readiness
         run: |
-          # Start dev-ci.sh and capture both PID and output
-          ./dev-ci.sh > dev_server_output.log 2>&1 &
-          DEV_SERVER_PID=$!
-          echo $DEV_SERVER_PID > dev_server.pid
-          echo "Dev server started with PID: $DEV_SERVER_PID"
+          # Start dev-ci.sh and capture output (it will exit after setting up services)
+          echo "Starting dev-ci.sh to set up services..."
+          if ! ./dev-ci.sh > dev_server_output.log 2>&1; then
+            echo "❌ dev-ci.sh failed to complete setup"
+            echo "=== Dev server output ==="
+            cat dev_server_output.log || true
+            exit 1
+          fi
           
-          # Give dev-ci.sh time to complete its startup sequence
-          echo "Waiting for dev server to complete startup..."
-          timeout=240  # Increased timeout for CI environment
+          echo "✅ dev-ci.sh completed successfully"
+          echo "=== Dev server setup output ==="
+          cat dev_server_output.log || true
+          
+          # Now wait for the frontend server to be responding
+          echo "Waiting for frontend server to be ready..."
+          timeout=60  # Reduced timeout since setup is already complete
           startup_complete=false
           
           while [ $timeout -gt 0 ]; do
-            # Check if dev-ci.sh process is still running
-            if ! kill -0 $DEV_SERVER_PID 2>/dev/null; then
-              echo "⚠️ Dev server process has exited unexpectedly"
-              echo "=== Dev server output ==="
-              cat dev_server_output.log || true
-              exit 1
-            fi
-            
             # Check if frontend server is responding
             if curl -f http://localhost:8080 > /dev/null 2>&1; then
-              echo "✅ Dev server is ready on port 8080!"
+              echo "✅ Frontend server is ready on port 8080!"
               startup_complete=true
               break
             fi
             
-            # Show progress and any recent output
-            echo "Waiting for server... ($timeout seconds left)"
-            if [ -f dev_server_output.log ]; then
-              echo "--- Recent dev server output (last 10 lines) ---"
-              tail -n 10 dev_server_output.log || true
-              echo "--- End recent output ---"
-            fi
-            
-            sleep 5
-            timeout=$((timeout-5))
+            echo "Waiting for frontend server... ($timeout seconds left)"
+            sleep 2
+            timeout=$((timeout-2))
           done
           
           if [ "$startup_complete" != "true" ]; then
-            echo "❌ Dev server failed to start within 240 seconds"
-            echo "=== Full dev server output ==="
-            cat dev_server_output.log || true
+            echo "❌ Frontend server failed to respond within 60 seconds"
             echo "=== Process status ==="
             ps aux | grep -E "(hardhat|bun|vite)" || true
             exit 1
