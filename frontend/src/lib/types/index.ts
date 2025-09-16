@@ -25,6 +25,16 @@ export interface AssetBalance {
   contractAddress?: string;
 }
 
+export interface ChannelState {
+  counterparty: string;
+  myBalance: bigint;
+  theirBalance: bigint;
+  collateral: AssetBalance[];
+  nonce: number;
+  isActive: boolean;
+  lastUpdate: number;
+}
+
 export interface EntityState {
   height: number;
   timestamp: number;
@@ -33,6 +43,7 @@ export interface EntityState {
   proposals: Map<string, Proposal>;
   config: EntityConfig;
   reserves: Map<string, AssetBalance>;
+  channels: Map<string, ChannelState>;
 }
 
 export interface EntityConfig {

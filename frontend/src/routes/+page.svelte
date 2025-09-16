@@ -6,6 +6,7 @@
   import TransactionHistoryIO from '../lib/components/IO/TransactionHistoryIO.svelte';
   import EntityFormation from '../lib/components/Formation/EntityFormation.svelte';
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
+  import NetworkDirectory from '../lib/components/Network/NetworkDirectory.svelte';
   import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
@@ -97,6 +98,14 @@
           >
             🏛️ Jurisdictions
           </button>
+          <button
+            class="tab-button"
+            class:active={activeTab === 'network'}
+            on:click={() => switchTab('network')}
+            id="networkTab"
+          >
+            🌐 Network
+          </button>
         </div>
 
         <div id="formationTabContent" class="tab-content" class:active={activeTab === 'formation'}>
@@ -105,6 +114,10 @@
 
         <div id="jurisdictionsTabContent" class="tab-content" class:active={activeTab === 'jurisdictions'}>
           <JurisdictionStatus />
+        </div>
+
+        <div id="networkTabContent" class="tab-content" class:active={activeTab === 'network'}>
+          <NetworkDirectory />
         </div>
       </div>
     </div>

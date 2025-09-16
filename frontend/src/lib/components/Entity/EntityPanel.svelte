@@ -22,6 +22,7 @@
   import ProposalsList from './ProposalsList.svelte';
   import TransactionHistory from './TransactionHistory/index.svelte';
   import ControlsPanel from './ControlsPanel.svelte';
+  import AccountChannels from './AccountChannels.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -44,6 +45,7 @@
   // Reactive component states
   $: consensusExpanded = $settings.componentStates[`consensus-${tab.id}`] ?? true;
   $: reservesExpanded = $settings.componentStates[`reserves-${tab.id}`] ?? false;
+  $: channelsExpanded = $settings.componentStates[`channels-${tab.id}`] ?? false;
   $: chatExpanded = $settings.componentStates[`chat-${tab.id}`] ?? true;
   $: proposalsExpanded = $settings.componentStates[`proposals-${tab.id}`] ?? false;
   $: historyExpanded = $settings.componentStates[`history-${tab.id}`] ?? false;
@@ -260,6 +262,31 @@
       {:else}
         <p class="empty-state">No reserves yet - deposit assets via Depository.sol</p>
       {/if}
+    </div>
+  </div>
+
+  <!-- Account Channels Component -->
+  <div class="panel-component" id="channels-{tab.id}">
+    <div
+      class="component-header"
+      class:collapsed={!channelsExpanded}
+      on:click={() => toggleComponent(`channels-${tab.id}`)}
+      role="button"
+      tabindex="0"
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`channels-${tab.id}`)}
+    >
+      <div class="component-title">
+        <span>🔗</span>
+        <span>Account Channels</span>
+      </div>
+      <div class="component-toggle">▼</div>
+    </div>
+    <div
+      class="component-content"
+      class:collapsed={!channelsExpanded}
+      style="max-height: 400px;"
+    >
+      <AccountChannels {replica} />
     </div>
   </div>
 
