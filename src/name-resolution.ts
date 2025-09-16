@@ -146,7 +146,9 @@ export const processProfileUpdate = async (
   entityId: string,
   updates: ProfileUpdateTx,
   hankoSignature: string,
+  env?: Env,
 ): Promise<void> => {
+  console.log(`🏷️ processProfileUpdate called for ${entityId} with updates:`, updates);
   try {
     // Get existing profile or create new one
     let profile = await getProfile(db, entityId);
@@ -171,7 +173,29 @@ export const processProfileUpdate = async (
     profile.lastUpdated = Date.now();
     profile.hankoSignature = hankoSignature;
 
-    // Store updated profile
+    // Sync to gossip layer FIRST (before storing) to ensure it's captured in snapshots
+    if (env?.gossip?.announce) {
+      try {
+        env.gossip.announce({
+          entityId,
+          capabilities: (updates as any).capabilities || [], // Use actual capabilities from profile update
+          hubs: (updates as any).hubs || [], // Use actual hubs from profile update
+          metadata: {
+            name: profile.name,
+            avatar: profile.avatar,
+            bio: profile.bio,
+            website: profile.website,
+            lastUpdated: profile.lastUpdated,
+            hankoSignature: profile.hankoSignature,
+          },
+        });
+        console.log(`📡 Synced profile update to gossip: ${entityId}`);
+      } catch (gossipError) {
+        console.error(`❌ Failed to sync profile to gossip layer for ${entityId}:`, gossipError);
+      }
+    }
+
+    // Store updated profile to database after gossip sync
     await storeProfile(db, profile);
 
     console.log(`✅ Updated profile for ${profile.name} (${formatEntityDisplay(entityId)})`);
