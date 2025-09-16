@@ -160,29 +160,48 @@ jobs:
             ${{ runner.os }}-contracts-
 
       - name: Build contracts for E2E
-        run: bun run env:build
-
-      - name: Start dev server in background
         run: |
-          ./dev-ci.sh &
-          echo $! > dev_server.pid
-          echo "Dev server started with PID: $(cat dev_server.pid)"
+          bun run env:build
+          # Clear any existing deployment cache to avoid reconciliation issues in CI
+          rm -rf contracts/ignition/deployments/chain-* || true
 
-      - name: Wait for dev server to be ready
+      - name: Start dev server and wait for readiness
         run: |
-          echo "Waiting for dev server to start..."
-          timeout=180
+          # Start dev-ci.sh and capture output (it will exit after setting up services)
+          echo "Starting dev-ci.sh to set up services..."
+          if ! ./dev-ci.sh > dev_server_output.log 2>&1; then
+            echo "❌ dev-ci.sh failed to complete setup"
+            echo "=== Dev server output ==="
+            cat dev_server_output.log || true
+            exit 1
+          fi
+          
+          echo "✅ dev-ci.sh completed successfully"
+          echo "=== Dev server setup output ==="
+          cat dev_server_output.log || true
+          
+          # Now wait for the frontend server to be responding
+          echo "Waiting for frontend server to be ready..."
+          timeout=60  # Reduced timeout since setup is already complete
+          startup_complete=false
+          
           while [ $timeout -gt 0 ]; do
+            # Check if frontend server is responding
             if curl -f http://localhost:8080 > /dev/null 2>&1; then
-              echo "✅ Dev server is ready on port 8080!"
+              echo "✅ Frontend server is ready on port 8080!"
+              startup_complete=true
               break
             fi
-            echo "Waiting for server... ($timeout seconds left)"
-            sleep 3
-            timeout=$((timeout-3))
+            
+            echo "Waiting for frontend server... ($timeout seconds left)"
+            sleep 2
+            timeout=$((timeout-2))
           done
-          if [ $timeout -le 0 ]; then
-            echo "❌ Dev server failed to start within 180 seconds"
+          
+          if [ "$startup_complete" != "true" ]; then
+            echo "❌ Frontend server failed to respond within 60 seconds"
+            echo "=== Process status ==="
+            ps aux | grep -E "(hardhat|bun|vite)" || true
             exit 1
           fi
 
