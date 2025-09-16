@@ -3,6 +3,8 @@
  * All interfaces and type definitions used across the XLN system
  */
 
+import type { Profile } from './gossip.js';
+
 export interface JurisdictionConfig {
   address: string;
   name: string;
@@ -81,6 +83,15 @@ export interface JurisdictionEventData {
   transactionHash: string;
 }
 
+export interface AccountInput {
+  fromEntityId: string;
+  toEntityId: string;
+  metadata?: {
+    purpose?: string;
+    description?: string;
+  };
+}
+
 export type EntityTx =
   | {
       type: 'chat';
@@ -101,6 +112,10 @@ export type EntityTx =
   | {
       type: 'j_event';
       data: JurisdictionEventData;
+    }
+  | {
+      type: 'accountInput';
+      data: AccountInput;
     };
 
 export interface AssetBalance {
@@ -158,7 +173,16 @@ export interface Env {
   timestamp: number;
   serverInput: ServerInput; // Persistent storage for merged inputs
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
-  // Future: add database connections, config, utilities, etc.
+  gossip: any; // Gossip layer for network profiles
+  // Future: add config, utilities, etc.
+}
+
+export interface ServerSnapshot {
+  height: number;
+  entities: Record<string, EntityState>;
+  gossip: {
+    profiles: Record<string, Profile>;
+  };
 }
 
 export interface EnvSnapshot {
@@ -168,6 +192,9 @@ export interface EnvSnapshot {
   serverInput: ServerInput;
   serverOutputs: EntityInput[];
   description: string;
+  gossip?: {
+    profiles: Record<string, Profile>;
+  };
 }
 
 // Entity types

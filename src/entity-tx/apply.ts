@@ -1,13 +1,17 @@
 import { calculateQuorumPower } from '../entity-consensus';
+import { processProfileUpdate } from '../name-resolution';
+import { db } from '../server';
 import { EntityState, EntityTx, Env, Proposal } from '../types';
 import { DEBUG, log } from '../utils';
-import { addToReserves, subtractFromReserves } from './financial';
+// import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
+import { handleAccountInput } from './handlers/account';
 import { handleJEvent } from './j-events';
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 
-export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: EntityTx): EntityState => {
-  console.log(`🚨 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, entityTx.data);
+export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<EntityState> => {
+  console.log(`🚨 APPLY-ENTITY-TX CALLED: type="${entityTx.type}", data=`, entityTx.data);
+  console.log(`🚨 APPLY-ENTITY-TX: Available types in this function: profile-update, j_event, accountInput, etc.`);
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
@@ -124,11 +128,11 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
       updatedProposal.votes.set(voter, voteData);
 
       const yesVoters = Array.from(updatedProposal.votes.entries())
-        .filter(([_, voteData]) => {
+        .filter(([_voter, voteData]) => {
           const vote = typeof voteData === 'object' ? voteData.choice : voteData;
           return vote === 'yes';
         })
-        .map(([voter, _]) => voter);
+        .map(([voter, _voteData]) => voter);
 
       const totalYesPower = calculateQuorumPower(entityState.config, yesVoters);
 
@@ -152,12 +156,34 @@ export const applyEntityTx = (env: Env, entityState: EntityState, entityTx: Enti
     }
 
     if (entityTx.type === 'profile-update') {
-      if (DEBUG) console.log(`    🏷️ Profile update transaction processed (gossip layer will handle storage)`);
+      console.log(`🏷️ Profile update transaction processing - data:`, entityTx.data);
+
+      // Extract profile update data
+      const profileData = entityTx.data.profile;
+      console.log(`🏷️ Extracted profileData:`, profileData);
+
+      if (profileData && profileData.entityId) {
+        console.log(`🏷️ Calling processProfileUpdate for entity ${profileData.entityId}`);
+        // Process profile update synchronously to ensure gossip is updated before snapshot
+        try {
+          await processProfileUpdate(db, profileData.entityId, profileData, profileData.hankoSignature || '', env);
+        } catch (error) {
+          console.error(`❌ Failed to process profile update for ${profileData.entityId}:`, error);
+        }
+      } else {
+        console.warn(`⚠️ Invalid profile-update transaction data:`, entityTx.data);
+        console.warn(`⚠️ ProfileData missing or invalid:`, profileData);
+      }
+
       return entityState;
     }
 
     if (entityTx.type === 'j_event') {
       return handleJEvent(entityState, entityTx.data);
+    }
+
+    if (entityTx.type === 'accountInput') {
+      return handleAccountInput(entityState, entityTx.data, env);
     }
 
     return entityState;

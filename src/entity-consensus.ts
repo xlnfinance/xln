@@ -41,7 +41,7 @@ const validateEntityInput = (input: EntityInput): boolean => {
         }
         if (
           typeof tx.type !== 'string' ||
-          !['chat', 'propose', 'vote', 'profile-update', 'j_event'].includes(tx.type)
+          !['chat', 'propose', 'vote', 'profile-update', 'j_event', 'accountInput'].includes(tx.type)
         ) {
           log.error(`❌ Invalid transaction type: ${tx.type}`);
           return false;
@@ -180,7 +180,11 @@ const validateVotingPower = (power: bigint): boolean => {
 /**
  * Main entity input processor - handles consensus, proposals, and state transitions
  */
-export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityInput: EntityInput): EntityInput[] => {
+export const applyEntityInput = async (
+  env: Env,
+  entityReplica: EntityReplica,
+  entityInput: EntityInput,
+): Promise<EntityInput[]> => {
   // Debug: Log every input being processed with timestamp and unique identifier
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const timestamp = Date.now();
@@ -429,6 +433,18 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
 
   // Commit notifications are now handled at the top of the function
 
+  // Debug consensus trigger conditions
+  console.log(`🎯 CONSENSUS-CHECK: Entity ${entityReplica.entityId}:${entityReplica.signerId}`);
+  console.log(`🎯   isProposer: ${entityReplica.isProposer}`);
+  console.log(`🎯   mempool.length: ${entityReplica.mempool.length}`);
+  console.log(`🎯   hasProposal: ${!!entityReplica.proposal}`);
+  if (entityReplica.mempool.length > 0) {
+    console.log(
+      `🎯   mempoolTypes:`,
+      entityReplica.mempool.map(tx => tx.type),
+    );
+  }
+
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
   if (entityReplica.isProposer && entityReplica.mempool.length > 0 && !entityReplica.proposal) {
     console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
@@ -447,7 +463,7 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
     if (isSingleSigner) {
       console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
       // For single signer entities, directly apply transactions without consensus
-      const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
+      const newEntityState = await applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
       entityReplica.state = {
         ...newEntityState,
         height: entityReplica.state.height + 1,
@@ -468,7 +484,7 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
         `    🚀 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`,
       );
     // Compute new state once during proposal
-    const newEntityState = applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
+    const newEntityState = await applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
 
     // Proposer creates new timestamp for this frame (always use current time for new proposals)
     const newTimestamp = Date.now();
@@ -576,11 +592,21 @@ export const applyEntityInput = (env: Env, entityReplica: EntityReplica, entityI
   return entityOutbox;
 };
 
-export const applyEntityFrame = (env: Env, entityState: EntityState, entityTxs: EntityTx[]): EntityState => {
-  return entityTxs.reduce(
-    (currentEntityState, entityTx) => applyEntityTx(env, currentEntityState, entityTx),
-    entityState,
-  );
+export const applyEntityFrame = async (
+  env: Env,
+  entityState: EntityState,
+  entityTxs: EntityTx[],
+): Promise<EntityState> => {
+  console.log(`🎯 APPLY-ENTITY-FRAME: Processing ${entityTxs.length} transactions`);
+  entityTxs.forEach((tx, index) => {
+    console.log(`🎯 Transaction ${index}: type="${tx.type}", data=`, tx.data);
+  });
+
+  let currentEntityState = entityState;
+  for (const entityTx of entityTxs) {
+    currentEntityState = await applyEntityTx(env, currentEntityState, entityTx);
+  }
+  return currentEntityState;
 };
 
 // === HELPER FUNCTIONS ===

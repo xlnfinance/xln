@@ -194,6 +194,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
       replicas,
       // Add timestamp for compatibility
       timestamp: Date.now(),
+      // Note: gossip layer will be re-created by server on restore
     };
   } else {
     // Fallback to sync JSON decoding

@@ -30,6 +30,9 @@ import {
   registerNumberedEntityOnChain,
   transferNameBetweenEntities,
 } from './evm';
+import { createGossipLayer } from './gossip';
+import { type Profile } from './gossip.js';
+import { loadPersistedProfiles } from './gossip-loader';
 import {
   createProfileUpdateTx,
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
@@ -57,7 +60,7 @@ import {
 
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
-const db: Level<Buffer, Buffer> = new Level('db', {
+export const db: Level<Buffer, Buffer> = new Level('db', {
   valueEncoding: 'buffer',
   keyEncoding: 'binary',
 });
@@ -139,6 +142,19 @@ const captureSnapshot = async (
   serverOutputs: EntityInput[],
   description: string,
 ): Promise<void> => {
+  // Convert gossip profiles Map to plain object for serialization
+  const profiles: Record<string, Profile> = {};
+  console.log(`🔍 SNAPSHOT-DEBUG: env.gossip exists: ${!!env.gossip}`);
+  console.log(`🔍 SNAPSHOT-DEBUG: env.gossip.profiles exists: ${!!env.gossip?.profiles}`);
+  console.log(`🔍 SNAPSHOT-DEBUG: env.gossip.profiles size: ${env.gossip?.profiles?.size || 0}`);
+  if (env.gossip?.profiles) {
+    console.log(`🔍 SNAPSHOT-DEBUG: Profile keys:`, Array.from(env.gossip.profiles.keys()));
+    for (const [id, profile] of env.gossip.profiles.entries()) {
+      profiles[id] = profile;
+      console.log(`🔍 SNAPSHOT-DEBUG: Capturing profile ${id}:`, profile.metadata?.name || 'no name');
+    }
+  }
+
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
@@ -157,6 +173,9 @@ const captureSnapshot = async (
       precommits: output.precommits ? new Map(output.precommits) : undefined,
     })),
     description,
+    gossip: {
+      profiles,
+    },
   };
 
   env.history = env.history || [];
@@ -173,6 +192,7 @@ const captureSnapshot = async (
 
     if (DEBUG) {
       console.log(`💾 Snapshot ${snapshot.height} saved to IndexedDB successfully`);
+      console.log(`💾 Saved gossip profiles: ${Object.keys(profiles).length} entries`);
     }
   } catch (error) {
     console.error(`❌ Failed to save snapshot ${snapshot.height} to IndexedDB:`, error);
@@ -299,9 +319,22 @@ const applyServerInput = async (
     console.log(`🔍 REPLICA-DEBUG: After processing serverTxs, total replicas: ${env.replicas.size}`);
 
     // Process entity inputs
-    mergedInputs.forEach(entityInput => {
+    for (const entityInput of mergedInputs) {
       const replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
       const entityReplica = env.replicas.get(replicaKey);
+
+      console.log(`🔍 REPLICA-LOOKUP: Key="${replicaKey}"`);
+      console.log(`🔍 REPLICA-LOOKUP: Found replica: ${!!entityReplica}`);
+      console.log(`🔍 REPLICA-LOOKUP: Input txs: ${entityInput.entityTxs?.length || 0}`);
+      if (entityInput.entityTxs && entityInput.entityTxs.length > 0) {
+        console.log(
+          `🔍 REPLICA-LOOKUP: Tx types:`,
+          entityInput.entityTxs.map(tx => tx.type),
+        );
+      }
+      if (!entityReplica) {
+        console.log(`🔍 REPLICA-LOOKUP: Available replica keys:`, Array.from(env.replicas.keys()));
+      }
 
       if (entityReplica) {
         if (DEBUG) {
@@ -311,10 +344,10 @@ const applyServerInput = async (
           if (entityInput.precommits?.size) console.log(`  → ${entityInput.precommits.size} precommits`);
         }
 
-        const entityOutputs = applyEntityInput(env, entityReplica, entityInput);
+        const entityOutputs = await applyEntityInput(env, entityReplica, entityInput);
         entityOutbox.push(...entityOutputs);
       }
-    });
+    }
 
     // Update env (mutable)
     env.height++;
@@ -338,6 +371,17 @@ const applyServerInput = async (
     // Notify Svelte about environment changes
     console.log(`🔍 REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env.replicas.size}`);
     console.log(`🔍 REPLICA-DEBUG: Replica keys:`, Array.from(env.replicas.keys()));
+    console.log(`🔍 GOSSIP-DEBUG: Environment keys before notify:`, Object.keys(env));
+    console.log(`🔍 GOSSIP-DEBUG: Gossip layer exists:`, !!env.gossip);
+    console.log(`🔍 GOSSIP-DEBUG: Gossip layer type:`, typeof env.gossip);
+    console.log(`🔍 GOSSIP-DEBUG: Gossip announce method:`, typeof env.gossip?.announce);
+    
+    // CRITICAL FIX: Initialize gossip layer if missing
+    if (!env.gossip) {
+      console.log(`🚨 CRITICAL: gossip layer missing from environment, creating new one`);
+      env.gossip = createGossipLayer();
+      console.log(`✅ Gossip layer created and added to environment`);
+    }
 
     // Compare old vs new entities
     const oldEntityKeys = Array.from(env.replicas.keys()).filter(
@@ -412,13 +456,23 @@ const applyServerInput = async (
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
-  // First, create default environment
+  // Initialize gossip layer
+  console.log('🕸️ Initializing gossip layer...');
+  const gossipLayer = createGossipLayer();
+  console.log('✅ Gossip layer initialized');
+
+  // Load persisted profiles from database into gossip layer
+  console.log('📡 Loading persisted profiles from database...');
+  await loadPersistedProfiles(db, gossipLayer);
+
+  // First, create default environment with gossip layer
   env = {
     replicas: new Map(),
     height: 0,
     timestamp: Date.now(),
     serverInput: { serverTxs: [], entityInputs: [] },
     history: [],
+    gossip: gossipLayer,
   };
 
   // Then try to load saved state if available
@@ -461,12 +515,23 @@ const main = async (): Promise<Env> => {
 
     if (snapshots.length > 0) {
       const latestSnapshot = snapshots[snapshots.length - 1];
+
+      // Restore gossip profiles from snapshot
+      const gossipLayer = createGossipLayer();
+      if (latestSnapshot.gossip?.profiles) {
+        for (const [id, profile] of Object.entries(latestSnapshot.gossip.profiles)) {
+          gossipLayer.profiles.set(id, profile as Profile);
+        }
+        console.log(`📡 Restored gossip profiles: ${Object.keys(latestSnapshot.gossip.profiles).length} entries`);
+      }
+
       env = {
         replicas: latestSnapshot.replicas,
         height: latestSnapshot.height,
         timestamp: latestSnapshot.timestamp,
         serverInput: latestSnapshot.serverInput,
         history: snapshots, // Include the loaded history
+        gossip: gossipLayer, // Use restored gossip layer
       };
       console.log(`✅ History restored. Server is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
@@ -549,6 +614,7 @@ const clearDatabaseAndHistory = async () => {
     timestamp: Date.now(),
     serverInput: { serverTxs: [], entityInputs: [] },
     history: [],
+    gossip: createGossipLayer(),
   };
 
   console.log('✅ Database and server history cleared');
@@ -730,6 +796,7 @@ export const createEmptyEnv = (): Env => {
     timestamp: Date.now(),
     serverInput: { serverTxs: [], entityInputs: [] },
     history: [],
+    gossip: createGossipLayer(),
   };
 };
 
