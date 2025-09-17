@@ -35,8 +35,8 @@
  *
  * Uses actual secp256k1 signatures compatible with Solidity ecrecover
  */
-import { createHash, randomBytes } from './utils.js';
 import { ethers } from 'ethers';
+import { createHash, randomBytes } from './utils';
 // Browser-compatible Buffer.concat replacement
 const bufferConcat = (buffers) => {
     if (typeof Buffer.concat === 'function') {
@@ -91,11 +91,7 @@ const createRealSignature = async (hash, privateKey) => {
         const sPadded = new Uint8Array(32);
         rPadded.set(r, 32 - r.length);
         sPadded.set(s, 32 - s.length);
-        return bufferConcat([
-            Buffer.from(rPadded),
-            Buffer.from(sPadded),
-            Buffer.from([v])
-        ]);
+        return bufferConcat([Buffer.from(rPadded), Buffer.from(sPadded), Buffer.from([v])]);
     }
     catch (error) {
         console.error(`❌ Failed to create signature: ${error}`);
@@ -124,11 +120,7 @@ export const createDirectHashSignature = async (hash, privateKey) => {
         rPadded.set(r, 32 - r.length);
         sPadded.set(s, 32 - s.length);
         console.log(`🔑 Created signature: r=${ethers.hexlify(r).slice(0, 10)}..., s=${ethers.hexlify(s).slice(0, 10)}..., v=${v}`);
-        return bufferConcat([
-            Buffer.from(rPadded),
-            Buffer.from(sPadded),
-            Buffer.from([v])
-        ]);
+        return bufferConcat([Buffer.from(rPadded), Buffer.from(sPadded), Buffer.from([v])]);
     }
     catch (error) {
         console.error(`❌ Failed to create direct hash signature: ${error}`);
@@ -188,7 +180,7 @@ export const packRealSignatures = (signatures) => {
         const byteIndex = Math.floor(i / 8);
         const bitIndex = i % 8;
         if (vByte === 28) {
-            vValues[byteIndex] |= (1 << bitIndex);
+            vValues[byteIndex] |= 1 << bitIndex;
         }
     }
     const packed = bufferConcat([rsValues, vValues]);
@@ -310,12 +302,12 @@ export const buildRealHanko = async (hashToSign, config) => {
         entityIndexes: claim.entityIndexes,
         weights: claim.weights,
         threshold: claim.threshold,
-        expectedQuorumHash: claim.expectedQuorumHash
+        expectedQuorumHash: claim.expectedQuorumHash,
     }));
     const hanko = {
         placeholders: config.noEntities, // Failed entities (index 0..N-1)
-        packedSignatures, // EOA signatures (index N..M-1)  
-        claims // Entity claims (index M..∞)
+        packedSignatures, // EOA signatures (index N..M-1)
+        claims, // Entity claims (index M..∞)
     };
     console.log(`✅ Built REAL hanko with verifiable signatures`);
     console.log(`   📋 Signers: ${signerAddresses.map(addr => addr.slice(0, 10) + '...').join(', ')}`);
@@ -375,7 +367,7 @@ export const recoverHankoEntities = async (hanko, hash) => {
     //
     // CONCRETE EXAMPLE:
     // Claim 0: EntityA needs EntityB (assume YES) → A gets added to yesEntities
-    // Claim 1: EntityB needs EntityA (assume YES) → B gets added to yesEntities  
+    // Claim 1: EntityB needs EntityA (assume YES) → B gets added to yesEntities
     // Result: Both A and B are in yesEntities → mutual validation succeeds!
     for (let claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
         const claim = hanko.claims[claimIndex];
@@ -390,7 +382,7 @@ export const recoverHankoEntities = async (hanko, hash) => {
                 console.log(`❌ Entity index ${entityIndex} out of bounds (max: ${totalEntities})`);
                 continue;
             }
-            // Prevent self-reference  
+            // Prevent self-reference
             const referencedClaimIndex = entityIndex - hanko.placeholders.length - signatures.length;
             if (referencedClaimIndex === claimIndex) {
                 console.log(`❌ Claim ${claimIndex} cannot reference itself`);
@@ -427,7 +419,7 @@ export const recoverHankoEntities = async (hanko, hash) => {
     return {
         yesEntities,
         noEntities: hanko.placeholders,
-        claims: hanko.claims
+        claims: hanko.claims,
     };
 };
 // === FULL CYCLE TEST ===
@@ -447,13 +439,15 @@ export const testFullCycle = async () => {
     const hanko = await buildRealHanko(hashToSign, {
         noEntities: [],
         privateKeys: [privateKey1, privateKey2],
-        claims: [{
+        claims: [
+            {
                 entityId: Buffer.from('0000000000000000000000000000000000000000000000000000000000000001', 'hex'),
                 entityIndexes: [0, 1], // Both signatures
                 weights: [1, 1],
                 threshold: 2,
-                expectedQuorumHash: randomBytes(32)
-            }]
+                expectedQuorumHash: randomBytes(32),
+            },
+        ],
     });
     // Verify unpacking works
     const unpacked = unpackRealSignatures(hanko.packedSignatures);
@@ -464,7 +458,8 @@ export const testFullCycle = async () => {
         console.log(`   Signature ${i + 1}: ${verified ? '✅' : '❌'} ${expectedAddr.slice(0, 10)}...`);
     }
     // Create ABI-encoded data for Solidity (flashloan governance format)
-    const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])"], [[
+    const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])'], [
+        [
             hanko.placeholders.map(p => '0x' + Buffer.from(p).toString('hex')),
             '0x' + Buffer.from(hanko.packedSignatures).toString('hex'),
             hanko.claims.map(c => [
@@ -472,9 +467,10 @@ export const testFullCycle = async () => {
                 c.entityIndexes,
                 c.weights,
                 c.threshold,
-                '0x' + Buffer.from(c.expectedQuorumHash).toString('hex')
-            ])
-        ]]);
+                '0x' + Buffer.from(c.expectedQuorumHash).toString('hex'),
+            ]),
+        ],
+    ]);
     console.log(`\n📋 ABI Encoded hanko: ${abiEncoded.length} bytes`);
     return { hanko, abiEncoded, hashToSign };
 };
@@ -490,7 +486,7 @@ export const testGasOptimization = async () => {
     // Method 2: Pre-recover entities and send optimized data
     const recovered = await recoverHankoEntities(hanko, hashToSign);
     // Encode optimized data (yesEntities + noEntities + claims)
-    const optimizedEncoded = ethers.AbiCoder.defaultAbiCoder().encode(["bytes32[]", "bytes32[]", "tuple(bytes32,uint256[],uint256[],uint256,bytes32)[]"], [
+    const optimizedEncoded = ethers.AbiCoder.defaultAbiCoder().encode(['bytes32[]', 'bytes32[]', 'tuple(bytes32,uint256[],uint256[],uint256,bytes32)[]'], [
         recovered.yesEntities.map(entity => '0x' + Buffer.from(entity).toString('hex')),
         recovered.noEntities.map(entity => '0x' + Buffer.from(entity).toString('hex')),
         recovered.claims.map(c => [
@@ -498,8 +494,8 @@ export const testGasOptimization = async () => {
             c.entityIndexes,
             c.weights,
             c.threshold,
-            '0x' + Buffer.from(c.expectedQuorumHash).toString('hex')
-        ])
+            '0x' + Buffer.from(c.expectedQuorumHash).toString('hex'),
+        ]),
     ]);
     console.log(`📊 Method 2 - Pre-recovered:`);
     console.log(`   Calldata size: ${optimizedEncoded.length} bytes`);
@@ -508,4 +504,4 @@ export const testGasOptimization = async () => {
     console.log(`   Additional savings: No signature recovery gas cost on-chain`);
     console.log(`\n💡 Recommendation: Use Method 2 for gas-sensitive applications`);
 };
-// All functions exported above 
+// All functions exported above

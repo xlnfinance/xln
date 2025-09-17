@@ -4,8 +4,8 @@
  * This demonstrates how to integrate the J-Event Watcher with the XLN server
  * to enable automatic jurisdiction event monitoring and entity notification.
  */
-import { createEmptyEnv } from './server.js';
-import { setupJEventWatcher } from './j-event-watcher.js';
+import { setupJEventWatcher } from './j-event-watcher';
+import { createEmptyEnv } from './server';
 const DEBUG = true;
 async function demoJEventWatcher() {
     console.log('🚀 DEMO: Starting J-Event Watcher Integration');
@@ -15,7 +15,7 @@ async function demoJEventWatcher() {
     const config = {
         rpcUrl: 'http://localhost:8545', // Local hardhat/anvil node
         entityProviderAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3', // Example address
-        depositoryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512' // Example address
+        depositoryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512', // Example address
     };
     try {
         // Set up the J-Event Watcher
@@ -62,8 +62,8 @@ function simulateJurisdictionEvent(env) {
             depository: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
             controlAmount: '1000000000000000000', // 1 token with 18 decimals
             dividendAmount: '0',
-            purpose: 'Series A Funding'
-        }
+            purpose: 'Series A Funding',
+        },
     };
     // Create the entity transaction that would be submitted by each signer
     const entityTx = {
@@ -73,14 +73,14 @@ function simulateJurisdictionEvent(env) {
             event: simulatedJEvent,
             observedAt: Date.now(),
             blockNumber: simulatedJEvent.blockNumber,
-            transactionHash: simulatedJEvent.transactionHash
-        }
+            transactionHash: simulatedJEvent.transactionHash,
+        },
     };
     // Add to server input (this is what the watcher does automatically)
     env.serverInput.entityInputs.push({
         entityId: '1',
         signerId: 'alice',
-        entityTxs: [entityTx]
+        entityTxs: [entityTx],
     });
     if (DEBUG) {
         console.log('🎭 Simulated j-event added to server input:');

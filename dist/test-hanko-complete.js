@@ -3,8 +3,8 @@
  * Tests real Ethereum signatures, flashloan governance, and edge cases
  */
 import { ethers } from 'ethers';
-import { createHash, randomBytes } from './utils.js';
-import { buildRealHanko, packRealSignatures, unpackRealSignatures, createDirectHashSignature, verifySignatureRecovery, recoverHankoEntities, testFullCycle, testGasOptimization } from './hanko-real.js';
+import { buildRealHanko, createDirectHashSignature, packRealSignatures, recoverHankoEntities, testFullCycle, testGasOptimization, unpackRealSignatures, verifySignatureRecovery, } from './hanko-real';
+import { createHash, randomBytes } from './utils';
 // === TEST UTILITIES ===
 const generateTestKeys = (count) => {
     const keys = [];
@@ -76,13 +76,15 @@ const testBasicHanko = async () => {
     const hanko = await buildRealHanko(testHash, {
         noEntities: [], // No failed entities
         privateKeys: keys,
-        claims: [{
+        claims: [
+            {
                 entityId: Buffer.from('0000000000000000000000000000000000000000000000000000000000000001', 'hex'),
                 entityIndexes: [0, 1], // Both signatures
                 weights: [1, 1],
                 threshold: 2,
-                expectedQuorumHash: randomBytes(32)
-            }]
+                expectedQuorumHash: randomBytes(32),
+            },
+        ],
     });
     console.log(`✅ Built hanko with ${hanko.claims.length} claims`);
     console.log(`📦 Packed signatures: ${hanko.packedSignatures.length} bytes`);
@@ -90,7 +92,8 @@ const testBasicHanko = async () => {
     // Test recovery
     const recovered = await recoverHankoEntities(hanko, testHash);
     console.log(`🔍 Recovered: ${recovered.yesEntities.length} yes, ${recovered.noEntities.length} no`);
-    if (recovered.yesEntities.length !== 3) { // 2 EOAs + 1 entity claim
+    if (recovered.yesEntities.length !== 3) {
+        // 2 EOAs + 1 entity claim
         throw new Error(`Expected 3 yes entities, got ${recovered.yesEntities.length}`);
     }
 };
@@ -114,7 +117,7 @@ const testHierarchicalHanko = async () => {
                 entityIndexes: [0, 1, 2], // First 3 signatures
                 weights: [1, 1, 1],
                 threshold: 2,
-                expectedQuorumHash: randomBytes(32)
+                expectedQuorumHash: randomBytes(32),
             },
             {
                 // Entity B: Entity A + 1 EOA, needs both
@@ -122,9 +125,9 @@ const testHierarchicalHanko = async () => {
                 entityIndexes: [4, 3], // Entity A (index 4 = first claim) + EOA (index 3)
                 weights: [1, 1],
                 threshold: 2,
-                expectedQuorumHash: randomBytes(32)
-            }
-        ]
+                expectedQuorumHash: randomBytes(32),
+            },
+        ],
     });
     console.log(`✅ Built hierarchical hanko:`);
     console.log(`   Entity A: 3 EOAs → threshold 2`);
@@ -147,7 +150,7 @@ const testEdgeCases = async () => {
         const emptyHanko = await buildRealHanko(testHash, {
             noEntities: [],
             privateKeys: [],
-            claims: []
+            claims: [],
         });
         console.log('✅ Empty hanko created successfully');
     }
@@ -160,13 +163,15 @@ const testEdgeCases = async () => {
     const singleHanko = await buildRealHanko(testHash, {
         noEntities: [],
         privateKeys: singleKey,
-        claims: [{
+        claims: [
+            {
                 entityId: Buffer.from('0000000000000000000000000000000000000000000000000000000000000001', 'hex'),
                 entityIndexes: [0],
                 weights: [1],
                 threshold: 1,
-                expectedQuorumHash: randomBytes(32)
-            }]
+                expectedQuorumHash: randomBytes(32),
+            },
+        ],
     });
     console.log('✅ Single signature hanko created');
     // Test 3: Failed entities (placeholders)
@@ -174,13 +179,15 @@ const testEdgeCases = async () => {
     const failedHanko = await buildRealHanko(testHash, {
         noEntities: [randomBytes(32), randomBytes(32)], // 2 failed entities
         privateKeys: singleKey,
-        claims: [{
+        claims: [
+            {
                 entityId: Buffer.from('0000000000000000000000000000000000000000000000000000000000000001', 'hex'),
                 entityIndexes: [0, 1, 2], // placeholder, placeholder, signature
                 weights: [1, 1, 1],
                 threshold: 1, // Only needs the signature
-                expectedQuorumHash: randomBytes(32)
-            }]
+                expectedQuorumHash: randomBytes(32),
+            },
+        ],
     });
     console.log('✅ Failed entities hanko created');
     const failedRecovered = await recoverHankoEntities(failedHanko, testHash);
@@ -198,13 +205,15 @@ const testPerformance = async () => {
     const largeHanko = await buildRealHanko(testHash, {
         noEntities: [],
         privateKeys: largeKeys,
-        claims: [{
+        claims: [
+            {
                 entityId: Buffer.from('0000000000000000000000000000000000000000000000000000000000000001', 'hex'),
                 entityIndexes: Array.from({ length: LARGE_COUNT }, (_, i) => i),
                 weights: Array.from({ length: LARGE_COUNT }, () => 1),
                 threshold: Math.floor(LARGE_COUNT * 0.66), // 66% threshold
-                expectedQuorumHash: randomBytes(32)
-            }]
+                expectedQuorumHash: randomBytes(32),
+            },
+        ],
     });
     const buildTime = Date.now() - startTime;
     console.log(`✅ Built large hanko in ${buildTime}ms`);
@@ -214,7 +223,7 @@ const testPerformance = async () => {
     const recovered = await recoverHankoEntities(largeHanko, testHash);
     const recoverTime = Date.now() - recoverStart;
     console.log(`🔍 Recovery took ${recoverTime}ms`);
-    console.log(`📊 Throughput: ${Math.round(LARGE_COUNT / (buildTime + recoverTime) * 1000)} sigs/sec`);
+    console.log(`📊 Throughput: ${Math.round((LARGE_COUNT / (buildTime + recoverTime)) * 1000)} sigs/sec`);
 };
 // === INTEGRATION TESTS ===
 const testIntegration = async () => {
@@ -260,4 +269,4 @@ const runAllTests = async () => {
 if (typeof process !== 'undefined' && import.meta.url === `file://${process.argv[1]}`) {
     runAllTests();
 }
-export { runAllTests, testRealSignatures, testSignaturePacking, testBasicHanko, testHierarchicalHanko, testEdgeCases, testPerformance, testIntegration };
+export { runAllTests, testBasicHanko, testEdgeCases, testHierarchicalHanko, testIntegration, testPerformance, testRealSignatures, testSignaturePacking, };

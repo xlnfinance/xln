@@ -1,7 +1,7 @@
 /**
  * Simple runner for Hanko tests
  */
-import { runBasicHankoTests } from './test-hanko-basic.js';
+import { runBasicHankoTests } from './test-hanko-basic';
 async function main() {
     console.log('🚀 Starting Hanko Tests...\n');
     const success = await runBasicHankoTests();

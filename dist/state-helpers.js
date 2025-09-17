@@ -2,8 +2,8 @@
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
-import { encode } from './snapshot-coder.js';
-import { DEBUG } from './utils.js';
+import { encode } from './snapshot-coder';
+import { DEBUG } from './utils';
 // === SNAPSHOT UTILITIES ===
 export const deepCloneReplica = (replica) => {
     const cloneMap = (map) => new Map(map);
@@ -12,56 +12,62 @@ export const deepCloneReplica = (replica) => {
         entityId: replica.entityId,
         signerId: replica.signerId,
         state: {
+            entityId: replica.state.entityId, // Clone entityId
             height: replica.state.height,
             timestamp: replica.state.timestamp,
             nonces: cloneMap(replica.state.nonces),
             messages: cloneArray(replica.state.messages),
             proposals: new Map(Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
                 id,
-                { ...proposal, votes: cloneMap(proposal.votes) }
+                { ...proposal, votes: cloneMap(proposal.votes) },
             ])),
-            config: replica.state.config
+            config: replica.state.config,
+            // 💰 Clone financial state
+            reserves: cloneMap(replica.state.reserves),
+            channels: cloneMap(replica.state.channels),
+            collaterals: cloneMap(replica.state.collaterals),
         },
         mempool: cloneArray(replica.mempool),
-        proposal: replica.proposal ? {
-            height: replica.proposal.height,
-            txs: cloneArray(replica.proposal.txs),
-            hash: replica.proposal.hash,
-            newState: replica.proposal.newState,
-            signatures: cloneMap(replica.proposal.signatures)
-        } : undefined,
-        lockedFrame: replica.lockedFrame ? {
-            height: replica.lockedFrame.height,
-            txs: cloneArray(replica.lockedFrame.txs),
-            hash: replica.lockedFrame.hash,
-            newState: replica.lockedFrame.newState,
-            signatures: cloneMap(replica.lockedFrame.signatures)
-        } : undefined,
-        isProposer: replica.isProposer
+        proposal: replica.proposal
+            ? {
+                height: replica.proposal.height,
+                txs: cloneArray(replica.proposal.txs),
+                hash: replica.proposal.hash,
+                newState: replica.proposal.newState,
+                signatures: cloneMap(replica.proposal.signatures),
+            }
+            : undefined,
+        lockedFrame: replica.lockedFrame
+            ? {
+                height: replica.lockedFrame.height,
+                txs: cloneArray(replica.lockedFrame.txs),
+                hash: replica.lockedFrame.hash,
+                newState: replica.lockedFrame.newState,
+                signatures: cloneMap(replica.lockedFrame.signatures),
+            }
+            : undefined,
+        isProposer: replica.isProposer,
     };
 };
 export const captureSnapshot = (env, envHistory, db, serverInput, serverOutputs, description) => {
     const snapshot = {
         height: env.height,
         timestamp: env.timestamp,
-        replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [
-            key,
-            deepCloneReplica(replica)
-        ])),
+        replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [key, deepCloneReplica(replica)])),
         serverInput: {
             serverTxs: [...serverInput.serverTxs],
             entityInputs: serverInput.entityInputs.map(input => ({
                 ...input,
                 entityTxs: input.entityTxs ? [...input.entityTxs] : undefined,
-                precommits: input.precommits ? new Map(input.precommits) : undefined
-            }))
+                precommits: input.precommits ? new Map(input.precommits) : undefined,
+            })),
         },
         serverOutputs: serverOutputs.map(output => ({
             ...output,
             entityTxs: output.entityTxs ? [...output.entityTxs] : undefined,
-            precommits: output.precommits ? new Map(output.precommits) : undefined
+            precommits: output.precommits ? new Map(output.precommits) : undefined,
         })),
-        description
+        description,
     };
     envHistory.push(snapshot);
     // --- PERSISTENCE WITH BATCH OPERATIONS ---

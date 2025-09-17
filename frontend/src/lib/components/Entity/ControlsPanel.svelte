@@ -147,12 +147,11 @@
     // Check if it's a simple number (entity number)
     if (/^\d+$/.test(recipient)) {
       const entityNumber = BigInt(recipient);
-      const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-      // Convert bytes32 entityId to a 20-byte address
-      return '0x' + entityId.slice(26);
+      // Return the full bytes32 entityId
+      return '0x' + entityNumber.toString(16).padStart(64, '0');
     }
-    // Assume it's already an address
-    // TODO: Add proper address validation (e.g., using ethers.js)
+    // Assume it's already an address or a bytes32 string
+    // TODO: Add proper address/bytes32 validation
     return recipient;
   }
 
@@ -164,9 +163,9 @@
 
     const recipientAddress = resolveRecipient(jtxRecipient.trim());
     const tokenIdNum = Number(jtxTokenId);
-    
+
     if (isNaN(tokenIdNum)) {
-      alert('Invalid token selected.');
+      alert('Invalid token selected. Please ensure the dropdown value is a number.');
       return;
     }
     if (jtxAmount <= 0) {
@@ -179,13 +178,14 @@
       const env = $xlnEnvironment;
       if (!env) throw new Error('XLN environment not ready');
 
+      // This is the correct structure for a Depository batch transaction
       const batch = {
         reserveToReserve: [{
-          receiver: recipientAddress,
+          receivingEntity: recipientAddress,
           tokenId: tokenIdNum,
           amount: jtxAmount,
         }],
-        // Ensure other batch arrays are empty to avoid errors
+        // Explicitly set other batch arrays to empty to ensure a clean transaction
         reserveToExternalToken: [],
         externalTokenToReserve: [],
         reserveToCollateral: [],
@@ -197,7 +197,7 @@
         hub_id: 0,
       };
 
-      // This is the actual call to the Depository contract via the XLN library
+      // The key step: broadcasting the transaction directly to the jurisdiction's depository
       await xln.depositoryProcessBatch(env, tab.signer, batch);
       
       console.log('💸 J-tx sent successfully to', recipientAddress);

@@ -13,19 +13,23 @@ import { ethers } from 'ethers';
 // Debug flag for logging
 const DEBUG = true;
 export class JEventWatcher {
+    provider;
+    entityProviderContract;
+    depositoryContract;
+    config;
+    signers = new Map();
+    lastProcessedBlock = 0;
+    isWatching = false;
+    // Contract ABIs (minimal for events we care about)
+    entityProviderABI = [
+        'event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)',
+        'event ControlSharesReleased(bytes32 indexed entityId, address indexed depository, uint256 controlAmount, uint256 dividendAmount, string purpose)',
+        'event NameAssigned(string indexed name, uint256 indexed entityNumber)',
+    ];
+    depositoryABI = [
+        'event ControlSharesReceived(address indexed entityProvider, address indexed fromEntity, uint256 indexed tokenId, uint256 amount, bytes data)',
+    ];
     constructor(config) {
-        this.signers = new Map();
-        this.lastProcessedBlock = 0;
-        this.isWatching = false;
-        // Contract ABIs (minimal for events we care about)
-        this.entityProviderABI = [
-            "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
-            "event ControlSharesReleased(bytes32 indexed entityId, address indexed depository, uint256 controlAmount, uint256 dividendAmount, string purpose)",
-            "event NameAssigned(string indexed name, uint256 indexed entityNumber)"
-        ];
-        this.depositoryABI = [
-            "event ControlSharesReceived(address indexed entityProvider, address indexed fromEntity, uint256 indexed tokenId, uint256 amount, bytes data)"
-        ];
         this.config = config;
         this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
         this.entityProviderContract = new ethers.Contract(config.entityProviderAddress, this.entityProviderABI, this.provider);
@@ -39,7 +43,7 @@ export class JEventWatcher {
         this.signers.set(signerId, {
             signerId,
             privateKey,
-            entityIds
+            entityIds,
         });
         if (DEBUG) {
             console.log(`🔭 J-WATCHER: Added signer ${signerId} monitoring entities: ${entityIds.join(', ')}`);
@@ -82,7 +86,7 @@ export class JEventWatcher {
                 transactionHash: event.transactionHash,
                 entityId: entityId.toString(),
                 entityNumber: Number(entityNumber),
-                data: { boardHash }
+                data: { boardHash },
             }, env);
         });
         this.entityProviderContract.on('ControlSharesReleased', (entityId, depository, controlAmount, dividendAmount, purpose, event) => {
@@ -92,7 +96,7 @@ export class JEventWatcher {
                 transactionHash: event.transactionHash,
                 entityId: entityId.toString(),
                 entityNumber: Number(entityId), // entityId is the number for registered entities
-                data: { depository, controlAmount, dividendAmount, purpose }
+                data: { depository, controlAmount, dividendAmount, purpose },
             }, env);
         });
         this.entityProviderContract.on('NameAssigned', (name, entityNumber, event) => {
@@ -101,7 +105,7 @@ export class JEventWatcher {
                 blockNumber: event.blockNumber,
                 transactionHash: event.transactionHash,
                 entityNumber: Number(entityNumber),
-                data: { name }
+                data: { name },
             }, env);
         });
         // Depository events
@@ -113,7 +117,7 @@ export class JEventWatcher {
                 blockNumber: event.blockNumber,
                 transactionHash: event.transactionHash,
                 entityNumber: entityNumber,
-                data: { entityProvider, fromEntity, tokenId, amount, data }
+                data: { entityProvider, fromEntity, tokenId, amount, data },
             }, env);
         });
     }
@@ -148,8 +152,8 @@ export class JEventWatcher {
         try {
             // Get all relevant events from both contracts
             const [epEvents, depEvents] = await Promise.all([
-                this.entityProviderContract.queryFilter({}, fromBlock, toBlock),
-                this.depositoryContract.queryFilter({}, fromBlock, toBlock)
+                this.entityProviderContract.queryFilter('', fromBlock, toBlock),
+                this.depositoryContract.queryFilter('', fromBlock, toBlock),
             ]);
             // Process events in chronological order
             const allEvents = [...epEvents, ...depEvents].sort((a, b) => {
@@ -180,7 +184,7 @@ export class JEventWatcher {
                         transactionHash: event.transactionHash,
                         entityId: event.args.entityId.toString(),
                         entityNumber: Number(event.args.entityNumber),
-                        data: { boardHash: event.args.boardHash }
+                        data: { boardHash: event.args.boardHash },
                     };
                     break;
                 case 'ControlSharesReleased':
@@ -194,8 +198,8 @@ export class JEventWatcher {
                             depository: event.args.depository,
                             controlAmount: event.args.controlAmount.toString(),
                             dividendAmount: event.args.dividendAmount.toString(),
-                            purpose: event.args.purpose
-                        }
+                            purpose: event.args.purpose,
+                        },
                     };
                     break;
                 case 'NameAssigned':
@@ -204,10 +208,10 @@ export class JEventWatcher {
                         blockNumber: event.blockNumber,
                         transactionHash: event.transactionHash,
                         entityNumber: Number(event.args.entityNumber),
-                        data: { name: event.args.name }
+                        data: { name: event.args.name },
                     };
                     break;
-                case 'ControlSharesReceived':
+                case 'ControlSharesReceived': {
                     const entityNumber = this.extractEntityNumberFromTokenId(Number(event.args.tokenId));
                     jurisdictionEvent = {
                         type: 'shares_received',
@@ -219,10 +223,11 @@ export class JEventWatcher {
                             fromEntity: event.args.fromEntity,
                             tokenId: event.args.tokenId.toString(),
                             amount: event.args.amount.toString(),
-                            data: event.args.data
-                        }
+                            data: event.args.data,
+                        },
                     };
                     break;
+                }
                 default:
                     return; // Skip unknown events
             }
@@ -259,15 +264,15 @@ export class JEventWatcher {
                     event: jEvent,
                     observedAt: Date.now(),
                     blockNumber: jEvent.blockNumber,
-                    transactionHash: jEvent.transactionHash
-                }
+                    transactionHash: jEvent.transactionHash,
+                },
             };
             // Submit to entity via server input
             if (env.serverInput && jEvent.entityNumber) {
                 env.serverInput.entityInputs.push({
                     entityId: jEvent.entityNumber.toString(),
                     signerId: signer.signerId,
-                    entityTxs: [entityTx]
+                    entityTxs: [entityTx],
                 });
                 if (DEBUG) {
                     console.log(`🔭 J-SUBMIT: Signer ${signer.signerId} submitting j-event to entity #${jEvent.entityNumber}`);
@@ -281,7 +286,7 @@ export class JEventWatcher {
      */
     extractEntityNumberFromTokenId(tokenId) {
         // Remove the high bit if set (dividend token)
-        return tokenId & 0x7FFFFFFF;
+        return tokenId & 0x7fffffff;
     }
     /**
      * Get current watching status
@@ -290,7 +295,7 @@ export class JEventWatcher {
         return {
             isWatching: this.isWatching,
             lastProcessedBlock: this.lastProcessedBlock,
-            signerCount: this.signers.size
+            signerCount: this.signers.size,
         };
     }
 }
@@ -308,7 +313,7 @@ export async function setupJEventWatcher(env, rpcUrl, entityProviderAddr, deposi
         rpcUrl,
         entityProviderAddress: entityProviderAddr,
         depositoryAddress: depositoryAddr,
-        startBlock: 0 // Start from genesis, or could be configured
+        startBlock: 0, // Start from genesis, or could be configured
     });
     // Add example signers (would be configured per deployment)
     watcher.addSigner('alice', 'alice-private-key', ['1', '2', '3']);

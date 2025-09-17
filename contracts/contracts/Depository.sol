@@ -28,22 +28,42 @@ contract Depository is Console {
   mapping(address => bool) public approvedEntityProviders;
   address[] public entityProvidersList;
   
-  mapping (address entity => mapping (uint tokenId => uint)) public _reserves;
+  mapping (bytes32 => mapping (uint => uint)) public _reserves;
 
-  mapping (bytes channelKey => ChannelInfo) public _channels;
-  mapping (bytes channelKey => mapping(uint tokenId => ChannelCollateral)) public _collaterals; 
+  mapping (bytes => ChannelInfo) public _channels;
+  mapping (bytes => mapping(uint => ChannelCollateral)) public _collaterals; 
   
 
-  mapping (address entity => mapping (uint tokenId => Debt[])) public _debts;
+  mapping (bytes32 => mapping (uint => Debt[])) public _debts;
   // the current debt index to pay
-  mapping (address entity => mapping (uint tokenId => uint)) public _debtIndex;
+  mapping (bytes32 => mapping (uint => uint)) public _debtIndex;
   // total number of debts of an entity
-  mapping (address entity => uint) public _activeDebts;
+  mapping (bytes32 => uint) public _activeDebts;
+
+
+  // === REPUTATION SCORES ===
+
+  struct EntityScore {
+    // Total gas used by the entity in `processBatch` calls. Tracks overall activity.
+    uint64 totalGasUsed;
+    // Timestamp when the entity first acquired an active debt. Resets to 0 when all debts are cleared.
+    uint48 inDebtSince;
+    // The total number of outstanding debts across all tokens.
+    uint32 totalActiveDebts;
+    // Counter for how many times the entity has been involved in a dispute.
+    uint32 totalDisputes;
+    // A counter for successfully paid-off debts. A measure of reliability.
+    uint32 successfulRepayments;
+    // A counter for successful cooperative settlements. A measure of good-faith participation.
+    uint32 cooperativeActions;
+  }
+
+  mapping(bytes32 => EntityScore) public entityScores;
 
 
   struct Settled {
-      address left;
-      address right;
+      bytes32 left;
+      bytes32 right;
       uint tokenId;
       uint leftReserve;
       uint rightReserve;
@@ -53,17 +73,27 @@ contract Depository is Console {
   event ChannelSettled(Settled[]);
 
   struct Hub {
-    address addr;
+    bytes32 entityId;
     uint gasused;
     string uri;
   }
   Hub[] public _hubs;
   
-  event TransferReserveToCollateral(address indexed receiver, address indexed addr, uint collateral, int ondelta, uint tokenId);
-  event DisputeStarted(address indexed sender, address indexed peer, uint indexed disputeNonce, bytes initialArguments);
-  event CooperativeClose(address indexed sender, address indexed peer, uint indexed cooperativeNonce);
+  event TransferReserveToCollateral(bytes32 indexed receivingEntity, bytes32 indexed counterentity, uint collateral, int ondelta, uint tokenId);
+  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
+  event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed cooperativeNonce);
   
-  event ReserveTransferred(address indexed from, address indexed to, uint indexed tokenId, uint amount);
+  event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
+
+  /**
+   * @notice Emitted whenever an entity's reserve balance for a specific token changes.
+   * @dev This is the primary event for j-watchers to sync entity state.
+   * @param entity The entity whose reserve was updated.
+   * @param tokenId The internal ID of the token.
+   * @param newBalance The absolute new balance of the token for the entity.
+   */
+  event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+
 
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
@@ -133,7 +163,7 @@ contract Depository is Console {
     
     // empty record, hub_id==0 means not a hub
     _hubs.push(Hub({
-      addr: address(0),
+      entityId: bytes32(0),
       uri: '',
       gasused: 0
     }));
@@ -220,14 +250,14 @@ contract Depository is Console {
     require(entityId != bytes32(0), "No entity recovered from Hanko");
     
     // 🚀 Nonce management: Prevent replay attacks
-    address entityAddress = address(uint160(uint256(entityId)));
+    bytes32 entityIdBytes32 = entityId; // Already bytes32
     bytes32 hankoHash = keccak256(hankoData);
     
-    require(nonce == entityNonces[entityAddress] + 1, "Invalid nonce (must be sequential)");
-    entityNonces[entityAddress] = nonce;
+    require(nonce == entityNonces[address(uint160(uint256(entityIdBytes32)))] + 1, "Invalid nonce (must be sequential)");
+    entityNonces[address(uint160(uint256(entityIdBytes32)))] = nonce;
     
     // ⚡ Process the actual batch
-    completeSuccess = _processBatch(entityAddress, abi.decode(encodedBatch, (Batch)));
+    completeSuccess = _processBatch(entityIdBytes32, abi.decode(encodedBatch, (Batch)));
     
     emit HankoBatchProcessed(entityId, hankoHash, nonce, completeSuccess);
     
@@ -239,10 +269,10 @@ contract Depository is Console {
 
 
   function processBatch(Batch calldata batch) public returns (bool completeSuccess) {
-    return _processBatch(msg.sender, batch);
+    return _processBatch(bytes32(uint256(uint160(msg.sender))), batch);
   }
 
-  function _processBatch(address entityAddress, Batch memory batch) private returns (bool completeSuccess) {
+  function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
     uint startGas = gasleft();
 
     // the order is important: first go methods that increase entity's balance
@@ -264,7 +294,7 @@ contract Depository is Console {
     */
     
     for (uint i = 0; i < batch.cooperativeUpdate.length; i++) {
-      if(!(cooperativeUpdate(batch.cooperativeUpdate[i]))){
+      if(!(cooperativeUpdate(entityId, batch.cooperativeUpdate[i]))){
         completeSuccess = false;
       }
     }
@@ -290,7 +320,7 @@ contract Depository is Console {
 
     
     for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
-      if(!(reserveToCollateral(batch.reserveToCollateral[i]))){
+      if(!(reserveToCollateral(entityId, batch.reserveToCollateral[i]))){
         completeSuccess = false;
       }
     }
@@ -306,9 +336,12 @@ contract Depository is Console {
 
     // increase gasused for hubs
     // this is hardest to fake metric of real usage
-    if (batch.hub_id != 0 && msg.sender == _hubs[batch.hub_id].addr){
+    if (batch.hub_id != 0 && entityId == _hubs[batch.hub_id].entityId){
       _hubs[batch.hub_id].gasused += startGas - gasleft();
     }
+
+    // Update entity's gas usage score
+    entityScores[entityId].totalGasUsed += uint64(startGas - gasleft());
 
     return completeSuccess;
     
@@ -327,13 +360,13 @@ contract Depository is Console {
   }
 
   struct AddrAmountPair {
-    address addr;
+    bytes32 entity;
     uint amount;
   }
 
   struct ReserveToCollateral {
     uint tokenId;
-    address receiver;
+    bytes32 receivingEntity;
     // put in _channels with who (addr) and how much (amount)
     AddrAmountPair[] pairs;
   }
@@ -346,7 +379,7 @@ contract Depository is Console {
   }
   //Enforces the invariant: Its main job is to run the check you described: require(leftReserveDiff + rightReserveDiff + collateralDiff == 0). This guarantees no value is created or lost, only moved.
   struct CooperativeUpdate {
-    address peer;
+    bytes32 counterentity;
     Diff[] diffs;
     uint[] forgiveDebtsInTokenIds;
     bytes sig; 
@@ -374,7 +407,7 @@ contract Depository is Console {
   }
 
   struct CooperativeDisputeProof {
-    address peer;
+    bytes32 counterentity;
     ProofBody proofbody;
     bytes initialArguments;
     bytes finalArguments;
@@ -382,7 +415,7 @@ contract Depository is Console {
   }
 
   struct InitialDisputeProof {
-    address peer;
+    bytes32 counterentity;
     uint cooperativeNonce;
     uint disputeNonce;
     bytes32 proofbodyHash; 
@@ -392,7 +425,7 @@ contract Depository is Console {
   }
 
   struct FinalDisputeProof {
-    address peer;
+    bytes32 counterentity;
     uint initialCooperativeNonce;
     uint initialDisputeNonce;
     uint disputeUntilBlock;
@@ -410,7 +443,7 @@ contract Depository is Console {
 
   struct Debt {
     uint amount;
-    address creditor;
+    bytes32 creditor;
   }
   
   struct ChannelCollateral {
@@ -468,24 +501,27 @@ contract Depository is Console {
   function registerHub(uint hub_id, string memory new_uri) public returns (uint) {
     if (hub_id == 0) {
       _hubs.push(Hub({
-        addr: msg.sender,
+        entityId: bytes32(uint256(uint160(msg.sender))),
         uri: new_uri,
         gasused: 0
       }));
       return _hubs.length - 1;
     } else {
-      require(msg.sender == _hubs[hub_id].addr);
+      require(bytes32(uint256(uint160(msg.sender))) == _hubs[hub_id].entityId, "Sender is not hub owner");
       _hubs[hub_id].uri = new_uri;
       return hub_id;
     }
   }
 
   struct ExternalTokenToReserve{
+    bytes32 entity; // The entity to credit. If bytes32(0), defaults to msg.sender
     bytes32 packedToken;
     uint internalTokenId;
     uint amount;
   }
   function externalTokenToReserve(ExternalTokenToReserve memory params) public {
+    bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(msg.sender))) : params.entity;
+    
     if (params.internalTokenId == 0) {
       // Check if token already exists using efficient lookup
       params.internalTokenId = tokenToId[params.packedToken];
@@ -519,46 +555,49 @@ contract Depository is Console {
       IERC1155(contractAddress).safeTransferFrom(msg.sender, address(this), uint(tokenId), params.amount, "");
     }
 
-    _reserves[msg.sender][params.internalTokenId] += params.amount;
+    _reserves[targetEntity][params.internalTokenId] += params.amount;
+    emit ReserveUpdated(targetEntity, params.internalTokenId, _reserves[targetEntity][params.internalTokenId]);
   }
 
 
   struct ReserveToExternalToken{
-    address receiver;
+    bytes32 receivingEntity;
     uint tokenId;
     uint amount;
   }
-  function reserveToExternalToken(ReserveToExternalToken memory params) public {
-    enforceDebts(msg.sender, params.tokenId);
+  function reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
+    enforceDebts(entity, params.tokenId);
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
     //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
 
-    require(_reserves[msg.sender][params.tokenId] >= params.amount, "Not enough reserve");
+    require(_reserves[entity][params.tokenId] >= params.amount, "Not enough reserve");
 
-    _reserves[msg.sender][params.tokenId] -= params.amount;
+    _reserves[entity][params.tokenId] -= params.amount;
+    emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
 
     if (tokenType == TypeERC20) {
-      require(IERC20(contractAddress).transfer(params.receiver, params.amount));
+      require(IERC20(contractAddress).transfer(address(uint160(uint256(params.receivingEntity))), params.amount));
     } else if (tokenType == TypeERC721) {
-      IERC721(contractAddress).transferFrom(address(this), params.receiver, uint(tokenId));
+      IERC721(contractAddress).transferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(tokenId));
     } else if (tokenType == TypeERC1155) {
-      IERC1155(contractAddress).safeTransferFrom(address(this), params.receiver, uint(tokenId), params.amount, "");
+      IERC1155(contractAddress).safeTransferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(tokenId), params.amount, "");
     }
 
   }
   struct ReserveToReserve{
-    address receiver;
+    bytes32 receivingEntity;
     uint tokenId;
     uint amount;
   }
-  function reserveToReserve(ReserveToReserve memory params) public {
-    enforceDebts(msg.sender, params.tokenId);
+  function reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
+    enforceDebts(entity, params.tokenId);
 
-    require(_reserves[msg.sender][params.tokenId] >= params.amount);
-    _reserves[msg.sender][params.tokenId] -= params.amount;
-    _reserves[params.receiver][params.tokenId] += params.amount;
-    emit ReserveTransferred(msg.sender, params.receiver, params.tokenId, params.amount);
+    require(_reserves[entity][params.tokenId] >= params.amount);
+    _reserves[entity][params.tokenId] -= params.amount;
+    _reserves[params.receivingEntity][params.tokenId] += params.amount;
+    emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
+    emit ReserveUpdated(params.receivingEntity, params.tokenId, _reserves[params.receivingEntity][params.tokenId]);
   }
 
   /**
@@ -570,21 +609,24 @@ contract Depository is Console {
    * @param purpose Human-readable purpose (e.g., "Sale", "Investment", "Dividend Distribution")
    */
   function transferControlShares(
-    address to,
+    bytes32 entity,
+    bytes32 to,
     uint256 internalTokenId,
     uint256 amount,
     string calldata purpose
-  ) external {
-    enforceDebts(msg.sender, internalTokenId);
+  ) internal {
+    enforceDebts(entity, internalTokenId);
 
-    require(_reserves[msg.sender][internalTokenId] >= amount, "Insufficient control shares");
-    require(to != address(0), "Invalid recipient");
-    require(to != msg.sender, "Cannot transfer to self");
+    require(_reserves[entity][internalTokenId] >= amount, "Insufficient control shares");
+    require(to != bytes32(0), "Invalid recipient");
+    require(to != entity, "Cannot transfer to self");
 
-    _reserves[msg.sender][internalTokenId] -= amount;
+    _reserves[entity][internalTokenId] -= amount;
     _reserves[to][internalTokenId] += amount;
 
-    emit ControlSharesTransferred(msg.sender, to, internalTokenId, amount, purpose);
+    emit ControlSharesTransferred(entity, to, internalTokenId, amount, purpose);
+    emit ReserveUpdated(entity, internalTokenId, _reserves[entity][internalTokenId]);
+    emit ReserveUpdated(to, internalTokenId, _reserves[to][internalTokenId]);
   }
 
   /**
@@ -602,9 +644,9 @@ contract Depository is Console {
 
 
   
-  function getDebts(address addr, uint tokenId) public view returns (Debt[] memory allDebts, uint currentDebtIndex) {
-    currentDebtIndex = _debtIndex[addr][tokenId];
-    allDebts = _debts[addr][tokenId];
+  function getDebts(bytes32 entity, uint tokenId) public view returns (Debt[] memory allDebts, uint currentDebtIndex) {
+    currentDebtIndex = _debtIndex[entity][tokenId];
+    allDebts = _debts[entity][tokenId];
   }
 
 
@@ -612,39 +654,47 @@ contract Depository is Console {
   // can be called manually
   // iterates over _debts starting from current _debtIndex, first-in-first-out 
   // max _debts?
-  function enforceDebts(address addr, uint tokenId) public returns (uint totalDebts) {
-    uint debtsLength = _debts[addr][tokenId].length;
+  function enforceDebts(bytes32 entity, uint tokenId) public returns (uint totalDebts) {
+    uint debtsLength = _debts[entity][tokenId].length;
     if (debtsLength == 0) {
       return 0;
     }
    
-    uint memoryReserve = _reserves[addr][tokenId]; 
-    uint memoryDebtIndex = _debtIndex[addr][tokenId];
+    uint memoryReserve = _reserves[entity][tokenId]; 
+    uint memoryDebtIndex = _debtIndex[entity][tokenId];
     
     if (memoryReserve == 0){
       return debtsLength - memoryDebtIndex;
     }
     // allow partial enforcing in case there are too many _debts to pay off at once (over block gas limit)
     while (true) {
-      Debt storage debt = _debts[addr][tokenId][memoryDebtIndex];
+      Debt storage debt = _debts[entity][tokenId][memoryDebtIndex];
       
       if (memoryReserve >= debt.amount) {
         // can pay this debt off in full
         memoryReserve -= debt.amount;
         _reserves[debt.creditor][tokenId] += debt.amount;
 
-        delete _debts[addr][tokenId][memoryDebtIndex];
+        delete _debts[entity][tokenId][memoryDebtIndex];
+
+        // Update reputation score for repayment
+        EntityScore storage score = entityScores[entity];
+        score.totalActiveDebts--;
+        score.successfulRepayments++;
+        if (score.totalActiveDebts == 0) {
+          score.inDebtSince = 0; // Reset timestamp when all debts are clear
+        }
 
         // last debt was paid off, the entity is debt free now
         if (memoryDebtIndex+1 == debtsLength) {
           memoryDebtIndex = 0;
           // resets .length to 0
-          delete _debts[addr][tokenId]; 
+          delete _debts[entity][tokenId]; 
           debtsLength = 0;
           break;
         }
         memoryDebtIndex++;
-        _activeDebts[addr]--;
+        _activeDebts[entity]--;
         
       } else {
         // pay off the debt partially and break the loop
@@ -656,54 +706,54 @@ contract Depository is Console {
     }
 
     // put memory variables back to storage
-    _reserves[addr][tokenId] = memoryReserve;
-    _debtIndex[addr][tokenId] = memoryDebtIndex;
+    _reserves[entity][tokenId] = memoryReserve;
+    _debtIndex[entity][tokenId] = memoryDebtIndex;
     
     return debtsLength - memoryDebtIndex;
   }
 
 
 
-  function channelKey(address a1, address a2) public pure returns (bytes memory) {
-    //determenistic channel key is 40 bytes: concatenated lowerKey + higherKey
-    return a1 < a2 ? abi.encodePacked(a1, a2) : abi.encodePacked(a2, a1);
+  function channelKey(bytes32 e1, bytes32 e2) public pure returns (bytes memory) {
+    //determenistic channel key is 64 bytes: concatenated lowerKey + higherKey
+    return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
   
 
   
 
-  function reserveToCollateral(ReserveToCollateral memory params) public returns (bool completeSuccess) {
+  function reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {
     uint tokenId = params.tokenId;
-    address receiver = params.receiver;
+    bytes32 receivingEntity = params.receivingEntity;
    
     // debts must be paid before any transfers from reserve 
-    enforceDebts(msg.sender, tokenId);
+    enforceDebts(entity, tokenId);
 
     for (uint i = 0; i < params.pairs.length; i++) {
-      address addr = params.pairs[i].addr;
+      bytes32 counterentity = params.pairs[i].entity;
       uint amount = params.pairs[i].amount;
 
-      bytes memory ch_key = channelKey(params.receiver, addr);
+      bytes memory ch_key = channelKey(receivingEntity, counterentity);
 
-      logChannel(params.receiver, addr);
+      logChannel(receivingEntity, counterentity);
 
-      if (_reserves[msg.sender][tokenId] >= amount) {
+      if (_reserves[entity][tokenId] >= amount) {
         ChannelCollateral storage col = _collaterals[ch_key][tokenId];
 
-        _reserves[msg.sender][tokenId] -= amount;
+        _reserves[entity][tokenId] -= amount;
         col.collateral += amount;
-        if (params.receiver < addr) { // if receiver is left
+        if (receivingEntity < counterentity) { // if receiver is left
           col.ondelta += int(amount);
         }
 
-        emit TransferReserveToCollateral(receiver, addr, col.collateral, col.ondelta, tokenId);
+        emit TransferReserveToCollateral(receivingEntity, counterentity, col.collateral, col.ondelta, tokenId);
 
         log("Deposited to channel ", _collaterals[ch_key][tokenId].collateral);
       } else {
-        log("Not enough funds", msg.sender);
+        log("Not enough funds", entity);
         return false;
       }
-      logChannel(params.receiver, addr);
+      logChannel(receivingEntity, counterentity);
 
     }
 
@@ -715,17 +765,17 @@ contract Depository is Console {
 
 
   // mutually agreed update of channel state in a single atomic operation
-  function cooperativeUpdate(CooperativeUpdate memory params) public returns (bool) {
-    bytes memory ch_key = channelKey(msg.sender, params.peer);
-    address left;
-    address right;
+  function cooperativeUpdate(bytes32 entity, CooperativeUpdate memory params) internal returns (bool) {
+    bytes memory ch_key = channelKey(entity, params.counterentity);
+    bytes32 left;
+    bytes32 right;
 
-    if (msg.sender < params.peer) {
-        left = msg.sender;
-        right = params.peer;
+    if (entity < params.counterentity) {
+        left = entity;
+        right = params.counterentity;
     } else {
-        left = params.peer;
-        right = msg.sender;
+        left = params.counterentity;
+        right = entity;
     }
 
 
@@ -739,10 +789,14 @@ contract Depository is Console {
 
     log('Encoded msg', encoded_msg);
     
-    if(params.peer != ECDSA.recover(hash, params.sig)) {
+    if(params.counterentity != ECDSA.recover(hash, params.sig)) {
       log("Invalid signer ", ECDSA.recover(hash, params.sig));
       return false;
     }
+
+    // Update cooperative action scores
+    entityScores[entity].cooperativeActions++;
+    entityScores[params.counterentity].cooperativeActions++;
 
     Settled[] memory settledEvents = new Settled[](params.diffs.length);
 
@@ -753,28 +807,28 @@ contract Depository is Console {
       // ✅ INVARIANT CHECK: Total value change within the channel for this token must be zero.
       // leftReserveChange + rightReserveChange + collateralChange == 0
       int myReserveDiff = -(diff.peerReserveDiff + diff.collateralDiff);
-      require(_reserves[msg.sender][tokenId] >= uint(-myReserveDiff), "Not enough sender reserve");
+      require(_reserves[entity][tokenId] >= uint(-myReserveDiff), "Not enough sender reserve");
 
 
       if (diff.peerReserveDiff < 0) {
-        enforceDebts(params.peer, tokenId);
-        require(_reserves[params.peer][tokenId] >= uint(-diff.peerReserveDiff), "Not enough peer reserve");
+        enforceDebts(params.counterentity, tokenId);
+        require(_reserves[params.counterentity][tokenId] >= uint(-diff.peerReserveDiff), "Not enough peer reserve");
 
-        _reserves[params.peer][tokenId] -= uint(-diff.peerReserveDiff);
+        _reserves[params.counterentity][tokenId] -= uint(-diff.peerReserveDiff);
       } else {
-        _reserves[params.peer][tokenId] += uint(diff.peerReserveDiff);
+        _reserves[params.counterentity][tokenId] += uint(diff.peerReserveDiff);
       }
 
 
       // ensure that the entity has enough funds to apply the diffs
       if (myReserveDiff < 0) {
-        enforceDebts(msg.sender, tokenId);
+        enforceDebts(entity, tokenId);
         // This check is already implicitly done by the invariant and the peer's reserve check,
         // but an explicit check is safer.
-        require(_reserves[msg.sender][tokenId] >= uint(-myReserveDiff), "Not enough sender reserve");
-        _reserves[msg.sender][tokenId] -= uint(-myReserveDiff);
+        require(_reserves[entity][tokenId] >= uint(-myReserveDiff), "Not enough sender reserve");
+        _reserves[entity][tokenId] -= uint(-myReserveDiff);
       } else {
-        _reserves[msg.sender][tokenId] += uint(myReserveDiff);
+        _reserves[entity][tokenId] += uint(myReserveDiff);
       }
 
 
@@ -808,7 +862,7 @@ contract Depository is Console {
 
     _channels[ch_key].cooperativeNonce++;
 
-    logChannel(msg.sender, params.peer);
+    logChannel(entity, params.counterentity);
     return true;
   }
 
@@ -821,14 +875,14 @@ contract Depository is Console {
   // then increases cooperativeNonce to invalidate all previous dispute proofs
 
   // todo: private visability
-  function finalizeChannel(address entity1, 
-      address entity2, 
+  function finalizeChannel(bytes32 entity1, 
+      bytes32 entity2, 
       ProofBody memory proofbody, 
       bytes memory arguments1, 
       bytes memory arguments2) public returns (bool) 
   {
-    address leftAddress;
-    address rightAddress;
+    bytes32 leftAddress;
+    bytes32 rightAddress;
     bytes memory leftArguments;
     bytes memory rightArguments;
     if (entity1 < entity2) {
@@ -924,6 +978,13 @@ contract Depository is Console {
             amount: debtAmount
           }));
           _activeDebts[getsDebt]++;
+
+          // Update reputation score for new debt
+          EntityScore storage score = entityScores[getsDebt];
+          score.totalActiveDebts++;
+          if (score.inDebtSince == 0) {
+            score.inDebtSince = uint48(block.timestamp);
+          }
         }
       }
 
@@ -942,7 +1003,7 @@ contract Depository is Console {
   }
 
   function cooperativeDisputeProof (CooperativeDisputeProof memory params) public returns (bool) {
-    bytes memory ch_key = channelKey(msg.sender, params.peer);
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
 
     console.log("Received proof");
@@ -962,20 +1023,24 @@ contract Depository is Console {
 
     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
-    require(ECDSA.recover(final_hash, params.sig) == params.peer);
+    require(ECDSA.recover(final_hash, params.sig) == params.counterentity);
 
     require(_channels[ch_key].disputeHash == bytes32(0));
 
     delete _channels[ch_key].disputeHash;
 
-    finalizeChannel(msg.sender, params.peer, params.proofbody, params.finalArguments, params.initialArguments);
+    finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.proofbody, params.finalArguments, params.initialArguments);
     
-    emit CooperativeClose(msg.sender, params.peer, _channels[ch_key].cooperativeNonce);
+    emit CooperativeClose(bytes32(uint256(uint160(msg.sender))), params.counterentity, _channels[ch_key].cooperativeNonce);
   }
 
 
   function initialDisputeProof(InitialDisputeProof memory params) public returns (bool) {
-    bytes memory ch_key = channelKey(msg.sender, params.peer);
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+
+    // Update dispute scores for both parties
+    entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+    entityScores[params.counterentity].totalDisputes++;
 
     // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
     require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce);
@@ -990,46 +1055,33 @@ contract Depository is Console {
 
     log('encoded_msg',encoded_msg);
 
-    require(ECDSA.recover(final_hash, params.sig) == params.peer, "Invalid signer");
+    require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
 
     require(_channels[ch_key].disputeHash == bytes32(0));
 
     bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
       params.disputeNonce, 
-      msg.sender < params.peer, // is started by left
+      bytes32(uint256(uint160(msg.sender))) < params.counterentity, // is started by left
       block.number + 20,
       params.proofbodyHash, 
       keccak256(abi.encodePacked(params.initialArguments)));
 
     _channels[ch_key].disputeHash = keccak256(encodedDispute);
-    emit DisputeStarted(msg.sender, params.peer, params.disputeNonce, params.initialArguments);
+    emit DisputeStarted(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.disputeNonce, params.initialArguments);
   }
 
   function finalDisputeProof(FinalDisputeProof memory params) public returns (bool) {
-    bytes memory ch_key = channelKey(msg.sender, params.peer);
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+
+    // Update dispute scores for both parties involved in the finalization
+    entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+    entityScores[params.counterentity].totalDisputes++;
+
     // verify the dispute was started
 
-    bytes memory encodedDispute = abi.encodePacked(params.initialCooperativeNonce,
-      params.initialDisputeNonce, 
-      params.startedByLeft, 
-      params.disputeUntilBlock,
-      params.initialProofbodyHash, 
-      keccak256(params.initialArguments));
-    
-    require(_channels[ch_key].disputeHash == keccak256(encodedDispute), "Dispute not found");
-
-    if (params.sig.length != 0) {
-      // counter proof was provided
-      bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
-      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, 
-        ch_key, 
-        params.finalCooperativeNonce, 
-        params.finalDisputeNonce, 
-        finalProofbodyHash);
-
-      bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+    bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
       log('encoded_msg',encoded_msg);
-      require(ECDSA.recover(final_hash, params.sig) == params.peer, "Invalid signer");
+      require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
 
       // TODO: if nonce is same, Left one's proof is considered valid
 
@@ -1038,13 +1090,13 @@ contract Depository is Console {
       
     } else {
       // counterparty agrees or does not respond 
-      bool senderIsCounterparty = params.startedByLeft != msg.sender < params.peer;
+      bool senderIsCounterparty = params.startedByLeft != (bytes32(uint256(uint160(msg.sender))) < params.counterentity);
       require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
       require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
     }
     
 
-    finalizeChannel(msg.sender, params.peer, params.finalProofbody, params.finalArguments, params.initialArguments);
+    finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
   
 
     return true;
@@ -1074,20 +1126,20 @@ contract Depository is Console {
   
   
   // return users with reserves in provided tokens
-  function getUsers(address[] memory addrs, uint[] memory tokenIds) external view returns (UserReturn[] memory response) {
-    response = new UserReturn[](addrs.length);
-    for (uint i = 0;i<addrs.length;i++){
-      address addr = addrs[i];
+  function getUsers(bytes32[] memory entities, uint[] memory tokenIds) external view returns (UserReturn[] memory response) {
+    response = new UserReturn[](entities.length);
+    for (uint i = 0;i<entities.length;i++){
+      bytes32 entity = entities[i];
       response[i] = UserReturn({
-        ETH_balance: addr.balance,
+        ETH_balance: address(uint160(uint256(entity))).balance,
         tokens: new TokenReserveDebts[](tokenIds.length)
       });
     
       for (uint j = 0;j<tokenIds.length;j++){
         response[i].tokens[j]= TokenReserveDebts({
-          reserve: _reserves[addr][tokenIds[j]],
-          debtIndex: _debtIndex[addr][tokenIds[j]],
-          debts: _debts[addr][tokenIds[j]]
+          reserve: _reserves[entity][tokenIds[j]],
+          debtIndex: _debtIndex[entity][tokenIds[j]],
+          debts: _debts[entity][tokenIds[j]]
         });
       }
     }
@@ -1096,14 +1148,14 @@ contract Depository is Console {
   }
   
   // get many _channels around one address, with collaterals in provided tokens
-  function getChannels(address  addr, address[] memory peers, uint[] memory tokenIds) public view returns (ChannelReturn[] memory response) {
+  function getChannels(bytes32 entity, bytes32[] memory counterentities, uint[] memory tokenIds) public view returns (ChannelReturn[] memory response) {
     bytes memory ch_key;
 
     // set length of the response array
-    response = new ChannelReturn[](peers.length);
+    response = new ChannelReturn[](counterentities.length);
 
-    for (uint i = 0;i<peers.length;i++){
-      ch_key = channelKey(addr, peers[i]);
+    for (uint i = 0;i<counterentities.length;i++){
+      ch_key = channelKey(entity, counterentities[i]);
 
       response[i]=ChannelReturn({
         channel: _channels[ch_key],
@@ -1137,17 +1189,17 @@ contract Depository is Console {
   */
 
 
-  function logChannel(address a1, address a2) public {
+  function logChannel(bytes32 e1, bytes32 e2) public {
     /*
-    bytes memory ch_key = channelKey(a1, a2);
+    bytes memory ch_key = channelKey(e1, e2);
     log(">>> Logging channel", ch_key);
     log("cooperativeNonce", _channels[ch_key].cooperativeNonce);
     log("disputeHash", _channels[ch_key].disputeHash);
 
     for (uint i = 0; i < _tokens.length; i++) {
       log("Token", _tokens[i]);
-      log("Left:", _reserves[a1][i]);
-      log("Right:", _reserves[a2][i]);
+      log("Left:", _reserves[e1][i]);
+      log("Right:", _reserves[e2][i]);
       log("collateral", _collaterals[ch_key][i].collateral);
       log("ondelta", _collaterals[ch_key][i].ondelta);
     }*/
@@ -1156,15 +1208,15 @@ contract Depository is Console {
   // Events for control/dividend shares
   event ControlSharesReceived(
     address indexed entityProvider,
-    address indexed fromEntity, 
+    bytes32 indexed fromEntity, 
     uint256 indexed tokenId,
     uint256 amount,
     bytes data
   );
   
   event ControlSharesTransferred(
-    address indexed from,
-    address indexed to,
+    bytes32 indexed from,
+    bytes32 indexed to,
     uint256 indexed internalTokenId,
     uint256 amount,
     string purpose
@@ -1196,9 +1248,9 @@ contract Depository is Console {
       }
       
       // Add to sender's reserves (the entity that sent the tokens)
-      _reserves[from][internalTokenId] += value;
+      _reserves[bytes32(uint256(uint160(from)))][internalTokenId] += value;
       
-      emit ControlSharesReceived(msg.sender, from, id, value, data);
+      emit ControlSharesReceived(msg.sender, bytes32(uint256(uint160(from))), id, value, data);
     }
     
     return this.onERC1155Received.selector;
@@ -1215,58 +1267,5 @@ contract Depository is Console {
    * @param tokenId The internal ID of the token being moved.
    * @param amount The amount to move.
    */
-  function reserveToCollateralUnilateral(address peer, uint256 tokenId, uint256 amount) external {
-      require(amount > 0, "Amount must be positive");
-      enforceDebts(msg.sender, tokenId);
-      require(_reserves[msg.sender][tokenId] >= amount, "Insufficient reserve");
-
-      _reserves[msg.sender][tokenId] -= amount;
-
-      bytes memory ch_key = channelKey(msg.sender, peer);
-      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
-      col.collateral += amount;
-
-      // If msg.sender is the 'left' party (lower address), their deposit increases ondelta.
-      if (msg.sender < peer) {
-          col.ondelta += int256(amount);
-      }
-      // If msg.sender is 'right', ondelta is implicitly reduced relative to their new contribution,
-      // which correctly reflects that the new collateral belongs to them. So, no change to ondelta.
-
-      emit TransferReserveToCollateral(msg.sender, peer, col.collateral, col.ondelta, tokenId);
-  }
-
-  /**
-   * @notice Cooperative action to move funds from a channel's collateral back to a reserve.
-   * @dev REQUIRES a signature from the counterparty.
-   * @param peer The counterparty in the channel.
-   * @param tokenId The internal ID of the token being moved.
-   * @param amount The amount to move.
-   * @param signature The counterparty's signature approving the withdrawal.
-   */
-  function collateralToReserve(address peer, uint256 tokenId, uint256 amount, bytes calldata signature) external {
-      require(amount > 0, "Amount must be positive");
-
-      bytes32 messageHash = keccak256(abi.encodePacked("COLLATERAL_TO_RESERVE", msg.sender, peer, tokenId, amount));
-      bytes32 signedHash = ECDSA.toEthSignedMessageHash(messageHash);
-      require(ECDSA.recover(signedHash, signature) == peer, "Invalid signature");
-
-      bytes memory ch_key = channelKey(msg.sender, peer);
-      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
-      require(col.collateral >= amount, "Insufficient collateral");
-
-      col.collateral -= amount;
-      _reserves[msg.sender][tokenId] += amount;
-
-      // If msg.sender is the 'left' party, their withdrawal decreases ondelta.
-      if (msg.sender < peer) {
-          col.ondelta -= int256(amount);
-      }
-      // If msg.sender is 'right', their withdrawal means less of the total collateral belongs to 'left',
-      // so ondelta (left's share) remains unchanged relative to the new, smaller total.
-
-      emit TransferReserveToCollateral(peer, msg.sender, col.collateral, col.ondelta, tokenId); // Note reversed order for clarity
-  }
-
 
 }

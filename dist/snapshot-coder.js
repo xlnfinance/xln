@@ -77,7 +77,7 @@ function deterministicDeepSort(obj) {
 function reconstructMaps(obj) {
     if (Array.isArray(obj)) {
         // Check if it's a key-value pair array that should be a Map
-        const isMapArray = obj.every((item) => Array.isArray(item) && item.length === 2);
+        const isMapArray = obj.every(item => Array.isArray(item) && item.length === 2);
         if (isMapArray) {
             return new Map(obj.map(([k, v]) => [k, reconstructMaps(v)]));
         }
@@ -168,7 +168,7 @@ export const decodeAsync = async (buffer) => {
             serverInput: reconstructMaps(serverInput),
             replicas,
             // Add timestamp for compatibility
-            timestamp: Date.now()
+            timestamp: Date.now(),
         };
     }
     else {

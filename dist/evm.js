@@ -3,30 +3,30 @@
  * Handles blockchain interactions, jurisdictions, and smart contract operations
  */
 import { ethers } from 'ethers';
-import path from 'path';
 import fs from 'fs';
-import { DEBUG, isBrowser } from './utils.js';
-import { encodeBoard, hashBoard, detectEntityType, extractNumberFromEntityId } from './entity-factory.js';
+import path from 'path';
+import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
+import { DEBUG, isBrowser } from './utils';
 // === ETHEREUM INTEGRATION ===
 // Load contract configuration directly in jurisdiction generation
 export const ENTITY_PROVIDER_ABI = [
-    "function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)",
-    "function assignName(string memory name, uint256 entityNumber) external",
-    "function transferName(string memory name, uint256 newEntityNumber) external",
-    "function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))",
-    "function nameToNumber(string memory name) external view returns (uint256)",
-    "function numberToName(uint256 entityNumber) external view returns (string memory)",
-    "function nextNumber() external view returns (uint256)",
+    'function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)',
+    'function assignName(string memory name, uint256 entityNumber) external',
+    'function transferName(string memory name, uint256 newEntityNumber) external',
+    'function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))',
+    'function nameToNumber(string memory name) external view returns (uint256)',
+    'function numberToName(uint256 entityNumber) external view returns (string memory)',
+    'function nextNumber() external view returns (uint256)',
     // Governance functions (governance is auto-setup on entity registration)
-    "function getTokenIds(uint256 entityNumber) external pure returns (uint256 controlTokenId, uint256 dividendTokenId)",
-    "function getGovernanceInfo(uint256 entityNumber) external view returns (uint256 controlTokenId, uint256 dividendTokenId, uint256 controlSupply, uint256 dividendSupply, bool hasActiveProposal, bytes32 articlesHash)",
-    "function balanceOf(address account, uint256 id) external view returns (uint256)",
-    "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external",
+    'function getTokenIds(uint256 entityNumber) external pure returns (uint256 controlTokenId, uint256 dividendTokenId)',
+    'function getGovernanceInfo(uint256 entityNumber) external view returns (uint256 controlTokenId, uint256 dividendTokenId, uint256 controlSupply, uint256 dividendSupply, bool hasActiveProposal, bytes32 articlesHash)',
+    'function balanceOf(address account, uint256 id) external view returns (uint256)',
+    'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external',
     // Events
-    "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
-    "event NameAssigned(string indexed name, uint256 indexed entityNumber)",
-    "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)",
-    "event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)"
+    'event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)',
+    'event NameAssigned(string indexed name, uint256 indexed entityNumber)',
+    'event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)',
+    'event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)',
 ];
 export const connectToEthereum = async (jurisdiction) => {
     try {
@@ -47,7 +47,7 @@ export const connectToEthereum = async (jurisdiction) => {
 // Note: setupGovernance is no longer needed - governance is automatically created on entity registration
 export const registerNumberedEntityOnChain = async (config, name) => {
     if (!config.jurisdiction) {
-        throw new Error("Jurisdiction required for on-chain registration");
+        throw new Error('Jurisdiction required for on-chain registration');
     }
     try {
         const { entityProvider } = await connectToEthereum(config.jurisdiction);
@@ -243,7 +243,7 @@ export const generateJurisdictions = async () => {
                 name: jData.name,
                 entityProviderAddress: jData.contracts.entityProvider,
                 depositoryAddress: jData.contracts.depository,
-                chainId: jData.chainId
+                chainId: jData.chainId,
             });
         }
     }

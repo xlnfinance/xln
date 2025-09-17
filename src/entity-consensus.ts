@@ -184,7 +184,7 @@ export const applyEntityInput = async (
   env: Env,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
-): Promise<EntityInput[]> => {
+): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
   // Debug: Log every input being processed with timestamp and unique identifier
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const timestamp = Date.now();
@@ -212,11 +212,11 @@ export const applyEntityInput = async (
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
     log.error(`❌ Invalid input for ${entityInput.entityId}:${entityInput.signerId}`);
-    return [];
+    return { newState: entityReplica.state, outputs: [] };
   }
   if (!validateEntityReplica(entityReplica)) {
     log.error(`❌ Invalid replica state for ${entityReplica.entityId}:${entityReplica.signerId}`);
-    return [];
+    return { newState: entityReplica.state, outputs: [] };
   }
 
   const entityOutbox: EntityInput[] = [];
@@ -296,7 +296,7 @@ export const applyEntityInput = async (
         );
 
       // Return early - commit notifications don't trigger further processing
-      return entityOutbox;
+      return { newState: entityReplica.state, outputs: entityOutbox };
     }
   }
 
@@ -349,7 +349,7 @@ export const applyEntityInput = async (
     for (const [signerId, signature] of entityInput.precommits) {
       if (detectByzantineFault(entityReplica.proposal.signatures, signerId, signature)) {
         log.error(`❌ Rejecting Byzantine input from ${signerId}`);
-        return entityOutbox; // Return early, don't process malicious input
+        return { newState: entityReplica.state, outputs: entityOutbox }; // Return early, don't process malicious input
       }
       entityReplica.proposal.signatures.set(signerId, signature);
     }
@@ -365,7 +365,7 @@ export const applyEntityInput = async (
     // SECURITY: Validate voting power
     if (!validateVotingPower(totalPower)) {
       log.error(`❌ Invalid voting power calculation: ${totalPower}`);
-      return entityOutbox;
+      return { newState: entityReplica.state, outputs: entityOutbox };
     }
 
     if (DEBUG) {
@@ -476,7 +476,7 @@ export const applyEntityInput = async (
         console.log(
           `    ⚡ Single signer entity: transactions applied directly, height: ${entityReplica.state.height}`,
         );
-      return entityOutbox; // Skip the full consensus process
+      return { newState: entityReplica.state, outputs: entityOutbox }; // Skip the full consensus process
     }
 
     if (DEBUG)
@@ -492,7 +492,7 @@ export const applyEntityInput = async (
     // SECURITY: Validate timestamp
     if (!validateTimestamp(newTimestamp, Date.now())) {
       log.error(`❌ Invalid proposal timestamp: ${newTimestamp}`);
-      return entityOutbox;
+      return { newState: entityReplica.state, outputs: entityOutbox };
     }
 
     const frameHash = `frame_${entityReplica.state.height + 1}_${newTimestamp}`;
@@ -589,7 +589,7 @@ export const applyEntityInput = async (
     }
   });
 
-  return entityOutbox;
+  return { newState: entityReplica.state, outputs: entityOutbox };
 };
 
 export const applyEntityFrame = async (
