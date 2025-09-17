@@ -80,7 +80,7 @@ These ledgers are sovereign and composable. Interactions are mediated by signatu
 
 - **Channels (bilateral A-ledgers)**: Deterministic, bilateral machines replicated at both sides. Each channel has a stable `channelKey = sha256(min(addrL,addrR) || max(addrL,addrR))`. State includes `blockId`, `timestamp`, `transitionId`, `previousBlockHash`, `previousStateHash`.
 - **Subchannels & deltas**: Each channel holds many subchannels with token-specific deltas and limits:
-  - `leftCreditLimit/rightCreditLimit`, `leftAllowence/rightAllowence`, `collateral`, `ondelta/offdelta`, `cooperativeNonce`, `disputeNonce`.
+  - `leftCreditLimit/rightCreditLimit`, `leftAllowance/rightAllowance`, `collateral`, `ondelta/offdelta`, `cooperativeNonce`, `disputeNonce`.
   - `proposedEvents` are typed intents (e.g., settle, withdraw) that become proofs for the Entity to sign and commit.
 - **Subcontracts**: Embedded contract-like records per token/chain, tracking deposits/withdrawals (`leftDeposit/rightDeposit`, `leftWithdraw/rightWithdraw`) and `status` (active/closing/closed).
 - **Proof encoding**: Channel state is RLP-encoded and stored under `channelMap[channelKey]`; the channel root is committed in the Entity’s final block, anchoring the A-ledger into the E-ledger.
