@@ -34,6 +34,15 @@ export const ENTITY_PROVIDER_ABI = [
   'event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)',
 ];
 
+export const DEPOSITORY_ABI = [
+  'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
+  'function debugBulkFundEntities() external',
+  'function processBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, uint256 externalTokenId, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(bytes32 counterentity, uint256 tokenId, uint256 amount)[] reserveToCollateral, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(uint256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bool startedByLeft, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, tuple(uint256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
+  'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
+  'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
+  'event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)',
+];
+
 export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
   try {
     // Connect to specified RPC node
@@ -44,11 +53,88 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
 
     // Create contract instances
     const entityProvider = new ethers.Contract(jurisdiction.entityProviderAddress, ENTITY_PROVIDER_ABI, signer);
-    const depository = new ethers.Contract(jurisdiction.depositoryAddress, [], signer); // Add depository ABI later if needed
+    const depository = new ethers.Contract(jurisdiction.depositoryAddress, DEPOSITORY_ABI, signer);
 
     return { provider, signer, entityProvider, depository };
   } catch (error) {
     console.error(`Failed to connect to ${jurisdiction.name} at ${jurisdiction.address}:`, error);
+    throw error;
+  }
+};
+
+// Debug function to fund entity reserves for testing
+export const debugFundReserves = async (jurisdiction: JurisdictionConfig, entityId: string, tokenId: number, amount: string) => {
+  try {
+    console.log(`💰 DEBUG: Funding entity ${entityId.slice(0, 10)} with ${amount} of token ${tokenId}...`);
+    
+    const { depository } = await connectToEthereum(jurisdiction);
+    
+    // Fund the entity's reserves for testing
+    const tx = await depository.debugFundReserves(entityId, tokenId, amount);
+    console.log(`📡 Debug funding transaction: ${tx.hash}`);
+    
+    const receipt = await tx.wait();
+    console.log(`✅ Debug funding confirmed in block ${receipt.blockNumber}`);
+    
+    // Check new balance
+    const newBalance = await depository._reserves(entityId, tokenId);
+    console.log(`💰 Entity ${entityId.slice(0, 10)} now has ${newBalance.toString()} of token ${tokenId}`);
+    
+    return { transaction: tx, receipt, newBalance };
+  } catch (error) {
+    console.error(`❌ Failed to fund reserves:`, error);
+    throw error;
+  }
+};
+
+// Submit real processBatch transaction to jurisdiction
+export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entityId: string, batch: any) => {
+  try {
+    console.log(`💸 Submitting real processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
+    console.log(`🔍 BATCH DEBUG:`, JSON.stringify(batch, null, 2));
+    console.log(`🔍 ENTITY DEBUG: ${entityId}`);
+    console.log(`🔍 JURISDICTION DEBUG:`, jurisdiction);
+    
+    const { depository, provider } = await connectToEthereum(jurisdiction);
+    console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
+    
+    // Check if contract exists
+    const code = await provider.getCode(depository.target);
+    console.log(`🔍 CONTRACT CODE LENGTH: ${code.length} characters`);
+    
+    if (code === '0x') {
+      throw new Error('Contract not deployed at this address');
+    }
+    
+    // Check current balance (entities should be pre-funded in constructor)
+    const currentBalance = await depository._reserves(entityId, batch.reserveToReserve[0]?.tokenId || 1);
+    console.log(`🔍 Current balance: ${currentBalance.toString()}`);
+    
+    if (currentBalance.toString() === '0') {
+      throw new Error(`Entity ${entityId.slice(0, 10)} has no reserves! Contract should be pre-funded.`);
+    }
+    
+    // First try to estimate gas to get better error info
+    console.log(`🔍 Estimating gas for processBatch...`);
+    try {
+      const gasEstimate = await depository.processBatch.estimateGas(entityId, batch);
+      console.log(`🔍 Gas estimate: ${gasEstimate.toString()}`);
+    } catch (gasError) {
+      console.error(`❌ Gas estimation failed:`, gasError);
+      throw gasError;
+    }
+    
+    // Submit the batch transaction to the real blockchain (entity can sign as any entity for now)
+    const tx = await depository.processBatch(entityId, batch);
+    console.log(`📡 Transaction submitted: ${tx.hash}`);
+    
+    // Wait for confirmation
+    const receipt = await tx.wait();
+    console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
+    
+    return { transaction: tx, receipt };
+  } catch (error) {
+    console.error(`❌ Failed to submit processBatch to ${jurisdiction.name}:`, error);
     throw error;
   }
 };

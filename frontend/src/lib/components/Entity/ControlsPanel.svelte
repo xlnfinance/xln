@@ -197,10 +197,27 @@
         hub_id: 0,
       };
 
-      // The key step: broadcasting the transaction directly to the jurisdiction's depository
-      await xln.depositoryProcessBatch(env, tab.signer, batch);
+      // Real blockchain submission: UI → j-machine → j-watcher → entity machine
+      console.log('💸 Submitting REAL processBatch to blockchain...');
       
-      console.log('💸 J-tx sent successfully to', recipientAddress);
+      // Get jurisdiction info
+      const ethJurisdiction = await xln.getJurisdictionByAddress('ethereum');
+      if (!ethJurisdiction) {
+        throw new Error('Ethereum jurisdiction not found');
+      }
+      
+      // Submit real transaction to deployed Depository contract
+      const result = await xln.submitProcessBatch(ethJurisdiction, tab.entityId, batch);
+      console.log('✅ Real blockchain transaction confirmed:', result.receipt.hash);
+      
+      // Now wait for j-watcher to pick up the ReserveUpdated events and feed to entity machine
+      // The j-watcher should automatically detect the events and create entity inputs
+      console.log('⏳ Waiting for j-watcher to process events...');
+      
+      // Give j-watcher time to process events
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      console.log('💸 Reserve transfer sent successfully to', recipientAddress);
       
       // Reset form
       jtxRecipient = '';

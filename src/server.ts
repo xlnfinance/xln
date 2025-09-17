@@ -23,11 +23,13 @@ import {
 import {
   assignNameOnChain,
   connectToEthereum,
+  debugFundReserves,
   getAvailableJurisdictions,
   getEntityInfoFromChain,
   getJurisdictionByAddress,
   getNextEntityNumber,
   registerNumberedEntityOnChain,
+  submitProcessBatch,
   transferNameBetweenEntities,
 } from './evm';
 import { createGossipLayer } from './gossip';
@@ -671,6 +673,8 @@ export {
   runDemoWrapper,
   // Name resolution functions
   searchEntityNames,
+  submitProcessBatch,
+  debugFundReserves,
   transferNameBetweenEntities,
 };
 
