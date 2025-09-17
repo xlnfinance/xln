@@ -4,7 +4,7 @@
  * Combines basic name registry with gossip layer for profile storage.
  * Includes autocomplete functionality and hanko-signed profile updates.
  */
-import { formatEntityDisplay, generateEntityAvatar } from './utils.js';
+import { formatEntityDisplay, generateEntityAvatar } from './utils';
 // === PROFILE STORAGE ===
 /**
  * Store entity profile in gossip layer
@@ -94,7 +94,7 @@ export const searchEntityNames = async (db, query, limit = 10) => {
                     entityId,
                     name: profile?.name || formatEntityDisplay(entityId),
                     avatar,
-                    relevance
+                    relevance,
                 });
             }
         }
@@ -119,7 +119,7 @@ export const searchEntityNames = async (db, query, limit = 10) => {
 export const createProfileUpdateTx = (updates) => {
     return {
         type: 'profile-update',
-        data: updates
+        data: updates,
     };
 };
 /**
@@ -135,7 +135,7 @@ export const processProfileUpdate = async (db, entityId, updates, hankoSignature
                 entityId,
                 name: formatEntityDisplay(entityId), // Default to formatted entity ID
                 lastUpdated: Date.now(),
-                hankoSignature
+                hankoSignature,
             };
         }
         // Apply updates
@@ -158,39 +158,6 @@ export const processProfileUpdate = async (db, entityId, updates, hankoSignature
         console.error('Error processing profile update:', error);
     }
 };
-// === INITIALIZATION & DEMO DATA ===
-/**
- * Initialize demo profiles for existing entities
- */
-export const initializeDemoProfiles = async (db, env) => {
-    if (!db)
-        return;
-    console.log('🏷️ Initializing demo entity profiles...');
-    // Create profiles for existing entities
-    const demoProfiles = [
-        {
-            entityId: '0x0000000000000000000000000000000000000000000000000000000000000001',
-            name: 'Trading Collective',
-            bio: 'A decentralized trading group focused on DeFi strategies',
-            website: 'https://trading-collective.xyz',
-            lastUpdated: Date.now(),
-            hankoSignature: 'demo_signature_1'
-        },
-        {
-            entityId: '0x0000000000000000000000000000000000000000000000000000000000000002',
-            name: 'Governance DAO',
-            bio: 'Multi-signature governance entity for protocol decisions',
-            website: 'https://governance-dao.org',
-            lastUpdated: Date.now(),
-            hankoSignature: 'demo_signature_2'
-        }
-    ];
-    // Store demo profiles
-    for (const profile of demoProfiles) {
-        await storeProfile(db, profile);
-    }
-    console.log(`✅ Initialized ${demoProfiles.length} demo profiles`);
-};
 // === NAME RESOLUTION HELPERS ===
 /**
  * Resolve entity ID to display name
@@ -206,6 +173,6 @@ export const getEntityDisplayInfo = async (db, entityId) => {
     const profile = await getProfile(db, entityId);
     return {
         name: profile?.name || formatEntityDisplay(entityId),
-        avatar: profile?.avatar || generateEntityAvatar(entityId)
+        avatar: profile?.avatar || generateEntityAvatar(entityId),
     };
 };

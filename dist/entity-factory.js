@@ -3,16 +3,16 @@
  * Entity creation, ID generation, and entity utility functions
  */
 import { ethers } from 'ethers';
-import { DEBUG } from './utils.js';
+import { DEBUG } from './utils';
 // Entity encoding utilities
 export const encodeBoard = (config) => {
     const delegates = config.validators.map(validator => ({
         entityId: validator, // For EOA addresses (20 bytes)
-        votingPower: Number(config.shares[validator] || 1n)
+        votingPower: Number(config.shares[validator] || 1n),
     }));
     const board = {
         votingThreshold: Number(config.threshold),
-        delegates: delegates
+        delegates: delegates,
     };
     // Return JSON representation that can be hashed consistently
     return JSON.stringify(board, Object.keys(board).sort());
@@ -35,7 +35,7 @@ export const generateLazyEntityId = (validators, threshold) => {
     const sortedValidators = validatorData.slice().sort((a, b) => a.name.localeCompare(b.name));
     const quorumData = {
         validators: sortedValidators,
-        threshold: threshold.toString()
+        threshold: threshold.toString(),
     };
     const serialized = JSON.stringify(quorumData);
     return hashBoard(serialized);
@@ -136,20 +136,20 @@ export const createLazyEntity = (name, validators, threshold, jurisdiction) => {
         threshold,
         validators,
         shares,
-        jurisdiction
+        jurisdiction,
     };
 };
 // 2. NUMBERED ENTITIES (Small gas cost)
 export const createNumberedEntity = async (name, validators, threshold, jurisdiction) => {
     if (!jurisdiction) {
-        throw new Error("Jurisdiction required for numbered entity registration");
+        throw new Error('Jurisdiction required for numbered entity registration');
     }
     const boardHash = hashBoard(encodeBoard({
         mode: 'proposer-based',
         threshold,
         validators,
         shares: validators.reduce((acc, v) => ({ ...acc, [v]: 1n }), {}),
-        jurisdiction
+        jurisdiction,
     }));
     if (DEBUG)
         console.log(`🔢 Creating numbered entity: ${name}`);
@@ -178,14 +178,14 @@ export const createNumberedEntity = async (name, validators, threshold, jurisdic
         threshold,
         validators,
         shares,
-        jurisdiction
+        jurisdiction,
     };
     return { config, entityNumber };
 };
 // 3. NAMED ENTITIES (Premium - admin assignment required)
 export const requestNamedEntity = async (name, entityNumber, jurisdiction) => {
     if (!jurisdiction) {
-        throw new Error("Jurisdiction required for named entity");
+        throw new Error('Jurisdiction required for named entity');
     }
     if (DEBUG)
         console.log(`🏷️ Requesting named entity assignment`);
@@ -213,7 +213,7 @@ export const resolveEntityIdentifier = async (identifier) => {
         const number = parseInt(identifier.slice(1));
         return {
             entityId: generateNumberedEntityId(number),
-            type: 'numbered'
+            type: 'numbered',
         };
     }
     else if (/^\d+$/.test(identifier)) {
@@ -221,14 +221,14 @@ export const resolveEntityIdentifier = async (identifier) => {
         const number = parseInt(identifier);
         return {
             entityId: generateNumberedEntityId(number),
-            type: 'numbered'
+            type: 'numbered',
         };
     }
     else if (identifier.startsWith('0x')) {
         // 0x123... -> direct entity ID
         return {
             entityId: identifier,
-            type: detectEntityType(identifier)
+            type: detectEntityType(identifier),
         };
     }
     else {
@@ -241,7 +241,7 @@ export const resolveEntityIdentifier = async (identifier) => {
         if (simulatedNumber > 0) {
             return {
                 entityId: generateNumberedEntityId(simulatedNumber),
-                type: 'named'
+                type: 'named',
             };
         }
         else {

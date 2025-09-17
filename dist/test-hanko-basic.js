@@ -7,17 +7,17 @@
  * - Test various signature scenarios
  */
 import { ethers } from 'ethers';
-import { buildRealHanko, unpackRealSignatures, detectSignatureCount } from './hanko-real.js';
+import { buildRealHanko, detectSignatureCount, unpackRealSignatures } from './hanko-real';
 // Test private keys (same as in other tests)
 const testKeys = {
     alice: Buffer.from('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c6a2440020bbaa6bd1a13'.slice(2), 'hex'),
     bob: Buffer.from('0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804d99bb9a1'.slice(2), 'hex'),
-    carol: Buffer.from('0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6'.slice(2), 'hex')
+    carol: Buffer.from('0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6'.slice(2), 'hex'),
 };
 const testAddresses = {
     alice: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
     bob: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-    carol: '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+    carol: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
 };
 /**
  * Test 1: Single signature Hanko
@@ -28,7 +28,7 @@ async function testSingleSignature() {
     const hanko = await buildRealHanko(testHash, {
         noEntities: [], // No failed entities
         privateKeys: [testKeys.alice], // Alice signs
-        claims: [] // No claims
+        claims: [], // No claims
     });
     console.log('✅ Built Hanko with:');
     console.log(`   - Placeholders: ${hanko.placeholders.length}`);
@@ -51,7 +51,7 @@ async function testMultipleSignatures() {
     const hanko = await buildRealHanko(testHash, {
         noEntities: [],
         privateKeys: [testKeys.alice, testKeys.bob, testKeys.carol], // All three sign
-        claims: []
+        claims: [],
     });
     console.log('✅ Built Hanko with:');
     console.log(`   - Placeholders: ${hanko.placeholders.length}`);
@@ -72,13 +72,15 @@ async function testMixedHanko() {
     const hanko = await buildRealHanko(testHash, {
         noEntities: [Buffer.from(ethers.randomBytes(32))], // 1 failed entity
         privateKeys: [testKeys.alice, testKeys.bob], // 2 signatures
-        claims: [{
+        claims: [
+            {
                 entityId: Buffer.from(ethers.randomBytes(32)),
                 entityIndexes: [1, 2], // Reference the signatures
                 weights: [50, 50],
                 threshold: 100,
-                expectedQuorumHash: Buffer.from(ethers.randomBytes(32))
-            }]
+                expectedQuorumHash: Buffer.from(ethers.randomBytes(32)),
+            },
+        ],
     });
     console.log('✅ Built complex Hanko with:');
     console.log(`   - Placeholders: ${hanko.placeholders.length}`);
@@ -102,11 +104,14 @@ async function testABIEncoding() {
     const hanko = await buildRealHanko(testHash, {
         noEntities: [],
         privateKeys: [testKeys.alice],
-        claims: []
+        claims: [],
     });
     // Test ABI encoding (what we send to Solidity)
     try {
-        const hankoData = ethers.AbiCoder.defaultAbiCoder().encode(['tuple(bytes[] placeholders, bytes packedSignatures, tuple(bytes entityId, uint256[] entityIndexes, uint256[] weights, uint256 threshold, bytes expectedQuorumHash)[] claims)'], [[
+        const hankoData = ethers.AbiCoder.defaultAbiCoder().encode([
+            'tuple(bytes[] placeholders, bytes packedSignatures, tuple(bytes entityId, uint256[] entityIndexes, uint256[] weights, uint256 threshold, bytes expectedQuorumHash)[] claims)',
+        ], [
+            [
                 hanko.placeholders.map(p => ethers.hexlify(p)),
                 ethers.hexlify(hanko.packedSignatures),
                 hanko.claims.map(c => [
@@ -114,16 +119,17 @@ async function testABIEncoding() {
                     c.entityIndexes,
                     c.weights,
                     c.threshold,
-                    ethers.hexlify(c.expectedQuorumHash)
-                ])
-            ]]);
+                    ethers.hexlify(c.expectedQuorumHash),
+                ]),
+            ],
+        ]);
         console.log('✅ ABI encoding successful');
         console.log(`   - Encoded length: ${hankoData.length} chars`);
         console.log(`   - Sample: ${hankoData.slice(0, 100)}...`);
         return true;
     }
     catch (error) {
-        console.error('❌ ABI encoding failed:', error.message);
+        console.error('❌ ABI encoding failed:', error instanceof Error ? error.message : String(error));
         return false;
     }
 }
@@ -144,7 +150,7 @@ async function testSignatureVerification() {
     const hanko = await buildRealHanko(testHash, {
         noEntities: [],
         privateKeys: [testKeys.alice],
-        claims: []
+        claims: [],
     });
     const signatures = unpackRealSignatures(hanko.packedSignatures);
     console.log(`   - Hanko signatures: ${signatures.length}`);

@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import "./Token.sol";
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "./ECDSA.sol";
+import "hardhat/console.sol";
 
 contract EntityProvider is ERC1155 { 
   struct Entity {
@@ -793,7 +794,7 @@ contract EntityProvider is ERC1155 {
     return false; // DIVIDEND cannot cancel anyone
   }
 
-  function _validateControlProposer(bytes32 entityId, address proposer, EntityArticles memory articles) internal view {
+  function _validateControlProposer(bytes32 entityId, address proposer, EntityArticles memory /*articles*/) internal view {
     (uint256 controlTokenId,) = getTokenIds(uint256(entityId));
     uint256 proposerBalance = balanceOf(proposer, controlTokenId);
     require(proposerBalance > 0, "No control tokens");
@@ -859,12 +860,12 @@ contract EntityProvider is ERC1155 {
    * @notice Override to track token supply changes
    */
   function _afterTokenTransfer(
-    address operator,
+    address /*operator*/,
     address from,
     address to,
     uint256[] memory ids,
     uint256[] memory amounts,
-    bytes memory data
+    bytes memory /*data*/
   ) internal {
     for (uint i = 0; i < ids.length; i++) {
       uint256 entityNumber = getEntityFromToken(ids[i]);

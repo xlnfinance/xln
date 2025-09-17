@@ -2,8 +2,8 @@
  * XLN Utility Functions
  * Platform detection, crypto polyfills, logging, and helper functions
  */
-import { extractNumberFromEntityId } from './entity-factory.js';
 import { toSvg } from 'jdenticon';
+import { extractNumberFromEntityId } from './entity-factory';
 // Global polyfills for browser compatibility
 if (typeof global === 'undefined') {
     globalThis.global = globalThis;
@@ -11,8 +11,8 @@ if (typeof global === 'undefined') {
 // Environment detection and compatibility layer
 export const isBrowser = typeof window !== 'undefined';
 // Simplified crypto compatibility
-export const createHash = isBrowser ?
-    (algorithm) => ({
+export const createHash = isBrowser
+    ? (algorithm) => ({
         update: (data) => ({
             digest: (encoding) => {
                 // Create proper 32-byte hash for browser demo using Web Crypto API
@@ -22,7 +22,7 @@ export const createHash = isBrowser ?
                 let hash = 0;
                 for (let i = 0; i < data.length; i++) {
                     const char = data.charCodeAt(i);
-                    hash = ((hash << 5) - hash) + char;
+                    hash = (hash << 5) - hash + char;
                     hash = hash & hash; // Convert to 32bit integer
                 }
                 // Create a 32-byte buffer by repeating and expanding the hash
@@ -39,17 +39,19 @@ export const createHash = isBrowser ?
                     }
                     return Buffer.from(bytes);
                 }
-            }
-        })
-    }) :
-    require('crypto').createHash;
-export const randomBytes = isBrowser ?
-    (size) => {
+            },
+        }),
+    })
+    : // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('crypto').createHash;
+export const randomBytes = isBrowser
+    ? (size) => {
         const array = new Uint8Array(size);
         crypto.getRandomValues(array);
         return array;
-    } :
-    require('crypto').randomBytes;
+    }
+    : // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('crypto').randomBytes;
 // Simplified Buffer polyfill for browser
 const getBuffer = () => {
     if (isBrowser) {
@@ -59,9 +61,10 @@ const getBuffer = () => {
                     return new TextEncoder().encode(data);
                 }
                 return new Uint8Array(data);
-            }
+            },
         };
     }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('buffer').Buffer;
 };
 export const Buffer = getBuffer();
@@ -74,11 +77,15 @@ if (isBrowser) {
 }
 // Debug compatibility
 const createDebug = (namespace) => {
-    const shouldLog = namespace.includes('state') || namespace.includes('tx') ||
-        namespace.includes('block') || namespace.includes('error') ||
-        namespace.includes('diff') || namespace.includes('info');
+    const shouldLog = namespace.includes('state') ||
+        namespace.includes('tx') ||
+        namespace.includes('block') ||
+        namespace.includes('error') ||
+        namespace.includes('diff') ||
+        namespace.includes('info');
     return shouldLog ? console.log.bind(console, `[${namespace}]`) : () => { };
 };
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const debug = isBrowser ? createDebug : require('debug');
 // Configure debug logging with functional approach
 export const log = {
@@ -87,12 +94,16 @@ export const log = {
     block: debug('block:🟢'),
     error: debug('error:🔴'),
     diff: debug('diff:🟣'),
-    info: debug('info:ℹ️')
+    info: debug('info:ℹ️'),
 };
 // Hash utility function
-export const hash = (data) => createHash('sha256').update(data.toString()).digest();
+export const hash = (data) => {
+    const result = createHash('sha256').update(data.toString()).digest();
+    // Ensure we always return a Buffer, regardless of what digest() returns
+    return Buffer.from(result);
+};
 // Global debug flag
-export let DEBUG = true;
+export const DEBUG = true;
 // Function to clear the database and reset in-memory history
 export const clearDatabase = async (db) => {
     console.log('Clearing database and resetting history...');
@@ -109,7 +120,7 @@ export const clearDatabase = async (db) => {
             try {
                 // Clear all possible database names that Level.js might use
                 const clearPromises = dbNames.map(dbName => {
-                    return new Promise((resolve) => {
+                    return new Promise(resolve => {
                         const deleteReq = indexedDB.deleteDatabase(dbName);
                         deleteReq.onsuccess = () => {
                             console.log(`✅ Cleared IndexedDB: ${dbName}`);
@@ -128,6 +139,7 @@ export const clearDatabase = async (db) => {
                 await Promise.all(clearPromises);
                 console.log('✅ All databases cleared, re-initializing...');
                 // Trigger re-initialization instead of page reload
+                // TODO: delete deprecated reinitializeAfterClear
                 if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
                     window.reinitializeAfterClear();
                 }
@@ -172,14 +184,14 @@ export const getEntityDisplayInfo = (entityId) => {
         return {
             name: `Entity #${number}`,
             avatar: generateEntityAvatar(entityId),
-            type: 'numbered'
+            type: 'numbered',
         };
     }
     else {
         return {
             name: entityId,
             avatar: generateEntityAvatar(entityId),
-            type: 'lazy'
+            type: 'lazy',
         };
     }
 };
@@ -188,26 +200,26 @@ export const getEntityDisplayInfo = (entityId) => {
  * Demo signer mappings (using Hardhat default addresses)
  */
 export const DEMO_SIGNERS = {
-    'alice': {
+    alice: {
         name: 'alice.eth',
-        address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+        address: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
     },
-    'bob': {
+    bob: {
         name: 'bob.eth',
-        address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
+        address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
     },
-    'carol': {
+    carol: {
         name: 'carol.eth',
-        address: '0x90F79bf6EB2c4f870365E785982E1f101E93b906'
+        address: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
     },
-    'david': {
+    david: {
         name: 'david.eth',
-        address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65'
+        address: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
     },
-    'eve': {
+    eve: {
         name: 'eve.eth',
-        address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc'
-    }
+        address: '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
+    },
 };
 /**
  * Format signer for display (name.eth with avatar indicator)
@@ -234,13 +246,13 @@ export const getSignerDisplayInfo = (signerId) => {
         return {
             name: signerInfo.name,
             address: signerInfo.address,
-            avatar: generateSignerAvatar(signerId)
+            avatar: generateSignerAvatar(signerId),
         };
     }
     return {
         name: signerId,
         address: signerId,
-        avatar: generateSignerAvatar(signerId)
+        avatar: generateSignerAvatar(signerId),
     };
 };
 /**

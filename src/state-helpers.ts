@@ -17,6 +17,7 @@ export const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
     entityId: replica.entityId,
     signerId: replica.signerId,
     state: {
+      entityId: replica.state.entityId, // Clone entityId
       height: replica.state.height,
       timestamp: replica.state.timestamp,
       nonces: cloneMap(replica.state.nonces),

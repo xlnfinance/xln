@@ -47,14 +47,14 @@ describe("EntityProvider with Automatic Governance", function () {
       expect(foundationEntityId).to.equal(1);
       
       const entity = await entityProvider.entities(ethers.zeroPadValue(ethers.toBeHex(1), 32));
-      expect(entity.exists).to.be.true;
+      expect(entity.currentBoardHash).to.not.equal(ethers.ZeroHash);
       expect(entity.registrationBlock).to.be.gt(0);
       expect(entity.articlesHash).to.not.equal(ethers.ZeroHash);
       
       // Check foundation has governance tokens (minus 1000 transferred to owner)
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(1);
       const foundationAddress = ethers.getAddress(`0x${(1).toString(16).padStart(40, '0')}`);
-      const expectedSupply = ethers.parseUnits("1", 15); // 1 quadrillion
+      const expectedSupply = 10n**15n; // 1 quadrillion
       
       expect(await entityProvider.balanceOf(foundationAddress, controlTokenId)).to.equal(expectedSupply - BigInt(1000));
       expect(await entityProvider.balanceOf(foundationAddress, dividendTokenId)).to.equal(expectedSupply);
@@ -62,13 +62,14 @@ describe("EntityProvider with Automatic Governance", function () {
 
     it("Should allow foundation token holders to use foundation functions", async function () {
       // Owner now has foundation tokens and can call foundation functions
-      expect(await entityProvider.balanceOf(owner.address, await entityProvider.getTokenIds(1).then(r => r[0]))).to.equal(1000);
+      const [foundationControlTokenId] = await entityProvider.getTokenIds(1);
+      expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(1000);
       
       // Should be able to assign names
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
       await entityProvider.registerNumberedEntity(boardHash);
       
-      await expect(entityProvider.assignName("testname", 2)).to.not.be.reverted;
+      await expect(entityProvider.connect(owner).assignName("testname", 2)).to.not.be.reverted;
     });
   });
 
@@ -79,26 +80,25 @@ describe("EntityProvider with Automatic Governance", function () {
       const tx = await entityProvider.registerNumberedEntity(boardHash);
       const receipt = await tx.wait();
       
-      // Should emit both EntityRegistered and GovernanceEnabled events
-      const entityEvent = receipt.logs.find(log => log.fragment?.name === 'EntityRegistered');
-      const governanceEvent = receipt.logs.find(log => log.fragment?.name === 'GovernanceEnabled');
-      expect(entityEvent).to.not.be.undefined;
-      expect(governanceEvent).to.not.be.undefined;
+      // Check for events
+      const registeredEvent = receipt.logs.some(log => entityProvider.interface.parseLog(log)?.name === 'EntityRegistered');
+      const governanceEvent = receipt.logs.some(log => entityProvider.interface.parseLog(log)?.name === 'GovernanceEnabled');
+      expect(registeredEvent).to.be.true;
+      expect(governanceEvent).to.be.true;
       
-      // Next entity should be #3 (foundation #1, new entity #2)
-      const nextNumber = await entityProvider.nextNumber();
-      expect(nextNumber).to.equal(3);
+      // Next entity should be #2 (foundation is #1)
+      const entityNumber = 2;
       
       // Check entity has governance auto-setup
-      const entityId = ethers.zeroPadValue(ethers.toBeHex(2), 32);
+      const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
-      expect(entity.exists).to.be.true;
+      expect(entity.currentBoardHash).to.equal(boardHash);
       expect(entity.articlesHash).to.not.equal(ethers.ZeroHash);
       
       // Check governance tokens were created with fixed supply
-      const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(2);
-      const entityAddress = ethers.getAddress(`0x${(2).toString(16).padStart(40, '0')}`);
-      const expectedSupply = ethers.parseUnits("1", 15); // 1 quadrillion
+      const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
+      const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
+      const expectedSupply = 10n**15n; // 1 quadrillion
       
       expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
@@ -113,13 +113,12 @@ describe("EntityProvider with Automatic Governance", function () {
         controlThreshold: 67
       };
       
-      const tx = await entityProvider.foundationRegisterEntity(boardHash, customArticles);
-      await tx.wait();
+      await expect(entityProvider.connect(owner).foundationRegisterEntity(boardHash, customArticles)).to.not.be.reverted;
       
-      // Check custom governance was applied
-      const entityId = ethers.zeroPadValue(ethers.toBeHex(2), 32);
+      const entityNumber = 2;
+      const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
-      expect(entity.exists).to.be.true;
+      expect(entity.currentBoardHash).to.equal(boardHash);
       expect(entity.articlesHash).to.equal(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
         ["tuple(uint32,uint32,uint32,uint16)"],
         [[customArticles.controlDelay, customArticles.dividendDelay, customArticles.foundationDelay, customArticles.controlThreshold]]
@@ -133,6 +132,7 @@ describe("EntityProvider with Automatic Governance", function () {
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
       
       expect(controlTokenId).to.equal(entityNumber);
+      // 255th bit flip
       expect(dividendTokenId).to.equal(BigInt(entityNumber) | (BigInt(1) << BigInt(255)));
       
       // Should be able to extract entity number from both token IDs
@@ -253,25 +253,37 @@ describe("EntityProvider with Automatic Governance", function () {
 
   describe("Entity Signature Recovery", function () {
     it("Should recover entity ID from hanko signature", async function () {
-      // This test demonstrates the concept, but would need actual hanko signature implementation
-      const testHash = ethers.keccak256(ethers.toUtf8Bytes("test message"));
-      
-      // Mock hanko signature (in reality would be actual board + signatures)
-      const mockBoard = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["tuple(uint16,tuple(bytes,uint16)[])"],
-        [[100, []]] // Empty board for testing
-      );
-      const mockSignature = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["bytes[]"],
-        [[]] // Empty signatures for testing
-      );
-      // Call recoverEntity (will return 0 for invalid signature in current implementation)
-      const recoveredEntityId = await entityProvider.recoverEntity(mockBoard, mockSignature, testHash);
-      
-      // For now, expect 0 since we don't have valid signatures
-      expect(recoveredEntityId).to.equal(0);
-      
-      // TODO: Implement proper hanko signature generation and verification for real testing
+        // The message hash MUST be prepared according to EIP-191.
+        // ethers.hashMessage() automatically prepends the required prefix.
+        const testHash = ethers.hashMessage(ethers.toUtf8Bytes("test message"));
+        
+        // This signature is from 'alice'
+        const signature = await alice.signMessage(ethers.toUtf8Bytes("test message"));
+
+        const board = {
+            votingThreshold: 1,
+            entityIds: [ethers.zeroPadValue(alice.address, 32)],
+            votingPowers: [1],
+            boardChangeDelay: 0,
+            controlChangeDelay: 0,
+            dividendChangeDelay: 0
+        };
+
+        const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(
+            ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
+            [[board.votingThreshold, board.entityIds, board.votingPowers, board.boardChangeDelay, board.controlChangeDelay, board.dividendChangeDelay]]
+        );
+
+        const encodedSignature = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[signature]]);
+        
+        // CRITICAL FIX: The boardHash used to register the entity MUST be identical
+        // to the one reconstructed from the signature data.
+        const boardHash = ethers.keccak256(encodedBoard);
+        await entityProvider.registerNumberedEntity(boardHash); // This creates Entity #2
+
+        // Now, when we try to recover, the hashes will match.
+        const recoveredEntityId = await entityProvider.recoverEntity(encodedBoard, encodedSignature, testHash);
+        expect(recoveredEntityId).to.equal(2);
     });
   });
 

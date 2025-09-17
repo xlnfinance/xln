@@ -1,382 +1,191 @@
 /**
  * XLN Demo Runner
- * Exact 1:1 copy of runDemo function from server.ts
+ * Sets up a clean environment with two single-signer entities and demonstrates a reserve transfer.
  */
-import { DEBUG } from './utils.js';
-import { generateLazyEntityId, generateNumberedEntityId } from './entity-factory.js';
-import { registerNumberedEntityOnChain, getJurisdictionByAddress } from './evm.js';
-import { applyServerInput, processUntilEmpty } from './server.js';
-import { formatEntityDisplay, formatSignerDisplay } from './utils.js';
-// Exact 1:1 copy of runDemo function from server.ts
+import { generateNumberedEntityId } from './entity-factory';
+import { getJurisdictionByAddress } from './evm';
+import { applyServerInput, processUntilEmpty } from './server';
+import { DEBUG, formatEntityDisplay } from './utils';
+// This function simulates the data that a j-watcher would extract from on-chain events
+const createDepositEvent = (entityId, signerId, asset, eventType = 'DEPOSIT') => {
+    const event = {
+        entityId: entityId,
+        signerId: signerId,
+        entityTxs: [{
+                type: 'j_event',
+                data: {
+                    from: signerId,
+                    event: {
+                        type: 'ReserveUpdated', // The watcher sees a reserve update
+                        data: {
+                            entity: entityId,
+                            tokenId: asset.tokenId,
+                            newBalance: asset.amount, // The event contains the final new balance
+                            name: asset.asset,
+                            symbol: asset.asset,
+                            decimals: asset.decimals,
+                        },
+                    },
+                    observedAt: Date.now(),
+                    blockNumber: 1, // Mock block number 
+                    transactionHash: `0xDEMO_${eventType}_${asset.asset}_${entityId.slice(0, 10)}`,
+                },
+            }],
+    };
+    if (DEBUG) {
+        console.log(`🎭 Mock j_event created: ${eventType} ${asset.amount} ${asset.asset} for entity ${entityId.slice(0, 10)}...`);
+    }
+    return event;
+};
 const runDemo = async (env) => {
     if (DEBUG) {
-        console.log('🚀 Starting XLN Consensus Demo - Multi-Entity Test');
-        console.log('✨ Using deterministic hash-based proposal IDs (no randomness)');
-        console.log('🌍 Environment-based architecture with merged serverInput');
-        console.log('🗑️ History cleared for fresh start');
+        console.log('🚀 Starting XLN Demo: First Principles');
     }
     const ethereumJurisdiction = await getJurisdictionByAddress('ethereum');
     if (!ethereumJurisdiction) {
         throw new Error('❌ Ethereum jurisdiction not found');
     }
-    // === TEST 1: Chat Entity - NUMBERED ENTITY (Blockchain Registered) ===
-    console.log('\n📋 TEST 1: Chat Entity - Numbered Entity with Jurisdiction');
-    const chatValidators = ['alice', 'bob', 'carol'];
-    const chatConfig = {
-        mode: 'proposer-based',
-        threshold: BigInt(2), // Need 2 out of 3 shares
-        validators: chatValidators,
-        shares: {
-            alice: BigInt(1), // Equal voting power
-            bob: BigInt(1),
-            carol: BigInt(1)
-        },
-        jurisdiction: ethereumJurisdiction // Add jurisdiction
-    };
-    // Create numbered entity (blockchain registered)
-    const chatEntityId = generateNumberedEntityId(1); // Use entity #1
-    applyServerInput(env, {
-        serverTxs: chatValidators.map((signerId, index) => ({
-            type: 'importReplica',
-            entityId: chatEntityId,
-            signerId,
-            data: {
-                config: chatConfig,
-                isProposer: index === 0
-            }
-        })),
-        entityInputs: []
-    });
-    // === TEST 2: Trading Entity - NUMBERED ENTITY (Weighted Voting) ===
-    console.log('\n📋 TEST 2: Trading Entity - Numbered Entity with Jurisdiction');
-    const tradingValidators = ['alice', 'bob', 'carol', 'david'];
-    const tradingConfig = {
-        mode: 'gossip-based',
-        threshold: BigInt(7), // Need 7 out of 10 weighted shares
-        validators: tradingValidators,
-        shares: {
-            alice: BigInt(4), // Weighted voting power
-            bob: BigInt(3),
-            carol: BigInt(2),
-            david: BigInt(1)
-        },
-        jurisdiction: ethereumJurisdiction // Add jurisdiction
-    };
-    // Create numbered entity (blockchain registered)
-    const tradingEntityId = generateNumberedEntityId(2); // Use entity #2
-    // Note: Governance is now automatically created when entity #2 is registered on-chain
-    console.log(`✅ Entity #2 governance automatically created with fixed supply`);
-    console.log(`📋 Fixed supply: 1 quadrillion control & dividend tokens (held by entity)`);
-    console.log(`🔄 Distribution: Use reserveToReserve() to manually distribute tokens`);
-    applyServerInput(env, {
-        serverTxs: tradingValidators.map((signerId, index) => ({
-            type: 'importReplica',
-            entityId: tradingEntityId,
-            signerId,
-            data: {
-                config: tradingConfig,
-                isProposer: index === 0
-            }
-        })),
-        entityInputs: []
-    });
-    // === TEST 3: Governance Entity - LAZY ENTITY (Higher Threshold) ===
-    console.log('\n📋 TEST 3: Governance Entity - Lazy Entity with Jurisdiction');
-    const govValidators = ['alice', 'bob', 'carol', 'david', 'eve'];
-    const govConfig = {
-        mode: 'proposer-based',
-        threshold: BigInt(10), // Need 10 out of 15 shares (2/3 + 1 for BFT)
-        validators: govValidators,
-        shares: {
-            alice: BigInt(3),
-            bob: BigInt(3),
-            carol: BigInt(3),
-            david: BigInt(3),
-            eve: BigInt(3)
-        },
-        jurisdiction: ethereumJurisdiction
-    };
-    // Create lazy entity (hash-based ID)
-    const govEntityId = generateLazyEntityId(govValidators, BigInt(10));
-    applyServerInput(env, {
-        serverTxs: govValidators.map((signerId, index) => ({
-            type: 'importReplica',
-            entityId: govEntityId,
-            signerId,
-            data: {
-                config: govConfig,
-                isProposer: index === 0
-            }
-        })),
-        entityInputs: []
-    });
-    console.log('\n🔥 CORNER CASE TESTS:');
-    // === CORNER CASE 0: Single signer entity (should bypass consensus) ===
-    console.log('\n⚠️  CORNER CASE 0: Single signer entity - direct execution');
-    const singleSignerConfig = {
+    const s1 = 's1';
+    const s2 = 's2';
+    console.log(`\n📋 Forming entities e1=[${s1}] and e2=[${s2}]...`);
+    const e1_config = {
         mode: 'proposer-based',
         threshold: BigInt(1),
-        validators: ['alice'],
-        shares: { alice: BigInt(1) },
-        jurisdiction: ethereumJurisdiction
+        validators: [s1],
+        shares: { [s1]: BigInt(1) },
+        jurisdiction: ethereumJurisdiction,
     };
-    const singleEntityId = generateLazyEntityId(['alice'], BigInt(1));
-    applyServerInput(env, {
-        serverTxs: [{
-                type: 'importReplica',
-                entityId: singleEntityId,
-                signerId: 'alice',
-                data: {
-                    config: singleSignerConfig,
-                    isProposer: true
-                }
-            }],
-        entityInputs: []
+    const e1_id = generateNumberedEntityId(1);
+    const e2_config = {
+        mode: 'proposer-based',
+        threshold: BigInt(1),
+        validators: [s2],
+        shares: { [s2]: BigInt(1) },
+        jurisdiction: ethereumJurisdiction,
+    };
+    const e2_id = generateNumberedEntityId(2);
+    await applyServerInput(env, {
+        serverTxs: [
+            { type: 'importReplica', entityId: e1_id, signerId: s1, data: { config: e1_config, isProposer: true } },
+            { type: 'importReplica', entityId: e2_id, signerId: s2, data: { config: e2_config, isProposer: true } },
+        ],
+        entityInputs: [],
     });
-    processUntilEmpty(env, [{
-            entityId: singleEntityId,
-            signerId: 'alice',
-            entityTxs: [{ type: 'chat', data: { from: 'alice', message: 'Single signer test message!' } }]
-        }]);
-    // === CORNER CASE 1: Single transaction (minimal consensus) ===
-    console.log('\n⚠️  CORNER CASE 1: Single transaction in chat');
-    processUntilEmpty(env, [{
-            entityId: chatEntityId,
-            signerId: 'alice',
-            entityTxs: [{ type: 'chat', data: { from: 'alice', message: 'First message in chat!' } }]
-        }]);
-    // === CORNER CASE 2: Batch proposals (stress test) ===
-    console.log('\n⚠️  CORNER CASE 2: Batch proposals in trading');
-    processUntilEmpty(env, [{
-            entityId: tradingEntityId,
-            signerId: 'alice',
-            entityTxs: [
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Trading proposal 1: Set daily limit' } }, proposer: 'alice' } },
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Trading proposal 2: Update fees' } }, proposer: 'bob' } },
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Trading proposal 3: Add new pairs' } }, proposer: 'carol' } }
-            ]
-        }]);
-    // === CORNER CASE 3: High threshold governance (needs 4/5 validators) ===
-    console.log('\n⚠️  CORNER CASE 3: High threshold governance vote');
-    processUntilEmpty(env, [{
-            entityId: govEntityId,
-            signerId: 'alice',
-            entityTxs: [{ type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Governance proposal: Increase block size limit' } }, proposer: 'alice' } }]
-        }]);
-    // === CORNER CASE 4: Multiple entities concurrent activity ===
-    console.log('\n⚠️  CORNER CASE 4: Concurrent multi-entity activity');
-    processUntilEmpty(env, [
-        {
-            entityId: chatEntityId,
-            signerId: 'alice',
-            entityTxs: [
-                { type: 'chat', data: { from: 'bob', message: 'Chat during trading!' } },
-                { type: 'chat', data: { from: 'carol', message: 'Exciting times!' } }
-            ]
-        },
-        {
-            entityId: tradingEntityId,
-            signerId: 'alice',
-            entityTxs: [
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Trading proposal: Cross-entity transfer protocol' } }, proposer: 'david' } }
-            ]
-        },
-        {
-            entityId: govEntityId,
-            signerId: 'alice',
-            entityTxs: [
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Governance decision: Implement new voting system' } }, proposer: 'bob' } },
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Governance decision: Update treasury rules' } }, proposer: 'carol' } }
-            ]
-        }
-    ]);
-    // === CORNER CASE 5: Empty mempool auto-propose (should be ignored) ===
-    console.log('\n⚠️  CORNER CASE 5: Empty mempool test (no auto-propose)');
-    processUntilEmpty(env, [{
-            entityId: chatEntityId,
-            signerId: 'alice',
-            entityTxs: [] // Empty transactions should not trigger proposal
-        }]);
-    // === CORNER CASE 6: Large message batch ===
-    console.log('\n⚠️  CORNER CASE 6: Large message batch');
-    const largeBatch = Array.from({ length: 8 }, (_, i) => ({
-        type: 'chat',
-        data: { from: ['alice', 'bob', 'carol'][i % 3], message: `Batch message ${i + 1}` }
-    }));
-    processUntilEmpty(env, [{
-            entityId: chatEntityId,
-            signerId: 'alice',
-            entityTxs: largeBatch
-        }]);
-    // === CORNER CASE 7: Proposal voting system ===
-    console.log('\n⚠️  CORNER CASE 7: Proposal voting system');
-    // Create a proposal that needs votes
-    processUntilEmpty(env, [{
-            entityId: tradingEntityId,
-            signerId: 'alice',
-            entityTxs: [
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Major decision: Upgrade trading protocol' } }, proposer: 'carol' } } // Carol only has 2 shares, needs more votes
-            ]
-        }]);
-    // Simulate voting on the proposal
-    // We need to get the proposal ID from the previous execution, but for demo purposes, we'll simulate voting workflow
-    console.log('\n⚠️  CORNER CASE 7b: Voting on proposals (simulated)');
-    processUntilEmpty(env, [{
-            entityId: govEntityId,
-            signerId: 'alice',
-            entityTxs: [
-                { type: 'propose', data: { action: { type: 'collective_message', data: { message: 'Critical governance: Emergency protocol activation' } }, proposer: 'eve' } } // Eve only has 3 shares, needs 10 total
-            ]
-        }]);
-    // === FINAL VERIFICATION ===
+    await processUntilEmpty(env, []);
+    // Clear any leftover transactions in mempool
+    const e1_replica = env.replicas.get(`${e1_id}:${s1}`);
+    const e2_replica = env.replicas.get(`${e2_id}:${s2}`);
+    if (e1_replica) {
+        console.log(`🧹 Cleared ${e1_replica.mempool.length} leftover transactions from e1 mempool`);
+        e1_replica.mempool.length = 0;
+    }
+    if (e2_replica) {
+        console.log(`🧹 Cleared ${e2_replica.mempool.length} leftover transactions from e2 mempool`);
+        e2_replica.mempool.length = 0;
+    }
+    console.log(`✅ Entity ${formatEntityDisplay(e1_id)} and ${formatEntityDisplay(e2_id)} created.`);
+    console.log(`\n💰 Prefunding entity ${formatEntityDisplay(e1_id)}...`);
+    const initialPortfolio = [
+        { asset: 'ETH', amount: '11000000000000000000', decimals: 18, tokenId: 1 },
+        { asset: 'USDT', amount: '5000000000', decimals: 6, tokenId: 2 },
+    ];
+    const depositInputs = initialPortfolio.map(asset => createDepositEvent(e1_id, s1, asset));
+    await applyServerInput(env, { serverTxs: [], entityInputs: depositInputs });
+    await processUntilEmpty(env, []);
+    const e1_replica_after_funding = env.replicas.get(`${e1_id}:${s1}`);
+    // Debug: Check what's actually in reserves
     if (DEBUG) {
-        console.log('\n🎯 === FINAL VERIFICATION ===');
-        console.log('✨ All proposal IDs are deterministic hashes of proposal data');
-        console.log('🌍 Environment-based architecture working correctly');
-        // Group replicas by entity
-        const entitiesByType = new Map();
-        env.replicas.forEach((replica, key) => {
-            const entityType = replica.entityId;
-            if (!entitiesByType.has(entityType)) {
-                entitiesByType.set(entityType, []);
+        console.log('📊 Debug - Reserves after funding:');
+        if (e1_replica_after_funding?.state.reserves) {
+            for (const [tokenId, balance] of e1_replica_after_funding.state.reserves.entries()) {
+                console.log(`  Token ${tokenId}: ${balance.amount} ${balance.symbol} (${balance.decimals} decimals)`);
             }
-            entitiesByType.get(entityType).push([key, replica]);
-        });
-        let allEntitiesConsensus = true;
-        entitiesByType.forEach((replicas, entityType) => {
-            const displayName = formatEntityDisplay(entityType);
-            console.log(`\n📊 Entity #${displayName}`);
-            console.log(`   Mode: ${replicas[0][1].state.config.mode}`);
-            console.log(`   Threshold: ${replicas[0][1].state.config.threshold}`);
-            console.log(`   Validators: ${replicas[0][1].state.config.validators.length}`);
-            // Show voting power distribution
-            const shares = replicas[0][1].state.config.shares;
-            console.log(`   Voting Power:`);
-            Object.entries(shares).forEach(([validator, power]) => {
-                console.log(`     ${formatSignerDisplay(validator)}: ${power} shares`);
-            });
-            // Check consensus within entity
-            const allMessages = [];
-            const allProposals = [];
-            replicas.forEach(([key, replica]) => {
-                console.log(`   ${key}: ${replica.state.messages.length} messages, ${replica.state.proposals.size} proposals, height ${replica.state.height}`);
-                if (replica.state.messages.length > 0) {
-                    replica.state.messages.forEach((msg, i) => console.log(`     ${i + 1}. ${msg}`));
-                }
-                if (replica.state.proposals.size > 0) {
-                    console.log(`     Proposals:`);
-                    replica.state.proposals.forEach((proposal, id) => {
-                        const yesVotes = Array.from(proposal.votes.values()).filter(vote => vote === 'yes').length;
-                        const totalVotes = proposal.votes.size;
-                        console.log(`       ${id} by ${proposal.proposer} [${proposal.status}] ${yesVotes}/${totalVotes} votes`);
-                        console.log(`         Action: ${proposal.action.data.message}`);
-                    });
-                }
-                allMessages.push([...replica.state.messages]);
-                allProposals.push([...replica.state.proposals.values()]);
-            });
-            // Verify consensus within entity (messages and proposals)
-            const firstMessages = allMessages[0];
-            const messagesConsensus = allMessages.every(messages => messages.length === firstMessages.length &&
-                messages.every((msg, i) => msg === firstMessages[i]));
-            const firstProposals = allProposals[0];
-            const proposalsConsensus = allProposals.every(proposals => proposals.length === firstProposals.length &&
-                proposals.every((prop, i) => prop.id === firstProposals[i].id &&
-                    prop.status === firstProposals[i].status &&
-                    prop.votes.size === firstProposals[i].votes.size));
-            const entityConsensus = messagesConsensus && proposalsConsensus;
-            console.log(`   🔍 Consensus: ${entityConsensus ? '✅ SUCCESS' : '❌ FAILED'} (messages: ${messagesConsensus ? '✅' : '❌'}, proposals: ${proposalsConsensus ? '✅' : '❌'})`);
-            if (entityConsensus) {
-                console.log(`   📈 Total messages: ${firstMessages.length}, proposals: ${firstProposals.length}`);
-                const totalShares = Object.values(shares).reduce((sum, val) => sum + val, BigInt(0));
-                console.log(`   ⚖️  Total voting power: ${totalShares} (threshold: ${replicas[0][1].state.config.threshold})`);
-            }
-            allEntitiesConsensus = allEntitiesConsensus && entityConsensus;
-        });
-        console.log(`\n🏆 === OVERALL RESULT ===`);
-        console.log(`${allEntitiesConsensus ? '✅ SUCCESS' : '❌ FAILED'} - All entities achieved consensus`);
-        console.log(`📊 Total entities tested: ${entitiesByType.size}`);
-        console.log(`📊 Total replicas: ${env.replicas.size}`);
-        console.log(`🔄 Total server ticks: ${env.height}`);
-        console.log('🎯 Fully deterministic - no randomness used');
-        console.log('🌍 Environment-based architecture with clean function signatures');
-        // Show mode distribution
-        const modeCount = new Map();
-        env.replicas.forEach(replica => {
-            const mode = replica.state.config.mode;
-            modeCount.set(mode, (modeCount.get(mode) || 0) + 1);
-        });
-        console.log(`📡 Mode distribution:`);
-        modeCount.forEach((count, mode) => {
-            console.log(`   ${mode}: ${count} replicas`);
-        });
+        }
+        else {
+            console.log('  No reserves found');
+        }
     }
+    const ethReserve = e1_replica_after_funding?.state.reserves.get('1');
+    const expectedETHAmount = 11000000000000000000n;
+    if (!e1_replica_after_funding) {
+        throw new Error('❌ Verification failed: e1 replica not found after funding.');
+    }
+    if (!ethReserve) {
+        throw new Error('❌ Verification failed: e1 ETH reserve not found. Available reserves: ' +
+            Array.from(e1_replica_after_funding.state.reserves.keys()).join(', '));
+    }
+    if (ethReserve.amount !== expectedETHAmount) {
+        throw new Error(`❌ Verification failed: e1 ETH amount mismatch. Expected: ${expectedETHAmount}, Got: ${ethReserve.amount}`);
+    }
+    console.log(`✅ ${formatEntityDisplay(e1_id)} funded successfully with ${ethReserve.amount / 10n ** 18n} ETH.`);
+    console.log(`\n💸 Performing reserve transfer from ${formatEntityDisplay(e1_id)} to ${formatEntityDisplay(e2_id)}...`);
+    const transferAmount = 1000000000000000000n; // 1 ETH
+    const transferTokenId = 1;
+    // Get current balances to calculate new balances after transfer
+    const e1_replica_before_transfer = env.replicas.get(`${e1_id}:${s1}`);
+    const e2_replica_before_transfer = env.replicas.get(`${e2_id}:${s2}`);
+    if (!e1_replica_before_transfer) {
+        throw new Error('❌ Entity 1 replica not found before transfer');
+    }
+    const e1_current_balance = e1_replica_before_transfer.state.reserves.get('1')?.amount || 0n;
+    const e2_current_balance = e2_replica_before_transfer?.state.reserves.get('1')?.amount || 0n;
+    console.log(`📊 Pre-transfer: e1=${e1_current_balance}, e2=${e2_current_balance}`);
+    // Calculate new balances
+    const e1_new_balance = e1_current_balance - transferAmount; // 11 ETH - 1 ETH = 10 ETH
+    const e2_new_balance = e2_current_balance + transferAmount; // 0 ETH + 1 ETH = 1 ETH
+    console.log(`📊 Post-transfer: e1=${e1_new_balance}, e2=${e2_new_balance}`);
+    // Create j_events to simulate the jurisdiction updating both entities' reserves
+    const transferEvents = [
+        // Update Entity 1's balance (sender)
+        createDepositEvent(e1_id, s1, {
+            asset: 'ETH',
+            amount: e1_new_balance.toString(),
+            decimals: 18,
+            tokenId: transferTokenId
+        }, 'TRANSFER_OUT'),
+        // Update Entity 2's balance (receiver)  
+        createDepositEvent(e2_id, s2, {
+            asset: 'ETH',
+            amount: e2_new_balance.toString(),
+            decimals: 18,
+            tokenId: transferTokenId
+        }, 'TRANSFER_IN')
+    ];
+    console.log(`💸 Simulating jurisdiction events for reserve transfer...`);
+    await applyServerInput(env, { serverTxs: [], entityInputs: transferEvents });
+    await processUntilEmpty(env, []);
+    console.log('✅ Transfer transaction submitted.');
+    const e1_replica_after_transfer = env.replicas.get(`${e1_id}:${s1}`);
+    const e2_replica_after_transfer = env.replicas.get(`${e2_id}:${s2}`);
+    // Debug: Check final reserves for both entities
     if (DEBUG) {
-        console.log('\n🎯 Demo completed successfully!');
-        console.log('📊 Check the dashboard for final entity states');
-        console.log('🔄 Use time machine to replay any step');
-    }
-    // === BLOCKCHAIN DEMO: Create numbered entities on Ethereum ===
-    console.log('\n🔗 BLOCKCHAIN DEMO: Creating numbered entities on Ethereum');
-    // Get Ethereum jurisdiction config
-    const ethJurisdiction = await getJurisdictionByAddress('ethereum');
-    if (!ethJurisdiction) {
-        throw new Error('❌ Ethereum jurisdiction not found - deployment failed');
-    }
-    // Create numbered entities for demo purposes (async, fire and forget)
-    setTimeout(async () => {
-        try {
-            // Create numbered entity for chat
-            const chatConfig = {
-                mode: 'proposer-based',
-                threshold: BigInt(2),
-                validators: chatValidators,
-                shares: {
-                    alice: BigInt(1),
-                    bob: BigInt(1),
-                    carol: BigInt(1)
-                },
-                jurisdiction: ethJurisdiction
-            };
-            await registerNumberedEntityOnChain(chatConfig, 'Demo Chat');
-            console.log('✅ Demo chat entity registered on Ethereum');
-            // Create numbered entity for trading
-            const tradingConfigForChain = {
-                mode: 'gossip-based',
-                threshold: BigInt(7),
-                validators: tradingValidators,
-                shares: {
-                    alice: BigInt(4),
-                    bob: BigInt(3),
-                    carol: BigInt(2),
-                    david: BigInt(1)
-                },
-                jurisdiction: ethJurisdiction
-            };
-            await registerNumberedEntityOnChain(tradingConfigForChain, 'Demo Trading');
-            console.log('✅ Demo trading entity registered on Ethereum');
-            // Create numbered entity for governance
-            const govConfigForChain = {
-                mode: 'proposer-based',
-                threshold: BigInt(10),
-                validators: govValidators,
-                shares: {
-                    alice: BigInt(3),
-                    bob: BigInt(3),
-                    carol: BigInt(3),
-                    david: BigInt(3),
-                    eve: BigInt(3)
-                },
-                jurisdiction: ethJurisdiction
-            };
-            await registerNumberedEntityOnChain(govConfigForChain, 'Demo Governance');
-            console.log('✅ Demo governance entity registered on Ethereum');
+        console.log('📊 Debug - Final reserves after transfer:');
+        console.log('Entity 1 reserves:');
+        if (e1_replica_after_transfer?.state.reserves) {
+            for (const [tokenId, balance] of e1_replica_after_transfer.state.reserves.entries()) {
+                console.log(`  Token ${tokenId}: ${balance.amount} ${balance.symbol} (${balance.decimals} decimals)`);
+            }
         }
-        catch (error) {
-            console.error('❌ Demo blockchain registration failed:', error.message);
-            throw error;
+        console.log('Entity 2 reserves:');
+        if (e2_replica_after_transfer?.state.reserves) {
+            for (const [tokenId, balance] of e2_replica_after_transfer.state.reserves.entries()) {
+                console.log(`  Token ${tokenId}: ${balance.amount} ${balance.symbol} (${balance.decimals} decimals)`);
+            }
         }
-    }, 1000); // Give demo time to complete first
+    }
+    const e1_final_balance = e1_replica_after_transfer?.state.reserves.get('1')?.amount;
+    const e2_final_balance = e2_replica_after_transfer?.state.reserves.get('1')?.amount;
+    const expectedE1Balance = 10000000000000000000n; // 11 ETH - 1 ETH transfer = 10 ETH
+    const expectedE2Balance = 1000000000000000000n; // 1 ETH transferred
+    if (e1_final_balance !== expectedE1Balance) {
+        throw new Error(`❌ Verification failed: e1 has incorrect final ETH balance. Expected: ${expectedE1Balance}, Got: ${e1_final_balance}`);
+    }
+    if (e2_final_balance !== expectedE2Balance) {
+        throw new Error(`❌ Verification failed: e2 did not receive ETH. Expected: ${expectedE2Balance}, Got: ${e2_final_balance}`);
+    }
+    console.log(`✅ State verified: e1 has ${e1_final_balance / 10n ** 18n} ETH, e2 has ${e2_final_balance / 10n ** 18n} ETH.`);
+    console.log('\n🎯 Demo completed!');
+    console.log('📊 Check the dashboard to verify final reserve states for e1 and e2.');
     return env;
 };
 export { runDemo };

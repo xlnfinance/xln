@@ -136,6 +136,7 @@ export interface ChannelState {
 }
 
 export interface EntityState {
+  entityId: string; // The entity ID this state belongs to
   height: number;
   timestamp: number;
   nonces: Map<string, number>;

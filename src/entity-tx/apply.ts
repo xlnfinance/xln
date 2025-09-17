@@ -10,8 +10,8 @@ import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 
 export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<EntityState> => {
-  console.log(`🚨 APPLY-ENTITY-TX CALLED: type="${entityTx.type}", data=`, entityTx.data);
-  console.log(`🚨 APPLY-ENTITY-TX: Available types in this function: profile-update, j_event, accountInput, etc.`);
+  console.log(`🚨 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, JSON.stringify(entityTx.data, null, 2));
+  console.log(`🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput`);
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
@@ -183,7 +183,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'accountInput') {
-      return handleAccountInput(entityState, entityTx.data, env);
+      return await handleAccountInput(entityState, entityTx.data, env);
     }
 
     return entityState;
