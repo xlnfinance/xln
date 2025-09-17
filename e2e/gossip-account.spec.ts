@@ -7,6 +7,7 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
   await page.goto('http://localhost:8080');
   await page.waitForLoadState('networkidle');
   await page.waitForFunction(() => (window as any).xlnEnv !== undefined, { timeout: 10000 });
+  await page.waitForTimeout(1000); // Allow page to fully render
 
   // Run demo to create entities (alice, bob, chat, trading, governance entities)
   console.log('🎭 Creating demo entities...');
@@ -16,6 +17,7 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
 
   console.log('🎯 Adding entity panel and selecting Alice...');
   await page.locator('.admin-topbar').getByTitle('Add Entity Panel').click();
+  await page.waitForTimeout(800); // Allow panel to appear
 
   // Select Alice first
   const firstPanel = page.locator('.entity-panel').first();
@@ -36,10 +38,12 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
   const networkTab = page.locator('#networkTab');
   await expect(networkTab).toBeVisible();
   await networkTab.click();
+  await page.waitForTimeout(800); // Allow tab switch animation
   console.log('📡 Clicked Network Directory tab');
 
   // Wait for Network Directory to be visible
   await expect(page.locator('.network-directory')).toBeVisible();
+  await page.waitForTimeout(600); // Allow network directory to fully load
   console.log('✅ Network Directory loaded successfully');
 
   // === STEP 3: Announce gossip profile using UI ===
@@ -47,19 +51,23 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
   const myProfileButton = page.getByRole('button', { name: '▶ 👤 My Profile' });
   await expect(myProfileButton).toBeVisible();
   await myProfileButton.click();
+  await page.waitForTimeout(700); // Allow profile form to expand
   console.log('👤 Opened My Profile form');
 
   await page.getByTestId('capabilities-multiselect').click();
   await page.getByRole('option', { name: 'trading' }).click();
   await page.getByRole('option', { name: 'routing' }).click();
   await page.keyboard.press('Escape');
+  await page.waitForTimeout(500); // Allow multiselect to close
   console.log('⚙️ Selected trading and routing capabilities');
 
   await page.getByText('🌟 Register as Hub').click();
   await page.getByRole('textbox', { name: 'Hub Name:' }).fill('HubX1');
+  await page.waitForTimeout(500); // Allow text input to register
   console.log('🌟 Configured Alice as Hub with name "HubX1"');
 
   await page.getByTestId('announce-profile-button').click();
+  await page.waitForTimeout(1200); // Allow profile announcement and card creation
   console.log("📢 Announced Alice's hub profile to gossip layer");
 
   const aliceProfileCard = page.getByTestId('profile-card').first();
@@ -71,6 +79,7 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
   await expect(aliceProfileCard.getByText('🌟 Hub').first()).toBeVisible();
   await expect(aliceProfileCard.getByText('name: "HubX1"').first()).toBeVisible();
   await expect(aliceProfileCard.getByText('Your Hub').first()).toBeVisible();
+  await page.waitForTimeout(800); // Allow profile card to fully render
   console.log("✅ Verified Alice's hub profile details and 'Your Hub' status");
 
   // === STEP 4: Choose Bob as the entity to join the hub ===
@@ -82,17 +91,20 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
     .locator('[data-value="Ethereum:bob:0x37214fa5196f5bba427e84b86e317c1b1829fe5010069dce10cd795cbc48dd66"]')
     .first();
   await bobOption.click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800); // Allow entity switch and UI update
   console.log('👤 Switched to Bob entity');
 
   await aliceProfileCard.getByTestId('join-hub-button').first().scrollIntoViewIfNeeded();
   await expect(aliceProfileCard.getByTestId('join-hub-button').first()).toBeVisible();
+  await page.waitForTimeout(600); // Allow button state to update
   console.log("🤝 Found 'Join Hub' button for Alice's hub (Bob's perspective)");
 
   await aliceProfileCard.getByTestId('join-hub-button').first().click();
+  await page.waitForTimeout(1000); // Allow channel creation and UI update
   console.log('🔗 Bob clicked "Join Hub" button - creating symmetric channel');
 
   await expect(aliceProfileCard.getByText('✅ Already joined this hub').first()).toBeVisible();
+  await page.waitForTimeout(800); // Allow status change to be visible
   console.log('✅ UI updated to show "Already joined this hub" status');
 
   // === STEP 5: Verify Bob's account channels ===
@@ -102,6 +114,7 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
   await expect(firstPanel.getByRole('button', { name: '🔗 Account Channels ▼' })).toBeVisible();
 
   await firstPanel.getByRole('button', { name: '🔗 Account Channels ▼' }).click();
+  await page.waitForTimeout(700); // Allow channels section to expand
   console.log("🔗 Expanded Bob's Account Channels section");
 
   await expect(
@@ -111,6 +124,7 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
       .getByText('🏢 0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803')
       .first(),
   ).toBeVisible();
+  await page.waitForTimeout(600); // Allow channel data to be visible
   console.log("✅ Verified Bob has channel with Alice (Alice's entity ID visible)");
 
   // === STEP 6: Switch to Alice and verify symmetric account channels ===
@@ -119,7 +133,7 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
   await entityDropdown.click();
   await page.waitForTimeout(300);
   await aliceOption.click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800); // Allow entity switch back to Alice
   console.log('👤 Switched back to Alice entity');
 
   await expect(
@@ -129,6 +143,7 @@ test('Gossip + Account Input UI Flow', async ({ page }) => {
       .getByText('🏢 0x37214fa5196f5bba427e84b86e317c1b1829fe5010069dce10cd795cbc48dd66')
       .first(),
   ).toBeVisible();
+  await page.waitForTimeout(1000); // Final pause to show completed state
   console.log("✅ Verified Alice has symmetric channel with Bob (Bob's entity ID visible)");
   console.log('🎉 TEST COMPLETED: Gossip + Account Input UI Flow successful!');
   console.log('   - Alice announced hub profile to gossip layer');
