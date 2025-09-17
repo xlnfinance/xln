@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './global-setup';
 
 test.describe('Entity Reserves Verification', () => {
   test('should display entity reserves with portfolio bars after demo', async ({ page }) => {

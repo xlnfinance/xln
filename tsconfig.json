@@ -13,6 +13,6 @@
     "typeRoots": ["./node_modules/@types", "./types"],
     "types": []
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "playwright.config.ts"],
   "exclude": ["node_modules", "**/*.test.ts"]
 }
