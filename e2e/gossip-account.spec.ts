@@ -1,0 +1,138 @@
+import { expect, test } from './global-setup';
+
+test('Gossip + Account Input UI Flow', async ({ page }) => {
+  // === STEP 1: Navigate and Setup ===
+  console.log('📍 STEP 1: Navigate to XLN and wait for environment');
+
+  await page.goto('http://localhost:8080');
+  await page.waitForLoadState('networkidle');
+  await page.waitForFunction(() => (window as any).xlnEnv !== undefined, { timeout: 10000 });
+
+  // Run demo to create entities (alice, bob, chat, trading, governance entities)
+  console.log('🎭 Creating demo entities...');
+  await page.locator('button[title="Run Demo"]').click();
+  await page.waitForTimeout(2000); // Wait for demo to complete
+  console.log('✅ Demo entities created successfully');
+
+  console.log('🎯 Adding entity panel and selecting Alice...');
+  await page.locator('.admin-topbar').getByTitle('Add Entity Panel').click();
+
+  // Select Alice first
+  const firstPanel = page.locator('.entity-panel').first();
+  const entityDropdown = firstPanel.locator('.unified-dropdown').first();
+  await entityDropdown.click();
+  await page.waitForTimeout(300);
+
+  const aliceOption = firstPanel
+    .locator('[data-value="Ethereum:alice:0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803"]')
+    .first();
+  await aliceOption.click();
+  await page.waitForTimeout(500);
+  console.log('✅ Alice entity selected in panel');
+
+  // === STEP 2: Navigate to Network Tab ===
+  console.log('📍 STEP 2: Navigate to Network Directory tab');
+
+  const networkTab = page.locator('#networkTab');
+  await expect(networkTab).toBeVisible();
+  await networkTab.click();
+  console.log('📡 Clicked Network Directory tab');
+
+  // Wait for Network Directory to be visible
+  await expect(page.locator('.network-directory')).toBeVisible();
+  console.log('✅ Network Directory loaded successfully');
+
+  // === STEP 3: Announce gossip profile using UI ===
+  console.log("📍 STEP 3: Creating and announcing Alice's hub profile");
+  const myProfileButton = page.getByRole('button', { name: '▶ 👤 My Profile' });
+  await expect(myProfileButton).toBeVisible();
+  await myProfileButton.click();
+  console.log('👤 Opened My Profile form');
+
+  await page.getByTestId('capabilities-multiselect').click();
+  await page.getByRole('option', { name: 'trading' }).click();
+  await page.getByRole('option', { name: 'routing' }).click();
+  await page.keyboard.press('Escape');
+  console.log('⚙️ Selected trading and routing capabilities');
+
+  await page.getByText('🌟 Register as Hub').click();
+  await page.getByRole('textbox', { name: 'Hub Name:' }).fill('HubX1');
+  console.log('🌟 Configured Alice as Hub with name "HubX1"');
+
+  await page.getByTestId('announce-profile-button').click();
+  console.log("📢 Announced Alice's hub profile to gossip layer");
+
+  const aliceProfileCard = page.getByTestId('profile-card').first();
+  await aliceProfileCard.scrollIntoViewIfNeeded();
+  await expect(aliceProfileCard).toBeVisible();
+  console.log("🃏 Alice's profile card appeared in Network Directory");
+
+  await expect(aliceProfileCard.getByText('🏢 HubX').first()).toBeVisible();
+  await expect(aliceProfileCard.getByText('🌟 Hub').first()).toBeVisible();
+  await expect(aliceProfileCard.getByText('name: "HubX1"').first()).toBeVisible();
+  await expect(aliceProfileCard.getByText('Your Hub').first()).toBeVisible();
+  console.log("✅ Verified Alice's hub profile details and 'Your Hub' status");
+
+  // === STEP 4: Choose Bob as the entity to join the hub ===
+  console.log('📍 STEP 4: Switching to Bob to test hub joining functionality');
+  await entityDropdown.click();
+  await page.waitForTimeout(300);
+
+  const bobOption = firstPanel
+    .locator('[data-value="Ethereum:bob:0x37214fa5196f5bba427e84b86e317c1b1829fe5010069dce10cd795cbc48dd66"]')
+    .first();
+  await bobOption.click();
+  await page.waitForTimeout(500);
+  console.log('👤 Switched to Bob entity');
+
+  await aliceProfileCard.getByTestId('join-hub-button').first().scrollIntoViewIfNeeded();
+  await expect(aliceProfileCard.getByTestId('join-hub-button').first()).toBeVisible();
+  console.log("🤝 Found 'Join Hub' button for Alice's hub (Bob's perspective)");
+
+  await aliceProfileCard.getByTestId('join-hub-button').first().click();
+  console.log('🔗 Bob clicked "Join Hub" button - creating symmetric channel');
+
+  await expect(aliceProfileCard.getByText('✅ Already joined this hub').first()).toBeVisible();
+  console.log('✅ UI updated to show "Already joined this hub" status');
+
+  // === STEP 5: Verify Bob's account channels ===
+  console.log("📍 STEP 5: Verifying Bob's account channels show connection to Alice");
+
+  await firstPanel.getByRole('button', { name: '🔗 Account Channels ▼' }).scrollIntoViewIfNeeded();
+  await expect(firstPanel.getByRole('button', { name: '🔗 Account Channels ▼' })).toBeVisible();
+
+  await firstPanel.getByRole('button', { name: '🔗 Account Channels ▼' }).click();
+  console.log("🔗 Expanded Bob's Account Channels section");
+
+  await expect(
+    firstPanel
+      .getByTestId('account-channels')
+      .first()
+      .getByText('🏢 0x2bd72c34b6cf4dc3580ab7b8c06319fa71b23df11c016e9d834f8f5222104803')
+      .first(),
+  ).toBeVisible();
+  console.log("✅ Verified Bob has channel with Alice (Alice's entity ID visible)");
+
+  // === STEP 6: Switch to Alice and verify symmetric account channels ===
+  console.log('📍 STEP 6: Switching back to Alice to verify symmetric channel creation');
+
+  await entityDropdown.click();
+  await page.waitForTimeout(300);
+  await aliceOption.click();
+  await page.waitForTimeout(500);
+  console.log('👤 Switched back to Alice entity');
+
+  await expect(
+    firstPanel
+      .getByTestId('account-channels')
+      .first()
+      .getByText('🏢 0x37214fa5196f5bba427e84b86e317c1b1829fe5010069dce10cd795cbc48dd66')
+      .first(),
+  ).toBeVisible();
+  console.log("✅ Verified Alice has symmetric channel with Bob (Bob's entity ID visible)");
+  console.log('🎉 TEST COMPLETED: Gossip + Account Input UI Flow successful!');
+  console.log('   - Alice announced hub profile to gossip layer');
+  console.log("   - Bob successfully joined Alice's hub");
+  console.log('   - Symmetric channels created between Alice and Bob');
+  console.log('   - UI correctly shows channel status from both perspectives');
+});

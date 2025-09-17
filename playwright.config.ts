@@ -20,6 +20,9 @@ export default defineConfig({
     screenshot: 'on',
     viewport: { width: 1920, height: 1080 },
     video: { mode: 'on', size: { width: 1920, height: 1080 } },
+    launchOptions: {
+      args: ['--start-maximized'], // optional, maximizes the window
+    },
   },
   projects: [
     {
