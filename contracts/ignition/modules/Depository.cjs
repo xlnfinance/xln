@@ -2,8 +2,7 @@ const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 
 const DepositoryModule = buildModule("DepositoryModule", (m) => {
 
-
-  const depository = m.contract('Depository')
+  const depository = m.contract('Depository', [], { id: 'DepositoryV2' })
   const subcontractProvider = m.contract('SubcontractProvider')
   const entityProvider = m.contract('EntityProvider')
 

@@ -16,6 +16,7 @@
       .replace(/'/g, "&#039;");
   }
   import EntityDropdown from './EntityDropdown.svelte';
+  import AccountInspectorDropdown from './AccountInspectorDropdown.svelte';
   import EntityProfile from './EntityProfile.svelte';
   import ConsensusState from './ConsensusState.svelte';
   import ChatMessages from './ChatMessages.svelte';
@@ -29,6 +30,7 @@
 
   let replica: EntityReplica | null = null;
   let showCloseButton = true;
+  let selectedAccount: { entityId: string; account: any } | null = null;
 
   // Reactive statement to get replica data
   $: {
@@ -45,7 +47,7 @@
   // Reactive component states
   $: consensusExpanded = $settings.componentStates[`consensus-${tab.id}`] ?? true;
   $: reservesExpanded = $settings.componentStates[`reserves-${tab.id}`] ?? false;
-  $: channelsExpanded = $settings.componentStates[`channels-${tab.id}`] ?? false;
+  $: accountsExpanded = $settings.componentStates[`accounts-${tab.id}`] ?? false;
   $: chatExpanded = $settings.componentStates[`chat-${tab.id}`] ?? true;
   $: proposalsExpanded = $settings.componentStates[`proposals-${tab.id}`] ?? false;
   $: historyExpanded = $settings.componentStates[`history-${tab.id}`] ?? false;
@@ -57,39 +59,43 @@
 
   // 💰 Financial calculation functions
 
-  // Mock asset prices for demo (in real system, fetch from oracle/API)
-  const assetPrices: Record<string, number> = {
-    'ETH': 2500,      // $2,500 per ETH
-    'USDT': 1,        // $1 per USDT
-    'USDC': 1,        // $1 per USDC
-    'ACME-SHARES': 15.50, // $15.50 per ACME share
-    'BTC-SHARES': 45000   // $45,000 per BTC share
+  // Token registry for consistent naming (matches contract prefunding)
+  const TOKEN_REGISTRY: Record<string, { symbol: string; name: string; decimals: number; price: number }> = {
+    '0': { symbol: 'NULL', name: 'Null Token', decimals: 18, price: 0 },
+    '1': { symbol: 'ETH', name: 'Ethereum', decimals: 18, price: 2500 },       // Contract prefunds 1M
+    '2': { symbol: 'USDT', name: 'Tether USD', decimals: 18, price: 1 },       // Contract prefunds 1M
+    '3': { symbol: 'USDC', name: 'USD Coin', decimals: 18, price: 1 },         // Contract prefunds 1M
+    '4': { symbol: 'ACME', name: 'ACME Corp Shares', decimals: 18, price: 15.50 },
+    '5': { symbol: 'BTC', name: 'Bitcoin Shares', decimals: 8, price: 45000 },
   };
 
-  function formatAssetDisplay(balance: any): string {
-    const divisor = BigInt(10) ** BigInt(balance.decimals);
+  const getTokenInfo = (tokenId: string) => TOKEN_REGISTRY[tokenId] || { symbol: `TKN${tokenId}`, decimals: 18, price: 0 };
+
+  function formatAssetDisplay(tokenId: string, balance: any): string {
+    const tokenInfo = getTokenInfo(tokenId);
+    const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
     const wholePart = balance.amount / divisor;
     const fractionalPart = balance.amount % divisor;
 
     if (fractionalPart === 0n) {
-      return `${wholePart} ${balance.symbol}`;
+      return `${wholePart} ${tokenInfo.symbol}`;
     }
 
-    const fractionalStr = fractionalPart.toString().padStart(balance.decimals, '0');
-    return `${wholePart}.${fractionalStr} ${balance.symbol}`;
+    const fractionalStr = fractionalPart.toString().padStart(tokenInfo.decimals, '0');
+    return `${wholePart}.${fractionalStr} ${tokenInfo.symbol}`;
   }
 
-  function getAssetValue(balance: any): number {
-    const divisor = BigInt(10) ** BigInt(balance.decimals);
+  function getAssetValue(tokenId: string, balance: any): number {
+    const tokenInfo = getTokenInfo(tokenId);
+    const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
     const amount = Number(balance.amount) / Number(divisor);
-    const price = assetPrices[balance.symbol] || 0;
-    return amount * price;
+    return amount * tokenInfo.price;
   }
 
   function calculateTotalNetworth(reserves: Map<string, any>): number {
     let total = 0;
-    for (const [symbol, balance] of reserves.entries()) {
-      total += getAssetValue(balance);
+    for (const [tokenId, balance] of reserves.entries()) {
+      total += getAssetValue(tokenId, balance);
     }
     return total;
   }
@@ -98,12 +104,22 @@
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signer, entityId } = event.detail;
 
+    // Clear selected account when changing entities
+    selectedAccount = null;
+
     tabOperations.updateTab(tab.id, {
       jurisdiction,
       signer,
       entityId,
       title: `Entity ${entityId.slice(-4)}`
     });
+  }
+
+  // Handle account selection from AccountInspectorDropdown
+  function handleAccountSelect(event: CustomEvent) {
+    const { entityId, account } = event.detail;
+    selectedAccount = { entityId, account };
+    console.log('📋 Account selected:', entityId.slice(-4), account);
   }
 
   // Handle tab close
@@ -143,10 +159,13 @@
 
 <div class="entity-panel" data-panel-id={tab.id}>
   <div class="panel-header">
-    <EntityDropdown
-      {tab}
-      on:entitySelect={handleEntitySelect}
-    />
+    <div class="panel-header-dropdowns">
+      <EntityDropdown
+        {tab}
+        on:entitySelect={handleEntitySelect}
+      />
+      <AccountInspectorDropdown {replica} on:accountSelect={handleAccountSelect} />
+    </div>
     <div class="panel-header-controls">
       {#if isLast}
         <button class="panel-add-btn" on:click={handleAddTab} title="Add Entity Panel">
@@ -177,11 +196,103 @@
       </div>
     </div>
   {:else}
-    <!-- Entity Profile Section -->
-    <EntityProfile {replica} {tab} />
+    {#if selectedAccount}
+      <!-- Account-specific view -->
+      <div class="account-view-header">
+        <div class="account-title">
+          <h3>🏢 Entity {selectedAccount.entityId.slice(-4)} Account Details</h3>
+          <button class="back-to-entity-btn" on:click={() => selectedAccount = null}>
+            ← Back to Entity Overview
+          </button>
+        </div>
+      </div>
+      
+      <!-- Dedicated Account Information Panel -->
+      <div class="panel-component account-details-panel">
+        <div class="component-header">
+          <div class="component-title">
+            <span>💳</span>
+            <span>Account with Entity {selectedAccount.entityId.slice(-4)}</span>
+          </div>
+        </div>
+        <div class="component-content" style="max-height: none; padding: 20px;">
+          <div class="account-full-details">
+            <!-- Account status -->
+            <div class="account-status-section">
+              <h4>Account Status</h4>
+              <div class="status-row">
+                <span class="label">Status:</span>
+                <span class="value {selectedAccount.account.mempool?.length > 0 ? 'pending' : 'synced'}">
+                  {selectedAccount.account.mempool?.length > 0 ? '🟡 Pending' : '✅ Synced'}
+                </span>
+              </div>
+              <div class="status-row">
+                <span class="label">Frame:</span>
+                <span class="value">#{selectedAccount.account.currentFrame?.frameId || 0}</span>
+              </div>
+              <div class="status-row">
+                <span class="label">Mempool:</span>
+                <span class="value">{selectedAccount.account.mempool?.length || 0} transactions</span>
+              </div>
+            </div>
 
-    <!-- Consensus State Component -->
-  <div class="panel-component" id="consensus-{tab.id}">
+            <!-- Token balances -->
+            {#if selectedAccount.account.deltas && selectedAccount.account.deltas.size > 0}
+              <div class="token-balances-section">
+                <h4>Token Balances</h4>
+                {#each Array.from(selectedAccount.account.deltas.entries()) as [tokenId, delta]}
+                  {@const tokenInfo = getTokenInfo(tokenId)}
+                  <div class="token-detail-card">
+                    <div class="token-header">
+                      <span class="token-symbol" style="color: {tokenInfo.symbol === 'ETH' ? '#627eea' : tokenInfo.symbol === 'USDT' ? '#26a17b' : '#007acc'}">{tokenInfo.symbol}</span>
+                      <span class="token-name">{tokenInfo.name}</span>
+                    </div>
+                    <div class="balance-details">
+                      <div class="balance-item">
+                        <span class="balance-label">Collateral:</span>
+                        <span class="balance-value">{delta.collateral?.toString() || '0'}</span>
+                      </div>
+                      <div class="balance-item">
+                        <span class="balance-label">Off-chain Delta:</span>
+                        <span class="balance-value">{delta.offdelta?.toString() || '0'}</span>
+                      </div>
+                      <div class="balance-item">
+                        <span class="balance-label">On-chain Delta:</span>
+                        <span class="balance-value">{delta.ondelta?.toString() || '0'}</span>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="no-tokens">
+                <p>No token balances yet</p>
+              </div>
+            {/if}
+
+            <!-- Mempool transactions -->
+            {#if selectedAccount.account.mempool && selectedAccount.account.mempool.length > 0}
+              <div class="mempool-section">
+                <h4>Pending Transactions</h4>
+                {#each selectedAccount.account.mempool as tx, i}
+                  <div class="mempool-tx">
+                    <span class="tx-index">#{i}</span>
+                    <span class="tx-type">{tx.type || 'Unknown'}</span>
+                    <span class="tx-data">{JSON.stringify(tx.data).slice(0, 50)}...</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    {:else}
+      <!-- Normal entity view -->
+      <!-- Entity Profile Section -->
+      <EntityProfile {replica} {tab} />
+
+      <!-- Consensus State Component -->
+      <div class="panel-component" id="consensus-{tab.id}">
     <div
       class="component-header"
       class:collapsed={!consensusExpanded}
@@ -234,15 +345,16 @@
           </div>
 
           <!-- Asset List with Portfolio Bars -->
-          {#each Array.from(replica.state.reserves.entries()) as [symbol, balance]}
-            {@const assetValue = getAssetValue(balance)}
+          {#each Array.from(replica.state.reserves.entries()) as [tokenId, balance]}
+            {@const tokenInfo = getTokenInfo(tokenId)}
+            {@const assetValue = getAssetValue(tokenId, balance)}
             {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
             {@const percentage = totalNetworth > 0 ? (assetValue / totalNetworth) * 100 : 0}
 
             <div class="asset-row">
               <div class="asset-info">
-                <span class="asset-symbol">{balance.symbol}</span>
-                <span class="asset-amount">{formatAssetDisplay(balance)}</span>
+                <span class="asset-symbol">{tokenInfo.symbol}</span>
+                <span class="asset-amount">{formatAssetDisplay(tokenId, balance)}</span>
                 <span class="asset-value">${assetValue.toFixed(2)}</span>
               </div>
 
@@ -265,25 +377,25 @@
     </div>
   </div>
 
-  <!-- Account Channels Component -->
-  <div class="panel-component" id="channels-{tab.id}">
+  <!-- Accounts Component -->
+  <div class="panel-component" id="accounts-{tab.id}">
     <div
       class="component-header"
-      class:collapsed={!channelsExpanded}
-      on:click={() => toggleComponent(`channels-${tab.id}`)}
+      class:collapsed={!accountsExpanded}
+      on:click={() => toggleComponent(`accounts-${tab.id}`)}
       role="button"
       tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`channels-${tab.id}`)}
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`accounts-${tab.id}`)}
     >
       <div class="component-title">
-        <span>🔗</span>
-        <span>Account Channels</span>
+        <span>💳</span>
+        <span>Accounts</span>
       </div>
       <div class="component-toggle">▼</div>
     </div>
     <div
       class="component-content"
-      class:collapsed={!channelsExpanded}
+      class:collapsed={!accountsExpanded}
       style="max-height: 400px;"
     >
       <AccountChannels {replica} />
@@ -311,7 +423,7 @@
       class:collapsed={!chatExpanded}
       style="max-height: 25vh;"
     >
-      <ChatMessages {replica} {tab} />
+      <ChatMessages {replica} {tab} currentTimeIndex={$currentTimeIndex} />
     </div>
   </div>
 
@@ -389,6 +501,7 @@
       <ControlsPanel {replica} {tab} />
     </div>
   </div>
+    {/if}
   {/if}
 </div>
 
@@ -409,6 +522,13 @@
     padding-bottom: 12px;
     border-bottom: 1px solid #3e3e3e;
     gap: 12px;
+  }
+
+  .panel-header-dropdowns {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
   }
 
   .panel-header-controls {
@@ -651,5 +771,182 @@
     font-style: italic;
     text-align: center;
     padding: 20px;
+  }
+
+  /* Account View Styles */
+  .account-view-header {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #3e3e3e;
+  }
+
+  .account-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .account-title h3 {
+    margin: 0;
+    color: #007acc;
+    font-size: 18px;
+  }
+
+  .back-to-entity-btn {
+    padding: 6px 12px;
+    background: #555;
+    border: 1px solid #666;
+    border-radius: 4px;
+    color: #d4d4d4;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+  }
+
+  .back-to-entity-btn:hover {
+    background: #666;
+    border-color: #007acc;
+  }
+
+  .account-details-panel {
+    background: #252526;
+  }
+
+  .account-full-details {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .account-status-section h4,
+  .token-balances-section h4,
+  .mempool-section h4 {
+    margin: 0 0 12px 0;
+    color: #007acc;
+    font-size: 16px;
+    border-bottom: 1px solid #3e3e3e;
+    padding-bottom: 6px;
+  }
+
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #333;
+  }
+
+  .status-row:last-child {
+    border-bottom: none;
+  }
+
+  .status-row .label {
+    font-weight: bold;
+    color: #ccc;
+  }
+
+  .status-row .value {
+    font-family: 'Courier New', monospace;
+    color: #d4d4d4;
+  }
+
+  .status-row .value.pending {
+    color: #ffc107;
+  }
+
+  .status-row .value.synced {
+    color: #28a745;
+  }
+
+  .token-detail-card {
+    background: #2a2a2a;
+    border: 1px solid #3e3e3e;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .token-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #333;
+  }
+
+  .token-symbol {
+    font-weight: bold;
+    font-size: 16px;
+    font-family: 'Courier New', monospace;
+  }
+
+  .token-name {
+    color: #999;
+    font-size: 14px;
+  }
+
+  .balance-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+
+  .balance-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .balance-label {
+    font-size: 12px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .balance-value {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    color: #d4d4d4;
+    font-weight: bold;
+  }
+
+  .no-tokens {
+    text-align: center;
+    padding: 20px;
+    color: #777;
+    font-style: italic;
+  }
+
+  .mempool-tx {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #2a2a2a;
+    border: 1px solid #3e3e3e;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+
+  .tx-index {
+    font-family: 'Courier New', monospace;
+    color: #007acc;
+    font-weight: bold;
+    min-width: 30px;
+  }
+
+  .tx-type {
+    font-weight: bold;
+    color: #ffc107;
+    min-width: 100px;
+  }
+
+  .tx-data {
+    font-family: 'Courier New', monospace;
+    color: #999;
+    flex: 1;
+    font-size: 12px;
   }
 </style>

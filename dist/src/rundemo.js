@@ -1,6 +1,9 @@
 /**
- * XLN Demo Runner
+ * XLN Demo Runner (J-MOCKED VERSION)
  * Sets up a clean environment with two single-signer entities and demonstrates a reserve transfer.
+ *
+ * NOTE: This console demo uses MOCKED j-events for fast development/testing.
+ * The UI "Run Demo" button uses REAL j-watcher with blockchain integration.
  */
 import { generateNumberedEntityId } from './entity-factory';
 import { getJurisdictionByAddress } from './evm';
@@ -184,8 +187,9 @@ const runDemo = async (env) => {
         throw new Error(`❌ Verification failed: e2 did not receive ETH. Expected: ${expectedE2Balance}, Got: ${e2_final_balance}`);
     }
     console.log(`✅ State verified: e1 has ${e1_final_balance / 10n ** 18n} ETH, e2 has ${e2_final_balance / 10n ** 18n} ETH.`);
-    console.log('\n🎯 Demo completed!');
+    console.log('\n🎯 J-MOCKED Demo completed!');
     console.log('📊 Check the dashboard to verify final reserve states for e1 and e2.');
+    console.log('🌐 For REAL blockchain integration, use the "Run Demo" button in the UI!');
     return env;
 };
 export { runDemo };

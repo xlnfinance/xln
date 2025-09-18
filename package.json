@@ -21,11 +21,11 @@
     "dev:quick": "./dev-quick.sh",
     "dev:watch": "./dev-watch.sh",
     "dev:reset": "./reset-networks.sh",
-    "test": "cd contracts && npx hardhat test",
+    "test": "cd contracts && echo 'ℹ️ Contract tests now run as part of deployment cycle (see deploy-contracts.sh)'",
     "build:static": "cd frontend && bun run build:static && echo '✅ Static build complete for GitHub Pages'",
     "build:legacy": "cp index.html dist/legacy.html && echo '✅ Legacy index.html copied to dist/'",
     "build:deploy": "mkdir -p dist && npm run build:static && npm run build:legacy && echo '🚀 Ready for GitHub Pages deployment'",
-    "test:contracts": "cd contracts && npx hardhat test",
+    "test:contracts:r2r": "cd contracts && bunx hardhat run test-r2r-post-deployment.cjs --network localhost",
     "test:governance": "cd contracts && npx hardhat test --grep governance",
     "test:entity": "cd contracts && npx hardhat test --grep entity",
     "test:old": "NODE_OPTIONS=\"--loader ts-node/esm\" npx mocha src/test/merkle.test.ts --timeout 60000 --exit",
@@ -88,8 +88,7 @@
     "level": "^8.0.1",
     "merkletreejs": "^0.4.0",
     "msgpackr": "^1.11.5",
-    "ws": "^8.17.0",
-    "xlnfinance-contracts": "file:contracts"
+    "ws": "^8.17.0"
   },
   "type": "module"
 }

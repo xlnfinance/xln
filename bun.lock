@@ -14,7 +14,6 @@
         "merkletreejs": "^0.4.0",
         "msgpackr": "^1.11.5",
         "ws": "^8.17.0",
-        "xlnfinance-contracts": "file:contracts",
       },
       "devDependencies": {
         "@nomicfoundation/hardhat-toolbox": "^5.0.0",
@@ -202,8 +201,6 @@
     "@nomicfoundation/solidity-analyzer-linux-x64-musl": ["@nomicfoundation/solidity-analyzer-linux-x64-musl@0.1.2", "", {}, "sha512-GzzVeeJob3lfrSlDKQw2bRJ8rBf6mEYaWY+gW0JnTDHINA0s2gPR4km5RLIj1xeZZOYz4zRw+AEeYgLRqB2NXg=="],
 
     "@nomicfoundation/solidity-analyzer-win32-x64-msvc": ["@nomicfoundation/solidity-analyzer-win32-x64-msvc@0.1.2", "", {}, "sha512-Fdjli4DCcFHb4Zgsz0uEJXZ2K7VEO+w5KVv7HmT7WO10iODdU9csC2az4jrhEsRtiR9Gfd74FlG0NYlw1BMdyA=="],
-
-    "@openzeppelin/contracts": ["@openzeppelin/contracts@5.4.0", "", {}, "sha512-eCYgWnLg6WO+X52I16TZt8uEjbtdkgLC0SUX/xnAksjjrQI4Xfn4iBRoI5j55dmlOhDv1Y7BoR3cU7e3WWhC6A=="],
 
     "@phc/format": ["@phc/format@1.0.0", "", {}, "sha512-m7X9U6BG2+J+R1lSOdCiITLLrxm+cWlNI3HUFA92oLO77ObGNzaKdh8pMLqdZcshtkKuV84olNNXDfMc4FezBQ=="],
 
@@ -1148,8 +1145,6 @@
     "wrappy": ["wrappy@1.0.2", "", {}, "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="],
 
     "ws": ["ws@8.18.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg=="],
-
-    "xlnfinance-contracts": ["xln-contracts@file:contracts", { "dependencies": { "@openzeppelin/contracts": "^5.0.2" }, "devDependencies": { "@nomicfoundation/hardhat-ignition": "^0.15.5", "@nomicfoundation/hardhat-ignition-ethers": "^0.15.5", "@nomicfoundation/hardhat-network-helpers": "^1.0.11", "@nomicfoundation/hardhat-toolbox": "^5.0.0", "@nomicfoundation/hardhat-verify": "^2.0.9", "@typechain/ethers-v6": "^0.5.1", "@typechain/hardhat": "^9.1.0", "@types/chai": "^4.3.16", "@types/mocha": ">=9.1.0", "chai": "^4.3.10", "ethers": "^6.13.2", "hardhat": "^2.22.6", "hardhat-gas-reporter": "^1.0.10", "solidity-coverage": "^0.8.12", "ts-node": ">=8.0.0", "typechain": "^8.3.2", "typescript": ">=4.5.0" } }],
 
     "y18n": ["y18n@5.0.8", "", {}, "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA=="],
 

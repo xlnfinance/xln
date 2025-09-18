@@ -112,6 +112,10 @@ export const detectEntityType = (entityId: string): EntityType => {
 };
 
 export const extractNumberFromEntityId = (entityId: string): number | null => {
+  if (!entityId || typeof entityId !== 'string') {
+    return null;
+  }
+  
   // Check if this is a hex string (0x followed by hex digits)
   if (entityId.startsWith('0x') && entityId.length === 66) {
     try {
@@ -182,7 +186,7 @@ export const createNumberedEntity = async (
   validators: string[],
   threshold: bigint,
   jurisdiction: JurisdictionConfig,
-): Promise<{ config: ConsensusConfig; entityNumber: number }> => {
+): Promise<{ config: ConsensusConfig; entityNumber: number; entityId: string }> => {
   if (!jurisdiction) {
     throw new Error('Jurisdiction required for numbered entity registration');
   }
@@ -224,7 +228,7 @@ export const createNumberedEntity = async (
     jurisdiction,
   };
 
-  return { config, entityNumber };
+  return { config, entityNumber, entityId };
 };
 
 // 3. NAMED ENTITIES (Premium - admin assignment required)

@@ -84,6 +84,9 @@ export const detectEntityType = (entityId) => {
     return 'lazy';
 };
 export const extractNumberFromEntityId = (entityId) => {
+    if (!entityId || typeof entityId !== 'string') {
+        return null;
+    }
     // Check if this is a hex string (0x followed by hex digits)
     if (entityId.startsWith('0x') && entityId.length === 66) {
         try {
@@ -180,7 +183,7 @@ export const createNumberedEntity = async (name, validators, threshold, jurisdic
         shares,
         jurisdiction,
     };
-    return { config, entityNumber };
+    return { config, entityNumber, entityId };
 };
 // 3. NAMED ENTITIES (Premium - admin assignment required)
 export const requestNamedEntity = async (name, entityNumber, jurisdiction) => {

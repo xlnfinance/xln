@@ -25,7 +25,7 @@ export const applyEntityTx = async (env, entityState, entityTx) => {
                 messages: [...entityState.messages],
                 proposals: new Map(entityState.proposals),
                 reserves: new Map(entityState.reserves),
-                channels: new Map(entityState.channels),
+                accounts: new Map(entityState.accounts),
                 collaterals: new Map(entityState.collaterals),
             };
             newEntityState.nonces.set(from, expectedNonce);
@@ -59,7 +59,7 @@ export const applyEntityTx = async (env, entityState, entityTx) => {
                 messages: [...entityState.messages],
                 proposals: new Map(entityState.proposals),
                 reserves: new Map(entityState.reserves),
-                channels: new Map(entityState.channels),
+                accounts: new Map(entityState.accounts),
                 collaterals: new Map(entityState.collaterals),
             };
             if (shouldExecuteImmediately) {
@@ -92,7 +92,7 @@ export const applyEntityTx = async (env, entityState, entityTx) => {
                 messages: [...entityState.messages],
                 proposals: new Map(entityState.proposals),
                 reserves: new Map(entityState.reserves),
-                channels: new Map(entityState.channels),
+                accounts: new Map(entityState.accounts),
                 collaterals: new Map(entityState.collaterals),
             };
             const updatedProposal = {

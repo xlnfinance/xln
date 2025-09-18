@@ -4,9 +4,20 @@
 
 // Import utilities and types
 // High-level database using Level polyfill (works in both Node.js and browser)
+import fs from 'fs';
 import { Level } from 'level';
 
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
+// TODO: Re-enable account-tx imports after fixing export issues
+// import {
+//   sendAccountInputMessage,
+//   sendDirectPaymentToEntity, 
+//   sendCreditLimitUpdateToEntity,
+//   sendAccountAcknowledgment,
+//   sendBatchAccountInputs,
+//   getCrossEntityMessagingSummary,
+//   validateAccountInputMessage
+// } from './account-tx/messaging';
 import {
   createLazyEntity,
   createNumberedEntity,
@@ -30,11 +41,13 @@ import {
   getNextEntityNumber,
   registerNumberedEntityOnChain,
   submitProcessBatch,
+  submitPrefundAccount,
   transferNameBetweenEntities,
 } from './evm';
 import { createGossipLayer } from './gossip';
 import { type Profile } from './gossip.js';
 import { loadPersistedProfiles } from './gossip-loader';
+import { setupJEventWatcher, JEventWatcher } from './j-event-watcher';
 import {
   createProfileUpdateTx,
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
@@ -78,6 +91,9 @@ let envChangeCallback: ((env: Env) => void) | null = null;
 // Module-level environment variable
 let env: Env;
 
+// Module-level j-watcher instance
+let jWatcher: JEventWatcher | null = null;
+
 export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
   envChangeCallback = callback;
 };
@@ -85,6 +101,54 @@ export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
 const notifyEnvChange = (env: Env) => {
   if (envChangeCallback) {
     envChangeCallback(env);
+  }
+};
+
+// J-Watcher initialization
+const startJEventWatcher = async (env: Env): Promise<void> => {
+  try {
+    // Get the Ethereum jurisdiction
+    const ethereum = await getJurisdictionByAddress('ethereum');
+    if (!ethereum) {
+      console.warn('⚠️ Ethereum jurisdiction not found, skipping j-watcher');
+      return;
+    }
+
+    // Set up j-watcher with the deployed contracts
+    jWatcher = await setupJEventWatcher(
+      env,
+      ethereum.address, // RPC URL
+      ethereum.entityProviderAddress,
+      ethereum.depositoryAddress
+    );
+
+    console.log('✅ J-Event Watcher started successfully');
+    console.log(`🔭 Monitoring: ${ethereum.address}`);
+    console.log(`📍 EntityProvider: ${ethereum.entityProviderAddress}`);
+    console.log(`📍 Depository: ${ethereum.depositoryAddress}`);
+    
+    // J-watcher now handles its own periodic sync every 500ms
+    // Set up a periodic check to process any queued events from j-watcher
+    setInterval(async () => {
+      if (env.serverInput.entityInputs.length > 0) {
+        const eventCount = env.serverInput.entityInputs.length;
+        console.log(`🔭 J-WATCHER: Processing ${eventCount} J-machine events`);
+        
+        // Process the queued entity inputs from j-watcher
+        await applyServerInput(env, { 
+          serverTxs: [], 
+          entityInputs: [...env.serverInput.entityInputs] 
+        });
+        
+        // Clear the processed inputs
+        env.serverInput.entityInputs.length = 0;
+        
+        notifyEnvChange(env); // Notify UI of changes
+      }
+    }, 100); // Check every 100ms to process j-watcher events quickly
+    
+  } catch (error) {
+    console.error('❌ Failed to start J-Event Watcher:', error);
   }
 };
 
@@ -313,6 +377,9 @@ const applyServerInput = async (
             reserves: new Map(),
             channels: new Map(),
             collaterals: new Map(),
+            
+            // 🔭 J-machine tracking
+            jBlock: 0,
           },
           mempool: [],
           isProposer: serverTx.data.isProposer,
@@ -321,6 +388,28 @@ const applyServerInput = async (
       }
     });
     console.log(`🔍 REPLICA-DEBUG: After processing serverTxs, total replicas: ${env.replicas.size}`);
+
+    // Sync newly created entities with j-watcher for historical events
+    console.log(`🔍 J-WATCHER SYNC CHECK: jWatcher=${!!jWatcher}, serverTxs.length=${env.serverInput.serverTxs.length}`);
+    if (jWatcher && env.serverInput.serverTxs.length > 0) {
+      const hasImportReplica = env.serverInput.serverTxs.some(tx => tx.type === 'importReplica');
+      console.log(`🔍 J-WATCHER SYNC CHECK: hasImportReplica=${hasImportReplica}, serverTx types=[${env.serverInput.serverTxs.map(tx => tx.type).join(', ')}]`);
+      if (hasImportReplica) {
+        console.log('🔄 Triggering j-watcher sync for newly created entities...');
+        try {
+          const eventsProcessed = await jWatcher.syncNewlyCreatedEntities(env);
+          if (eventsProcessed) {
+            console.log('🔄✅ Historical events processed individually during sync');
+          }
+        } catch (error) {
+          console.error('🔄❌ Failed to sync newly created entities:', error);
+        }
+      } else {
+        console.log('🔍 J-WATCHER SYNC: No importReplica serverTxs found, skipping sync');
+      }
+    } else {
+      console.log('🔍 J-WATCHER SYNC: Conditions not met for sync trigger');
+    }
 
     // Process entity inputs
     for (const entityInput of mergedInputs) {
@@ -462,6 +551,23 @@ const applyServerInput = async (
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
+  // DEBUG: Log jurisdictions.json content on startup
+  if (!isBrowser) {
+    try {
+      const jurisdictionsContent = fs.readFileSync('./jurisdictions.json', 'utf8');
+      const jurisdictions = JSON.parse(jurisdictionsContent);
+      console.log('🔍 STARTUP: Current jurisdictions.json content:');
+      console.log('📍 Ethereum Depository:', jurisdictions.jurisdictions.ethereum.contracts.depository);
+      console.log('📍 Ethereum EntityProvider:', jurisdictions.jurisdictions.ethereum.contracts.entityProvider);
+      console.log('📍 Polygon Depository:', jurisdictions.jurisdictions.polygon.contracts.depository);
+      console.log('📍 Arbitrum Depository:', jurisdictions.jurisdictions.arbitrum.contracts.depository);
+      console.log('📍 Last updated:', jurisdictions.lastUpdated);
+      console.log('📍 Full Ethereum config:', JSON.stringify(jurisdictions.jurisdictions.ethereum, null, 2));
+    } catch (error) {
+      console.log('⚠️ Failed to read jurisdictions.json:', (error as Error).message);
+    }
+  }
+
   // Initialize gossip layer
   console.log('🕸️ Initializing gossip layer...');
   const gossipLayer = createGossipLayer();
@@ -598,6 +704,13 @@ const main = async (): Promise<Env> => {
 
   log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
 
+  // Start j-watcher for real-time blockchain monitoring (both Node.js and browser)  
+  try {
+    await startJEventWatcher(env);
+  } catch (error) {
+    console.error('❌ Failed to start J-Event Watcher:', error);
+  }
+
   return env;
 };
 
@@ -674,8 +787,18 @@ export {
   // Name resolution functions
   searchEntityNames,
   submitProcessBatch,
+  submitPrefundAccount,
   debugFundReserves,
   transferNameBetweenEntities,
+  
+  // Account messaging functions - TODO: Re-enable after fixing account-tx exports
+  // sendAccountInputMessage,
+  // sendDirectPaymentToEntity,
+  // sendCreditLimitUpdateToEntity,
+  // sendAccountAcknowledgment,
+  // sendBatchAccountInputs,
+  // getCrossEntityMessagingSummary,
+  // validateAccountInputMessage,
 };
 
 // The browser-specific auto-execution logic has been removed.
@@ -695,6 +818,9 @@ if (!isBrowser) {
           console.log('💡 To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag');
           await runDemo(env);
 
+          // Start j-watcher after demo completes
+          await startJEventWatcher(env);
+
           // Add a small delay to ensure demo completes before verification
           setTimeout(async () => {
             await verifyJurisdictionRegistrations();
@@ -702,6 +828,8 @@ if (!isBrowser) {
         } else {
           console.log('✅ Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)');
           console.log('💡 Use XLN.runDemo(env) to run demo manually if needed');
+          
+          // J-watcher is already started in main(), no need to start again
         }
       }
     })
@@ -792,6 +920,8 @@ const runDemoWrapper = async (env: any): Promise<any> => {
     console.log('🎯 Check the entity cards above to see the results');
     console.log('🕰️ Use the time machine to replay the consensus steps');
 
+    // J-watcher is already started in main(), no need to start again
+
     return result;
   } catch (error) {
     console.error('❌ XLN Demo failed:', error);
@@ -817,17 +947,20 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   let iterationCount = 0;
   const maxIterations = 10; // Safety limit
 
-  console.log('🔥 PROCESS-CASCADE: Starting with', outputs.length, 'initial outputs');
-  console.log(
-    '🔥 PROCESS-CASCADE: Initial outputs:',
-    outputs.map(o => ({
-      entityId: o.entityId.slice(0, 8) + '...',
-      signerId: o.signerId,
-      txs: o.entityTxs?.length || 0,
-      precommits: o.precommits?.size || 0,
-      hasFrame: !!o.proposedFrame,
-    })),
-  );
+  // Only log cascade details if there are outputs to process
+  if (outputs.length > 0) {
+    console.log('🔥 PROCESS-CASCADE: Starting with', outputs.length, 'initial outputs');
+    console.log(
+      '🔥 PROCESS-CASCADE: Initial outputs:',
+      outputs.map(o => ({
+        entityId: o.entityId.slice(0, 8) + '...',
+        signerId: o.signerId,
+        txs: o.entityTxs?.length || 0,
+        precommits: o.precommits?.size || 0,
+        hasFrame: !!o.proposedFrame,
+      })),
+    );
+  }
 
   // DEBUG: Log transaction details for vote transactions
   outputs.forEach((output, i) => {
@@ -863,7 +996,7 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
 
   if (iterationCount >= maxIterations) {
     console.warn('⚠️ processUntilEmpty reached maximum iterations');
-  } else {
+  } else if (iterationCount > 0) {
     console.log(`🔥 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
   }
 

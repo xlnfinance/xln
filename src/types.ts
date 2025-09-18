@@ -86,6 +86,7 @@ export interface JurisdictionEventData {
 export interface AccountInput {
   fromEntityId: string;
   toEntityId: string;
+  accountTx: AccountTx; // The actual account transaction to process
   metadata?: {
     purpose?: string;
     description?: string;
@@ -119,21 +120,91 @@ export type EntityTx =
     };
 
 export interface AssetBalance {
-  symbol: string; // "ETH", "USDT", "ACME-SHARES"
   amount: bigint; // Balance in smallest unit (wei, cents, shares)
-  decimals: number; // For display (18 for ETH, 6 for USDT, 0 for shares)
-  contractAddress?: string; // For ERC20 tokens
+  // Note: symbol, decimals, contractAddress come from token registry, not stored here
 }
 
-export interface ChannelState {
-  counterparty: string; // Other entity's address
-  myBalance: bigint; // My balance in this channel
-  theirBalance: bigint; // Their balance in this channel
-  collateral: AssetBalance[]; // Assets locked as collateral
-  nonce: number; // Channel nonce for updates
-  isActive: boolean; // Channel status
-  lastUpdate: number; // Timestamp of last update
+// Account machine structures for signed and collateralized accounts between entities
+export interface AccountDelta {
+  tokenId: number;
+  delta: bigint; // Positive = we owe them, Negative = they owe us
 }
+
+export interface AccountFrame {
+  frameId: number;
+  timestamp: number;
+  tokenIds: number[]; // Array of token IDs in this account
+  deltas: bigint[]; // Array of deltas corresponding to tokenIds
+}
+
+export interface AccountMachine {
+  counterpartyEntityId: string;
+  mempool: AccountTx[]; // Unprocessed account transactions
+  currentFrame: AccountFrame; // Current agreed state
+  sentTransitions: number; // Number of transitions sent but not yet confirmed
+  
+  // Per-token delta states
+  deltas: Map<number, Delta>; // tokenId -> Delta
+  
+  // Proof structures
+  proofHeader: {
+    cooperativeNonce: number;
+    disputeNonce: number;
+  };
+  proofBody: {
+    tokenIds: number[];
+    deltas: bigint[]; 
+  };
+  hankoSignature?: string; // Last signed proof by counterparty
+}
+
+// Delta structure for per-token account state (based on old_src)
+export interface Delta {
+  tokenId: number;
+  collateral: bigint;
+  ondelta: bigint;  // On-chain delta
+  offdelta: bigint; // Off-chain delta  
+  leftCreditLimit: bigint;
+  rightCreditLimit: bigint;
+  leftAllowence: bigint;
+  rightAllowence: bigint;
+}
+
+// Derived account balance information per token
+export interface DerivedDelta {
+  delta: bigint;
+  collateral: bigint;
+  inCollateral: bigint;
+  outCollateral: bigint;
+  inOwnCredit: bigint;
+  outPeerCredit: bigint;
+  inAllowence: bigint;
+  outAllowence: bigint;
+  totalCapacity: bigint;
+  ownCreditLimit: bigint;
+  peerCreditLimit: bigint;
+  inCapacity: bigint;
+  outCapacity: bigint;
+  outOwnCredit: bigint;
+  inPeerCredit: bigint;
+}
+
+// Account transaction types
+export type AccountTx = 
+  | { type: 'initial_ack'; data: { message: string } }
+  | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
+  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; description?: string } }
+  | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint; isForSelf: boolean } }
+  | { type: 'account_settle'; data: { 
+      tokenId: number; 
+      ownReserve: string;
+      counterpartyReserve: string;
+      collateral: string;
+      ondelta: string;
+      side: 'left' | 'right';
+      blockNumber: number;
+      transactionHash: string;
+    } }
 
 export interface EntityState {
   entityId: string; // The entity ID this state belongs to
@@ -144,10 +215,16 @@ export interface EntityState {
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
 
-  // 💰 NEW: Financial state
-  reserves: Map<string, AssetBalance>; // symbol -> balance ("ETH" -> {amount: 10n, decimals: 18})
-  channels: Map<string, ChannelState>; // counterpartyId -> channel state
-  collaterals: Map<string, AssetBalance>; // Total assets locked in channels
+  // 💰 Financial state
+  reserves: Map<string, AssetBalance>; // tokenId -> balance ("1" -> {amount: 10n})
+  accounts: Map<string, AccountMachine>; // counterpartyEntityId -> account state
+  collaterals: Map<string, AssetBalance>; // Total assets locked in accounts
+  
+  // 🔭 J-machine tracking
+  jBlock: number; // Last processed J-machine block number
+  
+  // 🔗 Account machine integration
+  accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine
 }
 
 export interface ProposedEntityFrame {

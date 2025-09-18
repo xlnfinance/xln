@@ -1,22 +1,22 @@
 import {
   time,
   loadFixture,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+} from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
+import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs.js";
 import { expect } from "chai";
 import hre from "hardhat";
 import { Contract, AbiCoder, Signer } from "ethers";
 import { ethers } from "hardhat";
-import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { Depository, SubcontractProvider, EntityProvider, SubcontractProvider__factory, Depository__factory } from "../typechain-types";
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers.js";
+import { Depository, SubcontractProvider, EntityProvider, SubcontractProvider__factory, Depository__factory } from "../typechain-types/index.js";
 
 
 const coder = AbiCoder.defaultAbiCoder()
-enum MessageType {
-  CooperativeUpdate,
-  CooperativeDisputeProof,
-  DisputeProof
-}
+const MessageType = {
+  CooperativeUpdate: 0,
+  CooperativeDisputeProof: 1,
+  DisputeProof: 2
+} as const;
 
 function stringify(obj: any) {
   function replacer(key: string, value: any) {
@@ -156,9 +156,31 @@ describe("Depository", function () {
 
 
     it("should transfer ERC20 token from reserve to another reserve", async function () {
-      await depository.reserveToReserve({ receiver: user1.address, tokenId: erc20id, amount: 50 });
-      const reserveUser1 = await depository._reserves(user1.address, erc20id);
-      const reserveUser0 = await depository._reserves(user0.address, erc20id);
+      const entity0 = ethers.keccak256(ethers.toUtf8Bytes(user0.address.toLowerCase()));
+      const entity1 = ethers.keccak256(ethers.toUtf8Bytes(user1.address.toLowerCase()));
+      
+      // Create batch with reserveToReserve transfer
+      const batch = {
+        reserveToExternalToken: [],
+        externalTokenToReserve: [],
+        reserveToReserve: [{
+          receivingEntity: entity1,
+          tokenId: erc20id,
+          amount: 50
+        }],
+        reserveToCollateral: [],
+        cooperativeUpdate: [],
+        cooperativeDisputeProof: [],
+        initialDisputeProof: [],
+        finalDisputeProof: [],
+        flashloans: [],
+        hub_id: 0
+      };
+      
+      await depository.processBatch(entity0, batch);
+      
+      const reserveUser1 = await depository._reserves(entity1, erc20id);
+      const reserveUser0 = await depository._reserves(entity0, erc20id);
 
       expect(reserveUser1).to.equal(50);
       expect(reserveUser0).to.equal(9950);
@@ -391,7 +413,68 @@ describe("Depository", function () {
       expect(collateral.collateral).to.equal(0);
     });
 
+    it("should have pre-funded entities 1-20 with 1M tokens in constructor", async function () {
+      console.log("Testing pre-funded entities...");
+      
+      // Test entities 1-20 are pre-funded with tokens 1,2,3
+      for (let entityNum = 1; entityNum <= 20; entityNum++) {
+        const entityId = `0x${entityNum.toString(16).padStart(64, '0')}`;
+        
+        for (let tokenId = 1; tokenId <= 3; tokenId++) {
+          const balance = await depository._reserves(entityId, tokenId);
+          console.log(`Entity ${entityNum}, Token ${tokenId}: ${balance.toString()}`);
+          expect(balance).to.equal(ethers.parseEther("1")); // 1M tokens = 1e18
+        }
+      }
+      
+      console.log("✅ All entities 1-20 are properly pre-funded!");
+    });
 
+    it("should execute reserveToReserve transfer between pre-funded entities", async function () {
+      const entity1 = "0x0000000000000000000000000000000000000000000000000000000000000001"; // Entity #1
+      const entity2 = "0x0000000000000000000000000000000000000000000000000000000000000002"; // Entity #2
+      const tokenId = 1;
+      const transferAmount = ethers.parseEther("0.1"); // 0.1 ETH
+      
+      // Check initial balances
+      const initialBalance1 = await depository._reserves(entity1, tokenId);
+      const initialBalance2 = await depository._reserves(entity2, tokenId);
+      
+      console.log(`Initial: Entity1=${initialBalance1}, Entity2=${initialBalance2}`);
+      expect(initialBalance1).to.equal(ethers.parseEther("1")); // 1M pre-funded
+      expect(initialBalance2).to.equal(ethers.parseEther("1")); // 1M pre-funded
+      
+      // Create batch with reserveToReserve transfer
+      const batch = {
+        reserveToExternalToken: [],
+        externalTokenToReserve: [],
+        reserveToReserve: [{
+          receivingEntity: entity2,
+          tokenId: tokenId,
+          amount: transferAmount
+        }],
+        reserveToCollateral: [],
+        cooperativeUpdate: [],
+        cooperativeDisputeProof: [],
+        initialDisputeProof: [],
+        finalDisputeProof: [],
+        flashloans: [],
+        hub_id: 0
+      };
+      
+      // Execute processBatch
+      await depository.processBatch(entity1, batch);
+      
+      // Check final balances
+      const finalBalance1 = await depository._reserves(entity1, tokenId);
+      const finalBalance2 = await depository._reserves(entity2, tokenId);
+      
+      console.log(`Final: Entity1=${finalBalance1}, Entity2=${finalBalance2}`);
+      expect(finalBalance1).to.equal(initialBalance1 - transferAmount);
+      expect(finalBalance2).to.equal(initialBalance2 + transferAmount);
+      
+      console.log("✅ Reserve-to-reserve transfer working!");
+    });
 
   });
 

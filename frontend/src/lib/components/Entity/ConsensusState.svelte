@@ -19,6 +19,10 @@
       <span class="consensus-value">{replica.state?.height || 0}</span>
     </div>
     <div class="consensus-item">
+      <span class="consensus-label">J-Block:</span>
+      <span class="consensus-value consensus-jblock">🔭 {replica.state?.jBlock || 0}</span>
+    </div>
+    <div class="consensus-item">
       <span class="consensus-label">Messages:</span>
       <span class="consensus-value">{replica.state?.messages?.length || 0}</span>
     </div>
@@ -64,6 +68,11 @@
 
   .consensus-status-unlocked {
     color: #4ade80;
+  }
+
+  .consensus-jblock {
+    color: #007acc;
+    font-family: 'Monaco', 'Menlo', monospace;
   }
 
   .empty-state {

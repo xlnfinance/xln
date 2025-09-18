@@ -31,7 +31,7 @@ export const ENTITY_PROVIDER_ABI = [
 export const DEPOSITORY_ABI = [
     'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
     'function debugBulkFundEntities() external',
-    'function processBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, uint256 externalTokenId, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(bytes32 counterentity, uint256 tokenId, uint256 amount)[] reserveToCollateral, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(uint256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bool startedByLeft, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, tuple(uint256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
+    'function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
     'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
     'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
     'event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)',
@@ -72,6 +72,17 @@ export const debugFundReserves = async (jurisdiction, entityId, tokenId, amount)
         throw error;
     }
 };
+/**
+ * Fund entity with multiple assets and emit ReserveUpdated events
+ */
+export const fundEntityReserves = async (entityId, assets) => {
+    console.log(`💰 Funding entity ${entityId.slice(0, 10)}... with ${assets.length} assets`);
+    for (const asset of assets) {
+        console.log(`  💳 Adding ${asset.symbol}: ${asset.amount} (token ${asset.tokenId})`);
+        await fundReserves(entityId, asset.tokenId, asset.amount);
+    }
+    console.log(`✅ Entity ${entityId.slice(0, 10)}... funded with all assets`);
+};
 // Submit real processBatch transaction to jurisdiction
 export const submitProcessBatch = async (jurisdiction, entityId, batch) => {
     try {
@@ -79,6 +90,20 @@ export const submitProcessBatch = async (jurisdiction, entityId, batch) => {
         console.log(`🔍 BATCH DEBUG:`, JSON.stringify(batch, null, 2));
         console.log(`🔍 ENTITY DEBUG: ${entityId}`);
         console.log(`🔍 JURISDICTION DEBUG:`, jurisdiction);
+        console.log(`🔍 JURISDICTION SOURCE: Reading from jurisdictions.json file`);
+        // Fix batch amounts - convert any JS numbers to wei strings
+        if (batch.reserveToReserve) {
+            for (let i = 0; i < batch.reserveToReserve.length; i++) {
+                const transfer = batch.reserveToReserve[i];
+                if (typeof transfer.amount === 'number') {
+                    // Convert number to wei string
+                    const weiAmount = (BigInt(Math.floor(transfer.amount * 1e18))).toString();
+                    console.log(`🔧 Converting amount ${transfer.amount} → ${weiAmount} wei`);
+                    transfer.amount = weiAmount;
+                }
+            }
+        }
+        console.log(`🔍 FIXED BATCH:`, JSON.stringify(batch, null, 2));
         const { depository, provider } = await connectToEthereum(jurisdiction);
         console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
         // Check if contract exists
@@ -87,11 +112,99 @@ export const submitProcessBatch = async (jurisdiction, entityId, batch) => {
         if (code === '0x') {
             throw new Error('Contract not deployed at this address');
         }
+        // Test if this is our new contract
+        try {
+            console.log(`🔍 Testing if contract has debugBulkFundEntities...`);
+            await depository.debugBulkFundEntities.staticCall();
+            console.log(`✅ This is our NEW contract with debug functions!`);
+        }
+        catch (debugError) {
+            console.log(`❌ This is OLD contract - no debug functions:`, debugError.message);
+        }
         // Check current balance (entities should be pre-funded in constructor)
-        const currentBalance = await depository._reserves(entityId, batch.reserveToReserve[0]?.tokenId || 1);
-        console.log(`🔍 Current balance: ${currentBalance.toString()}`);
-        if (currentBalance.toString() === '0') {
-            throw new Error(`Entity ${entityId.slice(0, 10)} has no reserves! Contract should be pre-funded.`);
+        console.log(`🔍 Checking balance for entity ${entityId} token ${batch.reserveToReserve[0]?.tokenId || 1}...`);
+        try {
+            const currentBalance = await depository._reserves(entityId, batch.reserveToReserve[0]?.tokenId || 1);
+            console.log(`🔍 Current balance: ${currentBalance.toString()}`);
+            if (currentBalance.toString() === '0') {
+                console.log(`⚠️ Entity has no reserves - this suggests old contract without pre-funding`);
+                throw new Error(`Entity ${entityId.slice(0, 10)} has no reserves! Contract should be pre-funded.`);
+            }
+        }
+        catch (balanceError) {
+            console.log(`❌ Failed to check balance:`, balanceError.message);
+            throw balanceError;
+        }
+        // Debug the exact function call being made
+        console.log(`🔍 Function signature: processBatch(bytes32,tuple)`);
+        console.log(`🔍 Entity ID: ${entityId}`);
+        console.log(`🔍 Batch structure:`, Object.keys(batch));
+        console.log(`🔍 reserveToReserve array:`, batch.reserveToReserve);
+        // Check if function exists in contract interface
+        const functionFragments = depository.interface.fragments.filter(f => f.type === 'function');
+        const functions = functionFragments.map(f => f.name);
+        const hasProcessBatch = functions.includes('processBatch');
+        console.log(`🔍 Contract has processBatch function: ${hasProcessBatch}`);
+        console.log(`🔍 Available functions:`, functions.slice(0, 10), '...');
+        // DEEP DEBUGGING: Check ABI vs deployed bytecode
+        console.log(`🔍 DEEP DEBUG: Contract interface analysis`);
+        console.log(`🔍 Contract target address: ${depository.target}`);
+        // Get function selector for processBatch
+        const processBatchFunc = depository.interface.getFunction('processBatch');
+        const processBatchSelector = processBatchFunc?.selector || 'NOT_FOUND';
+        console.log(`🔍 Function selector: ${processBatchSelector}`);
+        // Check deployed bytecode contains this selector
+        const bytecode = await provider.getCode(depository.target);
+        const hasSelector = bytecode.includes(processBatchSelector.slice(2)); // Remove 0x
+        console.log(`🔍 Deployed bytecode contains processBatch selector: ${hasSelector}`);
+        console.log(`🔍 Bytecode length: ${bytecode.length} chars`);
+        // Check ABI hash vs expected
+        const abiHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(depository.interface.fragments.map(f => f.format()))));
+        console.log(`🔍 ABI hash: ${abiHash.slice(0, 10)}...`);
+        // Log exact call data being generated
+        const callData = depository.interface.encodeFunctionData('processBatch', [entityId, batch]);
+        console.log(`🔍 Call data length: ${callData.length} chars`);
+        console.log(`🔍 Call data start: ${callData.slice(0, 20)}...`);
+        // Try different entity addresses to see if it's entity-specific
+        console.log(`🔍 Testing with different entity addresses...`);
+        // Test entity 0 (should exist from token 0)
+        try {
+            const balance0 = await depository._reserves("0x0000000000000000000000000000000000000000000000000000000000000000", 0);
+            console.log(`🔍 Entity 0 Token 0 balance: ${balance0.toString()}`);
+        }
+        catch (e) {
+            console.log(`❌ Entity 0 balance check failed: ${e.message}`);
+        }
+        // Try simpler batch with just empty arrays
+        const emptyBatch = {
+            reserveToExternalToken: [],
+            externalTokenToReserve: [],
+            reserveToReserve: [],
+            reserveToCollateral: [],
+            cooperativeUpdate: [],
+            cooperativeDisputeProof: [],
+            initialDisputeProof: [],
+            finalDisputeProof: [],
+            flashloans: [],
+            hub_id: 0
+        };
+        console.log(`🔍 Testing empty batch first...`);
+        try {
+            const emptyResult = await depository.processBatch.staticCall(entityId, emptyBatch);
+            console.log(`✅ Empty batch works: ${emptyResult}`);
+            // If empty batch works, try our batch
+            console.log(`🔍 Now testing our batch...`);
+            const result = await depository.processBatch.staticCall(entityId, batch);
+            console.log(`✅ Static call successful: ${result}`);
+        }
+        catch (staticError) {
+            console.error(`❌ Static call failed:`, staticError);
+            console.log(`🔍 Error details:`, {
+                code: staticError.code,
+                data: staticError.data,
+                reason: staticError.reason
+            });
+            throw staticError;
         }
         // First try to estimate gas to get better error info
         console.log(`🔍 Estimating gas for processBatch...`);
@@ -326,9 +439,8 @@ export const generateJurisdictions = async () => {
 };
 export let DEFAULT_JURISDICTIONS = null;
 export const getJurisdictions = async () => {
-    if (!DEFAULT_JURISDICTIONS) {
-        DEFAULT_JURISDICTIONS = await generateJurisdictions();
-    }
+    // Always regenerate to pick up fresh deployments (no caching during development)
+    DEFAULT_JURISDICTIONS = await generateJurisdictions();
     return DEFAULT_JURISDICTIONS;
 };
 export const getAvailableJurisdictions = async () => {

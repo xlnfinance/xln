@@ -24,7 +24,19 @@ export const deepCloneReplica = (replica) => {
             config: replica.state.config,
             // 💰 Clone financial state
             reserves: cloneMap(replica.state.reserves),
-            channels: cloneMap(replica.state.channels),
+            accounts: new Map(Array.from(replica.state.accounts.entries()).map(([id, account]) => [
+                id,
+                {
+                    ...account,
+                    mempool: cloneArray(account.mempool),
+                    deltas: cloneMap(account.deltas),
+                    proofHeader: { ...account.proofHeader },
+                    proofBody: {
+                        tokenIds: [...account.proofBody.tokenIds],
+                        deltas: [...account.proofBody.deltas],
+                    },
+                },
+            ])),
             collaterals: cloneMap(replica.state.collaterals),
         },
         mempool: cloneArray(replica.mempool),

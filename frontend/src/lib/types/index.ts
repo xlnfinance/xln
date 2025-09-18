@@ -25,14 +25,67 @@ export interface AssetBalance {
   contractAddress?: string;
 }
 
-export interface ChannelState {
-  counterparty: string;
-  myBalance: bigint;
-  theirBalance: bigint;
-  collateral: AssetBalance[];
-  nonce: number;
-  isActive: boolean;
-  lastUpdate: number;
+export interface AccountFrame {
+  frameId: number;
+  timestamp: number;
+  tokenIds: number[];
+  deltas: number[];
+}
+
+export interface AccountDelta {
+  tokenId: number;
+  amount: number;
+}
+
+export interface AccountTx {
+  type: string;
+  data: any;
+}
+
+export interface Delta {
+  tokenId: number;
+  collateral: bigint;
+  ondelta: bigint;
+  offdelta: bigint;
+  leftCreditLimit: bigint;
+  rightCreditLimit: bigint;
+  leftAllowence: bigint;
+  rightAllowence: bigint;
+}
+
+export interface DerivedDelta {
+  delta: bigint;
+  collateral: bigint;
+  inCollateral: bigint;
+  outCollateral: bigint;
+  inOwnCredit: bigint;
+  outPeerCredit: bigint;
+  inAllowence: bigint;
+  outAllowence: bigint;
+  totalCapacity: bigint;
+  ownCreditLimit: bigint;
+  peerCreditLimit: bigint;
+  inCapacity: bigint;
+  outCapacity: bigint;
+  outOwnCredit: bigint;
+  inPeerCredit: bigint;
+}
+
+export interface AccountMachine {
+  counterpartyEntityId: string;
+  mempool: AccountTx[];
+  currentFrame: AccountFrame;
+  sentTransitions: number;
+  deltas: Map<number, Delta>;
+  proofHeader: {
+    cooperativeNonce: number;
+    disputeNonce: number;
+  };
+  proofBody: {
+    tokenIds: number[];
+    deltas: bigint[];
+  };
+  hankoSignature?: string;
 }
 
 export interface EntityState {
@@ -43,7 +96,10 @@ export interface EntityState {
   proposals: Map<string, Proposal>;
   config: EntityConfig;
   reserves: Map<string, AssetBalance>;
-  channels: Map<string, ChannelState>;
+  accounts: Map<string, AccountMachine>;
+  collaterals: Map<string, any>;
+  entityId: string;
+  jBlock: number;
 }
 
 export interface EntityConfig {

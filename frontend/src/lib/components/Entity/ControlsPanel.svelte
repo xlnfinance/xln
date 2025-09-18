@@ -13,10 +13,13 @@
   let voteChoice = '';
   let voteComment = '';
 
-  // State for J-tx (reserve-to-reserve)
-  let jtxRecipient = '';
-  let jtxAmount = 0;
-  let jtxTokenId = '';
+  // State for J-tx (reserve-to-reserve) - Set defaults for easier testing
+  let jtxRecipient = '2';
+  let jtxAmount = 0.1;
+  let jtxTokenId = '0';
+
+  // State for account opening
+  let accountCounterparty = '2';
 
 
   // Get proposals for voting
@@ -143,6 +146,46 @@
     }
   }
 
+  async function openAccount() {
+    if (!tab.entityId || !tab.signer || !accountCounterparty.trim()) return;
+    
+    try {
+      const xln = await getXLN();
+      const env = $xlnEnvironment;
+      if (!env) throw new Error('XLN environment not ready');
+
+      // Resolve the counterparty entity ID
+      const counterpartyEntityId = resolveRecipient(accountCounterparty);
+      
+      const accountInput = {
+        entityId: tab.entityId,
+        signerId: tab.signer,
+        entityTxs: [{
+          type: 'accountInput',
+          data: {
+            fromEntityId: tab.entityId,
+            toEntityId: counterpartyEntityId,
+            accountTx: {
+              type: 'initial_ack',
+              data: { message: 'Account opening request' }
+            }
+          }
+        }]
+      };
+      
+      console.log('💳 Opening account with entity:', counterpartyEntityId);
+      
+      // Direct processUntilEmpty for entityInputs (no serverTxs needed)
+      await xln.processUntilEmpty(env, [accountInput]);
+      
+      console.log('✅ Account opened successfully');
+      accountCounterparty = '';
+    } catch (error) {
+      console.error('Failed to open account:', error);
+      alert(`Failed to open account: ${error.message}`);
+    }
+  }
+
   function resolveRecipient(recipient: string): string {
     // Check if it's a simple number (entity number)
     if (/^\d+$/.test(recipient)) {
@@ -164,12 +207,24 @@
     const recipientAddress = resolveRecipient(jtxRecipient.trim());
     const tokenIdNum = Number(jtxTokenId);
 
+    console.log('🔍 R2R Transfer Debug:');
+    console.log('  From Entity:', tab.entityId);
+    console.log('  To Entity:', recipientAddress);
+    console.log('  Token ID:', tokenIdNum);
+    console.log('  Amount:', jtxAmount);
+
     if (isNaN(tokenIdNum)) {
       alert('Invalid token selected. Please ensure the dropdown value is a number.');
       return;
     }
     if (jtxAmount <= 0) {
       alert('Amount must be greater than zero.');
+      return;
+    }
+
+    // Check for self-transfer
+    if (tab.entityId === recipientAddress) {
+      alert(`Cannot transfer to yourself!\n\nYou are Entity #1 (${tab.entityId})\nTrying to send to: ${recipientAddress}\n\nTip: Try entering "2" to send to Entity #2 instead.`);
       return;
     }
 
@@ -250,6 +305,7 @@
       <option value="chat" selected>💬 Create chat message</option>
       <option value="proposal">📋 Add proposal</option>
       <option value="vote">🗳️ Vote on proposal</option>
+      <option value="account">💳 Open account</option>
       <option value="entity">🏛️ Form new entity</option>
       <option value="jtx">💸 Send J-tx</option>
       <option value="settings">⚙️ Update settings</option>
@@ -301,8 +357,11 @@
     
     {:else if selectedAction === 'jtx'}
       <div class="form-group">
-        <label class="form-label">Recipient Address:</label>
-        <input class="form-input" type="text" bind:value={jtxRecipient} placeholder="Enter recipient's entity ID or address..." />
+        <label class="form-label">Recipient Entity:</label>
+        <input class="form-input" type="text" bind:value={jtxRecipient} placeholder="Entity number (e.g., 2, 3) or full entity ID..." />
+        <div class="form-hint">
+          💡 Tip: Try entity number "2" to transfer to Entity #2
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Token:</label>
@@ -318,6 +377,16 @@
         <input class="form-input" type="number" bind:value={jtxAmount} placeholder="0.0" />
       </div>
       <button class="form-button" on:click={submitJtx}>Send Transfer</button>
+
+    {:else if selectedAction === 'account'}
+      <div class="form-group">
+        <label class="form-label">Counterparty Entity:</label>
+        <input class="form-input" type="text" bind:value={accountCounterparty} placeholder="Entity number (e.g., 2, 3) or full entity ID..." />
+        <div class="form-hint">
+          💡 Tip: Try entity number "2" to open account with Entity #2
+        </div>
+      </div>
+      <button class="form-button" on:click={openAccount}>Open Account</button>
 
     {:else}
       <div class="form-group">
@@ -422,6 +491,13 @@
 
   .empty-message small {
     color: #999;
+    font-style: italic;
+  }
+
+  .form-hint {
+    font-size: 0.8em;
+    color: #007acc;
+    margin-top: 4px;
     font-style: italic;
   }
 </style>

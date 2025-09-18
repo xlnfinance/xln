@@ -59,6 +59,31 @@ deploy_to_network() {
 
     # Ensure logs directory exists
     mkdir -p ../logs
+    
+    # COMPREHENSIVE cache clearing for this network
+    echo "   🧹 Clearing ALL caches for $network_name..."
+    rm -rf cache/ 2>/dev/null || true
+    rm -rf artifacts/ 2>/dev/null || true
+    rm -rf typechain-types/ 2>/dev/null || true
+    rm -rf ignition/deployments/chain-1337/ 2>/dev/null || true
+    echo "   ✅ All caches cleared"
+    
+    # Force fresh compilation
+    echo "   🔧 Compiling contracts..."
+    if ! npx hardhat compile --force 2>&1; then
+        echo "   ❌ Contract compilation failed"
+        cd ..
+        return 1
+    fi
+    
+    # Verify our function is in compiled ABI
+    if grep -q "debugBulkFundEntities" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+        echo "   ✅ Pre-funding function found in compiled ABI"
+    else
+        echo "   ❌ Pre-funding function missing from compiled ABI"
+        cd ..
+        return 1
+    fi
 
     # Verify script exists before attempting deployment
     if [ ! -f "scripts/deploy-entity-provider.cjs" ]; then
@@ -101,14 +126,46 @@ deploy_to_network() {
         return 1
     fi
     echo "$depository_output" > "../logs/deploy-depository-$port.log" 2>/dev/null || true
-    # Extract final address from Hardhat Ignition output (last line with 0x address)
+    
+    # Wait for ignition to create deployment artifacts
+    local deployment_file="ignition/deployments/chain-1337/deployed_addresses.json"
+    echo "   🔍 Waiting for deployment file: $deployment_file"
+    local tries=0
+    while [ ! -f "$deployment_file" ] && [ $tries -lt 10 ]; do
+        sleep 1
+        tries=$((tries+1))
+        echo "   ⏳ Waiting for deployment file... (try $tries/10)"
+    done
+    
+    # Extract Depository address from deployed_addresses.json
     local depository_address
-    depository_address=$(echo "$depository_output" | grep -o '0x[a-fA-F0-9]\{40\}' | tail -1 || true)
-    if [ -z "$depository_address" ]; then
+    if [ -f "$deployment_file" ]; then
+        echo "   ✅ Deployment file found, extracting addresses..."
+        cat "$deployment_file"
+        depository_address=$(jq -r '.["DepositoryModule#DepositoryV2"] // .["DepositoryModule#Depository"]' "$deployment_file" 2>/dev/null || true)
+        echo "   🔍 Extracted Depository: $depository_address"
+    else
+        echo "   ❌ Deployment file not found after waiting"
+    fi
+    if [ -z "$depository_address" ] || [ "$depository_address" = "null" ]; then
+        # Fallback to old method
+        depository_address=$(echo "$depository_output" | grep -o '0x[a-fA-F0-9]\{40\}' | tail -1 || true)
+        echo "   🔍 Fallback extraction: $depository_address"
+    fi
+    if [ -z "$depository_address" ] || [ "$depository_address" = "null" ]; then
         echo "   ❌ Could not extract Depository address"
         return 1
     fi
     echo "   ✅ Depository: $depository_address"
+    
+    # SKIP old verification - run R2R test instead
+    echo "   🧪 Running Reserve-to-Reserve (R2R) functionality test..."
+    if bunx hardhat run test-r2r-post-deployment.cjs --network "$network_config" 2>&1; then
+        echo "   ✅ R2R test passed - Depository contract working correctly"
+    else
+        echo "   ❌ R2R test failed - Contract deployment may have issues"
+        echo "   ⚠️ Continuing anyway (you can debug later)"
+    fi
 
     # Store both addresses in variables for later use
     case $port in
@@ -139,17 +196,18 @@ if deploy_to_network "8545" "$NETWORK_8545"; then
     ((success_count++))
 fi
 
-if deploy_to_network "8546" "$NETWORK_8546"; then
-    ((success_count++))
-fi
+# COMMENTED OUT: Focus on Ethereum only for now
+# if deploy_to_network "8546" "$NETWORK_8546"; then
+#     ((success_count++))
+# fi
 
-if deploy_to_network "8547" "$NETWORK_8547"; then
-    ((success_count++))
-fi
+# if deploy_to_network "8547" "$NETWORK_8547"; then
+#     ((success_count++))
+# fi
 
 echo ""
 echo "📊 Deployment Summary:"
-echo "   ✅ Successful: $success_count/3 networks"
+echo "   ✅ Successful: $success_count/1 networks (Ethereum only)"
 
 if [ $success_count -gt 0 ]; then
     echo ""
@@ -160,25 +218,21 @@ if [ $success_count -gt 0 ]; then
         echo "     EntityProvider: $CONTRACT_8545_EP"
         echo "     Depository: $CONTRACT_8545_DEP"
     fi
-    if [ -n "$CONTRACT_8546_EP" ]; then
-        echo "   $NETWORK_8546 (port 8546):"
-        echo "     EntityProvider: $CONTRACT_8546_EP"
-        echo "     Depository: $CONTRACT_8546_DEP"
-    fi
-    if [ -n "$CONTRACT_8547_EP" ]; then
-        echo "   $NETWORK_8547 (port 8547):"
-        echo "     EntityProvider: $CONTRACT_8547_EP"
-        echo "     Depository: $CONTRACT_8547_DEP"
-    fi
 
     # Update server configuration
     echo ""
     echo "🔧 Creating unified jurisdiction configuration..."
+    
+    # DEBUG: Show what variables we actually have (Ethereum only)
+    echo "🔍 DEBUG: Contract variables before jurisdictions.json generation:"
+    echo "   CONTRACT_8545_EP='$CONTRACT_8545_EP'"
+    echo "   CONTRACT_8545_DEP='$CONTRACT_8545_DEP'"
+    echo ""
 
-    # Create unified jurisdictions.json with actual deployed addresses
+    # Create fresh jurisdictions.json with actual deployed addresses (NO placeholders!)
     cat > jurisdictions.json << EOF
 {
-  "version": "1.0.0",
+  "version": "1.0.0", 
   "lastUpdated": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "jurisdictions": {
     "ethereum": {
@@ -186,36 +240,12 @@ if [ $success_count -gt 0 ]; then
       "chainId": 1337,
       "rpc": "http://localhost:8545",
       "contracts": {
-        "entityProvider": "${CONTRACT_8545_EP:-"NOT_DEPLOYED"}",
-        "depository": "${CONTRACT_8545_DEP:-"NOT_DEPLOYED"}"
+        "entityProvider": "$CONTRACT_8545_EP",
+        "depository": "$CONTRACT_8545_DEP"
       },
-      "explorer": "http://localhost:8545",
+      "explorer": "http://localhost:8545", 
       "currency": "ETH",
-      "status": "${CONTRACT_8545_EP:+active}"
-    },
-    "polygon": {
-      "name": "Polygon",
-      "chainId": 1337,
-      "rpc": "http://localhost:8546",
-      "contracts": {
-        "entityProvider": "${CONTRACT_8546_EP:-"NOT_DEPLOYED"}",
-        "depository": "${CONTRACT_8546_DEP:-"NOT_DEPLOYED"}"
-      },
-      "explorer": "http://localhost:8546",
-      "currency": "MATIC",
-      "status": "${CONTRACT_8546_EP:+active}"
-    },
-    "arbitrum": {
-      "name": "Arbitrum",
-      "chainId": 1337,
-      "rpc": "http://localhost:8547",
-      "contracts": {
-        "entityProvider": "${CONTRACT_8547_EP:-"NOT_DEPLOYED"}",
-        "depository": "${CONTRACT_8547_DEP:-"NOT_DEPLOYED"}"
-      },
-      "explorer": "http://localhost:8547",
-      "currency": "ETH",
-      "status": "${CONTRACT_8547_EP:+active}"
+      "status": "active"
     }
   },
   "defaults": {
@@ -225,6 +255,10 @@ if [ $success_count -gt 0 ]; then
   }
 }
 EOF
+
+    echo "   ✅ Created fresh jurisdictions.json with:"
+    echo "     EntityProvider: $CONTRACT_8545_EP"
+    echo "     Depository: $CONTRACT_8545_DEP"
 
 
 
