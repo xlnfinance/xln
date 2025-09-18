@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import type { Tab, EntityReplica } from '../../types';
   import { getXLN, replicas, history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex } from '../../stores/timeStore';
@@ -9,11 +8,11 @@
   // Simple HTML escape (moved from deleted utils)
   function escapeHtml(unsafe: string): string {
     return unsafe
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
   import EntityDropdown from './EntityDropdown.svelte';
   import EntityProfile from './EntityProfile.svelte';
@@ -23,33 +22,35 @@
   import TransactionHistory from './TransactionHistory/index.svelte';
   import ControlsPanel from './ControlsPanel.svelte';
   import AccountChannels from './AccountChannels.svelte';
+  import ProfileForm from './ProfileForm.svelte';
 
-  export let tab: Tab;
-  export let isLast: boolean = false;
+  // Svelte 5 props
+  let { tab, isLast = false }: { tab: Tab; isLast?: boolean } = $props();
 
-  let replica: EntityReplica | null = null;
-  let showCloseButton = true;
+  // State variables
+  let showCloseButton = $state(true);
 
-  // Reactive statement to get replica data
-  $: {
+  // Derived reactive values
+  let replica = $derived.by((): EntityReplica | null => {
     if (tab.entityId && tab.signer) {
       // Prefer time-aware replicas if available
       const replicaKey = `${tab.entityId}:${tab.signer}`;
       const candidate = $visibleReplicas?.get?.(replicaKey);
-      replica = candidate; // TODO: Fix getReplica call
+      return candidate || null; // TODO: Fix getReplica call
     } else {
-      replica = null;
+      return null;
     }
-  }
+  });
 
   // Reactive component states
-  $: consensusExpanded = $settings.componentStates[`consensus-${tab.id}`] ?? true;
-  $: reservesExpanded = $settings.componentStates[`reserves-${tab.id}`] ?? false;
-  $: channelsExpanded = $settings.componentStates[`channels-${tab.id}`] ?? false;
-  $: chatExpanded = $settings.componentStates[`chat-${tab.id}`] ?? true;
-  $: proposalsExpanded = $settings.componentStates[`proposals-${tab.id}`] ?? false;
-  $: historyExpanded = $settings.componentStates[`history-${tab.id}`] ?? false;
-  $: controlsExpanded = $settings.componentStates[`controls-${tab.id}`] ?? false;
+  let consensusExpanded = $derived.by(() => $settings.componentStates[`consensus-${tab.id}`] ?? true);
+  let reservesExpanded = $derived.by(() => $settings.componentStates[`reserves-${tab.id}`] ?? false);
+  let channelsExpanded = $derived.by(() => $settings.componentStates[`channels-${tab.id}`] ?? false);
+  let chatExpanded = $derived.by(() => $settings.componentStates[`chat-${tab.id}`] ?? true);
+  let proposalsExpanded = $derived.by(() => $settings.componentStates[`proposals-${tab.id}`] ?? false);
+  let historyExpanded = $derived.by(() => $settings.componentStates[`history-${tab.id}`] ?? false);
+  let controlsExpanded = $derived.by(() => $settings.componentStates[`controls-${tab.id}`] ?? false);
+  let profileExpanded = $derived.by(() => $settings.componentStates[`profile-${tab.id}`] ?? false);
 
   function toggleComponent(componentId: string) {
     settingsOperations.toggleComponentState(componentId);
@@ -59,11 +60,11 @@
 
   // Mock asset prices for demo (in real system, fetch from oracle/API)
   const assetPrices: Record<string, number> = {
-    'ETH': 2500,      // $2,500 per ETH
-    'USDT': 1,        // $1 per USDT
-    'USDC': 1,        // $1 per USDC
-    'ACME-SHARES': 15.50, // $15.50 per ACME share
-    'BTC-SHARES': 45000   // $45,000 per BTC share
+    ETH: 2500, // $2,500 per ETH
+    USDT: 1, // $1 per USDT
+    USDC: 1, // $1 per USDC
+    'ACME-SHARES': 15.5, // $15.50 per ACME share
+    'BTC-SHARES': 45000, // $45,000 per BTC share
   };
 
   function formatAssetDisplay(balance: any): string {
@@ -102,7 +103,7 @@
       jurisdiction,
       signer,
       entityId,
-      title: `Entity ${entityId.slice(-4)}`
+      title: `Entity ${entityId.slice(-4)}`,
     });
   }
 
@@ -116,7 +117,15 @@
     tabOperations.addTab();
   }
 
-  onMount(() => {
+  // Handle profile announcement
+  function handleProfileAnnounced(profile: any) {
+    console.log('📡 Profile announced from EntityPanel:', profile);
+    // The profile has been announced and will appear in the network directory
+    // No additional action needed here since the gossip layer handles updates
+  }
+
+  // Effect for component lifecycle and event handling
+  $effect(() => {
     // Check if we should show close button
     const allTabs = tabOperations.getActiveTab();
     // Show close button if more than 1 tab exists
@@ -127,7 +136,7 @@
       console.log('🕰️ EntityPanel received time change event:', event.detail.timeIndex);
       // Force reactivity by triggering replica update
       if (tab.entityId && tab.signer) {
-        // The reactive statement will automatically pick up the new visibleReplicas
+        // The derived statement will automatically pick up the new visibleReplicas
         // due to timeState changes, but we can force a console log
         console.log(`🔄 Panel ${tab.id} updating for time index:`, event.detail.timeIndex);
       }
@@ -143,20 +152,13 @@
 
 <div class="entity-panel" data-panel-id={tab.id}>
   <div class="panel-header">
-    <EntityDropdown
-      {tab}
-      on:entitySelect={handleEntitySelect}
-    />
+    <EntityDropdown {tab} on:entitySelect={handleEntitySelect} />
     <div class="panel-header-controls">
       {#if isLast}
-        <button class="panel-add-btn" on:click={handleAddTab} title="Add Entity Panel">
-          ➕
-        </button>
+        <button class="panel-add-btn" onclick={handleAddTab} title="Add Entity Panel"> ➕ </button>
       {/if}
       {#if showCloseButton}
-        <button class="panel-close-btn" on:click={handleCloseTab} title="Close panel">
-          ×
-        </button>
+        <button class="panel-close-btn" onclick={handleCloseTab} title="Close panel"> × </button>
       {/if}
     </div>
   </div>
@@ -181,214 +183,206 @@
     <EntityProfile {replica} {tab} />
 
     <!-- Consensus State Component -->
-  <div class="panel-component" id="consensus-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!consensusExpanded}
-      on:click={() => toggleComponent(`consensus-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`consensus-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>⚖️</span>
-        <span>Consensus State</span>
-      </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      class:collapsed={!consensusExpanded}
-      style="max-height: 200px;"
-    >
-      <ConsensusState {replica} />
-    </div>
-  </div>
-
-  <!-- Reserves Component -->
-  <div class="panel-component" id="reserves-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!reservesExpanded}
-      on:click={() => toggleComponent(`reserves-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`reserves-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>💰</span>
-        <span>Reserves</span>
-      </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      class:collapsed={!reservesExpanded}
-      style="max-height: 300px;"
-    >
-      {#if replica?.state?.reserves && replica.state.reserves.size > 0}
-        <div class="reserves-container">
-          <!-- Portfolio Summary -->
-          <div class="portfolio-summary">
-            <strong>Portfolio Value: ${calculateTotalNetworth(replica.state.reserves).toFixed(2)}</strong>
-          </div>
-
-          <!-- Asset List with Portfolio Bars -->
-          {#each Array.from(replica.state.reserves.entries()) as [symbol, balance]}
-            {@const assetValue = getAssetValue(balance)}
-            {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
-            {@const percentage = totalNetworth > 0 ? (assetValue / totalNetworth) * 100 : 0}
-
-            <div class="asset-row">
-              <div class="asset-info">
-                <span class="asset-symbol">{balance.symbol}</span>
-                <span class="asset-amount">{formatAssetDisplay(balance)}</span>
-                <span class="asset-value">${assetValue.toFixed(2)}</span>
-              </div>
-
-              <!-- Green portfolio bar showing percentage -->
-              <div class="portfolio-bar-container">
-                <div class="portfolio-bar">
-                  <div
-                    class="portfolio-fill"
-                    style="width: {percentage}%"
-                  ></div>
-                </div>
-                <span class="asset-percentage">{percentage.toFixed(1)}%</span>
-              </div>
-            </div>
-          {/each}
+    <div class="panel-component" id="consensus-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!consensusExpanded}
+        onclick={() => toggleComponent(`consensus-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`consensus-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>⚖️</span>
+          <span>Consensus State</span>
         </div>
-      {:else}
-        <p class="empty-state">No reserves yet - deposit assets via Depository.sol</p>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Account Channels Component -->
-  <div class="panel-component" id="channels-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!channelsExpanded}
-      on:click={() => toggleComponent(`channels-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`channels-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>🔗</span>
-        <span>Account Channels</span>
+        <div class="component-toggle">▼</div>
       </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      class:collapsed={!channelsExpanded}
-      style="max-height: 400px;"
-    >
-      <AccountChannels {replica} />
-    </div>
-  </div>
-
-  <!-- Chat Component -->
-  <div class="panel-component" id="chat-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!chatExpanded}
-      on:click={() => toggleComponent(`chat-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`chat-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>💬</span>
-        <span>Chat</span>
+      <div class="component-content" class:collapsed={!consensusExpanded} style="max-height: 200px;">
+        <ConsensusState {replica} />
       </div>
-      <div class="component-toggle">▼</div>
     </div>
-    <div
-      class="component-content"
-      class:collapsed={!chatExpanded}
-      style="max-height: 25vh;"
-    >
-      <ChatMessages {replica} {tab} />
-    </div>
-  </div>
 
-  <!-- Proposals Component -->
-  <div class="panel-component" id="proposals-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!proposalsExpanded}
-      on:click={() => toggleComponent(`proposals-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`proposals-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>📋</span>
-        <span>Proposals</span>
+    <!-- Reserves Component -->
+    <div class="panel-component" id="reserves-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!reservesExpanded}
+        onclick={() => toggleComponent(`reserves-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`reserves-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>💰</span>
+          <span>Reserves</span>
+        </div>
+        <div class="component-toggle">▼</div>
       </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      class:collapsed={!proposalsExpanded}
-      style="max-height: 25vh;"
-    >
-      <ProposalsList {replica} {tab} />
-    </div>
-  </div>
+      <div class="component-content" class:collapsed={!reservesExpanded} style="max-height: 300px;">
+        {#if replica?.state?.reserves && replica.state.reserves.size > 0}
+          <div class="reserves-container">
+            <!-- Portfolio Summary -->
+            <div class="portfolio-summary">
+              <strong>Portfolio Value: ${calculateTotalNetworth(replica.state.reserves).toFixed(2)}</strong>
+            </div>
 
-  <!-- Transaction History Component -->
-  <div class="panel-component entity-history-panel" id="history-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!historyExpanded}
-      on:click={() => toggleComponent(`history-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`history-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>🗂️</span>
-        <span>History</span>
-      </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      class:collapsed={!historyExpanded}
-      style="max-height: 50vh;"
-    >
-      <TransactionHistory {replica} {tab} serverHistory={$history} currentTimeIndex={$currentTimeIndex} />
-    </div>
-  </div>
+            <!-- Asset List with Portfolio Bars -->
+            {#each Array.from(replica.state.reserves.entries()) as [symbol, balance]}
+              {@const assetValue = getAssetValue(balance)}
+              {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
+              {@const percentage = totalNetworth > 0 ? (assetValue / totalNetworth) * 100 : 0}
 
-  <!-- Controls Component -->
-  <div class="panel-component" id="controls-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!controlsExpanded}
-      on:click={() => toggleComponent(`controls-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`controls-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>⚙️</span>
-        <span>Controls</span>
+              <div class="asset-row">
+                <div class="asset-info">
+                  <span class="asset-symbol">{balance.symbol}</span>
+                  <span class="asset-amount">{formatAssetDisplay(balance)}</span>
+                  <span class="asset-value">${assetValue.toFixed(2)}</span>
+                </div>
+
+                <!-- Green portfolio bar showing percentage -->
+                <div class="portfolio-bar-container">
+                  <div class="portfolio-bar">
+                    <div class="portfolio-fill" style="width: {percentage}%"></div>
+                  </div>
+                  <span class="asset-percentage">{percentage.toFixed(1)}%</span>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="empty-state">No reserves yet - deposit assets via Depository.sol</p>
+        {/if}
       </div>
-      <div class="component-toggle">▼</div>
     </div>
-    <div
-      class="component-content"
-      class:collapsed={!controlsExpanded}
-      style="max-height: 400px;"
-    >
-      <ControlsPanel {replica} {tab} />
+
+    <!-- My Profile Component -->
+    <div class="panel-component" id="profile-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!profileExpanded}
+        onclick={() => toggleComponent(`profile-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`profile-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>👤</span>
+          <span>My Profile</span>
+        </div>
+        <div class="component-toggle">▼</div>
+      </div>
+      <div class="component-content" class:collapsed={!profileExpanded}>
+        <div class="profile-form-wrapper">
+          <ProfileForm onProfileAnnounced={handleProfileAnnounced} showHeader={false} componentId={`profile-${tab.id}`} />
+        </div>
+      </div>
     </div>
-  </div>
+
+    <!-- Account Channels Component -->
+    <div class="panel-component" id="channels-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!channelsExpanded}
+        onclick={() => toggleComponent(`channels-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`channels-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>🔗</span>
+          <span>Account Channels</span>
+        </div>
+        <div class="component-toggle">▼</div>
+      </div>
+      <div class="component-content" class:collapsed={!channelsExpanded} style="max-height: 400px;">
+        <AccountChannels {replica} />
+      </div>
+    </div>
+
+    <!-- Chat Component -->
+    <div class="panel-component" id="chat-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!chatExpanded}
+        onclick={() => toggleComponent(`chat-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`chat-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>💬</span>
+          <span>Chat</span>
+        </div>
+        <div class="component-toggle">▼</div>
+      </div>
+      <div class="component-content" class:collapsed={!chatExpanded} style="max-height: 25vh;">
+        <ChatMessages {replica} {tab} />
+      </div>
+    </div>
+
+    <!-- Proposals Component -->
+    <div class="panel-component" id="proposals-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!proposalsExpanded}
+        onclick={() => toggleComponent(`proposals-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`proposals-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>📋</span>
+          <span>Proposals</span>
+        </div>
+        <div class="component-toggle">▼</div>
+      </div>
+      <div class="component-content" class:collapsed={!proposalsExpanded} style="max-height: 25vh;">
+        <ProposalsList {replica} {tab} />
+      </div>
+    </div>
+
+    <!-- Transaction History Component -->
+    <div class="panel-component entity-history-panel" id="history-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!historyExpanded}
+        onclick={() => toggleComponent(`history-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`history-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>🗂️</span>
+          <span>History</span>
+        </div>
+        <div class="component-toggle">▼</div>
+      </div>
+      <div class="component-content" class:collapsed={!historyExpanded} style="max-height: 50vh;">
+        <TransactionHistory {replica} {tab} serverHistory={$history} currentTimeIndex={$currentTimeIndex} />
+      </div>
+    </div>
+
+    <!-- Controls Component -->
+    <div class="panel-component" id="controls-{tab.id}">
+      <div
+        class="component-header"
+        class:collapsed={!controlsExpanded}
+        onclick={() => toggleComponent(`controls-${tab.id}`)}
+        role="button"
+        tabindex="0"
+        onkeydown={e => e.key === 'Enter' && toggleComponent(`controls-${tab.id}`)}
+      >
+        <div class="component-title">
+          <span>⚙️</span>
+          <span>Controls</span>
+        </div>
+        <div class="component-toggle">▼</div>
+      </div>
+      <div class="component-content" class:collapsed={!controlsExpanded} style="max-height: 400px;">
+        <ControlsPanel {replica} {tab} />
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -502,7 +496,9 @@
   }
 
   .component-content {
-    transition: max-height 0.3s ease, opacity 0.3s ease;
+    transition:
+      max-height 0.3s ease,
+      opacity 0.3s ease;
     overflow: hidden;
   }
 
@@ -651,5 +647,27 @@
     font-style: italic;
     text-align: center;
     padding: 20px;
+  }
+
+  /* Profile Form Integration Styles */
+  .profile-form-wrapper {
+    padding: 16px;
+  }
+
+  /* Override ProfileForm styles when inside EntityPanel */
+  .profile-form-wrapper :global(.profile-form-container) {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    margin-bottom: 0;
+  }
+
+  .profile-form-wrapper :global(.profile-form-header) {
+    border-bottom: none;
+    display: none; /* Hide the internal header since we have our own component header */
+  }
+
+  .profile-form-wrapper :global(.profile-form-content) {
+    padding: 16px 0;
   }
 </style>

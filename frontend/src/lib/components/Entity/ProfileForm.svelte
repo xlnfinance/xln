@@ -1,16 +1,21 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
+  import { settings, settingsOperations } from '../../stores/settingsStore';
   import MultiSelect from 'svelte-multiselect';
-  import { onMount } from 'svelte';
 
-  // Callback prop for profile announcement
-  let { onProfileAnnounced }: { onProfileAnnounced?: (profile: any) => void } = $props();
+  // Props
+  let { onProfileAnnounced, showHeader = true, componentId }: {
+    onProfileAnnounced?: (profile: any) => void,
+    showHeader?: boolean,
+    componentId?: string
+  } = $props();
 
   let selectedCapabilities = $state<string[]>([]);
   let isHub = $state(false);
   let metadataInput = $state('');
-  let isExpanded = $state(false);
+  // Use settings store for expansion state when componentId is provided
+  let isExpanded = $derived(componentId ? ($settings.componentStates[componentId] ?? false) : false);
   let isAnnouncing = $state(false);
   let announceError = $state<string | null>(null);
 
@@ -62,7 +67,7 @@
       announceError = 'No active entity selected';
       return;
     }
-    
+
     if (!currentSignerId) {
       announceError = 'No signer available for current tab';
       return;
@@ -150,7 +155,10 @@
       hubAvatar = '';
       hubBio = '';
       hubWebsite = '';
-      isExpanded = false; // Collapse the profile form
+      // Collapse the profile form if using component settings
+      if (componentId && ($settings.componentStates[componentId] ?? false)) {
+        settingsOperations.toggleComponentState(componentId);
+      }
     } catch (err) {
       console.error('❌ Failed to submit profile update:', err);
       announceError = err instanceof Error ? err.message : 'Failed to submit profile update';
@@ -160,11 +168,13 @@
   }
 
   function toggleExpanded() {
-    isExpanded = !isExpanded;
-    
-    // Reload existing profile when expanding
-    if (isExpanded && currentEntityId) {
-      loadExistingProfile(currentEntityId);
+    if (componentId) {
+      const currentState = $settings.componentStates[componentId] ?? false;
+      settingsOperations.toggleComponentState(componentId);
+      // Reload existing profile when expanding (after toggle, so check for !currentState)
+      if (!currentState && currentEntityId) {
+        loadExistingProfile(currentEntityId);
+      }
     }
   }
 
@@ -260,17 +270,22 @@
       loadExistingProfile(currentEntityId);
     }
   });
+
+  // If header is hidden, always keep expanded by overriding the derived state
+  let finalExpandedState = $derived(!showHeader || isExpanded);
 </script>
 
 <div class="profile-form-container" data-testid="profile-form">
-  <div class="profile-form-header">
-    <button class="toggle-btn" onclick={toggleExpanded}>
-      <span class="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
-      <h3>👤 My Profile</h3>
-    </button>
-  </div>
+  {#if showHeader}
+    <div class="profile-form-header">
+      <button class="toggle-btn" onclick={toggleExpanded}>
+        <span class="toggle-icon">{finalExpandedState ? '▼' : '▶'}</span>
+        <h3>👤 My Profile</h3>
+      </button>
+    </div>
+  {/if}
 
-  {#if isExpanded}
+  {#if finalExpandedState}
     <div class="profile-form-content">
       {#if isLoadingProfile}
         <div class="loading-indicator">
