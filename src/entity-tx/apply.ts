@@ -30,7 +30,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         messages: [...entityState.messages],
         proposals: new Map(entityState.proposals),
         reserves: new Map(entityState.reserves),
-        channels: new Map(entityState.channels),
+        accounts: new Map(entityState.accounts),
         collaterals: new Map(entityState.collaterals),
       };
 
@@ -71,7 +71,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         messages: [...entityState.messages],
         proposals: new Map(entityState.proposals),
         reserves: new Map(entityState.reserves),
-        channels: new Map(entityState.channels),
+        accounts: new Map(entityState.accounts),
         collaterals: new Map(entityState.collaterals),
       };
 
@@ -114,7 +114,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         messages: [...entityState.messages],
         proposals: new Map(entityState.proposals),
         reserves: new Map(entityState.reserves),
-        channels: new Map(entityState.channels),
+        accounts: new Map(entityState.accounts),
         collaterals: new Map(entityState.collaterals),
       };
 

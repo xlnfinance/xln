@@ -70,6 +70,9 @@
 
     resultsContainer.innerHTML = '';
 
+    console.log(`🔍 EntityDropdown: Total replicas available: ${$replicas.size}`);
+    console.log(`🔍 EntityDropdown: Replica keys:`, Array.from($replicas.keys()));
+
     // Get all available jurisdictions
     const jurisdictions = [
       { name: 'Ethereum', id: 'ethereum' },
@@ -161,6 +164,11 @@
       const replicasArray = Array.from(currentReplicas.values()).filter(replica =>
         replica.state?.config?.jurisdiction?.name === jurisdiction.name
       );
+
+      console.log(`🔍 EntityDropdown: ${jurisdiction.name} has ${replicasArray.length} replicas`);
+      replicasArray.forEach(replica => {
+        console.log(`  📋 Entity: ${replica.entityId.slice(-4)} (${replica.signerId})`);
+      });
 
       if (replicasArray.length === 0) return;
 
@@ -356,7 +364,7 @@
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     z-index: 1000;
     width: 350px;
-    max-height: 300px;
+    max-height: 500px;
     overflow-y: auto;
     top: 100%;
     left: 0;

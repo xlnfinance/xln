@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🔄 Resetting XLN Networks and Redeploying Contracts..."
+echo "🔄 Resetting XLN Network (Ethereum only) and Redeploying Contracts..."
 
 # Stop existing networks
 echo "1️⃣ Stopping existing networks..."
@@ -10,10 +10,12 @@ echo "1️⃣ Stopping existing networks..."
 echo ""
 echo "2️⃣ Cleaning up old data..."
 rm -rf contracts/ignition/deployments/* 2>/dev/null || true
+rm -rf contracts/cache/ 2>/dev/null || true
+rm -rf contracts/artifacts/ 2>/dev/null || true
+rm -rf contracts/typechain-types/ 2>/dev/null || true
 rm -rf logs/*.log 2>/dev/null || true
-
 rm -rf db 2>/dev/null || true
-echo "✅ Cleanup complete"
+echo "✅ Cleanup complete (cleared ignition, hardhat cache, artifacts)"
 
 # Start fresh networks
 echo ""
@@ -34,7 +36,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🎉 Network reset complete!"
     echo ""
-    echo "✅ All networks are running with fresh contracts"
+    echo "✅ Ethereum network running with fresh contracts"
     echo "📋 Contract addresses saved to jurisdictions.json"
     echo ""
     echo "🚀 Next steps:"

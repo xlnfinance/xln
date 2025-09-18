@@ -7,10 +7,10 @@
   import type { EntityFormData } from '../../types';
 
   let formData: EntityFormData = {
-    jurisdiction: '8545',
-    entityType: 'lazy',
+    jurisdiction: '',
+    entityType: 'numbered',
     entityName: 'ACME',
-    validators: [{ name: 'alice', weight: 1 }],
+    validators: [{ name: 's1', weight: 1 }],
     threshold: 1 // Will be updated to match total weight on load
   };
 
@@ -19,9 +19,12 @@
   let userModifiedThreshold = false; // Track if user manually changed threshold
 
   // Set initial threshold to max on component mount
-  onMount(() => {
+  onMount(async () => {
     const initialTotalWeight = formData.validators.reduce((sum, v) => sum + v.weight, 0);
     formData.threshold = initialTotalWeight;
+    
+    // Load jurisdiction options from server
+    await loadJurisdictionOptions();
   });
 
   function addValidator() {
@@ -101,10 +104,10 @@
       const validatorNames = formData.validators.map(v => v.name);
       const threshold = BigInt(formData.threshold);
       
-      // Create proper jurisdiction object
+      // Create proper jurisdiction object from loaded options
+      const jurisdictionOption = jurisdictionOptions.find(j => j.value === formData.jurisdiction);
       const jurisdictionConfig = {
-        name: formData.jurisdiction === '8545' ? 'Ethereum' : 
-              formData.jurisdiction === '8546' ? 'Polygon' : 'Arbitrum',
+        name: jurisdictionOption?.label.split(' (')[0] || 'Unknown',
         port: formData.jurisdiction,
         url: `http://localhost:${formData.jurisdiction}`
       };
@@ -130,11 +133,12 @@
       } else {
         const creation = await xln.createNumberedEntity(formData.entityName, validatorNames, threshold, jurisdictionConfig);
         config = creation.config;
-        entityId = creation.config.entityId; // Numbered entities include entityId in config
+        entityId = creation.entityId; // Use the returned entityId
         console.log('✅ Numbered entity config created:', creation);
       }
       
-      // Create serverTxs to import replicas for each validator
+      // Create serverTxs to import replicas for each validator  
+      console.log(`🔍 Creating serverTxs with entityId: ${entityId}`);
       const serverTxs = validatorNames.map((signerId, index) => ({
         type: 'importReplica' as const,
         entityId: entityId,
@@ -145,19 +149,23 @@
         }
       }));
       
+      console.log(`🔍 Generated ${serverTxs.length} serverTxs:`, serverTxs);
+      
       // Apply to server and process until empty
-      const result = xln.applyServerInput(env, {
+      const result = await xln.applyServerInput(env, {
         serverTxs,
         entityInputs: []
       });
       
       console.log('🔥 Processing entity creation through server...');
-      xln.processUntilEmpty(env, result.entityOutbox);
+      await xln.processUntilEmpty(env, result.entityOutbox);
       console.log('✅ Entity creation complete!');
 
+      console.log(`💰 Entity ${entityId} automatically prefunded by Depository.sol contract during deployment`);
+      console.log(`🔄 J-Watcher will sync historical ReserveUpdated events to populate reserves`);
+
       // Auto-create panels with entity and signers pre-selected
-      const jurisdictionName = formData.jurisdiction === '8545' ? 'Ethereum' : 
-                               formData.jurisdiction === '8546' ? 'Polygon' : 'Arbitrum';
+      const jurisdictionName = jurisdictionOption?.label.split(' (')[0] || 'Unknown';
       
       console.log(`🎯 Auto-creating ${validatorNames.length} panels with entity and signers pre-selected`);
       console.log(`🌐 Jurisdiction: ${formData.jurisdiction} → ${jurisdictionName}`);
@@ -182,10 +190,10 @@
 
   function clearForm() {
     formData = {
-      jurisdiction: '8545',
-      entityType: 'lazy',
+      jurisdiction: '',
+      entityType: 'numbered',
       entityName: 'ACME',
-      validators: [{ name: 'alice', weight: 1 }],
+      validators: [{ name: 's1', weight: 1 }],
       threshold: 1
     };
     error = '';
@@ -243,11 +251,30 @@
     }
   }
 
-  const jurisdictionOptions = [
-    { value: '8545', label: 'Ethereum Mainnet (Port 8545)' },
-    { value: '8546', label: 'Polygon Network (Port 8546)' },
-    { value: '8547', label: 'Arbitrum One (Port 8547)' }
-  ];
+  let jurisdictionOptions: Array<{ value: string; label: string }> = [];
+
+  // Load jurisdiction options from server dynamically (NO HARDCODING!)
+  async function loadJurisdictionOptions() {
+    try {
+      const response = await fetch('/jurisdictions.json');
+      const config = await response.json();
+      
+      jurisdictionOptions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => ({
+        value: data.rpc.split(':').pop(), // Extract port
+        label: `${data.name} (Port ${data.rpc.split(':').pop()})`
+      }));
+      
+      // Set first jurisdiction as default
+      if (jurisdictionOptions.length > 0 && !formData.jurisdiction) {
+        formData.jurisdiction = jurisdictionOptions[0].value;
+      }
+      
+      console.log(`✅ Loaded ${jurisdictionOptions.length} jurisdiction options:`, jurisdictionOptions);
+    } catch (error) {
+      console.error('❌ Failed to load jurisdiction options:', error);
+      jurisdictionOptions = [];
+    }
+  }
 
   const entityTypeOptions = [
     { value: 'lazy', label: '🔒 Lazy Entity (Free - ID = Quorum Hash)' },
@@ -257,11 +284,11 @@
 
   const validatorOptions = [
     { value: '', label: 'Select signer...' },
-    { value: 'alice', label: 'alice.eth' },
-    { value: 'bob', label: 'bob.eth' },
-    { value: 'carol', label: 'carol.eth' },
-    { value: 'david', label: 'david.eth' },
-    { value: 'eve', label: 'eve.eth' }
+    { value: 's1', label: 's1 (Default)' },
+    { value: 's2', label: 's2' },
+    { value: 's3', label: 's3' },
+    { value: 's4', label: 's4' },
+    { value: 's5', label: 's5' }
   ];
 </script>
 
@@ -270,14 +297,13 @@
     <div class="formation-group">
       <label for="jurisdictionSelect">🏛️ Jurisdiction:</label>
       <select id="jurisdictionSelect" bind:value={formData.jurisdiction}>
-        <option value="8545">Ethereum Mainnet (Port 8545)</option>
-        <option value="8546">Polygon Network (Port 8546)</option>
-        <option value="8547">Arbitrum One (Port 8547)</option>
+        {#each jurisdictionOptions as option}
+          <option value={option.value}>{option.label}</option>
+        {/each}
       </select>
       <div class="jurisdiction-info">
         <small>
-          <strong>📡 Network:</strong> {formData.jurisdiction === '8545' ? 'Ethereum Mainnet' : 
-                                        formData.jurisdiction === '8546' ? 'Polygon Network' : 'Arbitrum One'}<br>
+          <strong>📡 Network:</strong> {jurisdictionOptions.find(j => j.value === formData.jurisdiction)?.label.split(' (')[0] || 'Unknown'}<br>
           <strong>🔗 RPC Port:</strong> {formData.jurisdiction}
         </small>
       </div>
@@ -286,8 +312,8 @@
     <div class="formation-group">
       <label for="entityTypeSelect">🆔 Entity Type:</label>
       <select id="entityTypeSelect" bind:value={formData.entityType}>
+        <option value="numbered">🔢 Numbered Entity (Gas Required - Sequential ID) [PREFUNDED]</option>
         <option value="lazy">🔒 Lazy Entity (Free - ID = Quorum Hash)</option>
-        <option value="numbered">🔢 Numbered Entity (Gas Required - Sequential ID)</option>
         <option value="named">🏷️ Named Entity (Premium Gas + Admin Approval)</option>
       </select>
       <div class="entity-type-info">
@@ -295,7 +321,7 @@
           {#if formData.entityType === 'lazy'}
             <strong>🔒 Lazy:</strong> Free to create, entityId = hash(validators), works immediately.
           {:else if formData.entityType === 'numbered'}
-            <strong>🔢 Numbered:</strong> Small gas cost, get sequential number like #42, on-chain registered.
+            <strong>🔢 Numbered:</strong> Small gas cost, get sequential number like #42, on-chain registered. <strong>✨ PREFUNDED with 1M tokens for testing!</strong>
           {:else}
             <strong>🏷️ Named:</strong> Premium gas + admin approval, get custom name like "coinbase".
           {/if}
@@ -321,11 +347,11 @@
           <div class="validator-row">
             <select bind:value={validator.name} class="validator-name">
               <option value="">Select signer...</option>
-              <option value="alice">alice.eth</option>
-              <option value="bob">bob.eth</option>
-              <option value="carol">carol.eth</option>
-              <option value="david">david.eth</option>
-              <option value="eve">eve.eth</option>
+              <option value="s1">s1 (Default)</option>
+              <option value="s2">s2</option>
+              <option value="s3">s3</option>
+              <option value="s4">s4</option>
+              <option value="s5">s5</option>
             </select>
             <input 
               type="number" 

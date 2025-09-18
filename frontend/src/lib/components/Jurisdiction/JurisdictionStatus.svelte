@@ -16,44 +16,34 @@
     entities: Array<{ id: string; name: string; type: string }>;
   }
 
-  let jurisdictions: JurisdictionInfo[] = [
-    {
-      port: 8545,
-      name: 'Ethereum Mainnet',
-      icon: '🔷',
-      chainId: '31337',
-      blockNumber: 0,
-      contractAddress: '',
-      nextEntityNumber: 1,
-      status: 'checking',
-      lastUpdate: '',
-      entities: []
-    },
-    {
-      port: 8546,
-      name: 'Polygon Network',
-      icon: '🟣',
-      chainId: '31337',
-      blockNumber: 0,
-      contractAddress: '',
-      nextEntityNumber: 1,
-      status: 'checking',
-      lastUpdate: '',
-      entities: []
-    },
-    {
-      port: 8547,
-      name: 'Arbitrum One',
-      icon: '🔵',
-      chainId: '31337',
-      blockNumber: 0,
-      contractAddress: '',
-      nextEntityNumber: 1,
-      status: 'checking',
-      lastUpdate: '',
-      entities: []
+  let jurisdictions: JurisdictionInfo[] = [];
+
+  // Load jurisdictions from server dynamically (NO HARDCODING!)
+  async function loadJurisdictionsFromServer() {
+    try {
+      const response = await fetch('/jurisdictions.json');
+      const config = await response.json();
+      
+      jurisdictions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => ({
+        port: parseInt(data.rpc.split(':').pop()),
+        name: data.name,
+        icon: key === 'ethereum' ? '🔷' : key === 'polygon' ? '🟣' : '🔵',
+        chainId: data.chainId.toString(),
+        blockNumber: 0,
+        contractAddress: data.contracts.entityProvider,
+        nextEntityNumber: 1,
+        status: 'checking' as const,
+        lastUpdate: '',
+        entities: []
+      }));
+      
+      console.log(`✅ Loaded ${jurisdictions.length} jurisdictions from server:`, jurisdictions.map(j => j.name));
+    } catch (error) {
+      console.error('❌ Failed to load jurisdictions from server:', error);
+      // Fallback to empty array - no hardcoding!
+      jurisdictions = [];
     }
-  ];
+  }
 
   async function refreshJurisdiction(jurisdiction: JurisdictionInfo) {
     jurisdiction.status = 'checking';
@@ -109,13 +99,18 @@
     }
   }
 
+  // Load jurisdictions dynamically on component mount
+  onMount(async () => {
+    await loadJurisdictionsFromServer();
+    if (jurisdictions.length > 0) {
+      refreshAllJurisdictions();
+    }
+  });
+
   async function deployContracts() {
     alert('Contract deployment feature coming soon! For now, use: cd contracts && npx hardhat ignition deploy ignition/modules/Depository.ts --network localhost');
   }
 
-  onMount(() => {
-    refreshAllJurisdictions();
-  });
 </script>
 
 <div class="jurisdictions-panel">

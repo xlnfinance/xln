@@ -163,6 +163,9 @@ export const clearDatabase = async (db) => {
  * @returns Human-readable entity name with icon
  */
 export const formatEntityDisplay = (entityId) => {
+    if (!entityId) {
+        return 'undefined';
+    }
     const number = extractNumberFromEntityId(entityId);
     if (number !== null) {
         // Numbered entity: show just the number with entity icon
@@ -179,6 +182,13 @@ export const formatEntityDisplay = (entityId) => {
  * @returns Object with display name and avatar
  */
 export const getEntityDisplayInfo = (entityId) => {
+    if (!entityId) {
+        return {
+            name: 'Entity (undefined)',
+            avatar: '❓',
+            type: 'numbered',
+        };
+    }
     const number = extractNumberFromEntityId(entityId);
     if (number !== null) {
         return {

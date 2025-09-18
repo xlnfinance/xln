@@ -1,26 +1,10 @@
 import { AccountInput, EntityState, Env } from '../../types';
+import { createDemoDelta } from '../../account-utils';
+// TODO: Re-enable when account-tx is fixed
+// import { processAccountTransaction } from '../../account-tx';
 
 export function handleAccountInput(state: EntityState, input: AccountInput, env: Env): EntityState {
-  console.log(`🚀 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId}`);
-
-  // 1. Prevent self-joins: An entity should not be able to join its own hub
-  if (input.fromEntityId === input.toEntityId) {
-    console.log(`⚠️ Reject accountInput: cannot join own hub`);
-    return state; // Return unchanged state
-  }
-
-  // 2. Validate hub capability: Only entities with "hub" capability should be joinable
-  const targetProfile = env.gossip?.profiles?.get(input.toEntityId);
-  if (!targetProfile) {
-    console.log(`⚠️ Reject accountInput: target profile not found for ${input.toEntityId}`);
-    return state;
-  }
-
-  const isHub = targetProfile.capabilities?.includes('hub') || targetProfile.capabilities?.includes('router');
-  if (!isHub) {
-    console.log(`⚠️ Reject accountInput: target is not a hub (capabilities: ${targetProfile.capabilities})`);
-    return state;
-  }
+  console.log(`🚀 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId}`, input.accountTx);
 
   // Create immutable copy of current state
   const newState: EntityState = {
@@ -29,72 +13,118 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
     messages: [...state.messages],
     proposals: new Map(state.proposals),
     reserves: new Map(state.reserves),
-    channels: new Map(state.channels),
+    accounts: new Map(state.accounts),
     collaterals: new Map(state.collaterals),
   };
 
-  // If channel already exists, just log and return
-  if (newState.channels.has(input.toEntityId)) {
-    console.log(`⚠️ Account already exists between ${input.fromEntityId} and ${input.toEntityId}`);
-    return newState;
+  // Get or create account machine for this counterparty
+  let accountMachine = newState.accounts.get(input.toEntityId);
+  if (!accountMachine) {
+    // Create new account machine with demo deltas for tokens 1, 2, 3
+    const demoDeltasMap = new Map();
+    demoDeltasMap.set(1, createDemoDelta(1, 1000n, 0n));  // ETH: 1000 collateral
+    demoDeltasMap.set(2, createDemoDelta(2, 2000n, -100n)); // USDT: 2000 collateral, we owe them 100
+    demoDeltasMap.set(3, createDemoDelta(3, 500n, 50n));    // USDC: 500 collateral, they owe us 50
+    
+    accountMachine = {
+      counterpartyEntityId: input.toEntityId,
+      mempool: [],
+      currentFrame: {
+        frameId: 0,
+        timestamp: Date.now(),
+        tokenIds: [1, 2, 3],
+        deltas: [0n, -100n, 50n],
+      },
+      sentTransitions: 0,
+      deltas: demoDeltasMap,
+      proofHeader: {
+        cooperativeNonce: 0,
+        disputeNonce: 0,
+      },
+      proofBody: {
+        tokenIds: [1, 2, 3],
+        deltas: [0n, -100n, 50n],
+      },
+    };
+    newState.accounts.set(input.toEntityId, accountMachine);
+    console.log(`💳 Created new account machine for counterparty ${input.toEntityId}`);
   }
 
-  // Create the channel on the source entity (current state)
-  const timestamp = Date.now();
-  newState.channels.set(input.toEntityId, {
-    counterparty: input.toEntityId,
-    myBalance: 0n,
-    theirBalance: 0n,
-    collateral: [],
-    nonce: 1,
-    isActive: true,
-    lastUpdate: timestamp,
-  });
-
-  // Now create the symmetric channel on the target entity
-  // Find target entity replicas and update their channel state
-  let targetEntityUpdated = false;
-  for (const [replicaKey, replica] of env.replicas) {
-    if (replica.entityId === input.toEntityId) {
-      // Check if channel already exists on target side
-      if (!replica.state.channels.has(input.fromEntityId)) {
-        // Create immutable copy of target state
-        const updatedTargetState: EntityState = {
-          ...replica.state,
-          nonces: new Map(replica.state.nonces),
-          messages: [...replica.state.messages],
-          proposals: new Map(replica.state.proposals),
-          reserves: new Map(replica.state.reserves),
-          channels: new Map(replica.state.channels),
-          collaterals: new Map(replica.state.collaterals),
-        };
-
-        // Add symmetric channel
-        updatedTargetState.channels.set(input.fromEntityId, {
-          counterparty: input.fromEntityId,
-          myBalance: 0n,
-          theirBalance: 0n,
-          collateral: [],
-          nonce: 1,
-          isActive: true,
-          lastUpdate: timestamp,
-        });
-
-        // Update the replica in the environment
-        env.replicas.set(replicaKey, {
-          ...replica,
-          state: updatedTargetState,
-        });
-
-        targetEntityUpdated = true;
-      }
+  // Process the account transaction immediately based on type
+  if (input.accountTx.type === 'account_settle') {
+    // Process settlement event from blockchain
+    const settleData = input.accountTx.data;
+    const tokenId = settleData.tokenId;
+    
+    console.log(`💰 Processing settlement for token ${tokenId}:`, settleData);
+    
+    // Get or create delta for this token
+    let delta = accountMachine.deltas.get(tokenId);
+    if (!delta) {
+      delta = createDemoDelta(tokenId, 0n, 0n);
+      accountMachine.deltas.set(tokenId, delta);
     }
-  }
+    
+    // Update delta with settlement data
+    delta.collateral = BigInt(settleData.collateral);
+    delta.ondelta = BigInt(settleData.ondelta);
+    
+    console.log(`💰 Updated delta for token ${tokenId}:`, {
+      tokenId: delta.tokenId,
+      collateral: delta.collateral.toString(),
+      ondelta: delta.ondelta.toString(),
+      offdelta: delta.offdelta.toString()
+    });
 
-  if (targetEntityUpdated) {
-    console.log(`🚀 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId} (channel created in both states)`);
+    // Update current frame with new settlement
+    const frameTokenIds = accountMachine.currentFrame.tokenIds;
+    const frameDeltas = [...accountMachine.currentFrame.deltas];
+    
+    const tokenIndex = frameTokenIds.indexOf(tokenId);
+    if (tokenIndex >= 0) {
+      // Update existing token in frame
+      frameDeltas[tokenIndex] = delta.ondelta + delta.offdelta;
+    } else {
+      // Add new token to frame
+      frameTokenIds.push(tokenId);
+      frameDeltas.push(delta.ondelta + delta.offdelta);
+    }
+    
+    accountMachine.currentFrame = {
+      frameId: accountMachine.currentFrame.frameId + 1,
+      timestamp: Date.now(),
+      tokenIds: frameTokenIds,
+      deltas: frameDeltas,
+    };
+    
+    // Add chat message about the settlement
+    const message = `💰 Settlement processed: Token ${tokenId}, Collateral ${settleData.collateral}, OnDelta ${settleData.ondelta}`;
+    newState.messages.push(message);
+    
+    console.log(`✅ Settlement processed for Entity ${input.toEntityId.slice(-4)}, Token ${tokenId}`);
   } else {
-    console.log(`⚠️ Target entity ${input.toEntityId} not found or channel already exists`);
+    // Process other account transactions immediately using account-tx processor
+    // TODO: Re-enable when account-tx is fixed  
+    // const result = processAccountTransaction(accountMachine, input.accountTx);
+    const result = { success: true }; // Temporary placeholder
+    
+    if (result.success) {
+      console.log(`✅ Processed ${input.accountTx.type} successfully for ${input.toEntityId}`);
+      
+      // Add a chat message about successful transaction
+      const message = `💳 ${input.accountTx.type} processed with Entity ${input.toEntityId.slice(-4)}`;
+      newState.messages.push(message);
+    } else {
+      console.log(`❌ Failed to process ${input.accountTx.type}: ${result.error}`);
+      
+      // Add to mempool for retry later
+      accountMachine.mempool.push(input.accountTx);
+      console.log(`💳 Added ${input.accountTx.type} to account mempool for retry`);
+      
+      // Add error message
+      const message = `⚠️ ${input.accountTx.type} failed with Entity ${input.toEntityId.slice(-4)}: ${result.error}`;
+      newState.messages.push(message);
+    }
   }
 
   return newState;

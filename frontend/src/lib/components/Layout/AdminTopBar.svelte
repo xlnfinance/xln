@@ -12,6 +12,18 @@
   // Reactive theme icon
   $: themeIcon = $settings.theme === 'dark' ? '🌙' : '☀️';
 
+  // J-machine status (derived from environment) 
+  $: jMachineStatus = (() => {
+    if (!$xlnEnvironment) return { block: 0, events: 0, height: 0 };
+    // Get max jBlock from all entities instead of server-level tracking
+    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.replicas?.values() || []).map(r => r.state?.jBlock || 0));
+    return {
+      block: maxJBlock,
+      events: $xlnEnvironment.serverInput?.entityInputs?.length || 0,
+      height: $xlnEnvironment.height || 0
+    };
+  })();
+
   // Event handlers
   async function handleRunDemo() {
     try {
@@ -20,11 +32,32 @@
       const xln = await getXLN();
       const env = $xlnEnvironment || await xln.main();
       
+      console.log('🔍 Environment before demo:', {
+        replicas: env?.replicas?.size || 0,
+        height: env?.height || 0
+      });
+      
       const result = await xln.runDemo(env);
+      
+      console.log('🔍 Environment after demo:', {
+        replicas: result?.replicas?.size || 0,
+        height: result?.height || 0,
+        entity1Reserves: result?.replicas?.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1')?.state?.reserves?.size || 0,
+        entity2Reserves: result?.replicas?.get('0x0000000000000000000000000000000000000000000000000000000000000002:s2')?.state?.reserves?.size || 0
+      });
+      
+      if (result?.replicas?.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1')?.state?.reserves) {
+        const e1reserves = result.replicas.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1').state.reserves;
+        console.log('🔍 Entity 1 reserves after demo:');
+        for (const [tokenId, balance] of e1reserves.entries()) {
+          console.log(`  Token ${tokenId}: ${balance.amount} ${balance.symbol}`);
+        }
+      }
       
       xlnEnvironment.set(result);
       console.log('✅ Demo completed successfully');
       console.log(`📸 History snapshots: ${result.history.length}`);
+      console.log('🔍 Store updated, UI should refresh automatically');
     } catch (error) {
       console.error('❌ Demo failed:', error);
       alert(`Demo failed: ${error.message}`);
@@ -107,6 +140,17 @@
 <div class="admin-topbar">
   <div class="admin-logo">
     <span class="logo-text">xln</span>
+    <div class="j-machine-status">
+      <span class="j-status-item" title="Last Synced J-machine Block">
+        🔭 J-Block: {jMachineStatus.block}
+      </span>
+      <span class="j-status-item" title="Pending J-machine Events">
+        ⚡ J-Events: {jMachineStatus.events}
+      </span>
+      <span class="j-status-item" title="Server Height (E-machine Frames)">
+        📊 S-Block: {jMachineStatus.height}
+      </span>
+    </div>
   </div>
   
   <div class="admin-navigation">
@@ -226,6 +270,33 @@
     color: #ffffff;
     letter-spacing: 0.5px;
     text-transform: lowercase;
+  }
+
+  .j-machine-status {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-left: 20px;
+    padding-left: 16px;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .j-status-item {
+    font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+    color: #aaa;
+    background: rgba(0, 122, 204, 0.1);
+    border: 1px solid rgba(0, 122, 204, 0.3);
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+  }
+
+  .j-status-item:hover {
+    color: #007acc;
+    border-color: #007acc;
+    background: rgba(0, 122, 204, 0.2);
   }
 
   .admin-navigation {
