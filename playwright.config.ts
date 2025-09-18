@@ -13,6 +13,7 @@ export default defineConfig({
   workers: 1,
   // retries: 1,
   outputDir: './e2e/test-results',
+  testIgnore: 'ignored-tests/**',
   use: {
     baseURL: 'http://localhost:8080',
     headless: process.env.HEADED !== 'true', // Headless by default, use HEADED=true for visual
