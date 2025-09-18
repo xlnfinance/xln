@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import type { EntityReplica, Proposal, XLNEnvironment } from '../frontend/src/lib/types/index.js';
+import type { EntityReplica, Proposal, XLNEnvironment } from '../../frontend/src/lib/types/index.js';
 
 test.describe('Simple Proposal Verification', () => {
   test('VERIFY: Proposal creation adds to backend state', async ({ page }) => {

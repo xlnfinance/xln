@@ -1,6 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 
-import type { EntityReplica, Proposal, XLNEnvironment } from '../frontend/src/lib/types/index.js';
+import type { EntityReplica, Proposal, XLNEnvironment } from '../../frontend/src/lib/types/index.js';
 
 // Helper functions
 async function setThreshold(page: Page, value: number) {

@@ -1,6 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 
-import type { EntityReplica, Env } from '../src/types.js';
+import type { EntityReplica, Env } from '../../src/types.js';
 
 // Helper functions
 async function setThreshold(page: Page, value: number) {

@@ -1,4 +1,4 @@
-import { expect, test } from './global-setup';
+import { expect, test } from '../global-setup';
 
 test('Gossip + Account Input UI Flow', async ({ page }) => {
   // === STEP 1: Navigate and Setup ===
