@@ -2,7 +2,6 @@
   import { onMount } from 'svelte';
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import ProfileCard from './ProfileCard.svelte';
-  import ProfileForm from './ProfileForm.svelte';
   
   let profiles: any[] = [];
   let isLoading = true;
@@ -44,17 +43,9 @@
     loadProfiles();
   }
 
-  function handleProfileAnnounced(profile: any) {
-    console.log('📡 Profile announced, refreshing directory...', profile);
-    // Immediately refresh the profile list to show the newly announced profile
-    loadProfiles();
-  }
 </script>
 
 <div class="network-directory">
-  <!-- Profile Management Section -->
-  <ProfileForm onProfileAnnounced={handleProfileAnnounced} />
-  
   <div class="directory-header">
     <h3>🌐 Network Directory</h3>
     <button class="refresh-btn" on:click={loadProfiles} disabled={isLoading}>
