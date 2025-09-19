@@ -10,21 +10,27 @@ export default defineConfig({
 		fs: {
 			// Allow serving files from the parent directory (to access ../dist/)
 			allow: ['..']
+		},
+		// Fast development setup
+		watch: {
+			usePolling: false,  // Use native file watching (faster)
+		},
+		hmr: {
+			overlay: false
+		},
+		// Force no-cache headers for static files
+		headers: {
+			'Cache-Control': 'no-cache, no-store, must-revalidate',
+			'Pragma': 'no-cache',
+			'Expires': '0'
 		}
 	},
-	resolve: {
-		alias: {
-			// Create alias for server modules
-			'@server': path.resolve('../dist/'),
-			'@assets': path.resolve('./static/')
-		}
+	// Fast builds
+	esbuild: {
+		target: 'es2022'
 	},
 	define: {
 		// Define globals for browser compatibility
 		global: 'globalThis',
-	},
-	optimizeDeps: {
-		// Include server dependencies for browser bundling
-		include: ['@server', '@assets']
 	}
 });

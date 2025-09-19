@@ -7,7 +7,7 @@ async function main() {
   // Read deployed contract address
   const deployedAddressesPath = "ignition/deployments/chain-1337/deployed_addresses.json";
   const deployedAddresses = JSON.parse(fs.readFileSync(deployedAddressesPath, "utf8"));
-  const depositoryAddress = deployedAddresses["DepositoryModule#DepositoryV2"];
+  const depositoryAddress = deployedAddresses["DepositoryModule#Depository"];
   
   console.log(`📍 Using Depository: ${depositoryAddress}`);
 

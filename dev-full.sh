@@ -8,10 +8,9 @@ echo ""
 cleanup() {
     echo ""
     echo "🛑 Stopping all development services..."
-    pkill -f "bun build.*watch" 2>/dev/null || true
+    pkill -f "vite dev" 2>/dev/null || true
     pkill -f "bun.*server" 2>/dev/null || true
-    pkill -f "fswatch" 2>/dev/null || true
-    pkill -f "bunx serve" 2>/dev/null || true
+    pkill -f "bun build.*watch" 2>/dev/null || true
     ./stop-networks.sh 2>/dev/null || true
     exit 0
 }
@@ -34,12 +33,19 @@ echo "📦 Starting TypeScript watch compilation..."
 mkdir -p dist
 mkdir -p frontend/static
 
-# Start TypeScript watch compilation - build to frontend/static so vite can serve it
-bun build src/server.ts --target browser --outfile frontend/static/server.js --watch --bundle &
-WATCH_PID=$!
+# Build server once for frontend
+echo "📦 Building server for frontend..."
+bun build src/server.ts --target browser --outfile frontend/static/server.js --bundle
 
-# Wait a moment for initial build
-sleep 2
+# Copy fresh jurisdictions to frontend
+cp jurisdictions.json frontend/static/jurisdictions.json
+
+# Watch ONLY src/server.ts for changes (NEVER touch jurisdictions.json)
+echo "📦 Starting server watch (ONLY src/server.ts)..."
+echo "   ⚠️  NOTE: This will ONLY rebuild server.js when src/server.ts changes"
+echo "   ⚠️  NOTE: jurisdictions.json is NEVER overwritten by this watcher"
+bun build src/server.ts --target browser --outfile frontend/static/server.js --bundle --watch &
+WATCH_PID=$!
 
 echo "🌐 Starting Svelte development server..."
 
@@ -62,5 +68,5 @@ echo ""
 echo "💡 All services running - Press Ctrl+C to stop everything"
 echo ""
 
-# Wait for processes (this keeps the script running)
+# Wait for both processes (this keeps the script running)
 wait $WATCH_PID $SERVE_PID

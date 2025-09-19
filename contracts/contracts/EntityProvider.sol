@@ -545,7 +545,7 @@ contract EntityProvider is ERC1155 {
     }
     
     uint256 expectedRSBytes = signatureCount * 64;
-    uint256 expectedVBytes = (signatureCount + 7) / 8; // Ceiling division
+    // uint256 expectedVBytes = (signatureCount + 7) / 8; // Ceiling division - unused
     
     signatures = new bytes[](signatureCount);
     

@@ -132,7 +132,7 @@
   // Close dropdown when clicking outside
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as Element;
-    if (!target.closest('.account-dropdown')) {
+    if (!target.closest('.unified-dropdown')) {
       isOpen = false;
     }
   }
@@ -146,48 +146,47 @@
   }
 </script>
 
-<div class="account-dropdown">
-  <button class="dropdown-btn" on:click={toggleDropdown} disabled={availableAccounts.length === 0}>
+<div class="unified-dropdown" class:open={isOpen}>
+  <button class="unified-dropdown-btn" on:click={toggleDropdown} disabled={availableAccounts.length === 0} style="width: 100%;">
+    <span class="dropdown-icon">📋</span>
     <span class="dropdown-text">{dropdownText}</span>
-    <span class="dropdown-arrow" class:open={isOpen}>▼</span>
+    <span class="dropdown-arrow">▼</span>
   </button>
-
-  {#if isOpen}
-    <div class="dropdown-content" bind:this={dropdownContent}>
-      <!-- Content populated by JavaScript -->
-    </div>
-  {/if}
+  <div class="unified-dropdown-content" class:show={isOpen} bind:this={dropdownContent}>
+    <!-- Content populated by JavaScript -->
+  </div>
 </div>
 
 <style>
-  .account-dropdown {
+  /* Unified Hierarchical Dropdown */
+  .unified-dropdown {
     position: relative;
     display: inline-block;
+    flex: 1;
   }
 
-  .dropdown-btn {
+  .unified-dropdown-btn {
+    background: #2d2d2d;
+    border: 1px solid #555;
+    border-radius: 6px;
+    color: #d4d4d4;
+    padding: 8px 16px;
+    font-size: 14px;
+    cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px;
-    background: #2d2d2d;
-    border: 1px solid #555;
-    border-radius: 4px;
-    color: #d4d4d4;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 14px;
     min-width: 200px;
+    transition: all 0.2s ease;
   }
 
-  .dropdown-btn:hover:not(:disabled) {
-    background: #3d3d3d;
+  .unified-dropdown-btn:hover {
+    background: #404040;
     border-color: #007acc;
   }
 
-  .dropdown-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .dropdown-icon {
+    font-size: 16px;
   }
 
   .dropdown-text {
@@ -203,11 +202,12 @@
     color: #9d9d9d;
   }
 
-  .dropdown-arrow.open {
+  .unified-dropdown.open .dropdown-arrow {
     transform: rotate(180deg);
   }
 
-  .dropdown-content {
+  .unified-dropdown-content {
+    display: none;
     position: absolute;
     background: #2d2d2d;
     border: 1px solid #555;
@@ -215,29 +215,33 @@
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     z-index: 1000;
     width: 350px;
-    max-height: 300px;
+    max-height: 500px;
     overflow-y: auto;
     top: 100%;
     left: 0;
     margin-top: 4px;
   }
 
+  .unified-dropdown-content.show {
+    display: block;
+  }
+
   /* Dark theme scrollbar */
-  .dropdown-content::-webkit-scrollbar {
+  .unified-dropdown-content::-webkit-scrollbar {
     width: 8px;
   }
   
-  .dropdown-content::-webkit-scrollbar-track {
+  .unified-dropdown-content::-webkit-scrollbar-track {
     background: #1e1e1e;
     border-radius: 4px;
   }
   
-  .dropdown-content::-webkit-scrollbar-thumb {
+  .unified-dropdown-content::-webkit-scrollbar-thumb {
     background: #555;
     border-radius: 4px;
   }
   
-  .dropdown-content::-webkit-scrollbar-thumb:hover {
+  .unified-dropdown-content::-webkit-scrollbar-thumb:hover {
     background: #666;
   }
 

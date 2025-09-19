@@ -37,7 +37,8 @@ export const ENTITY_PROVIDER_ABI = [
 export const DEPOSITORY_ABI = [
   'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugBulkFundEntities() external',
-  'function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
+  'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
+  'function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs)[] settlements, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
   'function prefundAccount(bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff)[] diffs) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
@@ -150,11 +151,13 @@ export const submitPrefundAccount = async (jurisdiction: JurisdictionConfig, ent
 
 export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entityId: string, batch: any) => {
   try {
-    console.log(`💸 Submitting real processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
+    console.log(`💸 Submitting processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
     console.log(`🔍 BATCH DEBUG:`, JSON.stringify(batch, null, 2));
     console.log(`🔍 ENTITY DEBUG: ${entityId}`);
     console.log(`🔍 JURISDICTION DEBUG:`, jurisdiction);
     console.log(`🔍 JURISDICTION SOURCE: Reading from jurisdictions.json file`);
+    console.log(`🔍 DEPOSITORY ADDRESS FROM JURISDICTION: ${jurisdiction.depositoryAddress}`);
+    console.log(`🔍 ENTITY PROVIDER ADDRESS FROM JURISDICTION: ${jurisdiction.entityProviderAddress}`);
     
     // Fix batch amounts - convert any JS numbers to wei strings
     if (batch.reserveToReserve) {
@@ -509,6 +512,7 @@ export const transferNameBetweenEntities = async (
 
 // Load contract configuration and generate jurisdictions
 export const generateJurisdictions = async (): Promise<Map<string, JurisdictionConfig>> => {
+
   const jurisdictions = new Map<string, JurisdictionConfig>();
 
   try {
@@ -517,8 +521,10 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
     if (!isBrowser && typeof process !== 'undefined') {
       // Node.js environment - read file directly
       const configPath = path.join(process.cwd(), 'jurisdictions.json');
+      console.log('🔍 JURISDICTION DEBUG: Loading from path:', configPath);
       const configContent = fs.readFileSync(configPath, 'utf8');
       config = JSON.parse(configContent);
+      console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
       console.log('✅ Loaded jurisdictions from config file');
     } else {
       // Browser environment - fetch from server (use relative path for GitHub Pages compatibility)
@@ -527,6 +533,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
       }
       config = await response.json();
+      console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
       console.log('✅ Loaded jurisdictions from server');
     }
 
@@ -566,4 +573,80 @@ export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]>
 export const getJurisdictionByAddress = async (address: string): Promise<JurisdictionConfig | undefined> => {
   const jurisdictions = await getJurisdictions();
   return jurisdictions.get(address);
+};
+
+export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity: string, rightEntity: string, diffs: any[]) => {
+  try {
+    console.log(`⚖️ Submitting settle transaction between ${leftEntity.slice(0, 10)}... and ${rightEntity.slice(0, 10)}...`);
+    console.log(`🔍 DIFFS:`, diffs.map(d => ({
+      ...d,
+      leftDiff: d.leftDiff.toString(),
+      rightDiff: d.rightDiff.toString(),
+      collateralDiff: d.collateralDiff.toString()
+    })));
+
+    const { depository, provider } = await connectToEthereum(jurisdiction);
+    console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
+
+    // Check if contract exists
+    const code = await provider.getCode(depository.target);
+    if (code === '0x') {
+      throw new Error('Contract not deployed at this address');
+    }
+
+    // Call settle function
+    console.log(`📤 Calling settle function...`);
+    const tx = await depository.settle(leftEntity, rightEntity, diffs);
+    console.log(`💫 Transaction sent: ${tx.hash}`);
+
+    // Wait for confirmation
+    const receipt = await tx.wait();
+    console.log(`✅ Settlement confirmed in block ${receipt.blockNumber}`);
+
+    if (receipt.status === 0) {
+      throw new Error(`Settlement transaction reverted! Hash: ${tx.hash}`);
+    }
+
+    console.log(`🎉 Settlement successful! Both entities should receive SettlementProcessed events`);
+    return { txHash: tx.hash, blockNumber: receipt.blockNumber };
+
+  } catch (error) {
+    console.error('❌ Settlement failed:', error);
+    throw error;
+  }
+};
+
+export const submitReserveToReserve = async (jurisdiction: JurisdictionConfig, fromEntity: string, toEntity: string, tokenId: number, amount: string) => {
+  try {
+    console.log(`💸 DIRECT R2R: ${fromEntity.slice(0,10)} → ${toEntity.slice(0,10)}, token ${tokenId}, amount ${amount}`);
+
+    const { depository, provider } = await connectToEthereum(jurisdiction);
+    console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
+
+    // Check if contract exists
+    const code = await provider.getCode(depository.target);
+    if (code === '0x') {
+      throw new Error('Contract not deployed at this address');
+    }
+
+    // Call direct reserveToReserve function
+    console.log(`📤 Calling reserveToReserve(${fromEntity}, ${toEntity}, ${tokenId}, ${amount})...`);
+    const tx = await depository.reserveToReserve(fromEntity, toEntity, tokenId, amount);
+    console.log(`💫 Transaction sent: ${tx.hash}`);
+
+    // Wait for confirmation
+    const receipt = await tx.wait();
+    console.log(`✅ R2R confirmed in block ${receipt.blockNumber}`);
+
+    if (receipt.status === 0) {
+      throw new Error(`R2R transaction reverted! Hash: ${tx.hash}`);
+    }
+
+    console.log(`🎉 Direct R2R successful!`);
+    return { txHash: tx.hash, blockNumber: receipt.blockNumber };
+
+  } catch (error) {
+    console.error('❌ Direct R2R failed:', error);
+    throw error;
+  }
 };

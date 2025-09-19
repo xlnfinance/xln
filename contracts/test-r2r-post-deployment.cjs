@@ -12,7 +12,7 @@ async function main() {
   }
 
   const deployedAddresses = JSON.parse(fs.readFileSync(deployedAddressesPath, "utf8"));
-  const depositoryAddress = deployedAddresses["DepositoryModule#DepositoryV2"] || deployedAddresses["DepositoryModule#Depository"];
+  const depositoryAddress = deployedAddresses["DepositoryModule#Depository"];
   
   if (!depositoryAddress) {
     throw new Error("❌ Depository address not found in deployed addresses");
@@ -57,6 +57,7 @@ async function main() {
       amount: transferAmount
     }],
     reserveToCollateral: [],
+    settlements: [],
     cooperativeUpdate: [],
     cooperativeDisputeProof: [],
     initialDisputeProof: [],

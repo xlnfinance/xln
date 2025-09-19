@@ -5,6 +5,12 @@
 
   export let replica: EntityReplica | null;
 
+  // Settle form variables
+  let settleLeftDiff = 0;
+  let settleRightDiff = 0;
+  let settleCollateralDiff = 0;
+  let settleOnDeltaDiff = 0;
+
   // Get accounts from entity state
   $: accounts = replica?.state?.accounts
     ? Array.from(replica.state.accounts.entries()).map(([counterpartyId, account]) => ({
@@ -136,6 +142,69 @@
       };
     });
   }
+
+  async function submitSettle(tokenId: number, counterpartyEntityId: string) {
+    if (!replica) return;
+
+    try {
+      console.log('⚖️ Submitting settle transaction:', {
+        tokenId,
+        leftEntity: replica.entityId,
+        rightEntity: counterpartyEntityId,
+        leftDiff: settleLeftDiff,
+        rightDiff: settleRightDiff,
+        collateralDiff: settleCollateralDiff,
+        onDeltaDiff: settleOnDeltaDiff
+      });
+
+      // Validate the invariant: leftDiff + rightDiff + collateralDiff = 0
+      const total = settleLeftDiff + settleRightDiff + settleCollateralDiff;
+      if (Math.abs(total) > 0.0001) {
+        alert(`Settlement invariant violation: leftDiff + rightDiff + collateralDiff must = 0. Current total: ${total}`);
+        return;
+      }
+
+      const xln = await getXLN();
+      const env = $xlnEnvironment;
+      if (!env) throw new Error('XLN environment not ready');
+
+      // Get jurisdiction info
+      const ethJurisdiction = await xln.getJurisdictionByAddress('ethereum');
+      if (!ethJurisdiction) {
+        throw new Error('Ethereum jurisdiction not found');
+      }
+
+      // Convert to wei amounts
+      const leftDiffWei = BigInt(Math.floor(settleLeftDiff * 1e18));
+      const rightDiffWei = BigInt(Math.floor(settleRightDiff * 1e18));
+      const collateralDiffWei = BigInt(Math.floor(settleCollateralDiff * 1e18));
+
+      // Call settle function directly
+      await xln.submitSettle(
+        ethJurisdiction,
+        replica.entityId < counterpartyEntityId ? replica.entityId : counterpartyEntityId,
+        replica.entityId < counterpartyEntityId ? counterpartyEntityId : replica.entityId,
+        [{
+          tokenId,
+          leftDiff: leftDiffWei,
+          rightDiff: rightDiffWei,
+          collateralDiff: collateralDiffWei
+        }]
+      );
+
+      console.log('✅ Settlement submitted successfully');
+
+      // Reset form
+      settleLeftDiff = 0;
+      settleRightDiff = 0;
+      settleCollateralDiff = 0;
+      settleOnDeltaDiff = 0;
+
+    } catch (error) {
+      console.error('Failed to submit settle:', error);
+      alert(`Failed to submit settle: ${error.message}`);
+    }
+  }
 </script>
 
 <div class="account-channels" data-testid="account-channels">
@@ -245,6 +314,25 @@
                     <span>Credit: {formatTokenAmount(tokenData.tokenId, tokenData.derived.outPeerCredit)}</span>
                     <span>Collateral: {formatTokenAmount(tokenData.tokenId, tokenData.derived.outCollateral)}</span>
                   </div>
+                </div>
+              </div>
+
+              <!-- Settle Interface -->
+              <div class="settle-interface">
+                <div class="settle-header">
+                  <span class="settle-icon">⚖️</span>
+                  <span class="settle-title">Settle Deltas</span>
+                </div>
+                <div class="settle-form">
+                  <div class="diff-inputs">
+                    <input type="number" step="0.01" placeholder="Left Diff" bind:value={settleLeftDiff} class="diff-input" />
+                    <input type="number" step="0.01" placeholder="Right Diff" bind:value={settleRightDiff} class="diff-input" />
+                    <input type="number" step="0.01" placeholder="Collateral Diff" bind:value={settleCollateralDiff} class="diff-input" />
+                    <input type="number" step="0.01" placeholder="OnDelta Diff" bind:value={settleOnDeltaDiff} class="diff-input" />
+                  </div>
+                  <button class="settle-btn" on:click={() => submitSettle(tokenData.tokenId, account.counterpartyId)}>
+                    📤 Broadcast Settle
+                  </button>
                 </div>
               </div>
             </div>
@@ -564,4 +652,64 @@
     opacity: 0.8;
   }
 
+  .settle-interface {
+    margin-top: 16px;
+    padding: 12px;
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 6px;
+  }
+
+  .settle-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .settle-icon {
+    font-size: 16px;
+  }
+
+  .settle-title {
+    font-weight: 600;
+    color: #d4d4d4;
+  }
+
+  .diff-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .diff-input {
+    padding: 6px 8px;
+    background: #2d2d2d;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #d4d4d4;
+    font-size: 14px;
+  }
+
+  .diff-input:focus {
+    border-color: #007acc;
+    outline: none;
+  }
+
+  .settle-btn {
+    width: 100%;
+    padding: 8px 16px;
+    background: #0d7377;
+    border: none;
+    border-radius: 4px;
+    color: white;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .settle-btn:hover {
+    background: #0a5d61;
+  }
 </style>

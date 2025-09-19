@@ -127,7 +127,7 @@ contract SubcontractProvider is Console {
     }
   }
 
-  function logDeltas(string memory _msg, int[] memory deltas) public {
+  function logDeltas(string memory _msg, int[] memory deltas) public pure {
     console.log(_msg);
     for (uint i = 0; i < deltas.length; i++) {
       console.logInt(deltas[i]);
