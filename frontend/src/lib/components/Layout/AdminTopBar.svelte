@@ -12,7 +12,7 @@
   // Reactive theme icon
   $: themeIcon = $settings.theme === 'dark' ? '🌙' : '☀️';
 
-  // J-machine status (derived from environment) 
+  // J-machine status (derived from environment)
   $: jMachineStatus = (() => {
     if (!$xlnEnvironment) return { block: 0, events: 0, height: 0 };
     // Get max jBlock from all entities instead of server-level tracking
@@ -23,6 +23,36 @@
       height: $xlnEnvironment.height || 0
     };
   })();
+
+  // J-watcher status with proposer details
+  $: jWatcherStatus = (() => {
+    if (!$xlnEnvironment) return null;
+    try {
+      const proposers = Array.from($xlnEnvironment.replicas?.entries() || [])
+        .filter(([key, replica]) => replica.isProposer)
+        .map(([key, replica]) => {
+          const [entityId, signerId] = key.split(':');
+          return {
+            entityId: entityId.slice(0,10) + '...',
+            signerId,
+            jBlock: replica.state.jBlock,
+          };
+        });
+
+      return {
+        proposers,
+        nextSyncIn: Math.floor((1000 - (Date.now() % 1000)) / 100) / 10,
+      };
+    } catch (e) {
+      return null;
+    }
+  })();
+
+  // Timer for next sync countdown
+  let nextSyncTimer = 0;
+  setInterval(() => {
+    nextSyncTimer = Math.floor((1000 - (Date.now() % 1000)) / 100) / 10;
+  }, 100);
 
   // Event handlers
   async function handleRunDemo() {
@@ -49,8 +79,8 @@
       if (result?.replicas?.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1')?.state?.reserves) {
         const e1reserves = result.replicas.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1').state.reserves;
         console.log('🔍 Entity 1 reserves after demo:');
-        for (const [tokenId, balance] of e1reserves.entries()) {
-          console.log(`  Token ${tokenId}: ${balance.amount} ${balance.symbol}`);
+        for (const [tokenId, amount] of e1reserves.entries()) {
+          console.log(`  Token ${tokenId}: ${amount.toString()}`);
         }
       }
       
@@ -150,6 +180,23 @@
       <span class="j-status-item" title="Server Height (E-machine Frames)">
         📊 S-Block: {jMachineStatus.height}
       </span>
+      {#if jWatcherStatus && jWatcherStatus.proposers.length > 0}
+        <span class="j-status-item" title="J-Watcher Proposer Status">
+          🔄 Proposers: {jWatcherStatus.proposers.map(p => `${p.signerId}@${p.jBlock}`).join(', ')} | Next: {nextSyncTimer.toFixed(1)}s
+        </span>
+      {/if}
+      <div class="scale-control" title="Adjust portfolio bar scale for better comparison">
+        <span class="scale-label">📊 Scale: ${$settings.portfolioScale}</span>
+        <input
+          type="range"
+          min="1000"
+          max="10000"
+          step="500"
+          bind:value={$settings.portfolioScale}
+          on:input={(e) => settingsOperations.setPortfolioScale(Number(e.target.value))}
+          class="scale-slider"
+        />
+      </div>
     </div>
   </div>
   
@@ -533,6 +580,47 @@
   @keyframes tutorialGlow {
     0%, 100% { opacity: 0.3; }
     50% { opacity: 0.8; }
+  }
+
+  /* Global portfolio scale control */
+  .scale-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 16px;
+  }
+
+  .scale-label {
+    font-size: 11px;
+    color: #9d9d9d;
+    white-space: nowrap;
+  }
+
+  .scale-slider {
+    width: 80px;
+    height: 4px;
+    background: #404040;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .scale-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #007acc;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .scale-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    background: #007acc;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
   }
 </style>
 

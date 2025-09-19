@@ -73,11 +73,9 @@
     console.log(`🔍 EntityDropdown: Total replicas available: ${$replicas.size}`);
     console.log(`🔍 EntityDropdown: Replica keys:`, Array.from($replicas.keys()));
 
-    // Get all available jurisdictions
+    // Hardcode to Ethereum (8545) only for now
     const jurisdictions = [
-      { name: 'Ethereum', id: 'ethereum' },
-      { name: 'Polygon', id: 'polygon' },
-      { name: 'Arbitrum', id: 'arbitrum' }
+      { name: 'Ethereum', id: 'ethereum' }
     ];
 
     const dropdownMode = $settings.dropdownMode;

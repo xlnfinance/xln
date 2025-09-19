@@ -8,31 +8,24 @@ import { handleAccountInput } from './handlers/account';
 import { handleJEvent } from './j-events';
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
+import { cloneEntityState } from '../state-helpers';
 
-export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<EntityState> => {
+export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
   console.log(`🚨 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, JSON.stringify(entityTx.data, null, 2));
-  console.log(`🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput`);
+  console.log(`🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, account_request`);
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
 
       if (!validateMessage(message)) {
         log.error(`❌ Invalid chat message from ${from}`);
-        return entityState; // Return unchanged state
+        return { newState: entityState, outputs: [] }; // Return unchanged state
       }
 
       const currentNonce = entityState.nonces.get(from) || 0;
       const expectedNonce = currentNonce + 1;
 
-      const newEntityState = {
-        ...entityState,
-        nonces: new Map(entityState.nonces),
-        messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals),
-        reserves: new Map(entityState.reserves),
-        accounts: new Map(entityState.accounts),
-        collaterals: new Map(entityState.collaterals),
-      };
+      const newEntityState = cloneEntityState(entityState);
 
       newEntityState.nonces.set(from, expectedNonce);
       newEntityState.messages.push(`${from}: ${message}`);
@@ -41,7 +34,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         newEntityState.messages.shift();
       }
 
-      return newEntityState;
+      return { newState: newEntityState, outputs: [] };
     }
 
     if (entityTx.type === 'propose') {
@@ -65,15 +58,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const proposerPower = entityState.config.shares[proposer] || BigInt(0);
       const shouldExecuteImmediately = proposerPower >= entityState.config.threshold;
 
-      let newEntityState = {
-        ...entityState,
-        nonces: new Map(entityState.nonces),
-        messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals),
-        reserves: new Map(entityState.reserves),
-        accounts: new Map(entityState.accounts),
-        collaterals: new Map(entityState.collaterals),
-      };
+      let newEntityState = cloneEntityState(entityState);
 
       if (shouldExecuteImmediately) {
         proposal.status = 'executed';
@@ -90,7 +75,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       newEntityState.proposals.set(proposalId, proposal);
-      return newEntityState;
+      return { newState: newEntityState, outputs: [] };
     }
 
     if (entityTx.type === 'vote') {
@@ -103,20 +88,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       if (!proposal || proposal.status !== 'pending') {
         console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
-        return entityState;
+        return { newState: entityState, outputs: [] };
       }
 
       console.log(`    🗳️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
 
-      const newEntityState = {
-        ...entityState,
-        nonces: new Map(entityState.nonces),
-        messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals),
-        reserves: new Map(entityState.reserves),
-        accounts: new Map(entityState.accounts),
-        collaterals: new Map(entityState.collaterals),
-      };
+      const newEntityState = cloneEntityState(entityState);
 
       const updatedProposal = {
         ...proposal,
@@ -152,7 +129,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       newEntityState.proposals.set(proposalId, updatedProposal);
-      return newEntityState;
+      return { newState: newEntityState, outputs: [] };
     }
 
     if (entityTx.type === 'profile-update') {
@@ -175,20 +152,73 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.warn(`⚠️ ProfileData missing or invalid:`, profileData);
       }
 
-      return entityState;
+      return { newState: entityState, outputs: [] };
     }
 
     if (entityTx.type === 'j_event') {
-      return handleJEvent(entityState, entityTx.data);
+      const newState = handleJEvent(entityState, entityTx.data);
+      return { newState, outputs: [] };
     }
 
     if (entityTx.type === 'accountInput') {
-      return await handleAccountInput(entityState, entityTx.data, env);
+      const newState = await handleAccountInput(entityState, entityTx.data, env);
+      return { newState, outputs: [] };
     }
 
-    return entityState;
+    if (entityTx.type === 'account_request') {
+      console.log(`💳 ACCOUNT-REQUEST: Processing account request to ${entityTx.data.targetEntityId}`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+
+      // STEP 1: Create local account machine
+      if (!newState.accounts.has(entityTx.data.targetEntityId)) {
+        console.log(`💳 LOCAL-ACCOUNT: Creating local account with ${entityTx.data.targetEntityId.slice(0,10)}...`);
+
+        newState.accounts.set(entityTx.data.targetEntityId, {
+          counterpartyEntityId: entityTx.data.targetEntityId,
+          mempool: [],
+          currentFrame: { frameId: 0, timestamp: Date.now(), tokenIds: [], deltas: [] },
+          sentTransitions: 0,
+          ackedTransitions: 0,
+          deltas: new Map(),
+          proofHeader: { fromEntity: entityState.entityId, toEntity: entityTx.data.targetEntityId },
+          proofBody: { tokenIds: [], deltas: [] }
+        });
+      }
+
+      // STEP 2: Bubble up AccountInput to target entity
+      console.log(`💳 BUBBLE-OUTPUT: Creating AccountInput for target entity ${entityTx.data.targetEntityId.slice(0,10)}...`);
+
+      const accountInputForTarget: EntityInput = {
+        entityId: entityTx.data.targetEntityId,
+        signerId: 'system', // System-generated input
+        entityTxs: [{
+          type: 'accountInput',
+          data: {
+            fromEntityId: entityState.entityId,
+            toEntityId: entityTx.data.targetEntityId,
+            accountTx: {
+              type: 'initial_ack',
+              data: { message: 'Account opening request' }
+            },
+            metadata: {
+              purpose: 'account_opening_request',
+              description: `Account opening initiated by Entity ${entityState.entityId.slice(-4)}`
+            }
+          }
+        }]
+      };
+
+      outputs.push(accountInputForTarget);
+      console.log(`💳 OUTPUT-CREATED: Will route AccountInput to ${entityTx.data.targetEntityId.slice(0,10)}...`);
+
+      return { newState, outputs };
+    }
+
+    return { newState: entityState, outputs: [] };
   } catch (error) {
     log.error(`❌ Transaction execution error: ${error}`);
-    return entityState; // Return unchanged state on error
+    return { newState: entityState, outputs: [] }; // Return unchanged state on error
   }
 };

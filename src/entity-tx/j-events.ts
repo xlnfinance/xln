@@ -1,5 +1,6 @@
 import { EntityState } from '../types';
 import { DEBUG } from '../utils';
+import { cloneEntityState } from '../state-helpers';
 
 // Token registry for consistent naming (matches contract prefunding)
 const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number }> = {
@@ -22,23 +23,18 @@ const getTokenDecimals = (tokenId: number): number => {
 export const handleJEvent = (entityState: EntityState, entityTxData: any): EntityState => {
   const { from, event, observedAt, blockNumber, transactionHash } = entityTxData;
 
-  // Reject events from blocks we've already processed  
-  if (blockNumber <= entityState.jBlock) {
-    console.log(`🔄 Ignoring old j-event: ${event.type} from block ${blockNumber} (entity already at j-block ${entityState.jBlock})`);
+  // Reject events from blocks we've already processed - handle undefined jBlock
+  const currentJBlock = entityState.jBlock || 0;
+  console.log(`🔍 J-EVENT-CHECK: ${event.type} block=${blockNumber} vs entity.jBlock=${currentJBlock} (raw=${entityState.jBlock}), from=${from}`);
+  if (blockNumber <= currentJBlock) {
+    console.log(`🔄 IGNORING OLD J-EVENT: ${event.type} from block ${blockNumber} (entity already at j-block ${entityState.jBlock})`);
     return entityState;
   }
+  console.log(`✅ J-EVENT-ACCEPTED: ${event.type} block=${blockNumber} > entity.jBlock=${entityState.jBlock}, will process`);
 
-  const newEntityState = {
-    ...entityState,
-    messages: [...entityState.messages],
-    reserves: new Map(entityState.reserves),
-    nonces: new Map(entityState.nonces),
-    proposals: new Map(entityState.proposals),
-    accounts: new Map(entityState.accounts),
-    collaterals: new Map(entityState.collaterals),
-    accountInputQueue: [...(entityState.accountInputQueue || [])],
-    jBlock: blockNumber || entityState.jBlock,
-  };
+  const newEntityState = cloneEntityState(entityState);
+  // Update jBlock to current event block
+  newEntityState.jBlock = blockNumber ?? (entityState.jBlock ?? 0);
 
   // Create elaborate j-event message with full details
   const timestamp = new Date(observedAt).toLocaleTimeString();
@@ -67,7 +63,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
     const decimals = getTokenDecimals(tokenId);
     const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
     
-    elaborateMessage = `📊 ${from} observed RESERVE UPDATE: ${tokenSymbol} balance now ${balanceDisplay}
+    elaborateMessage = `📊 ${from} observed RESERVE UPDATE: ${tokenSymbol} balance now ${balanceDisplay} (accepted: event.block=${blockNumber} > entity.jBlock=${currentJBlock})
 📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
 🎯 Event: ReserveUpdated | 🔢 TokenID: ${tokenId} | 💰 New Balance: ${newBalance} (raw)
 🏦 Decimals: ${decimals} | 🔤 Symbol: ${tokenSymbol}`;
@@ -96,9 +92,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
     const { entity, tokenId, newBalance, name, symbol, decimals } = event.data;
     
     if (entity === entityState.entityId) {
-      newEntityState.reserves.set(String(tokenId), {
-        amount: BigInt(newBalance),
-      });
+      newEntityState.reserves.set(String(tokenId), BigInt(newBalance));
       if (DEBUG) console.log(`✅ Reserve updated for ${entity.slice(0,10)}...: Token ${tokenId} new balance is ${newBalance}`);
     }
   } else if (event.type === 'reserve_transferred') {

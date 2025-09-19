@@ -46,8 +46,6 @@
 
   // Reactive component states
   $: consensusExpanded = $settings.componentStates[`consensus-${tab.id}`] ?? true;
-  $: reservesExpanded = $settings.componentStates[`reserves-${tab.id}`] ?? false;
-  $: accountsExpanded = $settings.componentStates[`accounts-${tab.id}`] ?? false;
   $: chatExpanded = $settings.componentStates[`chat-${tab.id}`] ?? true;
   $: proposalsExpanded = $settings.componentStates[`proposals-${tab.id}`] ?? false;
   $: historyExpanded = $settings.componentStates[`history-${tab.id}`] ?? false;
@@ -71,31 +69,33 @@
 
   const getTokenInfo = (tokenId: string) => TOKEN_REGISTRY[tokenId] || { symbol: `TKN${tokenId}`, decimals: 18, price: 0 };
 
-  function formatAssetDisplay(tokenId: string, balance: any): string {
+  function formatAssetDisplay(tokenId: string, amount: bigint): string {
     const tokenInfo = getTokenInfo(tokenId);
     const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
-    const wholePart = balance.amount / divisor;
-    const fractionalPart = balance.amount % divisor;
+
+    const wholePart = amount / divisor;
+    const fractionalPart = amount % divisor;
 
     if (fractionalPart === 0n) {
-      return `${wholePart} ${tokenInfo.symbol}`;
+      return `${wholePart.toString()} ${tokenInfo.symbol}`;
     }
 
-    const fractionalStr = fractionalPart.toString().padStart(tokenInfo.decimals, '0');
-    return `${wholePart}.${fractionalStr} ${tokenInfo.symbol}`;
+    const fractionalStr = fractionalPart.toString().padStart(tokenInfo.decimals, '0').replace(/0+$/, '');
+    return `${wholePart.toString()}.${fractionalStr} ${tokenInfo.symbol}`;
   }
 
-  function getAssetValue(tokenId: string, balance: any): number {
+  function getAssetValue(tokenId: string, amount: bigint): number {
     const tokenInfo = getTokenInfo(tokenId);
     const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
-    const amount = Number(balance.amount) / Number(divisor);
-    return amount * tokenInfo.price;
+
+    const numericAmount = Number(amount) / Number(divisor);
+    return numericAmount * tokenInfo.price;
   }
 
-  function calculateTotalNetworth(reserves: Map<string, any>): number {
+  function calculateTotalNetworth(reserves: Map<string, bigint>): number {
     let total = 0;
-    for (const [tokenId, balance] of reserves.entries()) {
-      total += getAssetValue(tokenId, balance);
+    for (const [tokenId, amount] of reserves.entries()) {
+      total += getAssetValue(tokenId, amount);
     }
     return total;
   }
@@ -291,6 +291,55 @@
       <!-- Entity Profile Section -->
       <EntityProfile {replica} {tab} />
 
+      <!-- Reserves - Always Visible -->
+      {#if replica?.state?.reserves && replica.state.reserves.size > 0}
+        <div class="entity-reserves-section">
+          <div class="reserves-header">
+            <h3>💰 Reserves</h3>
+            <div class="portfolio-summary">
+              <strong>Portfolio Value: ${calculateTotalNetworth(replica.state.reserves).toFixed(2)}</strong>
+            </div>
+          </div>
+          <div class="reserves-grid">
+            {#each Array.from(replica.state.reserves.entries()) as [tokenId, amount]}
+              {@const tokenInfo = getTokenInfo(tokenId)}
+              {@const assetValue = getAssetValue(tokenId, amount)}
+              {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
+              {@const globalPercentage = $settings.portfolioScale > 0 ? Math.min((assetValue / $settings.portfolioScale) * 100, 100) : 0}
+              {@const portfolioPercentage = totalNetworth > 0 ? (assetValue / totalNetworth) * 100 : 0}
+
+              <div class="reserve-card">
+                <div class="reserve-info">
+                  <span class="reserve-symbol" style="color: {tokenInfo.symbol === 'ETH' ? '#627eea' : tokenInfo.symbol === 'USDT' ? '#26a17b' : '#007acc'}">{tokenInfo.symbol}</span>
+                  <span class="reserve-amount">{formatAssetDisplay(tokenId, amount)}</span>
+                  <span class="reserve-value">${assetValue.toFixed(2)} ({portfolioPercentage.toFixed(1)}% of entity)</span>
+                </div>
+                <div class="reserve-bar">
+                  <div class="reserve-fill" style="width: {globalPercentage}%" title="Relative to global scale: ${$settings.portfolioScale}"></div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div class="entity-reserves-section">
+          <div class="reserves-header">
+            <h3>💰 Reserves</h3>
+          </div>
+          <p class="empty-reserves">No reserves yet - deposit assets via Depository.sol</p>
+        </div>
+      {/if}
+
+      <!-- Accounts - Always Visible -->
+      <div class="entity-accounts-section">
+        <div class="accounts-header">
+          <h3>💳 Accounts</h3>
+        </div>
+        <div class="accounts-content">
+          <AccountChannels {replica} />
+        </div>
+      </div>
+
       <!-- Consensus State Component -->
       <div class="panel-component" id="consensus-{tab.id}">
     <div
@@ -316,91 +365,7 @@
     </div>
   </div>
 
-  <!-- Reserves Component -->
-  <div class="panel-component" id="reserves-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!reservesExpanded}
-      on:click={() => toggleComponent(`reserves-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`reserves-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>💰</span>
-        <span>Reserves</span>
-      </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      class:collapsed={!reservesExpanded}
-      style="max-height: 300px;"
-    >
-      {#if replica?.state?.reserves && replica.state.reserves.size > 0}
-        <div class="reserves-container">
-          <!-- Portfolio Summary -->
-          <div class="portfolio-summary">
-            <strong>Portfolio Value: ${calculateTotalNetworth(replica.state.reserves).toFixed(2)}</strong>
-          </div>
 
-          <!-- Asset List with Portfolio Bars -->
-          {#each Array.from(replica.state.reserves.entries()) as [tokenId, balance]}
-            {@const tokenInfo = getTokenInfo(tokenId)}
-            {@const assetValue = getAssetValue(tokenId, balance)}
-            {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
-            {@const percentage = totalNetworth > 0 ? (assetValue / totalNetworth) * 100 : 0}
-
-            <div class="asset-row">
-              <div class="asset-info">
-                <span class="asset-symbol">{tokenInfo.symbol}</span>
-                <span class="asset-amount">{formatAssetDisplay(tokenId, balance)}</span>
-                <span class="asset-value">${assetValue.toFixed(2)}</span>
-              </div>
-
-              <!-- Green portfolio bar showing percentage -->
-              <div class="portfolio-bar-container">
-                <div class="portfolio-bar">
-                  <div
-                    class="portfolio-fill"
-                    style="width: {percentage}%"
-                  ></div>
-                </div>
-                <span class="asset-percentage">{percentage.toFixed(1)}%</span>
-              </div>
-            </div>
-          {/each}
-        </div>
-      {:else}
-        <p class="empty-state">No reserves yet - deposit assets via Depository.sol</p>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Accounts Component -->
-  <div class="panel-component" id="accounts-{tab.id}">
-    <div
-      class="component-header"
-      class:collapsed={!accountsExpanded}
-      on:click={() => toggleComponent(`accounts-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`accounts-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>💳</span>
-        <span>Accounts</span>
-      </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      class:collapsed={!accountsExpanded}
-      style="max-height: 400px;"
-    >
-      <AccountChannels {replica} />
-    </div>
-  </div>
 
   <!-- Chat Component -->
   <div class="panel-component" id="chat-{tab.id}">
@@ -953,5 +918,109 @@
     color: #999;
     flex: 1;
     font-size: 12px;
+  }
+
+  /* Always-visible reserves section */
+  .entity-reserves-section {
+    background: #2d2d2d;
+    border: 1px solid #444;
+    border-radius: 8px;
+    margin: 16px 20px;
+    padding: 16px;
+  }
+
+  .reserves-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .reserves-header h3 {
+    margin: 0;
+    color: #e8e8e8;
+    font-size: 1.1em;
+  }
+
+  .portfolio-summary {
+    color: #28a745;
+    font-weight: 600;
+  }
+
+  .reserves-grid {
+    display: grid;
+    gap: 8px;
+  }
+
+  .reserve-card {
+    background: #1a1a1a;
+    border: 1px solid #3e3e3e;
+    border-radius: 6px;
+    padding: 12px;
+  }
+
+  .reserve-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .reserve-symbol {
+    font-weight: bold;
+    font-size: 1.1em;
+  }
+
+  .reserve-amount {
+    color: #e8e8e8;
+    font-weight: 500;
+  }
+
+  .reserve-value {
+    color: #28a745;
+    font-size: 0.9em;
+  }
+
+  .reserve-bar {
+    height: 4px;
+    background: #333;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .reserve-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #28a745, #20c997);
+    transition: width 0.3s ease;
+  }
+
+  .empty-reserves {
+    color: #777;
+    font-style: italic;
+    text-align: center;
+    margin: 0;
+  }
+
+  /* Always-visible accounts section */
+  .entity-accounts-section {
+    background: #2d2d2d;
+    border: 1px solid #444;
+    border-radius: 8px;
+    margin: 16px 20px;
+    padding: 16px;
+  }
+
+  .accounts-header {
+    margin-bottom: 12px;
+  }
+
+  .accounts-header h3 {
+    margin: 0;
+    color: #e8e8e8;
+    font-size: 1.1em;
+  }
+
+  .accounts-content {
+    /* Let AccountChannels handle its own styling */
   }
 </style>

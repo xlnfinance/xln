@@ -7,6 +7,7 @@
   import EntityFormation from '../lib/components/Formation/EntityFormation.svelte';
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
   import NetworkDirectory from '../lib/components/Network/NetworkDirectory.svelte';
+  import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
   import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
@@ -53,6 +54,7 @@
 
 <main class="app">
   <AdminTopBar />
+  <ErrorDisplay />
 
   {#if $isLoading}
     <div class="loading-container">
@@ -267,9 +269,14 @@
   }
 
   /* Dynamic panel width based on number of panels */
+  .entity-panels-container[data-panel-count='1'] {
+    justify-content: center;
+  }
+
   .entity-panels-container[data-panel-count='1'] :global(.entity-panel) {
-    flex: 1;
-    min-width: 100%;
+    flex: 0 0 50%;
+    min-width: 50%;
+    max-width: 50%;
   }
 
   .entity-panels-container[data-panel-count='2'] :global(.entity-panel) {

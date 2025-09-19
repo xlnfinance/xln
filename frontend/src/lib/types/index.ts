@@ -95,9 +95,8 @@ export interface EntityState {
   messages: string[];
   proposals: Map<string, Proposal>;
   config: EntityConfig;
-  reserves: Map<string, AssetBalance>;
+  reserves: Map<string, bigint>; // tokenId -> amount (simplified from AssetBalance)
   accounts: Map<string, AccountMachine>;
-  collaterals: Map<string, any>;
   entityId: string;
   jBlock: number;
 }
@@ -211,6 +210,7 @@ export interface Settings {
   theme: 'dark' | 'light';
   dropdownMode: 'signer-first' | 'entity-first';
   serverDelay: number;
+  portfolioScale: number; // Max value for portfolio comparison (e.g., $5000)
   componentStates: ComponentState;
 }
 

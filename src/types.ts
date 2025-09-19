@@ -117,6 +117,10 @@ export type EntityTx =
   | {
       type: 'accountInput';
       data: AccountInput;
+    }
+  | {
+      type: 'account_request';
+      data: { targetEntityId: string; requestType: 'open' | 'close' };
     };
 
 export interface AssetBalance {
@@ -142,10 +146,10 @@ export interface AccountMachine {
   mempool: AccountTx[]; // Unprocessed account transactions
   currentFrame: AccountFrame; // Current agreed state
   sentTransitions: number; // Number of transitions sent but not yet confirmed
-  
+
   // Per-token delta states
   deltas: Map<number, Delta>; // tokenId -> Delta
-  
+
   // Proof structures
   proofHeader: {
     cooperativeNonce: number;
@@ -153,7 +157,7 @@ export interface AccountMachine {
   };
   proofBody: {
     tokenIds: number[];
-    deltas: bigint[]; 
+    deltas: bigint[];
   };
   hankoSignature?: string; // Last signed proof by counterparty
 }
@@ -162,8 +166,8 @@ export interface AccountMachine {
 export interface Delta {
   tokenId: number;
   collateral: bigint;
-  ondelta: bigint;  // On-chain delta
-  offdelta: bigint; // Off-chain delta  
+  ondelta: bigint; // On-chain delta
+  offdelta: bigint; // Off-chain delta
   leftCreditLimit: bigint;
   rightCreditLimit: bigint;
   leftAllowence: bigint;
@@ -190,21 +194,24 @@ export interface DerivedDelta {
 }
 
 // Account transaction types
-export type AccountTx = 
+export type AccountTx =
   | { type: 'initial_ack'; data: { message: string } }
   | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; description?: string } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint; isForSelf: boolean } }
-  | { type: 'account_settle'; data: { 
-      tokenId: number; 
-      ownReserve: string;
-      counterpartyReserve: string;
-      collateral: string;
-      ondelta: string;
-      side: 'left' | 'right';
-      blockNumber: number;
-      transactionHash: string;
-    } }
+  | {
+      type: 'account_settle';
+      data: {
+        tokenId: number;
+        ownReserve: string;
+        counterpartyReserve: string;
+        collateral: string;
+        ondelta: string;
+        side: 'left' | 'right';
+        blockNumber: number;
+        transactionHash: string;
+      };
+    };
 
 export interface EntityState {
   entityId: string; // The entity ID this state belongs to
@@ -216,13 +223,11 @@ export interface EntityState {
   config: ConsensusConfig;
 
   // 💰 Financial state
-  reserves: Map<string, AssetBalance>; // tokenId -> balance ("1" -> {amount: 10n})
+  reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
   accounts: Map<string, AccountMachine>; // counterpartyEntityId -> account state
-  collaterals: Map<string, AssetBalance>; // Total assets locked in accounts
-  
   // 🔭 J-machine tracking
   jBlock: number; // Last processed J-machine block number
-  
+
   // 🔗 Account machine integration
   accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine
 }

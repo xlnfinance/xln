@@ -24,10 +24,10 @@
 
   function getAvailableEntities() {
     if (!replica || !$replicas) return [];
-    
+
     const currentEntityId = replica.entityId;
     const existingAccountIds = new Set(replica.state?.accounts ? Array.from(replica.state.accounts.keys()) : []);
-    
+
     // Get unique entities from replicas, excluding current entity and existing accounts
     const entitySet = new Set<string>();
     for (const [replicaKey] of $replicas.entries()) {
@@ -36,7 +36,7 @@
         entitySet.add(entityId);
       }
     }
-    
+
     return Array.from(entitySet).map(entityId => {
       // Try to get a human-readable name for the entity
       const entityNumber = getEntityNumber(entityId);
@@ -55,48 +55,42 @@
 
   async function openAccountWith(targetEntityId: string) {
     if (!replica) return;
-    
+
     try {
+      console.log(`💳 NEW-FLOW: Opening account with Entity ${targetEntityId.slice(-4)} via entity transaction`);
+
       const xln = await getXLN();
       const env = $xlnEnvironment;
       if (!env) throw new Error('XLN environment not ready');
 
-      // Create the AccountInput manually for now
-      const accountInput = {
+      // NEW FLOW: Send account_request as EntityTx to local e-machine
+      const accountRequestInput = {
         entityId: replica.entityId,
         signerId: replica.signerId,
         entityTxs: [{
-          type: 'accountInput',
+          type: 'account_request' as const,
           data: {
-            fromEntityId: replica.entityId,
-            toEntityId: targetEntityId,
-            accountTx: {
-              type: 'initial_ack',
-              data: { message: 'One-click account opening' }
-            },
-            metadata: {
-              purpose: 'one_click_account_opening',
-              description: `Account opened via one-click with Entity ${targetEntityId.slice(-4)}`
-            }
+            targetEntityId,
+            requestType: 'open' as const
           }
         }]
       };
 
-      await xln.processUntilEmpty(env, [accountInput]);
-      console.log(`✅ One-click account opened with Entity ${targetEntityId.slice(-4)}`);
+      await xln.processUntilEmpty(env, [accountRequestInput]);
+      console.log(`✅ Account request sent to local e-machine for Entity ${targetEntityId.slice(-4)}`);
     } catch (error) {
-      console.error('Failed to open account:', error);
-      alert(`Failed to open account: ${error.message}`);
+      console.error('Failed to send account request:', error);
+      alert(`Failed to send account request: ${error.message}`);
     }
   }
 
   async function prefundAccount(counterpartyEntityId: string) {
     if (!replica) return;
-    
+
     // Simple prefunding with default values for testing
     const tokenId = 1; // ETH
     const amount = 0.1; // 0.1 ETH
-    
+
     try {
       const xln = await getXLN();
       const env = $xlnEnvironment;
@@ -119,7 +113,7 @@
 
       console.log(`✅ Account prefunded with Entity ${counterpartyEntityId.slice(-4)}: ${amount} ETH`);
       console.log('Transaction:', result.hash);
-      
+
     } catch (error) {
       console.error('Failed to prefund account:', error);
       alert(`Failed to prefund account: ${error.message}`);
@@ -129,11 +123,11 @@
   // For each account, derive the token balances (assuming we are always "left" for simplicity)
   function getAccountTokens(account: any) {
     if (!account.deltas || !account.deltas.size) return [];
-    
+
     return Array.from(account.deltas.entries()).map(([tokenId, delta]) => {
       const derived = deriveDelta(delta, true); // Assume we are left party
       const tokenInfo = getTokenInfo(tokenId);
-      
+
       return {
         tokenId,
         tokenInfo,
@@ -226,14 +220,14 @@
               <span class="entity-id">...{entity.shortId}</span>
             </div>
             <div class="entity-actions">
-              <button 
+              <button
                 class="action-button open-button"
                 on:click={() => openAccountWith(entity.entityId)}
                 title="Open account with {entity.displayName}"
               >
                 📝 Open
               </button>
-              <button 
+              <button
                 class="action-button prefund-button"
                 on:click={() => prefundAccount(entity.entityId)}
                 title="Prefund account with {entity.displayName} (0.1 ETH)"
@@ -282,12 +276,12 @@
                   </span>
                 </div>
               </div>
-              
+
               <div class="balance-bars">
                 <div class="balance-side">
                   <div class="side-label">Our Side</div>
                   <div class="capacity-bar">
-                    <div class="bar-segment credit" 
+                    <div class="bar-segment credit"
                          style="width: {calculatePercentage(tokenData.derived.inOwnCredit, tokenData.derived.totalCapacity)}%">
                     </div>
                     <div class="bar-segment collateral"
@@ -299,7 +293,7 @@
                     <span>Collateral: {formatTokenAmount(tokenData.tokenId, tokenData.derived.inCollateral)}</span>
                   </div>
                 </div>
-                
+
                 <div class="balance-side">
                   <div class="side-label">Their Side</div>
                   <div class="capacity-bar">
@@ -357,7 +351,6 @@
   }
   .account-channels {
     margin-top: 16px;
-    min-height: 120vh;
   }
 
   .accounts-header {
@@ -416,7 +409,6 @@
     border: 1px solid #3e3e3e;
     border-radius: 6px;
     padding: 24px;
-    min-height: 400px;
     transition: all 0.2s ease;
   }
 

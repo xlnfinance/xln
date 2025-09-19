@@ -6,6 +6,7 @@ const defaultSettings: Settings = {
   theme: 'dark',
   dropdownMode: 'signer-first',
   serverDelay: 0,
+  portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {}
 };
 
@@ -96,6 +97,12 @@ const settingsOperations = {
   // Update server delay
   setServerDelay(delay: number) {
     settings.update(current => ({ ...current, serverDelay: delay }));
+    this.saveToStorage();
+  },
+
+  // Update portfolio scale
+  setPortfolioScale(scale: number) {
+    settings.update(current => ({ ...current, portfolioScale: scale }));
     this.saveToStorage();
   },
 
