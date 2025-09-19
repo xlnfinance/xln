@@ -1,0 +1,153 @@
+# Contract Deployment & Browser Synchronization System
+
+## 🎯 Overview
+
+The XLN system now features a robust contract deployment and browser synchronization system that ensures fresh contract addresses are automatically available to both server and browser components.
+
+## 🏗️ Architecture
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  Deploy Script  │ ─► │  Config Files    │ ─► │  Browser/Server │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                             │
+                             │
+                    jurisdictions.json
+                    (Unified Config)
+```
+
+## 📁 Generated Files
+
+### `jurisdictions.json` (Unified Config)
+- Single JSON file for both browser and server consumption
+- Contains all network configurations with contract addresses
+- Structured format with versioning and metadata
+- Auto-loaded by both Node.js and browser environments
+
+## 🚀 Quick Commands
+
+### Complete Reset
+```bash
+./reset-networks.sh
+```
+- Stops all networks
+- Cleans old data  
+- Starts fresh networks
+- Deploys contracts to all 3 networks
+- Generates both config files
+
+### Individual Operations
+```bash
+./start-networks.sh      # Start blockchain networks
+./stop-networks.sh       # Stop all networks  
+./deploy-contracts.sh    # Deploy to running networks
+./dev.sh                 # Development setup check
+```
+
+## 🔧 Network Configuration
+
+### Three Parallel Networks
+- **Ethereum** (port 8545) - Primary network
+- **Polygon** (port 8546) - Secondary network  
+- **Arbitrum** (port 8547) - Tertiary network
+
+### Contract Deployment
+- Each network gets individual EntityProvider contract
+- Addresses automatically extracted and saved
+- Browser gets fresh addresses on every deployment
+
+## 🔄 Synchronization Flow
+
+1. **Deployment**: `./deploy-contracts.sh` runs
+2. **Generation**: Creates both config files with fresh addresses
+3. **Detection**: Browser polls for config changes every 5s
+4. **Refresh**: Automatic browser reload when new deployment detected
+5. **Loading**: Fresh page loads with new contract addresses
+
+## 📝 Config File Examples
+
+### Unified Config (`jurisdictions.json`)
+```json
+{
+  "version": "1.0.0",
+  "lastUpdated": "2024-01-15T10:30:00Z",
+  "jurisdictions": {
+    "ethereum": {
+      "name": "Ethereum",
+      "chainId": 1337,
+      "rpc": "http://localhost:8545",
+      "contracts": {
+        "entityProvider": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+        "depository": "0xb513E6E4b8f2a923D98304ec87F64353C4D5C854"
+      },
+      "explorer": "http://localhost:8545",
+      "currency": "ETH",
+      "status": "active"
+    }
+  }
+} 
+      entityProvider: "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853"
+    }
+  },
+  deployedAt: 1721316516,
+  version: "abc123f"
+};
+```
+
+## 🛠️ Development Workflow
+
+### Starting Development
+```bash
+./dev.sh                 # Check and setup everything
+bun run src/server.ts    # Start the server
+open index.html          # Open in browser
+```
+
+### Fresh Deployment
+```bash
+./reset-networks.sh      # Complete reset
+# Browser automatically refreshes with new addresses
+```
+
+### Contract-Only Redeploy
+```bash
+./deploy-contracts.sh    # Keep networks, redeploy contracts
+# Browser detects change and refreshes in ~5 seconds
+```
+
+## 🔍 Troubleshooting
+
+### Networks Not Starting
+1. Kill existing processes: `./stop-networks.sh`
+2. Check ports 8545-8547 are free
+3. Start fresh: `./start-networks.sh`
+
+## 🎯 Benefits
+
+### ✅ Simplified
+- Single command: `./reset-networks.sh`
+- No manual address copying
+- No hardcoded addresses in browser code
+
+### ✅ Automatic
+- Browser syncs automatically
+- Server loads fresh addresses
+- Change detection and refresh
+
+### ✅ Robust  
+- Fallback configurations
+- Error handling
+- Development status checks
+
+### ✅ Multi-Network
+- Three parallel jurisdictions
+- Individual contract addresses
+- Cross-jurisdiction testing
+
+## 🔮 Future Improvements
+
+- WebSocket notifications for instant refresh
+- Contract verification integration
+- Multi-environment configurations (dev/staging/prod)
+- Automatic contract interaction testing
+- Gas optimization tracking 

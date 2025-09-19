@@ -16,7 +16,7 @@
   // State for J-tx (reserve-to-reserve) - Set defaults for easier testing
   let jtxRecipient = '2';
   let jtxAmount = 0.1;
-  let jtxTokenId = '0';
+  let jtxTokenId = '1';
 
   // State for account opening
   let accountCounterparty = '2';
@@ -244,6 +244,7 @@
         reserveToExternalToken: [],
         externalTokenToReserve: [],
         reserveToCollateral: [],
+        settlements: [],
         cooperativeUpdate: [],
         cooperativeDisputeProof: [],
         initialDisputeProof: [],
@@ -252,18 +253,42 @@
         hub_id: 0,
       };
 
-      // Real blockchain submission: UI → j-machine → j-watcher → entity machine
-      console.log('💸 Submitting REAL processBatch to blockchain...');
-      
-      // Get jurisdiction info
+      // Use SIMPLE reserveToReserve (what worked before!)
+      console.log('💸 Submitting SIMPLE reserveToReserve to blockchain...');
+
+      // Get jurisdiction info with debug
+      console.log('🔍 Getting ethereum jurisdiction...');
       const ethJurisdiction = await xln.getJurisdictionByAddress('ethereum');
       if (!ethJurisdiction) {
         throw new Error('Ethereum jurisdiction not found');
       }
-      
-      // Submit real transaction to deployed Depository contract
-      const result = await xln.submitProcessBatch(ethJurisdiction, tab.entityId, batch);
-      console.log('✅ Real blockchain transaction confirmed:', result.receipt.hash);
+      console.log('🔍 Found jurisdiction:', ethJurisdiction);
+
+      // Simple batch with ONLY reserveToReserve (like before)
+      const simpleBatch = {
+        reserveToReserve: [{
+          receivingEntity: recipientAddress,
+          tokenId: tokenIdNum,
+          amount: jtxAmount,
+        }],
+        reserveToExternalToken: [],
+        externalTokenToReserve: [],
+        reserveToCollateral: [],
+        settlements: [], // Required by new ABI but empty
+        cooperativeUpdate: [],
+        cooperativeDisputeProof: [],
+        initialDisputeProof: [],
+        finalDisputeProof: [],
+        flashloans: [],
+        hub_id: 0,
+      };
+
+      console.log('🔍 Simple R2R batch:', simpleBatch);
+
+      // Use DIRECT reserveToReserve function call (simplest possible!)
+      const weiAmount = (BigInt(Math.floor(jtxAmount * 1e18))).toString();
+      const result = await xln.submitReserveToReserve(ethJurisdiction, tab.entityId, recipientAddress, tokenIdNum, weiAmount);
+      console.log('✅ Direct R2R function call confirmed:', result.txHash);
       
       // Now wait for j-watcher to pick up the ReserveUpdated events and feed to entity machine
       // The j-watcher should automatically detect the events and create entity inputs

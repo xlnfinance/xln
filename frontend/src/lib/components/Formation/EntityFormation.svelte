@@ -264,9 +264,11 @@
         label: `${data.name} (Port ${data.rpc.split(':').pop()})`
       }));
       
-      // Set first jurisdiction as default
+      // Default to Ethereum (8545) instead of first option
       if (jurisdictionOptions.length > 0 && !formData.jurisdiction) {
-        formData.jurisdiction = jurisdictionOptions[0].value;
+        const ethereumOption = jurisdictionOptions.find(j => j.label.includes('Ethereum'));
+        formData.jurisdiction = ethereumOption ? ethereumOption.value : jurisdictionOptions[0].value;
+        console.log('🔍 Defaulted jurisdiction to:', formData.jurisdiction);
       }
       
       console.log(`✅ Loaded ${jurisdictionOptions.length} jurisdiction options:`, jurisdictionOptions);

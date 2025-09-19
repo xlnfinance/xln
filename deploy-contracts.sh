@@ -68,19 +68,69 @@ deploy_to_network() {
     rm -rf ignition/deployments/chain-1337/ 2>/dev/null || true
     echo "   ✅ All caches cleared"
     
-    # Force fresh compilation
-    echo "   🔧 Compiling contracts..."
+    # Force fresh compilation with typechain
+    echo "   🔧 Compiling contracts and generating TypeChain types..."
     if ! npx hardhat compile --force 2>&1; then
         echo "   ❌ Contract compilation failed"
         cd ..
         return 1
     fi
-    
-    # Verify our function is in compiled ABI
-    if grep -q "debugBulkFundEntities" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
-        echo "   ✅ Pre-funding function found in compiled ABI"
+
+    # TypeChain types are automatically generated during compilation with hardhat-toolbox
+    echo "   🔧 TypeChain types generated automatically during compilation"
+
+    # Verify TypeChain types were generated
+    if [ -d "typechain-types" ]; then
+        echo "   ✅ TypeChain types directory exists"
+        # Check if index file exists and create it if missing
+        if [ ! -f "typechain-types/index.ts" ]; then
+            echo "   🔧 Creating missing TypeChain index.ts..."
+            echo 'export * from "./contracts";' > typechain-types/index.ts
+        fi
     else
-        echo "   ❌ Pre-funding function missing from compiled ABI"
+        echo "   ⚠️ TypeChain types directory missing, but continuing..."
+    fi
+
+    # Run tests before deployment
+    echo "   🧪 Running contract tests before deployment..."
+    echo "   🔍 Running EntityProvider tests..."
+    if ls test/EntityProvider* >/dev/null 2>&1; then
+        if ! npx hardhat test test/EntityProvider* --network hardhat 2>&1 | tee "../logs/test-entityprovider-$port.log"; then
+            echo "   ❌ EntityProvider tests failed! Stopping deployment."
+            cd ..
+            return 1
+        fi
+        echo "   ✅ EntityProvider tests passed"
+    else
+        echo "   💡 EntityProvider tests not found, skipping..."
+    fi
+
+    # Skip Depository unit tests for now - use R2R smoke test instead
+    echo "   💡 Skipping Depository unit tests (use R2R smoke test for verification)"
+    
+    # Verify critical functions are in compiled ABI
+    echo "   🔍 Verifying critical functions in compiled ABI..."
+    if grep -q "debugBulkFundEntities" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+        echo "   ✅ debugBulkFundEntities function found in compiled ABI"
+    else
+        echo "   ❌ debugBulkFundEntities function missing from compiled ABI"
+        cd ..
+        return 1
+    fi
+
+    if grep -q "processBatch" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+        echo "   ✅ processBatch function found in compiled ABI"
+    else
+        echo "   ❌ processBatch function missing from compiled ABI"
+        echo "   🔍 This explains the R2R transaction failures!"
+        cd ..
+        return 1
+    fi
+
+    if grep -q "settle" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+        echo "   ✅ settle function found in compiled ABI"
+    else
+        echo "   ❌ settle function missing from compiled ABI"
         cd ..
         return 1
     fi
@@ -142,7 +192,7 @@ deploy_to_network() {
     if [ -f "$deployment_file" ]; then
         echo "   ✅ Deployment file found, extracting addresses..."
         cat "$deployment_file"
-        depository_address=$(jq -r '.["DepositoryModule#DepositoryV2"] // .["DepositoryModule#Depository"]' "$deployment_file" 2>/dev/null || true)
+        depository_address=$(jq -r '.["DepositoryModule#Depository"]' "$deployment_file" 2>/dev/null || true)
         echo "   🔍 Extracted Depository: $depository_address"
     else
         echo "   ❌ Deployment file not found after waiting"
@@ -157,15 +207,64 @@ deploy_to_network() {
         return 1
     fi
     echo "   ✅ Depository: $depository_address"
-    
-    # SKIP old verification - run R2R test instead
-    echo "   🧪 Running Reserve-to-Reserve (R2R) functionality test..."
-    if bunx hardhat run test-r2r-post-deployment.cjs --network "$network_config" 2>&1; then
-        echo "   ✅ R2R test passed - Depository contract working correctly"
-    else
-        echo "   ❌ R2R test failed - Contract deployment may have issues"
-        echo "   ⚠️ Continuing anyway (you can debug later)"
+
+    # CRITICAL: Verify processBatch function exists in deployed contract
+    echo "   🚨 CRITICAL: Verifying processBatch function in deployed contract..."
+    echo "   🔍 Using freshly deployed address: $depository_address"
+
+    # Pass the address to verification script
+    export DEPOSITORY_ADDRESS="$depository_address"
+    if ! verification_output=$(bunx hardhat run scripts/verify-contract-functions.cjs --network "$network_config" 2>&1); then
+        echo "   ❌ CRITICAL: Contract verification script FAILED!"
+        echo "$verification_output"
+        echo "   🚫 DEPLOYMENT FAILED - Cannot verify deployed contract"
+        cd ..
+        return 1
     fi
+
+    echo "$verification_output"
+    if echo "$verification_output" | grep -q "❌.*MISSING"; then
+        echo "   ❌ CRITICAL: Essential functions MISSING from deployed contract!"
+        echo "   🚫 DEPLOYMENT FAILED - Contract is broken"
+        cd ..
+        return 1
+    fi
+
+    if echo "$verification_output" | grep -q "✅ ALL CRITICAL FUNCTIONS VERIFIED"; then
+        echo "   ✅ CRITICAL: All functions verified in deployed contract"
+    else
+        echo "   ❌ CRITICAL: Function verification FAILED!"
+        echo "   🚫 DEPLOYMENT FAILED - Contract incomplete"
+        cd ..
+        return 1
+    fi
+
+    # CRITICAL: Run R2R smoke test - FAIL deployment if it doesn't work
+    echo "   🧪 Running CRITICAL Reserve-to-Reserve (R2R) smoke test..."
+    echo "   🚨 This test MUST PASS or deployment will FAIL"
+    if ! bunx hardhat run test-r2r-post-deployment.cjs --network "$network_config" 2>&1; then
+        echo "   ❌ CRITICAL: R2R smoke test FAILED!"
+        echo "   🚫 DEPLOYMENT FAILED - R2R functionality broken"
+        echo "   💡 This means the UI won't work with these contracts"
+        cd ..
+        return 1
+    fi
+    echo "   ✅ CRITICAL: R2R smoke test PASSED - Contracts fully functional"
+
+    # Build and update frontend bundle with latest server.js
+    echo "   🔧 Updating frontend bundle with latest server code..."
+    cd ..
+    if bun build src/server.ts --outdir dist --target node; then
+        echo "   ✅ Server built successfully"
+        if cp dist/server.js frontend/static/server.js; then
+            echo "   ✅ Frontend bundle updated with latest server.js"
+        else
+            echo "   ⚠️ Failed to copy server.js to frontend (continuing anyway)"
+        fi
+    else
+        echo "   ⚠️ Server build failed (continuing anyway)"
+    fi
+    cd contracts
 
     # Store both addresses in variables for later use
     case $port in
@@ -263,6 +362,16 @@ EOF
 
 
     echo "   ✅ Unified jurisdictions configuration saved"
+
+    # Update ALL jurisdiction files to prevent sync issues
+    echo "   🔄 Syncing jurisdictions to all frontend locations..."
+    cp jurisdictions.json frontend/static/jurisdictions.json 2>/dev/null || true
+    cp jurisdictions.json frontend/build/jurisdictions.json 2>/dev/null || true
+    if [ -f "frontend/.svelte-kit/output/client/jurisdictions.json" ]; then
+        cp jurisdictions.json frontend/.svelte-kit/output/client/jurisdictions.json 2>/dev/null || true
+        echo "   ✅ Updated SvelteKit output file"
+    fi
+    echo "   ✅ All jurisdiction files synchronized"
     echo ""
     echo "🎯 Deployment complete!"
     echo "📋 Next: Restart server to use new contracts"

@@ -1,7 +1,6 @@
 import { AccountInput, EntityState, Env } from '../../types';
 import { createDemoDelta } from '../../account-utils';
-// TODO: Re-enable when account-tx is fixed
-// import { processAccountTransaction } from '../../account-tx';
+import { processAccountTransaction } from '../../account-tx';
 
 export function handleAccountInput(state: EntityState, input: AccountInput, env: Env): EntityState {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId}`, input.accountTx);
@@ -104,9 +103,7 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
     console.log(`✅ Settlement processed for Entity ${input.toEntityId.slice(-4)}, Token ${tokenId}`);
   } else {
     // Process other account transactions immediately using account-tx processor
-    // TODO: Re-enable when account-tx is fixed  
-    // const result = processAccountTransaction(accountMachine, input.accountTx);
-    const result = { success: true }; // Temporary placeholder
+    const result = processAccountTransaction(accountMachine, input.accountTx);
     
     if (result.success) {
       console.log(`✅ Processed ${input.accountTx.type} successfully for ${input.toEntityId}`);

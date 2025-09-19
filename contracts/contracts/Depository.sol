@@ -403,6 +403,32 @@ contract Depository is Console {
     return true;
   }
 
+  // ========== DIRECT R2R FUNCTION ==========
+  // Simple reserve-to-reserve transfer (simpler than batch)
+  function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint tokenId, uint amount) public returns (bool) {
+    require(fromEntity != toEntity, "Cannot transfer to self");
+    require(_reserves[fromEntity][tokenId] >= amount, "Insufficient reserves");
+
+    console.log("=== DIRECT R2R TRANSFER ===");
+    console.logBytes32(fromEntity);
+    console.log("to");
+    console.logBytes32(toEntity);
+    console.log("amount:");
+    console.logUint(amount);
+
+    // Simple transfer: subtract from sender, add to receiver
+    _reserves[fromEntity][tokenId] -= amount;
+    _reserves[toEntity][tokenId] += amount;
+
+    // Emit events for j-watcher
+    emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
+    emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
+    emit ReserveTransferred(fromEntity, toEntity, tokenId, amount);
+
+    console.log("=== R2R TRANSFER COMPLETE ===");
+    return true;
+  }
+
   // ========== NEW SIMPLIFIED SETTLE FUNCTION ==========
   // Simple settlement between two entities without signature verification
   // Can be called independently or as part of processBatch
@@ -890,14 +916,13 @@ contract Depository is Console {
    * @param to Recipient entity address
    * @param internalTokenId Internal token ID (use getControlShareTokenId helper)
    * @param amount Amount of shares to transfer
-   * @param purpose Human-readable purpose (e.g., "Sale", "Investment", "Dividend Distribution")
    */
   function transferControlShares(
     bytes32 entity,
     bytes32 to,
     uint256 internalTokenId,
     uint256 amount,
-    string calldata purpose
+    string calldata /* purpose */
   ) internal {
     // enforceDebts(entity, internalTokenId); // DISABLED
 

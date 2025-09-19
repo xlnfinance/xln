@@ -42,6 +42,8 @@ import {
   registerNumberedEntityOnChain,
   submitProcessBatch,
   submitPrefundAccount,
+  submitSettle,
+  submitReserveToReserve,
   transferNameBetweenEntities,
 } from './evm';
 import { createGossipLayer } from './gossip';
@@ -788,6 +790,8 @@ export {
   searchEntityNames,
   submitProcessBatch,
   submitPrefundAccount,
+  submitSettle,
+  submitReserveToReserve,
   debugFundReserves,
   transferNameBetweenEntities,
   

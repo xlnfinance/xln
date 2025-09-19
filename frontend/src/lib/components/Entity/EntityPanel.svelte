@@ -531,6 +531,11 @@
     flex: 1;
   }
 
+  .panel-header-dropdowns > :global(*) {
+    flex: 1;
+    min-width: 0;
+  }
+
   .panel-header-controls {
     display: flex;
     align-items: center;

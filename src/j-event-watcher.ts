@@ -928,9 +928,8 @@ export class JEventWatcher {
           }
         }
 
-        console.log(`🔍 CONTINUOUS-CHECK: Checked ${env.replicas.size} entities against block ${currentBlock}, ${entitiesNeedingSync.length} need sync`);
-        
         if (entitiesNeedingSync.length > 0) {
+          console.log(`🔍 CONTINUOUS-CHECK: Checked ${env.replicas.size} entities against block ${currentBlock}, ${entitiesNeedingSync.length} need sync`);
           for (const {entityId, currentJBlock} of entitiesNeedingSync) {
             console.log(`🔄 ENTITY-SYNC: Entity ${entityId.slice(0,10)}... at jBlock ${currentJBlock}, syncing to block ${currentBlock}`);
             await this.syncEntityFromBlock(entityId, currentJBlock + 1, currentBlock, env);
