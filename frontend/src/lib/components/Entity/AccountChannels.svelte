@@ -68,10 +68,9 @@
         entityId: replica.entityId,
         signerId: replica.signerId,
         entityTxs: [{
-          type: 'account_request' as const,
+          type: 'openAccount' as const,
           data: {
-            targetEntityId,
-            requestType: 'open' as const
+            targetEntityId
           }
         }]
       };
@@ -335,6 +334,11 @@
           <div class="account-meta">
             <small class="frame-timestamp">
               Frame #{account.currentFrame.frameId} • Updated: {new Date(account.currentFrame.timestamp).toLocaleString()}
+            </small>
+            <small class="account-status">
+              Mempool: {account.mempool?.length || 0} pending •
+              Sent: {account.sentTransitions || 0} •
+              Credit: ${((account.globalCreditLimits?.ownLimit || 0n) / 100n).toString()}
             </small>
           </div>
         </div>

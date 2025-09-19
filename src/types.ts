@@ -83,7 +83,7 @@ export interface JurisdictionEventData {
   transactionHash: string;
 }
 
-export interface AccountInput {
+export interface AccountTxInput {
   fromEntityId: string;
   toEntityId: string;
   accountTx: AccountTx; // The actual account transaction to process
@@ -119,8 +119,8 @@ export type EntityTx =
       data: AccountInput;
     }
   | {
-      type: 'account_request';
-      data: { targetEntityId: string; requestType: 'open' | 'close' };
+      type: 'openAccount';
+      data: { targetEntityId: string };
     };
 
 export interface AssetBalance {
@@ -134,7 +134,8 @@ export interface AccountDelta {
   delta: bigint; // Positive = we owe them, Negative = they owe us
 }
 
-export interface AccountFrame {
+// Simple account state snapshot (for currentFrame)
+export interface AccountSnapshot {
   frameId: number;
   timestamp: number;
   tokenIds: number[]; // Array of token IDs in this account
@@ -144,14 +145,35 @@ export interface AccountFrame {
 export interface AccountMachine {
   counterpartyEntityId: string;
   mempool: AccountTx[]; // Unprocessed account transactions
-  currentFrame: AccountFrame; // Current agreed state
+  currentFrame: AccountSnapshot; // Current agreed state
   sentTransitions: number; // Number of transitions sent but not yet confirmed
+  ackedTransitions: number; // Number of transitions acknowledged by counterparty
 
-  // Per-token delta states
+  // Per-token delta states (giant per-token table like old_src)
   deltas: Map<number, Delta>; // tokenId -> Delta
 
-  // Proof structures
+  // Global credit limits (in reference currency - USDC)
+  globalCreditLimits: {
+    ownLimit: bigint; // How much credit we extend to counterparty (USD)
+    peerLimit: bigint; // How much credit counterparty extends to us (USD)
+  };
+
+  // Frame-based consensus (like old_src Channel, consistent with entity frames)
+  currentFrameId: number;
+  pendingFrame?: AccountFrame;
+  pendingSignatures: string[];
+
+  // Rollback support for bilateral disagreements
+  rollbackCount: number;
+  isProposer: boolean; // Left entity (lexicographically smaller) is proposer
+
+  // Cloned state for validation before committing (replaces dryRun)
+  clonedForValidation?: AccountMachine;
+
+  // Proof structures for dispute resolution
   proofHeader: {
+    fromEntity: string; // Our entity ID
+    toEntity: string; // Counterparty entity ID
     cooperativeNonce: number;
     disputeNonce: number;
   };
@@ -160,6 +182,39 @@ export interface AccountMachine {
     deltas: bigint[];
   };
   hankoSignature?: string; // Last signed proof by counterparty
+}
+
+// Account frame structure for bilateral consensus (renamed from AccountBlock)
+export interface AccountFrame {
+  frameId: number;
+  timestamp: number;
+  accountTxs: AccountTx[]; // Renamed from transitions
+  previousStateHash: string;
+  stateHash: string;
+  isProposer: boolean; // Which side proposed this frame
+  tokenIds: number[]; // Array of token IDs in this frame
+  deltas: bigint[]; // Array of deltas corresponding to tokenIds
+}
+
+// Unified AccountInput interface (merging transaction-level and frame-level inputs)
+export interface AccountInput {
+  fromEntityId: string;
+  toEntityId: string;
+
+  // For transaction-level inputs
+  accountTx?: AccountTx; // Single account transaction to process
+  metadata?: {
+    purpose?: string;
+    description?: string;
+  };
+
+  // For frame-level inputs (consensus)
+  frameId?: number; // Frame-based consensus
+  prevSignatures?: string[]; // Previous signatures (acknowledging their frame)
+  newAccountFrame?: AccountFrame; // New account frame we're proposing
+  newSignatures?: string[]; // Our signatures on the new frame
+  counter?: number; // Message counter for ordering (replay protection)
+  accountFrame?: AccountFrame; // Full frame data when proposing
 }
 
 // Delta structure for per-token account state (based on old_src)
@@ -199,6 +254,7 @@ export type AccountTx =
   | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; description?: string } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint; isForSelf: boolean } }
+  | { type: 'account_frame'; data: { frame: AccountFrame; processedTransactions: number; fromEntity: string } }
   | {
       type: 'account_settle';
       data: {

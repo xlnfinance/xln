@@ -249,8 +249,8 @@ const applyServerInput = async (
             config: serverTx.data.config,
             // 💰 Initialize financial state
             reserves: new Map(), // tokenId -> bigint amount
-            channels: new Map(),
-            
+            accounts: new Map(), // counterpartyEntityId -> AccountMachine
+
             // 🔭 J-machine tracking
             jBlock: 0, // Must start from 0 to resync all reserves
           },
@@ -320,24 +320,32 @@ const applyServerInput = async (
       }
     }
 
-    // Update env (mutable)
-    env.height++;
-    env.timestamp = Date.now();
+    // Only create server frame if there's actual work to do
+    const hasServerTxs = env.serverInput.serverTxs.length > 0;
+    const hasEntityInputs = mergedInputs.length > 0;
+    const hasOutputs = entityOutbox.length > 0;
 
-    // Capture snapshot BEFORE clearing (to show what was actually processed)
-    // Use merged inputs to avoid showing intermediate gossip messages in UI
-    const inputDescription = `Tick ${env.height - 1}: ${env.serverInput.serverTxs.length} serverTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
-    const processedInput = {
-      serverTxs: [...env.serverInput.serverTxs],
-      entityInputs: [...mergedInputs], // Use merged inputs instead of raw inputs
-    };
+    if (hasServerTxs || hasEntityInputs || hasOutputs) {
+      // Update env (mutable)
+      env.height++;
+      env.timestamp = Date.now();
 
-    // Clear processed data from env.serverInput
-    env.serverInput.serverTxs.length = 0;
-    env.serverInput.entityInputs.length = 0;
+      // Capture snapshot BEFORE clearing (to show what was actually processed)
+      const inputDescription = `Tick ${env.height - 1}: ${env.serverInput.serverTxs.length} serverTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
+      const processedInput = {
+        serverTxs: [...env.serverInput.serverTxs],
+        entityInputs: [...mergedInputs], // Use merged inputs instead of raw inputs
+      };
 
-    // Capture snapshot with the actual processed input and outputs
-    await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
+      // Clear processed data from env.serverInput
+      env.serverInput.serverTxs.length = 0;
+      env.serverInput.entityInputs.length = 0;
+
+      // Capture snapshot with the actual processed input and outputs
+      await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
+    } else {
+      console.log(`⚪ SKIP-FRAME: No serverTxs, entityInputs, or outputs - not creating empty frame`);
+    }
 
     // Notify Svelte about environment changes
     console.log(`🔍 REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env.replicas.size}`);
@@ -435,8 +443,6 @@ const main = async (): Promise<Env> => {
       console.log('🔍 STARTUP: Current jurisdictions.json content:');
       console.log('📍 Ethereum Depository:', jurisdictions.jurisdictions.ethereum.contracts.depository);
       console.log('📍 Ethereum EntityProvider:', jurisdictions.jurisdictions.ethereum.contracts.entityProvider);
-      console.log('📍 Polygon Depository:', jurisdictions.jurisdictions.polygon.contracts.depository);
-      console.log('📍 Arbitrum Depository:', jurisdictions.jurisdictions.arbitrum.contracts.depository);
       console.log('📍 Last updated:', jurisdictions.lastUpdated);
       console.log('📍 Full Ethereum config:', JSON.stringify(jurisdictions.jurisdictions.ethereum, null, 2));
     } catch (error) {
