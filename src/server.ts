@@ -58,6 +58,7 @@ import {
 } from './name-resolution';
 import { runDemo } from './rundemo';
 import { decode, encode } from './snapshot-coder';
+import { captureSnapshot, cloneEntityReplica } from './state-helpers';
 import { runDepositoryHankoTests } from './test-depository-hanko';
 import { runBasicHankoTests } from './test-hanko-basic';
 import { runAllTests as runCompleteHankoTests } from './test-hanko-complete';
@@ -93,8 +94,9 @@ let envChangeCallback: ((env: Env) => void) | null = null;
 // Module-level environment variable
 let env: Env;
 
-// Module-level j-watcher instance
+// Module-level j-watcher instance - prevent multiple instances
 let jWatcher: JEventWatcher | null = null;
+let jWatcherStarted = false;
 
 export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
   envChangeCallback = callback;
@@ -157,139 +159,9 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
 // Note: History is now stored in env.history (no global variable needed)
 
 // === SNAPSHOT UTILITIES ===
-const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
-  const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
-  const cloneArray = <T>(arr: T[]) => [...arr];
+// All cloning utilities now moved to state-helpers.ts
 
-  return {
-    entityId: replica.entityId,
-    signerId: replica.signerId,
-    state: {
-      entityId: replica.state.entityId, // Clone entityId
-      height: replica.state.height,
-      timestamp: replica.state.timestamp,
-      nonces: cloneMap(replica.state.nonces),
-      messages: cloneArray(replica.state.messages),
-      proposals: new Map(
-        Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
-          id,
-          { ...proposal, votes: cloneMap(proposal.votes) },
-        ]),
-      ),
-      config: replica.state.config,
-      // 💰 Clone financial state
-      reserves: cloneMap(replica.state.reserves),
-      channels: cloneMap(replica.state.channels),
-      collaterals: cloneMap(replica.state.collaterals),
-    },
-    mempool: cloneArray(replica.mempool),
-    proposal: replica.proposal
-      ? {
-          height: replica.proposal.height,
-          txs: cloneArray(replica.proposal.txs),
-          hash: replica.proposal.hash,
-          newState: replica.proposal.newState,
-          signatures: cloneMap(replica.proposal.signatures),
-        }
-      : undefined,
-    lockedFrame: replica.lockedFrame
-      ? {
-          height: replica.lockedFrame.height,
-          txs: cloneArray(replica.lockedFrame.txs),
-          hash: replica.lockedFrame.hash,
-          newState: replica.lockedFrame.newState,
-          signatures: cloneMap(replica.lockedFrame.signatures),
-        }
-      : undefined,
-    isProposer: replica.isProposer,
-  };
-};
-
-const captureSnapshot = async (
-  env: Env,
-  serverInput: ServerInput,
-  serverOutputs: EntityInput[],
-  description: string,
-): Promise<void> => {
-  // Convert gossip profiles Map to plain object for serialization
-  const profiles: Record<string, Profile> = {};
-  console.log(`🔍 SNAPSHOT-DEBUG: env.gossip exists: ${!!env.gossip}`);
-  console.log(`🔍 SNAPSHOT-DEBUG: env.gossip.profiles exists: ${!!env.gossip?.profiles}`);
-  console.log(`🔍 SNAPSHOT-DEBUG: env.gossip.profiles size: ${env.gossip?.profiles?.size || 0}`);
-  if (env.gossip?.profiles) {
-    console.log(`🔍 SNAPSHOT-DEBUG: Profile keys:`, Array.from(env.gossip.profiles.keys()));
-    for (const [id, profile] of env.gossip.profiles.entries()) {
-      profiles[id] = profile;
-      console.log(`🔍 SNAPSHOT-DEBUG: Capturing profile ${id}:`, profile.metadata?.name || 'no name');
-    }
-  }
-
-  const snapshot: EnvSnapshot = {
-    height: env.height,
-    timestamp: env.timestamp,
-    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [key, deepCloneReplica(replica)])),
-    serverInput: {
-      serverTxs: [...serverInput.serverTxs],
-      entityInputs: serverInput.entityInputs.map(input => ({
-        ...input,
-        entityTxs: input.entityTxs ? [...input.entityTxs] : undefined,
-        precommits: input.precommits ? new Map(input.precommits) : undefined,
-      })),
-    },
-    serverOutputs: serverOutputs.map(output => ({
-      ...output,
-      entityTxs: output.entityTxs ? [...output.entityTxs] : undefined,
-      precommits: output.precommits ? new Map(output.precommits) : undefined,
-    })),
-    description,
-    gossip: {
-      profiles,
-    },
-  };
-
-  env.history = env.history || [];
-  env.history.push(snapshot);
-
-  // --- PERSISTENCE WITH BATCH OPERATIONS ---
-  // Use batch operations for better performance
-  try {
-    const batch = db.batch();
-    batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
-    batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-
-    await batch.write();
-
-    if (DEBUG) {
-      console.log(`💾 Snapshot ${snapshot.height} saved to IndexedDB successfully`);
-      console.log(`💾 Saved gossip profiles: ${Object.keys(profiles).length} entries`);
-    }
-  } catch (error) {
-    console.error(`❌ Failed to save snapshot ${snapshot.height} to IndexedDB:`, error);
-    throw error;
-  }
-
-  if (DEBUG) {
-    console.log(`📸 Snapshot captured: "${description}" (${env.history.length} total)`);
-    if (serverInput.serverTxs.length > 0) {
-      console.log(`    🖥️  ServerTxs: ${serverInput.serverTxs.length}`);
-      serverInput.serverTxs.forEach((tx, i) => {
-        console.log(
-          `      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`,
-        );
-      });
-    }
-    if (serverInput.entityInputs.length > 0) {
-      console.log(`    📨 EntityInputs: ${serverInput.entityInputs.length}`);
-      serverInput.entityInputs.forEach((input, i) => {
-        const parts = [];
-        if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
-        if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
-        if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
-        console.log(`      ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
-      });
-    }
-  }
-};
+// All snapshot functionality now moved to state-helpers.ts
 
 // === UTILITY FUNCTIONS ===
 
@@ -376,45 +248,47 @@ const applyServerInput = async (
             proposals: new Map(),
             config: serverTx.data.config,
             // 💰 Initialize financial state
-            reserves: new Map(),
+            reserves: new Map(), // tokenId -> bigint amount
             channels: new Map(),
-            collaterals: new Map(),
             
             // 🔭 J-machine tracking
-            jBlock: 0,
+            jBlock: 0, // Must start from 0 to resync all reserves
           },
           mempool: [],
           isProposer: serverTx.data.isProposer,
         });
-        console.log(`🔍 REPLICA-DEBUG: Added replica ${replicaKey}, total replicas now: ${env.replicas.size}`);
+        // Validate jBlock immediately after creation
+        const createdReplica = env.replicas.get(replicaKey);
+        const actualJBlock = createdReplica?.state.jBlock;
+        console.log(`🔍 REPLICA-DEBUG: Added replica ${replicaKey}, jBlock should be 0, actually is: ${actualJBlock} (type: ${typeof actualJBlock})`);
+
+        if (typeof actualJBlock !== 'number') {
+          console.error(`💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
+          console.error(`💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
+          // Force fix immediately
+          if (createdReplica) {
+            createdReplica.state.jBlock = 0;
+            console.log(`💥   FIXED: Set jBlock to 0 for replica ${replicaKey}`);
+          }
+        }
       }
     });
     console.log(`🔍 REPLICA-DEBUG: After processing serverTxs, total replicas: ${env.replicas.size}`);
 
-    // Sync newly created entities with j-watcher for historical events
-    console.log(`🔍 J-WATCHER SYNC CHECK: jWatcher=${!!jWatcher}, serverTxs.length=${env.serverInput.serverTxs.length}`);
-    if (jWatcher && env.serverInput.serverTxs.length > 0) {
-      const hasImportReplica = env.serverInput.serverTxs.some(tx => tx.type === 'importReplica');
-      console.log(`🔍 J-WATCHER SYNC CHECK: hasImportReplica=${hasImportReplica}, serverTx types=[${env.serverInput.serverTxs.map(tx => tx.type).join(', ')}]`);
-      if (hasImportReplica) {
-        console.log('🔄 Triggering j-watcher sync for newly created entities...');
-        try {
-          const eventsProcessed = await jWatcher.syncNewlyCreatedEntities(env);
-          if (eventsProcessed) {
-            console.log('🔄✅ Historical events processed individually during sync');
-          }
-        } catch (error) {
-          console.error('🔄❌ Failed to sync newly created entities:', error);
-        }
-      } else {
-        console.log('🔍 J-WATCHER SYNC: No importReplica serverTxs found, skipping sync');
-      }
-    } else {
-      console.log('🔍 J-WATCHER SYNC: Conditions not met for sync trigger');
-    }
+    // Simple watcher automatically syncs all proposer replicas from their last jBlock
 
-    // Process entity inputs
+    // Process entity inputs - check for j-events
+    console.log(`🔍 SERVER-PROCESSING: About to process ${mergedInputs.length} merged entity inputs`);
     for (const entityInput of mergedInputs) {
+      // Track j-events in this input
+      const jEventCount = entityInput.entityTxs?.filter(tx => tx.type === 'j_event').length || 0;
+      if (jEventCount > 0) {
+        console.log(`🚨 FOUND-J-EVENTS: Entity ${entityInput.entityId.slice(0,10)}... has ${jEventCount} j-events from ${entityInput.signerId}`);
+        entityInput.entityTxs?.filter(tx => tx.type === 'j_event').forEach((jEvent, i) => {
+          console.log(`🚨   J-EVENT-${i}: type=${jEvent.data.event.type}, block=${jEvent.data.blockNumber}, observedAt=${new Date(jEvent.data.observedAt).toLocaleTimeString()}`);
+        });
+      }
+
       const replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
       const entityReplica = env.replicas.get(replicaKey);
 
@@ -463,7 +337,7 @@ const applyServerInput = async (
     env.serverInput.entityInputs.length = 0;
 
     // Capture snapshot with the actual processed input and outputs
-    await captureSnapshot(env, processedInput, entityOutbox, inputDescription);
+    await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
 
     // Notify Svelte about environment changes
     console.log(`🔍 REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env.replicas.size}`);
@@ -592,13 +466,15 @@ const main = async (): Promise<Env> => {
   // Then try to load saved state if available
   try {
     if (isBrowser) {
-      console.log('🌐 Browser environment: Attempting to load snapshots from IndexedDB...');
+      console.log('🌐 BROWSER-DEBUG: Starting IndexedDB snapshot loading process...');
     } else {
       console.log('🖥️ Node.js environment: Attempting to load snapshots from filesystem...');
     }
 
+    console.log('🔍 BROWSER-DEBUG: Querying latest_height from database...');
     const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
+    console.log(`📊 BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
 
     console.log(`📊 Found latest height: ${latestHeight}, loading ${latestHeight + 1} snapshots...`);
 
@@ -657,9 +533,10 @@ const main = async (): Promise<Env> => {
     }
   } catch (error: any) {
     if (error.code === 'LEVEL_NOT_FOUND') {
-      console.log('📦 No saved state found, using fresh environment');
+      console.log('📦 BROWSER-DEBUG: No saved state found, using fresh environment');
       if (isBrowser) {
-        console.log('💡 Browser: This is normal for first-time use. Database will be created automatically.');
+        console.log('💡 BROWSER-DEBUG: This is normal for first-time use. IndexedDB will be created automatically.');
+        console.log('🔍 BROWSER-DEBUG: Fresh environment means entities will start with jBlock=0');
       } else {
         console.log('💡 Node.js: No existing snapshots in db directory.');
       }
@@ -706,11 +583,29 @@ const main = async (): Promise<Env> => {
 
   log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
 
-  // Start j-watcher for real-time blockchain monitoring (both Node.js and browser)  
-  try {
-    await startJEventWatcher(env);
-  } catch (error) {
-    console.error('❌ Failed to start J-Event Watcher:', error);
+  // Debug final state before starting j-watcher
+  if (isBrowser) {
+    console.log(`🔍 BROWSER-DEBUG: Final state before j-watcher start:`);
+    console.log(`🔍   Environment height: ${env.height}`);
+    console.log(`🔍   Total replicas: ${env.replicas.size}`);
+    for (const [replicaKey, replica] of env.replicas.entries()) {
+      const [entityId, signerId] = replicaKey.split(':');
+      console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, isProposer=${replica.isProposer}`);
+    }
+  }
+
+  // Start j-watcher after snapshots are fully loaded (prevent multiple instances)
+  if (!jWatcherStarted) {
+    try {
+      console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher...');
+      await startJEventWatcher(env);
+      jWatcherStarted = true;
+      console.log('🔭 JWATCHER-READY: J-watcher started successfully');
+    } catch (error) {
+      console.error('❌ Failed to start J-Event Watcher:', error);
+    }
+  } else {
+    console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
   }
 
   return env;
@@ -742,6 +637,25 @@ const clearDatabaseAndHistory = async () => {
   };
 
   console.log('✅ Database and server history cleared');
+};
+
+// Export j-watcher status for frontend display
+export const getJWatcherStatus = () => {
+  if (!jWatcher || !env) return null;
+  return {
+    isWatching: jWatcher.getStatus().isWatching,
+    proposers: Array.from(env.replicas.entries())
+      .filter(([key, replica]) => replica.isProposer)
+      .map(([key, replica]) => {
+        const [entityId, signerId] = key.split(':');
+        return {
+          entityId: entityId.slice(0,10) + '...',
+          signerId,
+          jBlock: replica.state.jBlock,
+        };
+      }),
+    nextSyncIn: Math.floor((1000 - (Date.now() % 1000)) / 100) / 10, // Seconds until next 1s sync
+  };
 };
 
 export {

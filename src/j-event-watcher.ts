@@ -1,22 +1,19 @@
 /**
  * J-Machine Event Watcher
  *
- * MVP implementation that watches for jurisdiction events (EntityProvider.sol, Depository.sol)
- * and automatically submits them to the corresponding entity machines.
- *
- * This enables the j-machine ↔ e-machine event flow where:
- * - All signers listen to their jurisdiction locally
- * - When they see new events, they make entity transactions about what they observed
- * - Uses Hanko signatures for all on-entity-behalf transactions
+ * First-principles design:
+ * 1. Find all proposer replicas in server
+ * 2. Sync each proposer from their last jBlock (not duplicate events)
+ * 3. Feed new j-events to proposer replicas through server processUntilEmpty
+ * 4. Simple single polling loop - no complex timers or historical sync
  */
 
 import { ethers } from 'ethers';
-
 import type { EntityTx, Env } from './types.js';
 
-// Debug flag for logging
-const DEBUG = true;
-const HEAVY_LOGS = true; // Extra verbose logging for sync debugging
+// Debug flags - reduced for cleaner output
+const DEBUG = false; // Reduced j-watcher verbosity
+const HEAVY_LOGS = false;
 
 // Event types we care about from the jurisdiction
 interface JurisdictionEvent {
@@ -47,11 +44,9 @@ export class JEventWatcher {
   private depositoryContract: ethers.Contract;
   private config: WatcherConfig;
   private signers: Map<string, SignerConfig> = new Map();
-  private lastProcessedBlock: number = 0;
-  private syncInProgress: boolean = false;
   private isWatching: boolean = false;
 
-  // Contract ABIs (minimal for events we care about)
+  // Minimal ABIs for events we need
   private entityProviderABI = [
     'event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)',
     'event ControlSharesReleased(bytes32 indexed entityId, address indexed depository, uint256 controlAmount, uint256 dividendAmount, string purpose)',
@@ -77,11 +72,15 @@ export class JEventWatcher {
 
     this.depositoryContract = new ethers.Contract(config.depositoryAddress, this.depositoryABI, this.provider);
 
-    this.lastProcessedBlock = config.startBlock || 0;
+    if (DEBUG) {
+      console.log(`🔭 J-WATCHER: Initialized with RPC: ${config.rpcUrl}`);
+      console.log(`🔭 J-WATCHER: EntityProvider: ${config.entityProviderAddress}`);
+      console.log(`🔭 J-WATCHER: Depository: ${config.depositoryAddress}`);
+    }
   }
 
   /**
-   * Add a signer configuration for monitoring
+   * Add a signer configuration for monitoring (legacy compatibility)
    */
   addSigner(signerId: string, privateKey: string, entityIds: string[]) {
     this.signers.set(signerId, {
@@ -105,82 +104,30 @@ export class JEventWatcher {
     }
 
     this.isWatching = true;
-    
-    // Initialize from current block - 10 for new watchers, entities manage their own jBlock
-    const currentBlock = await this.provider.getBlockNumber();
-    this.lastProcessedBlock = Math.max(0, currentBlock - 10);
+    console.log('🔭 J-WATCHER: Starting simple first-principles watcher...');
 
-    console.log(`🔭 J-WATCHER: Starting from block ${this.lastProcessedBlock}`);
+    try {
+      // Test blockchain connection
+      const currentBlock = await this.provider.getBlockNumber();
+      console.log(`🔭 J-WATCHER: Connected to blockchain at block ${currentBlock}`);
+    } catch (error) {
+      console.log(`🔭⚠️  J-WATCHER: Blockchain not ready, will retry: ${error.message}`);
+    }
 
-    // Set up event listeners for real-time events
-    this.setupEventListeners(env);
-
-    // Process any historical events we missed
-    await this.processHistoricalEvents(env);
-
-    // Sync historical events for entities with jBlock=0
-    await this.syncHistoricalEventsForNewEntities(env);
-
-    // Start periodic sync every 500ms
-    this.startPeriodicSync(env);
-
-    // Start continuous entity monitoring every 1 second
-    this.startContinuousEntityMonitoring(env);
-
-    console.log(`🔭 J-WATCHER: Monitoring J-machine from block ${this.lastProcessedBlock}`);
-  }
-
-  /**
-   * Start periodic sync to catch new events
-   */
-  private startPeriodicSync(env: Env): void {
+    // Simple polling every 1 second - first principles approach
     setInterval(async () => {
-      if (!this.isWatching || this.syncInProgress) {
-        return;
-      }
-      
+      if (!this.isWatching) return;
+
       try {
-        this.syncInProgress = true;
-        await this.syncNewEvents(env);
-        
+        await this.syncAllProposerReplicas(env);
       } catch (error) {
-        console.error('🔭❌ J-WATCHER: Error during periodic sync:', error);
-      } finally {
-        this.syncInProgress = false;
+        if (DEBUG && !error.message.includes('ECONNREFUSED')) {
+          console.error('🔭❌ J-WATCHER: Sync error:', error.message);
+        }
       }
-    }, 500); // Sync every 500ms
-  }
+    }, 1000);
 
-  /**
-   * Sync only new events since last processed block
-   */
-  private async syncNewEvents(env: Env): Promise<void> {
-    const currentBlock = await this.provider.getBlockNumber();
-    
-    if (currentBlock <= this.lastProcessedBlock) {
-      // Completely silent when no new blocks
-      return;
-    }
-
-    const newBlocks = currentBlock - this.lastProcessedBlock;
-    let totalEventsProcessed = 0;
-
-    // Process new blocks in batches
-    const batchSize = 100;
-    for (let fromBlock = this.lastProcessedBlock + 1; fromBlock <= currentBlock; fromBlock += batchSize) {
-      const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
-      
-      const eventsInBatch = await this.processBlockRange(fromBlock, toBlock, env);
-      totalEventsProcessed += eventsInBatch;
-    }
-
-    // Update local last processed block
-    this.lastProcessedBlock = currentBlock;
-    
-    // Only log if we actually found events
-    if (totalEventsProcessed > 0) {
-      console.log(`🔭⚡ J-MACHINE SYNC: Found ${totalEventsProcessed} events in ${newBlocks} new blocks (now at J-block ${currentBlock})`);
-    }
+    console.log('🔭 J-WATCHER: Started with simple 1s polling');
   }
 
   /**
@@ -194,814 +141,276 @@ export class JEventWatcher {
   }
 
   /**
-   * Set up real-time event listeners
+   * Core logic: Find proposer replicas, sync each from last jBlock
+   * This is the first-principles approach you requested
    */
-  private setupEventListeners(env: Env): void {
-    // EntityProvider events
-    this.entityProviderContract.on('EntityRegistered', (entityId, entityNumber, boardHash, event) => {
-      this.handleJurisdictionEvent(
-        {
-          type: 'entity_registered',
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-          entityId: entityId.toString(),
-          entityNumber: Number(entityNumber),
-          data: { boardHash },
-        },
-        env,
-      );
-    });
-
-    this.entityProviderContract.on(
-      'ControlSharesReleased',
-      (entityId, depository, controlAmount, dividendAmount, purpose, event) => {
-        this.handleJurisdictionEvent(
-          {
-            type: 'control_shares_released',
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityId: entityId.toString(),
-            entityNumber: Number(entityId), // entityId is the number for registered entities
-            data: { depository, controlAmount, dividendAmount, purpose },
-          },
-          env,
-        );
-      },
-    );
-
-    this.entityProviderContract.on('NameAssigned', (name, entityNumber, event) => {
-      this.handleJurisdictionEvent(
-        {
-          type: 'name_assigned',
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-          entityNumber: Number(entityNumber),
-          data: { name },
-        },
-        env,
-      );
-    });
-
-    // Depository events
-    this.depositoryContract.on('ControlSharesReceived', (entityProvider, fromEntity, tokenId, amount, data, event) => {
-      // Extract entity number from tokenId (control tokens use entity number directly)
-      const entityNumber = this.extractEntityNumberFromTokenId(Number(tokenId));
-
-      this.handleJurisdictionEvent(
-        {
-          type: 'shares_received',
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-          entityNumber: entityNumber,
-          data: { entityProvider, fromEntity, tokenId, amount, data },
-        },
-        env,
-      );
-    });
-
-    // Reserve events from Depository
-    this.depositoryContract.on('ReserveUpdated', (entity, tokenId, newBalance, event) => {
-      this.handleReserveUpdatedEvent(entity, tokenId, newBalance, event, env);
-    });
-
-    this.depositoryContract.on('ReserveTransferred', (from, to, tokenId, amount, event) => {
-      // Handle transfer events for both sender and receiver entities
-      const fromEntityNumber = Number(from);
-      const toEntityNumber = Number(to);
-      
-      // Submit event for sender entity
-      this.handleJurisdictionEvent(
-        {
-          type: 'reserve_transferred',
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-          entityNumber: fromEntityNumber,
-          data: { from, to, tokenId: Number(tokenId), amount: amount.toString(), direction: 'sent' },
-        },
-        env,
-      );
-      
-      // Submit event for receiver entity  
-      this.handleJurisdictionEvent(
-        {
-          type: 'reserve_transferred',
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-          entityNumber: toEntityNumber,
-          data: { from, to, tokenId: Number(tokenId), amount: amount.toString(), direction: 'received' },
-        },
-        env,
-      );
-    });
-
-    // Settlement events from Depository
-    this.depositoryContract.on('SettlementProcessed', (leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta, event) => {
-      this.handleSettlementProcessedEvent(leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta, event, env);
-    });
-  }
-
-  /**
-   * Process historical events since last processed block
-   */
-  private async processHistoricalEvents(env: Env): Promise<void> {
+  private async syncAllProposerReplicas(env: Env): Promise<void> {
     try {
       const currentBlock = await this.provider.getBlockNumber();
 
-      if (this.lastProcessedBlock >= currentBlock) {
-        if (HEAVY_LOGS) console.log('🔭⏸️  J-WATCHER: No historical blocks to process');
+      if (DEBUG) {
+        console.log(`🔭🔍 SYNC-START: Current blockchain block=${currentBlock}, total replicas=${env.replicas.size}`);
+        console.log(`🔭🔍 SYNC-ENV-TIMESTAMP: env.timestamp=${env.timestamp}`);
+        for (const [replicaKey, replica] of env.replicas.entries()) {
+          console.log(`🔭🔍 REPLICA-STATE: ${replicaKey} → jBlock=${replica.state.jBlock}, height=${replica.state.height}, isProposer=${replica.isProposer}`);
+        }
+      }
+
+      // 1. Find all proposer replicas that need syncing
+      const proposerReplicas: Array<{entityId: string, signerId: string, lastJBlock: number}> = [];
+
+      for (const [replicaKey, replica] of env.replicas.entries()) {
+        if (replica.isProposer) {
+          const [entityId, signerId] = replicaKey.split(':');
+          const lastJBlock = replica.state.jBlock || 0;
+
+          if (DEBUG) {
+            console.log(`🔭🔍 REPLICA-CHECK: ${signerId} → Entity ${entityId.slice(0,10)}... jBlock=${lastJBlock}, currentBlock=${currentBlock}, isProposer=${replica.isProposer}`);
+          }
+
+          if (lastJBlock < currentBlock) {
+            proposerReplicas.push({ entityId, signerId, lastJBlock });
+
+            if (HEAVY_LOGS) {
+              console.log(`🔭🔍 PROPOSER-SYNC: Found proposer ${signerId} for entity ${entityId.slice(0,10)}... at jBlock ${lastJBlock}, needs sync to ${currentBlock}`);
+            }
+          } else {
+            if (DEBUG) {
+              console.log(`🔭✅ REPLICA-SYNCED: ${signerId} → Entity ${entityId.slice(0,10)}... already synced (jBlock=${lastJBlock} >= currentBlock=${currentBlock})`);
+            }
+          }
+        }
+      }
+
+      if (proposerReplicas.length === 0) {
+        // Completely silent when no sync needed
         return;
       }
 
-      const blocksToProcess = currentBlock - this.lastProcessedBlock;
-      if (HEAVY_LOGS) {
-        console.log(`🔭📚 J-WATCHER HISTORICAL: Processing ${blocksToProcess} blocks (${this.lastProcessedBlock + 1} → ${currentBlock})`);
-      }
-
-      // Get events in batches to avoid RPC limits
-      const batchSize = 1000;
-      for (let fromBlock = this.lastProcessedBlock + 1; fromBlock <= currentBlock; fromBlock += batchSize) {
-        const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
-
-        if (HEAVY_LOGS) {
-          console.log(`🔭📦 J-WATCHER HISTORICAL: Batch ${fromBlock} → ${toBlock}`);
+      if (DEBUG) {
+        console.log(`🔭⚡ SYNC: ${proposerReplicas.length} proposer replicas need sync to block ${currentBlock}`);
+        for (const { entityId, signerId, lastJBlock } of proposerReplicas) {
+          console.log(`🔭📋 SYNC-QUEUE: ${signerId} → Entity ${entityId.slice(0,10)}... from j-block ${lastJBlock + 1} to ${currentBlock}`);
         }
-
-        await this.processBlockRange(fromBlock, toBlock, env);
       }
 
-      this.lastProcessedBlock = currentBlock;
-      
-      if (HEAVY_LOGS) {
-        console.log(`🔭✅ J-WATCHER HISTORICAL: Completed! Processed ${blocksToProcess} blocks`);
+      // 2. Sync each proposer replica from their last jBlock
+      for (const { entityId, signerId, lastJBlock } of proposerReplicas) {
+        await this.syncEntityFromJBlock(entityId, signerId, lastJBlock + 1, currentBlock, env);
       }
+
     } catch (error) {
-      console.error('🔭❌ J-WATCHER: Error processing historical events:', error);
+      // Don't spam connection errors
+      if (!error.message.includes('ECONNREFUSED')) {
+        throw error;
+      }
     }
   }
 
   /**
-   * Process events in a specific block range
-   * @returns number of events processed
+   * Sync a specific entity from its last jBlock to current block
    */
-  private async processBlockRange(fromBlock: number, toBlock: number, env: Env): Promise<number> {
-    try {
-      // For new entities with jBlock=0, we need to get ALL historical events for their entityId
-      const entityFilters = this.getEntityFiltersForHistoricalSync(env, fromBlock);
-      
-      // Get all relevant events from both contracts by querying specific events
-      const [
-        entityRegisteredEvents,
-        controlSharesReleasedEvents,
-        nameAssignedEvents,
-        controlSharesReceivedEvents,
-        reserveUpdatedEvents,
-        reserveTransferredEvents,
-        settlementProcessedEvents
-      ] = await Promise.all([
-        this.entityProviderContract.queryFilter(this.entityProviderContract.filters.EntityRegistered(), fromBlock, toBlock),
-        this.entityProviderContract.queryFilter(this.entityProviderContract.filters.ControlSharesReleased(), fromBlock, toBlock),
-        this.entityProviderContract.queryFilter(this.entityProviderContract.filters.NameAssigned(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.ControlSharesReceived(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.ReserveUpdated(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.ReserveTransferred(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.SettlementProcessed(), fromBlock, toBlock),
-      ]);
-
-      // Combine all events and sort chronologically
-      const allEvents = [
-        ...entityRegisteredEvents,
-        ...controlSharesReleasedEvents, 
-        ...nameAssignedEvents,
-        ...controlSharesReceivedEvents,
-        ...reserveUpdatedEvents,
-        ...reserveTransferredEvents,
-        ...settlementProcessedEvents
-      ].sort((a, b) => {
-        if (a.blockNumber !== b.blockNumber) {
-          return a.blockNumber - b.blockNumber;
-        }
-        return a.transactionIndex - b.transactionIndex;
-      });
-
-      // Only log if we found events
-      if (allEvents.length > 0) {
-        console.log(`🔭⚡ J-WATCHER: Processing ${allEvents.length} events from blocks ${fromBlock}-${toBlock}`);
-        for (const event of allEvents) {
-          await this.processContractEvent(event, env);
-        }
-      }
-      
-      return allEvents.length;
-    } catch (error) {
-      console.error(`🔭❌ J-WATCHER: Error processing blocks ${fromBlock}-${toBlock}:`, error);
-      return 0;
-    }
-  }
-
-  /**
-   * Process a single contract event
-   */
-  private async processContractEvent(event: any, env: Env): Promise<void> {
-    try {
-      let jurisdictionEvent: JurisdictionEvent;
-
-      switch (event.eventName || event.event) {
-        case 'EntityRegistered':
-          jurisdictionEvent = {
-            type: 'entity_registered',
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityId: event.args.entityId.toString(),
-            entityNumber: Number(event.args.entityNumber),
-            data: { boardHash: event.args.boardHash },
-          };
-          break;
-
-        case 'ControlSharesReleased':
-          jurisdictionEvent = {
-            type: 'control_shares_released',
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityId: event.args.entityId.toString(),
-            entityNumber: Number(event.args.entityId),
-            data: {
-              depository: event.args.depository,
-              controlAmount: event.args.controlAmount.toString(),
-              dividendAmount: event.args.dividendAmount.toString(),
-              purpose: event.args.purpose,
-            },
-          };
-          break;
-
-        case 'NameAssigned':
-          jurisdictionEvent = {
-            type: 'name_assigned',
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber: Number(event.args.entityNumber),
-            data: { name: event.args.name },
-          };
-          break;
-
-        case 'ControlSharesReceived': {
-          const entityNumber = this.extractEntityNumberFromTokenId(Number(event.args.tokenId));
-          jurisdictionEvent = {
-            type: 'shares_received',
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber: entityNumber,
-            data: {
-              entityProvider: event.args.entityProvider,
-              fromEntity: event.args.fromEntity,
-              tokenId: event.args.tokenId.toString(),
-              amount: event.args.amount.toString(),
-              data: event.args.data,
-            },
-          };
-          break;
-        }
-
-        case 'ReserveUpdated':
-          // Handle ReserveUpdated events with special processing
-          this.handleReserveUpdatedEvent(
-            event.args.entity.toString(),
-            event.args.tokenId,
-            event.args.newBalance,
-            event,
-            env
-          );
-          return; // Don't process through normal flow
-
-        case 'ReserveTransferred':
-          // Process for sender entity
-          jurisdictionEvent = {
-            type: 'reserve_transferred',
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber: Number(event.args.from),
-            data: {
-              from: event.args.from.toString(),
-              to: event.args.to.toString(),
-              tokenId: Number(event.args.tokenId),
-              amount: event.args.amount.toString(),
-              direction: 'sent',
-            },
-          };
-          this.handleJurisdictionEvent(jurisdictionEvent, env);
-          
-          // Process for receiver entity
-          jurisdictionEvent = {
-            type: 'reserve_transferred',
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber: Number(event.args.to),
-            data: {
-              from: event.args.from.toString(),
-              to: event.args.to.toString(),
-              tokenId: Number(event.args.tokenId),
-              amount: event.args.amount.toString(),
-              direction: 'received',
-            },
-          };
-          break;
-
-        case 'SettlementProcessed':
-          // Handle SettlementProcessed events with special processing
-          this.handleSettlementProcessedEvent(
-            event.args.leftEntity.toString(),
-            event.args.rightEntity.toString(),
-            event.args.tokenId,
-            event.args.leftReserve,
-            event.args.rightReserve,
-            event.args.collateral,
-            event.args.ondelta,
-            event,
-            env
-          );
-          return; // Don't process through normal flow
-
-        default:
-          return; // Skip unknown events
-      }
-
-      this.handleJurisdictionEvent(jurisdictionEvent, env);
-    } catch (error) {
-      console.error('🔭 J-WATCHER: Error processing contract event:', error);
-    }
-  }
-
-  /**
-   * Handle SettlementProcessed events specifically
-   * Feed event to both left and right entities' machines
-   */
-  private handleSettlementProcessedEvent(
-    leftEntity: string,
-    rightEntity: string,
-    tokenId: bigint,
-    leftReserve: bigint,
-    rightReserve: bigint,
-    collateral: bigint,
-    ondelta: bigint,
-    event: any,
-    env: Env
-  ): void {
-    console.log(`🔍 SETTLEMENT-EVENT: Handling SettlementProcessed between ${leftEntity.slice(0,10)}... and ${rightEntity.slice(0,10)}... tokenId=${tokenId} block=${event.blockNumber}`);
-    
-    // Feed settlement event to both left and right entities
-    this.feedSettlementToEntity(leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta, event, env, 'left');
-    this.feedSettlementToEntity(rightEntity, leftEntity, tokenId, rightReserve, leftReserve, collateral, -ondelta, event, env, 'right');
-  }
-
-  /**
-   * Feed settlement event to a specific entity
-   */
-  private feedSettlementToEntity(
+  private async syncEntityFromJBlock(
     entityId: string,
-    counterpartyId: string,
-    tokenId: bigint,
-    ownReserve: bigint,
-    counterpartyReserve: bigint,
-    collateral: bigint,
-    ondelta: bigint,
-    event: any,
-    env: Env,
-    side: 'left' | 'right'
-  ): void {
-    // Find the proposer replica for this entity
-    const proposerReplica = this.findProposerReplica(entityId, env);
-    if (!proposerReplica) {
-      console.log(`🔭⚠️  SETTLEMENT-EVENT: No entity found for ${entityId.slice(0, 10)}...`);
-      return;
+    signerId: string,
+    fromBlock: number,
+    toBlock: number,
+    env: Env
+  ): Promise<void> {
+    if (fromBlock > toBlock) return;
+
+    if (DEBUG) {
+      console.log(`🔭📡 ENTITY-SYNC: Entity ${entityId.slice(0,10)}... (${signerId}) from j-block ${fromBlock} to ${toBlock}`);
     }
 
-    // Check if entity has already processed this block
-    const replicaKey = `${entityId}:${proposerReplica.signerId}`;
-    const replica = env.replicas.get(replicaKey);
-    if (replica && event.blockNumber <= replica.state.jBlock) {
-      console.log(`🔄 Skipping settlement j-event for ${entityId.slice(0, 10)}... at block ${event.blockNumber} (entity at j-block ${replica.state.jBlock})`);
-      return;
-    }
-
-    // Create j-event for this entity
-    const entityTx = {
-      type: 'j_event' as const,
-      data: {
-        from: proposerReplica.signerId,
-        event: {
-          type: 'SettlementProcessed',
-          data: {
-            leftEntity: side === 'left' ? entityId : counterpartyId,
-            rightEntity: side === 'left' ? counterpartyId : entityId,
-            counterpartyEntityId: counterpartyId,
-            tokenId: Number(tokenId),
-            ownReserve: ownReserve.toString(),
-            counterpartyReserve: counterpartyReserve.toString(),
-            collateral: collateral.toString(),
-            ondelta: ondelta.toString(),
-            side: side,
-          },
-        },
-        observedAt: Date.now(),
-        blockNumber: event.blockNumber || 0,
-        transactionHash: event.transactionHash || '0x0000000000000000',
-      },
-    };
-
-    // Submit to entity via the proposer replica
-    env.serverInput.entityInputs.push({
-      entityId: entityId,
-      signerId: proposerReplica.signerId,
-      entityTxs: [entityTx],
-    });
-
-    console.log(`🔭✅ SETTLEMENT PROCESSED: ${proposerReplica.signerId} processed settlement for Entity ${entityId.slice(0, 10)}... (${side} side)`);
-  }
-
-  /**
-   * Handle ReserveUpdated events specifically
-   * Feed event to the proposer replica for this entity
-   */
-  private handleReserveUpdatedEvent(entity: string, tokenId: bigint, newBalance: bigint, event: any, env: Env): void {
-    console.log(`🔍 RESERVE-EVENT: Handling ReserveUpdated for entity ${entity.slice(0,10)}... tokenId=${tokenId} balance=${newBalance} block=${event.blockNumber}`);
-    
-    // Find the proposer replica for this entity
-    const proposerReplica = this.findProposerReplica(entity, env);
-    if (!proposerReplica) {
-      console.log(`🔭⚠️  J-MACHINE EVENT: No entity found for reserve update ${entity.slice(0, 10)}...`);
-      console.log(`🔭🔍 Available replicas: ${Array.from(env.replicas.keys()).join(', ')}`);
-      return;
-    }
-
-    // Check if entity has already processed this block
-    const replicaKey = `${entity}:${proposerReplica.signerId}`;
-    const replica = env.replicas.get(replicaKey);
-    console.log(`🔍 JBLOCK-DEBUG: Entity ${entity.slice(0, 10)}... event block ${event.blockNumber} vs entity jBlock ${replica?.state.jBlock}`);
-    if (replica && event.blockNumber <= replica.state.jBlock) {
-      console.log(`🔄 Skipping j-event for ${entity.slice(0, 10)}... at block ${event.blockNumber} (entity at j-block ${replica.state.jBlock})`);
-      return;
-    }
-
-    // Log the actual reserve update with readable amounts
-    const blockNum = event?.blockNumber || 'unknown';
-    const txHash = event?.transactionHash || 'unknown';
-    console.log(`🔭💰 R2R DETECTED: Entity ${entity.slice(0, 10)}... Token ${tokenId} Balance ${(Number(newBalance) / 1e18).toFixed(4)} (J-block ${blockNum})`);
-
-    // Create j-event in the format expected by handleJEvent
-    const entityTx = {
-      type: 'j_event' as const,
-      data: {
-        from: proposerReplica.signerId,
-        event: {
-          type: 'ReserveUpdated', // Exact type expected by handler
-          data: {
-            entity: entity,
-            tokenId: Number(tokenId),
-            newBalance: newBalance.toString(),
-            symbol: `TKN${tokenId}`, // Default symbol
-            decimals: 18, // Default decimals
-          },
-        },
-        observedAt: Date.now(),
-        blockNumber: event.blockNumber || 0,
-        transactionHash: event.transactionHash || '0x0000000000000000',
-      },
-    };
-
-    // Submit to entity via the proposer replica
-    env.serverInput.entityInputs.push({
-      entityId: entity, // Use the bytes32 entity ID directly
-      signerId: proposerReplica.signerId,
-      entityTxs: [entityTx],
-    });
-
-    console.log(`🔭✅ R2R PROCESSED: ${proposerReplica.signerId} processed reserve update for Entity ${entity.slice(0, 10)}...`);
-    console.log(`🔍 QUEUE-DEBUG: Added to entityInputs, total queue length: ${env.serverInput.entityInputs.length}`);
-  }
-
-  /**
-   * Handle a jurisdiction event by creating entity transactions
-   * Feed event to the proposer replica for this entity
-   */
-  private handleJurisdictionEvent(jEvent: JurisdictionEvent, env: Env): void {
-    console.log(`🔭⚡ J-EVENT: ${jEvent.type} at block ${jEvent.blockNumber} for entity #${jEvent.entityNumber}`);
-
-    if (!jEvent.entityNumber) {
-      console.log(`🔭⚠️  J-EVENT: Missing entity number for event ${jEvent.type}`);
-      return;
-    }
-
-    // Convert entity number to entity ID and find proposer replica
-    const entityId = this.generateEntityId(jEvent.entityNumber);
-    const proposerReplica = this.findProposerReplica(entityId, env);
-    
-    if (!proposerReplica) {
-      console.log(`🔭⚠️  J-EVENT: No proposer replica found for entity #${jEvent.entityNumber}`);
-      return;
-    }
-
-    // Check if entity has already processed this block
-    const replicaKey = `${entityId}:${proposerReplica.signerId}`;
-    const replica = env.replicas.get(replicaKey);
-    if (replica && jEvent.blockNumber <= replica.state.jBlock) {
-      if (DEBUG) console.log(`🔄 Skipping j-event for entity #${jEvent.entityNumber} at block ${jEvent.blockNumber} (entity at j-block ${replica.state.jBlock})`);
-      return;
-    }
-
-    // Create entity transaction for the proposer with proper structure
-    const entityTx: EntityTx = {
-      type: 'j_event',
-      data: {
-        from: proposerReplica.signerId,
-        event: {
-          type: jEvent.type,
-          data: jEvent.data,
-        },
-        observedAt: Date.now(),
-        blockNumber: jEvent.blockNumber || 0,
-        transactionHash: jEvent.transactionHash || '0x0000000000000000',
-      },
-    };
-
-    // Submit to entity via the proposer replica
-    env.serverInput.entityInputs.push({
-      entityId: entityId,
-      signerId: proposerReplica.signerId,
-      entityTxs: [entityTx],
-    });
-
-    console.log(`🔭📤 J-EVENT: ${proposerReplica.signerId} → Entity #${jEvent.entityNumber} (${jEvent.type})`);
-  }
-
-  /**
-   * Extract entity number from token ID
-   * Control tokens use entity number directly, dividend tokens have high bit set
-   */
-  private extractEntityNumberFromTokenId(tokenId: number): number {
-    // Remove the high bit if set (dividend token)
-    return tokenId & 0x7fffffff;
-  }
-
-  /**
-   * Find the proposer replica for a given entity and check if event should be processed
-   */
-  private findProposerReplica(entityId: string, env: Env): { signerId: string; shouldProcess: boolean } | null {
-    // Look for a replica that has isProposer = true for this entity
-    // Replica keys are in format "entityId:signerName" e.g. "0x000...001:s1"
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      const [keyEntityId, signerName] = replicaKey.split(':');
-      if (keyEntityId === entityId && replica.isProposer) {
-        return { signerId: signerName, shouldProcess: true };
-      }
-    }
-    
-    // Fallback: find any replica for this entity
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      const [keyEntityId, signerName] = replicaKey.split(':');
-      if (keyEntityId === entityId) {
-        return { signerId: signerName, shouldProcess: true };
-      }
-    }
-    
-    return null;
-  }
-
-  /**
-   * Get the minimum jBlock from all entities to avoid reprocessing
-   */
-  private getMinEntityBlock(env: Env): number {
-    let minBlock = 0;
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      minBlock = Math.max(minBlock, replica.state.jBlock || 0);
-    }
-    return minBlock;
-  }
-
-  /**
-   * Get entity filters for historical sync - entities that need historical events
-   */
-  private getEntityFiltersForHistoricalSync(env: Env, fromBlock: number): string[] {
-    const needsHistoricalSync: string[] = [];
-    
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      const entityJBlock = replica.state.jBlock || 0;
-      
-      // If entity's jBlock is behind fromBlock, it needs historical sync
-      if (entityJBlock < fromBlock) {
-        const [entityId] = replicaKey.split(':');
-        if (!needsHistoricalSync.includes(entityId)) {
-          needsHistoricalSync.push(entityId);
-          if (DEBUG) console.log(`🔄 Entity ${entityId.slice(0, 10)}... needs historical sync from j-block ${entityJBlock}`);
-        }
-      }
-    }
-    
-    return needsHistoricalSync;
-  }
-
-  /**
-   * Sync historical events for entities that have jBlock=0 (newly created)
-   */
-  private async syncHistoricalEventsForNewEntities(env: Env): Promise<boolean> {
-    const currentBlock = await this.provider.getBlockNumber();
-    
-    console.log(`🔍 SYNC-DEBUG: Checking ${env.replicas.size} replicas for jBlock=0`);
-    
-    // Find entities that need historical sync
-    const newEntities: string[] = [];
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      console.log(`🔍 SYNC-DEBUG: Replica ${replicaKey}: jBlock=${replica.state.jBlock}`);
-      if (replica.state.jBlock === 0) {
-        const [entityId] = replicaKey.split(':');
-        if (!newEntities.includes(entityId)) {
-          newEntities.push(entityId);
-          console.log(`🔍 SYNC-DEBUG: Added entity ${entityId} to sync list`);
-        }
-      }
-    }
-    
-    console.log(`🔍 SYNC-DEBUG: Found ${newEntities.length} entities needing sync: [${newEntities.map(e => e.slice(0,10)+'...').join(', ')}]`);
-    
-    if (newEntities.length === 0) {
-      console.log('🔄 No new entities requiring historical sync');
-      return false;
-    }
-    
-    console.log(`🔄 Syncing historical events for ${newEntities.length} new entities from block 0 to ${currentBlock}`);
-    console.log(`🔍 QUEUE-DEBUG: Initial entityInputs length: ${env.serverInput.entityInputs.length}`);
-    
-    for (const entityId of newEntities) {
-      console.log(`🔄 Fetching historical ReserveUpdated events for entity ${entityId.slice(0, 10)}...`);
-      
-      try {
-        // Get all ReserveUpdated events for this specific entity
-        const reserveEvents = await this.depositoryContract.queryFilter(
-          this.depositoryContract.filters.ReserveUpdated(entityId), // Filter by entity
-          0, // From block 0
-          currentBlock
-        );
-        
-        console.log(`🔄 Found ${reserveEvents.length} historical ReserveUpdated events for entity ${entityId.slice(0, 10)}...`);
-        console.log(`🔄🔍 Full entityId being synced: ${entityId}`);
-        console.log(`🔄🔍 Available replicas during sync: ${Array.from(env.replicas.keys()).join(', ')}`);
-        
-        // Sort events chronologically
-        reserveEvents.sort((a, b) => {
-          if (a.blockNumber !== b.blockNumber) {
-            return a.blockNumber - b.blockNumber;
-          }
-          return (a.transactionIndex || 0) - (b.transactionIndex || 0);
-        });
-        
-        // Process each event individually and trigger processing after each one
-        // This ensures jBlock gets updated progressively, not all at once
-        for (const event of reserveEvents) {
-          console.log(`🔄🎯 Processing historical event: block ${event.blockNumber}, tx ${event.transactionHash}`);
-          
-          // Clear any previous entityInputs to process events one by one
-          const originalInputsLength = env.serverInput.entityInputs.length;
-          
-          // Process this single event
-          await this.processContractEvent(event, env);
-          
-          // If this event was queued, process it immediately before the next one
-          if (env.serverInput.entityInputs.length > originalInputsLength) {
-            console.log(`🔄⚡ Processing single historical event immediately to update jBlock`);
-            // Import processUntilEmpty to process this single event
-            const { processUntilEmpty } = await import('./server.js');
-            await processUntilEmpty(env, []);
-            console.log(`🔄✅ Historical event processed, entity jBlock updated`);
-          }
-        }
-        
-      } catch (error) {
-        console.error(`🔄❌ Error syncing historical events for entity ${entityId.slice(0, 10)}...`, error);
-      }
-    }
-    
-    console.log(`✅ Historical event sync completed for ${newEntities.length} entities`);
-    
-    // Return true if we processed any entities (events were processed individually)
-    return newEntities.length > 0;
-  }
-
-  /**
-   * Generate entity ID from entity number (matches server logic)
-   */
-  private generateEntityId(entityNumber: number): string {
-    // Convert number to bytes32 hex string (matches generateNumberedEntityId)
-    return '0x' + entityNumber.toString(16).padStart(64, '0');
-  }
-
-  /**
-   * Trigger historical sync for newly added entities
-   * Call this after entities are created to sync their historical events
-   */
-  async syncNewlyCreatedEntities(env: Env): Promise<boolean> {
-    if (!this.isWatching) {
-      if (DEBUG) console.log('🔄 J-WATCHER not watching, skipping newly created entity sync');
-      return false;
-    }
-    
-    console.log('🔄 Checking for newly created entities needing historical sync...');
-    return await this.syncHistoricalEventsForNewEntities(env);
-  }
-
-  /**
-   * Start continuous entity monitoring - checks all entities every 1 second
-   */
-  private startContinuousEntityMonitoring(env: Env): void {
-    setInterval(async () => {
-      if (!this.isWatching) return;
-
-      try {
-        const currentBlock = await this.provider.getBlockNumber();
-        const entitiesNeedingSync: Array<{entityId: string, currentJBlock: number}> = [];
-
-        // Check all entities
-        for (const [replicaKey, replica] of env.replicas.entries()) {
-          const [entityId] = replicaKey.split(':');
-          const currentJBlock = replica.state.jBlock || 0;
-          
-          // If entity jBlock is behind current blockchain, it needs sync
-          if (currentJBlock < currentBlock) {
-            entitiesNeedingSync.push({entityId, currentJBlock});
-          }
-        }
-
-        if (entitiesNeedingSync.length > 0) {
-          console.log(`🔍 CONTINUOUS-CHECK: Checked ${env.replicas.size} entities against block ${currentBlock}, ${entitiesNeedingSync.length} need sync`);
-          for (const {entityId, currentJBlock} of entitiesNeedingSync) {
-            console.log(`🔄 ENTITY-SYNC: Entity ${entityId.slice(0,10)}... at jBlock ${currentJBlock}, syncing to block ${currentBlock}`);
-            await this.syncEntityFromBlock(entityId, currentJBlock + 1, currentBlock, env);
-          }
-        }
-      } catch (error) {
-        console.error('🔄❌ Error in continuous entity monitoring:', error);
-      }
-    }, 1000); // Every 1 second
-  }
-
-  /**
-   * Sync a specific entity from a specific block range
-   */
-  private async syncEntityFromBlock(entityId: string, fromBlock: number, toBlock: number, env: Env): Promise<void> {
     try {
-      console.log(`🔄📡 SYNC-RANGE: Syncing entity ${entityId.slice(0,10)}... from block ${fromBlock} to ${toBlock}`);
-      
-      // Get ReserveUpdated events for this entity in this range
-      const reserveEvents = await this.depositoryContract.queryFilter(
+      // Get new events for this entity in this block range
+      const events = await this.getEntityEventsInRange(entityId, fromBlock, toBlock);
+
+      if (events.length === 0) {
+        if (HEAVY_LOGS) {
+          console.log(`🔭⚪ ENTITY-SYNC: No events found for entity ${entityId.slice(0,10)}... in blocks ${fromBlock}-${toBlock}`);
+        }
+        return;
+      }
+
+      console.log(`🔭📦 ENTITY-SYNC: Found ${events.length} new events for entity ${entityId.slice(0,10)}... in blocks ${fromBlock}-${toBlock}`);
+
+      // Process events chronologically and feed to proposer
+      for (const event of events) {
+        this.feedEventToProposer(entityId, signerId, event, env);
+      }
+
+      console.log(`🔭✅ ENTITY-SYNC: Queued ${events.length} events for entity ${entityId.slice(0,10)}... (${signerId})`);
+
+    } catch (error) {
+      console.error(`🔭❌ ENTITY-SYNC: Error syncing entity ${entityId.slice(0,10)}...`, error.message);
+    }
+  }
+
+  /**
+   * Get all events for a specific entity in block range
+   */
+  private async getEntityEventsInRange(entityId: string, fromBlock: number, toBlock: number) {
+    if (HEAVY_LOGS) {
+      console.log(`🔭🔍 EVENT-QUERY: Fetching events for entity ${entityId.slice(0,10)}... blocks ${fromBlock}-${toBlock}`);
+    }
+
+    // Get both ReserveUpdated and SettlementProcessed events for this entity
+    const [reserveEvents, settlementEventsLeft, settlementEventsRight] = await Promise.all([
+      this.depositoryContract.queryFilter(
         this.depositoryContract.filters.ReserveUpdated(entityId),
         fromBlock,
         toBlock
-      );
+      ),
+      this.depositoryContract.queryFilter(
+        this.depositoryContract.filters.SettlementProcessed(entityId, null, null),
+        fromBlock,
+        toBlock
+      ),
+      this.depositoryContract.queryFilter(
+        this.depositoryContract.filters.SettlementProcessed(null, entityId, null),
+        fromBlock,
+        toBlock
+      )
+    ]);
 
-      console.log(`🔄📦 SYNC-RANGE: Found ${reserveEvents.length} ReserveUpdated events for entity ${entityId.slice(0,10)}...`);
+    if (HEAVY_LOGS) {
+      console.log(`🔭🔍 EVENT-QUERY: Entity ${entityId.slice(0,10)}... - Reserve: ${reserveEvents.length}, SettlementLeft: ${settlementEventsLeft.length}, SettlementRight: ${settlementEventsRight.length}`);
+    }
 
-      // Sort events chronologically
-      reserveEvents.sort((a, b) => {
-        if (a.blockNumber !== b.blockNumber) {
-          return a.blockNumber - b.blockNumber;
-        }
-        return (a.transactionIndex || 0) - (b.transactionIndex || 0);
+    // Combine and sort chronologically
+    const allEvents = [
+      ...reserveEvents.map(e => ({ ...e, eventType: 'ReserveUpdated' })),
+      ...settlementEventsLeft.map(e => ({ ...e, eventType: 'SettlementProcessed', side: 'left' })),
+      ...settlementEventsRight.map(e => ({ ...e, eventType: 'SettlementProcessed', side: 'right' }))
+    ].sort((a, b) => {
+      if (a.blockNumber !== b.blockNumber) {
+        return a.blockNumber - b.blockNumber;
+      }
+      return (a.transactionIndex || 0) - (b.transactionIndex || 0);
+    });
+
+    if (HEAVY_LOGS && allEvents.length > 0) {
+      console.log(`🔭🔍 EVENT-QUERY: Entity ${entityId.slice(0,10)}... total events: ${allEvents.length}`);
+      allEvents.forEach((event, i) => {
+        console.log(`🔭🔍 EVENT-${i}: ${event.eventType} at block ${event.blockNumber} tx ${event.transactionIndex}`);
+      });
+    }
+
+    return allEvents;
+  }
+
+  /**
+   * Feed event to proposer replica via server entityInputs
+   */
+  private feedEventToProposer(entityId: string, signerId: string, event: any, env: Env): void {
+    let entityTx;
+
+    if (event.eventType === 'ReserveUpdated') {
+      entityTx = {
+        type: 'j_event' as const,
+        data: {
+          from: signerId,
+          event: {
+            type: 'ReserveUpdated',
+            data: {
+              entity: entityId,
+              tokenId: Number(event.args.tokenId),
+              newBalance: event.args.newBalance.toString(),
+              symbol: `TKN${event.args.tokenId}`,
+              decimals: 18,
+            },
+          },
+          observedAt: Date.now(),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash,
+        },
+      };
+
+      if (DEBUG) {
+        console.log(`🔭💰 R2R-EVENT: Entity ${entityId.slice(0,10)}... Token ${event.args.tokenId} Balance ${(Number(event.args.newBalance) / 1e18).toFixed(4)} (block ${event.blockNumber})`);
+      }
+
+    } else if (event.eventType === 'SettlementProcessed') {
+      const isLeft = event.side === 'left';
+      const counterpartyId = isLeft ? event.args.rightEntity.toString() : event.args.leftEntity.toString();
+      const ownReserve = isLeft ? event.args.leftReserve : event.args.rightReserve;
+      const counterpartyReserve = isLeft ? event.args.rightReserve : event.args.leftReserve;
+      const ondelta = isLeft ? event.args.ondelta : -event.args.ondelta;
+
+      entityTx = {
+        type: 'j_event' as const,
+        data: {
+          from: signerId,
+          event: {
+            type: 'SettlementProcessed',
+            data: {
+              leftEntity: event.args.leftEntity.toString(),
+              rightEntity: event.args.rightEntity.toString(),
+              counterpartyEntityId: counterpartyId,
+              tokenId: Number(event.args.tokenId),
+              ownReserve: ownReserve.toString(),
+              counterpartyReserve: counterpartyReserve.toString(),
+              collateral: event.args.collateral.toString(),
+              ondelta: ondelta.toString(),
+              side: event.side,
+            },
+          },
+          observedAt: Date.now(),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash,
+        },
+      };
+
+      if (DEBUG) {
+        console.log(`🔭💱 SETTLE-EVENT: Entity ${entityId.slice(0,10)}... vs ${counterpartyId.slice(0,10)}... (${event.side} side, block ${event.blockNumber})`);
+      }
+    }
+
+    if (entityTx) {
+      // Feed to server processing queue
+      console.log(`🚨 J-WATCHER-CREATING-EVENT: ${signerId} creating j-event ${event.eventType} block=${event.blockNumber} for entity ${entityId.slice(0,10)}...`);
+      env.serverInput.entityInputs.push({
+        entityId: entityId,
+        signerId: signerId,
+        entityTxs: [entityTx],
       });
 
-      // Process each event individually
-      for (const event of reserveEvents) {
-        console.log(`🔄⚡ SYNC-RANGE: Processing event block ${event.blockNumber} for entity ${entityId.slice(0,10)}...`);
-        
-        const beforeLength = env.serverInput.entityInputs.length;
-        await this.processContractEvent(event, env);
-        const afterLength = env.serverInput.entityInputs.length;
-        
-        console.log(`🔍 EVENT-DEBUG: entityInputs length before=${beforeLength}, after=${afterLength}`);
-        
-        // Process immediately to update jBlock
-        if (env.serverInput.entityInputs.length > 0) {
-          console.log(`🔄💥 SYNC-RANGE: Calling processUntilEmpty to process ${env.serverInput.entityInputs.length} queued events`);
-          const { processUntilEmpty } = await import('./server.js');
-          await processUntilEmpty(env, []);
-          
-          // Check if jBlock was updated
-          const replica = env.replicas.get(`${entityId}:${this.findProposerReplica(entityId, env)?.signerId}`);
-          const newJBlock = replica?.state.jBlock || 0;
-          console.log(`🔄✅ SYNC-RANGE: ProcessUntilEmpty completed, entity jBlock now: ${newJBlock}`);
-        } else {
-          console.log(`🔄⚠️ SYNC-RANGE: No events were queued for processing!`);
-        }
-      }
-      
+      console.log(`🔭✅ J-WATCHER-QUEUED: ${signerId} → Entity ${entityId.slice(0,10)}... (${event.eventType}) block=${event.blockNumber} - Queue length now: ${env.serverInput.entityInputs.length}`);
+    }
+  }
+
+  /**
+   * Legacy compatibility method - not used in first-principles design
+   */
+  async syncNewlyCreatedEntities(env: Env): Promise<boolean> {
+    if (DEBUG) {
+      console.log('🔭⚠️  J-WATCHER: syncNewlyCreatedEntities called (legacy) - first-principles design handles this automatically');
+    }
+    return false;
+  }
+
+  /**
+   * Get current blockchain block number
+   */
+  async getCurrentBlockNumber(): Promise<number> {
+    try {
+      return await this.provider.getBlockNumber();
     } catch (error) {
-      console.error(`🔄❌ SYNC-RANGE: Error syncing entity ${entityId.slice(0,10)}... from block ${fromBlock}:`, error);
+      if (DEBUG) {
+        console.log(`🔭⚠️  J-WATCHER: Could not get current block, using 0:`, error.message);
+      }
+      return 0;
     }
   }
 
   /**
    * Get current watching status
    */
-  getStatus(): { isWatching: boolean; lastProcessedBlock: number; signerCount: number } {
+  getStatus(): { isWatching: boolean; signerCount: number } {
     return {
       isWatching: this.isWatching,
-      lastProcessedBlock: this.lastProcessedBlock,
       signerCount: this.signers.size,
     };
   }
@@ -1016,6 +425,7 @@ export function createJEventWatcher(config: WatcherConfig): JEventWatcher {
 
 /**
  * Helper function to set up watcher with common configuration
+ * Updated for first-principles design
  */
 export async function setupJEventWatcher(
   env: Env,
@@ -1027,15 +437,19 @@ export async function setupJEventWatcher(
     rpcUrl,
     entityProviderAddress: entityProviderAddr,
     depositoryAddress: depositoryAddr,
-    startBlock: 0, // Start from genesis, or could be configured
+    startBlock: 0,
   });
 
-  // Add example signers (would be configured per deployment)
+  // Add example signers (legacy compatibility - not used in first-principles design)
   watcher.addSigner('s1', 's1-private-key', ['1', '2', '3', '4', '5']);
   watcher.addSigner('s2', 's2-private-key', ['1', '2', '3', '4', '5']);
   watcher.addSigner('s3', 's3-private-key', ['1', '2', '3', '4', '5']);
 
   await watcher.startWatching(env);
+
+  if (DEBUG) {
+    console.log('🔭✅ J-WATCHER: Setup complete with first-principles design');
+  }
 
   return watcher;
 }

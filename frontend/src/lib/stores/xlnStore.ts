@@ -43,7 +43,8 @@ export async function initializeXLN() {
     // Register callback for automatic reactivity
     xln.registerEnvChangeCallback?.((env: any) => {
       xlnEnvironment.set(env);
-      console.log('🔄 Environment updated automatically');
+      console.log('🔄 BROWSER-DEBUG: Environment updated automatically');
+      console.log(`🔍 BROWSER-DEBUG: Updated env - Height: ${env.height}, Replicas: ${env.replicas?.size || 0}`);
       
       // Update window for e2e testing
       if (typeof window !== 'undefined') {
@@ -52,16 +53,30 @@ export async function initializeXLN() {
     });
     
     // Local DB should load instantly - if not, just proceed with empty state
-    console.log('🚀 Starting XLN initialization...');
+    console.log('🚀 BROWSER-DEBUG: Starting XLN initialization...');
+    console.log('🔍 BROWSER-DEBUG: About to call xln.main() - this will load snapshots and start j-watcher');
     const env = await Promise.race([
       xln.main(),
-      new Promise((_, reject) => 
+      new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Local DB taking too long - using empty state')), 200)
       )
     ]);
 
+    console.log(`✅ BROWSER-DEBUG: XLN.main() completed! Loaded env with ${env.replicas?.size || 0} replicas`);
+
+    // Debug loaded replicas and their jBlock values
+    if (env.replicas && env.replicas.size > 0) {
+      console.log(`🔍 BROWSER-DEBUG: Loaded replicas from IndexedDB:`);
+      for (const [replicaKey, replica] of env.replicas.entries()) {
+        const [entityId, signerId] = replicaKey.split(':');
+        console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, height=${replica.state.height}, isProposer=${replica.isProposer}`);
+      }
+    } else {
+      console.log(`🔍 BROWSER-DEBUG: No replicas loaded - starting with fresh state`);
+    }
+
     // History is now guaranteed to be included in env
-    
+
     xlnEnvironment.set(env);
     isLoading.set(false);
     

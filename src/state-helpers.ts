@@ -4,50 +4,90 @@
  */
 
 import { encode } from './snapshot-coder';
-import { EntityInput, EntityReplica, Env, EnvSnapshot, ServerInput } from './types';
+import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerInput } from './types';
 import { DEBUG } from './utils';
 
-// === SNAPSHOT UTILITIES ===
+// === CLONING UTILITIES ===
+export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
+export const cloneArray = <T>(arr: T[]) => [...arr];
 
-export const deepCloneReplica = (replica: EntityReplica): EntityReplica => {
-  const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
-  const cloneArray = <T>(arr: T[]) => [...arr];
+/**
+ * Creates a safe deep clone of entity state with guaranteed jBlock preservation
+ * This prevents the jBlock corruption bugs that occur with manual state spreading
+ */
+export function cloneEntityState(entityState: EntityState): EntityState {
+  // CRITICAL: Log jBlock before and after cloning
+  const originalJBlock = entityState.jBlock;
+  console.log(`🔍 CLONE-TRACE: About to clone entity state, jBlock=${originalJBlock} (${typeof originalJBlock})`);
 
+  // Use structuredClone for deep cloning with fallback
+  try {
+    const cloned = structuredClone(entityState);
+
+    // CRITICAL: Validate jBlock was preserved correctly
+    if (typeof cloned.jBlock !== 'number') {
+      console.error(`💥 CLONE-CORRUPTION: structuredClone corrupted jBlock!`);
+      console.error(`💥   Original: ${entityState.jBlock} (${typeof entityState.jBlock})`);
+      console.error(`💥   Cloned: ${cloned.jBlock} (${typeof cloned.jBlock})`);
+      cloned.jBlock = entityState.jBlock ?? 0; // Force fix
+    }
+
+    console.log(`✅ CLONE-SUCCESS: Cloned state, jBlock=${cloned.jBlock} (${typeof cloned.jBlock})`);
+    return cloned;
+  } catch (error) {
+    console.warn(`⚠️ structuredClone failed, using manual clone: ${error.message}`);
+    const manual = manualCloneEntityState(entityState);
+    console.log(`✅ MANUAL-CLONE: Manual clone completed, jBlock=${manual.jBlock} (${typeof manual.jBlock})`);
+    return manual;
+  }
+}
+
+/**
+ * Manual entity state cloning with explicit jBlock preservation
+ * Fallback for environments that don't support structuredClone
+ */
+function manualCloneEntityState(entityState: EntityState): EntityState {
+  return {
+    ...entityState,
+    nonces: cloneMap(entityState.nonces),
+    messages: cloneArray(entityState.messages),
+    proposals: new Map(
+      Array.from(entityState.proposals.entries()).map(([id, proposal]) => [
+        id,
+        { ...proposal, votes: cloneMap(proposal.votes) },
+      ]),
+    ),
+    reserves: cloneMap(entityState.reserves),
+    accounts: new Map(
+      Array.from(entityState.accounts.entries()).map(([id, account]) => [
+        id,
+        {
+          ...account,
+          mempool: cloneArray(account.mempool),
+          deltas: cloneMap(account.deltas),
+          proofHeader: { ...account.proofHeader },
+          proofBody: {
+            tokenIds: [...account.proofBody.tokenIds],
+            deltas: [...account.proofBody.deltas],
+          },
+        },
+      ]),
+    ),
+    accountInputQueue: cloneArray(entityState.accountInputQueue || []),
+    // CRITICAL: Explicit jBlock preservation for financial integrity
+    jBlock: entityState.jBlock ?? 0,
+  };
+}
+
+/**
+ * Deep clone entity replica with all nested state properly cloned
+ * Uses cloneEntityState as the entry point for state cloning
+ */
+export const cloneEntityReplica = (replica: EntityReplica): EntityReplica => {
   return {
     entityId: replica.entityId,
     signerId: replica.signerId,
-    state: {
-      entityId: replica.state.entityId, // Clone entityId
-      height: replica.state.height,
-      timestamp: replica.state.timestamp,
-      nonces: cloneMap(replica.state.nonces),
-      messages: cloneArray(replica.state.messages),
-      proposals: new Map(
-        Array.from(replica.state.proposals.entries()).map(([id, proposal]) => [
-          id,
-          { ...proposal, votes: cloneMap(proposal.votes) },
-        ]),
-      ),
-      config: replica.state.config,
-      // 💰 Clone financial state
-      reserves: cloneMap(replica.state.reserves),
-      accounts: new Map(
-        Array.from(replica.state.accounts.entries()).map(([id, account]) => [
-          id,
-          {
-            ...account,
-            mempool: cloneArray(account.mempool),
-            deltas: cloneMap(account.deltas),
-            proofHeader: { ...account.proofHeader },
-            proofBody: {
-              tokenIds: [...account.proofBody.tokenIds],
-              deltas: [...account.proofBody.deltas],
-            },
-          },
-        ])
-      ),
-      collaterals: cloneMap(replica.state.collaterals),
-    },
+    state: cloneEntityState(replica.state), // Use unified entity state cloning
     mempool: cloneArray(replica.mempool),
     proposal: replica.proposal
       ? {
@@ -82,7 +122,7 @@ export const captureSnapshot = (
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
-    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [key, deepCloneReplica(replica)])),
+    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)])),
     serverInput: {
       serverTxs: [...serverInput.serverTxs],
       entityInputs: serverInput.entityInputs.map(input => ({

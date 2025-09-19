@@ -112,6 +112,24 @@ type SnapshotTuple = [
  * Encodes data using the configured method (JSON or msgpack)
  */
 export const encode = (data: any): Buffer => {
+  // CRITICAL: Validate financial state before encoding
+  if (data && data.replicas) {
+    console.log(`🔍 ENCODE-VALIDATION: Checking ${data.replicas.size} replicas for jBlock integrity`);
+    for (const [replicaKey, replica] of data.replicas.entries()) {
+      console.log(`🔍 ENCODE-CHECK: Replica ${replicaKey} exists: ${!!replica}, state exists: ${!!replica?.state}`);
+      if (replica && replica.state) {
+        const jBlock = replica.state.jBlock;
+        console.log(`🔍 ENCODE-JBLOCK: ${replicaKey} jBlock=${jBlock} (${typeof jBlock})`);
+        if (typeof jBlock !== 'number') {
+          console.error(`💥 CRITICAL: Attempting to save invalid jBlock for replica ${replicaKey}`);
+          console.error(`💥   Expected: number, Got: ${typeof jBlock}, Value: ${jBlock}`);
+          console.error(`💥   AUTO-FIXING: Setting jBlock to 0 and continuing save`);
+          replica.state.jBlock = 0; // Auto-repair corruption
+        }
+      }
+    }
+  }
+
   if (USE_MSGPACK) {
     // For msgpack mode, we need to use async initialization
     // This should not happen in current config (USE_MSGPACK = false)
@@ -132,7 +150,24 @@ export const decode = (buffer: Buffer): any => {
     throw new Error('Msgpack mode requires async initialization - use decodeAsync instead');
   } else {
     // Simple JSON decoding
-    return JSON.parse(buffer.toString(), jsonReviver);
+    const decoded = JSON.parse(buffer.toString(), jsonReviver);
+
+    // CRITICAL: Validate financial state integrity after deserialization
+    if (decoded && decoded.replicas) {
+      for (const [replicaKey, replica] of decoded.replicas.entries()) {
+        if (replica && replica.state) {
+          const jBlock = replica.state.jBlock;
+          if (typeof jBlock !== 'number') {
+            console.error(`💥 CRITICAL: Invalid jBlock type in snapshot for replica ${replicaKey}`);
+            console.error(`💥   Expected: number, Got: ${typeof jBlock}, Value: ${jBlock}`);
+            console.error(`💥   This compromises financial state integrity - setting to 0`);
+            replica.state.jBlock = 0; // Force safe value
+          }
+        }
+      }
+    }
+
+    return decoded;
   }
 };
 

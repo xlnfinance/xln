@@ -2702,12 +2702,6 @@ var require_classic_level = __commonJS((exports) => {
   exports.ClassicLevel = ClassicLevel;
 });
 
-// node_modules/level/index.js
-var $Level;
-var init_level = __esm(() => {
-  $Level = require_classic_level().ClassicLevel;
-});
-
 // node_modules/canvas-renderer/lib/rasterization/edgeTable.js
 var require_edgeTable = __commonJS((exports, module) => {
   function EdgeTable(width, height) {
@@ -28478,7 +28472,14 @@ var init_utils5 = __esm(() => {
   };
 });
 
+// src/server.ts
+import fs2 from "fs";
+
+// node_modules/level/index.js
+var $Level = require_classic_level().ClassicLevel;
+
 // src/name-resolution.ts
+init_utils5();
 var storeProfile = async (db, profile) => {
   if (!db) {
     console.warn("Database not available for profile storage");
@@ -28491,7 +28492,8 @@ var storeProfile = async (db, profile) => {
   } catch (error) {
     console.error("Error storing profile:", error);
   }
-}, getProfile = async (db, entityId) => {
+};
+var getProfile = async (db, entityId) => {
   if (!db)
     return null;
   try {
@@ -28500,7 +28502,8 @@ var storeProfile = async (db, profile) => {
   } catch (error) {
     return null;
   }
-}, updateNameIndex = async (db, name, entityId) => {
+};
+var updateNameIndex = async (db, name, entityId) => {
   try {
     let nameIndex = {};
     try {
@@ -28512,7 +28515,8 @@ var storeProfile = async (db, profile) => {
   } catch (error) {
     console.error("Error updating name index:", error);
   }
-}, searchEntityNames = async (db, query, limit = 10) => {
+};
+var searchEntityNames = async (db, query, limit = 10) => {
   if (!db || !query.trim())
     return [];
   try {
@@ -28549,12 +28553,14 @@ var storeProfile = async (db, profile) => {
     console.error("Error searching entity names:", error);
     return [];
   }
-}, createProfileUpdateTx = (updates) => {
+};
+var createProfileUpdateTx = (updates) => {
   return {
     type: "profile-update",
     data: updates
   };
-}, processProfileUpdate = async (db, entityId, updates, hankoSignature, env) => {
+};
+var processProfileUpdate = async (db, entityId, updates, hankoSignature, env) => {
   console.log(`\uD83C\uDFF7️ processProfileUpdate called for ${entityId} with updates:`, updates);
   try {
     let profile = await getProfile(db, entityId);
@@ -28601,19 +28607,21 @@ var storeProfile = async (db, profile) => {
   } catch (error) {
     console.error("Error processing profile update:", error);
   }
-}, resolveEntityName = async (db, entityId) => {
+};
+var resolveEntityName = async (db, entityId) => {
   const profile = await getProfile(db, entityId);
   return profile?.name || formatEntityDisplay(entityId);
-}, getEntityDisplayInfo2 = async (db, entityId) => {
+};
+var getEntityDisplayInfo2 = async (db, entityId) => {
   const profile = await getProfile(db, entityId);
   return {
     name: profile?.name || formatEntityDisplay(entityId),
     avatar: profile?.avatar || generateEntityAvatar(entityId)
   };
 };
-var init_name_resolution = __esm(() => {
-  init_utils5();
-});
+
+// src/entity-tx/apply.ts
+init_utils5();
 
 // src/account-utils.ts
 function createDemoDelta(tokenId, collateral = 1000n, delta = 0n) {
@@ -28628,7 +28636,6 @@ function createDemoDelta(tokenId, collateral = 1000n, delta = 0n) {
     rightAllowence: 0n
   };
 }
-var init_account_utils = () => {};
 
 // src/account-tx/direct-payment.ts
 function applyDirectPayment(accountMachine, payment, isOutgoing) {
@@ -28671,7 +28678,6 @@ function applyDirectPayment(accountMachine, payment, isOutgoing) {
   };
   return { success: true };
 }
-
 // src/account-tx/processor.ts
 function processAccountTransaction(accountMachine, transaction) {
   console.log(`\uD83D\uDD04 Processing account transaction: ${transaction.type}`);
@@ -28688,13 +28694,6 @@ function processAccountTransaction(accountMachine, transaction) {
       return { success: false, error: `Unknown transaction type: ${transaction.type}` };
   }
 }
-var init_processor = () => {};
-
-// src/account-tx/index.ts
-var init_account_tx = __esm(() => {
-  init_processor();
-});
-
 // src/entity-tx/handlers/account.ts
 function handleAccountInput(state, input, env) {
   console.log(`\uD83D\uDE80 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId}`, input.accountTx);
@@ -28704,8 +28703,7 @@ function handleAccountInput(state, input, env) {
     messages: [...state.messages],
     proposals: new Map(state.proposals),
     reserves: new Map(state.reserves),
-    accounts: new Map(state.accounts),
-    collaterals: new Map(state.collaterals)
+    accounts: new Map(state.accounts)
   };
   let accountMachine = newState.accounts.get(input.toEntityId);
   if (!accountMachine) {
@@ -28787,33 +28785,224 @@ function handleAccountInput(state, input, env) {
   }
   return newState;
 }
-var init_account = __esm(() => {
-  init_account_utils();
-  init_account_tx();
-});
 
 // src/entity-tx/j-events.ts
-var TOKEN_REGISTRY, getTokenSymbol = (tokenId) => {
+init_utils5();
+
+// src/snapshot-coder.ts
+var USE_MSGPACK = false;
+var jsonReplacer = (key, value) => {
+  if (value instanceof Map) {
+    return { _dataType: "Map", value: Array.from(value.entries()) };
+  }
+  if (typeof value === "bigint") {
+    return { _dataType: "BigInt", value: value.toString() };
+  }
+  return value;
+};
+var jsonReviver = (key, value) => {
+  if (typeof value === "object" && value !== null) {
+    if (value._dataType === "Map")
+      return new Map(value.value);
+    if (value._dataType === "BigInt")
+      return BigInt(value.value);
+  }
+  return value;
+};
+var encode = (data4) => {
+  if (data4 && data4.replicas) {
+    console.log(`\uD83D\uDD0D ENCODE-VALIDATION: Checking ${data4.replicas.size} replicas for jBlock integrity`);
+    for (const [replicaKey, replica] of data4.replicas.entries()) {
+      console.log(`\uD83D\uDD0D ENCODE-CHECK: Replica ${replicaKey} exists: ${!!replica}, state exists: ${!!replica?.state}`);
+      if (replica && replica.state) {
+        const jBlock = replica.state.jBlock;
+        console.log(`\uD83D\uDD0D ENCODE-JBLOCK: ${replicaKey} jBlock=${jBlock} (${typeof jBlock})`);
+        if (typeof jBlock !== "number") {
+          console.error(`\uD83D\uDCA5 CRITICAL: Attempting to save invalid jBlock for replica ${replicaKey}`);
+          console.error(`\uD83D\uDCA5   Expected: number, Got: ${typeof jBlock}, Value: ${jBlock}`);
+          console.error(`\uD83D\uDCA5   AUTO-FIXING: Setting jBlock to 0 and continuing save`);
+          replica.state.jBlock = 0;
+        }
+      }
+    }
+  }
+  if (USE_MSGPACK) {
+    throw new Error("Msgpack mode requires async initialization - use encodeAsync instead");
+  } else {
+    return Buffer.from(JSON.stringify(data4, jsonReplacer));
+  }
+};
+var decode2 = (buffer) => {
+  if (USE_MSGPACK) {
+    throw new Error("Msgpack mode requires async initialization - use decodeAsync instead");
+  } else {
+    const decoded = JSON.parse(buffer.toString(), jsonReviver);
+    if (decoded && decoded.replicas) {
+      for (const [replicaKey, replica] of decoded.replicas.entries()) {
+        if (replica && replica.state) {
+          const jBlock = replica.state.jBlock;
+          if (typeof jBlock !== "number") {
+            console.error(`\uD83D\uDCA5 CRITICAL: Invalid jBlock type in snapshot for replica ${replicaKey}`);
+            console.error(`\uD83D\uDCA5   Expected: number, Got: ${typeof jBlock}, Value: ${jBlock}`);
+            console.error(`\uD83D\uDCA5   This compromises financial state integrity - setting to 0`);
+            replica.state.jBlock = 0;
+          }
+        }
+      }
+    }
+    return decoded;
+  }
+};
+
+// src/state-helpers.ts
+init_utils5();
+var cloneMap = (map) => new Map(map);
+var cloneArray = (arr) => [...arr];
+function cloneEntityState(entityState) {
+  const originalJBlock = entityState.jBlock;
+  console.log(`\uD83D\uDD0D CLONE-TRACE: About to clone entity state, jBlock=${originalJBlock} (${typeof originalJBlock})`);
+  try {
+    const cloned = structuredClone(entityState);
+    if (typeof cloned.jBlock !== "number") {
+      console.error(`\uD83D\uDCA5 CLONE-CORRUPTION: structuredClone corrupted jBlock!`);
+      console.error(`\uD83D\uDCA5   Original: ${entityState.jBlock} (${typeof entityState.jBlock})`);
+      console.error(`\uD83D\uDCA5   Cloned: ${cloned.jBlock} (${typeof cloned.jBlock})`);
+      cloned.jBlock = entityState.jBlock ?? 0;
+    }
+    console.log(`✅ CLONE-SUCCESS: Cloned state, jBlock=${cloned.jBlock} (${typeof cloned.jBlock})`);
+    return cloned;
+  } catch (error) {
+    console.warn(`⚠️ structuredClone failed, using manual clone: ${error.message}`);
+    const manual = manualCloneEntityState(entityState);
+    console.log(`✅ MANUAL-CLONE: Manual clone completed, jBlock=${manual.jBlock} (${typeof manual.jBlock})`);
+    return manual;
+  }
+}
+function manualCloneEntityState(entityState) {
+  return {
+    ...entityState,
+    nonces: cloneMap(entityState.nonces),
+    messages: cloneArray(entityState.messages),
+    proposals: new Map(Array.from(entityState.proposals.entries()).map(([id2, proposal]) => [
+      id2,
+      { ...proposal, votes: cloneMap(proposal.votes) }
+    ])),
+    reserves: cloneMap(entityState.reserves),
+    accounts: new Map(Array.from(entityState.accounts.entries()).map(([id2, account]) => [
+      id2,
+      {
+        ...account,
+        mempool: cloneArray(account.mempool),
+        deltas: cloneMap(account.deltas),
+        proofHeader: { ...account.proofHeader },
+        proofBody: {
+          tokenIds: [...account.proofBody.tokenIds],
+          deltas: [...account.proofBody.deltas]
+        }
+      }
+    ])),
+    accountInputQueue: cloneArray(entityState.accountInputQueue || []),
+    jBlock: entityState.jBlock ?? 0
+  };
+}
+var cloneEntityReplica = (replica) => {
+  return {
+    entityId: replica.entityId,
+    signerId: replica.signerId,
+    state: cloneEntityState(replica.state),
+    mempool: cloneArray(replica.mempool),
+    proposal: replica.proposal ? {
+      height: replica.proposal.height,
+      txs: cloneArray(replica.proposal.txs),
+      hash: replica.proposal.hash,
+      newState: replica.proposal.newState,
+      signatures: cloneMap(replica.proposal.signatures)
+    } : undefined,
+    lockedFrame: replica.lockedFrame ? {
+      height: replica.lockedFrame.height,
+      txs: cloneArray(replica.lockedFrame.txs),
+      hash: replica.lockedFrame.hash,
+      newState: replica.lockedFrame.newState,
+      signatures: cloneMap(replica.lockedFrame.signatures)
+    } : undefined,
+    isProposer: replica.isProposer
+  };
+};
+var captureSnapshot = (env, envHistory, db, serverInput, serverOutputs, description) => {
+  const snapshot = {
+    height: env.height,
+    timestamp: env.timestamp,
+    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)])),
+    serverInput: {
+      serverTxs: [...serverInput.serverTxs],
+      entityInputs: serverInput.entityInputs.map((input) => ({
+        ...input,
+        entityTxs: input.entityTxs ? [...input.entityTxs] : undefined,
+        precommits: input.precommits ? new Map(input.precommits) : undefined
+      }))
+    },
+    serverOutputs: serverOutputs.map((output2) => ({
+      ...output2,
+      entityTxs: output2.entityTxs ? [...output2.entityTxs] : undefined,
+      precommits: output2.precommits ? new Map(output2.precommits) : undefined
+    })),
+    description
+  };
+  envHistory.push(snapshot);
+  const batch = db.batch();
+  batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
+  batch.put(Buffer.from("latest_height"), Buffer.from(snapshot.height.toString()));
+  batch.write();
+  if (DEBUG) {
+    console.log(`\uD83D\uDCF8 Snapshot captured: "${description}" (${envHistory.length} total)`);
+    if (serverInput.serverTxs.length > 0) {
+      console.log(`    \uD83D\uDDA5️  ServerTxs: ${serverInput.serverTxs.length}`);
+      serverInput.serverTxs.forEach((tx, i) => {
+        console.log(`      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? "proposer" : "validator"})`);
+      });
+    }
+    if (serverInput.entityInputs.length > 0) {
+      console.log(`    \uD83D\uDCE8 EntityInputs: ${serverInput.entityInputs.length}`);
+      serverInput.entityInputs.forEach((input, i) => {
+        const parts = [];
+        if (input.entityTxs?.length)
+          parts.push(`${input.entityTxs.length} txs`);
+        if (input.precommits?.size)
+          parts.push(`${input.precommits.size} precommits`);
+        if (input.proposedFrame)
+          parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
+        console.log(`      ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(", ") || "empty"})`);
+      });
+    }
+  }
+};
+
+// src/entity-tx/j-events.ts
+var TOKEN_REGISTRY = {
+  0: { symbol: "NULL", name: "Null Token", decimals: 18 },
+  1: { symbol: "ETH", name: "Ethereum", decimals: 18 },
+  2: { symbol: "USDT", name: "Tether USD", decimals: 18 },
+  3: { symbol: "USDC", name: "USD Coin", decimals: 18 },
+  4: { symbol: "ACME", name: "ACME Corp Shares", decimals: 18 },
+  5: { symbol: "BTC", name: "Bitcoin Shares", decimals: 8 }
+};
+var getTokenSymbol = (tokenId) => {
   return TOKEN_REGISTRY[tokenId]?.symbol || `TKN${tokenId}`;
-}, getTokenDecimals = (tokenId) => {
+};
+var getTokenDecimals = (tokenId) => {
   return TOKEN_REGISTRY[tokenId]?.decimals || 18;
-}, handleJEvent = (entityState, entityTxData) => {
+};
+var handleJEvent = (entityState, entityTxData) => {
   const { from, event, observedAt, blockNumber, transactionHash } = entityTxData;
-  if (blockNumber <= entityState.jBlock) {
-    console.log(`\uD83D\uDD04 Ignoring old j-event: ${event.type} from block ${blockNumber} (entity already at j-block ${entityState.jBlock})`);
+  const currentJBlock = entityState.jBlock || 0;
+  console.log(`\uD83D\uDD0D J-EVENT-CHECK: ${event.type} block=${blockNumber} vs entity.jBlock=${currentJBlock} (raw=${entityState.jBlock}), from=${from}`);
+  if (blockNumber <= currentJBlock) {
+    console.log(`\uD83D\uDD04 IGNORING OLD J-EVENT: ${event.type} from block ${blockNumber} (entity already at j-block ${entityState.jBlock})`);
     return entityState;
   }
-  const newEntityState = {
-    ...entityState,
-    messages: [...entityState.messages],
-    reserves: new Map(entityState.reserves),
-    nonces: new Map(entityState.nonces),
-    proposals: new Map(entityState.proposals),
-    accounts: new Map(entityState.accounts),
-    collaterals: new Map(entityState.collaterals),
-    accountInputQueue: [...entityState.accountInputQueue || []],
-    jBlock: blockNumber || entityState.jBlock
-  };
+  console.log(`✅ J-EVENT-ACCEPTED: ${event.type} block=${blockNumber} > entity.jBlock=${entityState.jBlock}, will process`);
+  const newEntityState = cloneEntityState(entityState);
+  newEntityState.jBlock = blockNumber ?? (entityState.jBlock ?? 0);
   const timestamp = new Date(observedAt).toLocaleTimeString();
   const txHashShort = transactionHash ? transactionHash.slice(0, 10) + "..." : "unknown";
   let elaborateMessage = "";
@@ -28836,7 +29025,7 @@ var TOKEN_REGISTRY, getTokenSymbol = (tokenId) => {
     const tokenSymbol = getTokenSymbol(tokenId);
     const decimals = getTokenDecimals(tokenId);
     const balanceDisplay = (Number(newBalance) / 10 ** decimals).toFixed(4);
-    elaborateMessage = `\uD83D\uDCCA ${from} observed RESERVE UPDATE: ${tokenSymbol} balance now ${balanceDisplay}
+    elaborateMessage = `\uD83D\uDCCA ${from} observed RESERVE UPDATE: ${tokenSymbol} balance now ${balanceDisplay} (accepted: event.block=${blockNumber} > entity.jBlock=${currentJBlock})
 \uD83D\uDCCD Block: ${blockNumber} | ⏰ ${timestamp} | \uD83D\uDD17 Tx: ${txHashShort}
 \uD83C\uDFAF Event: ReserveUpdated | \uD83D\uDD22 TokenID: ${tokenId} | \uD83D\uDCB0 New Balance: ${newBalance} (raw)
 \uD83C\uDFE6 Decimals: ${decimals} | \uD83D\uDD24 Symbol: ${tokenSymbol}`;
@@ -28861,9 +29050,7 @@ var TOKEN_REGISTRY, getTokenSymbol = (tokenId) => {
   if (event.type === "ReserveUpdated") {
     const { entity, tokenId, newBalance, name, symbol, decimals } = event.data;
     if (entity === entityState.entityId) {
-      newEntityState.reserves.set(String(tokenId), {
-        amount: BigInt(newBalance)
-      });
+      newEntityState.reserves.set(String(tokenId), BigInt(newBalance));
       if (DEBUG)
         console.log(`✅ Reserve updated for ${entity.slice(0, 10)}...: Token ${tokenId} new balance is ${newBalance}`);
     }
@@ -28924,19 +29111,9 @@ var TOKEN_REGISTRY, getTokenSymbol = (tokenId) => {
   }
   return newEntityState;
 };
-var init_j_events = __esm(() => {
-  init_utils5();
-  TOKEN_REGISTRY = {
-    0: { symbol: "NULL", name: "Null Token", decimals: 18 },
-    1: { symbol: "ETH", name: "Ethereum", decimals: 18 },
-    2: { symbol: "USDT", name: "Tether USD", decimals: 18 },
-    3: { symbol: "USDC", name: "USD Coin", decimals: 18 },
-    4: { symbol: "ACME", name: "ACME Corp Shares", decimals: 18 },
-    5: { symbol: "BTC", name: "Bitcoin Shares", decimals: 8 }
-  };
-});
 
 // src/entity-tx/proposals.ts
+init_utils5();
 var generateProposalId = (action, proposer, entityState) => {
   const proposalData = JSON.stringify({
     type: action.type,
@@ -28946,7 +29123,8 @@ var generateProposalId = (action, proposer, entityState) => {
   });
   const hash3 = createHash2("sha256").update(proposalData).digest("hex");
   return `prop_${hash3.slice(0, 12)}`;
-}, executeProposal = (entityState, proposal) => {
+};
+var executeProposal = (entityState, proposal) => {
   if (proposal.action.type === "collective_message") {
     const message = `[COLLECTIVE] ${proposal.action.data.message}`;
     if (DEBUG)
@@ -28962,11 +29140,9 @@ var generateProposalId = (action, proposer, entityState) => {
   }
   return entityState;
 };
-var init_proposals = __esm(() => {
-  init_utils5();
-});
 
 // src/entity-tx/validation.ts
+init_utils5();
 var validateMessage = (message) => {
   try {
     if (typeof message !== "string") {
@@ -28987,9 +29163,6 @@ var validateMessage = (message) => {
     return false;
   }
 };
-var init_validation = __esm(() => {
-  init_utils5();
-});
 
 // src/entity-tx/apply.ts
 var applyEntityTx = async (env, entityState, entityTx) => {
@@ -29004,15 +29177,7 @@ var applyEntityTx = async (env, entityState, entityTx) => {
       }
       const currentNonce = entityState.nonces.get(from) || 0;
       const expectedNonce = currentNonce + 1;
-      const newEntityState = {
-        ...entityState,
-        nonces: new Map(entityState.nonces),
-        messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals),
-        reserves: new Map(entityState.reserves),
-        accounts: new Map(entityState.accounts),
-        collaterals: new Map(entityState.collaterals)
-      };
+      const newEntityState = cloneEntityState(entityState);
       newEntityState.nonces.set(from, expectedNonce);
       newEntityState.messages.push(`${from}: ${message}`);
       if (newEntityState.messages.length > 10) {
@@ -29037,15 +29202,7 @@ var applyEntityTx = async (env, entityState, entityTx) => {
       };
       const proposerPower = entityState.config.shares[proposer] || BigInt(0);
       const shouldExecuteImmediately = proposerPower >= entityState.config.threshold;
-      let newEntityState = {
-        ...entityState,
-        nonces: new Map(entityState.nonces),
-        messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals),
-        reserves: new Map(entityState.reserves),
-        accounts: new Map(entityState.accounts),
-        collaterals: new Map(entityState.collaterals)
-      };
+      let newEntityState = cloneEntityState(entityState);
       if (shouldExecuteImmediately) {
         proposal.status = "executed";
         newEntityState = executeProposal(newEntityState, proposal);
@@ -29069,15 +29226,7 @@ var applyEntityTx = async (env, entityState, entityTx) => {
         return entityState;
       }
       console.log(`    \uD83D\uDDF3️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
-      const newEntityState = {
-        ...entityState,
-        nonces: new Map(entityState.nonces),
-        messages: [...entityState.messages],
-        proposals: new Map(entityState.proposals),
-        reserves: new Map(entityState.reserves),
-        accounts: new Map(entityState.accounts),
-        collaterals: new Map(entityState.collaterals)
-      };
+      const newEntityState = cloneEntityState(entityState);
       const updatedProposal = {
         ...proposal,
         votes: new Map(proposal.votes)
@@ -29132,26 +29281,8 @@ var applyEntityTx = async (env, entityState, entityTx) => {
     return entityState;
   }
 };
-var init_apply = __esm(() => {
-  init_entity_consensus();
-  init_name_resolution();
-  init_server();
-  init_utils5();
-  init_account();
-  init_j_events();
-  init_proposals();
-  init_validation();
-});
-// src/entity-tx/index.ts
-var init_entity_tx = __esm(() => {
-  init_apply();
-  init_account();
-  init_j_events();
-  init_proposals();
-  init_validation();
-});
-
 // src/entity-consensus.ts
+init_utils5();
 var validateEntityInput = (input) => {
   try {
     if (!input.entityId || typeof input.entityId !== "string") {
@@ -29218,7 +29349,8 @@ var validateEntityInput = (input) => {
     log.error(`❌ Input validation error: ${error}`);
     return false;
   }
-}, validateEntityReplica = (replica) => {
+};
+var validateEntityReplica = (replica) => {
   try {
     if (!replica.entityId || !replica.signerId) {
       log.error(`❌ Invalid replica IDs: ${replica.entityId}:${replica.signerId}`);
@@ -29237,7 +29369,8 @@ var validateEntityInput = (input) => {
     log.error(`❌ Replica validation error: ${error}`);
     return false;
   }
-}, detectByzantineFault = (signatures, signerId, newSignature) => {
+};
+var detectByzantineFault = (signatures, signerId, newSignature) => {
   try {
     const existingSig = signatures.get(signerId);
     if (existingSig && existingSig !== newSignature) {
@@ -29251,7 +29384,8 @@ var validateEntityInput = (input) => {
     log.error(`❌ Byzantine detection error: ${error}`);
     return false;
   }
-}, validateTimestamp = (proposedTime, currentTime) => {
+};
+var validateTimestamp = (proposedTime, currentTime) => {
   try {
     const maxDrift = 30000;
     const drift = Math.abs(proposedTime - currentTime);
@@ -29266,7 +29400,8 @@ var validateEntityInput = (input) => {
     log.error(`❌ Timestamp validation error: ${error}`);
     return false;
   }
-}, validateVotingPower = (power) => {
+};
+var validateVotingPower = (power) => {
   try {
     if (power < 0n) {
       log.error(`❌ Negative voting power: ${power}`);
@@ -29281,7 +29416,8 @@ var validateEntityInput = (input) => {
     log.error(`❌ Voting power validation error: ${error}`);
     return false;
   }
-}, applyEntityInput = async (env, entityReplica, entityInput) => {
+};
+var applyEntityInput = async (env, entityReplica, entityInput) => {
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const timestamp = Date.now();
   const currentProposalHash = entityReplica.proposal?.hash?.slice(0, 10) || "none";
@@ -29552,7 +29688,8 @@ var validateEntityInput = (input) => {
     }
   });
   return { newState: entityReplica.state, outputs: entityOutbox };
-}, applyEntityFrame = async (env, entityState, entityTxs) => {
+};
+var applyEntityFrame = async (env, entityState, entityTxs) => {
   console.log(`\uD83C\uDFAF APPLY-ENTITY-FRAME: Processing ${entityTxs.length} transactions`);
   entityTxs.forEach((tx, index) => {
     console.log(`\uD83C\uDFAF Transaction ${index}: type="${tx.type}", data=`, tx.data);
@@ -29562,18 +29699,21 @@ var validateEntityInput = (input) => {
     currentEntityState = await applyEntityTx(env, currentEntityState, entityTx);
   }
   return currentEntityState;
-}, calculateQuorumPower = (config, signers) => {
+};
+var calculateQuorumPower = (config, signers) => {
   return signers.reduce((total, signerId) => {
     return total + (config.shares[signerId] || 0n);
   }, 0n);
-}, sortSignatures = (signatures, config) => {
+};
+var sortSignatures = (signatures, config) => {
   const sortedEntries = Array.from(signatures.entries()).sort(([a], [b2]) => {
     const indexA = config.validators.indexOf(a);
     const indexB = config.validators.indexOf(b2);
     return indexA - indexB;
   });
   return new Map(sortedEntries);
-}, mergeEntityInputs = (inputs) => {
+};
+var mergeEntityInputs = (inputs) => {
   const merged = new Map;
   let duplicateCount = 0;
   const timestamp = Date.now();
@@ -29628,15 +29768,46 @@ var validateEntityInput = (input) => {
   }
   return Array.from(merged.values());
 };
-var init_entity_consensus = __esm(() => {
-  init_entity_tx();
-  init_utils5();
-});
+
+// src/server.ts
+init_entity_factory();
 
 // src/evm.ts
+init_lib2();
+init_entity_factory();
+init_utils5();
 import fs from "fs";
 import path from "path";
-var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction) => {
+var ENTITY_PROVIDER_ABI = [
+  "function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)",
+  "function assignName(string memory name, uint256 entityNumber) external",
+  "function transferName(string memory name, uint256 newEntityNumber) external",
+  "function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))",
+  "function nameToNumber(string memory name) external view returns (uint256)",
+  "function numberToName(uint256 entityNumber) external view returns (string memory)",
+  "function nextNumber() external view returns (uint256)",
+  "function getTokenIds(uint256 entityNumber) external pure returns (uint256 controlTokenId, uint256 dividendTokenId)",
+  "function getGovernanceInfo(uint256 entityNumber) external view returns (uint256 controlTokenId, uint256 dividendTokenId, uint256 controlSupply, uint256 dividendSupply, bool hasActiveProposal, bytes32 articlesHash)",
+  "function balanceOf(address account, uint256 id) external view returns (uint256)",
+  "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external",
+  "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
+  "event NameAssigned(string indexed name, uint256 indexed entityNumber)",
+  "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)",
+  "event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)"
+];
+var DEPOSITORY_ABI = [
+  "function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external",
+  "function debugBulkFundEntities() external",
+  "function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)",
+  "function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs)[] settlements, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)",
+  "function prefundAccount(bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)",
+  "function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff)[] diffs) external returns (bool)",
+  "function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)",
+  "event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)",
+  "event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)",
+  "event SettlementProcessed(bytes32 indexed leftEntity, bytes32 indexed rightEntity, uint256 indexed tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)"
+];
+var connectToEthereum = async (jurisdiction) => {
   try {
     const provider = new exports_ethers.JsonRpcProvider(jurisdiction.address);
     const signer = await provider.getSigner(0);
@@ -29647,7 +29818,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error(`Failed to connect to ${jurisdiction.name} at ${jurisdiction.address}:`, error);
     throw error;
   }
-}, debugFundReserves = async (jurisdiction, entityId, tokenId, amount) => {
+};
+var debugFundReserves = async (jurisdiction, entityId, tokenId, amount) => {
   try {
     console.log(`\uD83D\uDCB0 DEBUG: Funding entity ${entityId.slice(0, 10)} with ${amount} of token ${tokenId}...`);
     const { depository } = await connectToEthereum(jurisdiction);
@@ -29662,7 +29834,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error(`❌ Failed to fund reserves:`, error);
     throw error;
   }
-}, submitPrefundAccount = async (jurisdiction, entityId, counterpartyEntityId, tokenId, amount) => {
+};
+var submitPrefundAccount = async (jurisdiction, entityId, counterpartyEntityId, tokenId, amount) => {
   try {
     console.log(`\uD83D\uDCB0 Prefunding account between ${entityId.slice(0, 10)}... and ${counterpartyEntityId.slice(0, 10)}...`);
     console.log(`\uD83D\uDD0D TOKEN: ${tokenId}, AMOUNT: ${amount}`);
@@ -29691,7 +29864,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error(`❌ Failed to prefund account:`, error);
     throw error;
   }
-}, submitProcessBatch = async (jurisdiction, entityId, batch) => {
+};
+var submitProcessBatch = async (jurisdiction, entityId, batch) => {
   try {
     console.log(`\uD83D\uDCB8 Submitting processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
     console.log(`\uD83D\uDD0D BATCH DEBUG:`, JSON.stringify(batch, null, 2));
@@ -29812,7 +29986,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error(`❌ Failed to submit processBatch to ${jurisdiction.name}:`, error);
     throw error;
   }
-}, registerNumberedEntityOnChain = async (config, name) => {
+};
+var registerNumberedEntityOnChain = async (config, name) => {
   if (!config.jurisdiction) {
     throw new Error("Jurisdiction required for on-chain registration");
   }
@@ -29880,7 +30055,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error("❌ Blockchain registration failed:", error);
     throw error;
   }
-}, assignNameOnChain = async (name, entityNumber, jurisdiction) => {
+};
+var assignNameOnChain = async (name, entityNumber, jurisdiction) => {
   try {
     const { entityProvider } = await connectToEthereum(jurisdiction);
     if (DEBUG)
@@ -29903,7 +30079,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error("❌ Name assignment failed:", error);
     throw error;
   }
-}, getEntityInfoFromChain = async (entityId, jurisdiction) => {
+};
+var getEntityInfoFromChain = async (entityId, jurisdiction) => {
   try {
     const { entityProvider } = await connectToEthereum(jurisdiction);
     const entityInfo = await entityProvider.entities(entityId);
@@ -29928,7 +30105,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error("❌ Failed to get entity info from chain:", error);
     return { exists: false };
   }
-}, getNextEntityNumber = async (jurisdiction) => {
+};
+var getNextEntityNumber = async (jurisdiction) => {
   try {
     if (!jurisdiction) {
       throw new Error("Jurisdiction parameter is required");
@@ -29948,11 +30126,13 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error("❌ Failed to get next entity number:", error);
     throw error;
   }
-}, transferNameBetweenEntities = async (name, fromNumber, toNumber2, jurisdiction) => {
+};
+var transferNameBetweenEntities = async (name, fromNumber, toNumber2, jurisdiction) => {
   if (DEBUG)
     console.log(`\uD83D\uDD04 Transferring name "${name}" from #${fromNumber} to #${toNumber2}`);
   throw new Error("Name transfer not implemented - requires blockchain integration");
-}, generateJurisdictions = async () => {
+};
+var generateJurisdictions = async () => {
   const jurisdictions = new Map;
   try {
     let config;
@@ -29987,16 +30167,21 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error("❌ Failed to load jurisdictions:", error);
   }
   return jurisdictions;
-}, DEFAULT_JURISDICTIONS = null, getJurisdictions = async () => {
+};
+var DEFAULT_JURISDICTIONS = null;
+var getJurisdictions = async () => {
   DEFAULT_JURISDICTIONS = await generateJurisdictions();
   return DEFAULT_JURISDICTIONS;
-}, getAvailableJurisdictions = async () => {
+};
+var getAvailableJurisdictions = async () => {
   const jurisdictions = await getJurisdictions();
   return Array.from(jurisdictions.values());
-}, getJurisdictionByAddress = async (address) => {
+};
+var getJurisdictionByAddress = async (address) => {
   const jurisdictions = await getJurisdictions();
   return jurisdictions.get(address);
-}, submitSettle = async (jurisdiction, leftEntity, rightEntity, diffs) => {
+};
+var submitSettle = async (jurisdiction, leftEntity, rightEntity, diffs) => {
   try {
     console.log(`⚖️ Submitting settle transaction between ${leftEntity.slice(0, 10)}... and ${rightEntity.slice(0, 10)}...`);
     console.log(`\uD83D\uDD0D DIFFS:`, diffs.map((d) => ({
@@ -30025,7 +30210,8 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     console.error("❌ Settlement failed:", error);
     throw error;
   }
-}, submitReserveToReserve = async (jurisdiction, fromEntity, toEntity, tokenId, amount) => {
+};
+var submitReserveToReserve = async (jurisdiction, fromEntity, toEntity, tokenId, amount) => {
   try {
     console.log(`\uD83D\uDCB8 DIRECT R2R: ${fromEntity.slice(0, 10)} → ${toEntity.slice(0, 10)}, token ${tokenId}, amount ${amount}`);
     const { depository, provider } = await connectToEthereum(jurisdiction);
@@ -30049,40 +30235,6 @@ var ENTITY_PROVIDER_ABI, DEPOSITORY_ABI, connectToEthereum = async (jurisdiction
     throw error;
   }
 };
-var init_evm = __esm(() => {
-  init_lib2();
-  init_entity_factory();
-  init_utils5();
-  ENTITY_PROVIDER_ABI = [
-    "function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)",
-    "function assignName(string memory name, uint256 entityNumber) external",
-    "function transferName(string memory name, uint256 newEntityNumber) external",
-    "function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))",
-    "function nameToNumber(string memory name) external view returns (uint256)",
-    "function numberToName(uint256 entityNumber) external view returns (string memory)",
-    "function nextNumber() external view returns (uint256)",
-    "function getTokenIds(uint256 entityNumber) external pure returns (uint256 controlTokenId, uint256 dividendTokenId)",
-    "function getGovernanceInfo(uint256 entityNumber) external view returns (uint256 controlTokenId, uint256 dividendTokenId, uint256 controlSupply, uint256 dividendSupply, bool hasActiveProposal, bytes32 articlesHash)",
-    "function balanceOf(address account, uint256 id) external view returns (uint256)",
-    "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external",
-    "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
-    "event NameAssigned(string indexed name, uint256 indexed entityNumber)",
-    "event NameTransferred(string indexed name, uint256 indexed oldEntityNumber, uint256 indexed newEntityNumber)",
-    "event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId)"
-  ];
-  DEPOSITORY_ABI = [
-    "function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external",
-    "function debugBulkFundEntities() external",
-    "function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)",
-    "function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs)[] settlements, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)",
-    "function prefundAccount(bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)",
-    "function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff)[] diffs) external returns (bool)",
-    "function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)",
-    "event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)",
-    "event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)",
-    "event SettlementProcessed(bytes32 indexed leftEntity, bytes32 indexed rightEntity, uint256 indexed tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)"
-  ];
-});
 
 // src/gossip.ts
 function createGossipLayer() {
@@ -30136,14 +30288,16 @@ async function loadPersistedProfiles(db2, gossip) {
 }
 
 // src/j-event-watcher.ts
+init_lib2();
+var DEBUG2 = true;
+var HEAVY_LOGS = false;
+
 class JEventWatcher {
   provider;
   entityProviderContract;
   depositoryContract;
   config;
   signers = new Map;
-  lastProcessedBlock = 0;
-  syncInProgress = false;
   isWatching = false;
   entityProviderABI = [
     "event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)",
@@ -30161,7 +30315,11 @@ class JEventWatcher {
     this.provider = new exports_ethers.JsonRpcProvider(config.rpcUrl);
     this.entityProviderContract = new exports_ethers.Contract(config.entityProviderAddress, this.entityProviderABI, this.provider);
     this.depositoryContract = new exports_ethers.Contract(config.depositoryAddress, this.depositoryABI, this.provider);
-    this.lastProcessedBlock = config.startBlock || 0;
+    if (DEBUG2) {
+      console.log(`\uD83D\uDD2D J-WATCHER: Initialized with RPC: ${config.rpcUrl}`);
+      console.log(`\uD83D\uDD2D J-WATCHER: EntityProvider: ${config.entityProviderAddress}`);
+      console.log(`\uD83D\uDD2D J-WATCHER: Depository: ${config.depositoryAddress}`);
+    }
   }
   addSigner(signerId, privateKey, entityIds) {
     this.signers.set(signerId, {
@@ -30179,48 +30337,25 @@ class JEventWatcher {
       return;
     }
     this.isWatching = true;
-    const currentBlock = await this.provider.getBlockNumber();
-    this.lastProcessedBlock = Math.max(0, currentBlock - 10);
-    console.log(`\uD83D\uDD2D J-WATCHER: Starting from block ${this.lastProcessedBlock}`);
-    this.setupEventListeners(env);
-    await this.processHistoricalEvents(env);
-    await this.syncHistoricalEventsForNewEntities(env);
-    this.startPeriodicSync(env);
-    this.startContinuousEntityMonitoring(env);
-    console.log(`\uD83D\uDD2D J-WATCHER: Monitoring J-machine from block ${this.lastProcessedBlock}`);
-  }
-  startPeriodicSync(env) {
+    console.log("\uD83D\uDD2D J-WATCHER: Starting simple first-principles watcher...");
+    try {
+      const currentBlock = await this.provider.getBlockNumber();
+      console.log(`\uD83D\uDD2D J-WATCHER: Connected to blockchain at block ${currentBlock}`);
+    } catch (error) {
+      console.log(`\uD83D\uDD2D⚠️  J-WATCHER: Blockchain not ready, will retry: ${error.message}`);
+    }
     setInterval(async () => {
-      if (!this.isWatching || this.syncInProgress) {
+      if (!this.isWatching)
         return;
-      }
       try {
-        this.syncInProgress = true;
-        await this.syncNewEvents(env);
+        await this.syncAllProposerReplicas(env);
       } catch (error) {
-        console.error("\uD83D\uDD2D❌ J-WATCHER: Error during periodic sync:", error);
-      } finally {
-        this.syncInProgress = false;
+        if (DEBUG2 && !error.message.includes("ECONNREFUSED")) {
+          console.error("\uD83D\uDD2D❌ J-WATCHER: Sync error:", error.message);
+        }
       }
-    }, 500);
-  }
-  async syncNewEvents(env) {
-    const currentBlock = await this.provider.getBlockNumber();
-    if (currentBlock <= this.lastProcessedBlock) {
-      return;
-    }
-    const newBlocks = currentBlock - this.lastProcessedBlock;
-    let totalEventsProcessed = 0;
-    const batchSize = 100;
-    for (let fromBlock = this.lastProcessedBlock + 1;fromBlock <= currentBlock; fromBlock += batchSize) {
-      const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
-      const eventsInBatch = await this.processBlockRange(fromBlock, toBlock, env);
-      totalEventsProcessed += eventsInBatch;
-    }
-    this.lastProcessedBlock = currentBlock;
-    if (totalEventsProcessed > 0) {
-      console.log(`\uD83D\uDD2D⚡ J-MACHINE SYNC: Found ${totalEventsProcessed} events in ${newBlocks} new blocks (now at J-block ${currentBlock})`);
-    }
+    }, 1000);
+    console.log("\uD83D\uDD2D J-WATCHER: Started with simple 1s polling");
   }
   stopWatching() {
     this.isWatching = false;
@@ -30228,540 +30363,194 @@ class JEventWatcher {
     this.depositoryContract.removeAllListeners();
     console.log("\uD83D\uDD2D J-WATCHER: Stopped watching");
   }
-  setupEventListeners(env) {
-    this.entityProviderContract.on("EntityRegistered", (entityId, entityNumber, boardHash, event) => {
-      this.handleJurisdictionEvent({
-        type: "entity_registered",
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityId: entityId.toString(),
-        entityNumber: Number(entityNumber),
-        data: { boardHash }
-      }, env);
-    });
-    this.entityProviderContract.on("ControlSharesReleased", (entityId, depository, controlAmount, dividendAmount, purpose, event) => {
-      this.handleJurisdictionEvent({
-        type: "control_shares_released",
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityId: entityId.toString(),
-        entityNumber: Number(entityId),
-        data: { depository, controlAmount, dividendAmount, purpose }
-      }, env);
-    });
-    this.entityProviderContract.on("NameAssigned", (name, entityNumber, event) => {
-      this.handleJurisdictionEvent({
-        type: "name_assigned",
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityNumber: Number(entityNumber),
-        data: { name }
-      }, env);
-    });
-    this.depositoryContract.on("ControlSharesReceived", (entityProvider, fromEntity, tokenId, amount, data4, event) => {
-      const entityNumber = this.extractEntityNumberFromTokenId(Number(tokenId));
-      this.handleJurisdictionEvent({
-        type: "shares_received",
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityNumber,
-        data: { entityProvider, fromEntity, tokenId, amount, data: data4 }
-      }, env);
-    });
-    this.depositoryContract.on("ReserveUpdated", (entity, tokenId, newBalance, event) => {
-      this.handleReserveUpdatedEvent(entity, tokenId, newBalance, event, env);
-    });
-    this.depositoryContract.on("ReserveTransferred", (from, to, tokenId, amount, event) => {
-      const fromEntityNumber = Number(from);
-      const toEntityNumber = Number(to);
-      this.handleJurisdictionEvent({
-        type: "reserve_transferred",
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityNumber: fromEntityNumber,
-        data: { from, to, tokenId: Number(tokenId), amount: amount.toString(), direction: "sent" }
-      }, env);
-      this.handleJurisdictionEvent({
-        type: "reserve_transferred",
-        blockNumber: event.blockNumber,
-        transactionHash: event.transactionHash,
-        entityNumber: toEntityNumber,
-        data: { from, to, tokenId: Number(tokenId), amount: amount.toString(), direction: "received" }
-      }, env);
-    });
-    this.depositoryContract.on("SettlementProcessed", (leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta, event) => {
-      this.handleSettlementProcessedEvent(leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta, event, env);
-    });
-  }
-  async processHistoricalEvents(env) {
+  async syncAllProposerReplicas(env) {
     try {
       const currentBlock = await this.provider.getBlockNumber();
-      if (this.lastProcessedBlock >= currentBlock) {
-        if (HEAVY_LOGS)
-          console.log("\uD83D\uDD2D⏸️  J-WATCHER: No historical blocks to process");
+      if (DEBUG2) {
+        console.log(`\uD83D\uDD2D\uD83D\uDD0D SYNC-START: Current blockchain block=${currentBlock}, total replicas=${env.replicas.size}`);
+        console.log(`\uD83D\uDD2D\uD83D\uDD0D SYNC-ENV-TIMESTAMP: env.timestamp=${env.timestamp}`);
+        for (const [replicaKey, replica] of env.replicas.entries()) {
+          console.log(`\uD83D\uDD2D\uD83D\uDD0D REPLICA-STATE: ${replicaKey} → jBlock=${replica.state.jBlock}, height=${replica.state.height}, isProposer=${replica.isProposer}`);
+        }
+      }
+      const proposerReplicas = [];
+      for (const [replicaKey, replica] of env.replicas.entries()) {
+        if (replica.isProposer) {
+          const [entityId, signerId] = replicaKey.split(":");
+          const lastJBlock = replica.state.jBlock || 0;
+          if (DEBUG2) {
+            console.log(`\uD83D\uDD2D\uD83D\uDD0D REPLICA-CHECK: ${signerId} → Entity ${entityId.slice(0, 10)}... jBlock=${lastJBlock}, currentBlock=${currentBlock}, isProposer=${replica.isProposer}`);
+          }
+          if (lastJBlock < currentBlock) {
+            proposerReplicas.push({ entityId, signerId, lastJBlock });
+            if (HEAVY_LOGS) {
+              console.log(`\uD83D\uDD2D\uD83D\uDD0D PROPOSER-SYNC: Found proposer ${signerId} for entity ${entityId.slice(0, 10)}... at jBlock ${lastJBlock}, needs sync to ${currentBlock}`);
+            }
+          } else {
+            if (DEBUG2) {
+              console.log(`\uD83D\uDD2D✅ REPLICA-SYNCED: ${signerId} → Entity ${entityId.slice(0, 10)}... already synced (jBlock=${lastJBlock} >= currentBlock=${currentBlock})`);
+            }
+          }
+        }
+      }
+      if (proposerReplicas.length === 0) {
         return;
       }
-      const blocksToProcess = currentBlock - this.lastProcessedBlock;
-      if (HEAVY_LOGS) {
-        console.log(`\uD83D\uDD2D\uD83D\uDCDA J-WATCHER HISTORICAL: Processing ${blocksToProcess} blocks (${this.lastProcessedBlock + 1} → ${currentBlock})`);
+      if (DEBUG2) {
+        console.log(`\uD83D\uDD2D⚡ SYNC: ${proposerReplicas.length} proposer replicas need sync to block ${currentBlock}`);
+        for (const { entityId, signerId, lastJBlock } of proposerReplicas) {
+          console.log(`\uD83D\uDD2D\uD83D\uDCCB SYNC-QUEUE: ${signerId} → Entity ${entityId.slice(0, 10)}... from j-block ${lastJBlock + 1} to ${currentBlock}`);
+        }
       }
-      const batchSize = 1000;
-      for (let fromBlock = this.lastProcessedBlock + 1;fromBlock <= currentBlock; fromBlock += batchSize) {
-        const toBlock = Math.min(fromBlock + batchSize - 1, currentBlock);
+      for (const { entityId, signerId, lastJBlock } of proposerReplicas) {
+        await this.syncEntityFromJBlock(entityId, signerId, lastJBlock + 1, currentBlock, env);
+      }
+    } catch (error) {
+      if (!error.message.includes("ECONNREFUSED")) {
+        throw error;
+      }
+    }
+  }
+  async syncEntityFromJBlock(entityId, signerId, fromBlock, toBlock, env) {
+    if (fromBlock > toBlock)
+      return;
+    if (DEBUG2) {
+      console.log(`\uD83D\uDD2D\uD83D\uDCE1 ENTITY-SYNC: Entity ${entityId.slice(0, 10)}... (${signerId}) from j-block ${fromBlock} to ${toBlock}`);
+    }
+    try {
+      const events = await this.getEntityEventsInRange(entityId, fromBlock, toBlock);
+      if (events.length === 0) {
         if (HEAVY_LOGS) {
-          console.log(`\uD83D\uDD2D\uD83D\uDCE6 J-WATCHER HISTORICAL: Batch ${fromBlock} → ${toBlock}`);
+          console.log(`\uD83D\uDD2D⚪ ENTITY-SYNC: No events found for entity ${entityId.slice(0, 10)}... in blocks ${fromBlock}-${toBlock}`);
         }
-        await this.processBlockRange(fromBlock, toBlock, env);
+        return;
       }
-      this.lastProcessedBlock = currentBlock;
-      if (HEAVY_LOGS) {
-        console.log(`\uD83D\uDD2D✅ J-WATCHER HISTORICAL: Completed! Processed ${blocksToProcess} blocks`);
+      console.log(`\uD83D\uDD2D\uD83D\uDCE6 ENTITY-SYNC: Found ${events.length} new events for entity ${entityId.slice(0, 10)}... in blocks ${fromBlock}-${toBlock}`);
+      for (const event of events) {
+        this.feedEventToProposer(entityId, signerId, event, env);
       }
+      console.log(`\uD83D\uDD2D✅ ENTITY-SYNC: Queued ${events.length} events for entity ${entityId.slice(0, 10)}... (${signerId})`);
     } catch (error) {
-      console.error("\uD83D\uDD2D❌ J-WATCHER: Error processing historical events:", error);
+      console.error(`\uD83D\uDD2D❌ ENTITY-SYNC: Error syncing entity ${entityId.slice(0, 10)}...`, error.message);
     }
   }
-  async processBlockRange(fromBlock, toBlock, env) {
-    try {
-      const entityFilters = this.getEntityFiltersForHistoricalSync(env, fromBlock);
-      const [
-        entityRegisteredEvents,
-        controlSharesReleasedEvents,
-        nameAssignedEvents,
-        controlSharesReceivedEvents,
-        reserveUpdatedEvents,
-        reserveTransferredEvents,
-        settlementProcessedEvents
-      ] = await Promise.all([
-        this.entityProviderContract.queryFilter(this.entityProviderContract.filters.EntityRegistered(), fromBlock, toBlock),
-        this.entityProviderContract.queryFilter(this.entityProviderContract.filters.ControlSharesReleased(), fromBlock, toBlock),
-        this.entityProviderContract.queryFilter(this.entityProviderContract.filters.NameAssigned(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.ControlSharesReceived(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.ReserveUpdated(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.ReserveTransferred(), fromBlock, toBlock),
-        this.depositoryContract.queryFilter(this.depositoryContract.filters.SettlementProcessed(), fromBlock, toBlock)
-      ]);
-      const allEvents = [
-        ...entityRegisteredEvents,
-        ...controlSharesReleasedEvents,
-        ...nameAssignedEvents,
-        ...controlSharesReceivedEvents,
-        ...reserveUpdatedEvents,
-        ...reserveTransferredEvents,
-        ...settlementProcessedEvents
-      ].sort((a, b2) => {
-        if (a.blockNumber !== b2.blockNumber) {
-          return a.blockNumber - b2.blockNumber;
-        }
-        return a.transactionIndex - b2.transactionIndex;
+  async getEntityEventsInRange(entityId, fromBlock, toBlock) {
+    if (HEAVY_LOGS) {
+      console.log(`\uD83D\uDD2D\uD83D\uDD0D EVENT-QUERY: Fetching events for entity ${entityId.slice(0, 10)}... blocks ${fromBlock}-${toBlock}`);
+    }
+    const [reserveEvents, settlementEventsLeft, settlementEventsRight] = await Promise.all([
+      this.depositoryContract.queryFilter(this.depositoryContract.filters.ReserveUpdated(entityId), fromBlock, toBlock),
+      this.depositoryContract.queryFilter(this.depositoryContract.filters.SettlementProcessed(entityId, null, null), fromBlock, toBlock),
+      this.depositoryContract.queryFilter(this.depositoryContract.filters.SettlementProcessed(null, entityId, null), fromBlock, toBlock)
+    ]);
+    if (HEAVY_LOGS) {
+      console.log(`\uD83D\uDD2D\uD83D\uDD0D EVENT-QUERY: Entity ${entityId.slice(0, 10)}... - Reserve: ${reserveEvents.length}, SettlementLeft: ${settlementEventsLeft.length}, SettlementRight: ${settlementEventsRight.length}`);
+    }
+    const allEvents = [
+      ...reserveEvents.map((e) => ({ ...e, eventType: "ReserveUpdated" })),
+      ...settlementEventsLeft.map((e) => ({ ...e, eventType: "SettlementProcessed", side: "left" })),
+      ...settlementEventsRight.map((e) => ({ ...e, eventType: "SettlementProcessed", side: "right" }))
+    ].sort((a, b2) => {
+      if (a.blockNumber !== b2.blockNumber) {
+        return a.blockNumber - b2.blockNumber;
+      }
+      return (a.transactionIndex || 0) - (b2.transactionIndex || 0);
+    });
+    if (HEAVY_LOGS && allEvents.length > 0) {
+      console.log(`\uD83D\uDD2D\uD83D\uDD0D EVENT-QUERY: Entity ${entityId.slice(0, 10)}... total events: ${allEvents.length}`);
+      allEvents.forEach((event, i) => {
+        console.log(`\uD83D\uDD2D\uD83D\uDD0D EVENT-${i}: ${event.eventType} at block ${event.blockNumber} tx ${event.transactionIndex}`);
       });
-      if (allEvents.length > 0) {
-        console.log(`\uD83D\uDD2D⚡ J-WATCHER: Processing ${allEvents.length} events from blocks ${fromBlock}-${toBlock}`);
-        for (const event of allEvents) {
-          await this.processContractEvent(event, env);
-        }
-      }
-      return allEvents.length;
-    } catch (error) {
-      console.error(`\uD83D\uDD2D❌ J-WATCHER: Error processing blocks ${fromBlock}-${toBlock}:`, error);
-      return 0;
     }
+    return allEvents;
   }
-  async processContractEvent(event, env) {
-    try {
-      let jurisdictionEvent;
-      switch (event.eventName || event.event) {
-        case "EntityRegistered":
-          jurisdictionEvent = {
-            type: "entity_registered",
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityId: event.args.entityId.toString(),
-            entityNumber: Number(event.args.entityNumber),
-            data: { boardHash: event.args.boardHash }
-          };
-          break;
-        case "ControlSharesReleased":
-          jurisdictionEvent = {
-            type: "control_shares_released",
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityId: event.args.entityId.toString(),
-            entityNumber: Number(event.args.entityId),
+  feedEventToProposer(entityId, signerId, event, env) {
+    let entityTx;
+    if (event.eventType === "ReserveUpdated") {
+      entityTx = {
+        type: "j_event",
+        data: {
+          from: signerId,
+          event: {
+            type: "ReserveUpdated",
             data: {
-              depository: event.args.depository,
-              controlAmount: event.args.controlAmount.toString(),
-              dividendAmount: event.args.dividendAmount.toString(),
-              purpose: event.args.purpose
-            }
-          };
-          break;
-        case "NameAssigned":
-          jurisdictionEvent = {
-            type: "name_assigned",
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber: Number(event.args.entityNumber),
-            data: { name: event.args.name }
-          };
-          break;
-        case "ControlSharesReceived": {
-          const entityNumber = this.extractEntityNumberFromTokenId(Number(event.args.tokenId));
-          jurisdictionEvent = {
-            type: "shares_received",
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber,
-            data: {
-              entityProvider: event.args.entityProvider,
-              fromEntity: event.args.fromEntity,
-              tokenId: event.args.tokenId.toString(),
-              amount: event.args.amount.toString(),
-              data: event.args.data
-            }
-          };
-          break;
-        }
-        case "ReserveUpdated":
-          this.handleReserveUpdatedEvent(event.args.entity.toString(), event.args.tokenId, event.args.newBalance, event, env);
-          return;
-        case "ReserveTransferred":
-          jurisdictionEvent = {
-            type: "reserve_transferred",
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber: Number(event.args.from),
-            data: {
-              from: event.args.from.toString(),
-              to: event.args.to.toString(),
+              entity: entityId,
               tokenId: Number(event.args.tokenId),
-              amount: event.args.amount.toString(),
-              direction: "sent"
+              newBalance: event.args.newBalance.toString(),
+              symbol: `TKN${event.args.tokenId}`,
+              decimals: 18
             }
-          };
-          this.handleJurisdictionEvent(jurisdictionEvent, env);
-          jurisdictionEvent = {
-            type: "reserve_transferred",
-            blockNumber: event.blockNumber,
-            transactionHash: event.transactionHash,
-            entityNumber: Number(event.args.to),
+          },
+          observedAt: Date.now(),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash
+        }
+      };
+      if (DEBUG2) {
+        console.log(`\uD83D\uDD2D\uD83D\uDCB0 R2R-EVENT: Entity ${entityId.slice(0, 10)}... Token ${event.args.tokenId} Balance ${(Number(event.args.newBalance) / 1000000000000000000).toFixed(4)} (block ${event.blockNumber})`);
+      }
+    } else if (event.eventType === "SettlementProcessed") {
+      const isLeft = event.side === "left";
+      const counterpartyId = isLeft ? event.args.rightEntity.toString() : event.args.leftEntity.toString();
+      const ownReserve = isLeft ? event.args.leftReserve : event.args.rightReserve;
+      const counterpartyReserve = isLeft ? event.args.rightReserve : event.args.leftReserve;
+      const ondelta = isLeft ? event.args.ondelta : -event.args.ondelta;
+      entityTx = {
+        type: "j_event",
+        data: {
+          from: signerId,
+          event: {
+            type: "SettlementProcessed",
             data: {
-              from: event.args.from.toString(),
-              to: event.args.to.toString(),
+              leftEntity: event.args.leftEntity.toString(),
+              rightEntity: event.args.rightEntity.toString(),
+              counterpartyEntityId: counterpartyId,
               tokenId: Number(event.args.tokenId),
-              amount: event.args.amount.toString(),
-              direction: "received"
+              ownReserve: ownReserve.toString(),
+              counterpartyReserve: counterpartyReserve.toString(),
+              collateral: event.args.collateral.toString(),
+              ondelta: ondelta.toString(),
+              side: event.side
             }
-          };
-          break;
-        case "SettlementProcessed":
-          this.handleSettlementProcessedEvent(event.args.leftEntity.toString(), event.args.rightEntity.toString(), event.args.tokenId, event.args.leftReserve, event.args.rightReserve, event.args.collateral, event.args.ondelta, event, env);
-          return;
-        default:
-          return;
-      }
-      this.handleJurisdictionEvent(jurisdictionEvent, env);
-    } catch (error) {
-      console.error("\uD83D\uDD2D J-WATCHER: Error processing contract event:", error);
-    }
-  }
-  handleSettlementProcessedEvent(leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta, event, env) {
-    console.log(`\uD83D\uDD0D SETTLEMENT-EVENT: Handling SettlementProcessed between ${leftEntity.slice(0, 10)}... and ${rightEntity.slice(0, 10)}... tokenId=${tokenId} block=${event.blockNumber}`);
-    this.feedSettlementToEntity(leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta, event, env, "left");
-    this.feedSettlementToEntity(rightEntity, leftEntity, tokenId, rightReserve, leftReserve, collateral, -ondelta, event, env, "right");
-  }
-  feedSettlementToEntity(entityId, counterpartyId, tokenId, ownReserve, counterpartyReserve, collateral, ondelta, event, env, side) {
-    const proposerReplica = this.findProposerReplica(entityId, env);
-    if (!proposerReplica) {
-      console.log(`\uD83D\uDD2D⚠️  SETTLEMENT-EVENT: No entity found for ${entityId.slice(0, 10)}...`);
-      return;
-    }
-    const replicaKey = `${entityId}:${proposerReplica.signerId}`;
-    const replica = env.replicas.get(replicaKey);
-    if (replica && event.blockNumber <= replica.state.jBlock) {
-      console.log(`\uD83D\uDD04 Skipping settlement j-event for ${entityId.slice(0, 10)}... at block ${event.blockNumber} (entity at j-block ${replica.state.jBlock})`);
-      return;
-    }
-    const entityTx = {
-      type: "j_event",
-      data: {
-        from: proposerReplica.signerId,
-        event: {
-          type: "SettlementProcessed",
-          data: {
-            leftEntity: side === "left" ? entityId : counterpartyId,
-            rightEntity: side === "left" ? counterpartyId : entityId,
-            counterpartyEntityId: counterpartyId,
-            tokenId: Number(tokenId),
-            ownReserve: ownReserve.toString(),
-            counterpartyReserve: counterpartyReserve.toString(),
-            collateral: collateral.toString(),
-            ondelta: ondelta.toString(),
-            side
-          }
-        },
-        observedAt: Date.now(),
-        blockNumber: event.blockNumber || 0,
-        transactionHash: event.transactionHash || "0x0000000000000000"
-      }
-    };
-    env.serverInput.entityInputs.push({
-      entityId,
-      signerId: proposerReplica.signerId,
-      entityTxs: [entityTx]
-    });
-    console.log(`\uD83D\uDD2D✅ SETTLEMENT PROCESSED: ${proposerReplica.signerId} processed settlement for Entity ${entityId.slice(0, 10)}... (${side} side)`);
-  }
-  handleReserveUpdatedEvent(entity, tokenId, newBalance, event, env) {
-    console.log(`\uD83D\uDD0D RESERVE-EVENT: Handling ReserveUpdated for entity ${entity.slice(0, 10)}... tokenId=${tokenId} balance=${newBalance} block=${event.blockNumber}`);
-    const proposerReplica = this.findProposerReplica(entity, env);
-    if (!proposerReplica) {
-      console.log(`\uD83D\uDD2D⚠️  J-MACHINE EVENT: No entity found for reserve update ${entity.slice(0, 10)}...`);
-      console.log(`\uD83D\uDD2D\uD83D\uDD0D Available replicas: ${Array.from(env.replicas.keys()).join(", ")}`);
-      return;
-    }
-    const replicaKey = `${entity}:${proposerReplica.signerId}`;
-    const replica = env.replicas.get(replicaKey);
-    console.log(`\uD83D\uDD0D JBLOCK-DEBUG: Entity ${entity.slice(0, 10)}... event block ${event.blockNumber} vs entity jBlock ${replica?.state.jBlock}`);
-    if (replica && event.blockNumber <= replica.state.jBlock) {
-      console.log(`\uD83D\uDD04 Skipping j-event for ${entity.slice(0, 10)}... at block ${event.blockNumber} (entity at j-block ${replica.state.jBlock})`);
-      return;
-    }
-    const blockNum = event?.blockNumber || "unknown";
-    const txHash = event?.transactionHash || "unknown";
-    console.log(`\uD83D\uDD2D\uD83D\uDCB0 R2R DETECTED: Entity ${entity.slice(0, 10)}... Token ${tokenId} Balance ${(Number(newBalance) / 1000000000000000000).toFixed(4)} (J-block ${blockNum})`);
-    const entityTx = {
-      type: "j_event",
-      data: {
-        from: proposerReplica.signerId,
-        event: {
-          type: "ReserveUpdated",
-          data: {
-            entity,
-            tokenId: Number(tokenId),
-            newBalance: newBalance.toString(),
-            symbol: `TKN${tokenId}`,
-            decimals: 18
-          }
-        },
-        observedAt: Date.now(),
-        blockNumber: event.blockNumber || 0,
-        transactionHash: event.transactionHash || "0x0000000000000000"
-      }
-    };
-    env.serverInput.entityInputs.push({
-      entityId: entity,
-      signerId: proposerReplica.signerId,
-      entityTxs: [entityTx]
-    });
-    console.log(`\uD83D\uDD2D✅ R2R PROCESSED: ${proposerReplica.signerId} processed reserve update for Entity ${entity.slice(0, 10)}...`);
-    console.log(`\uD83D\uDD0D QUEUE-DEBUG: Added to entityInputs, total queue length: ${env.serverInput.entityInputs.length}`);
-  }
-  handleJurisdictionEvent(jEvent, env) {
-    console.log(`\uD83D\uDD2D⚡ J-EVENT: ${jEvent.type} at block ${jEvent.blockNumber} for entity #${jEvent.entityNumber}`);
-    if (!jEvent.entityNumber) {
-      console.log(`\uD83D\uDD2D⚠️  J-EVENT: Missing entity number for event ${jEvent.type}`);
-      return;
-    }
-    const entityId = this.generateEntityId(jEvent.entityNumber);
-    const proposerReplica = this.findProposerReplica(entityId, env);
-    if (!proposerReplica) {
-      console.log(`\uD83D\uDD2D⚠️  J-EVENT: No proposer replica found for entity #${jEvent.entityNumber}`);
-      return;
-    }
-    const replicaKey = `${entityId}:${proposerReplica.signerId}`;
-    const replica = env.replicas.get(replicaKey);
-    if (replica && jEvent.blockNumber <= replica.state.jBlock) {
-      if (DEBUG2)
-        console.log(`\uD83D\uDD04 Skipping j-event for entity #${jEvent.entityNumber} at block ${jEvent.blockNumber} (entity at j-block ${replica.state.jBlock})`);
-      return;
-    }
-    const entityTx = {
-      type: "j_event",
-      data: {
-        from: proposerReplica.signerId,
-        event: {
-          type: jEvent.type,
-          data: jEvent.data
-        },
-        observedAt: Date.now(),
-        blockNumber: jEvent.blockNumber || 0,
-        transactionHash: jEvent.transactionHash || "0x0000000000000000"
-      }
-    };
-    env.serverInput.entityInputs.push({
-      entityId,
-      signerId: proposerReplica.signerId,
-      entityTxs: [entityTx]
-    });
-    console.log(`\uD83D\uDD2D\uD83D\uDCE4 J-EVENT: ${proposerReplica.signerId} → Entity #${jEvent.entityNumber} (${jEvent.type})`);
-  }
-  extractEntityNumberFromTokenId(tokenId) {
-    return tokenId & 2147483647;
-  }
-  findProposerReplica(entityId, env) {
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      const [keyEntityId, signerName] = replicaKey.split(":");
-      if (keyEntityId === entityId && replica.isProposer) {
-        return { signerId: signerName, shouldProcess: true };
-      }
-    }
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      const [keyEntityId, signerName] = replicaKey.split(":");
-      if (keyEntityId === entityId) {
-        return { signerId: signerName, shouldProcess: true };
-      }
-    }
-    return null;
-  }
-  getMinEntityBlock(env) {
-    let minBlock = 0;
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      minBlock = Math.max(minBlock, replica.state.jBlock || 0);
-    }
-    return minBlock;
-  }
-  getEntityFiltersForHistoricalSync(env, fromBlock) {
-    const needsHistoricalSync = [];
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      const entityJBlock = replica.state.jBlock || 0;
-      if (entityJBlock < fromBlock) {
-        const [entityId] = replicaKey.split(":");
-        if (!needsHistoricalSync.includes(entityId)) {
-          needsHistoricalSync.push(entityId);
-          if (DEBUG2)
-            console.log(`\uD83D\uDD04 Entity ${entityId.slice(0, 10)}... needs historical sync from j-block ${entityJBlock}`);
+          },
+          observedAt: Date.now(),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash
         }
+      };
+      if (DEBUG2) {
+        console.log(`\uD83D\uDD2D\uD83D\uDCB1 SETTLE-EVENT: Entity ${entityId.slice(0, 10)}... vs ${counterpartyId.slice(0, 10)}... (${event.side} side, block ${event.blockNumber})`);
       }
     }
-    return needsHistoricalSync;
-  }
-  async syncHistoricalEventsForNewEntities(env) {
-    const currentBlock = await this.provider.getBlockNumber();
-    console.log(`\uD83D\uDD0D SYNC-DEBUG: Checking ${env.replicas.size} replicas for jBlock=0`);
-    const newEntities = [];
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      console.log(`\uD83D\uDD0D SYNC-DEBUG: Replica ${replicaKey}: jBlock=${replica.state.jBlock}`);
-      if (replica.state.jBlock === 0) {
-        const [entityId] = replicaKey.split(":");
-        if (!newEntities.includes(entityId)) {
-          newEntities.push(entityId);
-          console.log(`\uD83D\uDD0D SYNC-DEBUG: Added entity ${entityId} to sync list`);
-        }
-      }
+    if (entityTx) {
+      console.log(`\uD83D\uDEA8 J-WATCHER-CREATING-EVENT: ${signerId} creating j-event ${event.eventType} block=${event.blockNumber} for entity ${entityId.slice(0, 10)}...`);
+      env.serverInput.entityInputs.push({
+        entityId,
+        signerId,
+        entityTxs: [entityTx]
+      });
+      console.log(`\uD83D\uDD2D✅ J-WATCHER-QUEUED: ${signerId} → Entity ${entityId.slice(0, 10)}... (${event.eventType}) block=${event.blockNumber} - Queue length now: ${env.serverInput.entityInputs.length}`);
     }
-    console.log(`\uD83D\uDD0D SYNC-DEBUG: Found ${newEntities.length} entities needing sync: [${newEntities.map((e) => e.slice(0, 10) + "...").join(", ")}]`);
-    if (newEntities.length === 0) {
-      console.log("\uD83D\uDD04 No new entities requiring historical sync");
-      return false;
-    }
-    console.log(`\uD83D\uDD04 Syncing historical events for ${newEntities.length} new entities from block 0 to ${currentBlock}`);
-    console.log(`\uD83D\uDD0D QUEUE-DEBUG: Initial entityInputs length: ${env.serverInput.entityInputs.length}`);
-    for (const entityId of newEntities) {
-      console.log(`\uD83D\uDD04 Fetching historical ReserveUpdated events for entity ${entityId.slice(0, 10)}...`);
-      try {
-        const reserveEvents = await this.depositoryContract.queryFilter(this.depositoryContract.filters.ReserveUpdated(entityId), 0, currentBlock);
-        console.log(`\uD83D\uDD04 Found ${reserveEvents.length} historical ReserveUpdated events for entity ${entityId.slice(0, 10)}...`);
-        console.log(`\uD83D\uDD04\uD83D\uDD0D Full entityId being synced: ${entityId}`);
-        console.log(`\uD83D\uDD04\uD83D\uDD0D Available replicas during sync: ${Array.from(env.replicas.keys()).join(", ")}`);
-        reserveEvents.sort((a, b2) => {
-          if (a.blockNumber !== b2.blockNumber) {
-            return a.blockNumber - b2.blockNumber;
-          }
-          return (a.transactionIndex || 0) - (b2.transactionIndex || 0);
-        });
-        for (const event of reserveEvents) {
-          console.log(`\uD83D\uDD04\uD83C\uDFAF Processing historical event: block ${event.blockNumber}, tx ${event.transactionHash}`);
-          const originalInputsLength = env.serverInput.entityInputs.length;
-          await this.processContractEvent(event, env);
-          if (env.serverInput.entityInputs.length > originalInputsLength) {
-            console.log(`\uD83D\uDD04⚡ Processing single historical event immediately to update jBlock`);
-            const { processUntilEmpty } = await Promise.resolve().then(() => (init_server(), exports_server));
-            await processUntilEmpty(env, []);
-            console.log(`\uD83D\uDD04✅ Historical event processed, entity jBlock updated`);
-          }
-        }
-      } catch (error) {
-        console.error(`\uD83D\uDD04❌ Error syncing historical events for entity ${entityId.slice(0, 10)}...`, error);
-      }
-    }
-    console.log(`✅ Historical event sync completed for ${newEntities.length} entities`);
-    return newEntities.length > 0;
-  }
-  generateEntityId(entityNumber) {
-    return "0x" + entityNumber.toString(16).padStart(64, "0");
   }
   async syncNewlyCreatedEntities(env) {
-    if (!this.isWatching) {
-      if (DEBUG2)
-        console.log("\uD83D\uDD04 J-WATCHER not watching, skipping newly created entity sync");
-      return false;
+    if (DEBUG2) {
+      console.log("\uD83D\uDD2D⚠️  J-WATCHER: syncNewlyCreatedEntities called (legacy) - first-principles design handles this automatically");
     }
-    console.log("\uD83D\uDD04 Checking for newly created entities needing historical sync...");
-    return await this.syncHistoricalEventsForNewEntities(env);
+    return false;
   }
-  startContinuousEntityMonitoring(env) {
-    setInterval(async () => {
-      if (!this.isWatching)
-        return;
-      try {
-        const currentBlock = await this.provider.getBlockNumber();
-        const entitiesNeedingSync = [];
-        for (const [replicaKey, replica] of env.replicas.entries()) {
-          const [entityId] = replicaKey.split(":");
-          const currentJBlock = replica.state.jBlock || 0;
-          if (currentJBlock < currentBlock) {
-            entitiesNeedingSync.push({ entityId, currentJBlock });
-          }
-        }
-        if (entitiesNeedingSync.length > 0) {
-          console.log(`\uD83D\uDD0D CONTINUOUS-CHECK: Checked ${env.replicas.size} entities against block ${currentBlock}, ${entitiesNeedingSync.length} need sync`);
-          for (const { entityId, currentJBlock } of entitiesNeedingSync) {
-            console.log(`\uD83D\uDD04 ENTITY-SYNC: Entity ${entityId.slice(0, 10)}... at jBlock ${currentJBlock}, syncing to block ${currentBlock}`);
-            await this.syncEntityFromBlock(entityId, currentJBlock + 1, currentBlock, env);
-          }
-        }
-      } catch (error) {
-        console.error("\uD83D\uDD04❌ Error in continuous entity monitoring:", error);
-      }
-    }, 1000);
-  }
-  async syncEntityFromBlock(entityId, fromBlock, toBlock, env) {
+  async getCurrentBlockNumber() {
     try {
-      console.log(`\uD83D\uDD04\uD83D\uDCE1 SYNC-RANGE: Syncing entity ${entityId.slice(0, 10)}... from block ${fromBlock} to ${toBlock}`);
-      const reserveEvents = await this.depositoryContract.queryFilter(this.depositoryContract.filters.ReserveUpdated(entityId), fromBlock, toBlock);
-      console.log(`\uD83D\uDD04\uD83D\uDCE6 SYNC-RANGE: Found ${reserveEvents.length} ReserveUpdated events for entity ${entityId.slice(0, 10)}...`);
-      reserveEvents.sort((a, b2) => {
-        if (a.blockNumber !== b2.blockNumber) {
-          return a.blockNumber - b2.blockNumber;
-        }
-        return (a.transactionIndex || 0) - (b2.transactionIndex || 0);
-      });
-      for (const event of reserveEvents) {
-        console.log(`\uD83D\uDD04⚡ SYNC-RANGE: Processing event block ${event.blockNumber} for entity ${entityId.slice(0, 10)}...`);
-        const beforeLength = env.serverInput.entityInputs.length;
-        await this.processContractEvent(event, env);
-        const afterLength = env.serverInput.entityInputs.length;
-        console.log(`\uD83D\uDD0D EVENT-DEBUG: entityInputs length before=${beforeLength}, after=${afterLength}`);
-        if (env.serverInput.entityInputs.length > 0) {
-          console.log(`\uD83D\uDD04\uD83D\uDCA5 SYNC-RANGE: Calling processUntilEmpty to process ${env.serverInput.entityInputs.length} queued events`);
-          const { processUntilEmpty } = await Promise.resolve().then(() => (init_server(), exports_server));
-          await processUntilEmpty(env, []);
-          const replica = env.replicas.get(`${entityId}:${this.findProposerReplica(entityId, env)?.signerId}`);
-          const newJBlock = replica?.state.jBlock || 0;
-          console.log(`\uD83D\uDD04✅ SYNC-RANGE: ProcessUntilEmpty completed, entity jBlock now: ${newJBlock}`);
-        } else {
-          console.log(`\uD83D\uDD04⚠️ SYNC-RANGE: No events were queued for processing!`);
-        }
-      }
+      return await this.provider.getBlockNumber();
     } catch (error) {
-      console.error(`\uD83D\uDD04❌ SYNC-RANGE: Error syncing entity ${entityId.slice(0, 10)}... from block ${fromBlock}:`, error);
+      if (DEBUG2) {
+        console.log(`\uD83D\uDD2D⚠️  J-WATCHER: Could not get current block, using 0:`, error.message);
+      }
+      return 0;
     }
   }
   getStatus() {
     return {
       isWatching: this.isWatching,
-      lastProcessedBlock: this.lastProcessedBlock,
       signerCount: this.signers.size
     };
   }
@@ -30780,14 +30569,15 @@ async function setupJEventWatcher(env, rpcUrl, entityProviderAddr, depositoryAdd
   watcher.addSigner("s2", "s2-private-key", ["1", "2", "3", "4", "5"]);
   watcher.addSigner("s3", "s3-private-key", ["1", "2", "3", "4", "5"]);
   await watcher.startWatching(env);
+  if (DEBUG2) {
+    console.log("\uD83D\uDD2D✅ J-WATCHER: Setup complete with first-principles design");
+  }
   return watcher;
 }
-var DEBUG2 = true, HEAVY_LOGS = true;
-var init_j_event_watcher = __esm(() => {
-  init_lib2();
-});
 
 // src/rundemo.ts
+init_entity_factory();
+init_utils5();
 var createDepositEvent = (entityId, signerId, asset, eventType = "DEPOSIT") => {
   const event = {
     entityId,
@@ -30817,7 +30607,8 @@ var createDepositEvent = (entityId, signerId, asset, eventType = "DEPOSIT") => {
     console.log(`\uD83C\uDFAD Mock j_event created: ${eventType} ${asset.amount} ${asset.asset} for entity ${entityId.slice(0, 10)}...`);
   }
   return event;
-}, runDemo = async (env) => {
+};
+var runDemo = async (env) => {
   if (DEBUG) {
     console.log("\uD83D\uDE80 Starting XLN Demo: First Principles");
   }
@@ -30963,46 +30754,13 @@ var createDepositEvent = (entityId, signerId, asset, eventType = "DEPOSIT") => {
   console.log('\uD83C\uDF10 For REAL blockchain integration, use the "Run Demo" button in the UI!');
   return env;
 };
-var init_rundemo = __esm(() => {
-  init_entity_factory();
-  init_evm();
-  init_server();
-  init_utils5();
-});
 
-// src/snapshot-coder.ts
-var USE_MSGPACK = false, jsonReplacer = (key, value) => {
-  if (value instanceof Map) {
-    return { _dataType: "Map", value: Array.from(value.entries()) };
-  }
-  if (typeof value === "bigint") {
-    return { _dataType: "BigInt", value: value.toString() };
-  }
-  return value;
-}, jsonReviver = (key, value) => {
-  if (typeof value === "object" && value !== null) {
-    if (value._dataType === "Map")
-      return new Map(value.value);
-    if (value._dataType === "BigInt")
-      return BigInt(value.value);
-  }
-  return value;
-}, encode = (data4) => {
-  if (USE_MSGPACK) {
-    throw new Error("Msgpack mode requires async initialization - use encodeAsync instead");
-  } else {
-    return Buffer.from(JSON.stringify(data4, jsonReplacer));
-  }
-}, decode2 = (buffer) => {
-  if (USE_MSGPACK) {
-    throw new Error("Msgpack mode requires async initialization - use decodeAsync instead");
-  } else {
-    return JSON.parse(buffer.toString(), jsonReviver);
-  }
-};
-var init_snapshot_coder = () => {};
+// src/test-hanko-complete.ts
+init_lib2();
 
 // src/hanko-real.ts
+init_lib2();
+init_utils5();
 var bufferConcat = (buffers) => {
   if (typeof Buffer.concat === "function") {
     return Buffer.concat(buffers);
@@ -31016,7 +30774,8 @@ var bufferConcat = (buffers) => {
     }
     return Buffer.from(result);
   }
-}, bufferAlloc = (size, fill) => {
+};
+var bufferAlloc = (size, fill) => {
   if (typeof Buffer.alloc === "function") {
     return Buffer.alloc(size, fill);
   } else {
@@ -31026,7 +30785,8 @@ var bufferConcat = (buffers) => {
     }
     return Buffer.from(result);
   }
-}, createDirectHashSignature = async (hash3, privateKey) => {
+};
+var createDirectHashSignature = async (hash3, privateKey) => {
   try {
     const wallet = new exports_ethers.Wallet(exports_ethers.hexlify(privateKey));
     const hashHex = exports_ethers.hexlify(hash3);
@@ -31046,7 +30806,8 @@ var bufferConcat = (buffers) => {
     console.error(`❌ Failed to create direct hash signature: ${error}`);
     throw error;
   }
-}, verifySignatureRecovery = async (hash3, signature, expectedAddress) => {
+};
+var verifySignatureRecovery = async (hash3, signature, expectedAddress) => {
   try {
     const r = exports_ethers.hexlify(signature.slice(0, 32));
     const s = exports_ethers.hexlify(signature.slice(32, 64));
@@ -31059,7 +30820,8 @@ var bufferConcat = (buffers) => {
     console.error(`❌ Failed to verify signature recovery: ${error}`);
     return false;
   }
-}, packRealSignatures = (signatures) => {
+};
+var packRealSignatures = (signatures) => {
   console.log(`\uD83D\uDCE6 Packing ${signatures.length} REAL signatures...`);
   if (signatures.length === 0) {
     return bufferAlloc(0);
@@ -31093,7 +30855,8 @@ var bufferConcat = (buffers) => {
   const packed = bufferConcat([rsValues, vValues]);
   console.log(`✅ Packed ${signatures.length} real signatures: ${packed.length} bytes`);
   return packed;
-}, detectSignatureCount = (packedSignatures) => {
+};
+var detectSignatureCount = (packedSignatures) => {
   if (packedSignatures.length === 0)
     return 0;
   for (let count = 1;count <= 16000; count++) {
@@ -31109,7 +30872,8 @@ var bufferConcat = (buffers) => {
     }
   }
   throw new Error(`Invalid packed signature length: ${packedSignatures.length} bytes - cannot detect count`);
-}, unpackRealSignatures = (packedSignatures) => {
+};
+var unpackRealSignatures = (packedSignatures) => {
   const signatureCount = detectSignatureCount(packedSignatures);
   console.log(`\uD83D\uDCE6 Unpacking ${signatureCount} REAL signatures...`);
   if (signatureCount === 0)
@@ -31134,7 +30898,8 @@ var bufferConcat = (buffers) => {
   }
   console.log(`✅ Unpacked ${signatures.length} real signatures`);
   return signatures;
-}, buildRealHanko = async (hashToSign, config) => {
+};
+var buildRealHanko = async (hashToSign, config) => {
   console.log(`\uD83D\uDD8B️  Building REAL hanko: ${config.claims.length} claims, ${config.privateKeys.length} signatures`);
   const signatures = [];
   const signerAddresses = [];
@@ -31167,7 +30932,8 @@ var bufferConcat = (buffers) => {
   console.log(`   \uD83D\uDCCB Signers: ${signerAddresses.map((addr) => addr.slice(0, 10) + "...").join(", ")}`);
   console.log(`   \uD83D\uDCCA Signature count: ${signatures.length} (detected from length)`);
   return hanko;
-}, recoverHankoEntities = async (hanko, hash3) => {
+};
+var recoverHankoEntities = async (hanko, hash3) => {
   console.log("\uD83D\uDD0D Recovering hanko entities with flashloan governance...");
   const signatures = unpackRealSignatures(hanko.packedSignatures);
   const yesEntities = [];
@@ -31226,7 +30992,8 @@ var bufferConcat = (buffers) => {
     noEntities: hanko.placeholders,
     claims: hanko.claims
   };
-}, testFullCycle = async () => {
+};
+var testFullCycle = async () => {
   console.log(`
 \uD83E\uDDEA === FULL CYCLE TEST: TypeScript → Solidity ===
 `);
@@ -31275,7 +31042,8 @@ var bufferConcat = (buffers) => {
   console.log(`
 \uD83D\uDCCB ABI Encoded hanko: ${abiEncoded.length} bytes`);
   return { hanko, abiEncoded, hashToSign };
-}, testGasOptimization = async () => {
+};
+var testGasOptimization = async () => {
   console.log(`
 ⛽ === GAS OPTIMIZATION TEST ===
 `);
@@ -31303,21 +31071,20 @@ var bufferConcat = (buffers) => {
   console.log(`
 \uD83D\uDCA1 Recommendation: Use Method 2 for gas-sensitive applications`);
 };
-var init_hanko_real = __esm(() => {
-  init_lib2();
-  init_utils5();
-});
 
 // src/test-hanko-complete.ts
+init_utils5();
 var generateTestKeys = (count) => {
   const keys = [];
   for (let i = 0;i < count; i++) {
     keys.push(randomBytes4(32));
   }
   return keys;
-}, getWalletFromKey = (privateKey) => {
+};
+var getWalletFromKey = (privateKey) => {
   return new exports_ethers.Wallet(exports_ethers.hexlify(privateKey));
-}, testRealSignatures = async () => {
+};
+var testRealSignatures = async () => {
   console.log(`
 \uD83D\uDD10 === REAL SIGNATURE TESTS ===
 `);
@@ -31333,7 +31100,8 @@ var generateTestKeys = (count) => {
   if (!verified) {
     throw new Error("Signature verification failed");
   }
-}, testSignaturePacking = async () => {
+};
+var testSignaturePacking = async () => {
   console.log(`
 \uD83D\uDCE6 === SIGNATURE PACKING TESTS ===
 `);
@@ -31360,7 +31128,8 @@ var generateTestKeys = (count) => {
       throw new Error(`Signature ${i + 1} packing/unpacking failed`);
     }
   }
-}, testBasicHanko = async () => {
+};
+var testBasicHanko = async () => {
   console.log(`
 \uD83D\uDD8B️  === BASIC HANKO TESTS ===
 `);
@@ -31389,7 +31158,8 @@ var generateTestKeys = (count) => {
   if (recovered.yesEntities.length !== 3) {
     throw new Error(`Expected 3 yes entities, got ${recovered.yesEntities.length}`);
   }
-}, testHierarchicalHanko = async () => {
+};
+var testHierarchicalHanko = async () => {
   console.log(`
 \uD83C\uDFD7️  === HIERARCHICAL HANKO TESTS ===
 `);
@@ -31425,7 +31195,8 @@ var generateTestKeys = (count) => {
   if (recovered.yesEntities.length !== 6) {
     throw new Error(`Expected 6 yes entities, got ${recovered.yesEntities.length}`);
   }
-}, testEdgeCases = async () => {
+};
+var testEdgeCases = async () => {
   console.log(`
 ⚠️  === EDGE CASE TESTS ===
 `);
@@ -31474,7 +31245,8 @@ var generateTestKeys = (count) => {
   console.log("✅ Failed entities hanko created");
   const failedRecovered = await recoverHankoEntities(failedHanko, testHash);
   console.log(`   Recovered: ${failedRecovered.yesEntities.length} yes, ${failedRecovered.noEntities.length} placeholders`);
-}, testPerformance = async () => {
+};
+var testPerformance = async () => {
   console.log(`
 ⚡ === PERFORMANCE TESTS ===
 `);
@@ -31504,7 +31276,8 @@ var generateTestKeys = (count) => {
   const recoverTime = Date.now() - recoverStart;
   console.log(`\uD83D\uDD0D Recovery took ${recoverTime}ms`);
   console.log(`\uD83D\uDCCA Throughput: ${Math.round(LARGE_COUNT / (buildTime + recoverTime) * 1000)} sigs/sec`);
-}, testIntegration = async () => {
+};
+var testIntegration = async () => {
   console.log(`
 \uD83D\uDD17 === INTEGRATION TESTS ===
 `);
@@ -31514,7 +31287,8 @@ var generateTestKeys = (count) => {
   console.log("\uD83E\uDDEA Running gas optimization test...");
   await testGasOptimization();
   console.log("✅ Gas optimization test completed");
-}, runAllTests = async () => {
+};
+var runAllTests = async () => {
   console.log("\uD83D\uDE80 === COMPREHENSIVE HANKO TESTS ===");
   try {
     await testRealSignatures();
@@ -31542,75 +31316,28 @@ var generateTestKeys = (count) => {
     }
   }
 };
-var init_test_hanko_complete = __esm(() => {
-  init_lib2();
-  init_hanko_real();
-  init_utils5();
-  if (typeof process !== "undefined" && import.meta.url === `file://${process.argv[1]}`) {
-    runAllTests();
-  }
-});
+if (typeof process !== "undefined" && import.meta.url === `file://${process.argv[1]}`) {
+  runAllTests();
+}
 
 // src/server.ts
-var exports_server = {};
-__export(exports_server, {
-  transferNameBetweenEntities: () => transferNameBetweenEntities,
-  submitSettle: () => submitSettle,
-  submitReserveToReserve: () => submitReserveToReserve,
-  submitProcessBatch: () => submitProcessBatch,
-  submitPrefundAccount: () => submitPrefundAccount,
-  searchEntityNames: () => searchEntityNames2,
-  runDemoWrapper: () => runDemoWrapper,
-  runDemo: () => runDemo,
-  resolveEntityName: () => resolveEntityName2,
-  resolveEntityIdentifier: () => resolveEntityIdentifier,
-  requestNamedEntity: () => requestNamedEntity,
-  registerNumberedEntityOnChain: () => registerNumberedEntityOnChain,
-  registerEnvChangeCallback: () => registerEnvChangeCallback,
-  processUntilEmpty: () => processUntilEmpty,
-  main: () => main,
-  isEntityRegistered: () => isEntityRegistered,
-  hashBoard: () => hashBoard,
-  getSnapshot: () => getSnapshot,
-  getSignerDisplayInfo: () => getSignerDisplayInfo,
-  getNextEntityNumber: () => getNextEntityNumber,
-  getJurisdictionByAddress: () => getJurisdictionByAddress,
-  getHistory: () => getHistory,
-  getEntityInfoFromChain: () => getEntityInfoFromChain,
-  getEntityDisplayInfoFromProfile: () => getEntityDisplayInfoFromProfile,
-  getEntityDisplayInfo: () => getEntityDisplayInfo,
-  getCurrentHistoryIndex: () => getCurrentHistoryIndex,
-  getAvailableJurisdictions: () => getAvailableJurisdictions,
-  generateSignerAvatar: () => generateSignerAvatar,
-  generateNumberedEntityId: () => generateNumberedEntityId,
-  generateNamedEntityId: () => generateNamedEntityId,
-  generateLazyEntityId: () => generateLazyEntityId,
-  generateEntityAvatar: () => generateEntityAvatar,
-  formatSignerDisplay: () => formatSignerDisplay,
-  formatEntityDisplay: () => formatEntityDisplay,
-  encodeBoard: () => encodeBoard,
-  detectEntityType: () => detectEntityType,
-  demoCompleteHanko: () => demoCompleteHanko,
-  debugFundReserves: () => debugFundReserves,
-  db: () => db,
-  createProfileUpdateTx: () => createProfileUpdateTx,
-  createNumberedEntity: () => createNumberedEntity,
-  createLazyEntity: () => createLazyEntity,
-  createEmptyEnv: () => createEmptyEnv,
-  connectToEthereum: () => connectToEthereum,
-  clearDatabaseAndHistory: () => clearDatabaseAndHistory,
-  clearDatabase: () => clearDatabase,
-  assignNameOnChain: () => assignNameOnChain,
-  applyServerInput: () => applyServerInput
+init_utils5();
+var db = new $Level("db", {
+  valueEncoding: "buffer",
+  keyEncoding: "binary"
 });
-import fs2 from "fs";
-var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallback = (callback) => {
+var envChangeCallback = null;
+var env;
+var jWatcher = null;
+var registerEnvChangeCallback = (callback) => {
   envChangeCallback = callback;
-}, notifyEnvChange = (env2) => {
+};
+var notifyEnvChange = (env2) => {
   if (envChangeCallback) {
     envChangeCallback(env2);
   }
-}, startJEventWatcher = async (env2) => {
+};
+var startJEventWatcher = async (env2) => {
   try {
     const ethereum = await getJurisdictionByAddress("ethereum");
     if (!ethereum) {
@@ -31637,116 +31364,8 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
   } catch (error) {
     console.error("❌ Failed to start J-Event Watcher:", error);
   }
-}, deepCloneReplica = (replica) => {
-  const cloneMap = (map) => new Map(map);
-  const cloneArray = (arr) => [...arr];
-  return {
-    entityId: replica.entityId,
-    signerId: replica.signerId,
-    state: {
-      entityId: replica.state.entityId,
-      height: replica.state.height,
-      timestamp: replica.state.timestamp,
-      nonces: cloneMap(replica.state.nonces),
-      messages: cloneArray(replica.state.messages),
-      proposals: new Map(Array.from(replica.state.proposals.entries()).map(([id2, proposal]) => [
-        id2,
-        { ...proposal, votes: cloneMap(proposal.votes) }
-      ])),
-      config: replica.state.config,
-      reserves: cloneMap(replica.state.reserves),
-      channels: cloneMap(replica.state.channels),
-      collaterals: cloneMap(replica.state.collaterals)
-    },
-    mempool: cloneArray(replica.mempool),
-    proposal: replica.proposal ? {
-      height: replica.proposal.height,
-      txs: cloneArray(replica.proposal.txs),
-      hash: replica.proposal.hash,
-      newState: replica.proposal.newState,
-      signatures: cloneMap(replica.proposal.signatures)
-    } : undefined,
-    lockedFrame: replica.lockedFrame ? {
-      height: replica.lockedFrame.height,
-      txs: cloneArray(replica.lockedFrame.txs),
-      hash: replica.lockedFrame.hash,
-      newState: replica.lockedFrame.newState,
-      signatures: cloneMap(replica.lockedFrame.signatures)
-    } : undefined,
-    isProposer: replica.isProposer
-  };
-}, captureSnapshot = async (env2, serverInput, serverOutputs, description) => {
-  const profiles = {};
-  console.log(`\uD83D\uDD0D SNAPSHOT-DEBUG: env.gossip exists: ${!!env2.gossip}`);
-  console.log(`\uD83D\uDD0D SNAPSHOT-DEBUG: env.gossip.profiles exists: ${!!env2.gossip?.profiles}`);
-  console.log(`\uD83D\uDD0D SNAPSHOT-DEBUG: env.gossip.profiles size: ${env2.gossip?.profiles?.size || 0}`);
-  if (env2.gossip?.profiles) {
-    console.log(`\uD83D\uDD0D SNAPSHOT-DEBUG: Profile keys:`, Array.from(env2.gossip.profiles.keys()));
-    for (const [id2, profile] of env2.gossip.profiles.entries()) {
-      profiles[id2] = profile;
-      console.log(`\uD83D\uDD0D SNAPSHOT-DEBUG: Capturing profile ${id2}:`, profile.metadata?.name || "no name");
-    }
-  }
-  const snapshot = {
-    height: env2.height,
-    timestamp: env2.timestamp,
-    replicas: new Map(Array.from(env2.replicas.entries()).map(([key, replica]) => [key, deepCloneReplica(replica)])),
-    serverInput: {
-      serverTxs: [...serverInput.serverTxs],
-      entityInputs: serverInput.entityInputs.map((input) => ({
-        ...input,
-        entityTxs: input.entityTxs ? [...input.entityTxs] : undefined,
-        precommits: input.precommits ? new Map(input.precommits) : undefined
-      }))
-    },
-    serverOutputs: serverOutputs.map((output2) => ({
-      ...output2,
-      entityTxs: output2.entityTxs ? [...output2.entityTxs] : undefined,
-      precommits: output2.precommits ? new Map(output2.precommits) : undefined
-    })),
-    description,
-    gossip: {
-      profiles
-    }
-  };
-  env2.history = env2.history || [];
-  env2.history.push(snapshot);
-  try {
-    const batch = db.batch();
-    batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
-    batch.put(Buffer.from("latest_height"), Buffer.from(snapshot.height.toString()));
-    await batch.write();
-    if (DEBUG) {
-      console.log(`\uD83D\uDCBE Snapshot ${snapshot.height} saved to IndexedDB successfully`);
-      console.log(`\uD83D\uDCBE Saved gossip profiles: ${Object.keys(profiles).length} entries`);
-    }
-  } catch (error) {
-    console.error(`❌ Failed to save snapshot ${snapshot.height} to IndexedDB:`, error);
-    throw error;
-  }
-  if (DEBUG) {
-    console.log(`\uD83D\uDCF8 Snapshot captured: "${description}" (${env2.history.length} total)`);
-    if (serverInput.serverTxs.length > 0) {
-      console.log(`    \uD83D\uDDA5️  ServerTxs: ${serverInput.serverTxs.length}`);
-      serverInput.serverTxs.forEach((tx, i) => {
-        console.log(`      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? "proposer" : "validator"})`);
-      });
-    }
-    if (serverInput.entityInputs.length > 0) {
-      console.log(`    \uD83D\uDCE8 EntityInputs: ${serverInput.entityInputs.length}`);
-      serverInput.entityInputs.forEach((input, i) => {
-        const parts = [];
-        if (input.entityTxs?.length)
-          parts.push(`${input.entityTxs.length} txs`);
-        if (input.precommits?.size)
-          parts.push(`${input.precommits.size} precommits`);
-        if (input.proposedFrame)
-          parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
-        console.log(`      ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(", ") || "empty"})`);
-      });
-    }
-  }
-}, applyServerInput = async (env2, serverInput) => {
+};
+var applyServerInput = async (env2, serverInput) => {
   const startTime = Date.now();
   try {
     if (!serverInput) {
@@ -31811,37 +31430,34 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
             config: serverTx.data.config,
             reserves: new Map,
             channels: new Map,
-            collaterals: new Map,
             jBlock: 0
           },
           mempool: [],
           isProposer: serverTx.data.isProposer
         });
-        console.log(`\uD83D\uDD0D REPLICA-DEBUG: Added replica ${replicaKey}, total replicas now: ${env2.replicas.size}`);
+        const createdReplica = env2.replicas.get(replicaKey);
+        const actualJBlock = createdReplica?.state.jBlock;
+        console.log(`\uD83D\uDD0D REPLICA-DEBUG: Added replica ${replicaKey}, jBlock should be 0, actually is: ${actualJBlock} (type: ${typeof actualJBlock})`);
+        if (typeof actualJBlock !== "number") {
+          console.error(`\uD83D\uDCA5 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
+          console.error(`\uD83D\uDCA5   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
+          if (createdReplica) {
+            createdReplica.state.jBlock = 0;
+            console.log(`\uD83D\uDCA5   FIXED: Set jBlock to 0 for replica ${replicaKey}`);
+          }
+        }
       }
     });
     console.log(`\uD83D\uDD0D REPLICA-DEBUG: After processing serverTxs, total replicas: ${env2.replicas.size}`);
-    console.log(`\uD83D\uDD0D J-WATCHER SYNC CHECK: jWatcher=${!!jWatcher}, serverTxs.length=${env2.serverInput.serverTxs.length}`);
-    if (jWatcher && env2.serverInput.serverTxs.length > 0) {
-      const hasImportReplica = env2.serverInput.serverTxs.some((tx) => tx.type === "importReplica");
-      console.log(`\uD83D\uDD0D J-WATCHER SYNC CHECK: hasImportReplica=${hasImportReplica}, serverTx types=[${env2.serverInput.serverTxs.map((tx) => tx.type).join(", ")}]`);
-      if (hasImportReplica) {
-        console.log("\uD83D\uDD04 Triggering j-watcher sync for newly created entities...");
-        try {
-          const eventsProcessed = await jWatcher.syncNewlyCreatedEntities(env2);
-          if (eventsProcessed) {
-            console.log("\uD83D\uDD04✅ Historical events processed individually during sync");
-          }
-        } catch (error) {
-          console.error("\uD83D\uDD04❌ Failed to sync newly created entities:", error);
-        }
-      } else {
-        console.log("\uD83D\uDD0D J-WATCHER SYNC: No importReplica serverTxs found, skipping sync");
-      }
-    } else {
-      console.log("\uD83D\uDD0D J-WATCHER SYNC: Conditions not met for sync trigger");
-    }
+    console.log(`\uD83D\uDD0D SERVER-PROCESSING: About to process ${mergedInputs.length} merged entity inputs`);
     for (const entityInput of mergedInputs) {
+      const jEventCount = entityInput.entityTxs?.filter((tx) => tx.type === "j_event").length || 0;
+      if (jEventCount > 0) {
+        console.log(`\uD83D\uDEA8 FOUND-J-EVENTS: Entity ${entityInput.entityId.slice(0, 10)}... has ${jEventCount} j-events from ${entityInput.signerId}`);
+        entityInput.entityTxs?.filter((tx) => tx.type === "j_event").forEach((jEvent, i) => {
+          console.log(`\uD83D\uDEA8   J-EVENT-${i}: type=${jEvent.data.event.type}, block=${jEvent.data.blockNumber}, observedAt=${new Date(jEvent.data.observedAt).toLocaleTimeString()}`);
+        });
+      }
       const replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
       const entityReplica = env2.replicas.get(replicaKey);
       console.log(`\uD83D\uDD0D REPLICA-LOOKUP: Key="${replicaKey}"`);
@@ -31877,7 +31493,7 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     };
     env2.serverInput.serverTxs.length = 0;
     env2.serverInput.entityInputs.length = 0;
-    await captureSnapshot(env2, processedInput, entityOutbox, inputDescription);
+    await captureSnapshot(env2, env2.history, db, processedInput, entityOutbox, inputDescription);
     console.log(`\uD83D\uDD0D REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env2.replicas.size}`);
     console.log(`\uD83D\uDD0D REPLICA-DEBUG: Replica keys:`, Array.from(env2.replicas.keys()));
     console.log(`\uD83D\uDD0D GOSSIP-DEBUG: Environment keys before notify:`, Object.keys(env2));
@@ -31936,7 +31552,8 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     log.error(`❌ Error processing server input:`, error);
     return { entityOutbox: [], mergedInputs: [] };
   }
-}, main = async () => {
+};
+var main = async () => {
   if (!isBrowser) {
     try {
       const jurisdictionsContent = fs2.readFileSync("./jurisdictions.json", "utf8");
@@ -31967,12 +31584,14 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
   };
   try {
     if (isBrowser) {
-      console.log("\uD83C\uDF10 Browser environment: Attempting to load snapshots from IndexedDB...");
+      console.log("\uD83C\uDF10 BROWSER-DEBUG: Starting IndexedDB snapshot loading process...");
     } else {
       console.log("\uD83D\uDDA5️ Node.js environment: Attempting to load snapshots from filesystem...");
     }
+    console.log("\uD83D\uDD0D BROWSER-DEBUG: Querying latest_height from database...");
     const latestHeightBuffer = await db.get(Buffer.from("latest_height"));
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
+    console.log(`\uD83D\uDCCA BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
     console.log(`\uD83D\uDCCA Found latest height: ${latestHeight}, loading ${latestHeight + 1} snapshots...`);
     console.log(`\uD83D\uDCE5 Loading snapshots: 1 to ${latestHeight}...`);
     const snapshots = [];
@@ -32020,9 +31639,10 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     }
   } catch (error) {
     if (error.code === "LEVEL_NOT_FOUND") {
-      console.log("\uD83D\uDCE6 No saved state found, using fresh environment");
+      console.log("\uD83D\uDCE6 BROWSER-DEBUG: No saved state found, using fresh environment");
       if (isBrowser) {
-        console.log("\uD83D\uDCA1 Browser: This is normal for first-time use. Database will be created automatically.");
+        console.log("\uD83D\uDCA1 BROWSER-DEBUG: This is normal for first-time use. IndexedDB will be created automatically.");
+        console.log("\uD83D\uDD0D BROWSER-DEBUG: Fresh environment means entities will start with jBlock=0");
       } else {
         console.log("\uD83D\uDCA1 Node.js: No existing snapshots in db directory.");
       }
@@ -32044,16 +31664,31 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     console.log("\uD83C\uDF10 Browser environment: Demos available via UI buttons, not auto-running");
   }
   log.info(`\uD83C\uDFAF Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
+  if (isBrowser) {
+    console.log(`\uD83D\uDD0D BROWSER-DEBUG: Final state before j-watcher start:`);
+    console.log(`\uD83D\uDD0D   Environment height: ${env.height}`);
+    console.log(`\uD83D\uDD0D   Total replicas: ${env.replicas.size}`);
+    for (const [replicaKey, replica] of env.replicas.entries()) {
+      const [entityId, signerId] = replicaKey.split(":");
+      console.log(`\uD83D\uDD0D   Entity ${entityId.slice(0, 10)}... (${signerId}): jBlock=${replica.state.jBlock}, isProposer=${replica.isProposer}`);
+    }
+  }
   try {
+    console.log("\uD83D\uDD2D BROWSER-DEBUG: Starting j-watcher with loaded state...");
     await startJEventWatcher(env);
+    console.log("\uD83D\uDD2D BROWSER-DEBUG: J-watcher started successfully");
   } catch (error) {
     console.error("❌ Failed to start J-Event Watcher:", error);
   }
   return env;
-}, getHistory = () => env.history || [], getSnapshot = (index) => {
+};
+var getHistory = () => env.history || [];
+var getSnapshot = (index) => {
   const history = env.history || [];
   return index >= 0 && index < history.length ? history[index] : null;
-}, getCurrentHistoryIndex = () => (env.history || []).length - 1, clearDatabaseAndHistory = async () => {
+};
+var getCurrentHistoryIndex = () => (env.history || []).length - 1;
+var clearDatabaseAndHistory = async () => {
   console.log("\uD83D\uDDD1️ Clearing database and resetting server history...");
   await clearDatabase(db);
   env = {
@@ -32065,7 +31700,45 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     gossip: createGossipLayer()
   };
   console.log("✅ Database and server history cleared");
-}, verifyJurisdictionRegistrations = async () => {
+};
+var getJWatcherStatus = () => {
+  if (!jWatcher || !env)
+    return null;
+  return {
+    isWatching: jWatcher.getStatus().isWatching,
+    proposers: Array.from(env.replicas.entries()).filter(([key, replica]) => replica.isProposer).map(([key, replica]) => {
+      const [entityId, signerId] = key.split(":");
+      return {
+        entityId: entityId.slice(0, 10) + "...",
+        signerId,
+        jBlock: replica.state.jBlock
+      };
+    }),
+    nextSyncIn: Math.floor((1000 - Date.now() % 1000) / 100) / 10
+  };
+};
+if (!isBrowser) {
+  main().then(async (env2) => {
+    if (env2) {
+      const noDemoFlag = process.env.NO_DEMO === "1" || process.argv.includes("--no-demo");
+      if (!noDemoFlag) {
+        console.log("✅ Node.js environment initialized. Running demo for local testing...");
+        console.log("\uD83D\uDCA1 To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag");
+        await runDemo(env2);
+        await startJEventWatcher(env2);
+        setTimeout(async () => {
+          await verifyJurisdictionRegistrations();
+        }, 2000);
+      } else {
+        console.log("✅ Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)");
+        console.log("\uD83D\uDCA1 Use XLN.runDemo(env) to run demo manually if needed");
+      }
+    }
+  }).catch((error) => {
+    console.error("❌ An error occurred during Node.js auto-execution:", error);
+  });
+}
+var verifyJurisdictionRegistrations = async () => {
   console.log(`
 \uD83D\uDD0D === JURISDICTION VERIFICATION ===`);
   console.log(`\uD83D\uDCCB Verifying entity registrations across all jurisdictions...
@@ -32100,7 +31773,8 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
   }
   console.log(`✅ Jurisdiction verification complete!
 `);
-}, demoCompleteHanko = async () => {
+};
+var demoCompleteHanko = async () => {
   try {
     const isBrowser2 = typeof window !== "undefined";
     if (isBrowser2) {
@@ -32117,7 +31791,8 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     console.error("❌ Complete Hanko tests failed:", error);
     throw error;
   }
-}, runDemoWrapper = async (env2) => {
+};
+var runDemoWrapper = async (env2) => {
   try {
     console.log("\uD83D\uDE80 Starting XLN Consensus Demo...");
     console.log("\uD83D\uDCCA This will demonstrate entity creation, consensus, and message passing");
@@ -32130,7 +31805,8 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     console.error("❌ XLN Demo failed:", error);
     throw error;
   }
-}, createEmptyEnv = () => {
+};
+var createEmptyEnv = () => {
   return {
     replicas: new Map,
     height: 0,
@@ -32139,7 +31815,8 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     history: [],
     gossip: createGossipLayer()
   };
-}, processUntilEmpty = async (env2, inputs) => {
+};
+var processUntilEmpty = async (env2, inputs) => {
   let outputs = inputs || [];
   let iterationCount = 0;
   const maxIterations = 10;
@@ -32180,46 +31857,10 @@ var db, envChangeCallback = null, env, jWatcher = null, registerEnvChangeCallbac
     console.log(`\uD83D\uDD25 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
   }
   return env2;
-}, searchEntityNames2 = (query, limit) => searchEntityNames(db, query, limit), resolveEntityName2 = (entityId) => resolveEntityName(db, entityId), getEntityDisplayInfoFromProfile = (entityId) => getEntityDisplayInfo2(db, entityId);
-var init_server = __esm(() => {
-  init_level();
-  init_entity_consensus();
-  init_entity_factory();
-  init_evm();
-  init_j_event_watcher();
-  init_name_resolution();
-  init_rundemo();
-  init_snapshot_coder();
-  init_test_hanko_complete();
-  init_utils5();
-  db = new $Level("db", {
-    valueEncoding: "buffer",
-    keyEncoding: "binary"
-  });
-  if (!isBrowser) {
-    main().then(async (env2) => {
-      if (env2) {
-        const noDemoFlag = process.env.NO_DEMO === "1" || process.argv.includes("--no-demo");
-        if (!noDemoFlag) {
-          console.log("✅ Node.js environment initialized. Running demo for local testing...");
-          console.log("\uD83D\uDCA1 To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag");
-          await runDemo(env2);
-          await startJEventWatcher(env2);
-          setTimeout(async () => {
-            await verifyJurisdictionRegistrations();
-          }, 2000);
-        } else {
-          console.log("✅ Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)");
-          console.log("\uD83D\uDCA1 Use XLN.runDemo(env) to run demo manually if needed");
-        }
-      }
-    }).catch((error) => {
-      console.error("❌ An error occurred during Node.js auto-execution:", error);
-    });
-  }
-});
-init_server();
-
+};
+var searchEntityNames2 = (query, limit) => searchEntityNames(db, query, limit);
+var resolveEntityName2 = (entityId) => resolveEntityName(db, entityId);
+var getEntityDisplayInfoFromProfile = (entityId) => getEntityDisplayInfo2(db, entityId);
 export {
   transferNameBetweenEntities,
   submitSettle,
@@ -32242,6 +31883,7 @@ export {
   getSignerDisplayInfo,
   getNextEntityNumber,
   getJurisdictionByAddress,
+  getJWatcherStatus,
   getHistory,
   getEntityInfoFromChain,
   getEntityDisplayInfoFromProfile,
