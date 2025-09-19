@@ -4,7 +4,7 @@
  */
 
 import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerInput } from './types';
+import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerInput, AccountMachine, Delta } from './types';
 import { DEBUG } from './utils';
 
 // === CLONING UTILITIES ===
@@ -171,3 +171,48 @@ export const captureSnapshot = (
     }
   }
 };
+
+// === ACCOUNT MACHINE HELPERS ===
+
+/**
+ * Clone AccountMachine for validation (replaces dryRun pattern)
+ */
+export function cloneAccountMachine(account: AccountMachine): AccountMachine {
+  try {
+    return structuredClone(account);
+  } catch (error) {
+    console.warn(`⚠️ structuredClone failed for AccountMachine, using manual clone`);
+    return manualCloneAccountMachine(account);
+  }
+}
+
+/**
+ * Manual AccountMachine cloning
+ */
+function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
+  return {
+    ...account,
+    mempool: [...account.mempool],
+    currentFrame: {
+      ...account.currentFrame,
+      tokenIds: [...account.currentFrame.tokenIds],
+      deltas: [...account.currentFrame.deltas],
+    },
+    deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
+    globalCreditLimits: { ...account.globalCreditLimits },
+    pendingSignatures: [...account.pendingSignatures],
+    pendingFrame: account.pendingFrame ? {
+      ...account.pendingFrame,
+      accountTxs: [...account.pendingFrame.accountTxs],
+      tokenIds: [...account.pendingFrame.tokenIds],
+      deltas: [...account.pendingFrame.deltas]
+    } : undefined,
+    clonedForValidation: undefined, // Don't clone the clone
+    proofHeader: { ...account.proofHeader },
+    proofBody: {
+      ...account.proofBody,
+      tokenIds: [...account.proofBody.tokenIds],
+      deltas: [...account.proofBody.deltas],
+    },
+  };
+}

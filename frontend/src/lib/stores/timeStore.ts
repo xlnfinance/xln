@@ -191,10 +191,17 @@ const timeOperations = {
   // Initialize time machine
   initialize() {
     this.updateMaxTimeIndex();
-    
+
     // Subscribe to history changes to update max index automatically
-    history.subscribe(() => {
-      this.updateMaxTimeIndex();
+    // CRITICAL: Only update if we're in live mode to prevent time machine corruption
+    history.subscribe((newHistory) => {
+      const currentState = get(timeState);
+      if (currentState.isLive) {
+        // Only update max index when in live mode to prevent time machine corruption
+        this.updateMaxTimeIndex();
+      } else {
+        console.log(`🕰️ TIME-MACHINE: Ignoring history update while in historical mode (index: ${currentState.currentTimeIndex})`);
+      }
     });
   }
 };

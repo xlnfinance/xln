@@ -1,9 +1,10 @@
 /**
- * Simple Direct Payment - moves delta immediately
- * No complex capacity checking, no circular imports
+ * Direct Payment with proper capacity checking using deriveDelta
+ * Includes event bubbling back to E-Machine
  */
 
 import { AccountMachine, Delta } from '../types';
+import { deriveDelta } from '../account-utils';
 
 export type DirectPaymentData = {
   tokenId: number;
@@ -12,16 +13,16 @@ export type DirectPaymentData = {
 };
 
 /**
- * Simple DirectPayment that just moves delta right away
- * As requested: no linking to old_src, just direct delta updates
+ * DirectPayment with global credit limit checking (similar to old_src deriveDelta)
+ * Checks capacity constraints before applying payment
  */
 export function applyDirectPayment(
   accountMachine: AccountMachine,
   payment: DirectPaymentData,
   isOutgoing: boolean
-): { success: boolean; error?: string } {
+): { success: boolean; error?: string; events?: string[] } {
 
-  console.log(`💸 Simple DirectPayment: ${payment.amount.toString()} of token ${payment.tokenId}, outgoing: ${isOutgoing}`);
+  console.log(`💸 DirectPayment: ${payment.amount.toString()} of token ${payment.tokenId}, outgoing: ${isOutgoing}`);
 
   // Get or create delta for this token
   let delta = accountMachine.deltas.get(payment.tokenId);
@@ -31,21 +32,58 @@ export function applyDirectPayment(
       collateral: 0n,
       ondelta: 0n,
       offdelta: 0n,
-      leftCreditLimit: 1000n,
-      rightCreditLimit: 1000n,
+      leftCreditLimit: 1000000n, // Per-token credit limit: 1M USD equivalent
+      rightCreditLimit: 1000000n, // Per-token credit limit: 1M USD equivalent
       leftAllowence: 0n,
       rightAllowence: 0n,
     };
     accountMachine.deltas.set(payment.tokenId, delta);
+    console.log(`💳 Created new delta for token ${payment.tokenId}`);
   }
 
-  // Simple delta update - just move it right away
+  // Calculate current total delta and new delta after payment
+  const currentTotalDelta = delta.ondelta + delta.offdelta;
+  const newTotalDelta = isOutgoing ?
+    currentTotalDelta + payment.amount : // We owe them more (positive)
+    currentTotalDelta - payment.amount;  // They owe us more (negative)
+
+  console.log(`💸 Delta calculation: current=${currentTotalDelta.toString()}, new=${newTotalDelta.toString()}`);
+
+  // Check capacity constraints using deriveDelta (like old_src)
+  const derived = deriveDelta(delta, accountMachine.isProposer); // isProposer = isLeft in old_src
+
   if (isOutgoing) {
-    // We are sending money to them (positive offdelta means we owe them)
+    // Check if we have enough outbound capacity
+    if (payment.amount > derived.outCapacity) {
+      return {
+        success: false,
+        error: `Insufficient capacity: need ${payment.amount.toString()}, available ${derived.outCapacity.toString()}`
+      };
+    }
+    console.log(`💳 Capacity check passed: using ${payment.amount.toString()}/${derived.outCapacity.toString()} capacity`);
+
+    // Also check global credit limits for USD-denominated credit
+    if (payment.tokenId === 3 && newTotalDelta > 0n) { // Token 3 = USDC
+      const creditUsed = newTotalDelta;
+      const availableCredit = accountMachine.globalCreditLimits.peerLimit;
+
+      if (creditUsed > availableCredit) {
+        return {
+          success: false,
+          error: `Insufficient global credit: need ${creditUsed.toString()} USD, available ${availableCredit.toString()} USD`
+        };
+      }
+      console.log(`💳 Global credit check passed: using ${creditUsed.toString()}/${availableCredit.toString()} USD credit`);
+    }
+  }
+
+  // Apply the payment
+  if (isOutgoing) {
     delta.offdelta += payment.amount;
+    console.log(`💸 Sent ${payment.amount.toString()} token ${payment.tokenId} (we owe them more)`);
   } else {
-    // We are receiving money from them (negative offdelta means they owe us)
     delta.offdelta -= payment.amount;
+    console.log(`💰 Received ${payment.amount.toString()} token ${payment.tokenId} (they owe us more)`);
   }
 
   console.log(`💸 Updated offdelta for token ${payment.tokenId}: ${delta.offdelta.toString()}`);
@@ -55,13 +93,13 @@ export function applyDirectPayment(
   const frameDeltas = [...accountMachine.currentFrame.deltas];
 
   const tokenIndex = frameTokenIds.indexOf(payment.tokenId);
-  const totalDelta = delta.ondelta + delta.offdelta;
+  const finalTotalDelta = delta.ondelta + delta.offdelta;
 
   if (tokenIndex >= 0) {
-    frameDeltas[tokenIndex] = totalDelta;
+    frameDeltas[tokenIndex] = finalTotalDelta;
   } else {
     frameTokenIds.push(payment.tokenId);
-    frameDeltas.push(totalDelta);
+    frameDeltas.push(finalTotalDelta);
   }
 
   accountMachine.currentFrame = {
@@ -71,7 +109,17 @@ export function applyDirectPayment(
     deltas: frameDeltas,
   };
 
-  return { success: true };
+  console.log(`✅ Payment applied. New frame ${accountMachine.currentFrame.frameId}, delta: ${finalTotalDelta.toString()}`);
+
+  // Generate events to bubble up to E-Machine
+  const events = [];
+  if (isOutgoing) {
+    events.push(`💸 Sent ${payment.amount.toString()} token ${payment.tokenId} to Entity ${accountMachine.counterpartyEntityId.slice(-4)}`);
+  } else {
+    events.push(`💰 Received ${payment.amount.toString()} token ${payment.tokenId} from Entity ${accountMachine.counterpartyEntityId.slice(-4)}`);
+  }
+
+  return { success: true, events };
 }
 
 /**

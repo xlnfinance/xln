@@ -36,22 +36,19 @@ if [ -f "jurisdictions.json" ]; then
     
     # Check if contracts are deployed (get ethereum entityProvider address)
     ethereum_addr=$(jq -r '.ethereum.contracts.entityProvider // .jurisdictions.ethereum.contracts.entityProvider // "null"' jurisdictions.json 2>/dev/null)
-    polygon_addr=$(jq -r '.polygon.contracts.entityProvider // .jurisdictions.polygon.contracts.entityProvider // "null"' jurisdictions.json 2>/dev/null)
     
     # Check for placeholder/default Hardhat addresses
     default_hardhat="0x5FbDB2315678afecb367f032d93F642f64180aa3"
     
-    if [ "$ethereum_addr" = "$default_hardhat" ] || [ "$polygon_addr" = "$default_hardhat" ]; then
+    if [ "$ethereum_addr" = "$default_hardhat" ]; then
         echo "   ⚠️  Using default Hardhat addresses (contracts not deployed)"
         echo "   📄 Ethereum: $ethereum_addr"
-        echo "   📄 Polygon: $polygon_addr"
         echo "   💡 Run './deploy-contracts.sh' to deploy proper contracts"
-    elif [ "$ethereum_addr" != "null" ] && [ "$ethereum_addr" != "$polygon_addr" ]; then
-        echo "   ✅ Contracts appear to be individually deployed"
+    elif [ "$ethereum_addr" != "null" ]; then
+        echo "   ✅ Contracts deployed to Ethereum"
         echo "   📄 Ethereum: $ethereum_addr"
-        echo "   📄 Polygon: $polygon_addr"
     else
-        echo "   ⚠️  Contracts might need deployment or are using same address"
+        echo "   ⚠️  Contracts need deployment"
         echo "   💡 Run './deploy-contracts.sh' to deploy"
     fi
 else

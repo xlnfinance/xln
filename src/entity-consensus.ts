@@ -41,7 +41,7 @@ const validateEntityInput = (input: EntityInput): boolean => {
         }
         if (
           typeof tx.type !== 'string' ||
-          !['chat', 'propose', 'vote', 'profile-update', 'j_event', 'accountInput'].includes(tx.type)
+          !['chat', 'propose', 'vote', 'profile-update', 'j_event', 'accountInput', 'openAccount'].includes(tx.type)
         ) {
           log.error(`❌ Invalid transaction type: ${tx.type}`);
           return false;
@@ -615,6 +615,38 @@ export const applyEntityFrame = async (
     const { newState, outputs } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
     allOutputs.push(...outputs);
+  }
+
+  // AUTO-PROPOSE: Check if any accounts need to propose frames after processing transactions
+  const { getAccountsToProposeFrames, proposeAccountFrame } = await import('./account-consensus');
+  const accountsToProposeFrames = getAccountsToProposeFrames(currentEntityState);
+
+  if (accountsToProposeFrames.length > 0) {
+    console.log(`🔄 AUTO-PROPOSE: ${accountsToProposeFrames.length} accounts need frame proposals`);
+
+    for (const counterpartyEntityId of accountsToProposeFrames) {
+      console.log(`🔄 AUTO-PROPOSE: Proposing frame for account with ${counterpartyEntityId.slice(0,10)}`);
+
+      const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
+      if (accountMachine) {
+        const proposal = proposeAccountFrame(accountMachine);
+
+        if (proposal.success && proposal.accountInput) {
+          // Convert AccountInput to EntityInput for routing
+          allOutputs.push({
+            entityId: proposal.accountInput.toEntityId,
+            signerId: 'system',
+            entityTxs: [{
+              type: 'accountInput',
+              data: proposal.accountInput
+            }]
+          });
+
+          // Add events to entity messages
+          currentEntityState.messages.push(...proposal.events);
+        }
+      }
+    }
   }
 
   return { newState: currentEntityState, outputs: allOutputs };

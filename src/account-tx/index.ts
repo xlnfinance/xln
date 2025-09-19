@@ -1,6 +1,7 @@
 /**
- * Simple Account Transaction System
- * Minimal exports to avoid circular imports
+ * Account Transaction System
+ * Simple transaction types and processing only
+ * Use account-consensus.ts from src root for frame consensus
  */
 
 // Core DirectPayment functionality
@@ -11,11 +12,11 @@ export {
 
 export type { DirectPaymentData } from './direct-payment';
 
-// Transaction processing
+// Transaction processing (legacy - use account-consensus.ts instead)
 export {
   processAccountTransaction,
   processAccountMempool
 } from './processor';
 
-// Re-export types (no circular dependency since types.ts doesn't import from here)
+// Re-export types
 export type { AccountMachine, AccountTx, Delta } from '../types';

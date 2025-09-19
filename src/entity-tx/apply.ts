@@ -11,8 +11,9 @@ import { validateMessage } from './validation';
 import { cloneEntityState } from '../state-helpers';
 
 export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
-  console.log(`🚨 APPLY-ENTITY-TX: type=${entityTx.type}, data=`, JSON.stringify(entityTx.data, null, 2));
-  console.log(`🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, account_request`);
+  console.log(`🚨🚨 APPLY-ENTITY-TX: type="${entityTx.type}" (typeof: ${typeof entityTx.type})`);
+  console.log(`🚨🚨 APPLY-ENTITY-TX: data=`, JSON.stringify(entityTx.data, null, 2));
+  console.log(`🚨🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, openAccount`);
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
@@ -165,11 +166,14 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState, outputs: [] };
     }
 
-    if (entityTx.type === 'account_request') {
-      console.log(`💳 ACCOUNT-REQUEST: Processing account request to ${entityTx.data.targetEntityId}`);
+    if (entityTx.type === 'openAccount') {
+      console.log(`💳 OPEN-ACCOUNT: Opening account with ${entityTx.data.targetEntityId}`);
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
+
+      // Add chat message about account opening
+      newState.messages.push(`💳 Opening account with Entity ${entityTx.data.targetEntityId.slice(-4)}...`);
 
       // STEP 1: Create local account machine
       if (!newState.accounts.has(entityTx.data.targetEntityId)) {
@@ -182,7 +186,23 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           sentTransitions: 0,
           ackedTransitions: 0,
           deltas: new Map(),
-          proofHeader: { fromEntity: entityState.entityId, toEntity: entityTx.data.targetEntityId },
+          globalCreditLimits: {
+            ownLimit: 1000000n, // We extend 1M USD credit to counterparty
+            peerLimit: 1000000n, // Counterparty extends 1M USD credit to us
+          },
+          // Frame-based consensus fields
+          currentFrameId: 0,
+          pendingFrame: undefined,
+          pendingSignatures: [],
+          rollbackCount: 0,
+          isProposer: entityState.entityId < entityTx.data.targetEntityId, // Lexicographically smaller is proposer
+          clonedForValidation: undefined,
+          proofHeader: {
+            fromEntity: entityState.entityId,
+            toEntity: entityTx.data.targetEntityId,
+            cooperativeNonce: 0,
+            disputeNonce: 0,
+          },
           proofBody: { tokenIds: [], deltas: [] }
         });
       }
@@ -212,6 +232,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       outputs.push(accountInputForTarget);
       console.log(`💳 OUTPUT-CREATED: Will route AccountInput to ${entityTx.data.targetEntityId.slice(0,10)}...`);
+
+      // Add success message to chat
+      newState.messages.push(`✅ Account opening request sent to Entity ${entityTx.data.targetEntityId.slice(-4)}`);
 
       return { newState, outputs };
     }

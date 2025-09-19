@@ -67,13 +67,7 @@ echo "🚀 Starting networks..."
 ETHEREUM_PID=$!
 echo $ETHEREUM_PID > pids/ethereum.pid
 
-(cd contracts && bunx hardhat node --port 8546 --hostname 0.0.0.0) > logs/polygon-8546.log 2>&1 &
-POLYGON_PID=$!
-echo $POLYGON_PID > pids/polygon.pid
-
-(cd contracts && bunx hardhat node --port 8547 --hostname 0.0.0.0) > logs/arbitrum-8547.log 2>&1 &
-ARBITRUM_PID=$!
-echo $ARBITRUM_PID > pids/arbitrum.pid
+# Polygon and Arbitrum removed
 
 echo "⏳ Waiting for networks to initialize..."
 # give processes a head start then actively wait per-port
@@ -90,8 +84,6 @@ for port in 8545 8546 8547; do
             echo "--- Last 200 lines of logs for port $port ---"
             case $port in
                 8545) tail -n 200 logs/ethereum-8545.log || true ;;
-                8546) tail -n 200 logs/polygon-8546.log || true ;;
-                8547) tail -n 200 logs/arbitrum-8547.log || true ;;
             esac
             cleanup
             exit 1

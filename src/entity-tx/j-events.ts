@@ -100,21 +100,13 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
     
     // Update reserves based on transfer direction
     if (direction === 'sent') {
-      const currentReserve = newEntityState.reserves.get(String(tokenId));
-      if (currentReserve) {
-        const newAmount = currentReserve.amount - BigInt(amount);
-        newEntityState.reserves.set(String(tokenId), {
-          amount: newAmount >= 0n ? newAmount : 0n
-        });
-      }
+      const currentReserve = newEntityState.reserves.get(String(tokenId)) || 0n;
+      const newAmount = currentReserve - BigInt(amount);
+      newEntityState.reserves.set(String(tokenId), newAmount >= 0n ? newAmount : 0n);
       // Message already added above
     } else if (direction === 'received') {
-      const currentReserve = newEntityState.reserves.get(String(tokenId)) || {
-        amount: 0n
-      };
-      newEntityState.reserves.set(String(tokenId), {
-        amount: currentReserve.amount + BigInt(amount)
-      });
+      const currentReserve = newEntityState.reserves.get(String(tokenId)) || 0n;
+      newEntityState.reserves.set(String(tokenId), currentReserve + BigInt(amount));
       // Message already added above
     }
     
@@ -123,9 +115,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
     const { counterpartyEntityId, tokenId, ownReserve, counterpartyReserve, collateral, ondelta, side } = event.data;
     
     // Update own reserves based on the settlement
-    newEntityState.reserves.set(String(tokenId), {
-      amount: BigInt(ownReserve)
-    });
+    newEntityState.reserves.set(String(tokenId), BigInt(ownReserve));
     
     // Create accountInput to feed into a-machine for bilateral consensus
     // This enables the settlement event to be processed by the account machine

@@ -1,6 +1,6 @@
 import { AccountInput, EntityState, Env } from '../../types';
 import { createDemoDelta } from '../../account-utils';
-import { processAccountTransaction } from '../../account-tx';
+import { handleAccountInput as processAccountInput, addToAccountMempool } from '../../account-consensus';
 import { cloneEntityState } from '../../state-helpers';
 
 export function handleAccountInput(state: EntityState, input: AccountInput, env: Env): EntityState {
@@ -8,6 +8,11 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
 
   // Create immutable copy of current state
   const newState: EntityState = cloneEntityState(state);
+
+  // Add chat message about receiving account input
+  if (input.accountTx) {
+    newState.messages.push(`📨 Received ${input.accountTx.type} from Entity ${input.fromEntityId.slice(-4)}`);
+  }
 
   // Get or create account machine for this counterparty
   let accountMachine = newState.accounts.get(input.toEntityId);
@@ -28,8 +33,22 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
         deltas: [0n, -100n, 50n],
       },
       sentTransitions: 0,
+      ackedTransitions: 0,
       deltas: demoDeltasMap,
+      globalCreditLimits: {
+        ownLimit: 1000000n, // We extend 1M USD credit to counterparty
+        peerLimit: 1000000n, // Counterparty extends 1M USD credit to us
+      },
+      // Frame-based consensus fields
+      currentFrameId: 0,
+      pendingFrame: undefined,
+      pendingSignatures: [],
+      rollbackCount: 0,
+      isProposer: state.entityId < input.toEntityId, // Lexicographically smaller is proposer
+      clonedForValidation: undefined,
       proofHeader: {
+        fromEntity: state.entityId,
+        toEntity: input.toEntityId,
         cooperativeNonce: 0,
         disputeNonce: 0,
       },
@@ -94,25 +113,37 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
     newState.messages.push(message);
 
     console.log(`✅ Settlement processed for Entity ${input.toEntityId.slice(-4)}, Token ${tokenId}`);
-  } else {
-    // Process other account transactions immediately using account-tx processor
-    const result = processAccountTransaction(accountMachine, input.accountTx);
+  } else if (input.frameId || input.newAccountFrame || input.accountFrame) {
+    // Handle frame-level consensus using production account-consensus system
+    console.log(`🤝 Processing frame-level AccountInput from ${input.fromEntityId.slice(-4)}`);
+
+    const result = processAccountInput(accountMachine, input);
 
     if (result.success) {
-      console.log(`✅ Processed ${input.accountTx.type} successfully for ${input.toEntityId}`);
+      // Add events to entity messages
+      newState.messages.push(...result.events);
 
-      // Add a chat message about successful transaction
-      const message = `💳 ${input.accountTx.type} processed with Entity ${input.toEntityId.slice(-4)}`;
-      newState.messages.push(message);
+      // If there's a response, queue it for sending back
+      if (result.response) {
+        // TODO: Send response back to counterparty
+        console.log(`📤 Would send AccountInput response back to ${result.response.toEntityId.slice(-4)}`);
+      }
     } else {
-      console.log(`❌ Failed to process ${input.accountTx.type}: ${result.error}`);
+      console.log(`❌ Frame consensus failed: ${result.error}`);
+      newState.messages.push(`❌ Frame consensus failed with Entity ${input.fromEntityId.slice(-4)}: ${result.error}`);
+    }
+  } else if (input.accountTx) {
+    // Handle transaction-level input - add to mempool
+    console.log(`📥 Adding ${input.accountTx.type} to account mempool for ${input.toEntityId.slice(0,10)}`);
 
-      // Add to mempool for retry later
-      accountMachine.mempool.push(input.accountTx);
-      console.log(`💳 Added ${input.accountTx.type} to account mempool for retry`);
+    const added = addToAccountMempool(accountMachine, input.accountTx);
 
-      // Add error message
-      const message = `⚠️ ${input.accountTx.type} failed with Entity ${input.toEntityId.slice(-4)}: ${result.error}`;
+    if (added) {
+      const message = `💳 ${input.accountTx.type} queued for processing with Entity ${input.toEntityId.slice(-4)}`;
+      newState.messages.push(message);
+      console.log(`📊 Account mempool now has ${accountMachine.mempool.length} pending transactions`);
+    } else {
+      const message = `❌ Failed to add ${input.accountTx.type} to mempool (full)`;
       newState.messages.push(message);
     }
   }
