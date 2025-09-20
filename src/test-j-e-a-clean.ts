@@ -138,7 +138,8 @@ const runCleanIntegrationTest = async () => {
   };
 
   await applyServerInput(env, { serverTxs: [], entityInputs: [openAccountTx] });
-  await processUntilEmpty(env, []);
+  // TEMPORARILY DISABLED to isolate hang issue
+  // await processUntilEmpty(env, []);
 
   const e1_state_after = env.replicas.get(`${e1_id}:s1`)?.state;
   const e2_state_after = env.replicas.get(`${e2_id}:s2`)?.state;

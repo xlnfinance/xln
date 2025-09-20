@@ -162,7 +162,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'accountInput') {
-      const newState = await handleAccountInput(entityState, entityTx.data, env);
+      const newState = handleAccountInput(entityState, entityTx.data, env);
       return { newState, outputs: [] };
     }
 
