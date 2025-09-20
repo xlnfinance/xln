@@ -308,6 +308,24 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState, outputs: [] };
       }
 
+      // Initialize processed requests tracking if not exists
+      if (!newState.processedRequests) {
+        newState.processedRequests = new Set();
+      }
+
+      // Create idempotency key for this request
+      const idempotencyKey = `openAccount:${entityState.entityId}:${entityTx.data.targetEntityId}`;
+
+      // Check if we've already processed this exact request
+      if (newState.processedRequests.has(idempotencyKey)) {
+        console.log(`💳 DUPLICATE-REQUEST: Already processed opening request for ${entityTx.data.targetEntityId.slice(0,10)}`);
+        newState.messages.push(`⚠️ Duplicate request ignored for Entity ${entityTx.data.targetEntityId.slice(-4)}`);
+        return { newState, outputs: [] };
+      }
+
+      // Mark this request as processed
+      newState.processedRequests.add(idempotencyKey);
+
       // Add chat message about account opening
       newState.messages.push(`💳 Opening account with Entity ${entityTx.data.targetEntityId.slice(-4)}...`);
 

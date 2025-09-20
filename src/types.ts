@@ -313,6 +313,9 @@ export interface EntityState {
   // 🎯 Trading state
   orderbook?: any; // Will be lob_core instance
   markets?: Map<string, MarketConfig>; // Trading pairs this entity makes markets in
+
+  // 🔐 Idempotency tracking
+  processedRequests?: Set<string>; // Track processed requests to prevent duplicates
 }
 
 // Market configuration for an entity's trading pair

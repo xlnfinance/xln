@@ -76,6 +76,10 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
     // CRITICAL: Explicit jBlock preservation for financial integrity
     jBlock: entityState.jBlock ?? 0,
+    // Clone idempotency tracking set
+    processedRequests: entityState.processedRequests
+      ? new Set(entityState.processedRequests)
+      : undefined,
   };
 }
 
