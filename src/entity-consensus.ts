@@ -623,7 +623,8 @@ export const applyEntityFrame = async (
   const { getAccountsToProposeFrames, proposeAccountFrame } = await import('./account-consensus');
   const accountsToProposeFrames = getAccountsToProposeFrames(currentEntityState);
 
-  if (accountsToProposeFrames.length > 0) {
+  // TEMPORARILY DISABLED to test if this is causing infinite loop
+  if (false && accountsToProposeFrames.length > 0) {
     console.log(`🔄 AUTO-PROPOSE: ${accountsToProposeFrames.length} accounts need frame proposals`);
 
     for (const counterpartyEntityId of accountsToProposeFrames) {
@@ -632,6 +633,9 @@ export const applyEntityFrame = async (
       const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
       if (accountMachine) {
         const proposal = proposeAccountFrame(accountMachine);
+
+        // Debug: Check if state was actually modified
+        console.log(`🔍 AFTER-PROPOSE: mempool=${accountMachine.mempool.length}, sent=${accountMachine.sentTransitions}, pending=${!!accountMachine.pendingFrame}`);
 
         if (proposal.success && proposal.accountInput) {
           // Convert AccountInput to EntityInput for routing

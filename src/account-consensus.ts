@@ -421,9 +421,15 @@ export function addToAccountMempool(accountMachine: AccountMachine, accountTx: A
  * Check if account should auto-propose frame
  */
 export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
-  return accountMachine.mempool.length > 0 &&
+  const should = accountMachine.mempool.length > 0 &&
          accountMachine.sentTransitions === 0 &&
          !accountMachine.pendingFrame;
+
+  if (should) {
+    console.log(`🔍 SHOULD-PROPOSE: YES - mempool=${accountMachine.mempool.length}, sent=${accountMachine.sentTransitions}, pending=${!!accountMachine.pendingFrame}`);
+  }
+
+  return should;
 }
 
 /**
