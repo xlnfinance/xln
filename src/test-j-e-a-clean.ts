@@ -5,12 +5,19 @@
  * WITHOUT loading existing snapshots
  */
 
+import { existsSync, rmSync } from 'fs';
 import { generateNumberedEntityId } from './entity-factory';
 import { getJurisdictionByAddress } from './evm';
 import { applyServerInput, processUntilEmpty } from './server';
 import { ConsensusConfig, Env } from './types';
 
 const runCleanIntegrationTest = async () => {
+  // Clean up any existing DB to ensure truly clean test
+  if (existsSync('db')) {
+    console.log('🧹 Cleaning up existing database...');
+    rmSync('db', { recursive: true, force: true });
+  }
+
   console.log('🧪 Starting CLEAN J→E→A Integration Test (no existing snapshots)\n');
 
   // Initialize clean environment - NOT loading any existing snapshots

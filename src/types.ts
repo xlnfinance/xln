@@ -121,6 +121,29 @@ export type EntityTx =
   | {
       type: 'openAccount';
       data: { targetEntityId: string };
+    }
+  | {
+      type: 'place_order';
+      data: {
+        orderId: number;
+        side: 0 | 1; // 0=BUY, 1=SELL
+        price: number; // in ticks
+        quantity: number; // in lots
+        tif: 0 | 1 | 2; // 0=GTC, 1=IOC, 2=FOK
+        market?: string; // ETH/USDT, etc (optional, default to entity's primary market)
+      };
+    }
+  | {
+      type: 'cancel_order';
+      data: { orderId: number };
+    }
+  | {
+      type: 'modify_order';
+      data: {
+        orderId: number;
+        newPrice?: number;
+        deltaQty?: number;
+      };
     };
 
 export interface AssetBalance {
@@ -286,6 +309,20 @@ export interface EntityState {
 
   // 🔗 Account machine integration
   accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine
+
+  // 🎯 Trading state
+  orderbook?: any; // Will be lob_core instance
+  markets?: Map<string, MarketConfig>; // Trading pairs this entity makes markets in
+}
+
+// Market configuration for an entity's trading pair
+export interface MarketConfig {
+  baseToken: string; // e.g. 'ETH'
+  quoteToken: string; // e.g. 'USDT'
+  tickSize: number; // Minimum price increment
+  lotSize: number; // Minimum quantity increment
+  priceMin: number; // Min price in ticks
+  priceMax: number; // Max price in ticks
 }
 
 export interface ProposedEntityFrame {
