@@ -166,6 +166,50 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState, outputs: [] };
     }
 
+    if (entityTx.type === 'place_order') {
+      const newState = cloneEntityState(entityState);
+
+      // Initialize orderbook if not exists
+      if (!newState.orderbook) {
+        // Import the production orderbook from lob_core
+        const { createOrderbook } = await import('../orderbook/lob_core');
+        newState.orderbook = createOrderbook();
+      }
+
+      // Add order to orderbook
+      const order = {
+        id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        ...entityTx.data
+      };
+
+      // TODO: Call orderbook.addOrder(order) when lob_core is properly typed
+      newState.messages.push(`📊 Order placed: ${order.side} ${order.amount} @ ${order.price}`);
+
+      return { newState, outputs: [] };
+    }
+
+    if (entityTx.type === 'cancel_order') {
+      const newState = cloneEntityState(entityState);
+
+      if (newState.orderbook) {
+        // TODO: Call orderbook.cancelOrder(entityTx.data.orderId)
+        newState.messages.push(`❌ Order cancelled: ${entityTx.data.orderId}`);
+      }
+
+      return { newState, outputs: [] };
+    }
+
+    if (entityTx.type === 'modify_order') {
+      const newState = cloneEntityState(entityState);
+
+      if (newState.orderbook) {
+        // TODO: Cancel old order and place new one
+        newState.messages.push(`✏️ Order modified: ${entityTx.data.orderId}`);
+      }
+
+      return { newState, outputs: [] };
+    }
+
     if (entityTx.type === 'openAccount') {
       console.log(`💳 OPEN-ACCOUNT: Opening account with ${entityTx.data.targetEntityId}`);
 
