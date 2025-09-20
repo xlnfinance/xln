@@ -313,18 +313,20 @@ export const applyEntityInput = async (
     if (DEBUG) console.log(`    → Validator locked to frame ${entityInput.proposedFrame.hash.slice(0, 10)}...`);
 
     if (config.mode === 'gossip-based') {
-      // Send precommit to all validators
+      // Send precommit to all validators except self
       config.validators.forEach(validatorId => {
-        console.log(
-          `🔍 GOSSIP: [${timestamp}] ${entityReplica.signerId} sending precommit to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
-        );
-        entityOutbox.push({
-          entityId: entityInput.entityId,
-          signerId: validatorId,
-          precommits: new Map([[entityReplica.signerId, frameSignature]]),
-        });
+        if (validatorId !== entityReplica.signerId) {
+          console.log(
+            `🔍 GOSSIP: [${timestamp}] ${entityReplica.signerId} sending precommit to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
+          );
+          entityOutbox.push({
+            entityId: entityInput.entityId,
+            signerId: validatorId,
+            precommits: new Map([[entityReplica.signerId, frameSignature]]),
+          });
+        }
       });
-      if (DEBUG) console.log(`    → Signed proposal, gossiping precommit to ${config.validators.length} validators`);
+      if (DEBUG) console.log(`    → Signed proposal, gossiping precommit to ${config.validators.filter(v => v !== entityReplica.signerId).length} validators`);
     } else {
       // Send precommit to proposer only
       const proposerId = config.validators[0];

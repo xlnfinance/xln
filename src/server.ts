@@ -355,9 +355,9 @@ const applyServerInput = async (
     console.log(`🔍 GOSSIP-DEBUG: Gossip layer type:`, typeof env.gossip);
     console.log(`🔍 GOSSIP-DEBUG: Gossip announce method:`, typeof env.gossip?.announce);
     
-    // CRITICAL FIX: Initialize gossip layer if missing
-    if (!env.gossip) {
-      console.log(`🚨 CRITICAL: gossip layer missing from environment, creating new one`);
+    // CRITICAL FIX: Initialize gossip layer if missing or incomplete
+    if (!env.gossip || typeof env.gossip.announce !== 'function') {
+      console.log(`🚨 CRITICAL: gossip layer missing or incomplete (announce: ${typeof env.gossip?.announce}), creating new one`);
       env.gossip = createGossipLayer();
       console.log(`✅ Gossip layer created and added to environment`);
     }
@@ -919,7 +919,8 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   }
 
   if (iterationCount >= maxIterations) {
-    console.warn('⚠️ processUntilEmpty reached maximum iterations');
+    console.warn('⚠️ processUntilEmpty reached maximum iterations - stopping to prevent infinite loop');
+    console.warn('⚠️ Remaining outputs:', outputs.length);
   } else if (iterationCount > 0) {
     console.log(`🔥 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
   }
