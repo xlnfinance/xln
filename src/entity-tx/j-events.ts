@@ -26,11 +26,11 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
   // Reject events from blocks we've already processed - handle undefined jBlock
   const currentJBlock = entityState.jBlock || 0;
   console.log(`🔍 J-EVENT-CHECK: ${event.type} block=${blockNumber} vs entity.jBlock=${currentJBlock} (raw=${entityState.jBlock}), from=${from}`);
-  if (blockNumber <= currentJBlock) {
+  if (blockNumber < currentJBlock) {
     console.log(`🔄 IGNORING OLD J-EVENT: ${event.type} from block ${blockNumber} (entity already at j-block ${entityState.jBlock})`);
     return entityState;
   }
-  console.log(`✅ J-EVENT-ACCEPTED: ${event.type} block=${blockNumber} > entity.jBlock=${entityState.jBlock}, will process`);
+  console.log(`✅ J-EVENT-ACCEPTED: ${event.type} block=${blockNumber} >= entity.jBlock=${entityState.jBlock}, will process`);
 
   const newEntityState = cloneEntityState(entityState);
   // Update jBlock to current event block
