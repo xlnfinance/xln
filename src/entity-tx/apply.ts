@@ -216,6 +216,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
 
+      // Check if account already exists to prevent duplicate opening
+      if (entityState.accounts.has(entityTx.data.targetEntityId)) {
+        console.log(`💳 ACCOUNT-EXISTS: Account with ${entityTx.data.targetEntityId.slice(0,10)} already exists, skipping`);
+        newState.messages.push(`💳 Account already open with Entity ${entityTx.data.targetEntityId.slice(-4)}`);
+        return { newState, outputs: [] };
+      }
+
       // Add chat message about account opening
       newState.messages.push(`💳 Opening account with Entity ${entityTx.data.targetEntityId.slice(-4)}...`);
 
