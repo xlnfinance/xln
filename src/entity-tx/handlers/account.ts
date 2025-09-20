@@ -113,6 +113,30 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
     newState.messages.push(message);
 
     console.log(`✅ Settlement processed for Entity ${input.toEntityId.slice(-4)}, Token ${tokenId}`);
+  } else if (input.accountTx && input.accountTx.type === 'set_credit_limit') {
+    // Handle credit limit update
+    const creditData = input.accountTx.data;
+
+    if (creditData.isForSelf) {
+      // We're setting our own credit limit (how much we extend to them)
+      accountMachine.globalCreditLimits.ownLimit = creditData.amount;
+      console.log(`💳 Set our credit limit to ${creditData.amount} for Entity ${input.toEntityId.slice(-4)}`);
+      newState.messages.push(`💳 Extended ${creditData.amount} credit to Entity ${input.toEntityId.slice(-4)}`);
+    } else {
+      // They're informing us of their credit limit (how much they extend to us)
+      accountMachine.globalCreditLimits.peerLimit = creditData.amount;
+      console.log(`💳 Entity ${input.fromEntityId.slice(-4)} set their credit limit to ${creditData.amount}`);
+      newState.messages.push(`💳 Entity ${input.fromEntityId.slice(-4)} extended ${creditData.amount} credit to us`);
+    }
+
+    // Ensure the modified accountMachine is saved back to the Map (defensive, might not be needed)
+    newState.accounts.set(input.toEntityId, accountMachine);
+
+    // Store in mempool for frame consensus
+    const added = addToAccountMempool(accountMachine, input.accountTx);
+    if (!added) {
+      console.log(`⚠️ Credit limit update added but mempool full`);
+    }
   } else if (input.frameId || input.newAccountFrame || input.accountFrame) {
     // Handle frame-level consensus using production account-consensus system
     console.log(`🤝 Processing frame-level AccountInput from ${input.fromEntityId.slice(-4)}`);
