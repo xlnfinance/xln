@@ -172,18 +172,55 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Initialize orderbook if not exists
       if (!newState.orderbook) {
         // Import the production orderbook from lob_core
-        const { createOrderbook } = await import('../orderbook/lob_core');
-        newState.orderbook = createOrderbook();
+        const lob = await import('../orderbook/lob_core');
+
+        // Initialize with default parameters for demo
+        lob.resetBook({
+          tick: 1,           // 1 cent tick size
+          pmin: 1,          // Min price: $0.01
+          pmax: 1000000,    // Max price: $10,000
+          maxOrders: 10000, // Max 10k orders
+          stpPolicy: 1,     // Cancel taker on self-trade
+        });
+
+        newState.orderbook = { initialized: true };
       }
 
-      // Add order to orderbook
-      const order = {
-        id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-        ...entityTx.data
+      // Import orderbook functions
+      const lob = await import('../orderbook/lob_core');
+
+      // Convert order data to lob_core format
+      const orderId = Date.now(); // Use timestamp as order ID
+      const owner = 1; // TODO: Map entity/signer to owner ID
+
+      const cmd = {
+        kind: 0 as const, // NEW order
+        owner,
+        orderId,
+        side: entityTx.data.side === 'buy' ? 0 : 1 as 0 | 1,
+        tif: 0 as const, // GTC (Good Till Cancel)
+        postOnly: false,
+        reduceOnly: false,
+        priceTicks: Math.round(entityTx.data.price * 100), // Convert to cents
+        qtyLots: entityTx.data.amount,
       };
 
-      // TODO: Call orderbook.addOrder(order) when lob_core is properly typed
-      newState.messages.push(`📊 Order placed: ${order.side} ${order.amount} @ ${order.price}`);
+      // Apply the command
+      lob.applyCommand(cmd);
+
+      // Check for events
+      const events = lob.drainEvents(0);
+
+      // Process events and update messages
+      for (const event of events.items) {
+        if (event.k === 'ACK') {
+          newState.messages.push(`✅ Order #${event.id} accepted`);
+        } else if (event.k === 'REJECT') {
+          newState.messages.push(`❌ Order #${event.id} rejected: ${event.reason}`);
+        } else if (event.k === 'FILL') {
+          newState.messages.push(`💰 Trade: ${event.qtyLots} @ $${event.pxTicks / 100}`);
+        }
+      }
 
       return { newState, outputs: [] };
     }
@@ -191,9 +228,30 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     if (entityTx.type === 'cancel_order') {
       const newState = cloneEntityState(entityState);
 
-      if (newState.orderbook) {
-        // TODO: Call orderbook.cancelOrder(entityTx.data.orderId)
-        newState.messages.push(`❌ Order cancelled: ${entityTx.data.orderId}`);
+      if (newState.orderbook?.initialized) {
+        const lob = await import('../orderbook/lob_core');
+
+        const owner = 1; // TODO: Map entity/signer to owner ID
+        const orderId = Number(entityTx.data.orderId);
+
+        // Apply cancel command
+        lob.applyCommand({
+          kind: 1, // CANCEL
+          owner,
+          orderId,
+        });
+
+        // Check for events
+        const events = lob.drainEvents(0);
+
+        // Process events
+        for (const event of events.items) {
+          if (event.k === 'CANCEL') {
+            newState.messages.push(`❌ Order #${event.id} cancelled`);
+          }
+        }
+      } else {
+        newState.messages.push(`⚠️ No orderbook to cancel order from`);
       }
 
       return { newState, outputs: [] };
@@ -202,9 +260,36 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     if (entityTx.type === 'modify_order') {
       const newState = cloneEntityState(entityState);
 
-      if (newState.orderbook) {
-        // TODO: Cancel old order and place new one
-        newState.messages.push(`✏️ Order modified: ${entityTx.data.orderId}`);
+      if (newState.orderbook?.initialized) {
+        const lob = await import('../orderbook/lob_core');
+
+        const owner = 1; // TODO: Map entity/signer to owner ID
+        const orderId = Number(entityTx.data.orderId);
+
+        // Apply replace command
+        lob.applyCommand({
+          kind: 2, // REPLACE
+          owner,
+          orderId,
+          newPriceTicks: entityTx.data.newPrice
+            ? Math.round(entityTx.data.newPrice * 100)
+            : null,
+          qtyDeltaLots: entityTx.data.qtyDelta || 0,
+        });
+
+        // Check for events
+        const events = lob.drainEvents(0);
+
+        // Process events
+        for (const event of events.items) {
+          if (event.k === 'ACK') {
+            newState.messages.push(`✏️ Order #${event.id} modified`);
+          } else if (event.k === 'REJECT') {
+            newState.messages.push(`❌ Modify rejected: ${event.reason}`);
+          }
+        }
+      } else {
+        newState.messages.push(`⚠️ No orderbook to modify order in`);
       }
 
       return { newState, outputs: [] };
