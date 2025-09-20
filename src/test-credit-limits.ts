@@ -8,6 +8,7 @@ import { generateNumberedEntityId } from './entity-factory';
 import { getJurisdictionByAddress } from './evm';
 import { applyServerInput, processUntilEmpty } from './server';
 import { ConsensusConfig, Env } from './types';
+import { createGossipLayer } from './gossip';
 
 const testCreditLimits = async () => {
   // Clean DB
@@ -23,7 +24,7 @@ const testCreditLimits = async () => {
     timestamp: Date.now(),
     serverInput: { serverTxs: [], entityInputs: [] },
     history: [],
-    gossip: new Map(),
+    gossip: createGossipLayer(),
   };
 
   const ethereumJurisdiction = await getJurisdictionByAddress('ethereum');

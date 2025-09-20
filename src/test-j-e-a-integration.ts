@@ -8,6 +8,7 @@ import { generateNumberedEntityId } from './entity-factory';
 import { getJurisdictionByAddress } from './evm';
 import { applyServerInput, processUntilEmpty } from './server';
 import { ConsensusConfig, Env } from './types';
+import { createGossipLayer } from './gossip';
 
 const runIntegrationTest = async () => {
   console.log('🧪 Starting J→E→A Integration Test\n');
@@ -19,7 +20,7 @@ const runIntegrationTest = async () => {
     timestamp: Date.now(),
     serverInput: { serverTxs: [], entityInputs: [] },
     history: [],
-    gossip: new Map(), // Simple map for test, not using full gossip layer
+    gossip: createGossipLayer(), // Use proper gossip layer with announce method
   };
 
   // Get jurisdiction config
