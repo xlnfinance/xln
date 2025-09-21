@@ -343,11 +343,6 @@ const applyServerInput = async (
 
       // Capture snapshot with the actual processed input and outputs
       await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
-
-      // Route outputs back as inputs for next tick
-      entityOutbox.forEach(output => {
-        env.serverInput.entityInputs.push(output);
-      });
     } else {
       console.log(`⚪ SKIP-FRAME: No serverTxs, entityInputs, or outputs - not creating empty frame`);
     }
