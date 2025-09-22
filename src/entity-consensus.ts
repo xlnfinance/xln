@@ -8,6 +8,7 @@ import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env
 import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { logger } from './logger';
 import { entityChannelManager } from './entity-channel';
+import { LIMITS } from './constants';
 
 // === SECURITY VALIDATION ===
 
@@ -32,8 +33,8 @@ const validateEntityInput = (input: EntityInput): boolean => {
         log.error(`❌ EntityTxs must be array, got: ${typeof input.entityTxs}`);
         return false;
       }
-      if (input.entityTxs.length > 1000) {
-        log.error(`❌ Too many transactions: ${input.entityTxs.length} > 1000`);
+      if (input.entityTxs.length > LIMITS.MAX_ENTITY_TXS) {
+        log.error(`❌ Too many transactions: ${input.entityTxs.length} > ${LIMITS.MAX_ENTITY_TXS}`);
         return false;
       }
       for (const tx of input.entityTxs) {
@@ -57,8 +58,8 @@ const validateEntityInput = (input: EntityInput): boolean => {
         log.error(`❌ Precommits must be Map, got: ${typeof input.precommits}`);
         return false;
       }
-      if (input.precommits.size > 100) {
-        log.error(`❌ Too many precommits: ${input.precommits.size} > 100`);
+      if (input.precommits.size > LIMITS.MAX_PRECOMMITS) {
+        log.error(`❌ Too many precommits: ${input.precommits.size} > ${LIMITS.MAX_PRECOMMITS}`);
         return false;
       }
       for (const [signerId, signature] of input.precommits) {
@@ -106,8 +107,8 @@ const validateEntityReplica = (replica: EntityReplica): boolean => {
       log.error(`❌ Invalid state height: ${replica.state.height}`);
       return false;
     }
-    if (replica.mempool.length > 10000) {
-      log.error(`❌ Mempool overflow: ${replica.mempool.length} > 10000`);
+    if (replica.mempool.length > LIMITS.MEMPOOL_MAX) {
+      log.error(`❌ Mempool overflow: ${replica.mempool.length} > ${LIMITS.MEMPOOL_MAX}`);
       return false;
     }
     return true;

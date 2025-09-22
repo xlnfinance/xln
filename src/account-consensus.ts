@@ -19,8 +19,8 @@ import { deriveDelta } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-tx/crypto';
 
 // === CONSTANTS ===
-const MEMPOOL_LIMIT = 1000;
-const MAX_ROLLBACKS = 3;
+const LIMITS.ACCOUNT_MEMPOOL_MAX = 1000;
+const LIMITS.MAX_ROLLBACKS = 3;
 const MAX_MESSAGE_COUNTER = 1000000;
 
 // === VALIDATION ===
@@ -43,7 +43,7 @@ export function validateAccountFrame(frame: AccountFrame): boolean {
  * Validate message counter (strict replay protection)
  */
 export function validateMessageCounter(accountMachine: AccountMachine, counter: number): boolean {
-  if (counter <= 0 || counter > MAX_MESSAGE_COUNTER) return false;
+  if (counter <= 0 || counter > LIMITS.MAX_MESSAGE_COUNTER) return false;
 
   // Strict counter validation: must be greater than last acked
   if (counter <= accountMachine.ackedTransitions) {
@@ -181,8 +181,8 @@ export function proposeAccountFrame(
   const events: string[] = [];
 
   // Mempool size validation
-  if (accountMachine.mempool.length > MEMPOOL_LIMIT) {
-    return { success: false, error: `Mempool overflow: ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`, events };
+  if (accountMachine.mempool.length > LIMITS.ACCOUNT_MEMPOOL_MAX) {
+    return { success: false, error: `Mempool overflow: ${accountMachine.mempool.length} > ${LIMITS.ACCOUNT_MEMPOOL_MAX}`, events };
   }
 
   if (accountMachine.mempool.length === 0) {
@@ -334,7 +334,7 @@ export function handleAccountInput(
         console.log(`🔒 Proposer ignoring conflicting frame (right must rollback)`);
         return { success: false, error: 'Frame conflict - proposer ignores', events };
       } else {
-        if (accountMachine.rollbackCount < MAX_ROLLBACKS) {
+        if (accountMachine.rollbackCount < LIMITS.MAX_ROLLBACKS) {
           console.log(`🔄 Non-proposer rolling back (rollback #${accountMachine.rollbackCount + 1})`);
           accountMachine.rollbackCount++;
           accountMachine.pendingFrame = undefined;
@@ -408,13 +408,13 @@ export function handleAccountInput(
  * Add transaction to account mempool with limits
  */
 export function addToAccountMempool(accountMachine: AccountMachine, accountTx: AccountTx): boolean {
-  if (accountMachine.mempool.length >= MEMPOOL_LIMIT) {
-    console.log(`❌ Mempool full: ${accountMachine.mempool.length} >= ${MEMPOOL_LIMIT}`);
+  if (accountMachine.mempool.length >= LIMITS.ACCOUNT_MEMPOOL_MAX) {
+    console.log(`❌ Mempool full: ${accountMachine.mempool.length} >= ${LIMITS.ACCOUNT_MEMPOOL_MAX}`);
     return false;
   }
 
   accountMachine.mempool.push(accountTx);
-  console.log(`📥 Added ${accountTx.type} to mempool (${accountMachine.mempool.length}/${MEMPOOL_LIMIT})`);
+  console.log(`📥 Added ${accountTx.type} to mempool (${accountMachine.mempool.length}/${LIMITS.ACCOUNT_MEMPOOL_MAX})`);
   return true;
 }
 

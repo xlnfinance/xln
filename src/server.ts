@@ -8,6 +8,7 @@ import fs from 'fs';
 import { Level } from 'level';
 
 import { logger } from './logger';
+import { TIMING, LIMITS } from './constants';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { entityChannelManager } from './entity-channel';
 import { jMachine } from './j-machine';
@@ -161,7 +162,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
         
         notifyEnvChange(env); // Notify UI of changes
       }
-    }, 100); // Check every 100ms to process j-watcher events quickly
+    }, TIMING.TICK_INTERVAL); // Check every tick interval to process j-watcher events quickly
     
   } catch (error) {
     logger.error('Failed to start J-Event Watcher', {}, error as Error);
@@ -199,12 +200,12 @@ const applyServerInput = async (
     }
 
     // SECURITY: Resource limits
-    if (serverInput.serverTxs.length > 1000) {
-      log.error(`❌ Too many server transactions: ${serverInput.serverTxs.length} > 1000`);
+    if (serverInput.serverTxs.length > LIMITS.MAX_SERVER_TXS) {
+      log.error(`❌ Too many server transactions: ${serverInput.serverTxs.length} > ${LIMITS.MAX_SERVER_TXS}`);
       return { entityOutbox: [], mergedInputs: [] };
     }
-    if (serverInput.entityInputs.length > 10000) {
-      log.error(`❌ Too many entity inputs: ${serverInput.entityInputs.length} > 10000`);
+    if (serverInput.entityInputs.length > LIMITS.MAX_ENTITY_INPUTS) {
+      log.error(`❌ Too many entity inputs: ${serverInput.entityInputs.length} > ${LIMITS.MAX_ENTITY_INPUTS}`);
       return { entityOutbox: [], mergedInputs: [] };
     }
 
@@ -583,7 +584,7 @@ export async function initializeServer() {
     logger.jMachine('J-Machine initialized');
 
     // Start periodic sync
-    jMachine.startPeriodicSync(5000); // Sync every 5 seconds
+    jMachine.startPeriodicSync(TIMING.J_MACHINE_SYNC); // Sync at J-Machine interval
   } catch (error) {
     logger.warn('J-Machine initialization failed', {}, error as Error);
     // Continue without J-Machine - system can work in offline mode
