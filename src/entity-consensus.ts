@@ -6,6 +6,7 @@
 import { applyEntityTx } from './entity-tx';
 import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env } from './types';
 import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
+import { entityChannelManager } from './entity-channel';
 
 // === SECURITY VALIDATION ===
 
@@ -258,13 +259,23 @@ export const applyEntityInput = async (
   // This prevents race condition where commits clear mempool before forwarding
   if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
     if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
-    // Send mempool to proposer
+    // Send mempool to proposer through bilateral channel
     const proposerId = entityReplica.state.config.validators[0];
-    console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
+    console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId} via bilateral channel`);
     console.log(
       `🔥 BOB-TO-ALICE: Transaction types:`,
       entityReplica.mempool.map(tx => tx.type),
     );
+
+    // USE BILATERAL CHANNEL instead of global routing
+    entityChannelManager.sendMessage(
+      entityInput.entityId,  // from entity
+      entityInput.entityId,  // to same entity (different signer)
+      proposerId,           // target signer
+      [...entityReplica.mempool]
+    );
+
+    // Still push to outbox for backward compatibility during transition
     entityOutbox.push({
       entityId: entityInput.entityId,
       signerId: proposerId,
@@ -319,6 +330,14 @@ export const applyEntityInput = async (
           console.log(
             `🔍 GOSSIP: [${timestamp}] ${entityReplica.signerId} sending precommit to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
           );
+          // Send via bilateral channel
+          entityChannelManager.sendMessage(
+            entityInput.entityId,
+            entityInput.entityId,
+            validatorId,
+            [] // No transactions, just sending precommit via metadata
+          );
+          // Keep outbox for backward compatibility
           entityOutbox.push({
             entityId: entityInput.entityId,
             signerId: validatorId,
@@ -336,6 +355,14 @@ export const applyEntityInput = async (
       console.log(
         `🔍 PROPOSER-REASON: Signed new proposal, current state: proposal=${currentProposalHash}, locked=${entityReplica.lockedFrame?.hash?.slice(0, 10) || 'none'}`,
       );
+      // Send via bilateral channel
+      entityChannelManager.sendMessage(
+        entityInput.entityId,
+        entityInput.entityId,
+        proposerId,
+        [] // No transactions, just sending precommit via metadata
+      );
+      // Keep outbox for backward compatibility
       entityOutbox.push({
         entityId: entityInput.entityId,
         signerId: proposerId,
@@ -413,6 +440,14 @@ export const applyEntityInput = async (
             console.log(
               `🔍 COMMIT: [${timestamp}] ${entityReplica.signerId} sending commit notification to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${committedProposalHash} (${sortedSignatures.size} precommits from: ${precommitSigners.join(', ')})`,
             );
+            // Send commit notification via bilateral channel
+            entityChannelManager.sendMessage(
+              entityInput.entityId,
+              entityInput.entityId,
+              validatorId,
+              [] // Commit info in metadata
+            );
+            // Keep outbox for backward compatibility
             entityOutbox.push({
               entityId: entityInput.entityId,
               signerId: validatorId,

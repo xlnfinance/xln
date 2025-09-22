@@ -291,6 +291,24 @@ const applyServerInput = async (
 
     // Simple watcher automatically syncs all proposer replicas from their last jBlock
 
+    // BILATERAL CHANNELS: Pull pending messages from EntityChannelManager
+    console.log(`📡 BILATERAL-CHANNELS: Checking for pending messages from channels...`);
+    for (const [replicaKey, replica] of env.replicas) {
+      const entityId = replica.entityId;
+      const pendingMessages = entityChannelManager.getPendingMessages(entityId);
+
+      if (pendingMessages.length > 0) {
+        console.log(`📥 BILATERAL-CHANNELS: Found ${pendingMessages.length} pending messages for ${entityId.slice(0,10)}...`);
+
+        // Convert messages to EntityInputs and add to processing queue
+        for (const message of pendingMessages) {
+          const entityInput = entityChannelManager.messageToEntityInput(message);
+          env.serverInput.entityInputs.push(entityInput);
+          console.log(`🔄 BILATERAL-CHANNELS: Added message from ${message.fromEntityId.slice(0,8)}... to processing queue`);
+        }
+      }
+    }
+
     // Process entity inputs - check for j-events
     console.log(`🔍 SERVER-PROCESSING: About to process ${mergedInputs.length} merged entity inputs`);
     for (const entityInput of mergedInputs) {
