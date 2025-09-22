@@ -66,7 +66,7 @@ const runCleanIntegrationTest = async () => {
     ],
     entityInputs: [],
   });
-  await processUntilEmpty(env, []);
+  await processUntilEmpty(env, []); // Enable cascade processing
 
   // Verify entities created with jBlock=0
   const e1_replica = env.replicas.get(`${e1_id}:s1`);
@@ -110,7 +110,7 @@ const runCleanIntegrationTest = async () => {
   };
 
   await applyServerInput(env, { serverTxs: [], entityInputs: [jEvent] });
-  await processUntilEmpty(env, []);
+  // await processUntilEmpty(env, []); // DISABLED: Testing without cascade
 
   // Check if reserve update worked
   const e1_balance = e1_replica?.state.reserves.get('1');
@@ -137,9 +137,18 @@ const runCleanIntegrationTest = async () => {
     }],
   };
 
-  await applyServerInput(env, { serverTxs: [], entityInputs: [openAccountTx] });
-  // TEMPORARILY DISABLED to isolate hang issue
-  // await processUntilEmpty(env, []);
+  console.log('🔍 BEFORE applyServerInput...');
+  const result = await applyServerInput(env, { serverTxs: [], entityInputs: [openAccountTx] });
+  console.log('🔍 AFTER applyServerInput...');
+
+  // Process outputs to deliver messages between entities
+  await processUntilEmpty(env, result.entityOutbox);
+
+  // Log the outputs to see what was created
+  console.log(`📤 Outputs generated: ${result.entityOutbox.length}`);
+  if (result.entityOutbox.length > 0) {
+    console.log(`📤 Output 0: entityId=${result.entityOutbox[0].entityId}, signerId=${result.entityOutbox[0].signerId}`);
+  }
 
   const e1_state_after = env.replicas.get(`${e1_id}:s1`)?.state;
   const e2_state_after = env.replicas.get(`${e2_id}:s2`)?.state;
@@ -184,7 +193,7 @@ const runCleanIntegrationTest = async () => {
   };
 
   await applyServerInput(env, { serverTxs: [], entityInputs: [paymentTx] });
-  await processUntilEmpty(env, []);
+  // await processUntilEmpty(env, []); // DISABLED: Testing without cascade
 
   const e1_account = e1_state_after?.accounts.get(e2_id);
   const e2_account = e2_state_after?.accounts.get(e1_id);

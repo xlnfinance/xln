@@ -92,7 +92,15 @@ declare const console: any;
 let envChangeCallback: ((env: Env) => void) | null = null;
 
 // Module-level environment variable
-let env: Env;
+// Initialize with default environment - will be replaced if server is initialized
+let env: Env = {
+  replicas: new Map(),
+  height: 0,
+  timestamp: Date.now(),
+  serverInput: { serverTxs: [], entityInputs: [] },
+  history: [],
+  gossip: createGossipLayer(),
+};
 
 // Module-level j-watcher instance - prevent multiple instances
 let jWatcher: JEventWatcher | null = null;
@@ -289,8 +297,21 @@ const applyServerInput = async (
         });
       }
 
-      const replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
-      const entityReplica = env.replicas.get(replicaKey);
+      // For system-generated outputs, route to any available replica of the target entity
+      let replicaKey = `${entityInput.entityId}:${entityInput.signerId}`;
+      let entityReplica = env.replicas.get(replicaKey);
+
+      // If signerId is 'system', find any replica for this entity
+      if (entityInput.signerId === 'system' && !entityReplica) {
+        const targetEntityReplicas = Array.from(env.replicas.keys())
+          .filter(key => key.startsWith(entityInput.entityId + ':'));
+
+        if (targetEntityReplicas.length > 0) {
+          replicaKey = targetEntityReplicas[0]; // Use first available replica
+          entityReplica = env.replicas.get(replicaKey);
+          console.log(`🔍 SYSTEM-ROUTING: Routing system message to ${replicaKey}`);
+        }
+      }
 
       console.log(`🔍 REPLICA-LOOKUP: Key="${replicaKey}"`);
       console.log(`🔍 REPLICA-LOOKUP: Found replica: ${!!entityReplica}`);
@@ -458,6 +479,17 @@ const main = async (): Promise<Env> => {
     }
   }
 
+  // Initialize server when not imported as module
+  if (import.meta.main === import.meta.url || process.argv[1] === import.meta.filename) {
+    return await initializeServer();
+  }
+
+  // When imported as module, return a default environment without initialization
+  return env;
+};
+
+// Server initialization function - can be called explicitly by tests or main execution
+export async function initializeServer() {
   // Initialize gossip layer
   console.log('🕸️ Initializing gossip layer...');
   const gossipLayer = createGossipLayer();
@@ -572,7 +604,7 @@ const main = async (): Promise<Env> => {
   if (!isBrowser) {
     // DISABLED: Hanko tests during development
     console.log('\n🚀 Hanko tests disabled during development - focusing on core functionality');
-    
+
     // // Add hanko demo to the main execution
     // console.log('\n🖋️  Testing Complete Hanko Implementation...');
     // await demoCompleteHanko();
@@ -623,7 +655,7 @@ const main = async (): Promise<Env> => {
   }
 
   return env;
-};
+}
 
 // === TIME MACHINE API ===
 const getHistory = () => env.history || [];

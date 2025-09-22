@@ -15,7 +15,9 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
   }
 
   // Get or create account machine for this counterparty
-  let accountMachine = newState.accounts.get(input.toEntityId);
+  // When receiving an accountInput, the counterparty is the fromEntityId
+  const counterpartyId = input.fromEntityId;
+  let accountMachine = newState.accounts.get(counterpartyId);
   if (!accountMachine) {
     // Create new account machine with demo deltas for tokens 1, 2, 3
     const demoDeltasMap = new Map();
@@ -24,7 +26,7 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
     demoDeltasMap.set(3, createDemoDelta(3, 500n, 50n)); // USDC: 500 collateral, they owe us 50
 
     accountMachine = {
-      counterpartyEntityId: input.toEntityId,
+      counterpartyEntityId: counterpartyId,
       mempool: [],
       currentFrame: {
         frameId: 0,
@@ -44,11 +46,11 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
       pendingFrame: undefined,
       pendingSignatures: [],
       rollbackCount: 0,
-      isProposer: state.entityId < input.toEntityId, // Lexicographically smaller is proposer
+      isProposer: state.entityId < counterpartyId, // Lexicographically smaller is proposer
       clonedForValidation: undefined,
       proofHeader: {
         fromEntity: state.entityId,
-        toEntity: input.toEntityId,
+        toEntity: counterpartyId,
         cooperativeNonce: 0,
         disputeNonce: 0,
       },
@@ -57,8 +59,8 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
         deltas: [0n, -100n, 50n],
       },
     };
-    newState.accounts.set(input.toEntityId, accountMachine);
-    console.log(`💳 Created new account machine for counterparty ${input.toEntityId}`);
+    newState.accounts.set(counterpartyId, accountMachine);
+    console.log(`💳 Created new account machine for counterparty ${counterpartyId}`);
   }
 
   // Process the account transaction immediately based on type
