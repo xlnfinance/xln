@@ -12,16 +12,8 @@ import { TIMING, LIMITS } from './constants';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { entityChannelManager } from './entity-channel';
 import { jMachine } from './j-machine';
-// TODO: Re-enable account-tx imports after fixing export issues
-// import {
-//   sendAccountInputMessage,
-//   sendDirectPaymentToEntity, 
-//   sendCreditLimitUpdateToEntity,
-//   sendAccountAcknowledgment,
-//   sendBatchAccountInputs,
-//   getCrossEntityMessagingSummary,
-//   validateAccountInputMessage
-// } from './account-tx/messaging';
+// Account messaging functions are handled through bilateral channels
+// See entity-channel.ts for direct entity-to-entity communication
 import {
   createLazyEntity,
   createNumberedEntity,
@@ -869,14 +861,7 @@ export {
   debugFundReserves,
   transferNameBetweenEntities,
   
-  // Account messaging functions - TODO: Re-enable after fixing account-tx exports
-  // sendAccountInputMessage,
-  // sendDirectPaymentToEntity,
-  // sendCreditLimitUpdateToEntity,
-  // sendAccountAcknowledgment,
-  // sendBatchAccountInputs,
-  // getCrossEntityMessagingSummary,
-  // validateAccountInputMessage,
+  // Account messaging handled via entityChannelManager
 };
 
 // The browser-specific auto-execution logic has been removed.

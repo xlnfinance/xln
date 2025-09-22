@@ -165,17 +165,10 @@ export const clearDatabase = async (db?: any) => {
         await Promise.all(clearPromises);
         console.log('✅ All databases cleared, re-initializing...');
 
-        // Trigger re-initialization instead of page reload
-        // TODO: delete deprecated reinitializeAfterClear
-        if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
-          window.reinitializeAfterClear();
-        }
+        // Database cleared successfully
         return;
       } catch (error) {
         console.log('❌ Error clearing IndexedDB:', error);
-        if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
-          window.reinitializeAfterClear();
-        }
         return;
       }
     }
