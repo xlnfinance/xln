@@ -12,7 +12,8 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import { AccountMachine, AccountFrame, AccountTx, AccountInput, Delta } from './types';
+import { AccountMachine, AccountFrame, AccountTx, AccountInput, Delta, EntityState } from './types';
+import { logger } from './logger';
 import { cloneAccountMachine } from './state-helpers';
 import { deriveDelta } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-tx/crypto';
@@ -435,12 +436,12 @@ export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
 /**
  * Get accounts that should propose frames (for E-Machine auto-propose)
  */
-export function getAccountsToProposeFrames(entityState: any): string[] {
+export function getAccountsToProposeFrames(entityState: EntityState): string[] {
   const accountsToProposeFrames: string[] = [];
 
   // Check if accounts exists and is iterable
   if (!entityState.accounts || !(entityState.accounts instanceof Map)) {
-    console.log(`⚠️ No accounts or accounts not a Map: ${typeof entityState.accounts}`);
+    logger.warn('No accounts or accounts not a Map', { accountsType: typeof entityState.accounts });
     return accountsToProposeFrames;
   }
 
