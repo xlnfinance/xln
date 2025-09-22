@@ -7,6 +7,7 @@
 import fs from 'fs';
 import { Level } from 'level';
 
+import { logger } from './logger';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { entityChannelManager } from './entity-channel';
 import { jMachine } from './j-machine';
@@ -124,7 +125,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
     // Get the Ethereum jurisdiction
     const ethereum = await getJurisdictionByAddress('ethereum');
     if (!ethereum) {
-      console.warn('⚠️ Ethereum jurisdiction not found, skipping j-watcher');
+      logger.warn('Ethereum jurisdiction not found, skipping j-watcher');
       return;
     }
 
@@ -136,17 +137,18 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
       ethereum.depositoryAddress
     );
 
-    console.log('✅ J-Event Watcher started successfully');
-    console.log(`🔭 Monitoring: ${ethereum.address}`);
-    console.log(`📍 EntityProvider: ${ethereum.entityProviderAddress}`);
-    console.log(`📍 Depository: ${ethereum.depositoryAddress}`);
+    logger.jMachine('J-Event Watcher started successfully', {
+      rpcUrl: ethereum.address,
+      entityProviderAddress: ethereum.entityProviderAddress,
+      depositoryAddress: ethereum.depositoryAddress
+    });
     
     // J-watcher now handles its own periodic sync every 500ms
     // Set up a periodic check to process any queued events from j-watcher
     setInterval(async () => {
       if (env.serverInput.entityInputs.length > 0) {
         const eventCount = env.serverInput.entityInputs.length;
-        console.log(`🔭 J-WATCHER: Processing ${eventCount} J-machine events`);
+        logger.jMachine('Processing J-machine events', { eventCount });
         
         // Process the queued entity inputs from j-watcher
         await applyServerInput(env, { 
@@ -162,7 +164,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
     }, 100); // Check every 100ms to process j-watcher events quickly
     
   } catch (error) {
-    console.error('❌ Failed to start J-Event Watcher:', error);
+    logger.error('Failed to start J-Event Watcher', {}, error as Error);
   }
 };
 
@@ -215,35 +217,41 @@ const applyServerInput = async (
     const entityOutbox: EntityInput[] = [];
 
     if (DEBUG) {
-      console.log(`\n=== TICK ${env.height} ===`);
-      console.log(
-        `Server inputs: ${serverInput.serverTxs.length} new serverTxs, ${serverInput.entityInputs.length} new entityInputs`,
-      );
-      console.log(
-        `Total in env: ${env.serverInput.serverTxs.length} serverTxs, ${env.serverInput.entityInputs.length} entityInputs (merged to ${mergedInputs.length})`,
-      );
+      logger.debug('Starting server tick', {
+        blockHeight: env.height,
+        newServerTxs: serverInput.serverTxs.length,
+        newEntityInputs: serverInput.entityInputs.length,
+        totalServerTxs: env.serverInput.serverTxs.length,
+        totalEntityInputs: env.serverInput.entityInputs.length,
+        mergedInputsCount: mergedInputs.length
+      });
       if (mergedInputs.length > 0) {
-        console.log(`🔄 Processing merged inputs:`);
-        mergedInputs.forEach((input, i) => {
-          const parts = [];
-          if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
-          if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
-          if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
-          console.log(`  ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
+        logger.debug('Processing merged inputs', {
+          inputsCount: mergedInputs.length,
+          inputs: mergedInputs.map((input, i) => {
+            const parts = [];
+            if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
+            if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
+            if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
+            return `${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`;
+          })
         });
       }
     }
 
     // Process server transactions (replica imports) from env.serverInput
-    console.log(
-      `🔍 REPLICA-DEBUG: Processing ${env.serverInput.serverTxs.length} serverTxs, current replicas: ${env.replicas.size}`,
-    );
+    logger.debug('Processing serverTxs', {
+      serverTxsCount: env.serverInput.serverTxs.length,
+      currentReplicas: env.replicas.size
+    });
     env.serverInput.serverTxs.forEach(serverTx => {
       if (serverTx.type === 'importReplica') {
         if (DEBUG)
-          console.log(
-            `Importing replica Entity #${formatEntityDisplay(serverTx.entityId)}:${formatSignerDisplay(serverTx.signerId)} (proposer: ${serverTx.data.isProposer})`,
-          );
+          logger.debug('Importing replica', {
+            entityId: serverTx.entityId,
+            signerId: serverTx.signerId,
+            isProposer: serverTx.data.isProposer
+          });
 
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
 
@@ -274,50 +282,74 @@ const applyServerInput = async (
         // Validate jBlock immediately after creation
         const createdReplica = env.replicas.get(replicaKey);
         const actualJBlock = createdReplica?.state.jBlock;
-        console.log(`🔍 REPLICA-DEBUG: Added replica ${replicaKey}, jBlock should be 0, actually is: ${actualJBlock} (type: ${typeof actualJBlock})`);
+        logger.debug('Added replica', {
+          replicaKey,
+          expectedJBlock: 0,
+          actualJBlock,
+          jBlockType: typeof actualJBlock
+        });
 
         if (typeof actualJBlock !== 'number') {
-          console.error(`💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
-          console.error(`💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
+          logger.error('Entity creation bug: invalid jBlock', {
+            replicaKey,
+            expectedType: 'number',
+            expectedValue: 0,
+            actualType: typeof actualJBlock,
+            actualValue: actualJBlock
+          });
           // Force fix immediately
           if (createdReplica) {
             createdReplica.state.jBlock = 0;
-            console.log(`💥   FIXED: Set jBlock to 0 for replica ${replicaKey}`);
+            logger.info('Fixed jBlock for replica', { replicaKey, fixedValue: 0 });
           }
         }
       }
     });
-    console.log(`🔍 REPLICA-DEBUG: After processing serverTxs, total replicas: ${env.replicas.size}`);
+    logger.debug('Completed serverTxs processing', { totalReplicas: env.replicas.size });
 
     // Simple watcher automatically syncs all proposer replicas from their last jBlock
 
     // BILATERAL CHANNELS: Pull pending messages from EntityChannelManager
-    console.log(`📡 BILATERAL-CHANNELS: Checking for pending messages from channels...`);
+    logger.channel('Checking for pending messages from channels');
     for (const [replicaKey, replica] of env.replicas) {
       const entityId = replica.entityId;
       const pendingMessages = entityChannelManager.getPendingMessages(entityId);
 
       if (pendingMessages.length > 0) {
-        console.log(`📥 BILATERAL-CHANNELS: Found ${pendingMessages.length} pending messages for ${entityId.slice(0,10)}...`);
+        logger.channel('Found pending messages', {
+          entityId: entityId.slice(0,10) + '...',
+          messageCount: pendingMessages.length
+        });
 
         // Convert messages to EntityInputs and add to processing queue
         for (const message of pendingMessages) {
           const entityInput = entityChannelManager.messageToEntityInput(message);
           env.serverInput.entityInputs.push(entityInput);
-          console.log(`🔄 BILATERAL-CHANNELS: Added message from ${message.fromEntityId.slice(0,8)}... to processing queue`);
+          logger.channel('Added message to processing queue', {
+            fromEntityId: message.fromEntityId.slice(0,8) + '...'
+          });
         }
       }
     }
 
     // Process entity inputs - check for j-events
-    console.log(`🔍 SERVER-PROCESSING: About to process ${mergedInputs.length} merged entity inputs`);
+    logger.debug('About to process merged entity inputs', {
+      mergedInputsCount: mergedInputs.length
+    });
     for (const entityInput of mergedInputs) {
       // Track j-events in this input
       const jEventCount = entityInput.entityTxs?.filter(tx => tx.type === 'j_event').length || 0;
       if (jEventCount > 0) {
-        console.log(`🚨 FOUND-J-EVENTS: Entity ${entityInput.entityId.slice(0,10)}... has ${jEventCount} j-events from ${entityInput.signerId}`);
-        entityInput.entityTxs?.filter(tx => tx.type === 'j_event').forEach((jEvent, i) => {
-          console.log(`🚨   J-EVENT-${i}: type=${jEvent.data.event.type}, block=${jEvent.data.blockNumber}, observedAt=${new Date(jEvent.data.observedAt).toLocaleTimeString()}`);
+        logger.jMachine('Found J-events in entity input', {
+          entityId: entityInput.entityId.slice(0,10) + '...',
+          signerId: entityInput.signerId,
+          jEventCount,
+          events: entityInput.entityTxs?.filter(tx => tx.type === 'j_event').map((jEvent, i) => ({
+            index: i,
+            type: jEvent.data.event.type,
+            blockNumber: jEvent.data.blockNumber,
+            observedAt: new Date(jEvent.data.observedAt).toLocaleTimeString()
+          }))
         });
       }
 
@@ -333,29 +365,26 @@ const applyServerInput = async (
         if (targetEntityReplicas.length > 0) {
           replicaKey = targetEntityReplicas[0]; // Use first available replica
           entityReplica = env.replicas.get(replicaKey);
-          console.log(`🔍 SYSTEM-ROUTING: Routing system message to ${replicaKey}`);
+          logger.debug('Routing system message', { replicaKey });
         }
       }
 
-      console.log(`🔍 REPLICA-LOOKUP: Key="${replicaKey}"`);
-      console.log(`🔍 REPLICA-LOOKUP: Found replica: ${!!entityReplica}`);
-      console.log(`🔍 REPLICA-LOOKUP: Input txs: ${entityInput.entityTxs?.length || 0}`);
-      if (entityInput.entityTxs && entityInput.entityTxs.length > 0) {
-        console.log(
-          `🔍 REPLICA-LOOKUP: Tx types:`,
-          entityInput.entityTxs.map(tx => tx.type),
-        );
-      }
-      if (!entityReplica) {
-        console.log(`🔍 REPLICA-LOOKUP: Available replica keys:`, Array.from(env.replicas.keys()));
-      }
+      logger.debug('Replica lookup', {
+        replicaKey,
+        foundReplica: !!entityReplica,
+        inputTxsCount: entityInput.entityTxs?.length || 0,
+        txTypes: entityInput.entityTxs?.map(tx => tx.type),
+        availableReplicaKeys: !entityReplica ? Array.from(env.replicas.keys()) : undefined
+      });
 
       if (entityReplica) {
         if (DEBUG) {
-          console.log(`Processing input for ${replicaKey}:`);
-          if (entityInput.entityTxs?.length) console.log(`  → ${entityInput.entityTxs.length} transactions`);
-          if (entityInput.proposedFrame) console.log(`  → Proposed frame: ${entityInput.proposedFrame.hash}`);
-          if (entityInput.precommits?.size) console.log(`  → ${entityInput.precommits.size} precommits`);
+          logger.debug('Processing input for replica', {
+            replicaKey,
+            transactionCount: entityInput.entityTxs?.length,
+            proposedFrameHash: entityInput.proposedFrame?.hash,
+            precommitsCount: entityInput.precommits?.size
+          });
         }
 
         const { newState, outputs } = await applyEntityInput(env, entityReplica, entityInput);
@@ -389,30 +418,34 @@ const applyServerInput = async (
       // Capture snapshot with the actual processed input and outputs
       await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
     } else {
-      console.log(`⚪ SKIP-FRAME: No serverTxs, entityInputs, or outputs - not creating empty frame`);
+      logger.debug('Skipping frame creation - no work to do');
     }
 
     // Notify Svelte about environment changes
-    console.log(`🔍 REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env.replicas.size}`);
-    console.log(`🔍 REPLICA-DEBUG: Replica keys:`, Array.from(env.replicas.keys()));
-    console.log(`🔍 GOSSIP-DEBUG: Environment keys before notify:`, Object.keys(env));
-    console.log(`🔍 GOSSIP-DEBUG: Gossip layer exists:`, !!env.gossip);
-    console.log(`🔍 GOSSIP-DEBUG: Gossip layer type:`, typeof env.gossip);
-    console.log(`🔍 GOSSIP-DEBUG: Gossip announce method:`, typeof env.gossip?.announce);
+    logger.debug('Environment state before notification', {
+      totalReplicas: env.replicas.size,
+      replicaKeys: Array.from(env.replicas.keys()),
+      environmentKeys: Object.keys(env),
+      gossipLayerExists: !!env.gossip,
+      gossipLayerType: typeof env.gossip,
+      gossipAnnounceType: typeof env.gossip?.announce
+    });
     
     // CRITICAL FIX: Initialize gossip layer only if needed and not a test placeholder
     // Don't create gossip for single-signer entities (tests use Map as placeholder)
     if (!env.gossip) {
-      console.log(`🚨 CRITICAL: gossip layer missing, creating new one`);
+      logger.error('Critical: gossip layer missing, creating new one');
       env.gossip = createGossipLayer();
-      console.log(`✅ Gossip layer created and added to environment`);
+      logger.info('Gossip layer created and added to environment');
     } else if (env.gossip instanceof Map) {
       // Test environment uses Map as placeholder - don't replace it
-      console.log(`📝 Test environment detected (gossip is Map), keeping placeholder`);
+      logger.debug('Test environment detected (gossip is Map), keeping placeholder');
     } else if (typeof env.gossip.announce !== 'function') {
-      console.log(`🚨 CRITICAL: gossip layer incomplete (announce: ${typeof env.gossip?.announce}), creating new one`);
+      logger.error('Critical: gossip layer incomplete, creating new one', {
+        announceType: typeof env.gossip?.announce
+      });
       env.gossip = createGossipLayer();
-      console.log(`✅ Gossip layer recreated and added to environment`);
+      logger.info('Gossip layer recreated and added to environment');
     }
 
     // Compare old vs new entities
@@ -428,55 +461,71 @@ const applyServerInput = async (
         !key.startsWith('0x57e360b00f393ea6d898d6119f71db49241be80aec0fbdecf6358b0103d43a31:'),
     );
 
-    console.log(`🔍 OLD-ENTITY-DEBUG: ${oldEntityKeys.length} old entities:`, oldEntityKeys.slice(0, 2));
-    console.log(`🔍 NEW-ENTITY-DEBUG: ${newEntityKeys.length} new entities:`, newEntityKeys.slice(0, 2));
+    logger.debug('Entity distribution analysis', {
+      oldEntitiesCount: oldEntityKeys.length,
+      oldEntitiesSample: oldEntityKeys.slice(0, 2),
+      newEntitiesCount: newEntityKeys.length,
+      newEntitiesSample: newEntityKeys.slice(0, 2)
+    });
 
     if (oldEntityKeys.length > 0 && newEntityKeys.length > 0) {
       const oldReplica = env.replicas.get(oldEntityKeys[0]);
       const newReplica = env.replicas.get(newEntityKeys[0]);
-      console.log(`🔍 OLD-REPLICA-STRUCTURE:`, {
-        hasState: !!oldReplica?.state,
-        hasConfig: !!oldReplica?.state?.config,
-        hasJurisdiction: !!oldReplica?.state?.config?.jurisdiction,
-        jurisdictionName: oldReplica?.state?.config?.jurisdiction?.name,
-      });
-      console.log(`🔍 NEW-REPLICA-STRUCTURE:`, {
-        hasState: !!newReplica?.state,
-        hasConfig: !!newReplica?.state?.config,
-        hasJurisdiction: !!newReplica?.state?.config?.jurisdiction,
-        jurisdictionName: newReplica?.state?.config?.jurisdiction?.name,
+      logger.debug('Replica structure analysis', {
+        oldReplicaStructure: {
+          hasState: !!oldReplica?.state,
+          hasConfig: !!oldReplica?.state?.config,
+          hasJurisdiction: !!oldReplica?.state?.config?.jurisdiction,
+          jurisdictionName: oldReplica?.state?.config?.jurisdiction?.name,
+        },
+        newReplicaStructure: {
+          hasState: !!newReplica?.state,
+          hasConfig: !!newReplica?.state?.config,
+          hasJurisdiction: !!newReplica?.state?.config?.jurisdiction,
+          jurisdictionName: newReplica?.state?.config?.jurisdiction?.name,
+        }
       });
     }
 
     notifyEnvChange(env);
 
     if (DEBUG && entityOutbox.length > 0) {
-      console.log(`📤 Outputs: ${entityOutbox.length} messages`);
-      entityOutbox.forEach((output, i) => {
-        console.log(
-          `  ${i + 1}. → ${output.signerId} (${output.entityTxs ? `${output.entityTxs.length} txs` : ''}${output.proposedFrame ? ` proposal: ${output.proposedFrame.hash.slice(0, 10)}...` : ''}${output.precommits ? ` ${output.precommits.size} precommits` : ''})`,
-        );
+      logger.debug('Generated outputs', {
+        outputCount: entityOutbox.length,
+        outputs: entityOutbox.map((output, i) => ({
+          index: i + 1,
+          signerId: output.signerId,
+          txCount: output.entityTxs?.length,
+          proposedFrameHash: output.proposedFrame?.hash.slice(0, 10),
+          precommitsCount: output.precommits?.size
+        }))
       });
     } else if (DEBUG && entityOutbox.length === 0) {
-      console.log(`📤 No outputs generated`);
+      logger.debug('No outputs generated');
     }
 
     if (DEBUG) {
-      console.log(`Replica states:`);
-      env.replicas.forEach((replica, key) => {
-        const [entityId, signerId] = key.split(':');
-        const entityDisplay = formatEntityDisplay(entityId);
-        const signerDisplay = formatSignerDisplay(signerId);
-        console.log(
-          `  Entity #${entityDisplay}:${signerDisplay}: mempool=${replica.mempool.length}, messages=${replica.state.messages.length}, proposal=${replica.proposal ? '✓' : '✗'}`,
-        );
+      logger.debug('Replica states summary', {
+        replicas: Array.from(env.replicas.entries()).map(([key, replica]) => {
+          const [entityId, signerId] = key.split(':');
+          return {
+            entityId: formatEntityDisplay(entityId),
+            signerId: formatSignerDisplay(signerId),
+            mempoolSize: replica.mempool.length,
+            messagesCount: replica.state.messages.length,
+            hasProposal: !!replica.proposal
+          };
+        })
       });
     }
 
     // Performance logging
     const endTime = Date.now();
     if (DEBUG) {
-      console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
+      logger.debug('Tick completed', {
+        blockHeight: env.height - 1,
+        processingTimeMs: endTime - startTime
+      });
     }
 
     return { entityOutbox, mergedInputs };
@@ -493,13 +542,14 @@ const main = async (): Promise<Env> => {
     try {
       const jurisdictionsContent = fs.readFileSync('./jurisdictions.json', 'utf8');
       const jurisdictions = JSON.parse(jurisdictionsContent);
-      console.log('🔍 STARTUP: Current jurisdictions.json content:');
-      console.log('📍 Ethereum Depository:', jurisdictions.jurisdictions.ethereum.contracts.depository);
-      console.log('📍 Ethereum EntityProvider:', jurisdictions.jurisdictions.ethereum.contracts.entityProvider);
-      console.log('📍 Last updated:', jurisdictions.lastUpdated);
-      console.log('📍 Full Ethereum config:', JSON.stringify(jurisdictions.jurisdictions.ethereum, null, 2));
+      logger.info('Startup: loaded jurisdictions configuration', {
+        ethereumDepository: jurisdictions.jurisdictions.ethereum.contracts.depository,
+        ethereumEntityProvider: jurisdictions.jurisdictions.ethereum.contracts.entityProvider,
+        lastUpdated: jurisdictions.lastUpdated,
+        ethereumConfig: jurisdictions.jurisdictions.ethereum
+      });
     } catch (error) {
-      console.log('⚠️ Failed to read jurisdictions.json:', (error as Error).message);
+      logger.warn('Failed to read jurisdictions.json', {}, error as Error);
     }
   }
 
@@ -515,12 +565,12 @@ const main = async (): Promise<Env> => {
 // Server initialization function - can be called explicitly by tests or main execution
 export async function initializeServer() {
   // Initialize gossip layer
-  console.log('🕸️ Initializing gossip layer...');
+  logger.info('Initializing gossip layer');
   const gossipLayer = createGossipLayer();
-  console.log('✅ Gossip layer initialized');
+  logger.info('Gossip layer initialized');
 
   // Initialize J-Machine for blockchain event processing
-  console.log('🏛️ Initializing J-Machine...');
+  logger.jMachine('Initializing J-Machine');
   try {
     await jMachine.initialize({
       replicas: new Map(),
@@ -530,17 +580,17 @@ export async function initializeServer() {
       history: [],
       gossip: gossipLayer
     });
-    console.log('✅ J-Machine initialized');
+    logger.jMachine('J-Machine initialized');
 
     // Start periodic sync
     jMachine.startPeriodicSync(5000); // Sync every 5 seconds
   } catch (error) {
-    console.warn('⚠️ J-Machine initialization failed:', error);
+    logger.warn('J-Machine initialization failed', {}, error as Error);
     // Continue without J-Machine - system can work in offline mode
   }
 
   // Load persisted profiles from database into gossip layer
-  console.log('📡 Loading persisted profiles from database...');
+  logger.info('Loading persisted profiles from database');
   await loadPersistedProfiles(db, gossipLayer);
 
   // First, create default environment with gossip layer
@@ -556,20 +606,26 @@ export async function initializeServer() {
   // Then try to load saved state if available
   try {
     if (isBrowser) {
-      console.log('🌐 BROWSER-DEBUG: Starting IndexedDB snapshot loading process...');
+      logger.debug('Starting IndexedDB snapshot loading process');
     } else {
-      console.log('🖥️ Node.js environment: Attempting to load snapshots from filesystem...');
+      logger.debug('Node.js environment: Attempting to load snapshots from filesystem');
     }
 
-    console.log('🔍 BROWSER-DEBUG: Querying latest_height from database...');
+    logger.debug('Querying latest_height from database');
     const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
-    console.log(`📊 BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
+    logger.debug('Found latest height in database', { latestHeight });
 
-    console.log(`📊 Found latest height: ${latestHeight}, loading ${latestHeight + 1} snapshots...`);
+    logger.info('Loading snapshots', {
+      latestHeight,
+      snapshotsToLoad: latestHeight + 1
+    });
 
     // Load snapshots starting from 1 (height 0 is initial state, no snapshot saved)
-    console.log(`📥 Loading snapshots: 1 to ${latestHeight}...`);
+    logger.debug('Loading snapshots range', {
+      startHeight: 1,
+      endHeight: latestHeight
+    });
     const snapshots = [];
 
     // Start from 1 since height 0 is initial state with no snapshot
@@ -578,19 +634,26 @@ export async function initializeServer() {
         const buffer = await db.get(Buffer.from(`snapshot:${i}`));
         const snapshot = decode(buffer);
         snapshots.push(snapshot);
-        console.log(`📦 Snapshot ${i}: loaded ${buffer.length} bytes`);
+        logger.debug('Snapshot loaded', {
+          height: i,
+          sizeBytes: buffer.length
+        });
       } catch (error) {
-        console.error(`❌ Failed to load snapshot ${i}:`, error);
-        console.warn(`⚠️ Snapshot ${i} missing, continuing with available data...`);
+        logger.error('Failed to load snapshot', { height: i }, error as Error);
+        logger.warn('Snapshot missing, continuing with available data', { height: i });
       }
     }
 
     if (snapshots.length === 0) {
-      console.log(`📦 No snapshots found (latestHeight: ${latestHeight}), using fresh environment`);
+      logger.info('No snapshots found, using fresh environment', { latestHeight });
       throw new Error('LEVEL_NOT_FOUND');
     }
 
-    console.log(`📊 Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
+    logger.info('Snapshots loaded successfully', {
+      loadedCount: snapshots.length,
+      totalExpected: latestHeight,
+      startHeight: 1
+    });
     env.history = snapshots;
 
     if (snapshots.length > 0) {
@@ -602,7 +665,9 @@ export async function initializeServer() {
         for (const [id, profile] of Object.entries(latestSnapshot.gossip.profiles)) {
           gossipLayer.profiles.set(id, profile as Profile);
         }
-        console.log(`📡 Restored gossip profiles: ${Object.keys(latestSnapshot.gossip.profiles).length} entries`);
+        logger.info('Restored gossip profiles', {
+          profileCount: Object.keys(latestSnapshot.gossip.profiles).length
+        });
       }
 
       env = {
@@ -613,31 +678,29 @@ export async function initializeServer() {
         history: snapshots, // Include the loaded history
         gossip: gossipLayer, // Use restored gossip layer
       };
-      console.log(`✅ History restored. Server is at height ${env.height} with ${env.history.length} snapshots.`);
-      console.log(`📈 Snapshot details:`, {
+      logger.info('History restored successfully', {
         height: env.height,
+        snapshotCount: env.history.length,
         replicaCount: env.replicas.size,
         timestamp: new Date(env.timestamp).toISOString(),
-        serverInputs: env.serverInput.entityInputs.length,
+        serverInputs: env.serverInput.entityInputs.length
       });
     }
   } catch (error: any) {
     if (error.code === 'LEVEL_NOT_FOUND') {
-      console.log('📦 BROWSER-DEBUG: No saved state found, using fresh environment');
+      logger.debug('No saved state found, using fresh environment');
       if (isBrowser) {
-        console.log('💡 BROWSER-DEBUG: This is normal for first-time use. IndexedDB will be created automatically.');
-        console.log('🔍 BROWSER-DEBUG: Fresh environment means entities will start with jBlock=0');
+        logger.debug('First-time browser use: IndexedDB will be created automatically');
+        logger.debug('Fresh environment: entities will start with jBlock=0');
       } else {
-        console.log('💡 Node.js: No existing snapshots in db directory.');
+        logger.debug('Node.js: No existing snapshots in db directory');
       }
     } else {
-      console.error('❌ Failed to load state from LevelDB:', error);
-      console.error('🔍 Error details:', {
-        code: error.code,
-        message: error.message,
+      logger.error('Failed to load state from LevelDB', {
+        errorCode: error.code,
         isBrowser,
-        dbLocation: isBrowser ? 'IndexedDB: db' : 'db',
-      });
+        dbLocation: isBrowser ? 'IndexedDB: db' : 'db'
+      }, error);
       throw error;
     }
   }
@@ -647,7 +710,7 @@ export async function initializeServer() {
   // Only run demos in Node.js environment, not browser
   if (!isBrowser) {
     // DISABLED: Hanko tests during development
-    console.log('\n🚀 Hanko tests disabled during development - focusing on core functionality');
+    logger.info('Hanko tests disabled during development - focusing on core functionality');
 
     // // Add hanko demo to the main execution
     // console.log('\n🖋️  Testing Complete Hanko Implementation...');
@@ -668,34 +731,40 @@ export async function initializeServer() {
     //   );
     // }
   } else {
-    console.log('🌐 Browser environment: Demos available via UI buttons, not auto-running');
+    logger.info('Browser environment: Demos available via UI buttons, not auto-running');
   }
 
   log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
 
   // Debug final state before starting j-watcher
   if (isBrowser) {
-    console.log(`🔍 BROWSER-DEBUG: Final state before j-watcher start:`);
-    console.log(`🔍   Environment height: ${env.height}`);
-    console.log(`🔍   Total replicas: ${env.replicas.size}`);
-    for (const [replicaKey, replica] of env.replicas.entries()) {
-      const [entityId, signerId] = replicaKey.split(':');
-      console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, isProposer=${replica.isProposer}`);
-    }
+    logger.debug('Final state before j-watcher start', {
+      environmentHeight: env.height,
+      totalReplicas: env.replicas.size,
+      replicas: Array.from(env.replicas.entries()).map(([replicaKey, replica]) => {
+        const [entityId, signerId] = replicaKey.split(':');
+        return {
+          entityId: entityId.slice(0,10) + '...',
+          signerId,
+          jBlock: replica.state.jBlock,
+          isProposer: replica.isProposer
+        };
+      })
+    });
   }
 
   // Start j-watcher after snapshots are fully loaded (prevent multiple instances)
   if (!jWatcherStarted) {
     try {
-      console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher...');
+      logger.jMachine('Starting j-watcher after snapshots loaded');
       await startJEventWatcher(env);
       jWatcherStarted = true;
-      console.log('🔭 JWATCHER-READY: J-watcher started successfully');
+      logger.jMachine('J-watcher started successfully');
     } catch (error) {
-      console.error('❌ Failed to start J-Event Watcher:', error);
+      logger.error('Failed to start J-Event Watcher', {}, error as Error);
     }
   } else {
-    console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
+    logger.jMachine('J-watcher already started, skipping');
   }
 
   return env;
@@ -711,7 +780,7 @@ const getCurrentHistoryIndex = () => (env.history || []).length - 1;
 
 // Server-specific clearDatabase that also resets history
 const clearDatabaseAndHistory = async () => {
-  console.log('🗑️ Clearing database and resetting server history...');
+  logger.info('Clearing database and resetting server history');
 
   // Clear the Level database
   await clearDatabase(db);
@@ -726,7 +795,7 @@ const clearDatabaseAndHistory = async () => {
     gossip: createGossipLayer(),
   };
 
-  console.log('✅ Database and server history cleared');
+  logger.info('Database and server history cleared');
 };
 
 // Export j-watcher status for frontend display
@@ -822,8 +891,8 @@ if (!isBrowser) {
         const noDemoFlag = process.env.NO_DEMO === '1' || process.argv.includes('--no-demo');
 
         if (!noDemoFlag) {
-          console.log('✅ Node.js environment initialized. Running demo for local testing...');
-          console.log('💡 To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag');
+          logger.info('Node.js environment initialized. Running demo for local testing');
+          logger.info('To skip demo, use: NO_DEMO=1 bun run src/server.ts or --no-demo flag');
           await runDemo(env);
 
           // Start j-watcher after demo completes
@@ -834,30 +903,31 @@ if (!isBrowser) {
             await verifyJurisdictionRegistrations();
           }, 2000);
         } else {
-          console.log('✅ Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)');
-          console.log('💡 Use XLN.runDemo(env) to run demo manually if needed');
+          logger.info('Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)');
+          logger.info('Use XLN.runDemo(env) to run demo manually if needed');
           
           // J-watcher is already started in main(), no need to start again
         }
       }
     })
     .catch(error => {
-      console.error('❌ An error occurred during Node.js auto-execution:', error);
+      logger.error('An error occurred during Node.js auto-execution', {}, error as Error);
     });
 }
 
 // === BLOCKCHAIN VERIFICATION ===
 const verifyJurisdictionRegistrations = async () => {
-  console.log('\n🔍 === JURISDICTION VERIFICATION ===');
-  console.log('📋 Verifying entity registrations across all jurisdictions...\n');
+  logger.info('Starting jurisdiction verification');
 
   const jurisdictions = await getAvailableJurisdictions();
 
   for (const jurisdiction of jurisdictions) {
     try {
-      console.log(`🏛️ ${jurisdiction.name}:`);
-      console.log(`   📡 RPC: ${jurisdiction.address}`);
-      console.log(`   📄 Contract: ${jurisdiction.entityProviderAddress}`);
+      logger.info('Verifying jurisdiction', {
+        name: jurisdiction.name,
+        rpcUrl: jurisdiction.address,
+        contractAddress: jurisdiction.entityProviderAddress
+      });
 
       // Connect to this jurisdiction's network
       const { entityProvider } = await connectToEthereum(jurisdiction);
@@ -866,30 +936,41 @@ const verifyJurisdictionRegistrations = async () => {
       const nextNumber = await entityProvider.nextNumber();
       const registeredCount = Number(nextNumber) - 1;
 
-      console.log(`   📊 Registered Entities: ${registeredCount}`);
+      logger.info('Jurisdiction entity count', {
+        jurisdictionName: jurisdiction.name,
+        registeredEntities: registeredCount
+      });
 
       // Read registered entities
       if (registeredCount > 0) {
-        console.log(`   📝 Entity Details:`);
+        logger.debug('Reading entity details', {
+          jurisdictionName: jurisdiction.name
+        });
         for (let i = 1; i <= registeredCount; i++) {
           try {
             const entityId = generateNumberedEntityId(i);
             const entityInfo = await entityProvider.entities(entityId);
-            console.log(`      #${i}: ${entityId.slice(0, 10)}... (Block: ${entityInfo.registrationBlock})`);
+            logger.debug('Entity details', {
+              entityNumber: i,
+              entityId: entityId.slice(0, 10) + '...',
+              registrationBlock: entityInfo.registrationBlock
+            });
           } catch (error) {
-            console.log(`      #${i}: Error reading entity data`);
+            logger.warn('Error reading entity data', {
+              entityNumber: i
+            });
           }
         }
       }
 
-      console.log('');
     } catch (error) {
-      console.error(`   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
-      console.log('');
+      logger.error('Failed to verify jurisdiction', {
+        jurisdictionName: jurisdiction.name
+      }, error instanceof Error ? error : new Error(String(error)));
     }
   }
 
-  console.log('✅ Jurisdiction verification complete!\n');
+  logger.info('Jurisdiction verification complete');
 };
 
 // === HANKO DEMO FUNCTION ===
@@ -900,18 +981,18 @@ const demoCompleteHanko = async (): Promise<void> => {
     const isBrowser = typeof window !== 'undefined';
 
     if (isBrowser) {
-      console.log('🎯 Browser environment detected - running simplified Hanko demo...');
-      console.log('✅ Basic signature verification available');
-      console.log('💡 Full test suite available in Node.js environment');
-      console.log('✅ Hanko browser demo completed!');
+      logger.info('Browser environment detected - running simplified Hanko demo');
+      logger.info('Basic signature verification available');
+      logger.info('Full test suite available in Node.js environment');
+      logger.info('Hanko browser demo completed');
       return;
     }
 
-    console.log('🎯 Running complete Hanko test suite...');
+    logger.info('Running complete Hanko test suite');
     await runCompleteHankoTests();
-    console.log('✅ Complete Hanko tests passed!');
+    logger.info('Complete Hanko tests passed');
   } catch (error) {
-    console.error('❌ Complete Hanko tests failed:', error);
+    logger.error('Complete Hanko tests failed', {}, error as Error);
     throw error;
   }
 };
@@ -919,20 +1000,20 @@ const demoCompleteHanko = async (): Promise<void> => {
 // Create a wrapper for runDemo that provides better browser feedback
 const runDemoWrapper = async (env: any): Promise<any> => {
   try {
-    console.log('🚀 Starting XLN Consensus Demo...');
-    console.log('📊 This will demonstrate entity creation, consensus, and message passing');
+    logger.info('Starting XLN Consensus Demo');
+    logger.info('This will demonstrate entity creation, consensus, and message passing');
 
     const result = await runDemo(env);
 
-    console.log('✅ XLN Demo completed successfully!');
-    console.log('🎯 Check the entity cards above to see the results');
-    console.log('🕰️ Use the time machine to replay the consensus steps');
+    logger.info('XLN Demo completed successfully');
+    logger.info('Check the entity cards above to see the results');
+    logger.info('Use the time machine to replay the consensus steps');
 
     // J-watcher is already started in main(), no need to start again
 
     return result;
   } catch (error) {
-    console.error('❌ XLN Demo failed:', error);
+    logger.error('XLN Demo failed', {}, error as Error);
     throw error;
   }
 };
@@ -957,58 +1038,61 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
 
   // Only log cascade details if there are outputs to process
   if (outputs.length > 0) {
-    console.log('🔥 PROCESS-CASCADE: Starting with', outputs.length, 'initial outputs');
-    console.log(
-      '🔥 PROCESS-CASCADE: Initial outputs:',
-      outputs.map(o => ({
+    logger.consensus('Process cascade starting', {
+      initialOutputCount: outputs.length,
+      initialOutputs: outputs.map(o => ({
         entityId: o.entityId.slice(0, 8) + '...',
         signerId: o.signerId,
         txs: o.entityTxs?.length || 0,
         precommits: o.precommits?.size || 0,
         hasFrame: !!o.proposedFrame,
-      })),
-    );
+      }))
+    });
   }
 
   // DEBUG: Log transaction details for vote transactions
   outputs.forEach((output, i) => {
     if (output.entityTxs?.some(tx => tx.type === 'vote')) {
-      console.log(
-        `🗳️ VOTE-DEBUG: Input ${i + 1} contains vote transactions:`,
-        output.entityTxs.filter(tx => tx.type === 'vote'),
-      );
+      logger.consensus('Vote transactions found', {
+        inputIndex: i + 1,
+        voteTransactions: output.entityTxs.filter(tx => tx.type === 'vote')
+      });
     }
   });
 
   while (outputs.length > 0 && iterationCount < maxIterations) {
     iterationCount++;
-    console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
+    logger.consensus('Process cascade iteration', {
+      iteration: iterationCount,
+      outputCount: outputs.length
+    });
 
     const result = await applyServerInput(env, { serverTxs: [], entityInputs: outputs });
     outputs = result.entityOutbox;
 
-    console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} generated ${outputs.length} new outputs`);
-    if (outputs.length > 0) {
-      console.log(
-        '🔥 PROCESS-CASCADE: New outputs:',
-        outputs.map(o => ({
-          entityId: o.entityId.slice(0, 8) + '...',
-          signerId: o.signerId,
-          txs: o.entityTxs?.length || 0,
-          precommits: o.precommits?.size || 0,
-          hasFrame: !!o.proposedFrame,
-        })),
-      );
-    }
+    logger.consensus('Process cascade iteration complete', {
+      iteration: iterationCount,
+      newOutputCount: outputs.length,
+      newOutputs: outputs.length > 0 ? outputs.map(o => ({
+        entityId: o.entityId.slice(0, 8) + '...',
+        signerId: o.signerId,
+        txs: o.entityTxs?.length || 0,
+        precommits: o.precommits?.size || 0,
+        hasFrame: !!o.proposedFrame,
+      })) : undefined
+    });
   }
 
   if (iterationCount >= maxIterations && outputs.length > 0) {
-    console.error('❌ processUntilEmpty reached maximum iterations with outputs remaining!');
-    console.error('❌ This indicates an infinite loop in entity communication.');
-    console.error('❌ Remaining outputs:', outputs.length);
+    logger.error('Process cascade reached maximum iterations - infinite loop detected', {
+      maxIterations,
+      remainingOutputs: outputs.length
+    });
     throw new Error(`Infinite loop detected: ${outputs.length} outputs remain after ${maxIterations} iterations`);
   } else if (iterationCount > 0) {
-    console.log(`🔥 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
+    logger.consensus('Process cascade completed', {
+      totalIterations: iterationCount
+    });
   }
 
   return env;
