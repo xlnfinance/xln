@@ -364,9 +364,19 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // STEP 2: Bubble up AccountInput to target entity
       console.log(`💳 BUBBLE-OUTPUT: Creating AccountInput for target entity ${entityTx.data.targetEntityId.slice(0,10)}...`);
 
+      // Find a signer for the target entity from the replicas
+      let targetSignerId = 's1'; // Default fallback
+      for (const [key, replica] of env.replicas) {
+        if (key.startsWith(`${entityTx.data.targetEntityId}:`)) {
+          targetSignerId = replica.signerId;
+          console.log(`💳 Found target signer: ${targetSignerId} for entity ${entityTx.data.targetEntityId.slice(0,10)}...`);
+          break;
+        }
+      }
+
       const accountInputForTarget: EntityInput = {
         entityId: entityTx.data.targetEntityId,
-        signerId: 'system', // System-generated input
+        signerId: targetSignerId, // Route to target entity's signer
         entityTxs: [{
           type: 'accountInput',
           data: {
