@@ -10,7 +10,28 @@ import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState } from '../state-helpers';
 
-export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
+/**
+ * Generate deterministic owner ID from entity
+ * Owner IDs must be stable across restarts for orderbook consistency
+ * For now, we use entityId only since orders belong to the entity not specific signers
+ */
+function getOwnerIdFromEntity(entityId: string): number {
+  // Create deterministic hash from entityId
+  let hash = 0;
+  for (let i = 0; i < entityId.length; i++) {
+    const char = entityId.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  // Ensure positive number between 1 and 1000000
+  return (Math.abs(hash) % 1000000) + 1;
+}
+
+export const applyEntityTx = async (
+  env: Env,
+  entityState: EntityState,
+  entityTx: EntityTx
+): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
   console.log(`🚨🚨 APPLY-ENTITY-TX: type="${entityTx.type}" (typeof: ${typeof entityTx.type})`);
   console.log(`🚨🚨 APPLY-ENTITY-TX: data=`, JSON.stringify(entityTx.data, null, 2));
   console.log(`🚨🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, openAccount`);
@@ -191,7 +212,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Convert order data to lob_core format
       const orderId = Date.now(); // Use timestamp as order ID
-      const owner = 1; // TODO: Map entity/signer to owner ID
+      const owner = getOwnerIdFromEntity(entityState.entityId);
 
       const cmd = {
         kind: 0 as const, // NEW order
@@ -231,7 +252,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       if (newState.orderbook?.initialized) {
         const lob = await import('../orderbook/lob_core');
 
-        const owner = 1; // TODO: Map entity/signer to owner ID
+        const owner = getOwnerIdFromEntity(entityState.entityId);
         const orderId = Number(entityTx.data.orderId);
 
         // Apply cancel command
@@ -263,7 +284,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       if (newState.orderbook?.initialized) {
         const lob = await import('../orderbook/lob_core');
 
-        const owner = 1; // TODO: Map entity/signer to owner ID
+        const owner = getOwnerIdFromEntity(entityState.entityId);
         const orderId = Number(entityTx.data.orderId);
 
         // Apply replace command
