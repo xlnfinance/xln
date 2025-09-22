@@ -8,6 +8,8 @@ import fs from 'fs';
 import { Level } from 'level';
 
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
+import { entityChannelManager } from './entity-channel';
+import { jMachine } from './j-machine';
 // TODO: Re-enable account-tx imports after fixing export issues
 // import {
 //   sendAccountInputMessage,
@@ -244,6 +246,10 @@ const applyServerInput = async (
           );
 
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
+
+        // Register entity with channel manager for bilateral communication
+        entityChannelManager.registerEntity(serverTx.entityId);
+
         env.replicas.set(replicaKey, {
           entityId: serverTx.entityId,
           signerId: serverTx.signerId,
@@ -494,6 +500,26 @@ export async function initializeServer() {
   console.log('🕸️ Initializing gossip layer...');
   const gossipLayer = createGossipLayer();
   console.log('✅ Gossip layer initialized');
+
+  // Initialize J-Machine for blockchain event processing
+  console.log('🏛️ Initializing J-Machine...');
+  try {
+    await jMachine.initialize({
+      replicas: new Map(),
+      height: 0,
+      timestamp: Date.now(),
+      serverInput: { serverTxs: [], entityInputs: [] },
+      history: [],
+      gossip: gossipLayer
+    });
+    console.log('✅ J-Machine initialized');
+
+    // Start periodic sync
+    jMachine.startPeriodicSync(5000); // Sync every 5 seconds
+  } catch (error) {
+    console.warn('⚠️ J-Machine initialization failed:', error);
+    // Continue without J-Machine - system can work in offline mode
+  }
 
   // Load persisted profiles from database into gossip layer
   console.log('📡 Loading persisted profiles from database...');
