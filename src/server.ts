@@ -11,6 +11,7 @@ import { logger } from './logger';
 import { TIMING, LIMITS } from './constants';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { entityChannelManager } from './entity-channel';
+import { activateXLN, routeThroughChannels } from './activate-bilateral-channels';
 import { jMachine } from './j-machine';
 // Account messaging functions are handled through bilateral channels
 // See entity-channel.ts for direct entity-to-entity communication
@@ -383,7 +384,10 @@ const applyServerInput = async (
         const { newState, outputs } = await applyEntityInput(env, entityReplica, entityInput);
         // CRITICAL FIX: Update the replica in the environment with the new state
         env.replicas.set(replicaKey, { ...entityReplica, state: newState });
-        entityOutbox.push(...outputs);
+
+        // Route outputs through bilateral channels instead of global mempool
+        const routedOutputs = routeThroughChannels(env, outputs);
+        env.serverInput.entityInputs.push(...routedOutputs);
       }
     }
 
@@ -1006,7 +1010,7 @@ const runDemoWrapper = async (env: any): Promise<any> => {
 
 // === ENVIRONMENT UTILITIES ===
 export const createEmptyEnv = (): Env => {
-  return {
+  const env = {
     replicas: new Map(),
     height: 0,
     timestamp: Date.now(),
@@ -1014,6 +1018,11 @@ export const createEmptyEnv = (): Env => {
     history: [],
     gossip: createGossipLayer(),
   };
+
+  // Note: activateXLN is now async and should be called separately after environment creation
+  // to properly initialize J-Machine and bilateral channels
+
+  return env;
 };
 
 // === CONSENSUS PROCESSING UTILITIES ===

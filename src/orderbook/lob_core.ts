@@ -18,6 +18,30 @@
 import { createHash } from "crypto";
 
 /* ================================
+   Reason Codes (so orderbook can speak!)
+   ================================ */
+const REASON_CODES = {
+  'bad owner': 1,
+  'bad id': 2,
+  'qty bad': 3,
+  'price bad': 4,
+  'id too large': 5,
+  'dup id': 6,
+  'FOK no fill': 7,
+  'postOnly would cross': 8,
+  'IOC no fill': 9,
+  'not found': 10,
+  'bad delta': 11,
+  'qty overflow': 12,
+  'STP cancel taker': 13,
+} as const;
+
+const REASON_STRINGS = Object.entries(REASON_CODES).reduce((acc, [reason, code]) => {
+  acc[code] = reason;
+  return acc;
+}, {} as Record<number, string>);
+
+/* ================================
    Public Types
    ================================ */
 
@@ -188,7 +212,7 @@ export function drainEvents(from: number): { next: number; items: EgressEvent[] 
     const t = evT[i], a = evA[i], b = evB[i], c = evC[i], d = evD[i];
 
     if (t === 1) items.push({ k: "ACK", id: a, owner: b });
-    else if (t === 2) items.push({ k: "REJECT", id: a, owner: b, reason: String(c) });
+    else if (t === 2) items.push({ k: "REJECT", id: a, owner: b, reason: REASON_STRINGS[c] || `Unknown(${c})` });
     else if (t === 3) items.push({ k: "TRADE", px: a, qty: b, makerOwner: c, takerOwner: d });
     else if (t === 4) items.push({ k: "REDUCED", id: a, owner: b, delta: c, remain: d });
     else if (t === 5) items.push({ k: "CANCELED", id: a, owner: b });
@@ -421,9 +445,10 @@ function emitACK(owner: number, id: number) {
   evRecord(1, id, owner, 0, 0);
 }
 
-function emitREJECT(owner: number, id: number, _reason: string) {
+function emitREJECT(owner: number, id: number, reason: string) {
   evReject++;
-  evRecord(2, id, owner, 0, 0);
+  const reasonCode = REASON_CODES[reason as keyof typeof REASON_CODES] || 0;
+  evRecord(2, id, owner, reasonCode, 0);
 }
 
 function emitCANCELED(owner: number, id: number) {

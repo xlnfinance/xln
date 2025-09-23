@@ -44,12 +44,18 @@ export interface EntityInput {
   proposedFrame?: ProposedEntityFrame;
 }
 
+export type VoteChoice = 'yes' | 'no' | 'abstain';
+
+export interface VoteData {
+  choice: VoteChoice;
+  comment?: string;
+}
+
 export interface Proposal {
   id: string; // hash of the proposal
   proposer: string;
   action: ProposalAction;
-  // TODO: refactor votes to use VoteData
-  votes: Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string }>;
+  votes: Map<string, VoteData>;
   status: 'pending' | 'executed' | 'rejected';
   created: number; // entity timestamp when proposal was created (deterministic)
 }

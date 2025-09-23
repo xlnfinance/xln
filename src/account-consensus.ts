@@ -19,8 +19,10 @@ import { deriveDelta } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-tx/crypto';
 
 // === CONSTANTS ===
-const LIMITS.ACCOUNT_MEMPOOL_MAX = 1000;
-const LIMITS.MAX_ROLLBACKS = 3;
+const LIMITS = {
+  ACCOUNT_MEMPOOL_MAX: 1000,
+  MAX_ROLLBACKS: 3
+};
 const MAX_MESSAGE_COUNTER = 1000000;
 
 // === VALIDATION ===

@@ -1,9 +1,9 @@
-import { AccountInput, EntityState, Env } from '../../types';
+import { AccountInput, EntityState, EntityInput, Env } from '../../types';
 import { createDemoDelta } from '../../account-utils';
 import { handleAccountInput as processAccountInput, addToAccountMempool } from '../../account-consensus';
 import { cloneEntityState } from '../../state-helpers';
 
-export function handleAccountInput(state: EntityState, input: AccountInput, env: Env): EntityState {
+export function handleAccountInput(state: EntityState, input: AccountInput, env: Env): { newState: EntityState; outputs: EntityInput[] } {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId}`, input.accountTx);
 
   // Create immutable copy of current state
@@ -149,10 +149,11 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
       // Add events to entity messages
       newState.messages.push(...result.events);
 
-      // If there's a response, queue it for sending back
+      // If there's a response, create an output to send back
       if (result.response) {
-        // TODO: Send response back to counterparty
-        console.log(`📤 Would send AccountInput response back to ${result.response.toEntityId.slice(-4)}`);
+        // The response is already an EntityInput, return it as an output
+        console.log(`📤 Sending AccountInput response back to ${result.response.toEntityId.slice(-4)}`);
+        return { newState, outputs: [result.response] };
       }
     } else {
       console.log(`❌ Frame consensus failed: ${result.error}`);
@@ -174,5 +175,5 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
     }
   }
 
-  return newState;
+  return { newState, outputs: [] };
 }

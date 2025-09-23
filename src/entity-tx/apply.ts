@@ -32,9 +32,7 @@ export const applyEntityTx = async (
   entityState: EntityState,
   entityTx: EntityTx
 ): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
-  console.log(`🚨🚨 APPLY-ENTITY-TX: type="${entityTx.type}" (typeof: ${typeof entityTx.type})`);
-  console.log(`🚨🚨 APPLY-ENTITY-TX: data=`, JSON.stringify(entityTx.data, null, 2));
-  console.log(`🚨🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, openAccount`);
+  // Removed problematic JSON.stringify that could cause circular reference hang
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
@@ -121,16 +119,11 @@ export const applyEntityTx = async (
         ...proposal,
         votes: new Map(proposal.votes),
       };
-      // Only create the object variant when comment is provided (comment must be string)
-      const voteData: 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string } =
-        comment !== undefined ? ({ choice, comment } as { choice: 'yes' | 'no' | 'abstain'; comment: string }) : choice;
+      const voteData = comment !== undefined ? { choice, comment } : { choice };
       updatedProposal.votes.set(voter, voteData);
 
       const yesVoters = Array.from(updatedProposal.votes.entries())
-        .filter(([_voter, voteData]) => {
-          const vote = typeof voteData === 'object' ? voteData.choice : voteData;
-          return vote === 'yes';
-        })
+        .filter(([_voter, voteData]) => voteData.choice === 'yes')
         .map(([voter, _voteData]) => voter);
 
       const totalYesPower = calculateQuorumPower(entityState.config, yesVoters);
@@ -178,13 +171,14 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'j_event') {
+      console.log('🔍 J_EVENT: About to call handleJEvent');
       const newState = handleJEvent(entityState, entityTx.data);
+      console.log('🔍 J_EVENT: handleJEvent returned successfully');
       return { newState, outputs: [] };
     }
 
     if (entityTx.type === 'accountInput') {
-      const newState = handleAccountInput(entityState, entityTx.data, env);
-      return { newState, outputs: [] };
+      return handleAccountInput(entityState, entityTx.data, env);
     }
 
     if (entityTx.type === 'place_order') {
@@ -210,8 +204,12 @@ export const applyEntityTx = async (
       // Import orderbook functions
       const lob = await import('../orderbook/lob_core');
 
-      // Convert order data to lob_core format
-      const orderId = Date.now(); // Use timestamp as order ID
+      // Generate order ID - use a counter stored in entity state
+      // Initialize counter if not exists
+      if (!newState.orderbookOrderCounter) {
+        newState.orderbookOrderCounter = 1;
+      }
+      const orderId = newState.orderbookOrderCounter++;
       const owner = getOwnerIdFromEntity(entityState.entityId);
 
       const cmd = {
@@ -223,7 +221,7 @@ export const applyEntityTx = async (
         postOnly: false,
         reduceOnly: false,
         priceTicks: Math.round(entityTx.data.price * 100), // Convert to cents
-        qtyLots: entityTx.data.amount,
+        qtyLots: entityTx.data.quantity || entityTx.data.amount || 1, // Support both field names
       };
 
       // Apply the command
@@ -238,8 +236,8 @@ export const applyEntityTx = async (
           newState.messages.push(`✅ Order #${event.id} accepted`);
         } else if (event.k === 'REJECT') {
           newState.messages.push(`❌ Order #${event.id} rejected: ${event.reason}`);
-        } else if (event.k === 'FILL') {
-          newState.messages.push(`💰 Trade: ${event.qtyLots} @ $${event.pxTicks / 100}`);
+        } else if (event.k === 'TRADE') {
+          newState.messages.push(`💰 Trade: ${event.qty} @ $${event.px / 100}`);
         }
       }
 
@@ -253,7 +251,7 @@ export const applyEntityTx = async (
         const lob = await import('../orderbook/lob_core');
 
         const owner = getOwnerIdFromEntity(entityState.entityId);
-        const orderId = Number(entityTx.data.orderId);
+        const orderId = Number(entityTx.data.orderId) || 0;
 
         // Apply cancel command
         lob.applyCommand({
@@ -267,7 +265,7 @@ export const applyEntityTx = async (
 
         // Process events
         for (const event of events.items) {
-          if (event.k === 'CANCEL') {
+          if (event.k === 'CANCELED') {
             newState.messages.push(`❌ Order #${event.id} cancelled`);
           }
         }
@@ -285,7 +283,7 @@ export const applyEntityTx = async (
         const lob = await import('../orderbook/lob_core');
 
         const owner = getOwnerIdFromEntity(entityState.entityId);
-        const orderId = Number(entityTx.data.orderId);
+        const orderId = Number(entityTx.data.orderId) || 0;
 
         // Apply replace command
         lob.applyCommand({
@@ -422,6 +420,20 @@ export const applyEntityTx = async (
       newState.messages.push(`✅ Account opening request sent to Entity ${entityTx.data.targetEntityId.slice(-4)}`);
 
       return { newState, outputs };
+    }
+
+    if (entityTx.type === 'orderbook_discovery') {
+      // Process orderbook discovery from another entity
+      const { processOrderbookDiscovery } = await import('./orderbook-discovery');
+      const newState = processOrderbookDiscovery(entityState, entityTx.data);
+      return { newState, outputs: [] };
+    }
+
+    if (entityTx.type === 'share_orderbook') {
+      // Share our orderbook state with a counterparty
+      const { shareOrderbookState } = await import('./orderbook-discovery');
+      const outputs = shareOrderbookState(entityState, entityTx.data.targetEntityId);
+      return { newState: entityState, outputs };
     }
 
     return { newState: entityState, outputs: [] };
