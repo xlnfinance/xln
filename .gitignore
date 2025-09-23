@@ -17,7 +17,9 @@ logs/*
 
 # Generated files
 frontend/static/server.js
-#dist/ need for gh pages /server.js
+frontend/build/
+dist/
+.svelte-kit/
 *.log
 .env
 .env.local
