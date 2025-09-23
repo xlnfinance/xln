@@ -34,23 +34,9 @@
 
   $: activeFrameCount = serverFrames.filter((f) => f.hasActivity).length;
 
-  // Auto-focus current server frame when currentTimeIndex changes
-  function autoFocusCurrentFrame() {
-    if (typeof currentTimeIndex !== 'undefined' && currentTimeIndex >= 0 && containerElement) {
-      setTimeout(() => {
-        const currentFrameElement = containerElement.querySelector(`[data-frame="${currentTimeIndex}"]`);
-        if (currentFrameElement) {
-          currentFrameElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          console.log(`🎯 Auto-focused frame ${currentTimeIndex}`);
-        }
-      }, 100);
-    }
-  }
-
-  // Watch for currentTimeIndex changes
-  $: if (currentTimeIndex !== undefined && containerElement) {
-    autoFocusCurrentFrame();
-  }
+  // REMOVED: Auto-focus functionality to prevent unwanted scrolling/focus jumps
+  // Users can manually scroll to see frames they're interested in
+  // Auto-scrolling was causing disruptive UX during time machine navigation
 </script>
 
 <div class="scrollable-component transaction-history" bind:this={containerElement}>

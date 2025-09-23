@@ -29,10 +29,19 @@ export const jurisdictions = writable<JurisdictionsData | null>(null);
 export const jurisdictionsLoaded = writable(false);
 
 let loadPromise: Promise<JurisdictionsData> | null = null;
+let cachedData: JurisdictionsData | null = null;
 
 // Load jurisdictions ONCE from server.ts (single source)
 export async function loadJurisdictions(): Promise<JurisdictionsData> {
+  // Return cached data if already loaded
+  if (cachedData) {
+    console.log('🔍 JURISDICTIONS: Returning cached data (no fetch)');
+    return cachedData;
+  }
+
+  // Return existing promise if load is in progress
   if (loadPromise) {
+    console.log('🔍 JURISDICTIONS: Reusing existing load promise');
     return loadPromise;
   }
 
@@ -64,7 +73,10 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
           name: j.name,
           chainId: j.chainId,
           rpc: j.address,
-          contracts: j.contracts,
+          contracts: {
+            entityProvider: j.entityProviderAddress,
+            depository: j.depositoryAddress
+          },
           explorer: j.address,
           currency: j.name === 'Ethereum' ? 'ETH' : 'TOKEN',
           status: 'active'
@@ -73,6 +85,8 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
 
       console.log('🔍 SINGLE LOAD: Loaded contracts from server:', data.jurisdictions?.ethereum?.contracts);
 
+      // Cache the data
+      cachedData = data;
       jurisdictions.set(data);
       jurisdictionsLoaded.set(true);
       return data;
@@ -83,4 +97,13 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
   })();
 
   return loadPromise;
+}
+
+// Clear the cache (useful for testing or when file is updated)
+export function clearJurisdictionsCache(): void {
+  cachedData = null;
+  loadPromise = null;
+  jurisdictions.set(null);
+  jurisdictionsLoaded.set(false);
+  console.log('🔄 Frontend jurisdictions cache cleared');
 }

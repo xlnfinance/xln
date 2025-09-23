@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { timeState } from '../../stores/timeStore';
 
   let isCollapsed = false;
@@ -12,6 +12,47 @@
   $: currentSnapshot = $timeState.isLive ? null : $xlnEnvironment?.history?.[$timeState.currentTimeIndex];
   $: serverInput = currentSnapshot?.serverInput || { serverTxs: [], entityInputs: [] };
   $: serverOutputs = currentSnapshot?.serverOutputs || [];
+
+  // Enhanced JSON stringify function with proper formatting
+  function elaborateStringify(obj: any, maxDepth: number = 10): string {
+    try {
+      return JSON.stringify(obj, (key, value) => {
+        // Handle BigInt
+        if (typeof value === 'bigint') {
+          return `BigInt(${value.toString()})`;
+        }
+        // Handle Map objects
+        if (value instanceof Map) {
+          return Object.fromEntries(value);
+        }
+        // Handle Set objects
+        if (value instanceof Set) {
+          return Array.from(value);
+        }
+        // Handle Buffer objects
+        if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+          return `Buffer(${value.data.length} bytes)`;
+        }
+        // Handle Functions
+        if (typeof value === 'function') {
+          return `[Function: ${value.name || 'anonymous'}]`;
+        }
+        return value;
+      }, 2);
+    } catch (err) {
+      return `[Error stringifying: ${err.message}]`;
+    }
+  }
+
+  let showJsonDetails = {
+    serverTxs: false,
+    entityInputs: false,
+    entityOutputs: false
+  };
+
+  function toggleJsonDetails(section: keyof typeof showJsonDetails) {
+    showJsonDetails[section] = !showJsonDetails[section];
+  }
 </script>
 
 <div class="history-io-section">
@@ -34,13 +75,26 @@
           </div>
           
           <div class="server-section">
-            <h4>🖥️ Server Transactions</h4>
+            <div class="section-header">
+              <h4>🖥️ Server Transactions</h4>
+              <button class="json-toggle-btn" on:click={() => toggleJsonDetails('serverTxs')}>
+                {showJsonDetails.serverTxs ? '📋 Hide JSON' : '🔍 Show JSON'}
+              </button>
+            </div>
             <div class="server-txs-list">
               {#if serverInput.serverTxs.length > 0}
-                {#each serverInput.serverTxs as tx}
+                {#each serverInput.serverTxs as tx, index}
                   <div class="input-item">
-                    <strong>🖥️ {tx.type}</strong>: {tx.entityId}:{tx.signerId}
-                    {tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
+                    <div class="summary-line">
+                      <strong>🖥️ {tx.type}</strong>: {tx.entityId}:{tx.signerId}
+                      {tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
+                    </div>
+                    {#if showJsonDetails.serverTxs}
+                      <div class="json-details">
+                        <div class="json-header">Full ServerTx #{index + 1} JSON:</div>
+                        <pre class="json-content">{elaborateStringify(tx)}</pre>
+                      </div>
+                    {/if}
                   </div>
                 {/each}
               {:else}
@@ -50,19 +104,32 @@
           </div>
           
           <div class="server-section">
-            <h4>🔄 Entity Inputs</h4>
+            <div class="section-header">
+              <h4>🔄 Entity Inputs</h4>
+              <button class="json-toggle-btn" on:click={() => toggleJsonDetails('entityInputs')}>
+                {showJsonDetails.entityInputs ? '📋 Hide JSON' : '🔍 Show JSON'}
+              </button>
+            </div>
             <div class="entity-inputs-list">
               {#if serverInput.entityInputs.length > 0}
-                {#each serverInput.entityInputs as input}
+                {#each serverInput.entityInputs as input, index}
                   <div class="input-item">
-                    <strong>{input.entityId}:{input.signerId}</strong>
-                    {#if input.entityTxs && input.entityTxs.length > 0}
-                      <br>📝 <strong>{input.entityTxs.length} transactions:</strong>
-                      {#each input.entityTxs as tx, i}
-                        <br>  {i+1}. {tx.type === 'chat' ? `💬 Chat: "${tx.data.message}"` : 
-                                     tx.type === 'propose' ? `📝 Propose: "${tx.data.action.data.message}"` :
-                                     tx.type === 'vote' ? `🗳️ Vote: ${tx.data.choice}` : `⚙️ ${tx.type}`}
-                      {/each}
+                    <div class="summary-line">
+                      <strong>Entity #{$xlnFunctions?.getEntityNumber(input.entityId) || '?'}:{input.signerId}</strong>
+                      {#if input.entityTxs && input.entityTxs.length > 0}
+                        <br>📝 <strong>{input.entityTxs.length} transactions:</strong>
+                        {#each input.entityTxs as tx, i}
+                          <br>  {i+1}. {tx.type === 'chat' ? `💬 Chat: "${tx.data.message}"` :
+                                       tx.type === 'propose' ? `📝 Propose: "${tx.data.action.data.message}"` :
+                                       tx.type === 'vote' ? `🗳️ Vote: ${tx.data.choice}` : `⚙️ ${tx.type}`}
+                        {/each}
+                      {/if}
+                    </div>
+                    {#if showJsonDetails.entityInputs}
+                      <div class="json-details">
+                        <div class="json-header">Full EntityInput #{index + 1} JSON:</div>
+                        <pre class="json-content">{elaborateStringify(input)}</pre>
+                      </div>
                     {/if}
                   </div>
                 {/each}
@@ -82,19 +149,34 @@
           </div>
           
           <div class="server-section">
-            <h4>🚀 Entity Outputs</h4>
+            <div class="section-header">
+              <h4>🚀 Entity Outputs</h4>
+              <button class="json-toggle-btn" on:click={() => toggleJsonDetails('entityOutputs')}>
+                {showJsonDetails.entityOutputs ? '📋 Hide JSON' : '🔍 Show JSON'}
+              </button>
+            </div>
             <div class="entity-outputs-list">
               {#if serverOutputs.length > 0}
                 {#each serverOutputs as output, index}
                   <div class="input-item">
-                    <strong>📤 {index + 1}. → {output.signerId}</strong>
-                    {#if output.entityTxs && output.entityTxs.length > 0}
-                      <br>📝 <strong>{output.entityTxs.length} transactions:</strong>
-                      {#each output.entityTxs as tx, i}
-                        <br>  {i+1}. {tx.type === 'chat' ? `💬 Chat: "${tx.data.message}"` : 
-                                     tx.type === 'propose' ? `📝 Propose: "${tx.data.action.data.message}"` :
-                                     tx.type === 'vote' ? `🗳️ Vote: ${tx.data.choice}` : `⚙️ ${tx.type}`}
-                      {/each}
+                    <div class="summary-line">
+                      <strong>📤 {index + 1}. → Entity #{$xlnFunctions?.getEntityNumber(output.entityId) || '?'}:{output.signerId}</strong>
+                      {#if output.entityTxs && output.entityTxs.length > 0}
+                        <br>📝 <strong>{output.entityTxs.length} transactions:</strong>
+                        {#each output.entityTxs as tx, i}
+                          <br>  {i+1}. {tx.type === 'chat' ? `💬 Chat: "${tx.data.message}"` :
+                                       tx.type === 'propose' ? `📝 Propose: "${tx.data.action.data.message}"` :
+                                       tx.type === 'vote' ? `🗳️ Vote: ${tx.data.choice}` :
+                                       tx.type === 'accountInput' ? `💳 AccountInput: ${tx.data.accountTx?.type || 'unknown'}` :
+                                       `⚙️ ${tx.type}`}
+                        {/each}
+                      {/if}
+                    </div>
+                    {#if showJsonDetails.entityOutputs}
+                      <div class="json-details">
+                        <div class="json-header">Full EntityOutput #{index + 1} JSON:</div>
+                        <pre class="json-content">{elaborateStringify(output)}</pre>
+                      </div>
                     {/if}
                   </div>
                 {/each}
@@ -198,11 +280,67 @@
     margin-bottom: 0;
   }
 
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
   .server-section h4 {
-    margin: 0 0 10px 0;
+    margin: 0;
     color: #d4d4d4;
     font-size: 0.9em;
     font-weight: bold;
+  }
+
+  .json-toggle-btn {
+    background: #1a1a1a;
+    border: 1px solid #007acc;
+    color: #007acc;
+    padding: 4px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.7em;
+    transition: all 0.2s ease;
+  }
+
+  .json-toggle-btn:hover {
+    background: #007acc;
+    color: white;
+  }
+
+  .summary-line {
+    margin-bottom: 5px;
+  }
+
+  .json-details {
+    margin-top: 10px;
+    border-top: 1px solid #444;
+    padding-top: 8px;
+  }
+
+  .json-header {
+    color: #9d9d9d;
+    font-size: 0.75em;
+    margin-bottom: 5px;
+    font-weight: bold;
+  }
+
+  .json-content {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 8px;
+    font-size: 0.7em;
+    line-height: 1.3;
+    color: #e1e1e1;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    max-height: 300px;
+    overflow-y: auto;
   }
 
   .input-item {

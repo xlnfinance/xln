@@ -1,8 +1,7 @@
 <script lang="ts">
   import type { ServerFrame } from '../../../types';
   import { formatTimestamp } from '../../../utils/serverFrameProcessor';
-  import { renderBankingInput, renderBankingOutput, renderBankingImport } from '../../../utils/transactionRenderers';
-  import TransactionItem from './TransactionItem.svelte';
+  // Simplified without complex rendering - no more TransactionItem needed
 
   export let frame: ServerFrame;
   export let isCurrentFrame: boolean = false;
@@ -25,15 +24,24 @@
     <div class="frame-content">
       <div class="banking-transactions">
         {#each frame.imports as imp}
-          <TransactionItem transaction={renderBankingImport(imp)} />
+          <div class="simple-transaction">
+            <span class="tx-type">Import</span>
+            <span class="tx-details">Entity {imp.entityId.slice(-4)}</span>
+          </div>
         {/each}
 
         {#each frame.inputs as input}
-          <TransactionItem transaction={renderBankingInput(input)} />
+          <div class="simple-transaction">
+            <span class="tx-type">Input</span>
+            <span class="tx-details">{input.entityTxs?.length || 0} transactions</span>
+          </div>
         {/each}
 
         {#each frame.outputs as output}
-          <TransactionItem transaction={renderBankingOutput(output)} />
+          <div class="simple-transaction">
+            <span class="tx-type">Output</span>
+            <span class="tx-details">{output.entityTxs?.length || 0} transactions</span>
+          </div>
         {/each}
       </div>
     </div>
@@ -99,5 +107,23 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .simple-transaction {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 8px;
+    background: #3a3a3a;
+    border-radius: 3px;
+    font-size: 0.8em;
+  }
+
+  .tx-type {
+    color: #10b981;
+    font-weight: 500;
+  }
+
+  .tx-details {
+    color: #d4d4d4;
   }
 </style>

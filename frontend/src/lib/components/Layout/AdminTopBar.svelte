@@ -2,6 +2,8 @@
   import { getXLN, xlnEnvironment, error } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
+  import { timeOperations } from '../../stores/timeStore';
+  import { get } from 'svelte/store';
   import TutorialLauncher from '../Tutorial/TutorialLauncher.svelte';
   import TutorialOverlay from '../Tutorial/TutorialOverlay.svelte';
   import { isActiveTutorial, currentTutorial, currentStep, progressPercentage } from '../Tutorial/TutorialService';
@@ -61,21 +63,21 @@
       console.log('🎯 Running XLN demo...');
       const xln = await getXLN();
       const env = $xlnEnvironment || await xln.main();
-      
+
       console.log('🔍 Environment before demo:', {
         replicas: env?.replicas?.size || 0,
         height: env?.height || 0
       });
-      
+
       const result = await xln.runDemo(env);
-      
+
       console.log('🔍 Environment after demo:', {
         replicas: result?.replicas?.size || 0,
         height: result?.height || 0,
         entity1Reserves: result?.replicas?.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1')?.state?.reserves?.size || 0,
         entity2Reserves: result?.replicas?.get('0x0000000000000000000000000000000000000000000000000000000000000002:s2')?.state?.reserves?.size || 0
       });
-      
+
       if (result?.replicas?.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1')?.state?.reserves) {
         const e1reserves = result.replicas.get('0x0000000000000000000000000000000000000000000000000000000000000001:s1').state.reserves;
         console.log('🔍 Entity 1 reserves after demo:');
@@ -83,7 +85,7 @@
           console.log(`  Token ${tokenId}: ${amount.toString()}`);
         }
       }
-      
+
       xlnEnvironment.set(result);
       console.log('✅ Demo completed successfully');
       console.log(`📸 History snapshots: ${result.history.length}`);
@@ -91,6 +93,40 @@
     } catch (error) {
       console.error('❌ Demo failed:', error);
       alert(`Demo failed: ${error.message}`);
+    }
+  }
+
+  async function handlePrepopulate() {
+    try {
+      console.log('🌐 Starting XLN Prepopulation...');
+      const xln = await getXLN();
+      const env = $xlnEnvironment || await xln.main();
+
+      console.log('🔍 Environment before prepopulation:', {
+        replicas: env?.replicas?.size || 0,
+        height: env?.height || 0
+      });
+
+      // Call the prepopulate function with the environment
+      await xln.prepopulate(env, xln.processUntilEmpty);
+
+      console.log('🔍 Environment after prepopulation:', {
+        replicas: env?.replicas?.size || 0,
+        height: env?.height || 0,
+        accounts: Array.from(env?.replicas?.values() || [])
+          .map(r => r.state?.accounts?.size || 0)
+          .reduce((a, b) => a + b, 0)
+      });
+
+      // Environment and history are now updated automatically by applyServerInput
+      // which calls notifyEnvChange, triggering the registered callback
+      // that updates xlnEnvironment store, which in turn updates the derived history store
+
+      console.log('✅ Prepopulation completed successfully');
+      console.log('🔍 Store updated, UI should refresh automatically');
+    } catch (error) {
+      console.error('❌ Prepopulation failed:', error);
+      alert(`Prepopulation failed: ${error.message}`);
     }
   }
 
@@ -207,6 +243,9 @@
   <div class="admin-controls">
     <button class="admin-btn" on:click={handleRunDemo} title="Run Demo">
       <span>▶️</span>
+    </button>
+    <button class="admin-btn" on:click={handlePrepopulate} title="Prepopulate Network">
+      <span>🌐</span>
     </button>
     <button class="admin-btn" on:click={handleClearDatabase} title="Clear Database">
       <span>🗑️</span>

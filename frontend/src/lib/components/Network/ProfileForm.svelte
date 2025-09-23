@@ -227,7 +227,13 @@
         metadataInput = ''; // Clear JSON input when hub is selected
       } else {
         // For non-hub profiles, put metadata in JSON field
-        metadataInput = JSON.stringify(profile.metadata, null, 2);
+        // Handle BigInt serialization
+        metadataInput = JSON.stringify(profile.metadata, (key, value) => {
+          if (typeof value === 'bigint') {
+            return value.toString();
+          }
+          return value;
+        }, 2);
         hubName = '';
         hubAvatar = '';
         hubBio = '';

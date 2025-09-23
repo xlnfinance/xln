@@ -5,16 +5,69 @@ let XLN: any = null;
 
 async function getXLN() {
   if (XLN) return XLN;
-  
+
   const serverUrl = new URL('/server.js', window.location.origin).href;
   XLN = await import(/* @vite-ignore */ serverUrl);
+
+  // Expose globally for console debugging
+  exposeGlobalDebugObjects();
+
   return XLN;
+}
+
+/**
+ * Expose XLN objects globally for console debugging
+ */
+function exposeGlobalDebugObjects() {
+  if (typeof window !== 'undefined' && XLN) {
+    // @ts-ignore - Expose XLN server instance
+    window.XLN = XLN;
+
+    // @ts-ignore - Expose environment directly (avoid naming conflicts)
+    window.xlnEnv = xlnEnvironment;
+
+    console.log('🌍 GLOBAL DEBUG: XLN objects exposed');
+    console.log('  window.XLN - All server functions (deriveDelta, isLeft, etc.)');
+    console.log('  window.xlnEnv - Reactive environment store');
+    console.log('  Usage: window.XLN.deriveDelta(delta, true).ascii');
+    console.log('  Usage: Get current env value with xlnEnv subscribe pattern');
+  }
 }
 
 // Simple reactive store for XLN environment - just like legacy index.html
 export const xlnEnvironment = writable<any>(null);
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
+
+// Store XLN instance separately for function access
+export const xlnInstance = writable<any>(null);
+
+// Create derived stores for commonly used functions - simple and direct
+export const xlnFunctions = derived(xlnInstance, ($xlnInstance) => {
+  if (!$xlnInstance) return null;
+  return {
+    // Account utilities
+    deriveDelta: $xlnInstance.deriveDelta,
+    formatTokenAmount: $xlnInstance.formatTokenAmount,
+    getTokenInfo: $xlnInstance.getTokenInfo,
+    isLeft: $xlnInstance.isLeft,
+    createDemoDelta: $xlnInstance.createDemoDelta,
+    getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,
+    // Entity utilities
+    getEntityNumber: $xlnInstance.getEntityNumber,
+    formatEntityDisplay: $xlnInstance.formatEntityDisplay,
+    formatShortEntityId: $xlnInstance.formatShortEntityId,
+    safeStringify: $xlnInstance.safeStringify,
+    // Financial utilities (ethers.js-based, precision-safe)
+    formatTokenAmountEthers: $xlnInstance.formatTokenAmountEthers,
+    parseTokenAmount: $xlnInstance.parseTokenAmount,
+    convertTokenPrecision: $xlnInstance.convertTokenPrecision,
+    calculatePercentageEthers: $xlnInstance.calculatePercentageEthers,
+    formatAssetAmountEthers: $xlnInstance.formatAssetAmountEthers,
+    BigIntMath: $xlnInstance.BigIntMath,
+    FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
+  };
+});
 
 // Derived stores for convenience
 export const replicas = derived(
@@ -39,13 +92,22 @@ export async function initializeXLN() {
     error.set(null);
     
     const xln = await getXLN();
-    
+
+    // Store XLN instance separately for function access
+    xlnInstance.set(xln);
+    console.log('✅ XLN instance stored with functions:', Object.keys(xln).filter(k => typeof xln[k] === 'function'));
+    console.log('🔍 Looking for deriveDelta:', {
+      hasDeriveDelta: 'deriveDelta' in xln,
+      deriveDeltaType: typeof xln.deriveDelta,
+      allAccountFunctions: Object.keys(xln).filter(k => k.includes('account') || k.includes('Delta') || k.includes('token'))
+    });
+
     // Register callback for automatic reactivity
     xln.registerEnvChangeCallback?.((env: any) => {
       xlnEnvironment.set(env);
       console.log('🔄 BROWSER-DEBUG: Environment updated automatically');
       console.log(`🔍 BROWSER-DEBUG: Updated env - Height: ${env.height}, Replicas: ${env.replicas?.size || 0}`);
-      
+
       // Update window for e2e testing
       if (typeof window !== 'undefined') {
         (window as any).xlnEnv = env;

@@ -16,25 +16,24 @@
       .replace(/'/g, "&#039;");
   }
   import EntityDropdown from './EntityDropdown.svelte';
-  // Removed AccountInspectorDropdown - consolidated into AccountPreview + AccountPanel
+  import AccountInspectorDropdown from './AccountInspectorDropdown.svelte';
   import EntityProfile from './EntityProfile.svelte';
   import ConsensusState from './ConsensusState.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import ProposalsList from './ProposalsList.svelte';
   import TransactionHistory from './TransactionHistory/index.svelte';
   import ControlsPanel from './ControlsPanel.svelte';
-  import AccountList from './AccountList.svelte';
-  import AccountPanel from './AccountPanel.svelte';
-  import AccountDropdown from './AccountDropdown.svelte';
-  import PaymentPanel from './PaymentPanel.svelte';
-  import { xlnFunctions } from '../../stores/xlnStore';
+  import AccountChannels from './AccountChannels.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
 
+  // VISUAL VALUE WALLET STATE
+  let portfolioViewLevel = 0; // 0: Total, 1: Reserves+Accounts, 2: Individual Assets
+
   let replica: EntityReplica | null = null;
   let showCloseButton = true;
-  let selectedAccountId: string | null = null;
+  let selectedAccount: { entityId: string; account: any } | null = null;
 
   // Reactive statement to get replica data
   $: {
@@ -104,49 +103,71 @@
     return total;
   }
 
+  // VISUAL VALUE WALLET CALCULATIONS
+  function calculateAccountsValue(accounts: Map<string, any>): number {
+    let total = 0;
+    for (const [_, account] of accounts.entries()) {
+      if (account.deltas) {
+        for (const [tokenId, delta] of account.deltas.entries()) {
+          // Calculate total account value (collateral + available credit)
+          const collateralValue = getAssetValue(tokenId.toString(), delta.collateral || 0n);
+          const creditValue = getAssetValue(tokenId.toString(),
+            (delta.leftCreditLimit || 0n) + (delta.rightCreditLimit || 0n)
+          );
+          total += collateralValue + creditValue;
+        }
+      }
+    }
+    return total;
+  }
+
+  $: totalReservesValue = replica?.state?.reserves ? calculateTotalNetworth(replica.state.reserves) : 0;
+  $: totalAccountsValue = replica?.state?.accounts ? calculateAccountsValue(replica.state.accounts) : 0;
+  $: totalEntityValue = totalReservesValue + totalAccountsValue;
+
+  // Unfolding portfolio functions
+  function unfoldPortfolio() {
+    portfolioViewLevel = Math.min(portfolioViewLevel + 1, 2);
+  }
+
+  function foldPortfolio() {
+    portfolioViewLevel = Math.max(portfolioViewLevel - 1, 0);
+  }
+
+  function switchToAccount(accountId: string) {
+    const account = replica?.state?.accounts?.get(accountId);
+    if (account) {
+      selectedAccount = { entityId: accountId, account };
+    }
+  }
+
+  function switchToEntityOverview() {
+    selectedAccount = null;
+  }
+
+  // formatAssetDisplay already exists elsewhere in the file
+
   // Handle entity selection from dropdown
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signer, entityId } = event.detail;
 
     // Clear selected account when changing entities
-    selectedAccountId = null;
+    selectedAccount = null;
 
     tabOperations.updateTab(tab.id, {
       jurisdiction,
       signer,
       entityId,
-      title: `Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'}`
+      title: `Entity ${entityId.slice(-4)}`
     });
   }
 
-  // Handle account selection from dropdown OR account preview click
+  // Handle account selection from AccountInspectorDropdown
   function handleAccountSelect(event: CustomEvent) {
-    const accountId = event.detail.accountId;
-    selectedAccountId = accountId;
-    if (accountId) {
-      console.log('📋 Account selected: Entity #', $xlnFunctions?.getEntityNumber(accountId) || '?');
-    } else {
-      console.log('📋 Account selection cleared - back to entity view');
-    }
+    const { entityId, account } = event.detail;
+    selectedAccount = { entityId, account };
+    console.log('📋 Account selected:', entityId.slice(-4), account);
   }
-
-  // Handle account selection from preview click (simplified)
-  function handleAccountPreviewSelect(event: CustomEvent) {
-    const accountId = event.detail.accountId;
-    selectedAccountId = accountId;
-    console.log('📋 Account selected via preview: Entity #', $xlnFunctions?.getEntityNumber(accountId) || '?');
-  }
-
-  // Handle back to entity - clear account selection
-  function handleBackToEntity() {
-    selectedAccountId = null;
-    console.log('↩️ Back to entity view');
-  }
-
-  // Get selected account from state
-  $: selectedAccount = selectedAccountId && replica?.state?.accounts
-    ? replica.state.accounts.get(selectedAccountId)
-    : null;
 
   // Handle tab close
   function handleCloseTab() {
@@ -186,17 +207,11 @@
 <div class="entity-panel" data-panel-id={tab.id}>
   <div class="panel-header">
     <div class="panel-header-dropdowns">
-      <div class="dropdown-group">
-        <label class="dropdown-label">Entity:</label>
-        <EntityDropdown
-          {tab}
-          on:entitySelect={handleEntitySelect}
-        />
-      </div>
-      <div class="dropdown-group">
-        <label class="dropdown-label">Account:</label>
-        <AccountDropdown {replica} {selectedAccountId} on:accountSelect={handleAccountSelect} />
-      </div>
+      <EntityDropdown
+        {tab}
+        on:entitySelect={handleEntitySelect}
+      />
+      <AccountInspectorDropdown {replica} {selectedAccount} on:accountSelect={handleAccountSelect} />
     </div>
     <div class="panel-header-controls">
       {#if isLast}
@@ -216,35 +231,230 @@
     <!-- Empty State: No Entity Selected -->
     <div class="empty-panel-state">
       <div class="empty-panel-message">
+        <div class="empty-icon">🏢</div>
         <h3>Select Entity to View Profile</h3>
         <p>Use the dropdown above to select:</p>
         <div class="selection-steps">
-          <div class="step"><strong>Jurisdiction</strong> - Network/Port</div>
-          <div class="step"><strong>Signer</strong> - Your Identity</div>
-          <div class="step"><strong>Entity</strong> - Which Entity</div>
+          <div class="step">📍 <strong>Jurisdiction</strong> → Network/Port</div>
+          <div class="step">👤 <strong>Signer</strong> → Your Identity</div>
+          <div class="step">🏢 <strong>Entity</strong> → Which Entity</div>
         </div>
         <small>Once selected, you'll see consensus, chat, proposals, and controls.</small>
       </div>
     </div>
   {:else}
-    {#if selectedAccount && selectedAccountId}
-      <!-- Account Panel View -->
-      <AccountPanel
-        account={selectedAccount}
-        counterpartyId={selectedAccountId}
-        entityId={tab.entityId}
-        on:back={handleBackToEntity}
-      />
+    {#if selectedAccount}
+      <!-- Account view takes over entire panel -->
+      <!-- Breadcrumb Navigation -->
+      <div class="breadcrumb-header">
+        <div class="breadcrumb-nav">
+          <span class="breadcrumb-item clickable" on:click={switchToEntityOverview} role="button" tabindex="0">
+            🏢 Entity {tab.entityId?.slice(-4) || '?'}
+          </span>
+          <span class="breadcrumb-separator">→</span>
+          <span class="breadcrumb-item active">
+            💳 Account #{parseInt(selectedAccount.entityId, 16)}
+          </span>
+        </div>
+      </div>
+
+      <!-- Account Header Info -->
+      <div class="account-header-info">
+        <h2 class="account-main-title">💳 Bilateral Account</h2>
+        <div class="account-parties">
+          <span class="party-badge">Entity {tab.entityId?.slice(-4)}</span>
+          <span class="account-arrow">↔️</span>
+          <span class="party-badge">Entity {selectedAccount.entityId.slice(-4)}</span>
+        </div>
+      </div>
+
+      <!-- Account Balance Overview -->
+      <div class="account-balance-card">
+          <div class="account-full-details">
+            <!-- Account status -->
+            <div class="account-status-section">
+              <h4>Account Status</h4>
+              <div class="status-row">
+                <span class="label">Status:</span>
+                <span class="value {selectedAccount.account.mempool?.length > 0 ? 'pending' : 'synced'}">
+                  {selectedAccount.account.mempool?.length > 0 ? '🟡 Pending' : '✅ Synced'}
+                </span>
+              </div>
+              <div class="status-row">
+                <span class="label">Frame:</span>
+                <span class="value">#{selectedAccount.account.currentFrame?.frameId || 0}</span>
+              </div>
+              <div class="status-row">
+                <span class="label">Mempool:</span>
+                <span class="value">{selectedAccount.account.mempool?.length || 0} transactions</span>
+              </div>
+            </div>
+
+            <!-- Token balances -->
+            {#if selectedAccount.account.deltas && selectedAccount.account.deltas.size > 0}
+              <div class="token-balances-section">
+                <h4>Token Balances</h4>
+                {#each Array.from(selectedAccount.account.deltas.entries()) as [tokenId, delta]}
+                  {@const tokenInfo = getTokenInfo(tokenId)}
+                  <div class="token-detail-card">
+                    <div class="token-header">
+                      <span class="token-symbol" style="color: {tokenInfo.symbol === 'ETH' ? '#627eea' : tokenInfo.symbol === 'USDT' ? '#26a17b' : '#007acc'}">{tokenInfo.symbol}</span>
+                      <span class="token-name">{tokenInfo.name}</span>
+                    </div>
+                    <div class="balance-details">
+                      <div class="balance-item">
+                        <span class="balance-label">Collateral:</span>
+                        <span class="balance-value">{delta.collateral?.toString() || '0'}</span>
+                      </div>
+                      <div class="balance-item">
+                        <span class="balance-label">Off-chain Delta:</span>
+                        <span class="balance-value">{delta.offdelta?.toString() || '0'}</span>
+                      </div>
+                      <div class="balance-item">
+                        <span class="balance-label">On-chain Delta:</span>
+                        <span class="balance-value">{delta.ondelta?.toString() || '0'}</span>
+                      </div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="no-tokens">
+                <p>No token balances yet</p>
+              </div>
+            {/if}
+
+            <!-- Mempool transactions -->
+            {#if selectedAccount.account.mempool && selectedAccount.account.mempool.length > 0}
+              <div class="mempool-section">
+                <h4>Pending Transactions</h4>
+                {#each selectedAccount.account.mempool as tx, i}
+                  <div class="mempool-tx">
+                    <span class="tx-index">#{i}</span>
+                    <span class="tx-type">{tx.type || 'Unknown'}</span>
+                    <span class="tx-data">{JSON.stringify(tx.data).slice(0, 50)}...</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+      </div>
+
+      <!-- Settlement & Controls -->
+      <div class="panel-component">
+        <div class="component-header" on:click={() => toggleComponent(`account-controls-${tab.id}`)}>
+          <div class="component-title">
+            <span class="collapse-icon">{$settings.componentStates[`account-controls-${tab.id}`] ?? false ? '▼' : '▶'}</span>
+            <span>⚖️</span>
+            <span>Settlement & Controls</span>
+          </div>
+        </div>
+        {#if $settings.componentStates[`account-controls-${tab.id}`] ?? false}
+        <div class="component-content">
+          <div class="settlement-controls">
+            <button class="action-btn settle-btn">🏦 Settle to Chain</button>
+            <button class="action-btn transfer-btn">💸 Transfer Tokens</button>
+            <button class="action-btn dispute-btn">⚠️ Raise Dispute</button>
+          </div>
+        </div>
+        {/if}
+      </div>
     {:else}
       <!-- Normal entity view -->
       <!-- Entity Profile Section -->
       <EntityProfile {replica} {tab} />
 
-      <!-- Reserves - Always Visible -->
+      <!-- VISUAL VALUE WALLET - Unfolding Portfolio -->
+      <div class="visual-value-wallet">
+          <!-- Level 0: Giant Total Value Bar -->
+          {#if portfolioViewLevel === 0}
+            <div class="total-value-section">
+              <div class="value-header">
+                <h2 class="total-value-title">💎 Total Entity Value</h2>
+                <span class="total-value-amount">${totalEntityValue.toFixed(2)}</span>
+              </div>
+
+              <button class="giant-value-bar" on:click={unfoldPortfolio}>
+                <!-- Green: Reserves + Collateral -->
+                <div class="value-segment reserves-collateral"
+                     style="width: {$settings.portfolioScale > 0 ? Math.min((totalReservesValue / $settings.portfolioScale) * 100, 100) : 0}%"
+                     title="Reserves: ${totalReservesValue.toFixed(2)}">
+                </div>
+                <!-- Orange: Available Credit -->
+                <div class="value-segment available-credit"
+                     style="width: {$settings.portfolioScale > 0 ? Math.min((totalAccountsValue / $settings.portfolioScale) * 100, 100) : 0}%"
+                     title="Accounts: ${totalAccountsValue.toFixed(2)}">
+                </div>
+              </button>
+
+              <div class="value-breakdown">
+                <span class="breakdown-item">🟢 Reserves: ${totalReservesValue.toFixed(2)}</span>
+                <span class="breakdown-item">🟠 Accounts: ${totalAccountsValue.toFixed(2)}</span>
+              </div>
+
+              <div class="unfold-hint">💡 Click to unfold portfolio details</div>
+            </div>
+
+          {:else}
+            <!-- Level 1+: Detailed View -->
+            <div class="detailed-value-section">
+              <div class="value-header">
+                <button class="back-level-btn" on:click={foldPortfolio}>← Total Value</button>
+                <h2 class="detailed-title">📊 Portfolio Details</h2>
+              </div>
+
+              <!-- Level 1: Reserves Section -->
+              <!-- Detailed view content will be here -->
+              <p>Detailed breakdown coming soon...</p>
+            </div>
+          {/if}
+        </div>
+
+      {:else}
+        <!-- Account Detail View -->
+        <div class="account-detail-mode">
+          <div class="account-nav-header">
+            <button class="back-to-entity-btn" on:click={switchToEntityOverview}>
+              ← Back to Entity Overview
+            </button>
+            <h2 class="account-detail-title">
+              💳 Account with Entity #{parseInt(selectedAccount?.entityId || '0', 16)}
+            </h2>
+          </div>
+          <AccountChannels {replica} on:selectAccount={(e) => handleAccountSelect(e)} />
+        </div>
+
+      <!-- VISUAL VALUE WALLET: Giant Progress Bar -->
+      <div class="giant-portfolio-bar-section">
+        <div class="portfolio-header">
+          <h2 class="portfolio-title">💎 Total Entity Value</h2>
+          <span class="portfolio-amount">${totalEntityValue.toFixed(2)}</span>
+        </div>
+
+        <button class="giant-portfolio-bar" on:click={unfoldPortfolio}>
+          <!-- Green segment: Reserves -->
+          <div class="portfolio-segment reserves-segment"
+               style="width: {$settings.portfolioScale > 0 ? Math.min((totalReservesValue / $settings.portfolioScale) * 100, 100) : 0}%"
+               title="Reserves: ${totalReservesValue.toFixed(2)}">
+          </div>
+          <!-- Orange segment: Account Credit -->
+          <div class="portfolio-segment credit-segment"
+               style="width: {$settings.portfolioScale > 0 ? Math.min((totalAccountsValue / $settings.portfolioScale) * 100, 100) : 0}%"
+               title="Account Credit: ${totalAccountsValue.toFixed(2)}">
+          </div>
+        </button>
+
+        <div class="portfolio-legend">
+          <span class="legend-item">🟢 Reserves: ${totalReservesValue.toFixed(2)}</span>
+          <span class="legend-item">🟠 Account Credit: ${totalAccountsValue.toFixed(2)}</span>
+          <span class="unfold-hint">💡 Click to unfold details</span>
+        </div>
+      </div>
+
       {#if replica?.state?.reserves && replica.state.reserves.size > 0}
         <div class="entity-reserves-section">
           <div class="reserves-header">
-            <h3>Reserves</h3>
+            <h3>💰 Reserves</h3>
             <div class="portfolio-summary">
               <strong>Portfolio Value: ${calculateTotalNetworth(replica.state.reserves).toFixed(2)}</strong>
             </div>
@@ -273,7 +483,7 @@
       {:else}
         <div class="entity-reserves-section">
           <div class="reserves-header">
-            <h3>Reserves</h3>
+            <h3>💰 Reserves</h3>
           </div>
           <p class="empty-reserves">No reserves yet - deposit assets via Depository.sol</p>
         </div>
@@ -282,10 +492,10 @@
       <!-- Accounts - Always Visible -->
       <div class="entity-accounts-section">
         <div class="accounts-header">
-          <h3>Accounts</h3>
+          <h3>💳 Accounts</h3>
         </div>
         <div class="accounts-content">
-          <AccountList {replica} entityId={tab.entityId} on:select={handleAccountPreviewSelect} />
+          <AccountChannels {replica} on:selectAccount={(e) => handleAccountSelect(e)} />
         </div>
       </div>
 
@@ -415,34 +625,135 @@
       <ControlsPanel {replica} {tab} />
     </div>
   </div>
-
-  <!-- Payment Component -->
-  <div class="panel-component" id="payment-{tab.id}">
-    <div
-      class="component-header"
-      on:click={() => toggleComponent(`payment-${tab.id}`)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`payment-${tab.id}`)}
-    >
-      <div class="component-title">
-        <span>💸</span>
-        <span>Payments</span>
-      </div>
-      <div class="component-toggle">▼</div>
-    </div>
-    <div
-      class="component-content"
-      style="max-height: 600px;"
-    >
-      <PaymentPanel entityId={replica?.entityId || tab.entityId} />
-    </div>
-  </div>
-    {/if}
-  {/if}
+  {/if} <!-- End of entity view (closes else from selectedAccount check) -->
+  {/if} <!-- End of entity selected check (closes !tab.entityId check) -->
 </div>
 
 <style>
+  /* Breadcrumb Navigation */
+  .breadcrumb-header {
+    background: linear-gradient(135deg, #1a1a1a 0%, #252525 100%);
+    border-bottom: 2px solid #007acc;
+    padding: 12px 16px;
+    margin: -20px -20px 20px -20px;
+  }
+
+  .breadcrumb-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+  }
+
+  .breadcrumb-item {
+    color: #9d9d9d;
+    transition: all 0.2s ease;
+  }
+
+  .breadcrumb-item.clickable {
+    cursor: pointer;
+    color: #007acc;
+  }
+
+  .breadcrumb-item.clickable:hover {
+    color: #0098ff;
+    text-decoration: underline;
+  }
+
+  .breadcrumb-item.active {
+    color: #d4d4d4;
+    font-weight: 600;
+  }
+
+  .breadcrumb-separator {
+    color: #666;
+  }
+
+  /* Account Header */
+  .account-header-info {
+    margin-bottom: 24px;
+    padding: 20px;
+    background: #252525;
+    border-radius: 8px;
+    border: 1px solid #3e3e3e;
+  }
+
+  .account-main-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: #d4d4d4;
+    margin: 0 0 12px 0;
+  }
+
+  .account-parties {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .party-badge {
+    padding: 6px 12px;
+    background: #2d2d2d;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #d4d4d4;
+  }
+
+  .account-arrow {
+    font-size: 20px;
+    color: #007acc;
+  }
+
+  /* Account Balance Card */
+  .account-balance-card {
+    background: #2d2d2d;
+    border: 1px solid #3e3e3e;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  /* Settlement Controls */
+  .settlement-controls {
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .action-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: 1px solid #444;
+    border-radius: 6px;
+    background: #2d2d2d;
+    color: #d4d4d4;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .action-btn:hover {
+    background: #404040;
+    border-color: #007acc;
+  }
+
+  .settle-btn:hover {
+    background: #1a4d2e;
+    border-color: #28a745;
+  }
+
+  .transfer-btn:hover {
+    background: #4a3c00;
+    border-color: #ffc107;
+  }
+
+  .dispute-btn:hover {
+    background: #4d1a1a;
+    border-color: #dc3545;
+  }
+
   .entity-panel {
     background: #2d2d2d;
     border-right: 1px solid #3e3e3e;
@@ -464,25 +775,11 @@
   .panel-header-dropdowns {
     display: flex;
     align-items: center;
-    gap: 16px;
-    flex: 1;
-  }
-
-  .dropdown-group {
-    display: flex;
-    align-items: center;
     gap: 8px;
     flex: 1;
   }
 
-  .dropdown-label {
-    font-size: 0.85em;
-    color: #9d9d9d;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .dropdown-group > :global(*:not(label)) {
+  .panel-header-dropdowns > :global(*) {
     flex: 1;
     min-width: 0;
   }
@@ -1008,5 +1305,129 @@
 
   .accounts-content {
     /* Let AccountChannels handle its own styling */
+  }
+
+  /* VISUAL VALUE WALLET - Giant Portfolio Bar */
+  .giant-portfolio-bar-section {
+    background: linear-gradient(135deg, #1e1e1e, #2d2d2d);
+    border: 2px solid #28a745;
+    border-radius: 16px;
+    padding: 24px;
+    margin: 16px 0;
+    box-shadow: 0 8px 24px rgba(40, 167, 69, 0.1);
+  }
+
+  .portfolio-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .portfolio-title {
+    margin: 0;
+    font-size: 1.4em;
+    font-weight: bold;
+    color: #28a745;
+  }
+
+  .portfolio-amount {
+    font-size: 1.6em;
+    font-weight: bold;
+    color: #28a745;
+    font-family: monospace;
+  }
+
+  .giant-portfolio-bar {
+    width: 100%;
+    height: 24px;
+    background: #1a1a1a;
+    border: 2px solid #3e3e3e;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 16px;
+  }
+
+  .giant-portfolio-bar:hover {
+    border-color: #28a745;
+    transform: scale(1.02);
+    box-shadow: 0 4px 16px rgba(40, 167, 69, 0.2);
+  }
+
+  .portfolio-segment {
+    height: 100%;
+    transition: all 0.3s ease;
+  }
+
+  .reserves-segment {
+    background: linear-gradient(90deg, #28a745, #20c997);
+  }
+
+  .credit-segment {
+    background: linear-gradient(90deg, #fd7e14, #ffc107);
+  }
+
+  .portfolio-legend {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9em;
+    color: #999;
+    font-family: monospace;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .unfold-hint {
+    color: #007acc;
+    font-style: italic;
+    font-size: 0.85em;
+  }
+
+  /* Account Detail Mode */
+  .account-detail-mode {
+    background: #2d2d2d;
+    border: 1px solid #007acc;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 16px 0;
+  }
+
+  .account-nav-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #3e3e3e;
+  }
+
+  .back-to-entity-btn {
+    padding: 8px 16px;
+    background: rgba(0, 122, 204, 0.1);
+    border: 1px solid #007acc;
+    border-radius: 8px;
+    color: #007acc;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s ease;
+  }
+
+  .back-to-entity-btn:hover {
+    background: #007acc;
+    color: white;
+  }
+
+  .account-detail-title {
+    margin: 0;
+    color: #28a745;
+    font-size: 1.2em;
   }
 </style>

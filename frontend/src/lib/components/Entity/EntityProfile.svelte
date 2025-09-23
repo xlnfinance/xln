@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { EntityReplica, Tab } from '../../types';
-  
+  import { xlnFunctions } from '../../stores/xlnStore';
+
   export let replica: EntityReplica | null;
   export let tab: Tab;
 </script>
@@ -10,7 +11,7 @@
     <div class="entity-profile">
       <div class="profile-info">
         <div class="profile-name">
-          Entity {replica.entityId.slice(-4)}
+          Entity #{$xlnFunctions?.getEntityNumber(replica.entityId) || '?'}
         </div>
         <div class="profile-details">
           Signer: {replica.signerId}

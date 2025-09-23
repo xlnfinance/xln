@@ -1,9 +1,10 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { replicas, xlnFunctions } from '../../stores/xlnStore';
+  import { replicas } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
   import { getXLN } from '../../stores/xlnStore';
+  import { tabOperations } from '../../stores/tabStore';
   import type { Tab } from '../../types';
 
   export let tab: Tab;
@@ -19,8 +20,7 @@
 
   function getDropdownText(tab: Tab): string {
     if (tab.entityId && tab.signer && tab.jurisdiction) {
-      const entityNum = $xlnFunctions?.getEntityNumber(tab.entityId) || '?';
-      return `${tab.jurisdiction} → ${tab.signer} → Entity #${entityNum}`;
+      return `${tab.jurisdiction} → ${tab.signer} → ${tab.entityId.slice(-4)}`;
     } else if (tab.signer && tab.jurisdiction) {
       return `${tab.jurisdiction} → ${tab.signer} → Select Entity`;
     } else if (tab.jurisdiction) {
@@ -74,10 +74,9 @@
     console.log(`🔍 EntityDropdown: Total replicas available: ${$replicas.size}`);
     console.log(`🔍 EntityDropdown: Replica keys:`, Array.from($replicas.keys()));
 
-    // For now, show all entities regardless of jurisdiction
-    // TODO: Later we can filter by jurisdiction ID when we have multiple networks
+    // Hardcode to Ethereum (8545) only for now
     const jurisdictions = [
-      { name: 'All Entities', id: 'all' }
+      { name: 'Ethereum', id: 'ethereum' }
     ];
 
     const dropdownMode = $settings.dropdownMode;
@@ -91,8 +90,10 @@
 
   function renderSignerFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, searchTerm: string) {
     jurisdictions.forEach((jurisdiction, jIndex) => {
-      // Get all replicas (no jurisdiction filtering for now)
-      const replicasArray = Array.from($replicas.values());
+      // Get replicas for this jurisdiction
+      const replicasArray = Array.from($replicas.values()).filter(replica =>
+        replica.state?.config?.jurisdiction?.name === jurisdiction.name
+      );
 
       if (replicasArray.length === 0) return;
 
@@ -106,9 +107,9 @@
         signerGroups[signerId].push(replica);
       });
 
-      // Add header
+      // Add jurisdiction header
       const jurisdictionItem = createDropdownTreeItem(
-        `📊 ${jurisdiction.name}`,
+        `🏛️ ${jurisdiction.name}`,
         '',
         0,
         false,
@@ -137,8 +138,7 @@
         // Add entities for this signer
         signerEntities.forEach((replica, eIndex) => {
           const isLastEntity = eIndex === signerEntities.length - 1;
-          const entityNum = $xlnFunctions?.getEntityNumber(replica.entityId) || '?';
-          const entityDisplay = `Entity #${entityNum}`;
+          const entityDisplay = replica.entityId.slice(-4);
 
           const entityItem = createDropdownTreeItem(
             `🏢 ${entityDisplay}`,
@@ -158,13 +158,15 @@
 
   function renderEntityFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, searchTerm: string) {
     jurisdictions.forEach((jurisdiction, jIndex) => {
-      // Get all replicas (use time-aware replicas, no jurisdiction filtering)
+      // Get replicas for this jurisdiction (use time-aware replicas)
       const currentReplicas = $visibleReplicas || $replicas;
-      const replicasArray = Array.from(currentReplicas.values());
+      const replicasArray = Array.from(currentReplicas.values()).filter(replica =>
+        replica.state?.config?.jurisdiction?.name === jurisdiction.name
+      );
 
       console.log(`🔍 EntityDropdown: ${jurisdiction.name} has ${replicasArray.length} replicas`);
       replicasArray.forEach(replica => {
-        console.log(`  📋 Entity: #${$xlnFunctions?.getEntityNumber(replica.entityId) || '?'} (${replica.signerId})`);
+        console.log(`  📋 Entity: ${replica.entityId.slice(-4)} (${replica.signerId})`);
       });
 
       if (replicasArray.length === 0) return;
@@ -179,9 +181,9 @@
         entityGroups[entityId].push(replica);
       });
 
-      // Add header
+      // Add jurisdiction header
       const jurisdictionItem = createDropdownTreeItem(
-        `📊 ${jurisdiction.name}`,
+        `🏛️ ${jurisdiction.name}`,
         '',
         0,
         false,
@@ -195,12 +197,11 @@
       entityKeys.forEach((entityId, eIndex) => {
         const entitySigners = entityGroups[entityId];
         const isLastEntity = eIndex === entityKeys.length - 1;
-        const entityNum = $xlnFunctions?.getEntityNumber(entityId) || '?';
-        const entityDisplay = `Entity #${entityNum}`;
+        const entityDisplay = entityId.slice(-4);
 
         // Add entity
         const entityItem = createDropdownTreeItem(
-          `🏢 ${entityDisplay}`,
+          `🏢 ${entityDisplay} (${entitySigners.length} signers)`,
           '',
           1,
           false,
@@ -273,6 +274,14 @@
   }
 
   function selectEntity(jurisdiction: string, signerId: string, entityId: string) {
+    // Update the tab directly
+    tabOperations.updateTab(tab.id, {
+      jurisdiction,
+      signer: signerId,
+      entityId
+    });
+
+    // Also dispatch event for any listeners
     dispatch('entitySelect', {
       jurisdiction,
       signer: signerId,

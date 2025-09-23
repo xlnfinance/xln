@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getXLN } from '../../stores/xlnStore';
+  import { loadJurisdictions } from '../../stores/jurisdictionStore';
   import Button from '../Common/Button.svelte';
 
   interface JurisdictionInfo {
@@ -18,12 +19,12 @@
 
   let jurisdictions: JurisdictionInfo[] = [];
 
-  // Load jurisdictions from server dynamically (NO HARDCODING!)
+  // Load jurisdictions from centralized store (single source of truth)
   async function loadJurisdictionsFromServer() {
     try {
-      const response = await fetch('/jurisdictions.json');
-      const config = await response.json();
-      
+      // Use the centralized jurisdictionStore instead of fetching directly
+      const config = await loadJurisdictions();
+
       jurisdictions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => ({
         port: parseInt(data.rpc.split(':').pop()),
         name: data.name,
@@ -36,10 +37,10 @@
         lastUpdate: '',
         entities: []
       }));
-      
-      console.log(`✅ Loaded ${jurisdictions.length} jurisdictions from server:`, jurisdictions.map(j => j.name));
+
+      console.log(`✅ Loaded ${jurisdictions.length} jurisdictions from centralized store:`, jurisdictions.map(j => j.name));
     } catch (error) {
-      console.error('❌ Failed to load jurisdictions from server:', error);
+      console.error('❌ Failed to load jurisdictions from store:', error);
       // Fallback to empty array - no hardcoding!
       jurisdictions = [];
     }
