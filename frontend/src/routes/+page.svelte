@@ -8,6 +8,7 @@
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
   import NetworkDirectory from '../lib/components/Network/NetworkDirectory.svelte';
   import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
+  import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
   import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
@@ -22,6 +23,25 @@
 
   // Initialize the application
   onMount(async () => {
+    // Set up global error handlers FIRST
+    window.addEventListener('error', (event) => {
+      console.error('❌ Global error caught:', event.error);
+      error.set({
+        message: event.error?.message || event.message || 'An unknown error occurred',
+        source: event.filename || 'Unknown',
+        details: event.error?.stack || ''
+      });
+    });
+
+    window.addEventListener('unhandledrejection', (event) => {
+      console.error('❌ Unhandled promise rejection:', event.reason);
+      error.set({
+        message: event.reason?.message || String(event.reason) || 'Unhandled promise rejection',
+        source: 'Promise',
+        details: event.reason?.stack || ''
+      });
+    });
+
     try {
       console.log('🚀 Initializing XLN Svelte application...');
 
@@ -43,6 +63,11 @@
       console.log('✅ XLN Svelte application initialized successfully');
     } catch (err) {
       console.error('❌ Failed to initialize XLN application:', err);
+      error.set({
+        message: err?.message || 'Failed to initialize application',
+        source: 'Initialization',
+        details: err?.stack || ''
+      });
     }
   });
 </script>
@@ -126,6 +151,9 @@
 
     <!-- Time Machine -->
     <TimeMachine />
+
+    <!-- Error Popup -->
+    <ErrorPopup />
   {/if}
 </main>
 

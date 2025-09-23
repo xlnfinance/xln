@@ -1,11 +1,28 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { tabOperations, tabs } from '../../stores/tabStore';
 
   export let profile: any;
 
   let isJoining = false;
   let joinError: string | null = null;
+
+  // Helper to safely stringify values (handles BigInt)
+  function safeStringify(value: any): string {
+    try {
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      if (typeof value === 'object' && value !== null) {
+        return JSON.stringify(value, (key, val) =>
+          typeof val === 'bigint' ? val.toString() : val
+        );
+      }
+      return String(value);
+    } catch (err) {
+      return String(value);
+    }
+  }
 
   // Check if this profile is a hub/router
   $: isHub = (profile.capabilities?.includes('hub') || profile.capabilities?.includes('router')) ?? false;
@@ -100,7 +117,7 @@
   <div class="profile-header">
     <div class="entity-id">
       <strong
-        >🏢 {isHub ? profile.metadata?.name || `Hub ${profile.entityId.slice(-4)}` : profile.entityId.slice(-4)}</strong
+        >🏢 {isHub ? profile.metadata?.name || `Hub #${$xlnFunctions?.getEntityNumber(profile.entityId) || '?'}` : `Entity #${$xlnFunctions?.getEntityNumber(profile.entityId) || '?'}`}</strong
       >
     </div>
     {#if isHub}
@@ -138,7 +155,7 @@
           {#each Object.entries(profile.metadata) as [key, value]}
             <div class="metadata-item">
               <span class="metadata-key">{key}:</span>
-              <span class="metadata-value">{JSON.stringify(value)}</span>
+              <span class="metadata-value">{safeStringify(value)}</span>
             </div>
           {/each}
         </div>

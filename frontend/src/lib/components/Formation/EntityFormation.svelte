@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { loadJurisdictions } from '../../stores/jurisdictionStore';
   import { tabOperations } from '../../stores/tabStore';
   import Button from '../Common/Button.svelte';
   import FormField from '../Common/FormField.svelte';
   import type { EntityFormData } from '../../types';
+  import { xlnFunctions } from '../../stores/xlnStore';
 
   let formData: EntityFormData = {
     jurisdiction: '',
@@ -104,12 +106,19 @@
       const validatorNames = formData.validators.map(v => v.name);
       const threshold = BigInt(formData.threshold);
       
-      // Create proper jurisdiction object from loaded options
-      const jurisdictionOption = jurisdictionOptions.find(j => j.value === formData.jurisdiction);
-      const jurisdictionConfig = {
-        name: jurisdictionOption?.label.split(' (')[0] || 'Unknown',
-        port: formData.jurisdiction,
-        url: `http://localhost:${formData.jurisdiction}`
+      // Get the full jurisdiction config from our stored data
+      const jurisdictionConfig = jurisdictionData[formData.jurisdiction];
+      if (!jurisdictionConfig) {
+        throw new Error('Selected jurisdiction not found');
+      }
+
+      // Convert to the format expected by the backend
+      const formattedJurisdiction = {
+        name: jurisdictionConfig.name,
+        address: jurisdictionConfig.rpc,
+        entityProviderAddress: jurisdictionConfig.contracts.entityProvider,
+        depositoryAddress: jurisdictionConfig.contracts.depository,
+        chainId: jurisdictionConfig.chainId
       };
       
       let config;
@@ -124,14 +133,14 @@
         const isDuplicate = existingReplicas.some(key => key.startsWith(entityId + ':'));
         
         if (isDuplicate) {
-          throw new Error(`⚠️ This validator configuration already exists! Entity ID ${entityId.slice(-8)} is already in use. Try different validators or weights to create a unique entity.`);
+          throw new Error(`⚠️ This validator configuration already exists! Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'} is already in use. Try different validators or weights to create a unique entity.`);
         }
         
-        config = xln.createLazyEntity(formData.entityName, validatorNames, threshold, jurisdictionConfig);
+        config = xln.createLazyEntity(formData.entityName, validatorNames, threshold, formattedJurisdiction);
         console.log('✅ Lazy entity config created:', config);
-        console.log('✅ Entity ID:', entityId);
+        console.log('✅ Entity ID: #', $xlnFunctions?.getEntityNumber(entityId) || '?');
       } else {
-        const creation = await xln.createNumberedEntity(formData.entityName, validatorNames, threshold, jurisdictionConfig);
+        const creation = await xln.createNumberedEntity(formData.entityName, validatorNames, threshold, formattedJurisdiction);
         config = creation.config;
         entityId = creation.entityId; // Use the returned entityId
         console.log('✅ Numbered entity config created:', creation);
@@ -161,18 +170,18 @@
       await xln.processUntilEmpty(env, result.entityOutbox);
       console.log('✅ Entity creation complete!');
 
-      console.log(`💰 Entity ${entityId} automatically prefunded by Depository.sol contract during deployment`);
+      console.log(`💰 Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'} automatically prefunded by Depository.sol contract during deployment`);
       console.log(`🔄 J-Watcher will sync historical ReserveUpdated events to populate reserves`);
 
       // Auto-create panels with entity and signers pre-selected
-      const jurisdictionName = jurisdictionOption?.label.split(' (')[0] || 'Unknown';
+      const jurisdictionName = jurisdictionConfig?.name || 'Unknown';
       
       console.log(`🎯 Auto-creating ${validatorNames.length} panels with entity and signers pre-selected`);
       console.log(`🌐 Jurisdiction: ${formData.jurisdiction} → ${jurisdictionName}`);
       
       for (let i = 0; i < validatorNames.length; i++) {
         const signer = validatorNames[i];
-        console.log(`📋 Creating panel ${i + 1} for entity ${entityId} with signer: ${signer} on ${jurisdictionName}`);
+        console.log(`📋 Creating panel ${i + 1} for Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'} with signer: ${signer} on ${jurisdictionName}`);
         tabOperations.addTab(entityId, signer, jurisdictionName);
       }
       
@@ -252,26 +261,31 @@
   }
 
   let jurisdictionOptions: Array<{ value: string; label: string }> = [];
+  let jurisdictionData: Record<string, any> = {}; // Store full jurisdiction data
 
-  // Load jurisdiction options from server dynamically (NO HARDCODING!)
+  // Load jurisdiction options from centralized store (single source of truth)
   async function loadJurisdictionOptions() {
     try {
-      const response = await fetch('/jurisdictions.json');
-      const config = await response.json();
-      
-      jurisdictionOptions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => ({
-        value: data.rpc.split(':').pop(), // Extract port
-        label: `${data.name} (Port ${data.rpc.split(':').pop()})`
-      }));
-      
+      // Use the centralized jurisdictionStore instead of fetching directly
+      const config = await loadJurisdictions();
+
+      jurisdictionOptions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => {
+        const port = data.rpc.split(':').pop();
+        jurisdictionData[port] = data; // Store full jurisdiction data by port
+        return {
+          value: port, // Use port as value
+          label: `${data.name} (Port ${port})`
+        };
+      });
+
       // Default to Ethereum (8545) instead of first option
       if (jurisdictionOptions.length > 0 && !formData.jurisdiction) {
         const ethereumOption = jurisdictionOptions.find(j => j.label.includes('Ethereum'));
         formData.jurisdiction = ethereumOption ? ethereumOption.value : jurisdictionOptions[0].value;
         console.log('🔍 Defaulted jurisdiction to:', formData.jurisdiction);
       }
-      
-      console.log(`✅ Loaded ${jurisdictionOptions.length} jurisdiction options:`, jurisdictionOptions);
+
+      console.log(`✅ Loaded ${jurisdictionOptions.length} jurisdiction options from store:`, jurisdictionOptions);
     } catch (error) {
       console.error('❌ Failed to load jurisdiction options:', error);
       jurisdictionOptions = [];

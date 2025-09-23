@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN } from '../../stores/xlnStore';
+  import { visibleGossip, visibleEnvironment, isLive } from '../../stores/timeStore';
   import ProfileCard from './ProfileCard.svelte';
   import ProfileForm from './ProfileForm.svelte';
-  
+
   let profiles: any[] = [];
   let isLoading = true;
   let error: string | null = null;
@@ -12,20 +13,21 @@
     try {
       isLoading = true;
       error = null;
-      
-      const xln = await getXLN();
-      const env = $xlnEnvironment;
-      
-      
-      if (!env) {
-        throw new Error('XLN environment not ready');
+
+      // Use time-aware gossip data
+      const gossip = $visibleGossip;
+
+      if (!gossip) {
+        console.log('📡 No gossip layer available');
+        profiles = [];
+        return;
       }
 
-      // Access gossip layer from environment
-      const gossipProfiles = env.gossip?.getProfiles() || [];
+      // Access gossip profiles from the time-aware gossip layer
+      const gossipProfiles = gossip.getProfiles ? gossip.getProfiles() : [];
       profiles = gossipProfiles;
-      
-      console.log('📡 Loaded gossip profiles:', profiles);
+
+      console.log(`📡 Loaded gossip profiles (${$isLive ? 'LIVE' : 'HISTORICAL'}):`, profiles);
     } catch (err) {
       console.error('❌ Failed to load gossip profiles:', err);
       error = err instanceof Error ? err.message : 'Failed to load profiles';
@@ -39,8 +41,8 @@
     loadProfiles();
   });
 
-  // Reactive reload when environment changes
-  $: if ($xlnEnvironment) {
+  // Reactive reload when visible gossip changes (either from time travel or live updates)
+  $: if ($visibleGossip) {
     loadProfiles();
   }
 

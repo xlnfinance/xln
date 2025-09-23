@@ -9,22 +9,26 @@ const loadTimeState = (): TimeState => {
       const saved = localStorage.getItem('xln-time-state');
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
+        const loadedState = {
           currentTimeIndex: parsed.currentTimeIndex ?? -1,
           maxTimeIndex: parsed.maxTimeIndex ?? 0,
           isLive: parsed.isLive ?? true
         };
+        console.log('🕰️ Loaded time state from localStorage:', loadedState);
+        return loadedState;
       }
     } catch (err) {
       console.warn('Failed to load time state from localStorage:', err);
     }
   }
-  
-  return {
+
+  const defaultState = {
     currentTimeIndex: -1, // -1 means current time (live)
     maxTimeIndex: 0,
     isLive: true
   };
+  console.log('🕰️ Using default time state:', defaultState);
+  return defaultState;
 };
 
 // Time machine state with persistence
@@ -50,6 +54,36 @@ export const visibleReplicas = derived(
   }
 );
 
+// Derived store for getting current visible gossip (based on time index)
+export const visibleGossip = derived(
+  [timeState, history, xlnEnvironment],
+  ([$timeState, $history, $env]) => {
+    if ($timeState.isLive) {
+      return $env?.gossip || null;
+    }
+    const idx = $timeState.currentTimeIndex;
+    if (idx >= 0 && idx < $history.length) {
+      return $history[idx]?.gossip || null;
+    }
+    return null;
+  }
+);
+
+// Derived store for getting current visible environment (full snapshot)
+export const visibleEnvironment = derived(
+  [timeState, history, xlnEnvironment],
+  ([$timeState, $history, $env]) => {
+    if ($timeState.isLive) {
+      return $env;
+    }
+    const idx = $timeState.currentTimeIndex;
+    if (idx >= 0 && idx < $history.length) {
+      return $history[idx];
+    }
+    return $env; // Fallback to live if index is invalid
+  }
+);
+
 // Time operations
 const timeOperations = {
   // Save time state to localStorage
@@ -67,7 +101,13 @@ const timeOperations = {
   updateMaxTimeIndex() {
     const $history = get(history);
     const maxIndex = Math.max(0, $history.length - 1);
-    
+
+    console.log('🕰️ updateMaxTimeIndex():', {
+      historyLength: $history.length,
+      calculatedMaxIndex: maxIndex,
+      currentMaxIndex: get(timeState).maxTimeIndex
+    });
+
     timeState.update(current => ({
       ...current,
       maxTimeIndex: maxIndex
@@ -115,28 +155,59 @@ const timeOperations = {
   // Step backward in time
   stepBackward() {
     const $timeState = get(timeState);
-    
+    const $history = get(history);
+
+    // Calculate the current actual maxTimeIndex from history length
+    const actualMaxIndex = Math.max(0, $history.length - 1);
+
+    console.log('🕰️ stepBackward() called:', {
+      isLive: $timeState.isLive,
+      currentTimeIndex: $timeState.currentTimeIndex,
+      storedMaxTimeIndex: $timeState.maxTimeIndex,
+      actualMaxIndex: actualMaxIndex,
+      historyLength: $history.length
+    });
+
     if ($timeState.isLive) {
-      // Currently at live, go to most recent snapshot
-      this.goToTimeIndex($timeState.maxTimeIndex);
+      // Currently at live, go to most recent snapshot using ACTUAL max index
+      console.log('🕰️ Going from LIVE to most recent snapshot:', actualMaxIndex);
+      this.goToTimeIndex(actualMaxIndex);
     } else {
       // Go one step back, but not below 0
-      this.goToTimeIndex(Math.max(0, $timeState.currentTimeIndex - 1));
+      const targetIndex = Math.max(0, $timeState.currentTimeIndex - 1);
+      console.log('🕰️ Going one step back to:', targetIndex);
+      this.goToTimeIndex(targetIndex);
     }
   },
 
   // Step forward in time
   stepForward() {
     const $timeState = get(timeState);
-    
+    const $history = get(history);
+
+    // Calculate the current actual maxTimeIndex from history length
+    const actualMaxIndex = Math.max(0, $history.length - 1);
+
+    console.log('🕰️ stepForward() called:', {
+      isLive: $timeState.isLive,
+      currentTimeIndex: $timeState.currentTimeIndex,
+      storedMaxTimeIndex: $timeState.maxTimeIndex,
+      actualMaxIndex: actualMaxIndex,
+      historyLength: $history.length
+    });
+
     if ($timeState.isLive) {
       // Already at live, can't go further
+      console.log('🕰️ Already at LIVE, cannot step forward');
       return;
-    } else if ($timeState.currentTimeIndex < $timeState.maxTimeIndex) {
-      // Normal forward step
-      this.goToTimeIndex($timeState.currentTimeIndex + 1);
+    } else if ($timeState.currentTimeIndex < actualMaxIndex) {
+      // Normal forward step using actual max index
+      const targetIndex = $timeState.currentTimeIndex + 1;
+      console.log('🕰️ Going one step forward to:', targetIndex);
+      this.goToTimeIndex(targetIndex);
     } else {
       // At last snapshot, go to live
+      console.log('🕰️ At last snapshot, going to LIVE');
       this.goToLive();
     }
   },
