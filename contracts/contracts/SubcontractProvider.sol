@@ -114,9 +114,9 @@ contract SubcontractProvider is Console {
 
 
   function revealSecret(bytes32 secret) public {
-    console.log("Revealing HTLC secret:");
-    console.logBytes32(secret);
-    console.logBytes32(keccak256(abi.encode(secret)));
+    // console.log("Revealing HTLC secret:");
+    // console.logBytes32(secret);
+    // console.logBytes32(keccak256(abi.encode(secret)));
     hashToBlock[keccak256(abi.encode(secret))] = block.number;
   }
   
@@ -128,11 +128,11 @@ contract SubcontractProvider is Console {
   }
 
   function logDeltas(string memory _msg, int[] memory deltas) public pure {
-    console.log(_msg);
-    for (uint i = 0; i < deltas.length; i++) {
-      console.logInt(deltas[i]);
-    }
-    console.log('====================');
+    // console.log(_msg);
+    // for (uint i = 0; i < deltas.length; i++) {
+    //   console.logInt(deltas[i]);
+    // }
+    // console.log('====================');
   }
 
 

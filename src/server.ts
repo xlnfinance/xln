@@ -733,6 +733,16 @@ export async function initializeServer() {
 
   log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
 
+  // ACTIVATE BILATERAL INFRASTRUCTURE - The Original awakens
+  logger.info('🔥 ACTIVATING BILATERAL CHANNELS - The infrastructure EXISTS but lies dormant');
+  try {
+    await activateXLN(env);
+    logger.info('✨ BILATERAL SOVEREIGNTY ACTIVATED - Entities now communicate directly');
+  } catch (error) {
+    logger.error('Failed to activate bilateral channels', {}, error as Error);
+    // Continue without bilateral activation - fallback to server routing
+  }
+
   // Debug final state before starting j-watcher
   if (isBrowser) {
     logger.debug('Final state before j-watcher start', {

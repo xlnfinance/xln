@@ -24,6 +24,10 @@
   import TransactionHistory from './TransactionHistory/index.svelte';
   import ControlsPanel from './ControlsPanel.svelte';
   import AccountChannels from './AccountChannels.svelte';
+  // Import new XLN activation components
+  import OrderbookDisplay from '../Trading/OrderbookDisplay.svelte';
+  import FrameConsensus from '../Consensus/FrameConsensus.svelte';
+  import ConservationMonitor from '../Channels/ConservationMonitor.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -50,6 +54,10 @@
   $: proposalsExpanded = $settings.componentStates[`proposals-${tab.id}`] ?? false;
   $: historyExpanded = $settings.componentStates[`history-${tab.id}`] ?? false;
   $: controlsExpanded = $settings.componentStates[`controls-${tab.id}`] ?? false;
+  // New XLN components
+  $: orderbookExpanded = $settings.componentStates[`orderbook-${tab.id}`] ?? true;
+  $: frameConsensusExpanded = $settings.componentStates[`frameConsensus-${tab.id}`] ?? true;
+  $: conservationExpanded = $settings.componentStates[`conservation-${tab.id}`] ?? true;
 
   function toggleComponent(componentId: string) {
     settingsOperations.toggleComponentState(componentId);
@@ -365,7 +373,80 @@
     </div>
   </div>
 
+  <!-- Frame Consensus Component (NEW) -->
+  <div class="panel-component" id="frameConsensus-{tab.id}">
+    <div
+      class="component-header"
+      class:collapsed={!frameConsensusExpanded}
+      on:click={() => toggleComponent(`frameConsensus-${tab.id}`)}
+      role="button"
+      tabindex="0"
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`frameConsensus-${tab.id}`)}
+    >
+      <div class="component-title">
+        <span>🔄</span>
+        <span>Frame Consensus</span>
+      </div>
+      <div class="component-toggle">▼</div>
+    </div>
+    <div
+      class="component-content"
+      class:collapsed={!frameConsensusExpanded}
+      style="max-height: 300px;"
+    >
+      <FrameConsensus entityState={replica?.state} entityId={tab.entityId} />
+    </div>
+  </div>
 
+  <!-- Orderbook Display Component (NEW) -->
+  <div class="panel-component" id="orderbook-{tab.id}">
+    <div
+      class="component-header"
+      class:collapsed={!orderbookExpanded}
+      on:click={() => toggleComponent(`orderbook-${tab.id}`)}
+      role="button"
+      tabindex="0"
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`orderbook-${tab.id}`)}
+    >
+      <div class="component-title">
+        <span>📊</span>
+        <span>Orderbook</span>
+      </div>
+      <div class="component-toggle">▼</div>
+    </div>
+    <div
+      class="component-content"
+      class:collapsed={!orderbookExpanded}
+      style="max-height: 400px;"
+    >
+      <OrderbookDisplay entityId={tab.entityId} orderbook={replica?.state?.orderbook} />
+    </div>
+  </div>
+
+  <!-- Conservation Monitor Component (NEW) -->
+  <div class="panel-component" id="conservation-{tab.id}">
+    <div
+      class="component-header"
+      class:collapsed={!conservationExpanded}
+      on:click={() => toggleComponent(`conservation-${tab.id}`)}
+      role="button"
+      tabindex="0"
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`conservation-${tab.id}`)}
+    >
+      <div class="component-title">
+        <span>⚖️</span>
+        <span>Conservation Monitor</span>
+      </div>
+      <div class="component-toggle">▼</div>
+    </div>
+    <div
+      class="component-content"
+      class:collapsed={!conservationExpanded}
+      style="max-height: 400px;"
+    >
+      <ConservationMonitor channels={replica?.state?.channels || new Map()} entityId={tab.entityId} />
+    </div>
+  </div>
 
   <!-- Chat Component -->
   <div class="panel-component" id="chat-{tab.id}">

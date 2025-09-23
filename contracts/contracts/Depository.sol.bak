@@ -24,7 +24,7 @@ interface IERC721 {
 // IERC1155 already imported from EntityProvider.sol
 contract Depository is Console {
 
-  // Multi-provider support
+  // Multi-provider support  
   mapping(address => bool) public approvedEntityProviders;
   address[] public entityProvidersList;
   
@@ -37,7 +37,7 @@ contract Depository is Console {
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
   // the current debt index to pay
   mapping (bytes32 => mapping (uint => uint)) public _debtIndex;
-  // total number of debts of an entity
+  // total number of debts of an entity  
   mapping (bytes32 => uint) public _activeDebts;
 
 
@@ -94,6 +94,26 @@ contract Depository is Console {
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
+  /**
+   * @notice Emitted when entities settle off-chain account differences
+   * @dev This event contains final absolute values after settlement processing
+   * @param leftEntity The first entity in the settlement
+   * @param rightEntity The second entity in the settlement
+   * @param tokenId The token being settled
+   * @param leftReserve Final absolute reserve balance for left entity
+   * @param rightReserve Final absolute reserve balance for right entity
+   * @param collateral Final absolute collateral amount
+   * @param ondelta Final ondelta value
+   */
+  event SettlementProcessed(
+    bytes32 indexed leftEntity,
+    bytes32 indexed rightEntity,
+    uint indexed tokenId,
+    uint leftReserve,
+    uint rightReserve,
+    uint collateral,
+    int ondelta
+  );
 
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
@@ -167,6 +187,9 @@ contract Depository is Console {
       uri: '',
       gasused: 0
     }));
+    
+    // DEBUG: Prefund top 20 entities for testing
+    debugBulkFundEntities();
   }
   
   function getTokensLength() public view returns (uint) {
@@ -187,7 +210,10 @@ contract Depository is Console {
     ReserveToReserve[] reserveToReserve;
     ReserveToCollateral[] reserveToCollateral;
 
-    // cooperativeUpdate and cooperativeProof are always signed by the peer
+    // NEW: Simple settlements between entities (no signature verification for now)
+    Settlement[] settlements;
+    
+    // DEPRECATED: Keep for backwards compatibility but will be replaced
     CooperativeUpdate[] cooperativeUpdate;
     CooperativeDisputeProof[] cooperativeDisputeProof;
 
@@ -205,13 +231,13 @@ contract Depository is Console {
   }
 
 
-  // === HANKO INTEGRATION ===
+  /* === HANKO INTEGRATION ===
   
-  // Nonce tracking for replay protection (since Hanko signatures are stateless)
-  // EVM-style sequential nonces: each entity must use nonce = lastNonce + 1
+  /* Nonce tracking for replay protection (since Hanko signatures are stateless)
+  /* EVM-style sequential nonces: each entity must use nonce = lastNonce + 1
   mapping(address => uint256) public entityNonces;
   
-  // Domain separation for EIP-712 compatibility
+  /* Domain separation for EIP-712 compatibility
   bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");
   
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success);
@@ -224,6 +250,7 @@ contract Depository is Console {
    * @param hankoData ABI-encoded Hanko bytes (placeholders, packedSignatures, claims)
    * @param nonce EVM-style sequential nonce for replay protection
    */
+  /* DISABLED: Hanko processing
   function processBatchWithHanko(
     bytes calldata encodedBatch,
     address entityProvider,
@@ -263,16 +290,213 @@ contract Depository is Console {
     
     return completeSuccess;
   }
+  */
   
 
 
 
 
-  function processBatch(Batch calldata batch) public returns (bool completeSuccess) {
-    return _processBatch(bytes32(uint256(uint160(msg.sender))), batch);
+  // DEBUG: Simple function to fund entity reserves for testing
+  function debugFundReserves(bytes32 entity, uint tokenId, uint amount) public {
+    console.log("debugFundReserves: funding entity");
+    console.logBytes32(entity);
+    console.log("debugFundReserves: tokenId");
+    console.logUint(tokenId);
+    console.log("debugFundReserves: amount");
+    console.logUint(amount);
+    
+    _reserves[entity][tokenId] += amount;
+    emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
+    
+    console.log("debugFundReserves: new balance");
+    console.logUint(_reserves[entity][tokenId]);
+  }
+
+  // DEBUG: Bulk fund top 20 entities with test reserves
+  function debugBulkFundEntities() public {
+    console.log("debugBulkFundEntities: funding entities 1-20 with 1M tokens");
+    
+    uint256 fundAmount = 1000000000000000000; // 1M tokens (1e18)
+    
+    for (uint256 entityNum = 1; entityNum <= 20; entityNum++) {
+      bytes32 entity = bytes32(entityNum); // Entity ID is just the number padded
+      
+      // Fund with tokens 1, 2, 3
+      for (uint256 tokenId = 1; tokenId <= 3; tokenId++) {
+        _reserves[entity][tokenId] += fundAmount;
+        emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
+      }
+    }
+    
+    console.log("debugBulkFundEntities: funding complete");
+  }
+
+  function processBatch(bytes32 entity, Batch calldata batch) public returns (bool completeSuccess) {
+    console.log("=== processBatch ENTRY ===");
+    console.log("=== processBatch ENTRY ===");
+    console.log("=== processBatch ENTRY ===");
+    console.log("processBatch called with entity");
+    console.logBytes32(entity);
+    console.log("batch.reserveToReserve.length");
+    console.logUint(batch.reserveToReserve.length);
+    console.log("msg.sender:");
+    console.logAddress(msg.sender);
+    
+    if (batch.reserveToReserve.length > 0) {
+      console.log("First transfer details:");
+      console.log("  to entity:");
+      console.logBytes32(batch.reserveToReserve[0].receivingEntity);
+      console.log("  tokenId:");
+      console.logUint(batch.reserveToReserve[0].tokenId);
+      console.log("  amount:");
+      console.logUint(batch.reserveToReserve[0].amount);
+      
+      console.log("Sender current balance:");
+      console.logUint(_reserves[entity][batch.reserveToReserve[0].tokenId]);
+    }
+    
+    console.log("=== CALLING _processBatch ===");
+    return _processBatch(entity, batch);
+  }
+
+
+  // ========== ACCOUNT PREFUNDING FUNCTION ==========
+  // Allows an entity to fund an account's collateral from their reserves
+  function prefundAccount(bytes32 counterpartyEntity, uint tokenId, uint amount) public returns (bool) {
+    bytes32 fundingEntity = bytes32(uint256(uint160(msg.sender)));
+    require(fundingEntity != counterpartyEntity, "Cannot prefund account with self");
+    
+    // Ensure entities are in canonical order (left < right)
+    bytes32 leftEntity = fundingEntity < counterpartyEntity ? fundingEntity : counterpartyEntity;
+    bytes32 rightEntity = fundingEntity < counterpartyEntity ? counterpartyEntity : fundingEntity;
+    
+    // Simple channel key: hash of left and right entities converted to bytes
+    bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
+    
+    // Check funding entity has sufficient reserves
+    require(_reserves[fundingEntity][tokenId] >= amount, "Insufficient reserves for prefunding");
+    
+    // Move funds from reserves to account collateral
+    _reserves[fundingEntity][tokenId] -= amount;
+    
+    ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+    col.collateral += amount;
+    
+    // Emit SettlementProcessed event to notify both entities
+    emit SettlementProcessed(
+      leftEntity,
+      rightEntity,
+      tokenId,
+      _reserves[leftEntity][tokenId],
+      _reserves[rightEntity][tokenId],
+      col.collateral,
+      col.ondelta
+    );
+    
+    console.log("Account prefunded:");
+    console.logBytes32(fundingEntity);
+    console.log("funded account with:");
+    console.logBytes32(counterpartyEntity);
+    console.log("amount:");
+    console.logUint(amount);
+    
+    return true;
+  }
+
+  // ========== DIRECT R2R FUNCTION ==========
+  // Simple reserve-to-reserve transfer (simpler than batch)
+  function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint tokenId, uint amount) public returns (bool) {
+    require(fromEntity != toEntity, "Cannot transfer to self");
+    require(_reserves[fromEntity][tokenId] >= amount, "Insufficient reserves");
+
+    console.log("=== DIRECT R2R TRANSFER ===");
+    console.logBytes32(fromEntity);
+    console.log("to");
+    console.logBytes32(toEntity);
+    console.log("amount:");
+    console.logUint(amount);
+
+    // Simple transfer: subtract from sender, add to receiver
+    _reserves[fromEntity][tokenId] -= amount;
+    _reserves[toEntity][tokenId] += amount;
+
+    // Emit events for j-watcher
+    emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
+    emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
+    emit ReserveTransferred(fromEntity, toEntity, tokenId, amount);
+
+    console.log("=== R2R TRANSFER COMPLETE ===");
+    return true;
+  }
+
+  // ========== NEW SIMPLIFIED SETTLE FUNCTION ==========
+  // Simple settlement between two entities without signature verification
+  // Can be called independently or as part of processBatch
+  function settle(bytes32 leftEntity, bytes32 rightEntity, SettlementDiff[] memory diffs) public returns (bool) {
+    require(leftEntity != rightEntity, "Cannot settle with self");
+    require(leftEntity < rightEntity, "Entities must be in order (left < right)");
+    
+    // Simple channel key: hash of left and right entities converted to bytes
+    bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
+    
+    // Comment out signature verification for development
+    // TODO: Re-enable signature verification in production
+    
+    for (uint j = 0; j < diffs.length; j++) {
+      SettlementDiff memory diff = diffs[j];
+      uint tokenId = diff.tokenId;
+      
+      // ✅ INVARIANT CHECK: Total value change must be zero
+      // leftDiff + rightDiff + collateralDiff == 0
+      require(diff.leftDiff + diff.rightDiff + diff.collateralDiff == 0, "Settlement must balance");
+      
+      // Update left entity reserves
+      if (diff.leftDiff < 0) {
+        require(_reserves[leftEntity][tokenId] >= uint(-diff.leftDiff), "Left entity insufficient reserves");
+        _reserves[leftEntity][tokenId] -= uint(-diff.leftDiff);
+      } else if (diff.leftDiff > 0) {
+        _reserves[leftEntity][tokenId] += uint(diff.leftDiff);
+      }
+      
+      // Update right entity reserves  
+      if (diff.rightDiff < 0) {
+        require(_reserves[rightEntity][tokenId] >= uint(-diff.rightDiff), "Right entity insufficient reserves");
+        _reserves[rightEntity][tokenId] -= uint(-diff.rightDiff);
+      } else if (diff.rightDiff > 0) {
+        _reserves[rightEntity][tokenId] += uint(diff.rightDiff);
+      }
+      
+      // Update collateral
+      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+      if (diff.collateralDiff < 0) {
+        require(col.collateral >= uint(-diff.collateralDiff), "Insufficient collateral");
+        col.collateral -= uint(-diff.collateralDiff);
+      } else if (diff.collateralDiff > 0) {
+        col.collateral += uint(diff.collateralDiff);
+      }
+      
+      // Update ondelta
+      col.ondelta += diff.ondeltaDiff;
+      
+      // Emit SettlementProcessed event with final values for j-watcher consumption
+      emit SettlementProcessed(
+        leftEntity,
+        rightEntity,
+        tokenId,
+        _reserves[leftEntity][tokenId],
+        _reserves[rightEntity][tokenId],
+        col.collateral,
+        col.ondelta
+      );
+    }
+    
+    // TODO: Add cooperative nonce tracking if needed for settlement ordering
+    return true;
   }
 
   function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
+    console.log("_processBatch starting for entity");
+    console.logBytes32(entityId);
     uint startGas = gasleft();
 
     // the order is important: first go methods that increase entity's balance
@@ -280,6 +504,37 @@ contract Depository is Console {
 
     completeSuccess = true; 
 
+    // Process reserveToReserve transfers (the core functionality we need)
+    console.log("Processing reserveToReserve transfers count:");
+    console.logUint(batch.reserveToReserve.length);
+    for (uint i = 0; i < batch.reserveToReserve.length; i++) {
+      console.log("Transfer index:");
+      console.logUint(i);
+      console.log("From entity:");
+      console.logBytes32(entityId);
+      console.log("To entity:");
+      console.logBytes32(batch.reserveToReserve[i].receivingEntity);
+      console.log("Token ID:");
+      console.logUint(batch.reserveToReserve[i].tokenId);
+      console.log("Amount:");
+      console.logUint(batch.reserveToReserve[i].amount);
+      reserveToReserve(entityId, batch.reserveToReserve[i]);
+    }
+
+    // NEW: Process settlements (simplified account settlements between entities)
+    console.log("Processing settlements count:");
+    console.logUint(batch.settlements.length);
+    for (uint i = 0; i < batch.settlements.length; i++) {
+      Settlement memory settlement = batch.settlements[i];
+      console.log("Settlement between:");
+      console.logBytes32(settlement.leftEntity);
+      console.log("and:");
+      console.logBytes32(settlement.rightEntity);
+      
+      if (!settle(settlement.leftEntity, settlement.rightEntity, settlement.diffs)) {
+        completeSuccess = false;
+      }
+    }
 
     /*
     // flashloans allow to settle batch of cooperativeUpdate
@@ -293,6 +548,7 @@ contract Depository is Console {
     }
     */
     
+    /* DISABLED: dispute functions
     for (uint i = 0; i < batch.cooperativeUpdate.length; i++) {
       if(!(cooperativeUpdate(entityId, batch.cooperativeUpdate[i]))){
         completeSuccess = false;
@@ -317,13 +573,16 @@ contract Depository is Console {
         completeSuccess = false;
       }
     }
+    */
 
     
+    /* DISABLED: collateral functions
     for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
       if(!(reserveToCollateral(entityId, batch.reserveToCollateral[i]))){
         completeSuccess = false;
       }
     }
+    */
     
     /*
     for (uint i = 0; i < batch.revealSecret.length; i++) {
@@ -376,6 +635,23 @@ contract Depository is Console {
     int peerReserveDiff;
     int collateralDiff;
     int ondeltaDiff;
+  }
+
+  // Simplified settlement diff structure
+  struct SettlementDiff {
+    uint tokenId;
+    int leftDiff;        // Change for left entity
+    int rightDiff;       // Change for right entity  
+    int collateralDiff;  // Change in collateral
+    int ondeltaDiff;     // Change in ondelta
+  }
+
+  // Settlement batch between two entities
+  struct Settlement {
+    bytes32 leftEntity;
+    bytes32 rightEntity;
+    SettlementDiff[] diffs;
+    // No signature field - signatures commented out for development
   }
   //Enforces the invariant: Its main job is to run the check you described: require(leftReserveDiff + rightReserveDiff + collateralDiff == 0). This guarantees no value is created or lost, only moved.
   struct CooperativeUpdate {
@@ -566,7 +842,7 @@ contract Depository is Console {
     uint amount;
   }
   function reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
-    enforceDebts(entity, params.tokenId);
+    // enforceDebts(entity, params.tokenId); // DISABLED
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
     //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
@@ -591,13 +867,47 @@ contract Depository is Console {
     uint amount;
   }
   function reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
-    enforceDebts(entity, params.tokenId);
+    console.log("=== reserveToReserve ENTRY ===");
+    console.log("reserveToReserve: from entity");
+    console.logBytes32(entity);
+    console.log("reserveToReserve: to entity");
+    console.logBytes32(params.receivingEntity);
+    console.log("reserveToReserve: tokenId");
+    console.logUint(params.tokenId);
+    console.log("reserveToReserve: amount");
+    console.logUint(params.amount);
+    console.log("reserveToReserve: sender balance");
+    console.logUint(_reserves[entity][params.tokenId]);
+    
+    // enforceDebts(entity, params.tokenId); // DISABLED
 
-    require(_reserves[entity][params.tokenId] >= params.amount);
+    console.log("=== BALANCE CHECK ===");
+    if (_reserves[entity][params.tokenId] >= params.amount) {
+      console.log("SUCCESS: Balance check passed");
+    } else {
+      console.log("FAIL: Balance check failed - insufficient funds");
+      console.log("Required:");
+      console.logUint(params.amount);
+      console.log("Available:");
+      console.logUint(_reserves[entity][params.tokenId]);
+    }
+
+    require(_reserves[entity][params.tokenId] >= params.amount, "Insufficient balance for transfer");
+    
+    console.log("=== EXECUTING TRANSFER ===");
     _reserves[entity][params.tokenId] -= params.amount;
     _reserves[params.receivingEntity][params.tokenId] += params.amount;
+    
+    console.log("reserveToReserve: transfer complete");
+    console.log("reserveToReserve: new sender balance");
+    console.logUint(_reserves[entity][params.tokenId]);
+    console.log("reserveToReserve: new recipient balance");
+    console.logUint(_reserves[params.receivingEntity][params.tokenId]);
+    
     emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
     emit ReserveUpdated(params.receivingEntity, params.tokenId, _reserves[params.receivingEntity][params.tokenId]);
+    emit ReserveTransferred(entity, params.receivingEntity, params.tokenId, params.amount);
+    console.log("=== reserveToReserve COMPLETE ===");
   }
 
   /**
@@ -606,16 +916,15 @@ contract Depository is Console {
    * @param to Recipient entity address
    * @param internalTokenId Internal token ID (use getControlShareTokenId helper)
    * @param amount Amount of shares to transfer
-   * @param purpose Human-readable purpose (e.g., "Sale", "Investment", "Dividend Distribution")
    */
   function transferControlShares(
     bytes32 entity,
     bytes32 to,
     uint256 internalTokenId,
     uint256 amount,
-    string calldata purpose
+    string calldata /* purpose */
   ) internal {
-    enforceDebts(entity, internalTokenId);
+    // enforceDebts(entity, internalTokenId); // DISABLED
 
     require(_reserves[entity][internalTokenId] >= amount, "Insufficient control shares");
     require(to != bytes32(0), "Invalid recipient");
@@ -624,7 +933,7 @@ contract Depository is Console {
     _reserves[entity][internalTokenId] -= amount;
     _reserves[to][internalTokenId] += amount;
 
-    emit ControlSharesTransferred(entity, to, internalTokenId, amount, purpose);
+    // emit ControlSharesTransferred(entity, to, internalTokenId, amount, purpose); // DISABLED
     emit ReserveUpdated(entity, internalTokenId, _reserves[entity][internalTokenId]);
     emit ReserveUpdated(to, internalTokenId, _reserves[to][internalTokenId]);
   }
@@ -650,10 +959,10 @@ contract Depository is Console {
   }
 
 
-  // triggered automatically before every reserveTo{Reserve/ChannelCollateral/PackedToken}
-  // can be called manually
-  // iterates over _debts starting from current _debtIndex, first-in-first-out 
-  // max _debts?
+  /* triggered automatically before every reserveTo{Reserve/ChannelCollateral/PackedToken}
+  /* can be called manually
+  /* iterates over _debts starting from current _debtIndex, first-in-first-out 
+  /* max _debts?
   function enforceDebts(bytes32 entity, uint tokenId) public returns (uint totalDebts) {
     uint debtsLength = _debts[entity][tokenId].length;
     if (debtsLength == 0) {
@@ -718,9 +1027,6 @@ contract Depository is Console {
     //determenistic channel key is 64 bytes: concatenated lowerKey + higherKey
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
-  
-
-  
 
   function reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {
     uint tokenId = params.tokenId;
@@ -764,7 +1070,7 @@ contract Depository is Console {
 
 
 
-  // mutually agreed update of channel state in a single atomic operation
+  /* mutually agreed update of channel state in a single atomic operation
   function cooperativeUpdate(bytes32 entity, CooperativeUpdate memory params) internal returns (bool) {
     bytes memory ch_key = channelKey(entity, params.counterentity);
     bytes32 left;
@@ -866,41 +1172,36 @@ contract Depository is Console {
     return true;
   }
 
+  /* COMMENTED OUT: Channel finalization disabled for development focus
+  /* returns tokens to _reserves based on final deltas and _collaterals
+  /* then increases cooperativeNonce to invalidate all previous dispute proofs
 
- 
+  /* todo: private visability
+  /* function finalizeChannel(bytes32 entity1, 
+  /*     bytes32 entity2, 
+  /*     ProofBody memory proofbody, 
+  /*     bytes memory arguments1, 
+  /*     bytes memory arguments2) public returns (bool) 
+  /* {
+  /*   bytes32 leftAddress;
+  /*   bytes32 rightAddress;
+  /*   bytes memory leftArguments;
+  /*   bytes memory rightArguments;
+  /*   if (entity1 < entity2) {
+  /*       leftAddress = entity1;
+  /*       rightAddress = entity2;
+  /*       leftArguments = arguments1;
+  /*       rightArguments = arguments2;
+  /*   } else {
+  /*       leftAddress = entity2;
+  /*       rightAddress = entity1;    
+  /*       leftArguments = arguments2;
+  /*       rightArguments = arguments1;
+  /*   }
 
+  /*   bytes memory ch_key = abi.encodePacked(leftAddress, rightAddress);
 
-
-  // COMMENTED OUT: Channel finalization disabled for development focus
-  // returns tokens to _reserves based on final deltas and _collaterals
-  // then increases cooperativeNonce to invalidate all previous dispute proofs
-
-  // todo: private visability
-  // function finalizeChannel(bytes32 entity1, 
-  //     bytes32 entity2, 
-  //     ProofBody memory proofbody, 
-  //     bytes memory arguments1, 
-  //     bytes memory arguments2) public returns (bool) 
-  // {
-  //   bytes32 leftAddress;
-  //   bytes32 rightAddress;
-  //   bytes memory leftArguments;
-  //   bytes memory rightArguments;
-  //   if (entity1 < entity2) {
-  //       leftAddress = entity1;
-  //       rightAddress = entity2;
-  //       leftArguments = arguments1;
-  //       rightArguments = arguments2;
-  //   } else {
-  //       leftAddress = entity2;
-  //       rightAddress = entity1;    
-  //       leftArguments = arguments2;
-  //       rightArguments = arguments1;
-  //   }
-
-  //   bytes memory ch_key = abi.encodePacked(leftAddress, rightAddress);
-
-  //   logChannel(leftAddress, rightAddress);
+  /*   logChannel(leftAddress, rightAddress);
 
     // 1. create deltas (ondelta+offdelta) from proofbody
     int[] memory deltas = new int[](proofbody.offdeltas.length);
@@ -1040,78 +1341,78 @@ contract Depository is Console {
 
   /* DISABLED: dispute functions
   function initialDisputeProof(InitialDisputeProof memory params) public returns (bool) {
-  //   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+  /*   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
-  //   // Update dispute scores for both parties
-  //   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
-  //   entityScores[params.counterentity].totalDisputes++;
+  /*   // Update dispute scores for both parties
+  /*   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+  /*   entityScores[params.counterentity].totalDisputes++;
 
-  //   // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
-  //   require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce);
+  /*   // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
+  /*   require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce);
 
-  //   bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, 
-  //     ch_key, 
-  //     params.cooperativeNonce, 
-  //     params.disputeNonce, 
-  //     params.proofbodyHash);
+  /*   bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, 
+  /*     ch_key, 
+  /*     params.cooperativeNonce, 
+  /*     params.disputeNonce, 
+  /*     params.proofbodyHash);
 
-  //   bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+  /*   bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
-  //   log('encoded_msg',encoded_msg);
+  /*   log('encoded_msg',encoded_msg);
 
-  //   require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
+  /*   require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
 
-  //   require(_channels[ch_key].disputeHash == bytes32(0));
+  /*   require(_channels[ch_key].disputeHash == bytes32(0));
 
-  //   bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
-  //     params.disputeNonce, 
-  //     bytes32(uint256(uint160(msg.sender))) < params.counterentity, // is started by left
-  //     block.number + 20,
-  //     params.proofbodyHash, 
-  //     keccak256(abi.encodePacked(params.initialArguments)));
+  /*   bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
+  /*     params.disputeNonce, 
+  /*     bytes32(uint256(uint160(msg.sender))) < params.counterentity, // is started by left
+  /*     block.number + 20,
+  /*     params.proofbodyHash, 
+  /*     keccak256(abi.encodePacked(params.initialArguments)));
 
-  //   _channels[ch_key].disputeHash = keccak256(encodedDispute);
-  //   emit DisputeStarted(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.disputeNonce, params.initialArguments);
-  // }
+  /*   _channels[ch_key].disputeHash = keccak256(encodedDispute);
+  /*   emit DisputeStarted(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.disputeNonce, params.initialArguments);
+  /* }
 
-  // COMMENTED OUT: Dispute functionality disabled for development focus
-  // function finalDisputeProof(FinalDisputeProof memory params) public returns (bool) {
-  //   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+  /* COMMENTED OUT: Dispute functionality disabled for development focus
+  /* function finalDisputeProof(FinalDisputeProof memory params) public returns (bool) {
+  /*   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
-  //   // Update dispute scores for both parties involved in the finalization
-  //   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
-  //   entityScores[params.counterentity].totalDisputes++;
+  /*   // Update dispute scores for both parties involved in the finalization
+  /*   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+  /*   entityScores[params.counterentity].totalDisputes++;
 
-  //   // verify the dispute was started
+  /*   // verify the dispute was started
 
-  //   if (params.sig.length > 0) {
-  //     // Validate signature if provided
-  //     bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, 
-  //       ch_key, 
-  //       params.cooperativeNonce, 
-  //       params.initialDisputeNonce, 
-  //       params.finalDisputeNonce);
+  /*   if (params.sig.length > 0) {
+  /*     // Validate signature if provided
+  /*     bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, 
+  /*       ch_key, 
+  /*       params.cooperativeNonce, 
+  /*       params.initialDisputeNonce, 
+  /*       params.finalDisputeNonce);
         
-  //     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-  //     log('encoded_msg',encoded_msg);
-  //     require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
+  /*     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+  /*     log('encoded_msg',encoded_msg);
+  /*     require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
 
-  //     // TODO: if nonce is same, Left one's proof is considered valid
+  /*     // TODO: if nonce is same, Left one's proof is considered valid
 
-  //     require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
-  //   } else {
-  //     // counterparty agrees or does not respond 
-  //     bool senderIsCounterparty = params.startedByLeft != (bytes32(uint256(uint160(msg.sender))) < params.counterentity);
-  //     require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
-  //     require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
-  //   }
+  /*     require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
+  /*   } else {
+  /*     // counterparty agrees or does not respond 
+  /*     bool senderIsCounterparty = params.startedByLeft != (bytes32(uint256(uint160(msg.sender))) < params.counterentity);
+  /*     require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
+  /*     require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
+  /*   }
     
 
-  //   finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
+  /*   finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
   
 
-  //   return true;
-  // }
+  /*   return true;
+  /* }
 
 
 
@@ -1134,7 +1435,7 @@ contract Depository is Console {
   }
   
   
-  // return users with reserves in provided tokens
+  /* return users with reserves in provided tokens
   function getUsers(bytes32[] memory entities, uint[] memory tokenIds) external view returns (UserReturn[] memory response) {
     response = new UserReturn[](entities.length);
     for (uint i = 0;i<entities.length;i++){
@@ -1156,7 +1457,7 @@ contract Depository is Console {
     return response;
   }
   
-  // get many _channels around one address, with collaterals in provided tokens
+  /* get many _channels around one address, with collaterals in provided tokens
   function getChannels(bytes32 entity, bytes32[] memory counterentities, uint[] memory tokenIds) public view returns (ChannelReturn[] memory response) {
     bytes memory ch_key;
 
@@ -1214,7 +1515,7 @@ contract Depository is Console {
     }*/
   }       
 
-  // Events for control/dividend shares
+  /* Events for control/dividend shares
   event ControlSharesReceived(
     address indexed entityProvider,
     bytes32 indexed fromEntity, 
@@ -1265,9 +1566,9 @@ contract Depository is Console {
     return this.onERC1155Received.selector;
   }
 
-  // =================================================================================================
-  // === SHORTCUT FUNCTIONS ==========================================================================
-  // =================================================================================================
+  /* =================================================================================================
+  /* === SHORTCUT FUNCTIONS ==========================================================================
+  /* =================================================================================================
 
   /**
    * @notice Unilateral action to move funds from reserve to a channel's collateral.

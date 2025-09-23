@@ -298,23 +298,23 @@ contract Depository is Console {
 
   // DEBUG: Simple function to fund entity reserves for testing
   function debugFundReserves(bytes32 entity, uint tokenId, uint amount) public {
-    console.log("debugFundReserves: funding entity");
-    console.logBytes32(entity);
-    console.log("debugFundReserves: tokenId");
-    console.logUint(tokenId);
-    console.log("debugFundReserves: amount");
-    console.logUint(amount);
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
     
     _reserves[entity][tokenId] += amount;
     emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
     
-    console.log("debugFundReserves: new balance");
-    console.logUint(_reserves[entity][tokenId]);
+    // console.log removed
+    // console.log removed
   }
 
   // DEBUG: Bulk fund top 20 entities with test reserves
   function debugBulkFundEntities() public {
-    console.log("debugBulkFundEntities: funding entities 1-20 with 1M tokens");
+    // console.log removed
     
     uint256 fundAmount = 1000000000000000000; // 1M tokens (1e18)
     
@@ -328,34 +328,34 @@ contract Depository is Console {
       }
     }
     
-    console.log("debugBulkFundEntities: funding complete");
+    // console.log removed
   }
 
   function processBatch(bytes32 entity, Batch calldata batch) public returns (bool completeSuccess) {
-    console.log("=== processBatch ENTRY ===");
-    console.log("=== processBatch ENTRY ===");
-    console.log("=== processBatch ENTRY ===");
-    console.log("processBatch called with entity");
-    console.logBytes32(entity);
-    console.log("batch.reserveToReserve.length");
-    console.logUint(batch.reserveToReserve.length);
-    console.log("msg.sender:");
-    console.logAddress(msg.sender);
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
     
     if (batch.reserveToReserve.length > 0) {
-      console.log("First transfer details:");
-      console.log("  to entity:");
-      console.logBytes32(batch.reserveToReserve[0].receivingEntity);
-      console.log("  tokenId:");
-      console.logUint(batch.reserveToReserve[0].tokenId);
-      console.log("  amount:");
-      console.logUint(batch.reserveToReserve[0].amount);
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
       
-      console.log("Sender current balance:");
-      console.logUint(_reserves[entity][batch.reserveToReserve[0].tokenId]);
+      // console.log removed
+      // console.log removed
     }
     
-    console.log("=== CALLING _processBatch ===");
+    // console.log removed
     return _processBatch(entity, batch);
   }
 
@@ -393,12 +393,12 @@ contract Depository is Console {
       col.ondelta
     );
     
-    console.log("Account prefunded:");
-    console.logBytes32(fundingEntity);
-    console.log("funded account with:");
-    console.logBytes32(counterpartyEntity);
-    console.log("amount:");
-    console.logUint(amount);
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
     
     return true;
   }
@@ -409,12 +409,12 @@ contract Depository is Console {
     require(fromEntity != toEntity, "Cannot transfer to self");
     require(_reserves[fromEntity][tokenId] >= amount, "Insufficient reserves");
 
-    console.log("=== DIRECT R2R TRANSFER ===");
-    console.logBytes32(fromEntity);
-    console.log("to");
-    console.logBytes32(toEntity);
-    console.log("amount:");
-    console.logUint(amount);
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
 
     // Simple transfer: subtract from sender, add to receiver
     _reserves[fromEntity][tokenId] -= amount;
@@ -425,7 +425,7 @@ contract Depository is Console {
     emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
     emit ReserveTransferred(fromEntity, toEntity, tokenId, amount);
 
-    console.log("=== R2R TRANSFER COMPLETE ===");
+    // console.log removed
     return true;
   }
 
@@ -495,8 +495,8 @@ contract Depository is Console {
   }
 
   function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
-    console.log("_processBatch starting for entity");
-    console.logBytes32(entityId);
+    // console.log removed
+    // console.log removed
     uint startGas = gasleft();
 
     // the order is important: first go methods that increase entity's balance
@@ -505,31 +505,31 @@ contract Depository is Console {
     completeSuccess = true; 
 
     // Process reserveToReserve transfers (the core functionality we need)
-    console.log("Processing reserveToReserve transfers count:");
-    console.logUint(batch.reserveToReserve.length);
+    // console.log removed
+    // console.log removed
     for (uint i = 0; i < batch.reserveToReserve.length; i++) {
-      console.log("Transfer index:");
-      console.logUint(i);
-      console.log("From entity:");
-      console.logBytes32(entityId);
-      console.log("To entity:");
-      console.logBytes32(batch.reserveToReserve[i].receivingEntity);
-      console.log("Token ID:");
-      console.logUint(batch.reserveToReserve[i].tokenId);
-      console.log("Amount:");
-      console.logUint(batch.reserveToReserve[i].amount);
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
       reserveToReserve(entityId, batch.reserveToReserve[i]);
     }
 
     // NEW: Process settlements (simplified account settlements between entities)
-    console.log("Processing settlements count:");
-    console.logUint(batch.settlements.length);
+    // console.log removed
+    // console.log removed
     for (uint i = 0; i < batch.settlements.length; i++) {
       Settlement memory settlement = batch.settlements[i];
-      console.log("Settlement between:");
-      console.logBytes32(settlement.leftEntity);
-      console.log("and:");
-      console.logBytes32(settlement.rightEntity);
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
       
       if (!settle(settlement.leftEntity, settlement.rightEntity, settlement.diffs)) {
         completeSuccess = false;
@@ -808,7 +808,7 @@ contract Depository is Console {
         params.internalTokenId = _tokens.length - 1;
         tokenToId[params.packedToken] = params.internalTokenId;
         
-        //console.log("Saved new token:", params.internalTokenId);
+        //// console.log removed
       }
     } else {
       params.packedToken = _tokens[params.internalTokenId];
@@ -817,7 +817,7 @@ contract Depository is Console {
 
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(params.packedToken);
-    //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
+    //// console.log removed
 
     // todo: allow longer uint256 tokenId for ERC721 and ERC1155 
     // e.g. Rarible has format of 0xCreatorAddress..00000TokenId
@@ -845,7 +845,7 @@ contract Depository is Console {
     // enforceDebts(entity, params.tokenId); // DISABLED
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
-    //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
+    //// console.log removed
 
     require(_reserves[entity][params.tokenId] >= params.amount, "Not enough reserve");
 
@@ -867,47 +867,47 @@ contract Depository is Console {
     uint amount;
   }
   function reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
-    console.log("=== reserveToReserve ENTRY ===");
-    console.log("reserveToReserve: from entity");
-    console.logBytes32(entity);
-    console.log("reserveToReserve: to entity");
-    console.logBytes32(params.receivingEntity);
-    console.log("reserveToReserve: tokenId");
-    console.logUint(params.tokenId);
-    console.log("reserveToReserve: amount");
-    console.logUint(params.amount);
-    console.log("reserveToReserve: sender balance");
-    console.logUint(_reserves[entity][params.tokenId]);
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
     
     // enforceDebts(entity, params.tokenId); // DISABLED
 
-    console.log("=== BALANCE CHECK ===");
+    // console.log removed
     if (_reserves[entity][params.tokenId] >= params.amount) {
-      console.log("SUCCESS: Balance check passed");
+      // console.log removed
     } else {
-      console.log("FAIL: Balance check failed - insufficient funds");
-      console.log("Required:");
-      console.logUint(params.amount);
-      console.log("Available:");
-      console.logUint(_reserves[entity][params.tokenId]);
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
+      // console.log removed
     }
 
     require(_reserves[entity][params.tokenId] >= params.amount, "Insufficient balance for transfer");
     
-    console.log("=== EXECUTING TRANSFER ===");
+    // console.log removed
     _reserves[entity][params.tokenId] -= params.amount;
     _reserves[params.receivingEntity][params.tokenId] += params.amount;
     
-    console.log("reserveToReserve: transfer complete");
-    console.log("reserveToReserve: new sender balance");
-    console.logUint(_reserves[entity][params.tokenId]);
-    console.log("reserveToReserve: new recipient balance");
-    console.logUint(_reserves[params.receivingEntity][params.tokenId]);
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
+    // console.log removed
     
     emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
     emit ReserveUpdated(params.receivingEntity, params.tokenId, _reserves[params.receivingEntity][params.tokenId]);
     emit ReserveTransferred(entity, params.receivingEntity, params.tokenId, params.amount);
-    console.log("=== reserveToReserve COMPLETE ===");
+    // console.log removed
   }
 
   /**
@@ -1236,9 +1236,9 @@ contract Depository is Console {
           difference == 0){
           continue;
         }
-        console.log("Update delta");
-        console.logInt(deltas[allowence.deltaIndex]);
-        console.logInt(newDeltas[allowence.deltaIndex]);
+        // console.log removed
+        // console.log removed
+        // console.log removed
         deltas[allowence.deltaIndex] = newDeltas[allowence.deltaIndex];
       
       }
@@ -1309,9 +1309,9 @@ contract Depository is Console {
     bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
 
-    console.log("Received proof");
-    console.logBytes32(keccak256(abi.encode(params.proofbody)));
-    console.logBytes32(keccak256(params.initialArguments));
+    // console.log removed
+    // console.log removed));
+    // console.log removed);
 
     bytes memory encoded_msg = abi.encode(
       MessageType.CooperativeDisputeProof, 

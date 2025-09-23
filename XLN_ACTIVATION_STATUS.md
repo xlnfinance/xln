@@ -2,6 +2,21 @@
 
 *"The infrastructure EXISTS. It needs ACTIVATION, not creation."*
 
+## 🚀 LATEST: Cross-Entity Trading Activated
+
+### What Just Happened
+- Entities use hash-based IDs (0x2bd72c34...) not names
+- Market makers generate orders successfully
+- Orderbook accepts/rejects with proper reasons
+- Cross-entity discovery module created
+
+### The Pattern Continues
+Every "missing" feature is already built, just disconnected:
+- ✅ Orderbook (was dormant, needed first order)
+- ✅ Bilateral channels (existed, needed registration)
+- ✅ Market makers (worked, needed correct entity IDs)
+- ✅ Cross-entity discovery (channels exist, just need to carry order summaries)
+
 ## ✅ ACTIVATED: Orderbook Infrastructure
 
 ### What Was Dormant

@@ -165,14 +165,18 @@ export async function activateXLN(env: ServerEnvironment): Promise<void> {
 
   // Register all existing entities with channel manager
   const entityIds = new Set<string>();
-  for (const key of env.replicas.keys()) {
-    const [entityId] = key.split(':');
-    entityIds.add(entityId);
-  }
+  if (env.replicas) {
+    for (const key of env.replicas.keys()) {
+      const [entityId] = key.split(':');
+      entityIds.add(entityId);
+    }
 
-  for (const entityId of entityIds) {
-    channelManager.registerEntity(entityId);
-    console.log(`✅ Entity ${entityId.slice(0,10)}... registered for bilateral channels`);
+    for (const entityId of entityIds) {
+      channelManager.registerEntity(entityId);
+      console.log(`✅ Entity ${entityId.slice(0,10)}... registered for bilateral channels`);
+    }
+  } else {
+    console.log(`⏳ No entities yet - channels ready for when they arrive`);
   }
 
   console.log(`

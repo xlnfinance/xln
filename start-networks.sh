@@ -14,7 +14,7 @@ sleep 1
 # Start three hardhat nodes in background
 echo "📡 Starting Ethereum Network (port 8545)..."
 cd contracts && npx hardhat node --port 8545 --hostname 127.0.0.1 > ../logs/ethereum-8545.log 2>&1 &
-echo "$!" > ../pids/ethereum.pid
+echo "$!" > pids/ethereum.pid
 
 # COMMENTED OUT: Focus on Ethereum only
 # echo "📡 Starting Polygon Network (port 8546)..."
