@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
 
   interface ErrorItem {
@@ -59,6 +59,7 @@
         delete (window as any).showError;
       };
     }
+    return () => {}; // Default cleanup function
   });
 </script>
 

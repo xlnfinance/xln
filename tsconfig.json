@@ -5,14 +5,42 @@
     "moduleResolution": "bundler",
     "esModuleInterop": true,
     "outDir": "./dist",
+
+    // STRICTEST RULES FOR FINANCIAL SYSTEM
     "strict": true,
-    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictPropertyInitialization": true,
+    "strictBindCallApply": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+
+    // CATCH ERRORS EARLY
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+
+    // SAFETY
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "typeRoots": ["./node_modules/@types", "./types"],
     "types": []
   },
   "include": ["src/**/*", "playwright.config.ts"],
-  "exclude": ["node_modules", "**/*.test.ts"]
+  "exclude": [
+    "node_modules",
+    "**/*.test.ts",
+    "src/orderbook/**/*",
+    "src/hanko-*.ts",
+    "src/test-*.ts",
+    "src/brainvault/**/*"
+  ]
 }

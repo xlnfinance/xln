@@ -24,12 +24,12 @@ export const isBrowser = typeof window !== 'undefined';
 
 // Simplified crypto compatibility
 export const createHash = isBrowser
-  ? (algorithm: string) => ({
+  ? (_algorithm: string) => ({
       update: (data: string) => ({
         digest: (encoding?: string) => {
           // Create proper 32-byte hash for browser demo using Web Crypto API
           const encoder = new TextEncoder();
-          const dataBuffer = encoder.encode(data);
+          void encoder; // Available for future crypto implementation
 
           // Simple deterministic hash that produces 32 bytes
           let hash = 0;
@@ -72,7 +72,7 @@ export const randomBytes = isBrowser
 const getBuffer = () => {
   if (isBrowser) {
     return {
-      from: (data: any, encoding: string = 'utf8') => {
+      from: (data: any, _encoding: string = 'utf8') => {
         if (typeof data === 'string') {
           return new TextEncoder().encode(data);
         }
@@ -88,7 +88,7 @@ export const Buffer = getBuffer();
 
 // Browser polyfill for Uint8Array.toString()
 if (isBrowser) {
-  (Uint8Array.prototype as any).toString = function (encoding: string = 'utf8') {
+  (Uint8Array.prototype as any).toString = function (_encoding: string = 'utf8') {
     return new TextDecoder().decode(this);
   };
   (window as any).Buffer = Buffer;

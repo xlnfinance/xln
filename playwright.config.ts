@@ -15,7 +15,7 @@ export default defineConfig({
   outputDir: './e2e/test-results',
   use: {
     baseURL: 'http://localhost:8080',
-    headless: process.env.HEADED !== 'true', // Headless by default, use HEADED=true for visual
+    headless: process.env['HEADED'] !== 'true', // Headless by default, use HEADED=true for visual
     trace: 'on-first-retry',
     screenshot: 'on',
     viewport: { width: 1920, height: 1080 },

@@ -1,9 +1,11 @@
 /**
  * Strict validation utilities for financial data types
  * Ensures no undefined/null values in monetary calculations
+ *
+ * FINTECH-LEVEL TYPE SAFETY: Never allow undefined routing identifiers
  */
 
-import { Delta } from './types';
+import { Delta, EntityInput } from './types';
 
 /**
  * Strict validation for Delta objects - financial data must be complete
@@ -130,4 +132,87 @@ export function isDelta(obj: any): obj is Delta {
   } catch {
     return false;
   }
+}
+
+// ============================================================================
+// FINTECH-LEVEL TYPE SAFETY: ROUTING INTEGRITY VALIDATION
+// ============================================================================
+
+/**
+ * CRITICAL: Validate EntityInput has required routing identifiers
+ * Never allow undefined entityId/signerId in financial flows
+ */
+export function validateEntityInput(input: any): EntityInput {
+  if (!input) {
+    throw new Error(`FINANCIAL-SAFETY: EntityInput is null/undefined`);
+  }
+
+  if (!input.entityId || typeof input.entityId !== 'string') {
+    throw new Error(`FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected`);
+  }
+
+  if (!input.signerId || typeof input.signerId !== 'string') {
+    throw new Error(`FINANCIAL-SAFETY: signerId is missing or invalid - payment routing will fail`);
+  }
+
+  if (!input.entityTxs || !Array.isArray(input.entityTxs)) {
+    throw new Error(`FINANCIAL-SAFETY: entityTxs is missing or invalid`);
+  }
+
+  return input as EntityInput;
+}
+
+/**
+ * CRITICAL: Validate EntityOutput (same as EntityInput) has required routing identifiers
+ * Ensure all outputs have proper routing data for financial flows
+ */
+export function validateEntityOutput(output: any): EntityInput {
+  if (!output) {
+    throw new Error(`FINANCIAL-SAFETY: EntityOutput is null/undefined`);
+  }
+
+  if (!output.entityId || typeof output.entityId !== 'string') {
+    throw new Error(`FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption`);
+  }
+
+  if (!output.signerId || typeof output.signerId !== 'string') {
+    throw new Error(`FINANCIAL-SAFETY: EntityOutput signerId is missing - routing corruption`);
+  }
+
+  return output as EntityInput;
+}
+
+/**
+ * CRITICAL: Validate payment route integrity
+ * Ensure payment routing paths are complete and valid
+ */
+export function validatePaymentRoute(route: any): string[] {
+  if (!route || !Array.isArray(route)) {
+    throw new Error(`FINANCIAL-SAFETY: Payment route must be a valid array`);
+  }
+
+  if (route.length === 0) {
+    throw new Error(`FINANCIAL-SAFETY: Payment route cannot be empty`);
+  }
+
+  for (let i = 0; i < route.length; i++) {
+    const entityId = route[i];
+    if (!entityId || typeof entityId !== 'string') {
+      throw new Error(`FINANCIAL-SAFETY: Route[${i}] is invalid - entity ID required for financial routing`);
+    }
+  }
+
+  return route as string[];
+}
+
+/**
+ * CRITICAL: Safe Map.get() for financial data
+ * Replace all financial Map.get(id)! with null-safe patterns
+ */
+export function safeMapGet<K, V>(map: Map<K, V>, key: K, context: string): V {
+  const value = map.get(key);
+  if (value === undefined) {
+    throw new Error(`FINANCIAL-SAFETY: ${context} not found for key: ${key}`);
+  }
+  return value;
 }

@@ -51,7 +51,7 @@ export function startBuildWatcher() {
     } catch (error) {
       console.warn('Build watcher error:', error);
     }
-  }, 1000); // Check every second
+  }, 1000) as unknown as number; // Check every second
 }
 
 export function stopBuildWatcher() {

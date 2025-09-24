@@ -66,7 +66,7 @@ const tabOperations = {
       id: this.generateTabId(),
       title: `Entity Panel ${panelNumber}`,
       jurisdiction: jurisdiction || 'Ethereum',
-      signer: signerId || '',
+      signerId: signerId || '',
       entityId: entityId || '',
       isActive: false
     };
@@ -97,7 +97,7 @@ const tabOperations = {
 
     // If closed tab was active, switch to first remaining tab
     const currentActiveId = get(activeTabId);
-    if (currentActiveId === tabId) {
+    if (currentActiveId === tabId && updatedTabs.length > 0 && updatedTabs[0]) {
       this.setActiveTab(updatedTabs[0].id);
     }
 

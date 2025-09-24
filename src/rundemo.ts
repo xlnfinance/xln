@@ -104,7 +104,7 @@ const runDemo = async (env: Env): Promise<Env> => {
 
   console.log(`\n💰 Prefunding entity ${formatEntityDisplay(e1_id)}...`);
   const initialPortfolio = [
-    { asset: 'ETH', amount: '11000000000000000000', decimals: 18, tokenId: 1 },
+    { asset: 'ETH', amount: '100000000000000000000', decimals: 18, tokenId: 1 },
     { asset: 'USDT', amount: '5000000000', decimals: 6, tokenId: 2 },
   ];
 
@@ -127,7 +127,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   }
 
   const ethReserve = e1_replica_after_funding?.state.reserves.get('1');
-  const expectedETHAmount = 11000000000000000000n;
+  const expectedETHAmount = 100000000000000000000n;
   
   if (!e1_replica_after_funding) {
     throw new Error('❌ Verification failed: e1 replica not found after funding.');
@@ -163,7 +163,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   console.log(`📊 Pre-transfer: e1=${e1_current_balance}, e2=${e2_current_balance}`);
   
   // Calculate new balances
-  const e1_new_balance = e1_current_balance - transferAmount; // 11 ETH - 1 ETH = 10 ETH
+  const e1_new_balance = e1_current_balance - transferAmount; // 100 ETH - 1 ETH = 99 ETH
   const e2_new_balance = e2_current_balance + transferAmount; // 0 ETH + 1 ETH = 1 ETH
   
   console.log(`📊 Post-transfer: e1=${e1_new_balance}, e2=${e2_new_balance}`);
@@ -215,7 +215,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   const e1_final_balance = e1_replica_after_transfer?.state.reserves.get('1');
   const e2_final_balance = e2_replica_after_transfer?.state.reserves.get('1');
   
-  const expectedE1Balance = 10000000000000000000n; // 11 ETH - 1 ETH transfer = 10 ETH
+  const expectedE1Balance = 99000000000000000000n; // 100 ETH - 1 ETH transfer = 99 ETH
   const expectedE2Balance = 1000000000000000000n; // 1 ETH transferred
 
   if (e1_final_balance !== expectedE1Balance) {
@@ -234,8 +234,8 @@ const runDemo = async (env: Env): Promise<Env> => {
     entityId: e1_id,
     signerId: s1,
     entityTxs: [{
-      type: 'account_request' as const,
-      data: { targetEntityId: e2_id, requestType: 'open' as const }
+      type: 'openAccount' as const,
+      data: { targetEntityId: e2_id }
     }]
   };
 

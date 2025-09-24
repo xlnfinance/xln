@@ -6,7 +6,7 @@
 import { ethers } from 'ethers';
 
 import { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
-import { DEBUG, hash } from './utils';
+import { DEBUG } from './utils';
 
 // Extend globalThis to include our entity counter
 declare global {
@@ -171,13 +171,14 @@ export const createLazyEntity = (
     shares[validator] = 1n; // Equal voting power for simplicity
   });
 
-  return {
+  const config: ConsensusConfig = {
     mode: 'proposer-based',
     threshold,
     validators,
     shares,
-    jurisdiction,
+    ...(jurisdiction && { jurisdiction }),
   };
+  return config;
 };
 
 // 2. NUMBERED ENTITIES (Small gas cost)
@@ -206,29 +207,42 @@ export const createNumberedEntity = async (
   if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
   if (DEBUG) console.log(`   💸 Gas required for registration`);
 
-  // Simulate blockchain call - use sequential numbers for demo
-  // Use a simple global counter for demo purposes
-  if (!globalThis._entityCounter) globalThis._entityCounter = 0;
-  const entityNumber = ++globalThis._entityCounter;
-  const entityId = generateNumberedEntityId(entityNumber);
+  // Get the next entity number from the blockchain
+  const { getNextEntityNumber, registerNumberedEntityOnChain } = await import('./evm');
 
-  if (DEBUG) console.log(`   ✅ Assigned Entity Number: ${entityNumber}`);
-  if (DEBUG) console.log(`   EntityID: ${entityId}`);
+  try {
+    // First, get the next available entity number from the blockchain
+    await getNextEntityNumber(jurisdiction);
 
-  const shares: { [validatorId: string]: bigint } = {};
-  validators.forEach(validator => {
-    shares[validator] = 1n;
-  });
+    // Register the entity on-chain with its board configuration
+    const { entityNumber } = await registerNumberedEntityOnChain(
+      { mode: 'proposer-based', threshold, validators, shares: validators.reduce((acc, v) => ({ ...acc, [v]: 1n }), {}), jurisdiction },
+      name
+    );
 
-  const config: ConsensusConfig = {
-    mode: 'proposer-based',
-    threshold,
-    validators,
-    shares,
-    jurisdiction,
-  };
+    const entityId = generateNumberedEntityId(entityNumber);
 
-  return { config, entityNumber, entityId };
+    if (DEBUG) console.log(`   ✅ Registered Entity Number: ${entityNumber}`);
+    if (DEBUG) console.log(`   EntityID: ${entityId}`);
+
+    const shares: { [validatorId: string]: bigint } = {};
+    validators.forEach(validator => {
+      shares[validator] = 1n;
+    });
+
+    const config: ConsensusConfig = {
+      mode: 'proposer-based',
+      threshold,
+      validators,
+      shares,
+      jurisdiction,
+    };
+
+    return { config, entityNumber, entityId };
+  } catch (error) {
+    console.error('❌ Failed to register numbered entity on blockchain:', error);
+    throw error;
+  }
 };
 
 // 3. NAMED ENTITIES (Premium - admin assignment required)

@@ -22,9 +22,21 @@ export type Profile = {
     version?: string;
     capacity?: number;
     uptime?: string;
+    isHub?: boolean;
+    // Fee configuration (PPM = parts per million)
+    routingFeePPM?: number; // 0-10000 (0% - 1%)
+    baseFee?: bigint; // Base fee in smallest unit (e.g., wei for ETH)
     // Additional fields
     [key: string]: unknown;
   };
+  // Account capacities for routing
+  accounts?: Array<{
+    counterpartyId: string;
+    tokenCapacities: Map<number, {
+      inCapacity: bigint;
+      outCapacity: bigint;
+    }>;
+  }>;
 };
 
 export interface GossipLayer {
@@ -37,8 +49,17 @@ export function createGossipLayer(): GossipLayer {
   const profiles = new Map<string, Profile>();
 
   const announce = (profile: Profile): void => {
-    profiles.set(profile.entityId, profile);
-    console.log('📡 Gossip updated:', profile);
+    // Only update if newer timestamp or no existing profile
+    const existing = profiles.get(profile.entityId);
+    const newTimestamp = profile.metadata?.lastUpdated || 0;
+    const existingTimestamp = existing?.metadata?.lastUpdated || 0;
+
+    if (!existing || newTimestamp > existingTimestamp) {
+      profiles.set(profile.entityId, profile);
+      console.log(`📡 Gossip updated for ${profile.entityId} (timestamp: ${newTimestamp})`);
+    } else {
+      console.log(`📡 Gossip ignored older update for ${profile.entityId} (${newTimestamp} <= ${existingTimestamp})`);
+    }
   };
 
   const getProfiles = (): Profile[] => {

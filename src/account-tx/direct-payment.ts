@@ -3,8 +3,8 @@
  * Includes event bubbling back to E-Machine
  */
 
-import { AccountMachine, Delta } from '../types';
-import { deriveDelta } from '../account-utils';
+import { AccountMachine } from '../types';
+import { deriveDelta, getDefaultCreditLimit } from '../account-utils';
 
 export type DirectPaymentData = {
   tokenId: number;
@@ -27,13 +27,14 @@ export function applyDirectPayment(
   // Get or create delta for this token
   let delta = accountMachine.deltas.get(payment.tokenId);
   if (!delta) {
+    const defaultCreditLimit = getDefaultCreditLimit(payment.tokenId);
     delta = {
       tokenId: payment.tokenId,
       collateral: 0n,
       ondelta: 0n,
       offdelta: 0n,
-      leftCreditLimit: 1000000n, // Per-token credit limit: 1M USD equivalent
-      rightCreditLimit: 1000000n, // Per-token credit limit: 1M USD equivalent
+      leftCreditLimit: defaultCreditLimit,
+      rightCreditLimit: defaultCreditLimit,
       leftAllowence: 0n,
       rightAllowence: 0n,
     };
@@ -50,7 +51,8 @@ export function applyDirectPayment(
   console.log(`💸 Delta calculation: current=${currentTotalDelta.toString()}, new=${newTotalDelta.toString()}`);
 
   // Check capacity constraints using deriveDelta (like old_src)
-  const derived = deriveDelta(delta, accountMachine.isProposer); // isProposer = isLeft in old_src
+  const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+  const derived = deriveDelta(delta, isLeft); // isLeft like old_src
 
   if (isOutgoing) {
     // Check if we have enough outbound capacity

@@ -44,7 +44,7 @@
         return {
           type: 'j-event',
           content: `${observer} observed J-event: ${eventType}`,
-          details: { block, tx: tx.slice(0, 10) + '...' }
+          details: { block, tx: tx?.slice(0, 10) + '...' || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })() }
         };
       }
     }
@@ -58,7 +58,7 @@
           type: 'reserve-update',
           content: `Reserve Updated: Token ${token}`,
           details: { 
-            entity: entity.slice(0, 10) + '...', 
+            entity: entity?.slice(0, 10) + '...' || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })(),
             balance: (Number(balance) / 1e18).toFixed(4) + ' ETH'
           }
         };

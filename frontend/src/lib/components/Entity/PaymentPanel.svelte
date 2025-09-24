@@ -15,8 +15,8 @@
   let selectedRouteIndex = -1;
 
   // Get all entities for dropdown
-  $: allEntities = $replicas ? Array.from($replicas.keys())
-    .map(key => key.split(':')[0])
+  $: allEntities = $replicas ? Array.from($replicas.keys() as IterableIterator<string>)
+    .map((key: string) => key.split(':')[0])
     .filter((id, index, self) => self.indexOf(id) === index && id !== entityId)
     .sort() : [];
 
@@ -31,7 +31,7 @@
       // For now, create a simple direct route if account exists
       // TODO: Implement proper Dijkstra pathfinding using gossip profiles
 
-      const xln = await getXLN();
+      await getXLN();
       const env = $xlnEnvironment;
       if (!env) throw new Error('Environment not ready');
 
@@ -93,7 +93,7 @@
       }
     } catch (error) {
       console.error('Failed to find routes:', error);
-      alert(`Failed to find routes: ${error.message}`);
+      alert(`Failed to find routes: ${(error as Error)?.message || 'Unknown error'}`);
     } finally {
       findingRoutes = false;
     }
@@ -144,7 +144,7 @@
       selectedRouteIndex = -1;
     } catch (error) {
       console.error('Failed to send payment:', error);
-      alert(`Failed to send payment: ${error.message}`);
+      alert(`Failed to send payment: ${(error as Error)?.message || 'Unknown error'}`);
     } finally {
       sendingPayment = false;
     }

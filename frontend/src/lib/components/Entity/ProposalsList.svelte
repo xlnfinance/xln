@@ -23,7 +23,7 @@
 
   // Helper to get vote display and calculate voting power
   function getVoteInfo(proposal: any, config: any) {
-    const votes = proposal.votes ? Array.from(proposal.votes.entries()) : [];
+    const votes = proposal.votes ? Array.from(proposal.votes.entries() as [any, any][]) : [];
     const yesVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'yes');
     const noVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'no');
     const abstainVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'abstain');
@@ -53,7 +53,7 @@
 
 <div class="scrollable-component proposals-list">
   {#if replica && replica.state?.proposals?.size > 0}
-    {#each Array.from(replica.state.proposals.entries()) as [propId, proposal]}
+    {#each Array.from(replica.state.proposals.entries()) as [, proposal]}
       {@const voteInfo = getVoteInfo(proposal, replica.state?.config)}
       <div class="proposal-item">
         <div class="proposal-header">

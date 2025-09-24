@@ -121,6 +121,16 @@ export type EntityTx =
   | {
       type: 'openAccount';
       data: { targetEntityId: string };
+    }
+  | {
+      type: 'directPayment';
+      data: {
+        targetEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        route: string[]; // Full path from source to target
+        description?: string;
+      };
     };
 
 export interface AssetBalance {
@@ -165,7 +175,11 @@ export interface AccountMachine {
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;
-  isProposer: boolean; // Left entity (lexicographically smaller) is proposer
+
+  // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)
+  sendCounter: number;    // Incremented for each outgoing message
+  receiveCounter: number; // Incremented for each incoming message
+  // Removed isProposer - use isLeft() function like old_src Channel.ts instead
 
   // Cloned state for validation before committing (replaces dryRun)
   clonedForValidation?: AccountMachine;
@@ -182,6 +196,8 @@ export interface AccountMachine {
     deltas: bigint[];
   };
   hankoSignature?: string; // Last signed proof by counterparty
+  // Historical frame log - grows until manually pruned by entity
+  frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
 }
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
@@ -191,7 +207,7 @@ export interface AccountFrame {
   accountTxs: AccountTx[]; // Renamed from transitions
   previousStateHash: string;
   stateHash: string;
-  isProposer: boolean; // Which side proposed this frame
+  // Removed isProposer - both sides can propose bilaterally
   tokenIds: number[]; // Array of token IDs in this frame
   deltas: bigint[]; // Array of deltas corresponding to tokenIds
 }
@@ -246,13 +262,13 @@ export interface DerivedDelta {
   outCapacity: bigint;
   outOwnCredit: bigint;
   inPeerCredit: bigint;
+  ascii: string; // ASCII visualization from deriveDelta (like old_src)
 }
 
 // Account transaction types
 export type AccountTx =
-  | { type: 'initial_ack'; data: { message: string } }
   | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
-  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; description?: string } }
+  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint; isForSelf: boolean } }
   | { type: 'account_frame'; data: { frame: AccountFrame; processedTransactions: number; fromEntity: string } }
   | {

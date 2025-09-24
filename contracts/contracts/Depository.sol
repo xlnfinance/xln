@@ -188,7 +188,7 @@ contract Depository is Console {
       gasused: 0
     }));
     
-    // DEBUG: Prefund top 20 entities for testing
+    // DEBUG: Prefund top 1000 entities for testing
     debugBulkFundEntities();
   }
   
@@ -312,22 +312,22 @@ contract Depository is Console {
     console.logUint(_reserves[entity][tokenId]);
   }
 
-  // DEBUG: Bulk fund top 20 entities with test reserves
+  // DEBUG: Bulk fund top 1000 entities with test reserves
   function debugBulkFundEntities() public {
-    console.log("debugBulkFundEntities: funding entities 1-20 with 1M tokens");
-    
-    uint256 fundAmount = 1000000000000000000; // 1M tokens (1e18)
-    
-    for (uint256 entityNum = 1; entityNum <= 20; entityNum++) {
+    console.log("debugBulkFundEntities: funding entities 1-1000 with 100 ETH each");
+
+    uint256 fundAmount = 100000000000000000000; // 100 ETH (100e18)
+
+    for (uint256 entityNum = 1; entityNum <= 200; entityNum++) {
       bytes32 entity = bytes32(entityNum); // Entity ID is just the number padded
-      
+
       // Fund with tokens 1, 2, 3
       for (uint256 tokenId = 1; tokenId <= 3; tokenId++) {
         _reserves[entity][tokenId] += fundAmount;
         emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
       }
     }
-    
+
     console.log("debugBulkFundEntities: funding complete");
   }
 

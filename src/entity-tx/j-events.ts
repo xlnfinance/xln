@@ -89,14 +89,14 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
   newEntityState.messages.push(elaborateMessage);
 
   if (event.type === 'ReserveUpdated') {
-    const { entity, tokenId, newBalance, name, symbol, decimals } = event.data;
+    const { entity, tokenId, newBalance } = event.data;
     
     if (entity === entityState.entityId) {
       newEntityState.reserves.set(String(tokenId), BigInt(newBalance));
       if (DEBUG) console.log(`✅ Reserve updated for ${entity.slice(0,10)}...: Token ${tokenId} new balance is ${newBalance}`);
     }
   } else if (event.type === 'reserve_transferred') {
-    const { from, to, tokenId, amount, direction } = event.data;
+    const { tokenId, amount, direction } = event.data;
     
     // Update reserves based on transfer direction
     if (direction === 'sent') {

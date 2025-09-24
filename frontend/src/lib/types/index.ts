@@ -197,8 +197,9 @@ export interface Tab {
   id: string;
   title: string;
   jurisdiction: string;
-  signer: string;
+  signerId: string;  // FIXED: Use signerId like everywhere else in codebase
   entityId: string;
+  accountId?: string; // Optional account for focused navigation
   isActive: boolean;
 }
 

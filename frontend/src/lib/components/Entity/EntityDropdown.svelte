@@ -3,7 +3,6 @@
   import { replicas, xlnFunctions } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
-  import { getXLN } from '../../stores/xlnStore';
   import type { Tab } from '../../types';
 
   export let tab: Tab;
@@ -11,23 +10,18 @@
   const dispatch = createEventDispatcher();
 
   let isOpen = false;
-  let searchTerm = '';
   let dropdownContent: HTMLDivElement;
 
   // Get dropdown display text
   $: dropdownText = getDropdownText(tab);
 
   function getDropdownText(tab: Tab): string {
-    if (tab.entityId && tab.signer && tab.jurisdiction) {
+    // SIMPLE: Just show the selected entity (like I fixed in CombinedNavigationDropdown)
+    if (tab.entityId) {
       const entityNum = $xlnFunctions?.getEntityNumber(tab.entityId) || '?';
-      return `${tab.jurisdiction} → ${tab.signer} → Entity #${entityNum}`;
-    } else if (tab.signer && tab.jurisdiction) {
-      return `${tab.jurisdiction} → ${tab.signer} → Select Entity`;
-    } else if (tab.jurisdiction) {
-      return `${tab.jurisdiction} → Select Signer → Entity`;
-    } else {
-      return 'Select Jurisdiction → Signer → Entity';
+      return `Entity #${entityNum}`;
     }
+    return 'Select Entity';
   }
 
   function toggleDropdown() {
@@ -66,7 +60,7 @@
     updateDropdownResults(resultsContainer, '');
   }
 
-  function updateDropdownResults(resultsContainer: HTMLDivElement, searchTerm: string) {
+  function updateDropdownResults(resultsContainer: HTMLDivElement, _searchTerm: string) {
     if (!resultsContainer) return;
 
     resultsContainer.innerHTML = '';
@@ -77,20 +71,20 @@
     // For now, show all entities regardless of jurisdiction
     // TODO: Later we can filter by jurisdiction ID when we have multiple networks
     const jurisdictions = [
-      { name: 'All Entities', id: 'all' }
+      { name: '', id: 'all' }
     ];
 
     const dropdownMode = $settings.dropdownMode;
 
     if (dropdownMode === 'signer-first') {
-      renderSignerFirstDropdown(jurisdictions, resultsContainer, searchTerm);
+      renderSignerFirstDropdown(jurisdictions, resultsContainer, _searchTerm);
     } else {
-      renderEntityFirstDropdown(jurisdictions, resultsContainer, searchTerm);
+      renderEntityFirstDropdown(jurisdictions, resultsContainer, _searchTerm);
     }
   }
 
-  function renderSignerFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, searchTerm: string) {
-    jurisdictions.forEach((jurisdiction, jIndex) => {
+  function renderSignerFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, _searchTerm: string) {
+    jurisdictions.forEach((jurisdiction) => {
       // Get all replicas (no jurisdiction filtering for now)
       const replicasArray = Array.from($replicas.values());
 
@@ -98,7 +92,7 @@
 
       // Group replicas by signer
       const signerGroups: { [key: string]: any[] } = {};
-      replicasArray.forEach(replica => {
+      replicasArray.forEach((replica: any) => {
         const signerId = replica.signerId;
         if (!signerGroups[signerId]) {
           signerGroups[signerId] = [];
@@ -106,16 +100,7 @@
         signerGroups[signerId].push(replica);
       });
 
-      // Add header
-      const jurisdictionItem = createDropdownTreeItem(
-        `📊 ${jurisdiction.name}`,
-        '',
-        0,
-        false,
-        false,
-        searchTerm
-      );
-      resultsContainer.appendChild(jurisdictionItem);
+      // Skip jurisdiction header for cleaner UX - go straight to signers
 
       // Add signers and their entities
       const signerKeys = Object.keys(signerGroups);
@@ -130,13 +115,13 @@
           1,
           false,
           isLastSigner,
-          searchTerm
+          _searchTerm
         );
         resultsContainer.appendChild(signerItem);
 
         // Add entities for this signer
-        signerEntities.forEach((replica, eIndex) => {
-          const isLastEntity = eIndex === signerEntities.length - 1;
+        signerEntities?.forEach((replica, eIndex) => {
+          const isLastEntity = eIndex === (signerEntities?.length || 0) - 1;
           const entityNum = $xlnFunctions?.getEntityNumber(replica.entityId) || '?';
           const entityDisplay = `Entity #${entityNum}`;
 
@@ -146,7 +131,7 @@
             2,
             true,
             isLastEntity && isLastSigner,
-            searchTerm
+            _searchTerm
           );
 
           entityItem.addEventListener('click', () => selectEntity(jurisdiction.name, signerId, replica.entityId));
@@ -156,14 +141,14 @@
     });
   }
 
-  function renderEntityFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, searchTerm: string) {
-    jurisdictions.forEach((jurisdiction, jIndex) => {
+  function renderEntityFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, _searchTerm: string) {
+    jurisdictions.forEach((jurisdiction) => {
       // Get all replicas (use time-aware replicas, no jurisdiction filtering)
       const currentReplicas = $visibleReplicas || $replicas;
       const replicasArray = Array.from(currentReplicas.values());
 
       console.log(`🔍 EntityDropdown: ${jurisdiction.name} has ${replicasArray.length} replicas`);
-      replicasArray.forEach(replica => {
+      replicasArray.forEach((replica: any) => {
         console.log(`  📋 Entity: #${$xlnFunctions?.getEntityNumber(replica.entityId) || '?'} (${replica.signerId})`);
       });
 
@@ -171,7 +156,7 @@
 
       // Group replicas by entity
       const entityGroups: { [key: string]: any[] } = {};
-      replicasArray.forEach(replica => {
+      replicasArray.forEach((replica: any) => {
         const entityId = replica.entityId;
         if (!entityGroups[entityId]) {
           entityGroups[entityId] = [];
@@ -179,16 +164,7 @@
         entityGroups[entityId].push(replica);
       });
 
-      // Add header
-      const jurisdictionItem = createDropdownTreeItem(
-        `📊 ${jurisdiction.name}`,
-        '',
-        0,
-        false,
-        false,
-        searchTerm
-      );
-      resultsContainer.appendChild(jurisdictionItem);
+      // Skip jurisdiction header for cleaner UX - go straight to entities
 
       // Add entities and their signers
       const entityKeys = Object.keys(entityGroups);
@@ -205,13 +181,13 @@
           1,
           false,
           isLastEntity,
-          searchTerm
+          _searchTerm
         );
         resultsContainer.appendChild(entityItem);
 
         // Add signers for this entity
-        entitySigners.forEach((replica, sIndex) => {
-          const isLastSigner = sIndex === entitySigners.length - 1;
+        entitySigners?.forEach((replica, sIndex) => {
+          const isLastSigner = sIndex === (entitySigners?.length || 0) - 1;
 
           const signerItem = createDropdownTreeItem(
             `👤 ${replica.signerId}`,
@@ -219,7 +195,7 @@
             2,
             true,
             isLastSigner && isLastEntity,
-            searchTerm
+            _searchTerm
           );
 
           signerItem.addEventListener('click', () => selectEntity(jurisdiction.name, replica.signerId, replica.entityId));
@@ -229,7 +205,7 @@
     });
   }
 
-  function createDropdownTreeItem(text: string, value: string, level: number, isSelectable: boolean, isLast: boolean, searchTerm: string): HTMLDivElement {
+  function createDropdownTreeItem(text: string, value: string, level: number, isSelectable: boolean, _isLast: boolean, __searchTerm: string): HTMLDivElement {
     const item = document.createElement('div');
     item.className = `dropdown-item ${level > 0 ? `indent-${level}` : ''}`;
 
@@ -248,34 +224,25 @@
 
     if (isSelectable) {
       item.style.cursor = 'pointer';
-      item.dataset.value = value;
+      item.dataset['value'] = value;
     } else {
       item.style.cursor = 'default';
       item.style.color = '#9d9d9d';
     }
 
-    // Apply search highlighting if needed
-    if (searchTerm && text.toLowerCase().includes(searchTerm.toLowerCase())) {
-      highlightSearchTerm(item, searchTerm);
-    }
+    // TODO: Apply search highlighting if needed
+    // if (_searchTerm && text.toLowerCase().includes(_searchTerm.toLowerCase())) {
+    //   highlightSearchTerm(item, _searchTerm);
+    // }
 
     return item;
   }
 
-  function highlightSearchTerm(element: HTMLElement, searchTerm: string) {
-    // Simple highlighting implementation
-    const textSpan = element.querySelector('.item-text');
-    if (textSpan && searchTerm) {
-      const text = textSpan.textContent || '';
-      const regex = new RegExp(`(${searchTerm})`, 'gi');
-      textSpan.innerHTML = text.replace(regex, '<mark style="background: #ffd700; color: #000; padding: 2px;">$1</mark>');
-    }
-  }
 
   function selectEntity(jurisdiction: string, signerId: string, entityId: string) {
     dispatch('entitySelect', {
       jurisdiction,
-      signer: signerId,
+      signerId: signerId,
       entityId
     });
 

@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getXLN } from '../../stores/xlnStore';
-  import { visibleGossip, visibleEnvironment, isLive } from '../../stores/timeStore';
+  import { visibleGossip, isLive } from '../../stores/timeStore';
   import ProfileCard from './ProfileCard.svelte';
   import ProfileForm from './ProfileForm.svelte';
 

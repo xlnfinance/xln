@@ -1,5 +1,5 @@
 <script lang="ts">
-  import TransactionHistoryIO from './lib/components/Common/TransactionHistoryIO.svelte';
+  import TransactionHistoryIO from './lib/components/IO/TransactionHistoryIO.svelte';
   import EntityFormation from './lib/components/Formation/EntityFormation.svelte';
   import JurisdictionStatus from './lib/components/Jurisdiction/JurisdictionStatus.svelte';
 </script>

@@ -2,7 +2,6 @@
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
   import MultiSelect from 'svelte-multiselect';
-  import { onMount } from 'svelte';
 
   // Callback prop for profile announcement
   let { onProfileAnnounced }: { onProfileAnnounced?: (profile: any) => void } = $props();
@@ -41,7 +40,7 @@
   // Get current active entity
   let activeTab = $derived($tabs.find(tab => tab.isActive));
   let currentEntityId = $derived(activeTab?.entityId);
-  let currentSignerId = $derived(activeTab?.signer);
+  let currentSignerId = $derived(activeTab?.signerId);
 
   // Profile loading state
   let isLoadingProfile = $state(false);
@@ -179,7 +178,7 @@
 
     try {
       isLoadingProfile = true;
-      const xln = await getXLN();
+      await getXLN();
       const env = $xlnEnvironment;
 
       if (!env || !env.gossip) {
@@ -228,7 +227,7 @@
       } else {
         // For non-hub profiles, put metadata in JSON field
         // Handle BigInt serialization
-        metadataInput = JSON.stringify(profile.metadata, (key, value) => {
+        metadataInput = JSON.stringify(profile.metadata, (_, value) => {
           if (typeof value === 'bigint') {
             return value.toString();
           }

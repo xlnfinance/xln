@@ -12,14 +12,16 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import { AccountMachine, AccountFrame, AccountTx, AccountInput, Delta } from './types';
+import { AccountMachine, AccountFrame, AccountTx, AccountInput } from './types';
 import { cloneAccountMachine } from './state-helpers';
-import { deriveDelta } from './account-utils';
+import { deriveDelta, getDefaultCreditLimit, isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-tx/crypto';
+import { hash, hash20 } from './crypto-utils';
+import { safeStringify, buffersEqual } from './serialization-utils';
+import { encode } from './snapshot-coder';
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
-const MAX_ROLLBACKS = 3;
 const MAX_MESSAGE_COUNTER = 1000000;
 
 // === VALIDATION ===
@@ -62,18 +64,16 @@ export function validateMessageCounter(accountMachine: AccountMachine, counter: 
 
 // === FRAME HASH COMPUTATION ===
 
-function createFrameHash(frame: AccountFrame): string {
-  // Use crypto.createHash like old_src for proper deterministic hashing
-  const { createHash } = require('crypto');
-
+async function createFrameHash(frame: AccountFrame): Promise<string> {
+  // Use browser-compatible crypto for proper deterministic hashing
   const txsContent = frame.accountTxs.map(tx =>
-    `${tx.type}:${JSON.stringify(tx.data, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`
+    `${tx.type}:${safeStringify(tx.data)}`
   ).join('|');
 
   const content = `${frame.frameId}-${frame.timestamp}-${txsContent}-${frame.tokenIds.join(',')}-${frame.deltas.map(d => d.toString()).join(',')}`;
 
-  const hash = createHash('sha256').update(content).digest('hex');
-  return `0x${hash.slice(0, 40)}`; // Return first 20 bytes like old_src
+  // Use hash20 to get first 20 bytes like old_src
+  return await hash20(content);
 }
 
 // === TRANSACTION PROCESSING ===
@@ -92,60 +92,88 @@ export function processAccountTx(
   const events: string[] = [];
 
   switch (accountTx.type) {
-    case 'initial_ack':
-      events.push(`🤝 Account initialized with Entity ${accountMachine.counterpartyEntityId.slice(-4)}`);
-      return { success: true, events };
-
     case 'direct_payment': {
-      const { tokenId, amount, description } = accountTx.data;
+      const { tokenId, amount, route, description } = accountTx.data;
 
       // Get or create delta
       let delta = accountMachine.deltas.get(tokenId);
       if (!delta) {
+        const defaultCreditLimit = getDefaultCreditLimit(tokenId);
         delta = {
           tokenId,
           collateral: 0n,
           ondelta: 0n,
           offdelta: 0n,
-          leftCreditLimit: 1000000n, // 1M USD per-token limit
-          rightCreditLimit: 1000000n,
+          leftCreditLimit: defaultCreditLimit,
+          rightCreditLimit: defaultCreditLimit,
           leftAllowence: 0n,
           rightAllowence: 0n,
         };
         accountMachine.deltas.set(tokenId, delta);
       }
 
-      // Determine direction: our frame = outgoing payment, their frame = incoming payment
-      const isOutgoing = isOurFrame;
+      // CANONICAL BILATERAL CONSENSUS: Both sides compute identical state (like Channel.ts)
+      // The delta is always from left entity's perspective canonically
+      const isLeftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
 
-      if (isOutgoing) {
-        // Check capacity using deriveDelta
-        const derived = deriveDelta(delta, accountMachine.isProposer);
-        if (amount > derived.outCapacity) {
-          return {
-            success: false,
-            error: `Insufficient capacity: need ${amount.toString()}, available ${derived.outCapacity.toString()}`,
-            events,
-          };
-        }
+      // FINTECH TYPE SAFETY: Route must be defined for payments
+      if (!route || route.length === 0) {
+        return {
+          success: false,
+          error: `FINANCIAL-SAFETY: Route is required for direct payment`,
+          events,
+        };
+      }
 
-        // Check global credit limits for USDC (token 3)
-        const newDelta = delta.ondelta + delta.offdelta + amount;
-        if (tokenId === 3 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
-          return {
-            success: false,
-            error: `Exceeds global credit limit: ${newDelta.toString()} > ${accountMachine.globalCreditLimits.peerLimit.toString()}`,
-            events,
-          };
-        }
+      // Determine canonical delta direction based on payment sender
+      const paymentFromEntity = route[0];
+      if (!paymentFromEntity) {
+        return {
+          success: false,
+          error: `FINANCIAL-SAFETY: Payment sender entity (route[0]) is required`,
+          events,
+        };
+      }
+      const paymentToEntity = accountMachine.counterpartyEntityId;
 
-        // Apply outgoing payment (positive = we owe them)
-        delta.offdelta += amount;
+      // Canonical delta: always relative to left entity (like Channel.ts reference)
+      let canonicalDelta: bigint;
+      if (paymentFromEntity < paymentToEntity) {
+        // Payment from left to right: positive offdelta (left owes right)
+        canonicalDelta = amount;
+      } else {
+        // Payment from right to left: negative offdelta (right owes left)
+        canonicalDelta = -amount;
+      }
+
+      // Check capacity using deriveDelta (perspective-aware)
+      const derived = deriveDelta(delta, isLeftEntity);
+      if (isOurFrame && amount > derived.outCapacity) {
+        return {
+          success: false,
+          error: `Insufficient capacity: need ${amount.toString()}, available ${derived.outCapacity.toString()}`,
+          events,
+        };
+      }
+
+      // Check global credit limits for USDC (token 3)
+      const newDelta = delta.ondelta + delta.offdelta + canonicalDelta;
+      if (isOurFrame && tokenId === 3 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
+        return {
+          success: false,
+          error: `Exceeds global credit limit: ${newDelta.toString()} > ${accountMachine.globalCreditLimits.peerLimit.toString()}`,
+          events,
+        };
+      }
+
+      // Apply canonical delta (identical on both sides)
+      delta.offdelta += canonicalDelta;
+
+      // Events differ by perspective but state is identical
+      if (isOurFrame) {
         events.push(`💸 Sent ${amount.toString()} token ${tokenId} to Entity ${accountMachine.counterpartyEntityId.slice(-4)} ${description ? '(' + description + ')' : ''}`);
       } else {
-        // Apply incoming payment (negative = they owe us)
-        delta.offdelta -= amount;
-        events.push(`💰 Received ${amount.toString()} token ${tokenId} from Entity ${accountMachine.counterpartyEntityId.slice(-4)} ${description ? '(' + description + ')' : ''}`);
+        events.push(`💰 Received ${amount.toString()} token ${tokenId} from Entity ${paymentFromEntity.slice(-4)} ${description ? '(' + description + ')' : ''}`);
       }
 
       // Update current frame
@@ -157,6 +185,38 @@ export function processAccountTx(
       } else {
         accountMachine.currentFrame.tokenIds.push(tokenId);
         accountMachine.currentFrame.deltas.push(totalDelta);
+      }
+
+      // Check if we need to forward the payment (multi-hop routing)
+      const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
+      if (route && route.length > 1 && !isOutgoing) {
+        // We received the payment, but it's not for us - forward to next hop
+        const nextHop = route[0]; // Current entity should be route[0]
+        const finalTarget = route[route.length - 1];
+        if (!finalTarget) {
+          console.error(`❌ Empty route in payment - invalid payment routing`);
+          return { success: false, error: 'Invalid payment route', events };
+        }
+
+        if (accountMachine.counterpartyEntityId === nextHop) {
+          // This is wrong - we received from the entity we should forward to
+          console.error(`❌ Routing error: received from ${nextHop} but should forward to them`);
+        } else {
+          // Add forwarding event
+          events.push(
+            `↪️ Forwarding payment to ${finalTarget.slice(-4)} via ${route.length} more hops`
+          );
+
+          // Note: The actual forwarding happens through entity-consensus
+          // which will create a new AccountTx for the next hop
+          // Store the route info in the account machine for entity-consensus to process
+          (accountMachine as any).pendingForward = {
+            tokenId,
+            amount,
+            route: route.slice(1), // Remove current hop
+            description,
+          };
+        }
       }
 
       return { success: true, events };
@@ -172,25 +232,32 @@ export function processAccountTx(
 /**
  * Propose account frame (like old_src Channel consensus)
  */
-export function proposeAccountFrame(
+export async function proposeAccountFrame(
   accountMachine: AccountMachine
-): { success: boolean; accountInput?: AccountInput; events: string[]; error?: string } {
+): Promise<{ success: boolean; accountInput?: AccountInput; events: string[]; error?: string }> {
   console.log(`🚀 E-MACHINE: Proposing account frame for ${accountMachine.counterpartyEntityId.slice(-4)}`);
+  console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentFrameId=${accountMachine.currentFrameId}`);
 
   const events: string[] = [];
 
   // Mempool size validation
   if (accountMachine.mempool.length > MEMPOOL_LIMIT) {
+    console.log(`❌ E-MACHINE: Mempool overflow ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`);
     return { success: false, error: `Mempool overflow: ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`, events };
   }
 
   if (accountMachine.mempool.length === 0) {
+    console.log(`❌ E-MACHINE: No transactions in mempool to propose`);
     return { success: false, error: 'No transactions to propose', events };
   }
 
-  if (accountMachine.sentTransitions > 0) {
-    return { success: false, error: 'Already have pending transactions', events };
+  // Check if we have a pending frame waiting for ACK
+  if (accountMachine.pendingFrame) {
+    console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.frameId}`);
+    return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
+
+  console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
 
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
@@ -212,23 +279,28 @@ export function proposeAccountFrame(
     frameId: accountMachine.currentFrameId + 1,
     timestamp: Date.now(),
     accountTxs: [...accountMachine.mempool],
-    previousStateHash: accountMachine.currentFrameId === 0 ? 'genesis' : createFrameHash({
+    previousStateHash: accountMachine.currentFrameId === 0 ? 'genesis' : await createFrameHash({
       frameId: accountMachine.currentFrameId,
       timestamp: accountMachine.currentFrame.timestamp,
       accountTxs: [],
       previousStateHash: '',
       stateHash: '',
-      isProposer: accountMachine.isProposer,
+      // Both sides can propose - removed isProposer field
       tokenIds: accountMachine.currentFrame.tokenIds,
       deltas: accountMachine.currentFrame.deltas,
     }),
     stateHash: '',
-    isProposer: accountMachine.isProposer,
+    // Both sides can propose - removed isProposer field
     tokenIds: clonedMachine.currentFrame.tokenIds,
     deltas: clonedMachine.currentFrame.deltas,
   };
 
-  newFrame.stateHash = createFrameHash(newFrame);
+  newFrame.stateHash = await createFrameHash(newFrame);
+
+  // FINTECH-SAFETY: Never allow empty state hash
+  if (!newFrame.stateHash || newFrame.stateHash.length === 0) {
+    throw new Error('FINTECH-SAFETY: Frame state hash is empty - cryptographic integrity compromised');
+  }
 
   // Generate signature
   const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, newFrame.stateHash);
@@ -249,7 +321,7 @@ export function proposeAccountFrame(
     frameId: newFrame.frameId,
     newAccountFrame: newFrame,
     newSignatures: [signature],
-    counter: Date.now(),
+    counter: ++accountMachine.proofHeader.cooperativeNonce, // CHANNEL.TS REFERENCE: Line 536 - use cooperativeNonce as counter
     accountFrame: newFrame,
   };
 
@@ -291,7 +363,8 @@ export function handleAccountInput(
     const frameHash = accountMachine.pendingFrame.stateHash;
     const expectedSigner = accountMachine.proofHeader.toEntity;
 
-    if (input.prevSignatures.length > 0 && verifyAccountSignature(expectedSigner, frameHash, input.prevSignatures[0])) {
+    const signature = input.prevSignatures[0];
+    if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(expectedSigner, frameHash, signature)) {
       // Commit using cloned state
       if (accountMachine.clonedForValidation) {
         accountMachine.deltas = accountMachine.clonedForValidation.deltas;
@@ -302,12 +375,16 @@ export function handleAccountInput(
           deltas: accountMachine.pendingFrame.deltas,
         };
         accountMachine.currentFrameId = accountMachine.pendingFrame.frameId;
+
+        // Add confirmed frame to history
+        accountMachine.frameHistory.push({...accountMachine.pendingFrame});
+        console.log(`📚 Frame ${accountMachine.pendingFrame.frameId} added to history (total: ${accountMachine.frameHistory.length})`);
       }
 
       // Clear pending state
-      accountMachine.pendingFrame = undefined;
+      delete accountMachine.pendingFrame;
       accountMachine.sentTransitions = 0;
-      accountMachine.clonedForValidation = undefined;
+      delete accountMachine.clonedForValidation;
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
 
       events.push(`✅ Frame ${input.frameId} confirmed and committed`);
@@ -325,35 +402,43 @@ export function handleAccountInput(
       return { success: false, error: 'Invalid frame structure', events };
     }
 
-    // Handle frame conflicts with rollback logic
-    if (receivedFrame.frameId === accountMachine.currentFrameId && accountMachine.pendingFrame) {
-      console.log(`⚠️ Frame conflict detected`);
+    // Handle simultaneous proposals - both sides can propose
+    // If we have a pending frame and receive one with same ID, we need to handle it
+    if (receivedFrame.frameId === accountMachine.currentFrameId + 1 && accountMachine.pendingFrame &&
+        accountMachine.pendingFrame.frameId === receivedFrame.frameId) {
+      console.log(`🔄 Simultaneous proposals detected for frame ${receivedFrame.frameId}`);
 
-      if (accountMachine.isProposer) {
-        console.log(`🔒 Proposer ignoring conflicting frame (right must rollback)`);
-        return { success: false, error: 'Frame conflict - proposer ignores', events };
+      // Compare frame hashes to decide which to accept (deterministic tiebreaker)
+      const ourHash = accountMachine.pendingFrame.stateHash;
+      const theirHash = receivedFrame.stateHash;
+
+      if (ourHash < theirHash) {
+        console.log(`📤 Our frame wins (hash comparison), ignoring received frame`);
+        // Keep our pending frame, ignore theirs
+        return { success: false, error: 'Frame conflict - our frame has priority', events };
       } else {
-        if (accountMachine.rollbackCount < MAX_ROLLBACKS) {
-          console.log(`🔄 Non-proposer rolling back (rollback #${accountMachine.rollbackCount + 1})`);
-          accountMachine.rollbackCount++;
-          accountMachine.pendingFrame = undefined;
-          accountMachine.sentTransitions = 0;
-          accountMachine.clonedForValidation = undefined;
-          // Continue to accept the received frame
-        } else {
-          return { success: false, error: 'Too many rollbacks', events };
-        }
+        console.log(`📥 Their frame wins (hash comparison), accepting and rolling back ours`);
+        // Accept their frame, rollback ours
+        delete accountMachine.pendingFrame;
+        accountMachine.sentTransitions = 0;
+        delete accountMachine.clonedForValidation;
+        // Continue to process their frame
       }
     }
 
     // Verify frame sequence
     if (receivedFrame.frameId !== accountMachine.currentFrameId + 1) {
-      return { success: false, error: 'Frame sequence mismatch', events };
+      console.log(`❌ Frame sequence mismatch: expected ${accountMachine.currentFrameId + 1}, got ${receivedFrame.frameId}`);
+      return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentFrameId + 1}, got ${receivedFrame.frameId}`, events };
     }
 
     // Verify signatures
     if (input.newSignatures && input.newSignatures.length > 0) {
-      const isValid = verifyAccountSignature(input.fromEntityId, receivedFrame.stateHash, input.newSignatures[0]);
+      const signature = input.newSignatures[0];
+      if (!signature) {
+        return { success: false, error: 'Missing signature in newSignatures array', events };
+      }
+      const isValid = verifyAccountSignature(input.fromEntityId, receivedFrame.stateHash, signature);
       if (!isValid) {
         return { success: false, error: 'Invalid frame signature', events };
       }
@@ -372,6 +457,48 @@ export function handleAccountInput(
       processEvents.push(...result.events);
     }
 
+    // STATE VERIFICATION: Compare our computed state with their claimed state (like old_src Channel.ts)
+    const ourComputedState = encode(clonedMachine.deltas);
+
+    // Reconstruct their claimed state from the frame
+    const theirClaimedDeltas = new Map();
+    receivedFrame.tokenIds?.forEach((tokenId, i) => {
+      const existingDelta = accountMachine.deltas.get(tokenId);
+      if (existingDelta) {
+        // Frame contains total delta (ondelta + offdelta), we need to reconstruct the full delta
+        const totalClaimed = receivedFrame.deltas[i];
+        theirClaimedDeltas.set(tokenId, {
+          ...existingDelta,
+          // Assume ondelta stays same, frame delta represents new total
+          offdelta: totalClaimed! - existingDelta.ondelta
+        });
+      }
+    });
+    const theirClaimedState = encode(theirClaimedDeltas);
+
+    console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.frameId}:`);
+    console.log(`  Our computed:  ${ourComputedState.toString('hex').slice(0, 32)}...`);
+    console.log(`  Their claimed: ${theirClaimedState.toString('hex').slice(0, 32)}...`);
+
+    if (!buffersEqual(ourComputedState, theirClaimedState)) {
+      console.error(`❌ CONSENSUS-FAILURE: Both sides computed different final states!`);
+
+      // DUMP EVERYTHING - FULL DATA STRUCTURES
+      console.error(`❌ FULL CONSENSUS FAILURE DUMP:`);
+      console.error(`❌ AccountMachine BEFORE:`, safeStringify(accountMachine));
+      console.error(`❌ ClonedMachine AFTER:`, safeStringify(clonedMachine));
+      console.error(`❌ ReceivedFrame COMPLETE:`, safeStringify(receivedFrame));
+      console.error(`❌ TheirClaimedDeltas COMPLETE:`, safeStringify(Object.fromEntries(theirClaimedDeltas)));
+      console.error(`❌ OurComputedState BUFFER:`, Array.from(ourComputedState).map(b => b.toString(16).padStart(2,'0')).join(''));
+      console.error(`❌ TheirClaimedState BUFFER:`, Array.from(theirClaimedState).map(b => b.toString(16).padStart(2,'0')).join(''));
+      const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+      console.error(`❌ isLeft=${isLeftEntity}, fromEntity=${accountMachine.proofHeader.fromEntity}, toEntity=${accountMachine.proofHeader.toEntity}`);
+
+      return { success: false, error: `Bilateral consensus failure - states don't match`, events };
+    }
+
+    console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.frameId}`);
+
     // Commit frame
     accountMachine.deltas = clonedMachine.deltas;
     accountMachine.currentFrame = {
@@ -381,6 +508,10 @@ export function handleAccountInput(
       deltas: receivedFrame.deltas,
     };
     accountMachine.currentFrameId = receivedFrame.frameId;
+
+    // Add accepted frame to history
+    accountMachine.frameHistory.push({...receivedFrame});
+    console.log(`📚 Frame ${receivedFrame.frameId} accepted and added to history (total: ${accountMachine.frameHistory.length})`);
 
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.frameId} from Entity ${input.fromEntityId.slice(-4)}`);
@@ -392,7 +523,7 @@ export function handleAccountInput(
       toEntityId: input.fromEntityId,
       frameId: receivedFrame.frameId,
       prevSignatures: [confirmationSig],
-      counter: Date.now(),
+      counter: ++accountMachine.proofHeader.cooperativeNonce, // CHANNEL.TS REFERENCE: Line 536 - use cooperativeNonce as counter
     };
 
     return { success: true, response, events };
@@ -421,9 +552,11 @@ export function addToAccountMempool(accountMachine: AccountMachine, accountTx: A
  * Check if account should auto-propose frame
  */
 export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
-  return accountMachine.mempool.length > 0 &&
-         accountMachine.sentTransitions === 0 &&
-         !accountMachine.pendingFrame;
+  // Should propose if:
+  // 1. Has transactions in mempool
+  // 2. No pending frame waiting for confirmation
+  // Note: BOTH sides can propose in bilateral consensus (not just the proposer)
+  return accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
 }
 
 /**
@@ -453,14 +586,18 @@ export function getAccountsToProposeFrames(entityState: any): string[] {
  * Generate account proof for dispute resolution (like old_src Channel.getSubchannelProofs)
  * Must be ABI-compatible with Depository contract
  */
-export function generateAccountProof(accountMachine: AccountMachine): { proofHash: string; signature: string } {
+export async function generateAccountProof(accountMachine: AccountMachine): Promise<{ proofHash: string; signature: string }> {
   // Update proofBody with current state (like old_src does before signing)
   accountMachine.proofBody = {
     tokenIds: Array.from(accountMachine.deltas.keys()).sort((a, b) => a - b), // Deterministic order
     deltas: Array.from(accountMachine.deltas.keys())
       .sort((a, b) => a - b)
       .map(tokenId => {
-        const delta = accountMachine.deltas.get(tokenId)!;
+        const delta = accountMachine.deltas.get(tokenId);
+        if (!delta) {
+          console.error(`❌ Missing delta for tokenId ${tokenId} in account ${accountMachine.counterpartyEntityId}`);
+          throw new Error(`Critical financial data missing: delta for token ${tokenId}`);
+        }
         return delta.ondelta + delta.offdelta; // Total delta for each token
       }),
   };
@@ -475,10 +612,10 @@ export function generateAccountProof(accountMachine: AccountMachine): { proofHas
     deltas: accountMachine.proofBody.deltas.map(d => d.toString()), // Convert BigInt for JSON
   };
 
-  // Create deterministic proof hash
-  const { createHash } = require('crypto');
-  const proofContent = JSON.stringify(proofData);
-  const proofHash = createHash('sha256').update(proofContent).digest('hex');
+  // Create deterministic proof hash using browser-compatible crypto
+  const proofContent = safeStringify(proofData);
+  const fullHash = await hash(proofContent);
+  const proofHash = fullHash.slice(2); // Remove 0x prefix for compatibility
 
   // Generate hanko signature (like old_src does)
   const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, `0x${proofHash}`);

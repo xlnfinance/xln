@@ -4,8 +4,8 @@
 
   // Reactive values
   $: timeInfo = getTimeInfo($timeState, $history);
-  $: sliderValue = getSliderValue($timeState, $history);
-  $: progressPercent = getProgressPercent($timeState, $history);
+  $: sliderValue = getSliderValue($timeState);
+  $: progressPercent = getProgressPercent($timeState);
 
   function getTimeInfo(state: any, historyArray: any[]) {
     if (state.isLive) {
@@ -26,14 +26,14 @@
     }
   }
 
-  function getSliderValue(state: any, historyArray: any[]) {
+  function getSliderValue(state: any) {
     if (state.isLive) {
       return state.maxTimeIndex + 1; // Live position
     }
     return state.currentTimeIndex;
   }
 
-  function getProgressPercent(state: any, historyArray: any[]) {
+  function getProgressPercent(state: any) {
     if (state.isLive) {
       return 100;
     }
@@ -208,10 +208,6 @@
     transform: translateY(-1px);
   }
 
-  .time-btn-compact.primary {
-    background: #007bff;
-    border-color: #007bff;
-  }
 
   .time-btn-compact.live {
     background: #00ff88;
@@ -266,6 +262,7 @@
         #555 100%);
     outline: none;
     -webkit-appearance: none;
+    appearance: none;
     cursor: pointer;
     transition: background 0.1s ease;
   }

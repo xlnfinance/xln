@@ -112,6 +112,7 @@
     background: #555;
     outline: none;
     -webkit-appearance: none;
+    appearance: none;
   }
 
   .form-range::-webkit-slider-thumb {

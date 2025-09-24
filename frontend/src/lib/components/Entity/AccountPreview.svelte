@@ -3,7 +3,7 @@
   // Functions now accessed through $xlnEnvironment.xln from server.ts
   // Entity functions now accessed through xlnFunctions from server.js
   import { createEventDispatcher } from 'svelte';
-  import { xlnInstance, xlnFunctions } from '../../stores/xlnStore';
+  import { xlnFunctions } from '../../stores/xlnStore';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -29,7 +29,7 @@
     // Determine if current entity is left in the relationship
     const isLeftEntity = entityId < counterpartyId;
 
-    for (const [tokenId, delta] of account.deltas.entries()) {
+    for (const [, delta] of account.deltas.entries()) {
       const derived = $xlnFunctions.deriveDelta(delta, isLeftEntity);
       totalCapacity += derived.outCapacity + derived.inCapacity;
 
@@ -100,8 +100,16 @@
       <span class="entity-name">Entity #{$xlnFunctions?.getEntityNumber(counterpartyId) || '?'}</span>
     </div>
     <div class="account-status">
-      {#if account.mempool.length > 0}
-        <span class="status-badge pending">{account.mempool.length} pending</span>
+      {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
+        <span class="status-badge pending">
+          {#if (account as any).pendingFrame}
+            Awaiting Consensus
+          {:else if account.mempool.length > 0}
+            {account.mempool.length} pending
+          {:else}
+            {(account as any).sentTransitions} in flight
+          {/if}
+        </span>
       {:else}
         <span class="status-badge synced">Synced</span>
       {/if}
@@ -128,21 +136,21 @@
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.ourUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Our unused credit: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUnusedCredit) || 'N/A'}"
+                title="Our unused credit: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.theirCollateralLocked > 0n}
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.theirCollateralLocked * 100n) / td.totalCapacity)}%"
-                title="Their collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || 'N/A'}"
+                title="Their collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.ourUsedCredit > 0n}
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.ourUsedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit they're using: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUsedCredit) || 'N/A'}"
+                title="Credit they're using: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUsedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
           </div>
@@ -156,31 +164,31 @@
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.theirUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Their unused credit: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || 'N/A'}"
+                title="Their unused credit: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.ourCollateralLocked > 0n}
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.ourCollateralLocked * 100n) / td.totalCapacity)}%"
-                title="Our collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateralLocked) || 'N/A'}"
+                title="Our collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.theirUsedCredit > 0n}
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.theirUsedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit we're using: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUsedCredit) || 'N/A'}"
+                title="Credit we're using: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUsedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
           </div>
         </div>
         <div class="capacity-labels">
           <span class="capacity-out" title="Can send">
-            OUT {$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || 'N/A'}
+            OUT {$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}
           </span>
           <span class="capacity-in" title="Can receive">
-            IN {$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || 'N/A'}
+            IN {$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}
           </span>
         </div>
       </div>

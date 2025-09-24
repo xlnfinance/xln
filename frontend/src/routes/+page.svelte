@@ -13,8 +13,42 @@
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
   import { timeOperations } from '../lib/stores/timeStore';
+  import { history } from '../lib/stores/xlnStore';
+  import { get } from 'svelte/store';
 
   let activeTab = 'formation';
+
+  // SEQUENTIAL LOADING: Wait for history to be populated
+  async function waitForHistoryToLoad(): Promise<void> {
+    return new Promise((resolve) => {
+      console.log('🔄 SEQUENTIAL-LOAD: Waiting for history to load...');
+
+      // Check immediately first
+      const currentHistory = get(history);
+      if (currentHistory.length > 0) {
+        console.log('🔄 SEQUENTIAL-LOAD: History already loaded!', currentHistory.length);
+        resolve();
+        return;
+      }
+
+      // Wait for history subscription to fire with data
+      const unsubscribe = history.subscribe(($history) => {
+        console.log('🔄 SEQUENTIAL-LOAD: History subscription fired:', $history.length);
+        if ($history.length > 0) {
+          console.log('✅ SEQUENTIAL-LOAD: History loaded successfully with', $history.length, 'snapshots');
+          unsubscribe();
+          resolve();
+        }
+      });
+
+      // Timeout after 10 seconds to prevent infinite wait
+      setTimeout(() => {
+        console.warn('⚠️ SEQUENTIAL-LOAD: History load timeout - proceeding anyway');
+        unsubscribe();
+        resolve();
+      }, 10000);
+    });
+  }
 
   // Tab switching function
   function switchTab(tabName: string) {
@@ -26,20 +60,14 @@
     // Set up global error handlers FIRST
     window.addEventListener('error', (event) => {
       console.error('❌ Global error caught:', event.error);
-      error.set({
-        message: event.error?.message || event.message || 'An unknown error occurred',
-        source: event.filename || 'Unknown',
-        details: event.error?.stack || ''
-      });
+      const errorMsg = event.error?.message || event.message || 'An unknown error occurred';
+      error.set(`${errorMsg} (Source: ${event.filename || 'Unknown'})`);
     });
 
     window.addEventListener('unhandledrejection', (event) => {
       console.error('❌ Unhandled promise rejection:', event.reason);
-      error.set({
-        message: event.reason?.message || String(event.reason) || 'Unhandled promise rejection',
-        source: 'Promise',
-        details: event.reason?.stack || ''
-      });
+      const errorMsg = event.reason?.message || String(event.reason) || 'Unhandled promise rejection';
+      error.set(`${errorMsg} (Source: Promise)`);
     });
 
     try {
@@ -54,20 +82,22 @@
       // Initialize default tabs if none exist
       tabOperations.initializeDefaultTabs();
 
-      // Initialize time machine
-      timeOperations.initialize();
-
-      // Initialize XLN environment
+      // SEQUENTIAL LOADING: Initialize XLN environment FIRST
+      console.log('🔄 SEQUENTIAL-LOAD: Step 1 - Initializing XLN environment...');
       await initializeXLN();
+
+      // SEQUENTIAL LOADING: Wait for history to be populated, then initialize time machine
+      console.log('🔄 SEQUENTIAL-LOAD: Step 2 - Waiting for history to be populated...');
+      await waitForHistoryToLoad();
+
+      console.log('🔄 SEQUENTIAL-LOAD: Step 3 - Initializing time machine...');
+      timeOperations.initialize();
 
       console.log('✅ XLN Svelte application initialized successfully');
     } catch (err) {
       console.error('❌ Failed to initialize XLN application:', err);
-      error.set({
-        message: err?.message || 'Failed to initialize application',
-        source: 'Initialization',
-        details: err?.stack || ''
-      });
+      const errorMsg = (err as Error)?.message || 'Failed to initialize application';
+      error.set(`${errorMsg} (Source: Initialization)`);
     }
   });
 </script>
@@ -328,29 +358,6 @@
     min-width: 25vw;
   }
 
-  /* Test sections and tabs styles */
-  .test-section {
-    background: #ff6b6b;
-    color: white;
-    padding: 20px;
-    margin: 20px;
-    border-radius: 8px;
-    border: 2px solid #ff5252;
-    z-index: 10;
-    position: relative;
-  }
-
-  .test-section h3 {
-    margin: 0 0 10px 0;
-    color: white;
-    font-size: 1.2em;
-  }
-
-  .test-section p {
-    margin: 0;
-    color: #ffe0e0;
-    font-size: 1em;
-  }
 
   /* Tabs System */
   .actionable-tabs-container {

@@ -6,6 +6,7 @@
 import { applyEntityTx } from './entity-tx';
 import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env } from './types';
 import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
+import { safeStringify } from './serialization-utils';
 
 // === SECURITY VALIDATION ===
 
@@ -36,12 +37,12 @@ const validateEntityInput = (input: EntityInput): boolean => {
       }
       for (const tx of input.entityTxs) {
         if (!tx.type || !tx.data) {
-          log.error(`❌ Invalid transaction: ${JSON.stringify(tx)}`);
+          log.error(`❌ Invalid transaction: ${safeStringify(tx)}`);
           return false;
         }
         if (
           typeof tx.type !== 'string' ||
-          !['chat', 'propose', 'vote', 'profile-update', 'j_event', 'accountInput', 'openAccount'].includes(tx.type)
+          !['chat', 'propose', 'vote', 'profile-update', 'j_event', 'accountInput', 'openAccount', 'directPayment'].includes(tx.type)
         ) {
           log.error(`❌ Invalid transaction type: ${tx.type}`);
           return false;
@@ -242,6 +243,10 @@ export const applyEntityInput = async (
         `🔥 ALICE-RECEIVES: Alice isProposer=${entityReplica.isProposer}, current mempool=${entityReplica.mempool.length}`,
       );
     }
+    // Log details of each EntityTx
+    for (const tx of entityInput.entityTxs) {
+      console.log(`🏛️ E-MACHINE: - EntityTx type="${tx.type}", data=`, safeStringify(tx.data, 2));
+    }
     entityReplica.mempool.push(...entityInput.entityTxs);
     if (DEBUG)
       console.log(
@@ -260,6 +265,10 @@ export const applyEntityInput = async (
     if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
+    if (!proposerId) {
+      console.error(`❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
+      return { newState: entityReplica.state, outputs: entityOutbox };
+    }
     console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
     console.log(
       `🔥 BOB-TO-ALICE: Transaction types:`,
@@ -289,7 +298,7 @@ export const applyEntityInput = async (
         height: entityReplica.state.height + 1,
       };
       entityReplica.mempool.length = 0;
-      entityReplica.lockedFrame = undefined; // Release lock after commit
+      delete entityReplica.lockedFrame; // Release lock after commit
       if (DEBUG)
         console.log(
           `    → Applied commit, new state: ${entityReplica.state.messages.length} messages, height: ${entityReplica.state.height}`,
@@ -328,6 +337,10 @@ export const applyEntityInput = async (
     } else {
       // Send precommit to proposer only
       const proposerId = config.validators[0];
+      if (!proposerId) {
+        console.error(`❌ No proposer found in validators: ${config.validators}`);
+        return { newState: entityReplica.state, outputs: entityOutbox };
+      }
       console.log(
         `🔍 PROPOSER: [${timestamp}] ${entityReplica.signerId} sending precommit to ${proposerId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
       );
@@ -393,8 +406,8 @@ export const applyEntityInput = async (
 
       // Clear state (mutable)
       entityReplica.mempool.length = 0;
-      entityReplica.proposal = undefined;
-      entityReplica.lockedFrame = undefined; // Release lock after commit
+      delete entityReplica.proposal;
+      delete entityReplica.lockedFrame; // Release lock after commit
 
       // Only send commit notifications in proposer-based mode
       // In gossip mode, everyone already has all precommits via gossip
@@ -538,6 +551,10 @@ export const applyEntityInput = async (
     if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
+    if (!proposerId) {
+      console.error(`❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
+      return { newState: entityReplica.state, outputs: entityOutbox };
+    }
     console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
     console.log(
       `🔥 BOB-TO-ALICE: Transaction types:`,
@@ -611,31 +628,118 @@ export const applyEntityFrame = async (
   let currentEntityState = entityState;
   const allOutputs: EntityInput[] = [];
 
+  // Track accounts that need frame proposals during this processing round
+  const proposableAccounts = new Set<string>();
+
   for (const entityTx of entityTxs) {
     const { newState, outputs } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
     allOutputs.push(...outputs);
+
+    // Track which accounts need proposals based on transaction type
+    if (entityTx.type === 'accountInput' && entityTx.data) {
+      const fromEntity = entityTx.data.fromEntityId;
+      const accountMachine = currentEntityState.accounts.get(fromEntity);
+
+      if (accountMachine) {
+        // Add to proposable if:
+        // 1. Received a NEW frame that needs ACK (newAccountFrame)
+        // 2. Received an ACK (frameId with prevSignatures) AND we have mempool items
+        // 3. Received account transactions that need processing
+        const isNewFrame = entityTx.data.newAccountFrame;
+        const isAck = entityTx.data.frameId && entityTx.data.prevSignatures;
+        const hasAccountTx = entityTx.data.accountTx;
+        const hasPendingTxs = accountMachine.mempool.length > 0;
+
+        // Only propose if we have something to send:
+        // - Need to ACK a new frame
+        // - Have transactions in mempool
+        // - Received account transactions to process
+        if (isNewFrame || (hasPendingTxs && !accountMachine.pendingFrame) || hasAccountTx) {
+          proposableAccounts.add(fromEntity);
+          console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - NewFrame:${isNewFrame}, AccTx:${hasAccountTx}, Pending:${hasPendingTxs}`);
+        } else if (isAck) {
+          console.log(`✅ Received ACK from ${fromEntity.slice(0,10)}, no action needed (mempool empty)`);
+        }
+      }
+    } else if (entityTx.type === 'directPayment' && entityTx.data) {
+      console.log(`🔍 DIRECT-PAYMENT detected in applyEntityFrame`);
+      console.log(`🔍 Payment data:`, {
+        targetEntityId: entityTx.data.targetEntityId,
+        route: entityTx.data.route,
+        amount: entityTx.data.amount
+      });
+      console.log(`🔍 Current entity has ${currentEntityState.accounts.size} accounts`);
+
+      // Payment was added to mempool in applyEntityTx
+      // We need to find which account got the payment and mark it for frame proposal
+
+      // Check all accounts to see which one has new mempool items
+      for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
+        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        console.log(`🔍 Checking account ${counterpartyId.slice(0,10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}`);
+        if (accountMachine.mempool.length > 0) {
+          proposableAccounts.add(counterpartyId);
+          console.log(`🔄 ✅ Added ${counterpartyId.slice(0,10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
+        }
+      }
+    } else if (entityTx.type === 'openAccount' && entityTx.data) {
+      // Account opened - may need initial frame
+      const targetEntity = entityTx.data.targetEntityId;
+      const accountMachine = currentEntityState.accounts.get(targetEntity);
+      if (accountMachine) {
+        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        if (isLeft) {
+          proposableAccounts.add(targetEntity);
+          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
+        }
+      }
+    }
   }
 
-  // AUTO-PROPOSE: Check if any accounts need to propose frames after processing transactions
+  // AUTO-PROPOSE: Process all proposable accounts plus any with pending transactions
+  console.log(`🚀 AUTO-PROPOSE: Starting bilateral consensus check`);
+  console.log(`🚀 Proposable accounts so far: ${Array.from(proposableAccounts).join(', ') || 'none'}`);
+
   const { getAccountsToProposeFrames, proposeAccountFrame } = await import('./account-consensus');
-  const accountsToProposeFrames = getAccountsToProposeFrames(currentEntityState);
+
+  // Add accounts with mempool items that weren't already added
+  const additionalAccounts = getAccountsToProposeFrames(currentEntityState);
+  console.log(`🚀 Additional accounts from getAccountsToProposeFrames: ${additionalAccounts.join(', ') || 'none'}`);
+  additionalAccounts.forEach(accountId => proposableAccounts.add(accountId));
+
+  // Convert Set to Array for processing
+  const accountsToProposeFrames = Array.from(proposableAccounts);
 
   if (accountsToProposeFrames.length > 0) {
     console.log(`🔄 AUTO-PROPOSE: ${accountsToProposeFrames.length} accounts need frame proposals`);
+    console.log(`🔄 AUTO-PROPOSE: Accounts to propose: ${accountsToProposeFrames.map(id => id.slice(0,10)).join(', ')}`);
 
     for (const counterpartyEntityId of accountsToProposeFrames) {
-      console.log(`🔄 AUTO-PROPOSE: Proposing frame for account with ${counterpartyEntityId.slice(0,10)}`);
+      console.log(`🔄 AUTO-PROPOSE: Processing account ${counterpartyEntityId.slice(0,10)}...`);
 
       const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
       if (accountMachine) {
-        const proposal = proposeAccountFrame(accountMachine);
+        console.log(`🔄 AUTO-PROPOSE: Account details - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}`);
+        const proposal = await proposeAccountFrame(accountMachine);
+        console.log(`🔄 AUTO-PROPOSE: Proposal result - success=${proposal.success}, hasInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
 
         if (proposal.success && proposal.accountInput) {
+          // Get the proposer of the target entity from env
+          let targetProposerId = 'alice'; // Default fallback
+          const targetReplicaKeys = Array.from(env.replicas.keys()).filter(key => key.startsWith(proposal.accountInput!.toEntityId + ':'));
+          if (targetReplicaKeys.length > 0) {
+            const firstTargetReplica = env.replicas.get(targetReplicaKeys[0]!);
+            const firstValidator = firstTargetReplica?.state.config.validators[0];
+            if (firstValidator) {
+              targetProposerId = firstValidator;
+            }
+          }
+
           // Convert AccountInput to EntityInput for routing
           allOutputs.push({
             entityId: proposal.accountInput.toEntityId,
-            signerId: 'system',
+            signerId: targetProposerId, // Route to target entity's proposer
             entityTxs: [{
               type: 'accountInput',
               data: proposal.accountInput
@@ -765,7 +869,7 @@ export const getEntityStateSummary = (replica: EntityReplica): string => {
 /**
  * Checks if entity should auto-propose (simplified version)
  */
-export const shouldAutoPropose = (replica: EntityReplica, config: ConsensusConfig): boolean => {
+export const shouldAutoPropose = (replica: EntityReplica, _config: ConsensusConfig): boolean => {
   const hasMempool = replica.mempool.length > 0;
   const isProposer = replica.isProposer;
   const hasProposal = replica.proposal !== undefined;
