@@ -3,9 +3,20 @@
  * Based on old_src/app/Channel.ts deriveDelta logic
  */
 
-import { Delta, DerivedDelta, AccountMachine } from './types';
+import { Delta, DerivedDelta } from './types';
+import { validateDelta } from './validation-utils';
 
-const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
+/**
+ * Determine if an entity is the "left" party in a bilateral account (like old_src Channel.ts)
+ * @param myEntityId - Current entity ID
+ * @param counterpartyEntityId - Other entity ID
+ * @returns true if current entity is left (lexicographically smaller)
+ */
+export function isLeft(myEntityId: string, counterpartyEntityId: string): boolean {
+  return myEntityId < counterpartyEntityId;
+}
+
+const BASE_CREDIT_LIMIT = 1_000_000n;
 
 /**
  * Derive account balance information for a specific token
@@ -14,12 +25,24 @@ const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
  * @returns Derived balance information including capacities and credits
  */
 export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
+  // STRICT VALIDATION: Financial data must be complete and valid
+  try {
+    const validatedDelta = validateDelta(delta, 'deriveDelta input');
+    delta = validatedDelta; // Use validated delta
+  } catch (error) {
+    console.error('❌ CRITICAL: Invalid Delta in deriveDelta:', error);
+    throw error;
+  }
+
+  // EXACT copy from old_src Channel.ts deriveDelta method (lines 652-735)
+  const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
+
   const totalDelta = delta.ondelta + delta.offdelta;
   const collateral = nonNegative(delta.collateral);
 
   let ownCreditLimit = delta.leftCreditLimit;
   let peerCreditLimit = delta.rightCreditLimit;
-  
+
   let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
   let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
 
@@ -41,17 +64,40 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
 
   if (!isLeft) {
-    // flip the view for right party
+    // flip the view (EXACT from old_src lines 684-697)
     [inCollateral, inAllowence, inCapacity,
-     outCollateral, outAllowence, outCapacity] = 
+     outCollateral, outAllowence, outCapacity] =
     [outCollateral, outAllowence, outCapacity,
      inCollateral, inAllowence, inCapacity];
 
     [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
     // swap in<->out own<->peer credit
-    [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] = 
+    [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
     [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
   }
+
+  // ASCII visualization (EXACT from old_src Channel.ts lines 701-715) with debugging
+  const totalWidth = Number(totalCapacity);
+  const leftCreditWidth = Math.floor((Number(ownCreditLimit) / totalWidth) * 50);
+  const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);
+  const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
+  const deltaPosition = Math.floor(((Number(totalDelta) + Number(ownCreditLimit)) / totalWidth) * 50);
+
+  // ASCII visualization - proper bar with position marker
+  // Build the full capacity bar first
+  const fullBar =
+    '-'.repeat(leftCreditWidth) +
+    '='.repeat(collateralWidth) +
+    '-'.repeat(rightCreditWidth);
+
+  // Insert position marker at deltaPosition
+  const clampedPosition = Math.max(0, Math.min(deltaPosition, fullBar.length));
+  const ascii =
+    '[' +
+    fullBar.substring(0, clampedPosition) +
+    '|' +
+    fullBar.substring(clampedPosition) +
+    ']';
 
   return {
     delta: totalDelta,
@@ -69,6 +115,7 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     outCapacity,
     outOwnCredit,
     inPeerCredit,
+    ascii, // ASCII visualization like old_src
   };
 }
 
@@ -80,13 +127,14 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
  * @returns Delta object with reasonable defaults
  */
 export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, delta: bigint = 0n): Delta {
+  const creditLimit = getDefaultCreditLimit(tokenId);
   return {
     tokenId,
     collateral,
     ondelta: delta,
     offdelta: 0n,
-    leftCreditLimit: 500n,
-    rightCreditLimit: 500n,
+    leftCreditLimit: creditLimit,
+    rightCreditLimit: creditLimit,
     leftAllowence: 0n,
     rightAllowence: 0n,
   };
@@ -114,26 +162,24 @@ export function getTokenInfo(tokenId: number) {
 }
 
 /**
+ * Default per-token credit limit scaled to token decimals (matches old channel behavior)
+ */
+export function getDefaultCreditLimit(tokenId: number): bigint {
+  const tokenInfo = getTokenInfo(tokenId);
+  const decimals = BigInt(tokenInfo.decimals ?? 18);
+  return BASE_CREDIT_LIMIT * 10n ** decimals;
+}
+
+/**
  * Format amount for display with proper decimals
  */
-export function formatTokenAmount(tokenId: number, amount: bigint): string {
-  const tokenInfo = getTokenInfo(tokenId);
-  const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
-  const wholePart = amount / divisor;
-  const fractionalPart = amount % divisor;
-
-  if (fractionalPart === 0n) {
-    return `${wholePart} ${tokenInfo.symbol}`;
-  }
-
-  const fractionalStr = fractionalPart.toString().padStart(tokenInfo.decimals, '0');
-  return `${wholePart}.${fractionalStr} ${tokenInfo.symbol}`;
-}
+// DEPRECATED: Use financial-utils.ts formatTokenAmount instead
+// This is kept for backwards compatibility during migration
+export { formatTokenAmount } from './financial-utils';
 
 /**
  * Calculate percentage for capacity bar display
  */
-export function calculatePercentage(amount: bigint, total: bigint): number {
-  if (total === 0n) return 0;
-  return Number((amount * 100n) / total);
-}
+// DEPRECATED: Use financial-utils.ts calculatePercentage instead
+// This is kept for backwards compatibility during migration
+export { calculatePercentage } from './financial-utils';

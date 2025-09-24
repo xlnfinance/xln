@@ -1,13 +1,16 @@
 <script lang="ts">
   import type { AccountMachine } from '../../types';
   import { createEventDispatcher } from 'svelte';
-  import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
 
   // All utility functions now come from server.js via xlnFunctions
 
-  // Helper to safely format numbers that might be undefined/null
+  // FINTECH-SAFE: Never return "N/A" - fail fast if data is corrupted
   function safeFixed(value: any, decimals: number = 4): string {
-    if (value == null || isNaN(value)) return 'N/A';
+    if (value == null || isNaN(value)) {
+      console.error('FINTECH-SAFETY: Attempted to format null/NaN value:', value);
+      throw new Error('FINTECH-SAFETY: Invalid numeric value - financial data corrupted');
+    }
     return Number(value).toFixed(decimals);
   }
 
@@ -18,6 +21,9 @@
 
 
   export let account: AccountMachine;
+
+  // Cast account to any to handle missing properties safely
+  $: accountAny = account as any;
   export let counterpartyId: string;
   export let entityId: string;
 
@@ -31,9 +37,25 @@
   // Form states
   let selectedTokenId = 1;
   let creditAdjustment = 0;
-  let collateralAdjustment = 0;
   let paymentAmount = 0;
   let paymentDescription = '';
+
+  // Auto-set defaults for faster testing
+  $: {
+    // Set default token to first available
+    if (tokenDetails.length > 0 && selectedTokenId === 1 && !tokenDetails.find(td => td.tokenId === 1)) {
+      selectedTokenId = tokenDetails[0].tokenId;
+    }
+
+    // Set default amount to 10% of available to send
+    const selectedTokenDetail = tokenDetails.find(td => td.tokenId === selectedTokenId);
+    if (selectedTokenDetail && paymentAmount === 0) {
+      const outCapacity = Number(selectedTokenDetail.derived.outCapacity);
+      if (outCapacity > 0) {
+        paymentAmount = Math.round((outCapacity * 0.1) * 100) / 100; // 10% rounded to 2 decimals
+      }
+    }
+  }
 
   // Determine if we are the "left" entity in the canonical bilateral ordering
   // Use lexicographic comparison for deterministic left/right assignment
@@ -64,7 +86,15 @@
           outCapacity: 0n,
           ascii: '[loading...]'
         },
-        tokenInfo: { symbol: `TKN${tokenId}`, color: '#999', name: `Token ${tokenId}`, decimals: 18 }
+        tokenInfo: { symbol: `TKN${tokenId}`, color: '#999', name: `Token ${tokenId}`, decimals: 18 },
+        theirCreditLimit: 0,
+        theirUsedCredit: 0,
+        theirUnusedCredit: 0,
+        ourCreditLimit: 0,
+        ourUsedCredit: 0,
+        ourUnusedCredit: 0,
+        ourCollateral: 0,
+        theirCollateral: 0
       };
     }
 
@@ -153,19 +183,15 @@
       };
 
       await xln.processUntilEmpty(env, [paymentInput]);
-      console.log(`✅ Payment sent: ${paymentAmount} ${getTokenInfo(selectedTokenId).symbol}`);
+      console.log(`✅ Payment sent: ${paymentAmount} ${$xlnFunctions?.getTokenInfo(selectedTokenId)?.symbol || 'TOKEN'}`);
 
       // Reset form
       paymentAmount = 0;
       paymentDescription = '';
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to send payment:', err);
-      error.set({
-        message: `Payment failed: ${err.message}`,
-        source: 'AccountPanel.sendPayment',
-        details: $xlnFunctions?.safeStringify(err)
-      });
+      error.set(`Payment failed: ${err?.message || 'Unknown error'}`);
     }
   }
 
@@ -193,13 +219,9 @@
       console.log(`✅ Credit adjusted to: ${creditAdjustment}`);
 
       creditAdjustment = 0;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to adjust credit:', err);
-      error.set({
-        message: `Credit adjustment failed: ${err.message}`,
-        source: 'AccountPanel.adjustCredit',
-        details: $xlnFunctions?.safeStringify(err)
-      });
+      error.set(`Credit adjustment failed: ${err?.message || 'Unknown error'}`);
     }
   }
 
@@ -229,13 +251,9 @@
       }
 
       console.log('✅ Settlement submitted');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to settle:', err);
-      error.set({
-        message: `Settlement failed: ${err.message}`,
-        source: 'AccountPanel.settleAccount',
-        details: $xlnFunctions?.safeStringify(err)
-      });
+      error.set(`Settlement failed: ${err?.message || 'Unknown error'}`);
     }
   }
 
@@ -255,9 +273,6 @@
     alert('Account closure functionality coming soon');
   }
 
-  function handleBack() {
-    dispatch('back');
-  }
 </script>
 
 <div class="account-panel">
@@ -271,8 +286,16 @@
       </span>
       <div class="consensus-status">
         <span class="frame-badge">Frame #{account.currentFrame.frameId}</span>
-        {#if account.mempool.length > 0}
-          <span class="status-badge pending">{account.mempool.length} pending</span>
+        {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
+          <span class="status-badge pending">
+            {#if (account as any).pendingFrame}
+              Awaiting Consensus
+            {:else if account.mempool.length > 0}
+              {account.mempool.length} pending
+            {:else}
+              {(account as any).sentTransitions} in flight
+            {/if}
+          </span>
         {:else}
           <span class="status-badge synced">Synced</span>
         {/if}
@@ -523,30 +546,30 @@
 
     <!-- Account Frame History Section -->
     <div class="section">
-      <h3>💾 Account Frame History ({account.frameHistory?.length || 0} confirmed frames)</h3>
+      <h3>💾 Account Frame History ({(account as any).frameHistory?.length || 0} confirmed frames)</h3>
       <div class="frame-history">
 
         <!-- Pending Frame (TOP PRIORITY) -->
-        {#if account.pendingFrame}
+        {#if accountAny.pendingFrame}
           <div class="frame-item pending">
             <div class="frame-header">
-              <span class="frame-id">⏳ Pending Frame #{account.pendingFrame.frameId}</span>
+              <span class="frame-id">⏳ Pending Frame #{accountAny.pendingFrame.frameId}</span>
               <span class="frame-status pending">Awaiting Consensus</span>
               <span class="frame-timestamp">
-                {formatTimestamp(account.pendingFrame.timestamp)}
+                {formatTimestamp(accountAny.pendingFrame.timestamp)}
               </span>
             </div>
             <div class="frame-details">
               <div class="frame-detail">
                 <span class="detail-label">Transactions:</span>
-                <span class="detail-value">{account.pendingFrame.accountTxs.length}</span>
+                <span class="detail-value">{accountAny.pendingFrame.accountTxs.length}</span>
               </div>
               <div class="frame-detail">
                 <span class="detail-label">Signatures:</span>
-                <span class="detail-value">{account.pendingSignatures?.length || 0}/2</span>
+                <span class="detail-value">{accountAny.pendingSignatures?.length || 0}/2</span>
               </div>
               <div class="pending-transactions">
-                {#each account.pendingFrame.accountTxs as tx, i}
+                {#each accountAny.pendingFrame.accountTxs as tx, i}
                   <div class="pending-tx">
                     <span class="tx-index">{i+1}.</span>
                     <span class="tx-type">{tx.type}</span>
@@ -595,7 +618,7 @@
         {#if account.currentFrame}
           <div class="frame-item current">
             <div class="frame-header">
-              <span class="frame-id">✅ Current Frame #{account.currentFrame.frameId || account.currentFrameId}</span>
+              <span class="frame-id">✅ Current Frame #{account.currentFrame.frameId || accountAny.currentFrameId}</span>
               <span class="frame-status current">Active</span>
               <span class="frame-timestamp">
                 {formatTimestamp(account.currentFrame.timestamp || Date.now())}
@@ -604,21 +627,27 @@
             <div class="frame-details">
               <div class="frame-detail">
                 <span class="detail-label">Transactions:</span>
-                <span class="detail-value">{account.currentFrame.accountTxs?.length || 0}</span>
+                <span class="detail-value">{(account.currentFrame as any)?.accountTxs?.length || 0}</span>
               </div>
               <div class="frame-detail">
                 <span class="detail-label">State Hash:</span>
-                <span class="detail-value hash">{account.currentFrame.stateHash?.slice(0,12) || 'N/A'}...</span>
+                <span class="detail-value hash">
+                  {#if (account.currentFrame as any)?.stateHash}
+                    {(account.currentFrame as any).stateHash.slice(0,12)}...
+                  {:else}
+                    <span style="color: #ff4444; font-weight: bold;">MISSING HASH</span>
+                  {/if}
+                </span>
               </div>
             </div>
           </div>
         {/if}
 
         <!-- Historical Frames (from frameHistory array) -->
-        {#if account.frameHistory && account.frameHistory.length > 0}
+        {#if (account as any).frameHistory && (account as any).frameHistory.length > 0}
           <div class="historical-frames">
-            <h4>📚 Historical Frames (last {Math.min(10, account.frameHistory.length)}):</h4>
-            {#each account.frameHistory.slice(-10).reverse() as frame, i}
+            <h4>📚 Historical Frames (last {Math.min(10, (account as any).frameHistory.length)}):</h4>
+            {#each (account as any).frameHistory.slice(-10).reverse() as frame}
               <div class="frame-item historical">
                 <div class="frame-header">
                   <span class="frame-id">📜 Frame #{frame.frameId}</span>
@@ -642,7 +671,13 @@
                   </div>
                   <div class="frame-detail">
                     <span class="detail-label">Hash:</span>
-                    <span class="detail-value hash">{frame.stateHash?.slice(0,8) || 'N/A'}...</span>
+                    <span class="detail-value hash">
+                      {#if frame.stateHash}
+                        {frame.stateHash.slice(0,8)}...
+                      {:else}
+                        <span style="color: #ff4444; font-weight: bold;">MISSING HASH</span>
+                      {/if}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -650,7 +685,7 @@
           </div>
         {/if}
 
-        {#if !account.currentFrame && !account.pendingFrame && account.mempool.length === 0 && (!account.frameHistory || account.frameHistory.length === 0)}
+        {#if !account.currentFrame && !(account as any).pendingFrame && account.mempool.length === 0 && (!(account as any).frameHistory || (account as any).frameHistory.length === 0)}
           <div class="no-frames">
             No account activity yet. Send a payment to start bilateral consensus.
           </div>

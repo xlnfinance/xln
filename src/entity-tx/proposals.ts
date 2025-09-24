@@ -1,4 +1,4 @@
-import { calculateQuorumPower } from '../entity-consensus';
+// import { calculateQuorumPower } from '../entity-consensus'; // TODO: Remove if not needed
 import { EntityState, Proposal, ProposalAction } from '../types';
 import { createHash, DEBUG } from '../utils';
 

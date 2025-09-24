@@ -11,7 +11,7 @@ import { applyDirectPayment, DirectPaymentData } from './direct-payment';
  * Similar to old_src Channel isLeft logic
  */
 function determinePaymentDirection(
-  accountMachine: AccountMachine,
+  _accountMachine: AccountMachine,
   transaction: AccountTx,
   currentFrameIsOurs: boolean
 ): boolean {
@@ -37,13 +37,6 @@ export function processAccountTransaction(
   console.log(`🔄 Processing account transaction: ${transaction.type} (frameIsOurs: ${currentFrameIsOurs})`);
 
   switch (transaction.type) {
-    case 'initial_ack':
-      console.log(`👋 Processing initial acknowledgment: ${transaction.data.message}`);
-      return {
-        success: true,
-        events: [`🤝 Account initialized with Entity ${accountMachine.counterpartyEntityId.slice(-4)}`]
-      };
-
     case 'account_settle':
       console.log(`💰 Account settlement already processed in account handler`);
       return {

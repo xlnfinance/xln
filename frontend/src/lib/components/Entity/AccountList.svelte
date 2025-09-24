@@ -1,15 +1,13 @@
 <script lang="ts">
   import type { EntityReplica } from '../../types';
-  // Functions now accessed through $xlnEnvironment.xln from server.ts
+  import { createEventDispatcher } from 'svelte';
   import { getXLN, replicas, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
-  import AccountPanel from './AccountPanel.svelte';
 
   export let replica: EntityReplica | null;
 
-  // View state
-  let selectedAccountId: string | null = null;
-  let showAccountPanel = false;
+  // View state (for new account creation only)
+  const dispatch = createEventDispatcher();
   let selectedNewEntityId = '';
 
   // Get accounts from entity state
@@ -20,10 +18,6 @@
       }))
     : [];
 
-  // Get selected account
-  $: selectedAccount = selectedAccountId && replica?.state?.accounts
-    ? replica.state.accounts.get(selectedAccountId)
-    : null;
 
   // Get ALL entities in the system (excluding self) - reactive to accounts changes
   // This will recompute whenever accounts or replicas change
@@ -83,18 +77,13 @@
       console.log(`✅ Account request sent to local e-machine for Entity #${$xlnFunctions?.getEntityNumber(targetEntityId) || '?'}`);
     } catch (error) {
       console.error('Failed to send account request:', error);
-      alert(`Failed to send account request: ${error.message}`);
+      alert(`Failed to send account request: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 
   function selectAccount(event: CustomEvent) {
-    selectedAccountId = event.detail.accountId;
-    showAccountPanel = true;
-  }
-
-  function backToAccounts() {
-    showAccountPanel = false;
-    selectedAccountId = null;
+    // Forward the selection to parent (EntityPanel) for focused navigation
+    dispatch('select', event.detail);
   }
 
 
@@ -102,17 +91,8 @@
 </script>
 
 <div class="account-channels" data-testid="account-channels">
-  {#if showAccountPanel && selectedAccount}
-    <!-- Full Account Panel View -->
-    <AccountPanel
-      account={selectedAccount}
-      counterpartyId={selectedAccountId}
-      entityId={replica.entityId}
-      on:back={backToAccounts}
-    />
-  {:else}
-    <!-- Account List View -->
-    <div class="accounts-list-view">
+  <!-- Account List View (Always show previews, never full panel) -->
+  <div class="accounts-list-view">
 
 
       {#if accounts.length === 0}
@@ -127,12 +107,11 @@
               account={account}
               counterpartyId={account.counterpartyId}
               entityId={replica?.entityId || ''}
-              isSelected={selectedAccountId === account.counterpartyId}
+              isSelected={false}
               on:select={selectAccount}
             />
           {/each}
         </div>
-      {/if}
 
       <!-- Add Account Section -->
       <div class="add-account-section">
@@ -157,8 +136,8 @@
           📝 Open Account
         </button>
       </div>
-    </div>
-  {/if}
+    {/if}
+  </div>
 </div>
 
 <style>

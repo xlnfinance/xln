@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { afterUpdate } from 'svelte';
   import type { EntityReplica, Tab, Snapshot } from '../../../types';
   import { getServerFrames } from '../../../utils/serverFrameProcessor';
   import FrameItem from './FrameItem.svelte';
@@ -9,7 +8,6 @@
   export let serverHistory: Snapshot[] = [];
   export let currentTimeIndex: number | undefined = undefined;
 
-  let containerElement: HTMLDivElement;
 
   // Debug reactive statements
   $: {
@@ -39,7 +37,7 @@
   // Auto-scrolling was causing disruptive UX during time machine navigation
 </script>
 
-<div class="scrollable-component transaction-history" bind:this={containerElement}>
+<div class="scrollable-component transaction-history">
   {#if serverFrames.length > 0}
     <div class="history-summary">
       Found {activeFrameCount} frames with activity out of {serverFrames.length} total

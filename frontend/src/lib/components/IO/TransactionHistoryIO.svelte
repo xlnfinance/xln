@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { timeState } from '../../stores/timeStore';
 
   let isCollapsed = false;
@@ -14,9 +14,9 @@
   $: serverOutputs = currentSnapshot?.serverOutputs || [];
 
   // Enhanced JSON stringify function with proper formatting
-  function elaborateStringify(obj: any, maxDepth: number = 10): string {
+  function elaborateStringify(obj: any): string {
     try {
-      return JSON.stringify(obj, (key, value) => {
+      return JSON.stringify(obj, (_, value) => {
         // Handle BigInt
         if (typeof value === 'bigint') {
           return `BigInt(${value.toString()})`;
@@ -39,8 +39,8 @@
         }
         return value;
       }, 2);
-    } catch (err) {
-      return `[Error stringifying: ${err.message}]`;
+    } catch (err: any) {
+      return `[Error stringifying: ${err?.message || 'Unknown error'}]`;
     }
   }
 

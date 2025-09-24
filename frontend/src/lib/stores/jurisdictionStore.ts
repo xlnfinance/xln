@@ -68,7 +68,6 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
 
       // Convert jurisdiction array to object format
       jurisdictionsList.forEach((j: any) => {
-        const port = j.address.split(':').pop();
         data.jurisdictions[j.name.toLowerCase()] = {
           name: j.name,
           chainId: j.chainId,
@@ -83,7 +82,7 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
         };
       });
 
-      console.log('🔍 SINGLE LOAD: Loaded contracts from server:', data.jurisdictions?.ethereum?.contracts);
+      console.log('🔍 SINGLE LOAD: Loaded contracts from server:', data.jurisdictions['ethereum']?.contracts);
 
       // Cache the data
       cachedData = data;

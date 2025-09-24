@@ -97,21 +97,39 @@ const timeOperations = {
     }
   },
 
-  // Update max time index based on history length
+  // Update max time index based on history length - ROBUST VERSION
   updateMaxTimeIndex() {
     const $history = get(history);
+    const currentState = get(timeState);
+
+    // SAFETY: Ensure history is actually populated before proceeding
+    if (!$history || !Array.isArray($history)) {
+      console.warn('🕰️ TIME-MACHINE-SAFETY: History not ready, skipping update');
+      return;
+    }
+
     const maxIndex = Math.max(0, $history.length - 1);
 
-    console.log('🕰️ updateMaxTimeIndex():', {
+    console.log('🕰️ TIME-MACHINE-DEBUG updateMaxTimeIndex():', {
+      timestamp: new Date().toISOString(),
       historyLength: $history.length,
       calculatedMaxIndex: maxIndex,
-      currentMaxIndex: get(timeState).maxTimeIndex
+      currentMaxIndex: currentState.maxTimeIndex,
+      currentTimeIndex: currentState.currentTimeIndex,
+      isLive: currentState.isLive,
+      historyItemsPreview: $history.slice(-3).map((h, i) => `${i}: ${h?.height || 'no-height'}`)
     });
 
-    timeState.update(current => ({
-      ...current,
-      maxTimeIndex: maxIndex
-    }));
+    // SAFETY: Only update if the new maxIndex is different and valid
+    if (maxIndex !== currentState.maxTimeIndex && maxIndex >= 0) {
+      timeState.update(current => ({
+        ...current,
+        maxTimeIndex: maxIndex
+      }));
+      console.log('✅ TIME-MACHINE: Updated maxTimeIndex to', maxIndex);
+    } else {
+      console.log('🔄 TIME-MACHINE: No update needed, maxTimeIndex already correct');
+    }
   },
 
   // Go to specific time index
@@ -259,19 +277,38 @@ const timeOperations = {
     }));
   },
 
-  // Initialize time machine
+  // Initialize time machine - SEQUENTIAL LOADING
   initialize() {
-    this.updateMaxTimeIndex();
+    console.log('🕰️ LOAD-ORDER-DEBUG: timeOperations.initialize() called');
 
-    // Subscribe to history changes to update max index automatically
-    // CRITICAL: Only update if we're in live mode to prevent time machine corruption
-    history.subscribe((newHistory) => {
-      const currentState = get(timeState);
-      if (currentState.isLive) {
-        // Only update max index when in live mode to prevent time machine corruption
+    // Subscribe to history changes for REACTIVE initialization
+    // This ensures we wait for history to be loaded before setting maxTimeIndex
+    let hasInitialized = false;
+
+    history.subscribe(($history) => {
+      console.log('🕰️ LOAD-ORDER-DEBUG: History subscription triggered:', {
+        timestamp: new Date().toISOString(),
+        historyLength: $history.length,
+        hasInitialized,
+        currentTimeState: get(timeState)
+      });
+
+      // Wait for history to be properly loaded before initializing
+      if (!hasInitialized && $history.length > 0) {
+        console.log('🕰️ SEQUENTIAL-LOAD: First-time initialization with populated history');
+        hasInitialized = true;
         this.updateMaxTimeIndex();
+      } else if (hasInitialized) {
+        // Normal operation after initialization
+        const currentState = get(timeState);
+        if (currentState.isLive) {
+          // Only update max index when in live mode to prevent time machine corruption
+          this.updateMaxTimeIndex();
+        } else {
+          console.log(`🕰️ TIME-MACHINE: Ignoring history update while in historical mode (index: ${currentState.currentTimeIndex})`);
+        }
       } else {
-        console.log(`🕰️ TIME-MACHINE: Ignoring history update while in historical mode (index: ${currentState.currentTimeIndex})`);
+        console.log('🕰️ SEQUENTIAL-LOAD: Waiting for history to be populated...');
       }
     });
   }

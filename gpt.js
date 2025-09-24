@@ -14,12 +14,15 @@ function buildFileTree(dir, baseDir) {
             if (fs.statSync(filePath).isDirectory()) {
                 if (['node_modules', 'dist', '.git'].indexOf(file) != -1) return;
 
-                console.log(file)
+                //console.log(file)
 
                 const result = buildFileTree(filePath, baseDir);
                 node.children.push(result.node);
                 fileContents += result.fileContents;
-            } else if (path.extname(file) === '.ts' || path.extname(file) === '.sol') {
+            } else if (path.extname(file) === '.ts' || 
+            path.extname(file) === '.md' ||
+            path.extname(file) === '.js' ||
+            path.extname(file) === '.sol') {
                 node.children.push({ name: file, type: 'file' });
                 const relativePath = path.relative(baseDir, filePath);
                 const content = fs.readFileSync(filePath, 'utf8');
@@ -47,23 +50,21 @@ function printFileTree(node, prefix = '') {
     return result;
 }
 
-const srcPath = path.resolve(__dirname, 'src');
-const { node: fileTree, fileContents } = buildFileTree(srcPath, srcPath);
-const treeOutput = printFileTree(fileTree);
+const srcPathSrc = path.resolve(__dirname, 'src');
+const { node: fileTreeSrc, fileContents: fileContentsSrc } = buildFileTree(srcPathSrc, srcPathSrc);
 
-//const srcPath2 = path.resolve(__dirname, 'test');
-//const { node: fileTree2, fileContents: fileContents2 } = buildFileTree(srcPath2, srcPath2);
+const srcPathDocs = path.resolve(__dirname, 'docs');
+const { node: fileTreeDocs, fileContents: fileContentsDocs } = buildFileTree(srcPathDocs, srcPathDocs);
 
-const srcPath3 = path.resolve(__dirname, 'contracts/contracts');
-const { node: fileTree3, fileContents: fileContents3 } = buildFileTree(srcPath3, srcPath3);
-
+const srcPathContracts = path.resolve(__dirname, 'contracts/contracts');
+const { node: fileTreeContracts, fileContents: fileContentsContracts } = buildFileTree(srcPathContracts, srcPathContracts);
 
 
-const fullOutput = `${fileContents3}${fileContents}`;
+const fullTreeOutput = `${printFileTree(fileTreeContracts)}\n\n${printFileTree(fileTreeSrc)}\n\n${printFileTree(fileTreeDocs)}`;
+const fullOutput = `${fullTreeOutput}\n\n${fileContentsContracts}${fileContentsSrc}`;
 
-const outputPath = path.join(__dirname, 'output.txt');
+const outputPath = path.join(__dirname, 'frontend/static/c.txt');
 fs.writeFileSync(outputPath, fullOutput);
 
 console.log(`Full output has been written to ${outputPath}`);
-console.log('Here\'s a preview of the file tree:');
-console.log(treeOutput);
+console.log(fullTreeOutput);

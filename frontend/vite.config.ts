@@ -1,6 +1,5 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
-import path from 'path';
 
 export default defineConfig({
 	plugins: [sveltekit()],
@@ -32,5 +31,20 @@ export default defineConfig({
 	define: {
 		// Define globals for browser compatibility
 		global: 'globalThis',
+	},
+	resolve: {
+		alias: {
+			// BROWSER TARGET: Polyfill Node.js modules for browser compatibility
+			'http': false,
+			'https': false,
+			'crypto': false,
+			'fs': false,
+			'path': false,
+			'os': false,
+			'stream': false,
+			'util': false,
+			'buffer': false,
+			'process': false
+		}
 	}
 });

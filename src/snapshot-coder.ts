@@ -7,7 +7,7 @@
 const USE_MSGPACK = false;
 
 // JSON encoder imports and setup
-const jsonReplacer = (key: string, value: any) => {
+const jsonReplacer = (_key: string, value: any) => {
   if (value instanceof Map) {
     return { _dataType: 'Map', value: Array.from(value.entries()) };
   }
@@ -17,7 +17,7 @@ const jsonReplacer = (key: string, value: any) => {
   return value;
 };
 
-const jsonReviver = (key: string, value: any) => {
+const jsonReviver = (_key: string, value: any) => {
   if (typeof value === 'object' && value !== null) {
     if (value._dataType === 'Map') return new Map(value.value);
     if (value._dataType === 'BigInt') return BigInt(value.value);
@@ -158,10 +158,11 @@ export const decode = (buffer: Buffer): any => {
         if (replica && replica.state) {
           const jBlock = replica.state.jBlock;
           if (typeof jBlock !== 'number') {
-            console.error(`💥 CRITICAL: Invalid jBlock type in snapshot for replica ${replicaKey}`);
-            console.error(`💥   Expected: number, Got: ${typeof jBlock}, Value: ${jBlock}`);
-            console.error(`💥   This compromises financial state integrity - setting to 0`);
-            replica.state.jBlock = 0; // Force safe value
+            // IMPORTANT: Don't reset to 0 - this causes re-processing of ALL events!
+            // If jBlock is missing, use the snapshot height as a safe fallback
+            const fallbackJBlock = Number(decoded.height) || 0;
+            console.warn(`⚠️ jBlock missing for replica ${replicaKey}, using height ${fallbackJBlock} as fallback`);
+            replica.state.jBlock = fallbackJBlock;
           }
         }
       }
@@ -216,7 +217,8 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
     // Security/Integrity Check: Verify the hash of the replicas.
     const serializedReplicas = packrInstance.pack(sortedReplicas);
     const calculatedHash = sha256(serializedReplicas);
-    if (Buffer.compare(hashOfReplicas, calculatedHash) !== 0) {
+    // Browser-compatible buffer comparison
+    if (hashOfReplicas.toString('hex') !== calculatedHash.toString('hex')) {
       throw new Error('State integrity check failed: Replica hash does not match.');
     }
 

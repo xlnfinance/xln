@@ -1,15 +1,9 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, error } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
-  import { timeOperations } from '../../stores/timeStore';
-  import { get } from 'svelte/store';
-  import TutorialLauncher from '../Tutorial/TutorialLauncher.svelte';
-  import TutorialOverlay from '../Tutorial/TutorialOverlay.svelte';
-  import { isActiveTutorial, currentTutorial, currentStep, progressPercentage } from '../Tutorial/TutorialService';
 
   let showSettingsModal = false;
-  let showTutorialLauncher = false;
 
   // Reactive theme icon
   $: themeIcon = $settings.theme === 'dark' ? '🌙' : '☀️';
@@ -18,7 +12,7 @@
   $: jMachineStatus = (() => {
     if (!$xlnEnvironment) return { block: 0, events: 0, height: 0 };
     // Get max jBlock from all entities instead of server-level tracking
-    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.replicas?.values() || []).map(r => r.state?.jBlock || 0));
+    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.replicas?.values() || []).map((r: any) => r.state?.jBlock || 0));
     return {
       block: maxJBlock,
       events: $xlnEnvironment.serverInput?.entityInputs?.length || 0,
@@ -30,12 +24,12 @@
   $: jWatcherStatus = (() => {
     if (!$xlnEnvironment) return null;
     try {
-      const proposers = Array.from($xlnEnvironment.replicas?.entries() || [])
-        .filter(([key, replica]) => replica.isProposer)
+      const proposers = Array.from($xlnEnvironment.replicas?.entries() as [string, any][] || [])
+        .filter(([, replica]) => replica.isProposer)
         .map(([key, replica]) => {
           const [entityId, signerId] = key.split(':');
           return {
-            entityId: entityId.slice(0,10) + '...',
+            entityId: entityId?.slice(0,10) + '...' || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })(),
             signerId,
             jBlock: replica.state.jBlock,
           };
@@ -92,7 +86,7 @@
       console.log('🔍 Store updated, UI should refresh automatically');
     } catch (error) {
       console.error('❌ Demo failed:', error);
-      alert(`Demo failed: ${error.message}`);
+      alert(`Demo failed: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 
@@ -114,7 +108,7 @@
         replicas: env?.replicas?.size || 0,
         height: env?.height || 0,
         accounts: Array.from(env?.replicas?.values() || [])
-          .map(r => r.state?.accounts?.size || 0)
+          .map((r: any) => r.state?.accounts?.size || 0)
           .reduce((a, b) => a + b, 0)
       });
 
@@ -126,7 +120,7 @@
       console.log('🔍 Store updated, UI should refresh automatically');
     } catch (error) {
       console.error('❌ Prepopulation failed:', error);
-      alert(`Prepopulation failed: ${error.message}`);
+      alert(`Prepopulation failed: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 
@@ -163,7 +157,7 @@
         window.location.reload();
       } catch (error) {
         console.error('❌ Clear database failed:', error);
-        alert(`Clear database failed: ${error.message}`);
+        alert(`Clear database failed: ${(error as Error)?.message || 'Unknown error'}`);
       }
     }
   }
@@ -173,9 +167,6 @@
     alert('Entity Creator coming soon! Use the Controls section in any panel for now.');
   }
 
-  function handleStartTutorial() {
-    showTutorialLauncher = true;
-  }
 
   function handleToggleTheme() {
     settingsOperations.toggleTheme();
@@ -218,7 +209,7 @@
       </span>
       {#if jWatcherStatus && jWatcherStatus.proposers.length > 0}
         <span class="j-status-item" title="J-Watcher Proposer Status">
-          🔄 Proposers: {jWatcherStatus.proposers.map(p => `${p.signerId}@${p.jBlock}`).join(', ')} | Next: {nextSyncTimer.toFixed(1)}s
+          🔄 Proposers: {jWatcherStatus.proposers.map((p: any) => `${p.signerId}@${p.jBlock}`).join(', ')} | Next: {nextSyncTimer.toFixed(1)}s
         </span>
       {/if}
       <div class="scale-control" title="Adjust portfolio bar scale for better comparison">
@@ -229,7 +220,7 @@
           max="10000"
           step="500"
           bind:value={$settings.portfolioScale}
-          on:input={(e) => settingsOperations.setPortfolioScale(Number(e.target.value))}
+          on:input={(e) => settingsOperations.setPortfolioScale(Number((e.target as HTMLInputElement)?.value || 0))}
           class="scale-slider"
         />
       </div>
@@ -252,9 +243,6 @@
     </button>
     <button class="admin-btn" on:click={handleCreateEntity} title="Create New Entity">
       <span>➕</span>
-    </button>
-    <button class="admin-btn admin-btn-tutorial" on:click={handleStartTutorial} title="Start Interactive Tutorial">
-      <span>🎯</span>
     </button>
     <button class="admin-btn" on:click={handleAddPanel} title="Add Entity Panel">
       <span>📋</span>
@@ -563,6 +551,7 @@
     background: #333;
     outline: none;
     -webkit-appearance: none;
+    appearance: none;
   }
   
   .slider-container input[type="range"]::-webkit-slider-thumb {
@@ -591,35 +580,6 @@
     color: #d4d4d4;
   }
 
-  .admin-btn-tutorial {
-    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-    color: white;
-    position: relative;
-  }
-
-  .admin-btn-tutorial:hover {
-    background: linear-gradient(135deg, #2563eb, #1e40af);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-  }
-
-  .admin-btn-tutorial::after {
-    content: '';
-    position: absolute;
-    top: -2px;
-    left: -2px;
-    right: -2px;
-    bottom: -2px;
-    background: linear-gradient(45deg, #3b82f6, #8b5cf6, #06b6d4);
-    border-radius: 8px;
-    z-index: -1;
-    animation: tutorialGlow 2s infinite;
-  }
-
-  @keyframes tutorialGlow {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 0.8; }
-  }
 
   /* Global portfolio scale control */
   .scale-control {
@@ -663,14 +623,3 @@
   }
 </style>
 
-<!-- Tutorial Components -->
-<TutorialLauncher bind:isVisible={showTutorialLauncher} />
-
-{#if $isActiveTutorial && $currentTutorial && $currentStep}
-  <TutorialOverlay 
-    isVisible={$isActiveTutorial}
-    currentStep={0}
-    totalSteps={$currentTutorial.steps.length}
-    tutorialData={[$currentStep]}
-  />
-{/if}

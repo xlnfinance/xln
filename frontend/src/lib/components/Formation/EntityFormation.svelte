@@ -3,8 +3,6 @@
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import { loadJurisdictions } from '../../stores/jurisdictionStore';
   import { tabOperations } from '../../stores/tabStore';
-  import Button from '../Common/Button.svelte';
-  import FormField from '../Common/FormField.svelte';
   import type { EntityFormData } from '../../types';
   import { xlnFunctions } from '../../stores/xlnStore';
 
@@ -121,16 +119,16 @@
         chainId: jurisdictionConfig.chainId
       };
       
-      let config;
-      let entityId;
+      let config: any;
+      let entityId: string;
       
       if (formData.entityType === 'lazy') {
         // For lazy entities, we need to generate the ID separately
         entityId = xln.generateLazyEntityId(validatorNames, threshold);
         
         // Check if this board hash is already used
-        const existingReplicas = Array.from(env.replicas.keys());
-        const isDuplicate = existingReplicas.some(key => key.startsWith(entityId + ':'));
+        const existingReplicas = Array.from(env.replicas.keys()) as string[];
+        const isDuplicate = existingReplicas.some((key: string) => key.startsWith(entityId + ':'));
         
         if (isDuplicate) {
           throw new Error(`⚠️ This validator configuration already exists! Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'} is already in use. Try different validators or weights to create a unique entity.`);
@@ -181,8 +179,8 @@
       
       for (let i = 0; i < validatorNames.length; i++) {
         const signer = validatorNames[i];
-        console.log(`📋 Creating panel ${i + 1} for Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'} with signer: ${signer} on ${jurisdictionName}`);
-        tabOperations.addTab(entityId, signer, jurisdictionName);
+        console.log(`📋 Creating panel ${i + 1} for Entity #${$xlnFunctions?.getEntityNumber(entityId as string) || '?'} with signerId: ${signer} on ${jurisdictionName}`);
+        tabOperations.addTab(entityId as string, signer, jurisdictionName);
       }
       
       console.log(`✅ ${validatorNames.length} panels auto-created with replicas selected!`);
@@ -269,7 +267,7 @@
       // Use the centralized jurisdictionStore instead of fetching directly
       const config = await loadJurisdictions();
 
-      jurisdictionOptions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => {
+      jurisdictionOptions = Object.entries(config.jurisdictions).map(([, data]: [string, any]) => {
         const port = data.rpc.split(':').pop();
         jurisdictionData[port] = data; // Store full jurisdiction data by port
         return {
@@ -281,7 +279,7 @@
       // Default to Ethereum (8545) instead of first option
       if (jurisdictionOptions.length > 0 && !formData.jurisdiction) {
         const ethereumOption = jurisdictionOptions.find(j => j.label.includes('Ethereum'));
-        formData.jurisdiction = ethereumOption ? ethereumOption.value : jurisdictionOptions[0].value;
+        formData.jurisdiction = ethereumOption ? ethereumOption.value : (jurisdictionOptions[0]?.value || '');
         console.log('🔍 Defaulted jurisdiction to:', formData.jurisdiction);
       }
 
@@ -292,20 +290,6 @@
     }
   }
 
-  const entityTypeOptions = [
-    { value: 'lazy', label: '🔒 Lazy Entity (Free - ID = Quorum Hash)' },
-    { value: 'numbered', label: '🔢 Numbered Entity (Gas Required - Sequential ID)' },
-    { value: 'named', label: '🏷️ Named Entity (Premium Gas + Admin Approval)' }
-  ];
-
-  const validatorOptions = [
-    { value: '', label: 'Select signer...' },
-    { value: 's1', label: 's1 (Default)' },
-    { value: 's2', label: 's2' },
-    { value: 's3', label: 's3' },
-    { value: 's4', label: 's4' },
-    { value: 's5', label: 's5' }
-  ];
 </script>
 
 <div class="entity-formation">
@@ -584,6 +568,7 @@
     outline: none;
     margin-bottom: 10px;
     -webkit-appearance: none;
+    appearance: none;
   }
 
   .threshold-slider::-webkit-slider-thumb {

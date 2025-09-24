@@ -38,7 +38,7 @@
 
 import { ethers } from 'ethers';
 
-import { HankoBytes, HankoClaim, HankoMergeResult } from './types';
+import { HankoBytes, HankoClaim } from './types';
 import { createHash, randomBytes } from './utils';
 
 // Browser-compatible Buffer.concat replacement
@@ -77,14 +77,13 @@ const bufferAlloc = (size: number, fill?: number): Buffer => {
 /**
  * Create REAL Ethereum signature using secp256k1
  */
-const createRealSignature = async (hash: Buffer, privateKey: Buffer): Promise<Buffer> => {
+export async function createRealSignature(hash: Buffer, privateKey: Buffer): Promise<Buffer> {
   try {
     // Create wallet from private key
     const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
 
     // Sign the hash (ethers automatically prefixes with \x19Ethereum Signed Message)
     // For raw hash signing without prefix, we need to use wallet._signingKey
-    const hashHex = ethers.hexlify(hash);
     const signature = await wallet.signMessage(ethers.getBytes(hash));
 
     // Parse signature components
@@ -114,11 +113,9 @@ const createRealSignature = async (hash: Buffer, privateKey: Buffer): Promise<Bu
  */
 export const createDirectHashSignature = async (hash: Buffer, privateKey: Buffer): Promise<Buffer> => {
   try {
-    const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
 
     // Sign the raw hash directly (no message prefix)
     const hashHex = ethers.hexlify(hash);
-    const signature = await wallet.signMessage(ethers.getBytes(hash));
 
     // For direct hash signing, we need to use the signing key directly
     const signingKey = new ethers.SigningKey(ethers.hexlify(privateKey));
@@ -159,8 +156,9 @@ export const verifySignatureRecovery = async (
     const s = ethers.hexlify(signature.slice(32, 64));
     const v = signature[64];
 
-    // Recover address
-    const recoveredAddress = ethers.recoverAddress(ethers.hexlify(hash), { r, s, v });
+    // Recover address (convert v to yParity for ethers v6)
+    const yParity = (v! >= 27 ? v! - 27 : v!) as 0 | 1;
+    const recoveredAddress = ethers.recoverAddress(ethers.hexlify(hash), { r, s, v: v!, yParity });
 
     const matches = recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
     console.log(
@@ -185,11 +183,11 @@ export const packRealSignatures = (signatures: Buffer[]): Buffer => {
 
   // Validate all signatures are exactly 65 bytes
   for (let i = 0; i < signatures.length; i++) {
-    if (signatures[i].length !== 65) {
-      throw new Error(`Invalid signature ${i}: ${signatures[i].length} bytes (expected 65)`);
+    if (!signatures[i] || signatures[i]!.length !== 65) {
+      throw new Error(`Invalid signature ${i}: ${signatures[i]?.length || 0} bytes (expected 65)`);
     }
 
-    const v = signatures[i][64];
+    const v = signatures[i]![64];
     if (v !== 27 && v !== 28) {
       throw new Error(`Invalid v value in signature ${i}: ${v} (expected 27 or 28)`);
     }
@@ -211,12 +209,12 @@ export const packRealSignatures = (signatures: Buffer[]): Buffer => {
   const vValues = bufferAlloc(vBytesNeeded);
 
   for (let i = 0; i < signatures.length; i++) {
-    const vByte = signatures[i][64];
+    const vByte = signatures[i]![64];
     const byteIndex = Math.floor(i / 8);
     const bitIndex = i % 8;
 
     if (vByte === 28) {
-      vValues[byteIndex] |= 1 << bitIndex;
+      vValues[byteIndex]! |= 1 << bitIndex;
     }
   }
 
@@ -278,7 +276,7 @@ export const unpackRealSignatures = (packedSignatures: Buffer): Buffer[] => {
 
     const byteIndex = Math.floor(i / 8);
     const bitIndex = i % 8;
-    const vBit = (vValues[byteIndex] >> bitIndex) & 1;
+    const vBit = (vValues[byteIndex]! >> bitIndex) & 1;
     const vByte = vBit === 0 ? 27 : 28;
 
     const signature = bufferConcat([rs, Buffer.from([vByte])]);
@@ -348,7 +346,7 @@ export const buildRealHanko = async (
   const signerAddresses: string[] = [];
 
   for (let i = 0; i < config.privateKeys.length; i++) {
-    const privateKey = config.privateKeys[i];
+    const privateKey = config.privateKeys[i]!;
 
     // Get the address for this private key
     const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
@@ -357,11 +355,11 @@ export const buildRealHanko = async (
     console.log(`🔑 Signing with key ${i + 1}/${config.privateKeys.length}: ${wallet.address.slice(0, 10)}...`);
 
     // Create real signature
-    const signature = await createDirectHashSignature(hashToSign, privateKey);
+    const signature = await createDirectHashSignature(hashToSign!, privateKey);
     signatures.push(signature);
 
     // Verify the signature works
-    const verifySuccess = await verifySignatureRecovery(hashToSign, signature, wallet.address);
+    const verifySuccess = await verifySignatureRecovery(hashToSign!, signature, wallet.address);
     if (!verifySuccess) {
       throw new Error(`Signature verification failed for key ${i}`);
     }
@@ -433,12 +431,13 @@ export const recoverHankoEntities = async (
   for (let i = 0; i < signatures.length; i++) {
     try {
       // Use ethers to recover the signer address
-      const sig = signatures[i];
+      const sig = signatures[i]!;
       const r = ethers.hexlify(sig.slice(0, 32));
       const s = ethers.hexlify(sig.slice(32, 64));
       const v = sig[64];
 
-      const recoveredAddress = ethers.recoverAddress(ethers.hexlify(hash), { r, s, v });
+      const yParity = (v! >= 27 ? v! - 27 : v!) as 0 | 1;
+      const recoveredAddress = ethers.recoverAddress(ethers.hexlify(hash), { r, s, v: v!, yParity });
 
       // Convert address to bytes32 (same format as Solidity)
       const addressAsBytes32 = Buffer.from(ethers.zeroPadValue(recoveredAddress, 32).slice(2), 'hex');
@@ -462,6 +461,7 @@ export const recoverHankoEntities = async (
 
   for (let claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
     const claim = hanko.claims[claimIndex];
+    if (!claim) continue;
 
     console.log(
       `🔄 Processing claim ${claimIndex + 1}/${hanko.claims.length}: Entity ${ethers.hexlify(claim.entityId).slice(0, 10)}...`,
@@ -473,6 +473,7 @@ export const recoverHankoEntities = async (
 
     for (let i = 0; i < claim.entityIndexes.length; i++) {
       const entityIndex = claim.entityIndexes[i];
+      if (entityIndex === undefined) continue;
 
       // Validate bounds
       if (entityIndex >= totalEntities) {
@@ -493,13 +494,15 @@ export const recoverHankoEntities = async (
         continue;
       } else if (entityIndex < hanko.placeholders.length + signatures.length) {
         // Index N..M-1: EOA signature - verified, contributes full weight
-        console.log(`  🔑 Index ${entityIndex}: EOA signature (power: ${claim.weights[i]})`);
-        totalVotingPower += claim.weights[i];
+        const weight = claim.weights[i] || 0;
+        console.log(`  🔑 Index ${entityIndex}: EOA signature (power: ${weight})`);
+        totalVotingPower += weight;
       } else {
         // Index M..∞: Entity claim - ASSUME YES! (flashloan governance)
         const refClaimIdx = referencedClaimIndex;
-        console.log(`  🔥 Index ${entityIndex}: ASSUME claim ${refClaimIdx} = YES (power: ${claim.weights[i]})`);
-        totalVotingPower += claim.weights[i];
+        const weight = claim.weights[i] || 0;
+        console.log(`  🔥 Index ${entityIndex}: ASSUME claim ${refClaimIdx} = YES (power: ${weight})`);
+        totalVotingPower += weight;
       }
     }
 
@@ -561,7 +564,7 @@ export const testFullCycle = async (): Promise<{ hanko: HankoBytes; abiEncoded: 
 
   for (let i = 0; i < unpacked.length; i++) {
     const expectedAddr = i === 0 ? wallet1.address : wallet2.address;
-    const verified = await verifySignatureRecovery(hashToSign, unpacked[i], expectedAddr);
+    const verified = await verifySignatureRecovery(hashToSign, unpacked[i]!, expectedAddr);
     console.log(`   Signature ${i + 1}: ${verified ? '✅' : '❌'} ${expectedAddr.slice(0, 10)}...`);
   }
 

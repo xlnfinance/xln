@@ -7,10 +7,10 @@
   export let label: string = 'Entity:';
 
   // Get all available entities
-  $: availableEntities = $replicas ? Array.from($replicas.entries())
+  $: availableEntities = $replicas ? Array.from($replicas.entries() as [string, any][])
     .map(([replicaKey, replica]) => {
       const [entityId, signerId] = replicaKey.split(':');
-      return { entityId, signerId, replica };
+      return { entityId: entityId || '', signerId: signerId || '', replica };
     })
     .filter(({ entityId }) => entityId !== currentEntityId)
     .reduce((unique, item) => {

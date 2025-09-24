@@ -24,20 +24,20 @@
 
   // Get proposals for voting
   $: proposals = replica?.state?.proposals ? 
-    Array.from(replica.state.proposals.entries()).map(([id, proposal]) => ({ id, ...proposal })) : [];
+    Array.from(replica.state.proposals.entries()).map(([proposalId, proposal]) => ({ ...proposal, id: proposalId })) : [];
 
   // Get available tokens for sending
   $: availableTokens = replica?.state?.reserves
     ? Array.from(replica.state.reserves.entries()).map(([id, reserve]) => ({
         id: id,
-        name: reserve.name || `Token #${id}`,
-        amount: reserve.amount
+        name: `Token #${id}`,
+        amount: reserve
       }))
     : [];
 
 
   async function submitChatMessage() {
-    if (!tab.entityId || !tab.signer || !message.trim()) return;
+    if (!tab.entityId || !tab.signerId || !message.trim()) return;
     
     try {
       const xln = await getXLN();
@@ -47,10 +47,10 @@
       // Direct processUntilEmpty for entityInputs (no serverTxs needed)
       await xln.processUntilEmpty(env, [{
         entityId: tab.entityId,
-        signerId: tab.signer,
+        signerId: tab.signerId,
         entityTxs: [{
           type: 'chat',
-          data: { from: tab.signer, message: message.trim() }
+          data: { from: tab.signerId, message: message.trim() }
         }]
       }]);
       
@@ -58,12 +58,12 @@
       message = '';
     } catch (error) {
       console.error('Failed to send chat message:', error);
-      alert(`Failed to send message: ${error.message}`);
+      alert(`Failed to send message: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 
   async function submitProposal() {
-    if (!tab.entityId || !tab.signer || !proposalTitle.trim()) return;
+    if (!tab.entityId || !tab.signerId || !proposalTitle.trim()) return;
     
     try {
       const xln = await getXLN();
@@ -75,12 +75,12 @@
       // Direct processUntilEmpty for entityInputs (no serverTxs needed)
       await xln.processUntilEmpty(env, [{
         entityId: tab.entityId,
-        signerId: tab.signer,
+        signerId: tab.signerId,
         entityTxs: [{
           type: 'propose',
           data: {
             action: { type: 'collective_message', data: { message: proposalText } },
-            proposer: tab.signer
+            proposer: tab.signerId
           }
         }]
       }]);
@@ -90,12 +90,12 @@
       proposalDescription = '';
     } catch (error) {
       console.error('Failed to send proposal:', error);
-      alert(`Failed to send proposal: ${error.message}`);
+      alert(`Failed to send proposal: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 
   async function submitVote() {
-    if (!tab.entityId || !tab.signer || !selectedProposalId || !voteChoice) return;
+    if (!tab.entityId || !tab.signerId || !selectedProposalId || !voteChoice) return;
     
     try {
       const xln = await getXLN();
@@ -104,8 +104,8 @@
 
       // Check if already voted (same logic as legacy)
       const currentProposal = replica?.state?.proposals?.get(selectedProposalId);
-      if (currentProposal && currentProposal.votes.has(tab.signer)) {
-        alert(`You have already voted on this proposal as "${currentProposal.votes.get(tab.signer)}".`);
+      if (currentProposal && currentProposal.votes.has(tab.signerId)) {
+        alert(`You have already voted on this proposal as "${currentProposal.votes.get(tab.signerId)}".`);
         return;
       }
 
@@ -113,12 +113,12 @@
       
       const voteInput = {
         entityId: tab.entityId,
-        signerId: tab.signer,
+        signerId: tab.signerId,
         entityTxs: [{
           type: 'vote',
           data: {
             proposalId: selectedProposalId,
-            voter: tab.signer,
+            voter: tab.signerId,
             choice: voteValue,
             comment: voteComment.trim() || undefined
           }
@@ -127,7 +127,7 @@
       
       console.log('🗳️ FRONTEND-DEBUG: About to submit vote:', {
         entityId: tab.entityId,
-        signerId: tab.signer,
+        signerId: tab.signerId,
         proposalId: selectedProposalId,
         choice: voteValue,
         txType: 'vote'
@@ -142,12 +142,12 @@
       voteComment = '';
     } catch (error) {
       console.error('Failed to submit vote:', error);
-      alert(`Failed to submit vote: ${error.message}`);
+      alert(`Failed to submit vote: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 
   async function openAccount() {
-    if (!tab.entityId || !tab.signer || !accountCounterparty.trim()) return;
+    if (!tab.entityId || !tab.signerId || !accountCounterparty.trim()) return;
     
     try {
       const xln = await getXLN();
@@ -159,7 +159,7 @@
       
       const accountInput = {
         entityId: tab.entityId,
-        signerId: tab.signer,
+        signerId: tab.signerId,
         entityTxs: [{
           type: 'accountInput',
           data: {
@@ -182,7 +182,7 @@
       accountCounterparty = '';
     } catch (error) {
       console.error('Failed to open account:', error);
-      alert(`Failed to open account: ${error.message}`);
+      alert(`Failed to open account: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 
@@ -199,7 +199,7 @@
   }
 
   async function submitJtx() {
-    if (!tab.entityId || !tab.signer || !jtxRecipient.trim() || !jtxAmount || !jtxTokenId) {
+    if (!tab.entityId || !tab.signerId || !jtxRecipient.trim() || !jtxAmount || !jtxTokenId) {
       alert('Please fill in all fields for the transfer.');
       return;
     }
@@ -233,25 +233,6 @@
       const env = $xlnEnvironment;
       if (!env) throw new Error('XLN environment not ready');
 
-      // This is the correct structure for a Depository batch transaction
-      const batch = {
-        reserveToReserve: [{
-          receivingEntity: recipientAddress,
-          tokenId: tokenIdNum,
-          amount: jtxAmount,
-        }],
-        // Explicitly set other batch arrays to empty to ensure a clean transaction
-        reserveToExternalToken: [],
-        externalTokenToReserve: [],
-        reserveToCollateral: [],
-        settlements: [],
-        cooperativeUpdate: [],
-        cooperativeDisputeProof: [],
-        initialDisputeProof: [],
-        finalDisputeProof: [],
-        flashloans: [],
-        hub_id: 0,
-      };
 
       // Use SIMPLE reserveToReserve (what worked before!)
       console.log('💸 Submitting SIMPLE reserveToReserve to blockchain...');
@@ -306,13 +287,13 @@
 
     } catch (error) {
       console.error('Failed to send J-tx:', error);
-      alert(`Failed to send J-tx: ${error.message}`);
+      alert(`Failed to send J-tx: ${(error as Error)?.message || 'Unknown error'}`);
     }
   }
 </script>
 
 <div class="controls-section">
-  {#if !tab.entityId || !tab.signer}
+  {#if !tab.entityId || !tab.signerId}
     <div class="empty-controls">
       <div class="empty-message">
         <h4>🎯 Select Entity & Signer First</h4>

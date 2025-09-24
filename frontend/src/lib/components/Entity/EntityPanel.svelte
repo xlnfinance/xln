@@ -1,22 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Tab, EntityReplica } from '../../types';
-  import { getXLN, replicas, history } from '../../stores/xlnStore';
+  import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
 
-  // Simple HTML escape (moved from deleted utils)
-  function escapeHtml(unsafe: string): string {
-    return unsafe
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
   import EntityDropdown from './EntityDropdown.svelte';
-  // Removed AccountInspectorDropdown - consolidated into AccountPreview + AccountPanel
+  import AccountPanel from './AccountPanel.svelte';
   import EntityProfile from './EntityProfile.svelte';
   import ConsensusState from './ConsensusState.svelte';
   import ChatMessages from './ChatMessages.svelte';
@@ -24,7 +15,6 @@
   import TransactionHistory from './TransactionHistory/index.svelte';
   import ControlsPanel from './ControlsPanel.svelte';
   import AccountList from './AccountList.svelte';
-  import AccountPanel from './AccountPanel.svelte';
   import AccountDropdown from './AccountDropdown.svelte';
   import PaymentPanel from './PaymentPanel.svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
@@ -38,15 +28,20 @@
 
   // Reactive statement to get replica data
   $: {
-    if (tab.entityId && tab.signer) {
+    if (tab.entityId && tab.signerId) {
       // Prefer time-aware replicas if available
-      const replicaKey = `${tab.entityId}:${tab.signer}`;
+      const replicaKey = `${tab.entityId}:${tab.signerId}`;
       const candidate = $visibleReplicas?.get?.(replicaKey);
       replica = candidate; // TODO: Fix getReplica call
     } else {
       replica = null;
     }
   }
+
+  // Navigation state - entity view vs focused account view
+  $: isAccountFocused = selectedAccountId !== null;
+  $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
+    ? replica.state.accounts.get(selectedAccountId) : null;
 
   // Reactive component states
   $: consensusExpanded = $settings.componentStates[`consensus-${tab.id}`] ?? true;
@@ -106,14 +101,14 @@
 
   // Handle entity selection from dropdown
   function handleEntitySelect(event: CustomEvent) {
-    const { jurisdiction, signer, entityId } = event.detail;
+    const { jurisdiction, signerId, entityId } = event.detail;
 
     // Clear selected account when changing entities
     selectedAccountId = null;
 
     tabOperations.updateTab(tab.id, {
       jurisdiction,
-      signer,
+      signerId,
       entityId,
       title: `Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'}`
     });
@@ -130,11 +125,10 @@
     }
   }
 
-  // Handle account selection from preview click (simplified)
+  // Handle account selection from preview click - same as dropdown
   function handleAccountPreviewSelect(event: CustomEvent) {
-    const accountId = event.detail.accountId;
-    selectedAccountId = accountId;
-    console.log('📋 Account selected via preview: Entity #', $xlnFunctions?.getEntityNumber(accountId) || '?');
+    // Route to the same handler as dropdown for consistent behavior
+    handleAccountSelect(event);
   }
 
   // Handle back to entity - clear account selection
@@ -143,10 +137,6 @@
     console.log('↩️ Back to entity view');
   }
 
-  // Get selected account from state
-  $: selectedAccount = selectedAccountId && replica?.state?.accounts
-    ? replica.state.accounts.get(selectedAccountId)
-    : null;
 
   // Handle tab close
   function handleCloseTab() {
@@ -160,7 +150,7 @@
 
   onMount(() => {
     // Check if we should show close button
-    const allTabs = tabOperations.getActiveTab();
+    tabOperations.getActiveTab();
     // Show close button if more than 1 tab exists
     // This will be updated reactively through the parent
 
@@ -168,7 +158,7 @@
     const handleTimeChanged = (event: CustomEvent) => {
       console.log('🕰️ EntityPanel received time change event:', event.detail.timeIndex);
       // Force reactivity by triggering replica update
-      if (tab.entityId && tab.signer) {
+      if (tab.entityId && tab.signerId) {
         // The reactive statement will automatically pick up the new visibleReplicas
         // due to timeState changes, but we can force a console log
         console.log(`🔄 Panel ${tab.id} updating for time index:`, event.detail.timeIndex);
@@ -187,15 +177,15 @@
   <div class="panel-header">
     <div class="panel-header-dropdowns">
       <div class="dropdown-group">
-        <label class="dropdown-label">Entity:</label>
         <EntityDropdown
           {tab}
           on:entitySelect={handleEntitySelect}
         />
       </div>
       <div class="dropdown-group">
-        <label class="dropdown-label">Account:</label>
-        <AccountDropdown {replica} {selectedAccountId} on:accountSelect={handleAccountSelect} />
+        {#if replica}
+          <AccountDropdown {replica} {selectedAccountId} on:accountSelect={handleAccountSelect} />
+        {/if}
       </div>
     </div>
     <div class="panel-header-controls">
@@ -212,7 +202,22 @@
     </div>
   </div>
 
-  {#if !tab.entityId || !tab.signer}
+  {#if isAccountFocused && selectedAccount}
+    <!-- Focused Account View -->
+    <div class="focused-account-view">
+      <div class="account-breadcrumb">
+        <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{$xlnFunctions?.getEntityNumber(tab.entityId) || '?'}</button>
+        <span class="breadcrumb-separator">→</span>
+        <span class="breadcrumb-current">Account with Entity #{$xlnFunctions?.getEntityNumber(selectedAccountId) || '?'}</span>
+      </div>
+      <AccountPanel
+        account={selectedAccount}
+        counterpartyId={selectedAccountId || ''}
+        entityId={tab.entityId}
+        on:back={handleBackToEntity}
+      />
+    </div>
+  {:else if !tab.entityId || !tab.signerId}
     <!-- Empty State: No Entity Selected -->
     <div class="empty-panel-state">
       <div class="empty-panel-message">
@@ -285,7 +290,7 @@
           <h3>Accounts</h3>
         </div>
         <div class="accounts-content">
-          <AccountList {replica} entityId={tab.entityId} on:select={handleAccountPreviewSelect} />
+          <AccountList replica={replica} on:select={handleAccountPreviewSelect} />
         </div>
       </div>
 
@@ -1008,5 +1013,46 @@
 
   .accounts-content {
     /* Let AccountChannels handle its own styling */
+  }
+
+  /* Focused Account View Styles */
+  .focused-account-view {
+    padding: 20px;
+  }
+
+  .account-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #444;
+    font-size: 14px;
+  }
+
+  .breadcrumb-back {
+    background: #333;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #007acc;
+    cursor: pointer;
+    padding: 6px 10px;
+    font-size: 12px;
+    transition: all 0.2s ease;
+  }
+
+  .breadcrumb-back:hover {
+    background: #404040;
+    border-color: #007acc;
+  }
+
+  .breadcrumb-separator {
+    color: #666;
+    font-weight: bold;
+  }
+
+  .breadcrumb-current {
+    color: #d4d4d4;
+    font-weight: 500;
   }
 </style>

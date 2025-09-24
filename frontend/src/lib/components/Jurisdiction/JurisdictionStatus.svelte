@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getXLN } from '../../stores/xlnStore';
   import { loadJurisdictions } from '../../stores/jurisdictionStore';
   import Button from '../Common/Button.svelte';
 

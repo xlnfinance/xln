@@ -1,36 +1,22 @@
 import ChannelState, { StoredSubcontract } from '../types/ChannelState';
 import IMessage from '../types/IMessage';
-
 import Logger from '../utils/Logger';
-
 import Block from '../types/Block';
-
-
-
 import ENV from '../env';
 import { ethers, keccak256 } from 'ethers';
 import { Depository__factory, SubcontractProvider, SubcontractProvider__factory } from '../../contracts/typechain-types/index';
-
 import { deepClone, getTimestamp } from '../utils/Utils';
 import FlushMessage, {isValidFlushMessage} from '../types/Messages/FlushMessage';
 import IChannelStorage from '../types/IChannelStorage';
-
 import ChannelData from '../types/ChannelData';
 import IChannelContext from '../types/IChannelContext';
-
-
 import Transition from './Transition';
 import { sleep } from '../utils/Utils';
-
 import ChannelSavePoint from '../types/ChannelSavePoint';
 import { createSubchannelData, Subchannel, Delta } from '../types/Subchannel';
-
 import { BigNumberish } from 'ethers';
-
 import { decode, encode } from '../utils/Codec';
-
 import {SubcontractBatchABI, ProofbodyABI} from '../types/ABI';
-
 
 export function stringify(obj: any) {
   function replacer(key: string, value: any) {
@@ -602,15 +588,9 @@ export default class Channel {
         transitions: transitions,
       };
 
-      //this.logger.log('State before applying block:'+this.thisUserAddress, stringify(this.state));
-      //this.logger.log(123, this.state)
       await this.applyBlock(block, true); // <--- only dryRun
 
       let expectedLength = this.dryRunState!.subchannels.length + 1;
-      //this.logger.log('State after applying block:'+this.thisUserAddress, stringify(this.state));
-
-      //this.logger.log("block", block, this.data.pendingBlock);
-
 
       this.data.pendingBlock = decode(encode(block));
       this.data.sentTransitions = transitions.length;
@@ -746,9 +726,7 @@ export default class Channel {
   }
   
   public getSubchannel(chainId: number, dryRun: boolean = false): Subchannel | undefined {
-    //this.logger.log('Getting subchannel. Current subchannels:', stringify(this.state.subchannels));
     const subchannel = (dryRun ? this.dryRunState! : this.state).subchannels.find(subchannel => subchannel.chainId === chainId);
-    //this.logger.log(`Getting subchannel ${chainId}:`, stringify(subchannel));
     return subchannel;
   }
 
@@ -778,6 +756,14 @@ export default class Channel {
     await Promise.all(transitionPromises);
 
   }
+  public async save(): Promise<void> {
+    this.logger.log(`save ${this.channelId} ${this.state.blockId} ${this.state.previousBlockHash}`);
+    const channelSavePoint: ChannelSavePoint = {
+      data: this.data,
+      state: this.state
+    };
+    await this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
+  }
  
 
   private async applyTransition(block: Block, transitionData: any, dryRun: boolean): Promise<void> {
@@ -791,38 +777,12 @@ export default class Channel {
 
 
       state.transitionId++;
-    //try {
       transition = Transition.createFromDecoded(transitionData) as Transition.Any;
-    //} catch (error: any) {
-    //  this.logger.error(`Invalid transition data: ${error.message}`);
-    //  return;
-    //}
-     //if (!dryRun){
-      //this.logger.debug(`applyTr${dryRun} ${transition.type}`+this.thisUserAddress, stringify(transition));
-     //}
     
-    //try{
     await transition.apply(this, block, dryRun);
-   // } catch(e){
-     // this.logger.log(e);
-     // this.logger.debug('fatal in applytransiton', e);
-     // throw(e);
-    //}
-    //this.logger.log('State after applying transition:'+this.thisUserAddress, state);
     
   }
 
-  async save(): Promise<void> {
-    const channelSavePoint: ChannelSavePoint = {
-      data: this.data,
-      state: this.state
-    };
-
-    //this.logger.log("Saving state"+this.thisUserAddress, this.data.isLeft, stringify(channelSavePoint), new Date());
-
-    await this.storage.setValue<ChannelSavePoint>('channelSavePoint', channelSavePoint);
-    //this.logger.log("State saved successfully "+this.thisUserAddress);
-  }
 
   async load(): Promise<void> {
     try {
@@ -839,10 +799,6 @@ export default class Channel {
   async receiveMessage(encryptedMessage: string): Promise<void> {
     const decryptedMessage = await this.ctx.user.decryptMessage(this.otherUserAddress, encryptedMessage);
     this.logger.log(`Decrypted ${this.getId()}: ${decryptedMessage}`);
-  }
-
-  getBalance(): bigint { 
-    return 123n;
   }
 
 }

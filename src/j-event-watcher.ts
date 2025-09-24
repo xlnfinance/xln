@@ -9,21 +9,13 @@
  */
 
 import { ethers } from 'ethers';
-import type { EntityTx, Env } from './types.js';
+import type { Env } from './types.js';
 
 // Debug flags - reduced for cleaner output
 const DEBUG = false; // Reduced j-watcher verbosity
 const HEAVY_LOGS = false;
 
 // Event types we care about from the jurisdiction
-interface JurisdictionEvent {
-  type: 'entity_registered' | 'control_shares_released' | 'shares_received' | 'name_assigned' | 'reserve_updated' | 'reserve_transferred' | 'settlement_processed';
-  blockNumber: number;
-  transactionHash: string;
-  entityId?: string;
-  entityNumber?: number;
-  data: any;
-}
 
 interface WatcherConfig {
   rpcUrl: string;
@@ -42,7 +34,6 @@ export class JEventWatcher {
   private provider: ethers.JsonRpcProvider;
   private entityProviderContract: ethers.Contract;
   private depositoryContract: ethers.Contract;
-  private config: WatcherConfig;
   private signers: Map<string, SignerConfig> = new Map();
   private isWatching: boolean = false;
 
@@ -61,7 +52,6 @@ export class JEventWatcher {
   ];
 
   constructor(config: WatcherConfig) {
-    this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
 
     this.entityProviderContract = new ethers.Contract(
@@ -111,7 +101,7 @@ export class JEventWatcher {
       const currentBlock = await this.provider.getBlockNumber();
       console.log(`🔭 J-WATCHER: Connected to blockchain at block ${currentBlock}`);
     } catch (error) {
-      console.log(`🔭⚠️  J-WATCHER: Blockchain not ready, will retry: ${error.message}`);
+      console.log(`🔭⚠️  J-WATCHER: Blockchain not ready, will retry: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     // Simple polling every 1 second - first principles approach
@@ -121,8 +111,8 @@ export class JEventWatcher {
       try {
         await this.syncAllProposerReplicas(env);
       } catch (error) {
-        if (DEBUG && !error.message.includes('ECONNREFUSED')) {
-          console.error('🔭❌ J-WATCHER: Sync error:', error.message);
+        if (DEBUG && !(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
+          console.error('🔭❌ J-WATCHER: Sync error:', error instanceof Error ? error.message : String(error));
         }
       }
     }, 1000);
@@ -162,6 +152,7 @@ export class JEventWatcher {
       for (const [replicaKey, replica] of env.replicas.entries()) {
         if (replica.isProposer) {
           const [entityId, signerId] = replicaKey.split(':');
+          if (!entityId || !signerId) continue;
           const lastJBlock = replica.state.jBlock || 0;
 
           if (DEBUG) {
@@ -201,7 +192,7 @@ export class JEventWatcher {
 
     } catch (error) {
       // Don't spam connection errors
-      if (!error.message.includes('ECONNREFUSED')) {
+      if (!(error instanceof Error) || !error.message.includes('ECONNREFUSED')) {
         throw error;
       }
     }
@@ -244,7 +235,7 @@ export class JEventWatcher {
       console.log(`🔭✅ ENTITY-SYNC: Queued ${events.length} events for entity ${entityId.slice(0,10)}... (${signerId})`);
 
     } catch (error) {
-      console.error(`🔭❌ ENTITY-SYNC: Error syncing entity ${entityId.slice(0,10)}...`, error.message);
+      console.error(`🔭❌ ENTITY-SYNC: Error syncing entity ${entityId.slice(0,10)}...`, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -257,19 +248,26 @@ export class JEventWatcher {
     }
 
     // Get both ReserveUpdated and SettlementProcessed events for this entity
+    const reserveFilter = this.depositoryContract.filters['ReserveUpdated'];
+    const settlementFilter = this.depositoryContract.filters['SettlementProcessed'];
+
+    if (!reserveFilter || !settlementFilter) {
+      throw new Error('Contract filters not available');
+    }
+
     const [reserveEvents, settlementEventsLeft, settlementEventsRight] = await Promise.all([
       this.depositoryContract.queryFilter(
-        this.depositoryContract.filters.ReserveUpdated(entityId),
+        reserveFilter(entityId),
         fromBlock,
         toBlock
       ),
       this.depositoryContract.queryFilter(
-        this.depositoryContract.filters.SettlementProcessed(entityId, null, null),
+        settlementFilter(entityId, null, null),
         fromBlock,
         toBlock
       ),
       this.depositoryContract.queryFilter(
-        this.depositoryContract.filters.SettlementProcessed(null, entityId, null),
+        settlementFilter(null, entityId, null),
         fromBlock,
         toBlock
       )
@@ -384,7 +382,7 @@ export class JEventWatcher {
   /**
    * Legacy compatibility method - not used in first-principles design
    */
-  async syncNewlyCreatedEntities(env: Env): Promise<boolean> {
+  async syncNewlyCreatedEntities(_env: Env): Promise<boolean> {
     if (DEBUG) {
       console.log('🔭⚠️  J-WATCHER: syncNewlyCreatedEntities called (legacy) - first-principles design handles this automatically');
     }
@@ -399,7 +397,7 @@ export class JEventWatcher {
       return await this.provider.getBlockNumber();
     } catch (error) {
       if (DEBUG) {
-        console.log(`🔭⚠️  J-WATCHER: Could not get current block, using 0:`, error.message);
+        console.log(`🔭⚠️  J-WATCHER: Could not get current block, using 0:`, error instanceof Error ? error.message : String(error));
       }
       return 0;
     }

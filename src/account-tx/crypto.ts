@@ -60,7 +60,7 @@ export function getSignerFromSignature(signature: string, frameHash: string): st
     const parts = decoded.split('-');
 
     if (parts.length >= 2 && parts[1] === frameHash) {
-      return parts[0]; // Return entityId
+      return parts[0] || null; // Return entityId or null if empty
     }
   } catch (error) {
     console.log(`⚠️ Failed to parse signature: ${error}`);

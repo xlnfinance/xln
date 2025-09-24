@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
-  import { tabOperations, tabs } from '../../stores/tabStore';
+  import { tabs } from '../../stores/tabStore';
 
   export let profile: any;
 
@@ -14,7 +14,7 @@
         return value.toString();
       }
       if (typeof value === 'object' && value !== null) {
-        return JSON.stringify(value, (key, val) =>
+        return JSON.stringify(value, (_, val) =>
           typeof val === 'bigint' ? val.toString() : val
         );
       }
@@ -30,7 +30,7 @@
   // Get current active entity and signer
   $: activeTab = $tabs.find(tab => tab.isActive);
   $: currentEntityId = activeTab?.entityId;
-  $: currentSignerId = activeTab?.signer;
+  $: currentSignerId = activeTab?.signerId;
 
   // Check if already joined this hub (has channel)
   $: hasExistingChannel = (() => {

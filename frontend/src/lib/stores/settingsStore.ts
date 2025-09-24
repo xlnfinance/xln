@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ComponentState } from '../types';
+import type { Settings } from '../types';
 
 // Default settings
 const defaultSettings: Settings = {

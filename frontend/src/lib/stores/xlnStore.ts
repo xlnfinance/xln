@@ -77,7 +77,16 @@ export const replicas = derived(
 
 export const history = derived(
   xlnEnvironment,
-  ($env) => $env?.history || []
+  ($env) => {
+    const historyData = $env?.history || [];
+    console.log('🔄 LOAD-ORDER-DEBUG: History derived store updated:', {
+      timestamp: new Date().toISOString(),
+      historyLength: historyData.length,
+      environmentExists: !!$env,
+      envHeight: $env?.height || 0
+    });
+    return historyData;
+  }
 );
 
 export const currentHeight = derived(
@@ -139,14 +148,21 @@ export async function initializeXLN() {
 
     // History is now guaranteed to be included in env
 
+    console.log('🔄 LOAD-ORDER-DEBUG: Setting xlnEnvironment with history:', {
+      timestamp: new Date().toISOString(),
+      historyLength: env?.history?.length || 0,
+      environmentHeight: env?.height || 0,
+      replicasCount: env?.replicas?.size || 0
+    });
+
     xlnEnvironment.set(env);
     isLoading.set(false);
-    
+
     // Expose to window for e2e testing
     if (typeof window !== 'undefined') {
       (window as any).xlnEnv = env;
     }
-    
+
     console.log('✅ XLN Environment initialized with auto-reactivity');
     return env;
   } catch (err) {
@@ -154,7 +170,7 @@ export async function initializeXLN() {
     
     // If initialization fails, try to create a minimal environment
     try {
-      const xln = await getXLN();
+      await getXLN();
       console.log('🔄 Attempting minimal environment creation...');
       
       const minimalEnv = {
@@ -179,6 +195,7 @@ export async function initializeXLN() {
       error.set(errorMessage);
       isLoading.set(false);
       console.error('❌ Fallback initialization also failed:', fallbackErr);
+      void fallbackErr; // Acknowledge unused variable
       throw err;
     }
   }

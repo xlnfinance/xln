@@ -1,54 +1,58 @@
-import { AccountInput, EntityState, Env } from '../../types';
-import { createDemoDelta } from '../../account-utils';
-import { handleAccountInput as processAccountInput, addToAccountMempool } from '../../account-consensus';
+import { AccountInput, EntityState, Env, EntityInput } from '../../types';
+import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState } from '../../state-helpers';
+import { formatEntityId } from '../../entity-helpers';
+import { createDemoDelta, getDefaultCreditLimit } from '../../account-utils';
 
-export function handleAccountInput(state: EntityState, input: AccountInput, env: Env): EntityState {
+export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId}`, input.accountTx);
 
   // Create immutable copy of current state
   const newState: EntityState = cloneEntityState(state);
+  const outputs: EntityInput[] = [];
 
   // Add chat message about receiving account input
-  if (input.accountTx) {
+  if (input.accountTx && input.accountTx.type) {
     newState.messages.push(`📨 Received ${input.accountTx.type} from Entity ${input.fromEntityId.slice(-4)}`);
+  } else if (!input.accountTx) {
+    console.warn(`⚠️ Received accountInput without accountTx from ${input.fromEntityId}`);
+    newState.messages.push(`📨 Received account request from Entity ${input.fromEntityId.slice(-4)}`);
   }
 
-  // Get or create account machine for this counterparty
-  let accountMachine = newState.accounts.get(input.toEntityId);
+  // Get or create account machine for this counterparty (fromEntityId is who we're creating an account WITH)
+  let accountMachine = newState.accounts.get(input.fromEntityId);
   if (!accountMachine) {
-    // Create new account machine with demo deltas for tokens 1, 2, 3
-    const demoDeltasMap = new Map();
-    demoDeltasMap.set(1, createDemoDelta(1, 1000n, 0n)); // ETH: 1000 collateral
-    demoDeltasMap.set(2, createDemoDelta(2, 2000n, -100n)); // USDT: 2000 collateral, we owe them 100
-    demoDeltasMap.set(3, createDemoDelta(3, 500n, 50n)); // USDC: 500 collateral, they owe us 50
+    // Initialize with default USDT delta showing credit limits (no collateral initially)
+    const initialDeltas = new Map();
+    initialDeltas.set(2, createDemoDelta(2, 0n, 0n)); // USDT token
 
     accountMachine = {
-      counterpartyEntityId: input.toEntityId,
+      counterpartyEntityId: input.fromEntityId,
       mempool: [],
       currentFrame: {
         frameId: 0,
         timestamp: Date.now(),
-        tokenIds: [1, 2, 3],
-        deltas: [0n, -100n, 50n],
+        tokenIds: [],
+        deltas: [],
       },
       sentTransitions: 0,
       ackedTransitions: 0,
-      deltas: demoDeltasMap,
+      deltas: initialDeltas,
       globalCreditLimits: {
-        ownLimit: 1000000n, // We extend 1M USD credit to counterparty
-        peerLimit: 1000000n, // Counterparty extends 1M USD credit to us
+        ownLimit: getDefaultCreditLimit(3), // We extend 1M USD credit (USDC) to counterparty
+        peerLimit: getDefaultCreditLimit(3), // Counterparty extends same credit to us
       },
       // Frame-based consensus fields
       currentFrameId: 0,
-      pendingFrame: undefined,
       pendingSignatures: [],
       rollbackCount: 0,
-      isProposer: state.entityId < input.toEntityId, // Lexicographically smaller is proposer
-      clonedForValidation: undefined,
+      // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)
+      sendCounter: 0,    // Like Channel.ts line 131
+      receiveCounter: 0, // Like Channel.ts line 132
+      // Removed isProposer - use isLeft() function like old_src Channel.ts
       proofHeader: {
         fromEntity: state.entityId,
-        toEntity: input.toEntityId,
+        toEntity: input.fromEntityId,  // Fixed: should be fromEntityId
         cooperativeNonce: 0,
         disputeNonce: 0,
       },
@@ -56,13 +60,24 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
         tokenIds: [1, 2, 3],
         deltas: [0n, -100n, 50n],
       },
+      frameHistory: [] // Initialize empty frame history
     };
-    newState.accounts.set(input.toEntityId, accountMachine);
-    console.log(`💳 Created new account machine for counterparty ${input.toEntityId}`);
+    newState.accounts.set(input.fromEntityId, accountMachine);  // Fixed: use fromEntityId as key
+    console.log(`💳 Created new account machine for counterparty ${input.fromEntityId}`);
   }
 
   // Process the account transaction immediately based on type
-  if (input.accountTx.type === 'account_settle') {
+  if (input.accountTx && input.accountTx.type === 'account_payment' && input.accountTx.data.amount === 0n) {
+    // Handle incoming account opening (account_payment with 0 amount indicates account opening)
+    console.log(`💳 Received account opening request from Entity ${input.fromEntityId.slice(-4)}`);
+
+    // Account already created above, just acknowledge
+    newState.messages.push(`✅ Account opened with Entity ${formatEntityId(input.fromEntityId)}`);
+    console.log(`💳 Account established with Entity ${input.fromEntityId.slice(-4)}`);
+
+    // No need to send a response - accounts are symmetric
+    // Both sides create their account independently
+  } else if (input.accountTx && input.accountTx.type === 'account_settle') {
     // Process settlement event from blockchain
     const settleData = input.accountTx.data;
     const tokenId = settleData.tokenId;
@@ -125,28 +140,95 @@ export function handleAccountInput(state: EntityState, input: AccountInput, env:
 
       // If there's a response, queue it for sending back
       if (result.response) {
-        // TODO: Send response back to counterparty
-        console.log(`📤 Would send AccountInput response back to ${result.response.toEntityId.slice(-4)}`);
+        console.log(`📤 Sending AccountInput ACK back to ${result.response.toEntityId.slice(-4)}`);
+
+        // Get the proposer of the target entity
+        let targetProposerId = 'alice'; // Default fallback
+        const targetReplicaKeys = Array.from(env.replicas.keys()).filter(key => key.startsWith((result.response?.toEntityId || '') + ':'));
+        if (targetReplicaKeys.length > 0) {
+          const firstTargetReplica = env.replicas.get(targetReplicaKeys[0]!);
+          if (firstTargetReplica?.state.config.validators[0]) {
+            targetProposerId = firstTargetReplica.state.config.validators[0];
+          }
+        }
+
+        // Create output to send ACK back to counterparty
+        outputs.push({
+          entityId: result.response?.toEntityId || '',
+          signerId: targetProposerId,
+          entityTxs: [{
+            type: 'accountInput',
+            data: result.response
+          }]
+        });
+
+        console.log(`✅ ACK queued for Entity ${result.response.toEntityId.slice(-4)}`);
       }
     } else {
       console.log(`❌ Frame consensus failed: ${result.error}`);
       newState.messages.push(`❌ Frame consensus failed with Entity ${input.fromEntityId.slice(-4)}: ${result.error}`);
     }
   } else if (input.accountTx) {
-    // Handle transaction-level input - add to mempool
-    console.log(`📥 Adding ${input.accountTx.type} to account mempool for ${input.toEntityId.slice(0,10)}`);
+    // Special handling for direct_payment - needs to be forwarded
+    if (input.accountTx && input.accountTx.type === 'direct_payment') {
+      const paymentData = input.accountTx.data;
+      console.log(`💸 Processing direct_payment relay: route=${paymentData.route}, amount=${paymentData.amount}`);
 
-    const added = addToAccountMempool(accountMachine, input.accountTx);
+      // Check if we're the final destination
+      if (!paymentData.route || paymentData.route.length === 0) {
+        // We are the final destination - payment complete!
+        newState.messages.push(`💰 Received payment: ${paymentData.amount} (token ${paymentData.tokenId}) - ${paymentData.description}`);
+        console.log(`✅ Payment received at final destination`);
+        // IMPORTANT: Do NOT add to mempool - payment is already in the frame being processed
+        // The frame consensus already handled this transaction
+      } else if (paymentData.route.length === 1 && paymentData.route[0] === state.entityId) {
+        // Route contains only us - we're the destination
+        newState.messages.push(`💰 Received payment: ${paymentData.amount} (token ${paymentData.tokenId}) - ${paymentData.description}`);
+        console.log(`✅ Payment received at final destination (single hop)`);
+        // IMPORTANT: Do NOT add to mempool - payment is already in the frame being processed
+        // The frame consensus already handled this transaction
+      } else {
+        // We need to forward the payment to the next hop
+        const nextHop = paymentData.route[0];
+        const remainingRoute = paymentData.route.slice(1);
 
-    if (added) {
-      const message = `💳 ${input.accountTx.type} queued for processing with Entity ${input.toEntityId.slice(-4)}`;
-      newState.messages.push(message);
-      console.log(`📊 Account mempool now has ${accountMachine.mempool.length} pending transactions`);
-    } else {
-      const message = `❌ Failed to add ${input.accountTx.type} to mempool (full)`;
-      newState.messages.push(message);
+        console.log(`💸 Forwarding payment to next hop: ${nextHop}, remaining route: ${remainingRoute}`);
+
+        // Check if we have an account with next hop
+        if (!nextHop || !newState.accounts.has(nextHop)) {
+          console.error(`❌ Cannot forward payment: No account with ${nextHop}`);
+          newState.messages.push(`❌ Payment routing failed: No account with Entity ${nextHop?.slice(-4) || 'unknown'}`);
+        } else {
+          // Create forwarded payment AccountTx
+          const forwardedPayment = {
+            type: 'direct_payment' as const,
+            data: {
+              tokenId: paymentData.tokenId,
+              amount: paymentData.amount,
+              route: remainingRoute,
+              ...(paymentData.description ? { description: paymentData.description } : {}),
+            },
+          };
+
+          // Add to mempool for the next hop account
+          const nextHopAccount = newState.accounts.get(nextHop);
+          if (nextHopAccount) {
+            nextHopAccount.mempool.push(forwardedPayment);
+            newState.messages.push(`⚡ Relaying payment to Entity ${nextHop?.slice(-4)} (${remainingRoute.length} hops remaining)`);
+            console.log(`📤 Payment forwarded to ${nextHop} account mempool`);
+          }
+        }
+      }
+    } else if (input.accountTx) {
+      // Handle other transaction types
+      // IMPORTANT: Do NOT add incoming transactions to our mempool
+      // The transactions will be processed when they arrive in a frame
+      console.log(`📥 Received ${input.accountTx.type} from ${input.fromEntityId.slice(-4)} - will be processed in next frame`);
+
+      // Just acknowledge receipt - don't add to mempool
+      newState.messages.push(`📨 Received ${input.accountTx.type} from Entity ${input.fromEntityId.slice(-4)}`);
     }
   }
 
-  return newState;
+  return { newState, outputs };
 }

@@ -4,7 +4,7 @@
  */
 
 import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerInput, AccountMachine, Delta } from './types';
+import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerInput, AccountMachine } from './types';
 import { DEBUG } from './utils';
 
 // === CLONING UTILITIES ===
@@ -35,7 +35,7 @@ export function cloneEntityState(entityState: EntityState): EntityState {
     console.log(`✅ CLONE-SUCCESS: Cloned state, jBlock=${cloned.jBlock} (${typeof cloned.jBlock})`);
     return cloned;
   } catch (error) {
-    console.warn(`⚠️ structuredClone failed, using manual clone: ${error.message}`);
+    console.warn(`⚠️ structuredClone failed, using manual clone: ${(error as Error).message}`);
     const manual = manualCloneEntityState(entityState);
     console.log(`✅ MANUAL-CLONE: Manual clone completed, jBlock=${manual.jBlock} (${typeof manual.jBlock})`);
     return manual;
@@ -89,24 +89,24 @@ export const cloneEntityReplica = (replica: EntityReplica): EntityReplica => {
     signerId: replica.signerId,
     state: cloneEntityState(replica.state), // Use unified entity state cloning
     mempool: cloneArray(replica.mempool),
-    proposal: replica.proposal
-      ? {
-          height: replica.proposal.height,
-          txs: cloneArray(replica.proposal.txs),
-          hash: replica.proposal.hash,
-          newState: replica.proposal.newState,
-          signatures: cloneMap(replica.proposal.signatures),
-        }
-      : undefined,
-    lockedFrame: replica.lockedFrame
-      ? {
-          height: replica.lockedFrame.height,
-          txs: cloneArray(replica.lockedFrame.txs),
-          hash: replica.lockedFrame.hash,
-          newState: replica.lockedFrame.newState,
-          signatures: cloneMap(replica.lockedFrame.signatures),
-        }
-      : undefined,
+    ...(replica.proposal && {
+      proposal: {
+        height: replica.proposal.height,
+        txs: cloneArray(replica.proposal.txs),
+        hash: replica.proposal.hash,
+        newState: replica.proposal.newState,
+        signatures: cloneMap(replica.proposal.signatures),
+      }
+    }),
+    ...(replica.lockedFrame && {
+      lockedFrame: {
+        height: replica.lockedFrame.height,
+        txs: cloneArray(replica.lockedFrame.txs),
+        hash: replica.lockedFrame.hash,
+        newState: replica.lockedFrame.newState,
+        signatures: cloneMap(replica.lockedFrame.signatures),
+      }
+    }),
     isProposer: replica.isProposer,
   };
 };
@@ -126,15 +126,19 @@ export const captureSnapshot = (
     serverInput: {
       serverTxs: [...serverInput.serverTxs],
       entityInputs: serverInput.entityInputs.map(input => ({
-        ...input,
-        entityTxs: input.entityTxs ? [...input.entityTxs] : undefined,
-        precommits: input.precommits ? new Map(input.precommits) : undefined,
+        entityId: input.entityId,
+        signerId: input.signerId,
+        ...(input.entityTxs && { entityTxs: [...input.entityTxs] }),
+        ...(input.precommits && { precommits: new Map(input.precommits) }),
+        ...(input.proposedFrame && { proposedFrame: input.proposedFrame }),
       })),
     },
     serverOutputs: serverOutputs.map(output => ({
-      ...output,
-      entityTxs: output.entityTxs ? [...output.entityTxs] : undefined,
-      precommits: output.precommits ? new Map(output.precommits) : undefined,
+      entityId: output.entityId,
+      signerId: output.signerId,
+      ...(output.entityTxs && { entityTxs: [...output.entityTxs] }),
+      ...(output.precommits && { precommits: new Map(output.precommits) }),
+      ...(output.proposedFrame && { proposedFrame: output.proposedFrame }),
     })),
     description,
   };
@@ -190,24 +194,24 @@ export function cloneAccountMachine(account: AccountMachine): AccountMachine {
  * Manual AccountMachine cloning
  */
 function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
-  return {
-    ...account,
+  const result: AccountMachine = {
+    counterpartyEntityId: account.counterpartyEntityId,
     mempool: [...account.mempool],
     currentFrame: {
       ...account.currentFrame,
       tokenIds: [...account.currentFrame.tokenIds],
       deltas: [...account.currentFrame.deltas],
     },
+    sentTransitions: account.sentTransitions,
+    ackedTransitions: account.ackedTransitions,
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
     globalCreditLimits: { ...account.globalCreditLimits },
+    currentFrameId: account.currentFrameId,
     pendingSignatures: [...account.pendingSignatures],
-    pendingFrame: account.pendingFrame ? {
-      ...account.pendingFrame,
-      accountTxs: [...account.pendingFrame.accountTxs],
-      tokenIds: [...account.pendingFrame.tokenIds],
-      deltas: [...account.pendingFrame.deltas]
-    } : undefined,
-    clonedForValidation: undefined, // Don't clone the clone
+    rollbackCount: account.rollbackCount,
+    sendCounter: account.sendCounter,
+    receiveCounter: account.receiveCounter,
+    frameHistory: [...account.frameHistory], // Clone frame history array
     proofHeader: { ...account.proofHeader },
     proofBody: {
       ...account.proofBody,
@@ -215,4 +219,24 @@ function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
       deltas: [...account.proofBody.deltas],
     },
   };
+
+  // Add optional properties if they exist
+  if (account.pendingFrame) {
+    result.pendingFrame = {
+      ...account.pendingFrame,
+      accountTxs: [...account.pendingFrame.accountTxs],
+      tokenIds: [...account.pendingFrame.tokenIds],
+      deltas: [...account.pendingFrame.deltas]
+    };
+  }
+
+  if (account.clonedForValidation) {
+    result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation);
+  }
+
+  if (account.hankoSignature) {
+    result.hankoSignature = account.hankoSignature;
+  }
+
+  return result;
 }

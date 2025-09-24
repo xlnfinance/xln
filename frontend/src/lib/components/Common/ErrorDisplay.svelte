@@ -1,7 +1,13 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte';
 
-  let errors = [];
+  interface ErrorItem {
+    id: string;
+    timestamp: string;
+    message: string;
+  }
+
+  let errors: ErrorItem[] = [];
   let isVisible = false;
 
   onMount(() => {
@@ -18,7 +24,7 @@
       errors = [...errors.slice(-4), { // Keep last 5 errors
         timestamp: new Date().toLocaleTimeString(),
         message: errorMsg,
-        id: Date.now()
+        id: Date.now().toString()
       }];
 
       isVisible = true;
