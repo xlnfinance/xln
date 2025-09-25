@@ -84,7 +84,7 @@ export class PathFinder {
       }
 
       // Explore neighbors
-      const edges = this.graph.edges.get(current.node) || [];
+      const edges = this.graph.edges.get(current.node) ?? []; // Explicit undefined handling
       for (const edge of edges) {
         // Skip if wrong token or disabled
         if (edge.tokenId !== tokenId || edge.disabled) continue;

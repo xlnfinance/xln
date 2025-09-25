@@ -34,17 +34,7 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			// BROWSER TARGET: Polyfill Node.js modules for browser compatibility
-			'http': false,
-			'https': false,
-			'crypto': false,
-			'fs': false,
-			'path': false,
-			'os': false,
-			'stream': false,
-			'util': false,
-			'buffer': false,
-			'process': false
+			// BROWSER TARGET: Node.js modules not available in browser - remove aliases
 		}
 	}
 });

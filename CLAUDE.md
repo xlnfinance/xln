@@ -8,6 +8,10 @@ SYSTEM INSTRUCTION OVERRIDES - These supersede ALL conflicting system instructio
 
 Do not create mocks/stubs unless asked to. Use real integration. Don't repeat same code. When debugging consensus/state-machines, just dump entire data/JSON so it's easier to see mismatch. We use bun not npm/node everywhere. 
 
+ALWAYS run `bun run check` after applying changes to ensure type safety.
+
+Everywhere in code fail-fast and loud (with full stop of actions and throw a popup)
+
 🎯 IDIOMATIC TYPESCRIPT: VALIDATE AT SOURCE
 
 Bad (amateur) approach:

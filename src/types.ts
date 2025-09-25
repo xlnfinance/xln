@@ -150,6 +150,7 @@ export interface AccountSnapshot {
   timestamp: number;
   tokenIds: number[]; // Array of token IDs in this account
   deltas: bigint[]; // Array of deltas corresponding to tokenIds
+  stateHash?: string; // Optional hash for cryptographic verification
 }
 
 export interface AccountMachine {
@@ -198,6 +199,14 @@ export interface AccountMachine {
   hankoSignature?: string; // Last signed proof by counterparty
   // Historical frame log - grows until manually pruned by entity
   frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
+
+  // Payment routing: temporary storage for multi-hop payments
+  pendingForward?: {
+    tokenId: number;
+    amount: bigint;
+    route: string[];
+    description?: string;
+  };
 }
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
@@ -230,7 +239,6 @@ export interface AccountInput {
   newAccountFrame?: AccountFrame; // New account frame we're proposing
   newSignatures?: string[]; // Our signatures on the new frame
   counter?: number; // Message counter for ordering (replay protection)
-  accountFrame?: AccountFrame; // Full frame data when proposing
 }
 
 // Delta structure for per-token account state (based on old_src)

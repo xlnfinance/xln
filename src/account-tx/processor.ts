@@ -56,7 +56,9 @@ export function processAccountTransaction(
     }
 
     default:
-      return { success: false, error: `Unknown transaction type: ${(transaction as any).type}` };
+      // FINTECH-SAFETY: Never use 'as any' for transaction types
+      const txType = 'type' in transaction ? transaction.type : 'INVALID';
+      return { success: false, error: `Unknown transaction type: ${txType}` };
   }
 }
 

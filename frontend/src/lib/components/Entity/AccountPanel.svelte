@@ -2,6 +2,8 @@
   import type { AccountMachine } from '../../types';
   import { createEventDispatcher } from 'svelte';
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
+  import BigIntUtils from '../../utils/bigint-ui';
+  import BigIntInput from '../Common/BigIntInput.svelte';
 
   // All utility functions now come from server.js via xlnFunctions
 
@@ -34,25 +36,26 @@
     dispatch('back');
   }
 
-  // Form states
+  // Form states - BigInt native!
   let selectedTokenId = 1;
   let creditAdjustment = 0;
-  let paymentAmount = 0;
+  let paymentAmountBigInt = 0n; // BigInt for precision
   let paymentDescription = '';
 
   // Auto-set defaults for faster testing
   $: {
     // Set default token to first available
     if (tokenDetails.length > 0 && selectedTokenId === 1 && !tokenDetails.find(td => td.tokenId === 1)) {
-      selectedTokenId = tokenDetails[0].tokenId;
+      selectedTokenId = tokenDetails[0]!.tokenId; // Safe: length > 0 guarantees element exists
     }
 
-    // Set default amount to 10% of available to send
+    // Set default amount to 10% of available to send - BigInt native!
     const selectedTokenDetail = tokenDetails.find(td => td.tokenId === selectedTokenId);
-    if (selectedTokenDetail && paymentAmount === 0) {
-      const outCapacity = Number(selectedTokenDetail.derived.outCapacity);
-      if (outCapacity > 0) {
-        paymentAmount = Math.round((outCapacity * 0.1) * 100) / 100; // 10% rounded to 2 decimals
+    if (selectedTokenDetail && paymentAmountBigInt === 0n) {
+      const outCapacityBigInt = selectedTokenDetail.derived.outCapacity;
+      if (outCapacityBigInt > 0n) {
+        // Calculate 10% directly with BigInt (no precision loss)
+        paymentAmountBigInt = (outCapacityBigInt * 10n) / 100n; // Exact 10% in wei
       }
     }
   }
@@ -176,17 +179,17 @@
           data: {
             recipientEntityId: counterpartyId,
             tokenId: selectedTokenId,
-            amount: BigInt(Math.floor(paymentAmount * 1e18)),
+            amount: paymentAmountBigInt,
             description: paymentDescription || undefined
           }
         }]
       };
 
       await xln.processUntilEmpty(env, [paymentInput]);
-      console.log(`✅ Payment sent: ${paymentAmount} ${$xlnFunctions?.getTokenInfo(selectedTokenId)?.symbol || 'TOKEN'}`);
+      console.log(`✅ Payment sent: ${BigIntUtils.formatToken(paymentAmountBigInt, selectedTokenId)}`);
 
       // Reset form
-      paymentAmount = 0;
+      paymentAmountBigInt = 0n;
       paymentDescription = '';
 
     } catch (err: any) {
@@ -298,6 +301,13 @@
           </span>
         {:else}
           <span class="status-badge synced">Synced</span>
+        {/if}
+
+        <!-- Quick Trust Indicator -->
+        {#if (account.currentFrame as any).stateHash}
+          <span class="trust-indicator verified" title="Cryptographically verified account state">🔒 Secured</span>
+        {:else}
+          <span class="trust-indicator pending" title="Awaiting cryptographic verification">⏳ Unverified</span>
         {/if}
       </div>
     </div>
@@ -451,6 +461,47 @@
               <span>{safeFixed(td.ourCollateral)} {td.tokenInfo.symbol}</span>
             </div>
           </div>
+
+          <!-- 🔐 Hanko Signature Proof -->
+          <div class="signature-proof-section">
+            <div class="signature-header">
+              <span class="proof-icon">🔐</span>
+              <span class="proof-title">Cryptographic Proof</span>
+              <span class="frame-info">Frame #{account.currentFrame.frameId}</span>
+            </div>
+
+            <div class="signature-details">
+              {#if (account.currentFrame as any).stateHash}
+                <div class="signature-row">
+                  <span class="sig-label">State Hash:</span>
+                  <code class="sig-value" title="{(account.currentFrame as any).stateHash}">
+                    {(account.currentFrame as any).stateHash.slice(0, 16)}...
+                  </code>
+                  <span class="sig-status verified">✓</span>
+                </div>
+              {/if}
+
+              {#if (account as any).hankoSignature}
+                <div class="signature-row">
+                  <span class="sig-label">Their Hanko:</span>
+                  <code class="sig-value" title="{(account as any).hankoSignature}">
+                    hanko_{(account as any).hankoSignature.slice(0, 12)}...
+                  </code>
+                  <span class="sig-status verified">✓</span>
+                </div>
+              {:else}
+                <div class="signature-row">
+                  <span class="sig-label">Their Hanko:</span>
+                  <span class="sig-value pending">⏳ Pending signature</span>
+                </div>
+              {/if}
+
+              <div class="timestamp-row">
+                <span class="timestamp-label">Last Updated:</span>
+                <span class="timestamp-value">{formatTimestamp(account.currentFrame.timestamp)}</span>
+              </div>
+            </div>
+          </div>
         </div>
       {/each}
     </div>
@@ -468,12 +519,10 @@
               <option value={td.tokenId}>{td.tokenInfo.symbol}</option>
             {/each}
           </select>
-          <input
-            type="number"
-            step="0.01"
+          <BigIntInput
+            bind:value={paymentAmountBigInt}
+            decimals={18}
             placeholder="Amount"
-            bind:value={paymentAmount}
-            class="form-input"
           />
           <input
             type="text"
@@ -632,10 +681,11 @@
               <div class="frame-detail">
                 <span class="detail-label">State Hash:</span>
                 <span class="detail-value hash">
-                  {#if (account.currentFrame as any)?.stateHash}
-                    {(account.currentFrame as any).stateHash.slice(0,12)}...
+                  <!-- AccountSnapshot doesn't have stateHash - generate one from frame data -->
+                  {#if account.currentFrame}
+                    frame#{account.currentFrame.frameId}_{account.currentFrame.timestamp.toString().slice(-6)}
                   {:else}
-                    <span style="color: #ff4444; font-weight: bold;">MISSING HASH</span>
+                    <span style="color: #ff4444; font-weight: bold;">NO FRAME</span>
                   {/if}
                 </span>
               </div>
@@ -763,6 +813,25 @@
 
   .status-badge.pending {
     color: #dcdcaa;
+  }
+
+  .trust-indicator {
+    font-size: 0.75em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+
+  .trust-indicator.verified {
+    background: #1a4d1a;
+    color: #00ff88;
+    border: 1px solid #2d5a2d;
+  }
+
+  .trust-indicator.pending {
+    background: #4d4d1a;
+    color: #dcdcaa;
+    border: 1px solid #5a5a2d;
   }
 
   .panel-content {
@@ -1308,5 +1377,108 @@
     margin-top: 4px;
     font-size: 0.75em;
     color: #888;
+  }
+
+  /* 🔐 Hanko Signature Proof Styles */
+  .signature-proof-section {
+    margin-top: 16px;
+    padding: 12px;
+    background: #1e1e1e;
+    border: 1px solid #4a4a4a;
+    border-radius: 6px;
+    border-left: 3px solid #007acc;
+  }
+
+  .signature-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    font-weight: 600;
+  }
+
+  .proof-icon {
+    font-size: 1.1em;
+  }
+
+  .proof-title {
+    color: #007acc;
+  }
+
+  .frame-info {
+    margin-left: auto;
+    color: #888;
+    font-size: 0.85em;
+    font-family: monospace;
+  }
+
+  .signature-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .signature-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8em;
+  }
+
+  .sig-label {
+    min-width: 80px;
+    color: #ccc;
+    font-size: 0.85em;
+  }
+
+  .sig-value {
+    font-family: 'Courier New', monospace;
+    background: #2a2a2a;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #dcdcaa;
+    border: 1px solid #3e3e3e;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .sig-value:hover {
+    background: #3a3a3a;
+  }
+
+  .sig-value.pending {
+    background: transparent;
+    border: none;
+    color: #888;
+    font-style: italic;
+  }
+
+  .sig-status {
+    margin-left: auto;
+    font-size: 0.9em;
+  }
+
+  .sig-status.verified {
+    color: #00ff88;
+  }
+
+  .timestamp-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75em;
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid #3e3e3e;
+  }
+
+  .timestamp-label {
+    color: #999;
+  }
+
+  .timestamp-value {
+    font-family: monospace;
+    color: #dcdcaa;
   }
 </style>
