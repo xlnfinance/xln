@@ -963,6 +963,10 @@ contract Depository is Console {
   /* can be called manually
   /* iterates over _debts starting from current _debtIndex, first-in-first-out 
   /* max _debts?
+  /* Calling enforceDebts at the exit points is
+  sound: it guarantees nobody can move funds while they owe. What you get is a single choke point that’s trivial to audit: “any reserve decrease first clears
+  debts.”*/
+
   function enforceDebts(bytes32 entity, uint tokenId) public returns (uint totalDebts) {
     uint debtsLength = _debts[entity][tokenId].length;
     if (debtsLength == 0) {

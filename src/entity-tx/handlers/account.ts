@@ -66,6 +66,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     console.log(`💳 Created new account machine for counterparty ${input.fromEntityId}`);
   }
 
+  // FINTECH-SAFETY: Ensure accountMachine exists after creation/retrieval
+  if (!accountMachine) {
+    throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
+  }
+
   // Process the account transaction immediately based on type
   if (input.accountTx && input.accountTx.type === 'account_payment' && input.accountTx.data.amount === 0n) {
     // Handle incoming account opening (account_payment with 0 amount indicates account opening)
@@ -128,7 +133,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     newState.messages.push(message);
 
     console.log(`✅ Settlement processed for Entity ${input.toEntityId.slice(-4)}, Token ${tokenId}`);
-  } else if (input.frameId || input.newAccountFrame || input.accountFrame) {
+  } else if (input.frameId || input.newAccountFrame) {
     // Handle frame-level consensus using production account-consensus system
     console.log(`🤝 Processing frame-level AccountInput from ${input.fromEntityId.slice(-4)}`);
 

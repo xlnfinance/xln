@@ -57,6 +57,9 @@
 
   // Initialize the application
   onMount(async () => {
+    console.log('🔄 ONMOUNT-DEBUG: +page.svelte onMount() called - this should only happen ONCE');
+    console.log('🔍 ONMOUNT-DEBUG: Current timestamp:', new Date().toISOString());
+
     // Set up global error handlers FIRST
     window.addEventListener('error', (event) => {
       console.error('❌ Global error caught:', event.error);

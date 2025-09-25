@@ -61,9 +61,13 @@ export function buildNetworkGraph(
         const tokenCapacity = account.tokenCapacities.get(tokenId);
         if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
 
-        // Get fee configuration from profile
-        const baseFee = profile.metadata?.baseFee || 0n;
-        const feePPM = profile.metadata?.routingFeePPM || 100; // Default 100 PPM (0.01%)
+        // Get fee configuration from profile with explicit validation
+        const metadata = profile.metadata;
+        if (!metadata) {
+          console.warn(`🚨 ROUTING-SAFETY: Entity ${fromEntity} has no metadata, using safe defaults`);
+        }
+        const baseFee = metadata?.baseFee ?? 0n; // Explicit null/undefined check
+        const feePPM = metadata?.routingFeePPM ?? 100; // Explicit default: 100 PPM (0.01%)
 
         // Create edge
         const edge: ChannelEdge = {
@@ -108,6 +112,6 @@ export function getEdge(
   to: string,
   tokenId: number
 ): ChannelEdge | undefined {
-  const edges = graph.edges.get(from) || [];
+  const edges = graph.edges.get(from) ?? [];  // Explicit undefined handling
   return edges.find(e => e.to === to && e.tokenId === tokenId);
 }

@@ -25,14 +25,8 @@ const BASE_CREDIT_LIMIT = 1_000_000n;
  * @returns Derived balance information including capacities and credits
  */
 export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
-  // STRICT VALIDATION: Financial data must be complete and valid
-  try {
-    const validatedDelta = validateDelta(delta, 'deriveDelta input');
-    delta = validatedDelta; // Use validated delta
-  } catch (error) {
-    console.error('❌ CRITICAL: Invalid Delta in deriveDelta:', error);
-    throw error;
-  }
+  // VALIDATE AT SOURCE: Financial data must be valid
+  validateDelta(delta, 'deriveDelta');
 
   // EXACT copy from old_src Channel.ts deriveDelta method (lines 652-735)
   const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
@@ -128,7 +122,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
  */
 export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, delta: bigint = 0n): Delta {
   const creditLimit = getDefaultCreditLimit(tokenId);
-  return {
+
+  const deltaData = {
     tokenId,
     collateral,
     ondelta: delta,
@@ -138,6 +133,9 @@ export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, del
     leftAllowence: 0n,
     rightAllowence: 0n,
   };
+
+  // VALIDATE AT SOURCE: Guarantee type safety from this point forward
+  return validateDelta(deltaData, 'createDemoDelta');
 }
 
 /**

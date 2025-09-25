@@ -6,6 +6,7 @@
 import { encode } from './snapshot-coder';
 import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerInput, AccountMachine } from './types';
 import { DEBUG } from './utils';
+import { validateEntityState } from './validation-utils';
 
 // === CLONING UTILITIES ===
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
@@ -33,12 +34,16 @@ export function cloneEntityState(entityState: EntityState): EntityState {
     }
 
     console.log(`✅ CLONE-SUCCESS: Cloned state, jBlock=${cloned.jBlock} (${typeof cloned.jBlock})`);
-    return cloned;
+
+    // VALIDATE AT SOURCE: Guarantee type safety from this point forward
+    return validateEntityState(cloned, 'cloneEntityState.structuredClone');
   } catch (error) {
     console.warn(`⚠️ structuredClone failed, using manual clone: ${(error as Error).message}`);
     const manual = manualCloneEntityState(entityState);
     console.log(`✅ MANUAL-CLONE: Manual clone completed, jBlock=${manual.jBlock} (${typeof manual.jBlock})`);
-    return manual;
+
+    // VALIDATE AT SOURCE: Guarantee type safety from manual clone path too
+    return validateEntityState(manual, 'cloneEntityState.manual');
   }
 }
 

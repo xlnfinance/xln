@@ -9,13 +9,20 @@ import { extractNumberFromEntityId } from './entity-factory';
 
 // Global polyfills for browser compatibility
 if (typeof global === 'undefined') {
-  (globalThis as any).global = globalThis;
+  globalThis.global = globalThis;
 }
 
-// Extend Window interface to include custom properties
+// Extend global interfaces for browser compatibility
 declare global {
   interface Window {
     reinitializeAfterClear?: () => void;
+    Buffer: typeof Buffer;
+  }
+
+  var global: typeof globalThis;
+
+  interface Uint8Array {
+    toString(encoding?: string): string;
   }
 }
 
@@ -88,10 +95,10 @@ export const Buffer = getBuffer();
 
 // Browser polyfill for Uint8Array.toString()
 if (isBrowser) {
-  (Uint8Array.prototype as any).toString = function (_encoding: string = 'utf8') {
+  Uint8Array.prototype.toString = function (_encoding: string = 'utf8') {
     return new TextDecoder().decode(this);
   };
-  (window as any).Buffer = Buffer;
+  window.Buffer = Buffer;
 }
 
 // Debug compatibility
@@ -373,3 +380,57 @@ const generateFallbackAvatar = (seed: string): string => {
   const base64 = Buffer.from(svg).toString('base64');
   return `data:image/svg+xml;base64,${base64}`;
 };
+
+// === CRYPTOGRAPHIC UTILITIES ===
+
+/**
+ * Browser-compatible hash function using window.crypto
+ * @param content - String content to hash
+ * @returns Promise<string> - Full SHA-256 hash with 0x prefix
+ */
+export async function cryptoHash(content: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(content);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = new Uint8Array(hashBuffer);
+  const hashHex = Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
+  return `0x${hashHex}`;
+}
+
+/**
+ * Hash any object deterministically
+ * @param obj - Object to hash
+ * @returns Promise<string> - Full SHA-256 hash
+ */
+export async function hashObject(obj: any): Promise<string> {
+  const content = deterministicStringify(obj);
+  return await cryptoHash(content);
+}
+
+/**
+ * Hash for 20-byte addresses (like old_src)
+ * @param content - String content to hash
+ * @returns Promise<string> - First 20 bytes as hex
+ */
+export async function hash20(content: string): Promise<string> {
+  const fullHash = await cryptoHash(content);
+  return fullHash.slice(0, 42); // 0x + 40 chars = 20 bytes
+}
+
+// Keep old names for backward compatibility
+export const sha256Hash = cryptoHash;
+export const sha256Hash20 = hash20;
+
+/**
+ * Deterministic object serialization for hashing
+ * @param obj - Object to serialize
+ * @returns string - Deterministic JSON string
+ */
+export function deterministicStringify(obj: any): string {
+  return JSON.stringify(obj, (_key, value) => {
+    if (typeof value === 'bigint') {
+      return value.toString();
+    }
+    return value;
+  });
+}

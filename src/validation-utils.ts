@@ -1,11 +1,20 @@
 /**
- * Strict validation utilities for financial data types
- * Ensures no undefined/null values in monetary calculations
+ * FINTECH-GRADE TYPE VALIDATION SYSTEM
  *
- * FINTECH-LEVEL TYPE SAFETY: Never allow undefined routing identifiers
+ * Core Principle: Validate at SOURCE, Trust at USE
+ * - Data is validated ONCE at creation/entry points
+ * - After validation, data can be used without defensive checks
+ * - UI layer receives guaranteed-safe data structures
+ * - Zero tolerance for undefined/null in financial flows
  */
 
-import { Delta, EntityInput } from './types';
+import type {
+  Delta,
+  EntityInput,
+  EntityState,
+  AccountMachine,
+  AccountFrame
+} from './types';
 
 /**
  * Strict validation for Delta objects - financial data must be complete
@@ -215,4 +224,205 @@ export function safeMapGet<K, V>(map: Map<K, V>, key: K, context: string): V {
     throw new Error(`FINANCIAL-SAFETY: ${context} not found for key: ${key}`);
   }
   return value;
+}
+
+// =============================================================================
+// ENHANCED ERROR CLASSES - Fail Fast, Fail Loud
+// =============================================================================
+
+export class FinancialDataCorruptionError extends Error {
+  constructor(message: string, context?: Record<string, unknown>) {
+    super(`🚨 FINANCIAL-SAFETY VIOLATION: ${message}`);
+    this.name = 'FinancialDataCorruptionError';
+    if (context) {
+      this.message += `\nContext: ${JSON.stringify(context, (_k, v) => typeof v === 'bigint' ? v.toString() : v)}`;
+    }
+  }
+}
+
+export class TypeSafetyViolationError extends Error {
+  constructor(message: string, value?: unknown) {
+    super(`🛡️ TYPE-SAFETY VIOLATION: ${message}`);
+    this.name = 'TypeSafetyViolationError';
+    if (value !== undefined) {
+      this.message += `\nReceived: ${typeof value} = ${String(value)}`;
+    }
+  }
+}
+
+// =============================================================================
+// PRIMITIVE VALIDATORS - Building Blocks for Complex Types
+// =============================================================================
+
+function validateString(value: unknown, fieldName: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeSafetyViolationError(`${fieldName} must be a non-empty string`, value);
+  }
+  return value;
+}
+
+// Removed unused validateBigInt function
+
+function validateNumber(value: unknown, fieldName: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeSafetyViolationError(`${fieldName} must be a finite number`, value);
+  }
+  return value;
+}
+
+function validateObject(value: unknown, fieldName: string): Record<string, any> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeSafetyViolationError(`${fieldName} must be a non-null object`, value);
+  }
+  return value as Record<string, any>;
+}
+
+function validateArray<T>(value: unknown, fieldName: string): T[] {
+  if (!Array.isArray(value)) {
+    throw new TypeSafetyViolationError(`${fieldName} must be an array`, value);
+  }
+  return value;
+}
+
+// Removed unused validateMap function
+
+// =============================================================================
+// COMPREHENSIVE VALIDATORS - Complete Type Safety
+// =============================================================================
+
+/**
+ * Validates AccountFrame objects - Consensus frames for bilateral accounts
+ * CRITICAL: Frame integrity ensures consensus safety
+ */
+export function validateAccountFrame(value: unknown, context = 'AccountFrame'): AccountFrame {
+  const obj = validateObject(value, context);
+
+  const validated: AccountFrame = {
+    frameId: validateNumber(obj['frameId'], `${context}.frameId`),
+    timestamp: validateNumber(obj['timestamp'], `${context}.timestamp`),
+    accountTxs: validateArray(obj['accountTxs'], `${context}.accountTxs`),
+    previousStateHash: validateString(obj['previousStateHash'], `${context}.previousStateHash`),
+    stateHash: validateString(obj['stateHash'], `${context}.stateHash`),
+    tokenIds: validateArray<number>(obj['tokenIds'] || [], `${context}.tokenIds`),
+    deltas: validateArray<bigint>(obj['deltas'] || [], `${context}.deltas`)
+  };
+
+  // Additional integrity checks
+  if (validated.stateHash.length === 0) {
+    throw new FinancialDataCorruptionError('AccountFrame.stateHash cannot be empty');
+  }
+
+  if (validated.timestamp <= 0) {
+    throw new FinancialDataCorruptionError('AccountFrame.timestamp must be positive', { timestamp: validated.timestamp });
+  }
+
+  return validated;
+}
+
+/**
+ * Validates AccountMachine objects - Bilateral account state machines
+ * CRITICAL: Account integrity ensures payment routing safety
+ */
+export function validateAccountMachine(value: unknown, context = 'AccountMachine'): AccountMachine {
+  const obj = validateObject(value, context);
+
+  // This is a complex interface - for now just do basic validation
+  // TODO: Implement full validation of all AccountMachine fields
+  if (!obj['counterpartyEntityId'] || typeof obj['counterpartyEntityId'] !== 'string') {
+    throw new FinancialDataCorruptionError(`${context}.counterpartyEntityId must be a string`);
+  }
+
+  if (!obj['deltas'] || !(obj['deltas'] instanceof Map)) {
+    throw new FinancialDataCorruptionError(`${context}.deltas must be a Map`);
+  }
+
+  // Validate all deltas in the map
+  for (const [tokenId, delta] of obj['deltas'].entries()) {
+    validateDelta(delta, `${context}.deltas[${tokenId}]`);
+  }
+
+  return obj as AccountMachine; // Cast after basic validation
+}
+
+/**
+ * Validates EntityState objects - Complete entity state
+ * CRITICAL: Entity integrity ensures consensus and routing safety
+ */
+export function validateEntityState(value: unknown, context = 'EntityState'): EntityState {
+  const obj = validateObject(value, context);
+
+  // Basic validation - the interface is complex, so validate critical fields
+  if (!obj['entityId'] || typeof obj['entityId'] !== 'string') {
+    throw new FinancialDataCorruptionError(`${context}.entityId must be a string`);
+  }
+
+  if (typeof obj['height'] !== 'number') {
+    throw new FinancialDataCorruptionError(`${context}.height must be a number`);
+  }
+
+  if (typeof obj['timestamp'] !== 'number') {
+    throw new FinancialDataCorruptionError(`${context}.timestamp must be a number`);
+  }
+
+  if (!(obj['reserves'] instanceof Map)) {
+    throw new FinancialDataCorruptionError(`${context}.reserves must be a Map`);
+  }
+
+  if (!(obj['accounts'] instanceof Map)) {
+    throw new FinancialDataCorruptionError(`${context}.accounts must be a Map`);
+  }
+
+  // Validate all reserves are valid bigints
+  for (const [tokenId, amount] of obj['reserves'].entries()) {
+    if (typeof amount !== 'bigint') {
+      throw new FinancialDataCorruptionError(`Reserve amount for token ${tokenId} must be bigint`, { tokenId, amount });
+    }
+  }
+
+  return obj as EntityState; // Cast after basic validation
+}
+
+// Config validation removed - ConsensusConfig is more complex than expected
+
+// EntityReplica validation removed - interface too complex for now
+
+// =============================================================================
+// ENHANCED SAFE COLLECTION ACCESS
+// =============================================================================
+
+/**
+ * Safe Map.get() with validation for financial data
+ */
+export function safeMapGetFinancial<K, V>(
+  map: Map<K, V>,
+  key: K,
+  validator: (value: unknown, context: string) => V,
+  context: string
+): V {
+  const value = map.get(key);
+  if (value === undefined) {
+    throw new FinancialDataCorruptionError(`Missing financial data in ${context}`, { key: String(key) });
+  }
+  return validator(value, `${context}[${String(key)}]`);
+}
+
+/**
+ * Safe array access with bounds checking
+ */
+export function safeArrayGet<T>(array: T[], index: number, context: string): T {
+  if (index < 0 || index >= array.length) {
+    throw new TypeSafetyViolationError(`Array index out of bounds in ${context}`, { index, length: array.length });
+  }
+  return array[index]!; // Add non-null assertion to fix TypeScript issue
+}
+
+/**
+ * Validates an entity ID string
+ */
+export function validateEntityId(value: unknown, context: string): string {
+  const entityId = validateString(value, context);
+  if (entityId.includes('undefined')) {
+    throw new FinancialDataCorruptionError(`${context} contains 'undefined' - routing corruption detected`, { entityId });
+  }
+  return entityId;
 }

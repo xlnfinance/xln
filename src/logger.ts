@@ -74,9 +74,22 @@ export function disableAllLogs(): void {
   console.log('❌ All logs disabled');
 }
 
+// Extend Window interface for debugging
+declare global {
+  interface Window {
+    logConfig: {
+      show: typeof showLogConfig;
+      set: typeof setLogConfig;
+      enableAll: typeof enableAllLogs;
+      disableAll: typeof disableAllLogs;
+      config: typeof LOG_CONFIG;
+    };
+  }
+}
+
 // Export to window for runtime debugging
 if (typeof window !== 'undefined') {
-  (window as any).logConfig = {
+  window.logConfig = {
     show: showLogConfig,
     set: setLogConfig,
     enableAll: enableAllLogs,

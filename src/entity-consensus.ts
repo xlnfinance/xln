@@ -763,7 +763,11 @@ export const applyEntityFrame = async (
  */
 export const calculateQuorumPower = (config: ConsensusConfig, signers: string[]): bigint => {
   return signers.reduce((total, signerId) => {
-    return total + (config.shares[signerId] || 0n);
+    const shares = config.shares[signerId];
+    if (shares === undefined) {
+      throw new Error(`CONSENSUS-SAFETY: Unknown validator ${signerId} - cannot calculate quorum power`);
+    }
+    return total + shares;
   }, 0n);
 };
 

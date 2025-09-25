@@ -98,15 +98,27 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
   } else if (event.type === 'reserve_transferred') {
     const { tokenId, amount, direction } = event.data;
     
-    // Update reserves based on transfer direction
+    // Update reserves based on transfer direction - entityState guaranteed by validation
     if (direction === 'sent') {
-      const currentReserve = newEntityState.reserves.get(String(tokenId)) || 0n;
-      const newAmount = currentReserve - BigInt(amount);
+      const currentReserve = newEntityState.reserves.get(String(tokenId));
+      if (currentReserve === undefined) {
+        // Initialize reserve to 0n if not present (new token)
+        newEntityState.reserves.set(String(tokenId), 0n);
+        console.warn(`🔍 RESERVE-INIT: Initialized new token ${tokenId} reserve to 0n`);
+      }
+      const actualReserve = newEntityState.reserves.get(String(tokenId))!; // Now guaranteed to exist
+      const newAmount = actualReserve - BigInt(amount);
       newEntityState.reserves.set(String(tokenId), newAmount >= 0n ? newAmount : 0n);
       // Message already added above
     } else if (direction === 'received') {
-      const currentReserve = newEntityState.reserves.get(String(tokenId)) || 0n;
-      newEntityState.reserves.set(String(tokenId), currentReserve + BigInt(amount));
+      const currentReserve = newEntityState.reserves.get(String(tokenId));
+      if (currentReserve === undefined) {
+        // Initialize reserve to 0n if not present (new token)
+        newEntityState.reserves.set(String(tokenId), 0n);
+        console.warn(`🔍 RESERVE-INIT: Initialized new token ${tokenId} reserve to 0n`);
+      }
+      const actualReserve = newEntityState.reserves.get(String(tokenId))!; // Now guaranteed to exist
+      newEntityState.reserves.set(String(tokenId), actualReserve + BigInt(amount));
       // Message already added above
     }
     

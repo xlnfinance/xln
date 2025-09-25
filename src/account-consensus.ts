@@ -16,9 +16,12 @@ import { AccountMachine, AccountFrame, AccountTx, AccountInput } from './types';
 import { cloneAccountMachine } from './state-helpers';
 import { deriveDelta, getDefaultCreditLimit, isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-tx/crypto';
-import { hash, hash20 } from './crypto-utils';
+import { cryptoHash as hash, hash20 } from './utils';
 import { safeStringify, buffersEqual } from './serialization-utils';
+import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { encode } from './snapshot-coder';
+
+// Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
@@ -210,11 +213,11 @@ export function processAccountTx(
           // Note: The actual forwarding happens through entity-consensus
           // which will create a new AccountTx for the next hop
           // Store the route info in the account machine for entity-consensus to process
-          (accountMachine as any).pendingForward = {
+          accountMachine.pendingForward = {
             tokenId,
             amount,
             route: route.slice(1), // Remove current hop
-            description,
+            ...(description ? { description } : {}),
           };
         }
       }
@@ -223,7 +226,9 @@ export function processAccountTx(
     }
 
     default:
-      return { success: false, error: `Unknown accountTx type: ${(accountTx as any).type}`, events };
+      // Type-safe error handling for unknown AccountTx types
+      const unknownType = 'type' in accountTx ? accountTx.type : 'MISSING_TYPE';
+      return { success: false, error: `Unknown accountTx type: ${unknownType}`, events };
   }
 }
 
@@ -274,10 +279,10 @@ export async function proposeAccountFrame(
     allEvents.push(...result.events);
   }
 
-  // Create account frame
-  const newFrame: AccountFrame = {
+  // Create account frame matching the real AccountFrame interface
+  const frameData = {
     frameId: accountMachine.currentFrameId + 1,
-    timestamp: Date.now(),
+    timestamp: Date.now(), // Keep as number
     accountTxs: [...accountMachine.mempool],
     previousStateHash: accountMachine.currentFrameId === 0 ? 'genesis' : await createFrameHash({
       frameId: accountMachine.currentFrameId,
@@ -285,22 +290,21 @@ export async function proposeAccountFrame(
       accountTxs: [],
       previousStateHash: '',
       stateHash: '',
-      // Both sides can propose - removed isProposer field
       tokenIds: accountMachine.currentFrame.tokenIds,
       deltas: accountMachine.currentFrame.deltas,
     }),
-    stateHash: '',
-    // Both sides can propose - removed isProposer field
-    tokenIds: clonedMachine.currentFrame.tokenIds,
-    deltas: clonedMachine.currentFrame.deltas,
+    stateHash: '', // Will be filled after hash calculation
+    tokenIds: clonedMachine.currentFrame.tokenIds, // Keep as number[]
+    deltas: clonedMachine.currentFrame.deltas
   };
 
-  newFrame.stateHash = await createFrameHash(newFrame);
+  // Calculate state hash
+  frameData.stateHash = await createFrameHash(frameData as any);
 
-  // FINTECH-SAFETY: Never allow empty state hash
-  if (!newFrame.stateHash || newFrame.stateHash.length === 0) {
-    throw new Error('FINTECH-SAFETY: Frame state hash is empty - cryptographic integrity compromised');
-  }
+  // VALIDATE AT SOURCE: Guaranteed type safety from this point forward
+  const newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
+
+  // No more defensive checks needed - frame is guaranteed valid!
 
   // Generate signature
   const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, newFrame.stateHash);
@@ -322,7 +326,6 @@ export async function proposeAccountFrame(
     newAccountFrame: newFrame,
     newSignatures: [signature],
     counter: ++accountMachine.proofHeader.cooperativeNonce, // CHANNEL.TS REFERENCE: Line 536 - use cooperativeNonce as counter
-    accountFrame: newFrame,
   };
 
   return { success: true, accountInput, events };

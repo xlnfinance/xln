@@ -48,10 +48,18 @@ export const DEPOSITORY_ABI = [
 
 export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
   try {
-    // Support both direct properties and nested under contracts
-    const rpcUrl = jurisdiction.address || (jurisdiction as any).rpc;
-    const entityProviderAddress = jurisdiction.entityProviderAddress || (jurisdiction as any).contracts?.entityProvider;
-    const depositoryAddress = jurisdiction.depositoryAddress || (jurisdiction as any).contracts?.depository;
+    // FINTECH-SAFETY: Validate jurisdiction structure before using
+    const rpcUrl = jurisdiction.address;
+    const entityProviderAddress = jurisdiction.entityProviderAddress;
+    const depositoryAddress = jurisdiction.depositoryAddress;
+
+    // Support legacy format with explicit validation
+    if (!rpcUrl && 'rpc' in jurisdiction) {
+      console.warn('🚨 JURISDICTION-LEGACY: Using deprecated rpc field, should be address');
+    }
+    if (!entityProviderAddress && 'contracts' in jurisdiction) {
+      console.warn('🚨 JURISDICTION-LEGACY: Using deprecated contracts.entityProvider field');
+    }
 
     if (!rpcUrl) {
       throw new Error('Jurisdiction missing RPC URL (address or rpc property)');
@@ -228,7 +236,10 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
     
     // Check if function exists in contract interface
     const functionFragments = depository.interface.fragments.filter(f => f.type === 'function');
-    const functions = functionFragments.map(f => (f as any).name);
+    const functions = functionFragments.map(f => {
+      // Proper typing: FunctionFragment has name property
+      return 'name' in f ? (f as { name: string }).name : 'unknown';
+    });
     const hasProcessBatch = functions.includes('processBatch');
     console.log(`🔍 Contract has processBatch function: ${hasProcessBatch}`);
     console.log(`🔍 Available functions:`, functions.slice(0, 10), '...');
@@ -249,7 +260,10 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
     console.log(`🔍 Bytecode length: ${bytecode.length} chars`);
     
     // Check ABI hash vs expected
-    const abiHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(depository.interface.fragments.map(f => (f as any).format()))));
+    const abiHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(depository.interface.fragments.map(f => {
+      // Proper typing: Fragment has format method
+      return 'format' in f && typeof f.format === 'function' ? f.format() : f.toString();
+    }))));
     console.log(`🔍 ABI hash: ${abiHash.slice(0, 10)}...`);
     
     // Log exact call data being generated
@@ -293,11 +307,19 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
       console.log(`✅ Static call successful: ${result}`);
     } catch (staticError) {
       console.error(`❌ Static call failed:`, staticError);
-      console.log(`🔍 Error details:`, {
-        code: (staticError as any).code,
-        data: (staticError as any).data,
-        reason: (staticError as any).reason
-      });
+
+      // Type-safe error handling for ethers.js errors
+      const errorDetails: Record<string, unknown> = {};
+      if (staticError && typeof staticError === 'object') {
+        const errorObj = staticError as Record<string, unknown>;
+        const code = errorObj['code'];
+        const data = errorObj['data'];
+        const reason = errorObj['reason'];
+        if (code !== undefined) errorDetails['code'] = code;
+        if (data !== undefined) errorDetails['data'] = data;
+        if (reason !== undefined) errorDetails['reason'] = reason;
+      }
+      console.log(`🔍 Error details:`, errorDetails);
       throw staticError;
     }
     
@@ -492,9 +514,16 @@ export const getNextEntityNumber = async (jurisdiction: JurisdictionConfig): Pro
       throw new Error('Jurisdiction parameter is required');
     }
 
-    // Support both direct property and nested under contracts
-    const entityProviderAddress = jurisdiction.entityProviderAddress ||
-                                 (jurisdiction as any).contracts?.entityProvider;
+    // Support both direct property and nested under contracts with type safety
+    let entityProviderAddress = jurisdiction.entityProviderAddress;
+
+    if (!entityProviderAddress && 'contracts' in jurisdiction) {
+      const jurisdictionWithContracts = jurisdiction as Record<string, unknown> & { contracts?: { entityProvider?: string } };
+      const contractAddress = jurisdictionWithContracts.contracts?.entityProvider;
+      if (contractAddress) {
+        entityProviderAddress = contractAddress;
+      }
+    }
 
     if (!jurisdiction.name || !entityProviderAddress) {
       throw new Error('Jurisdiction object is missing required properties (name, entityProvider address)');
@@ -557,15 +586,20 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
 
     const jurisdictionData = config.jurisdictions;
 
-    // Build jurisdictions from loaded config
+    // Build jurisdictions from loaded config with type safety
     for (const [key, data] of Object.entries(jurisdictionData)) {
-      const jData = data as any;
+      // Validate structure before using
+      if (!data || typeof data !== 'object') {
+        console.warn(`🚨 Invalid jurisdiction data for ${key}:`, data);
+        continue;
+      }
+      const jData = data as Record<string, any>;
       jurisdictions.set(key, {
-        address: jData.rpc,
-        name: jData.name,
-        entityProviderAddress: jData.contracts.entityProvider,
-        depositoryAddress: jData.contracts.depository,
-        chainId: jData.chainId,
+        address: jData['rpc'],
+        name: jData['name'],
+        entityProviderAddress: jData['contracts']['entityProvider'],
+        depositoryAddress: jData['contracts']['depository'],
+        chainId: jData['chainId'],
       });
     }
   } catch (error) {

@@ -134,7 +134,7 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
 export const createProfileUpdateTx = (updates: ProfileUpdateTx): EntityTx => {
   return {
     type: 'profile-update' as const,
-    data: updates as any,
+    data: updates, // Remove unsafe type assertion
   } as EntityTx;
 };
 
@@ -178,8 +178,8 @@ export const processProfileUpdate = async (
       try {
         env.gossip.announce({
           entityId,
-          capabilities: (updates as any).capabilities || [], // Use actual capabilities from profile update
-          hubs: (updates as any).hubs || [], // Use actual hubs from profile update
+          capabilities: [], // ProfileUpdateTx doesn't include capabilities - use empty default
+          hubs: [], // ProfileUpdateTx doesn't include hubs - use empty default
           metadata: {
             name: profile.name,
             avatar: profile.avatar,

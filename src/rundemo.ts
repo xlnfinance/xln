@@ -157,8 +157,9 @@ const runDemo = async (env: Env): Promise<Env> => {
     throw new Error('❌ Entity 1 replica not found before transfer');
   }
   
-  const e1_current_balance = e1_replica_before_transfer.state.reserves.get('1') || 0n;
-  const e2_current_balance = e2_replica_before_transfer?.state.reserves.get('1') || 0n;
+  // Demo code: Default to 0n for display if token not initialized yet
+  const e1_current_balance = e1_replica_before_transfer.state.reserves.get('1') ?? 0n;
+  const e2_current_balance = e2_replica_before_transfer?.state.reserves.get('1') ?? 0n;
   
   console.log(`📊 Pre-transfer: e1=${e1_current_balance}, e2=${e2_current_balance}`);
   

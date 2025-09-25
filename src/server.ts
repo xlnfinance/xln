@@ -210,6 +210,20 @@ const applyServerInput = async (
 
     // Merge all entityInputs in env.serverInput
     const mergedInputs = mergeEntityInputs(env.serverInput.entityInputs);
+
+    // FINTECH-LEVEL TYPE SAFETY: Validate all merged inputs at entry point
+    mergedInputs.forEach((input, i) => {
+      try {
+        validateEntityInput(input);
+      } catch (error) {
+        console.error(`🚨 CRITICAL FINANCIAL ERROR: Invalid merged EntityInput[${i}]!`, {
+          error: (error as Error).message,
+          input
+        });
+        throw error; // Fail fast
+      }
+    });
+
     const entityOutbox: EntityInput[] = [];
 
     if (DEBUG) {
@@ -224,7 +238,7 @@ const applyServerInput = async (
         console.log(`🔄 Processing merged inputs:`);
         mergedInputs.forEach((input, i) => {
           const parts = [];
-          if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
+          if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`); // Debug logging - keep defensive
           if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
           if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
           console.log(`  ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
@@ -305,11 +319,11 @@ const applyServerInput = async (
     // Process entity inputs - check for j-events
     console.log(`🔍 SERVER-PROCESSING: About to process ${mergedInputs.length} merged entity inputs`);
     for (const entityInput of mergedInputs) {
-      // Track j-events in this input
-      const jEventCount = entityInput.entityTxs?.filter(tx => tx.type === 'j_event').length || 0;
+      // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
+      const jEventCount = entityInput.entityTxs!.filter(tx => tx.type === 'j_event').length;
       if (jEventCount > 0) {
-        console.log(`🚨 FOUND-J-EVENTS: Entity ${entityInput.entityId.slice(0,10)}... has ${jEventCount} j-events from ${entityInput.signerId || 'auto'}`);
-        entityInput.entityTxs?.filter(tx => tx.type === 'j_event').forEach((jEvent, i) => {
+        console.log(`🚨 FOUND-J-EVENTS: Entity ${entityInput.entityId.slice(0,10)}... has ${jEventCount} j-events from ${entityInput.signerId}`);
+        entityInput.entityTxs!.filter(tx => tx.type === 'j_event').forEach((jEvent, i) => {
           console.log(`🚨   J-EVENT-${i}: type=${jEvent.data.event.type}, block=${jEvent.data.blockNumber}, observedAt=${new Date(jEvent.data.observedAt).toLocaleTimeString()}`);
         });
       }
@@ -318,7 +332,7 @@ const applyServerInput = async (
       let actualSignerId = entityInput.signerId;
       if (!actualSignerId || actualSignerId === '') {
         // Check if this is an AccountInput that needs auto-routing
-        const hasAccountInput = entityInput.entityTxs?.some(tx => tx.type === 'accountInput');
+        const hasAccountInput = entityInput.entityTxs!.some(tx => tx.type === 'accountInput');
         if (hasAccountInput) {
           // Find the proposer for this entity
           const entityReplicaKeys = Array.from(env.replicas.keys()).filter(key => key.startsWith(entityInput.entityId + ':'));
@@ -348,7 +362,7 @@ const applyServerInput = async (
 
       console.log(`🔍 REPLICA-LOOKUP: Key="${replicaKey}"`);
       console.log(`🔍 REPLICA-LOOKUP: Found replica: ${!!entityReplica}`);
-      console.log(`🔍 REPLICA-LOOKUP: Input txs: ${entityInput.entityTxs?.length || 0}`);
+      console.log(`🔍 REPLICA-LOOKUP: Input txs: ${entityInput.entityTxs!.length}`);
       if (entityInput.entityTxs && entityInput.entityTxs.length > 0) {
         console.log(
           `🔍 REPLICA-LOOKUP: Tx types:`,
@@ -362,7 +376,7 @@ const applyServerInput = async (
       if (entityReplica) {
         if (DEBUG) {
           console.log(`Processing input for ${replicaKey}:`);
-          if (entityInput.entityTxs?.length) console.log(`  → ${entityInput.entityTxs.length} transactions`);
+          if (entityInput.entityTxs!.length) console.log(`  → ${entityInput.entityTxs!.length} transactions`);
           if (entityInput.proposedFrame) console.log(`  → Proposed frame: ${entityInput.proposedFrame.hash}`);
           if (entityInput.precommits?.size) console.log(`  → ${entityInput.precommits.size} precommits`);
         }
