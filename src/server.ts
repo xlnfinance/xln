@@ -1132,3 +1132,5 @@ export { prepopulate };
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
 const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, entityId);
 const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(db, entityId);
+
+// Avatar functions are already imported and exported above

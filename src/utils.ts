@@ -434,3 +434,6 @@ export function deterministicStringify(obj: any): string {
     return value;
   });
 }
+
+// Re-export from entity-factory for convenience
+export { extractNumberFromEntityId };
