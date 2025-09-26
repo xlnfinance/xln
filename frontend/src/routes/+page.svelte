@@ -7,6 +7,7 @@
   import EntityFormation from '../lib/components/Formation/EntityFormation.svelte';
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
   import NetworkDirectory from '../lib/components/Network/NetworkDirectory.svelte';
+  import NetworkTopology from '../lib/components/Network/NetworkTopology.svelte';
   import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
   import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
   import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
@@ -17,6 +18,13 @@
   import { get } from 'svelte/store';
 
   let activeTab = 'formation';
+  let birdViewMode = false;
+
+  // Bird view toggle handler
+  function toggleBirdView() {
+    birdViewMode = !birdViewMode;
+    console.log('🗺️ Bird view mode:', birdViewMode ? 'ON' : 'OFF');
+  }
 
   // SEQUENTIAL LOADING: Wait for history to be populated
   async function waitForHistoryToLoad(): Promise<void> {
@@ -111,7 +119,7 @@
 </svelte:head>
 
 <main class="app">
-  <AdminTopBar />
+  <AdminTopBar {birdViewMode} onToggleBirdView={toggleBirdView} />
   <ErrorDisplay />
 
   {#if $isLoading}
@@ -127,20 +135,25 @@
       <button class="retry-btn" on:click={() => initializeXLN()}> Retry </button>
     </div>
   {:else}
-    <div class="main-content">
-      <!-- Entity Panels Container -->
-      {#if $tabs.length > 0}
-        <div class="entity-panels-container" id="entityPanelsContainer" data-panel-count={$tabs.length}>
-          {#each $tabs as tab, index (tab.id)}
-            <EntityPanel {tab} isLast={index === $tabs.length - 1} />
-          {/each}
-        </div>
-      {/if}
-      <!-- Transaction History & I/O Section -->
-      <TransactionHistoryIO />
+    {#if birdViewMode}
+      <!-- Bird View Mode: Show Network Topology -->
+      <NetworkTopology onBirdViewStateChange={(isOpen) => { if (!isOpen) birdViewMode = false; }} />
+    {:else}
+      <!-- Normal Mode: Show Entity Panels -->
+      <div class="main-content">
+        <!-- Entity Panels Container -->
+        {#if $tabs.length > 0}
+          <div class="entity-panels-container" id="entityPanelsContainer" data-panel-count={$tabs.length}>
+            {#each $tabs as tab, index (tab.id)}
+              <EntityPanel {tab} isLast={index === $tabs.length - 1} />
+            {/each}
+          </div>
+        {/if}
+        <!-- Transaction History & I/O Section -->
+        <TransactionHistoryIO />
 
-      <!-- Entity Formation/Jurisdictions Tabs -->
-      <div class="actionable-tabs-container">
+        <!-- Entity Formation/Jurisdictions Tabs -->
+        <div class="actionable-tabs-container">
         <div class="tabs-header">
           <button
             class="tab-button"
@@ -178,11 +191,12 @@
 
         <div id="networkTabContent" class="tab-content" class:active={activeTab === 'network'}>
           <NetworkDirectory />
+          </div>
         </div>
       </div>
-    </div>
+    {/if}
 
-    <!-- Time Machine -->
+    <!-- Time Machine (always visible) -->
     <TimeMachine />
 
     <!-- Error Popup -->

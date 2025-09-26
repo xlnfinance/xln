@@ -3,6 +3,10 @@
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
 
+  // Bird view toggle state
+  export let birdViewMode = false;
+  export let onToggleBirdView: (() => void) | undefined = undefined;
+
   let showSettingsModal = false;
 
   // Reactive theme icon
@@ -197,6 +201,14 @@
 <div class="admin-topbar">
   <div class="admin-logo">
     <span class="logo-text">xln</span>
+    <button
+      class="bird-view-toggle"
+      class:active={birdViewMode}
+      on:click={onToggleBirdView}
+      title="Toggle Network Topology View"
+    >
+      🗺️
+    </button>
     <div class="j-machine-status">
       <span class="j-status-item" title="Last Synced J-machine Block">
         🔭 J-Block: {jMachineStatus.block}
@@ -336,7 +348,7 @@
     color: #007acc;
     font-weight: 600;
   }
-  
+
   .logo-text {
     font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
     font-size: 20px;
@@ -621,5 +633,32 @@
     border: none;
     cursor: pointer;
   }
-</style>
 
+  .bird-view-toggle {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 6px 8px;
+    color: #d4d4d4;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 16px;
+    margin-left: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bird-view-toggle:hover {
+    background: rgba(0, 122, 204, 0.1);
+    border-color: #007acc;
+    color: #007acc;
+  }
+
+  .bird-view-toggle.active {
+    background: rgba(0, 122, 204, 0.2);
+    border-color: #007acc;
+    color: #007acc;
+    box-shadow: 0 0 8px rgba(0, 122, 204, 0.3);
+  }
+</style>
