@@ -197,8 +197,12 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnI
     // Entity utilities
     getEntityNumber: (entityId: string): number | null => {
       try {
-        return $env.server.extractNumberFromEntityId(entityId);
-      } catch {
+        console.log('getEntityNumber called with:', entityId);
+        const result = $env.server.extractNumberFromEntityId(entityId);
+        console.log('extractNumberFromEntityId result:', result);
+        return result;
+      } catch (error) {
+        console.error('Error in getEntityNumber:', error);
         return null;
       }
     },
@@ -208,11 +212,13 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnI
     // Avatar generation (using server-side functions)
     generateEntityAvatar: (entityId: string): string => {
       try {
+        console.log('generateEntityAvatar called with:', entityId);
         if (!$env.server?.generateEntityAvatar) {
           console.warn('generateEntityAvatar not available on server');
           return '';
         }
         const result = $env.server.generateEntityAvatar(entityId);
+        console.log('generateEntityAvatar result length:', result?.length);
         if (!result) {
           console.warn('generateEntityAvatar returned empty result for:', entityId);
         }
