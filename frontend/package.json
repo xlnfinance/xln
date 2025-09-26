@@ -9,7 +9,7 @@
 		"build:static": "node copy-static-files.js && vite build && echo 'Built for GitHub Pages deployment'",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error --output machine 2>&1 | grep -v '^WARN\\|^Warning\\|^Warn:' | grep -E '(^ERROR|^Error:|svelte-check found [0-9]+ errors)' || echo '✅ 0 errors'",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && vite build",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
 	},
 	"devDependencies": {
@@ -22,5 +22,9 @@
 		"svelte-multiselect": "^11.2.3",
 		"typescript": "^5.0.0",
 		"vite": "^7.0.4"
+	},
+	"dependencies": {
+		"@types/three": "^0.180.0",
+		"three": "^0.180.0"
 	}
 }
