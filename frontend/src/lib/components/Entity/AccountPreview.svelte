@@ -214,6 +214,9 @@
     border: 1px solid #2d2d2d;
     border-radius: 4px;
     padding: 16px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
   }
 
   .account-preview.loading {
@@ -223,10 +226,6 @@
 
   .status-badge.loading {
     color: #888;
-  }
-    margin-bottom: 8px;
-    cursor: pointer;
-    transition: all 0.15s ease;
   }
 
   .account-preview:hover {
