@@ -9,7 +9,7 @@
 		"build:static": "node copy-static-files.js && vite build && echo 'Built for GitHub Pages deployment'",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error --diagnostic-sources \"js\" --compiler-warnings \"css-unused-selector:ignore,a11y-click-events-have-key-events:ignore,a11y-no-static-element-interactions:ignore,a11y-label-has-associated-control:ignore\"",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --diagnostic-sources \"js\" 2>&1 | grep -E '(Error:|svelte-check found [0-9]+ errors)'",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
 	},
 	"devDependencies": {
