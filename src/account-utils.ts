@@ -28,7 +28,6 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   // VALIDATE AT SOURCE: Financial data must be valid
   validateDelta(delta, 'deriveDelta');
 
-  // EXACT copy from old_src Channel.ts deriveDelta method (lines 652-735)
   const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
 
   const totalDelta = delta.ondelta + delta.offdelta;
@@ -58,7 +57,7 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
 
   if (!isLeft) {
-    // flip the view (EXACT from old_src lines 684-697)
+    // flip the view
     [inCollateral, inAllowence, inCapacity,
      outCollateral, outAllowence, outCapacity] =
     [outCollateral, outAllowence, outCapacity,
@@ -70,7 +69,7 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
   }
 
-  // ASCII visualization (EXACT from old_src Channel.ts lines 701-715) with debugging
+  // ASCII visualization
   const totalWidth = Number(totalCapacity);
   const leftCreditWidth = Math.floor((Number(ownCreditLimit) / totalWidth) * 50);
   const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);
@@ -109,7 +108,7 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     outCapacity,
     outOwnCredit,
     inPeerCredit,
-    ascii, // ASCII visualization like old_src
+    ascii,
   };
 }
 
