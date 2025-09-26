@@ -208,16 +208,34 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnI
     // Avatar generation (using server-side functions)
     generateEntityAvatar: (entityId: string): string => {
       try {
-        return $env.server.generateEntityAvatar(entityId);
-      } catch {
+        if (!$env.server?.generateEntityAvatar) {
+          console.warn('generateEntityAvatar not available on server');
+          return '';
+        }
+        const result = $env.server.generateEntityAvatar(entityId);
+        if (!result) {
+          console.warn('generateEntityAvatar returned empty result for:', entityId);
+        }
+        return result;
+      } catch (error) {
+        console.error('Error generating entity avatar:', error);
         return '';
       }
     },
 
     generateSignerAvatar: (signerId: string): string => {
       try {
-        return $env.server.generateSignerAvatar(signerId);
-      } catch {
+        if (!$env.server?.generateSignerAvatar) {
+          console.warn('generateSignerAvatar not available on server');
+          return '';
+        }
+        const result = $env.server.generateSignerAvatar(signerId);
+        if (!result) {
+          console.warn('generateSignerAvatar returned empty result for:', signerId);
+        }
+        return result;
+      } catch (error) {
+        console.error('Error generating signer avatar:', error);
         return '';
       }
     },
