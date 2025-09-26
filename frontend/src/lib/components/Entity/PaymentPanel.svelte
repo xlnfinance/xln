@@ -171,7 +171,9 @@
     >
       <option value="">Select entity...</option>
       {#each allEntities as id}
-        <option value={id}>Entity #{$xlnFunctions?.getEntityNumber(id) || '?'}</option>
+        {#if id}
+          <option value={id}>Entity #{$xlnFunctions?.getEntityNumber(id) || '?'}</option>
+        {/if}
       {/each}
     </select>
   </div>
