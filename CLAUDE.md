@@ -11,7 +11,45 @@ Do not create mocks/stubs unless asked to. Use real integration. Don't repeat sa
 ALWAYS run `bun run check` after applying changes to ensure type safety.
 
 Everywhere in code fail-fast and loud (with full stop of actions and throw a popup)
+  1. "VERIFY FIRST" Protocol
 
+  Rule: Before claiming anything works, run the EXACT command the user mentioned
+  - Before saying "it's fixed": Run bun run check and show full output
+  - Before saying "dependency installed": Run the failing import/command
+  - Before saying "build passes": Run complete build pipeline
+  - Trigger: Any claim about functionality working
+
+  2. "REPRODUCE THEN FIX" Protocol
+
+  Rule: Always reproduce the user's exact error before attempting fixes
+  - If user reports error X: First make error X happen on my end
+  - Don't assume - get the same error message they're seeing
+  - Only then start fixing with verified understanding
+  - Trigger: Any bug report or "this doesn't work"
+
+  3. "NO ASSUMPTION COMMITS" Protocol
+
+  Rule: Every code change must be verified before committing
+  - Run bun run check after ANY code modification
+  - Test the specific functionality being changed
+  - Never commit with "this should work" - only "this does work"
+  - Trigger: Before any git commit
+
+  4. "FULL CONTEXT GATHERING" Protocol
+
+  Rule: When user shows error, get complete environment context first
+  - Check what directory I'm in vs where error occurred
+  - Verify dependency versions match between environments
+  - Check if there are file differences I can't see
+  - Trigger: Any error that "works on my end"
+
+  5. "SHOW-DON'T-TELL" Protocol
+
+  Rule: Demonstrate fixes with actual command output, not descriptions
+  - Instead of "I configured it to suppress warnings" → Show bun run check output
+  - Instead of "the dependency is installed" → Show successful import
+  - Instead of "the types are fixed" → Show 0 TypeScript errors
+  - Trigger: Any technical claim about system state
 
 Type safety principles applied:
 - Validate at source - Entity IDs validated when processing replica keys
