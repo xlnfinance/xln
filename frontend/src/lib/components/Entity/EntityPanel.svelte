@@ -208,7 +208,7 @@
       <div class="account-breadcrumb">
         <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{$xlnFunctions?.getEntityNumber(tab.entityId) || '?'}</button>
         <span class="breadcrumb-separator">→</span>
-        <span class="breadcrumb-current">Account with Entity #{selectedAccountId ? $xlnFunctions?.getEntityNumber(selectedAccountId) || '?' : '?'}</span>
+        <span class="breadcrumb-current">Account with Entity #{$xlnFunctions?.getEntityNumber(selectedAccountId!) || '?'}</span>
       </div>
       <AccountPanel
         account={selectedAccount}

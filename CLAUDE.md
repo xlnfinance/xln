@@ -12,6 +12,12 @@ ALWAYS run `bun run check` after applying changes to ensure type safety.
 
 Everywhere in code fail-fast and loud (with full stop of actions and throw a popup)
 
+
+Type safety principles applied:
+- Validate at source - Entity IDs validated when processing replica keys
+- Fail fast and loud - Throw errors on invalid data format instead of silent fallbacks
+- Trust at use - Once validated, no need for defensive checks in UI
+
 🎯 IDIOMATIC TYPESCRIPT: VALIDATE AT SOURCE
 
 Bad (amateur) approach:

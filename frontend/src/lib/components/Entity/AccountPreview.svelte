@@ -12,16 +12,15 @@
 
   const dispatch = createEventDispatcher();
 
+  // Validate xlnFunctions availability - fail fast if not ready
+  $: functionsReady = $xlnFunctions?.formatTokenAmount && $xlnFunctions?.deriveDelta;
+
   // Calculate total utilization across all tokens
   $: utilization = calculateUtilization();
 
   function calculateUtilization(): number {
     if (!account.deltas || account.deltas.size === 0) return 0;
-
-      // Check if XLN functions are available
-    if (!$xlnFunctions?.deriveDelta) {
-      return 0;
-    }
+    if (!functionsReady) return 0;
 
     let totalCapacity = 0n;
     let totalUsed = 0n;
@@ -30,7 +29,7 @@
     const isLeftEntity = entityId < counterpartyId;
 
     for (const [, delta] of account.deltas.entries()) {
-      const derived = $xlnFunctions.deriveDelta(delta, isLeftEntity);
+      const derived = $xlnFunctions!.deriveDelta(delta, isLeftEntity);
       totalCapacity += derived.outCapacity + derived.inCapacity;
 
       // Used = credit they spent + our collateral locked
@@ -87,6 +86,7 @@
   });
 </script>
 
+{#if functionsReady}
 <div
   class="account-preview"
   class:selected={isSelected}
@@ -97,7 +97,7 @@
 >
   <div class="account-header">
     <div class="entity-info">
-      <span class="entity-name">Entity #{$xlnFunctions?.getEntityNumber(counterpartyId) || '?'}</span>
+      <span class="entity-name">Entity #{$xlnFunctions!.getEntityNumber(counterpartyId) || '?'}</span>
     </div>
     <div class="account-status">
       {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
@@ -178,23 +178,35 @@
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.theirUsedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit we're using: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUsedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                title="Credit we're using: {$xlnFunctions!.formatTokenAmount(td.tokenId, td.theirUsedCredit)}"
               ></div>
             {/if}
           </div>
         </div>
         <div class="capacity-labels">
           <span class="capacity-out" title="Can send">
-            OUT {$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}
+            OUT {$xlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outCapacity)}
           </span>
           <span class="capacity-in" title="Can receive">
-            IN {$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}
+            IN {$xlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inCapacity)}
           </span>
         </div>
       </div>
     {/each}
   </div>
 </div>
+{:else}
+  <div class="account-preview loading">
+    <div class="account-header">
+      <div class="entity-info">
+        <span class="entity-name">Entity #{counterpartyId.slice(-4)}</span>
+      </div>
+      <div class="account-status">
+        <span class="status-badge loading">Loading...</span>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .account-preview {
@@ -202,6 +214,16 @@
     border: 1px solid #2d2d2d;
     border-radius: 4px;
     padding: 16px;
+  }
+
+  .account-preview.loading {
+    opacity: 0.6;
+    background: #1a1a1a;
+  }
+
+  .status-badge.loading {
+    color: #888;
+  }
     margin-bottom: 8px;
     cursor: pointer;
     transition: all 0.15s ease;

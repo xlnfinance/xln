@@ -14,10 +14,16 @@
   let routes: any[] = [];
   let selectedRouteIndex = -1;
 
-  // Get all entities for dropdown
+  // Get all entities for dropdown - guaranteed non-null entity IDs
   $: allEntities = $replicas ? Array.from($replicas.keys() as IterableIterator<string>)
-    .map((key: string) => key.split(':')[0])
-    .filter((id, index, self) => self.indexOf(id) === index && id !== entityId)
+    .map((key: string) => {
+      const entityId = key.split(':')[0];
+      if (!entityId) throw new Error(`Invalid replica key format: ${key}`);
+      return entityId;
+    })
+    .filter((id: string, index: number, self: string[]) =>
+      self.indexOf(id) === index && id !== entityId
+    )
     .sort() : [];
 
   async function findRoutes() {
@@ -171,9 +177,7 @@
     >
       <option value="">Select entity...</option>
       {#each allEntities as id}
-        {#if id}
-          <option value={id}>Entity #{$xlnFunctions?.getEntityNumber(id) || '?'}</option>
-        {/if}
+        <option value={id}>Entity #{$xlnFunctions?.getEntityNumber(id) || '?'}</option>
       {/each}
     </select>
   </div>
