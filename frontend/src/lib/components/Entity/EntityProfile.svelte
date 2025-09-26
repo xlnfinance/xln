@@ -9,11 +9,23 @@
 <div class="entity-profile-section">
   {#if replica}
     <div class="entity-profile">
+      <div class="profile-avatar">
+        <img
+          src={$xlnFunctions?.generateEntityAvatar(replica.entityId) || ''}
+          alt="Entity Avatar"
+          class="avatar-image"
+        />
+      </div>
       <div class="profile-info">
         <div class="profile-name">
           Entity #{$xlnFunctions?.getEntityNumber(replica.entityId) || '?'}
         </div>
         <div class="profile-details">
+          <img
+            src={$xlnFunctions?.generateSignerAvatar(replica.signerId) || ''}
+            alt="Signer Avatar"
+            class="signer-avatar"
+          />
           Signer: {replica.signerId}
         </div>
       </div>
@@ -38,6 +50,25 @@
     align-items: center;
     gap: 12px;
     margin-bottom: 12px;
+  }
+
+  .profile-avatar {
+    flex-shrink: 0;
+  }
+
+  .avatar-image {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid #4a5568;
+  }
+
+  .signer-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
   }
 
   .profile-info {

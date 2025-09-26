@@ -42,32 +42,7 @@ export const error = writable<string | null>(null);
 // Store XLN instance separately for function access
 export const xlnInstance = writable<any>(null);
 
-// Create derived stores for commonly used functions - simple and direct
-export const xlnFunctions = derived(xlnInstance, ($xlnInstance) => {
-  if (!$xlnInstance) return null;
-  return {
-    // Account utilities
-    deriveDelta: $xlnInstance.deriveDelta,
-    formatTokenAmount: $xlnInstance.formatTokenAmount,
-    getTokenInfo: $xlnInstance.getTokenInfo,
-    isLeft: $xlnInstance.isLeft,
-    createDemoDelta: $xlnInstance.createDemoDelta,
-    getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,
-    // Entity utilities
-    getEntityNumber: $xlnInstance.getEntityNumber,
-    formatEntityDisplay: $xlnInstance.formatEntityDisplay,
-    formatShortEntityId: $xlnInstance.formatShortEntityId,
-    safeStringify: $xlnInstance.safeStringify,
-    // Financial utilities (ethers.js-based, precision-safe)
-    formatTokenAmountEthers: $xlnInstance.formatTokenAmountEthers,
-    parseTokenAmount: $xlnInstance.parseTokenAmount,
-    convertTokenPrecision: $xlnInstance.convertTokenPrecision,
-    calculatePercentageEthers: $xlnInstance.calculatePercentageEthers,
-    formatAssetAmountEthers: $xlnInstance.formatAssetAmountEthers,
-    BigIntMath: $xlnInstance.BigIntMath,
-    FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
-  };
-});
+// xlnFunctions is now defined at the end of the file
 
 // Derived stores for convenience
 export const replicas = derived(
@@ -194,3 +169,75 @@ export async function initializeXLN() {
 
 // Export XLN for direct use in components (like legacy index.html)
 export { getXLN };
+
+// === FRONTEND UTILITY FUNCTIONS ===
+// Derived store that provides utility functions for components
+export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnInstance]) => {
+  if (!$env?.server || !$xlnInstance) return null;
+
+  return {
+    // Account utilities
+    deriveDelta: $xlnInstance.deriveDelta,
+    formatTokenAmount: $xlnInstance.formatTokenAmount,
+    getTokenInfo: $xlnInstance.getTokenInfo,
+    isLeft: $xlnInstance.isLeft,
+    createDemoDelta: $xlnInstance.createDemoDelta,
+    getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,
+    safeStringify: $xlnInstance.safeStringify,
+
+    // Financial utilities (ethers.js-based, precision-safe)
+    formatTokenAmountEthers: $xlnInstance.formatTokenAmountEthers,
+    parseTokenAmount: $xlnInstance.parseTokenAmount,
+    convertTokenPrecision: $xlnInstance.convertTokenPrecision,
+    calculatePercentageEthers: $xlnInstance.calculatePercentageEthers,
+    formatAssetAmountEthers: $xlnInstance.formatAssetAmountEthers,
+    BigIntMath: $xlnInstance.BigIntMath,
+    FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
+
+    // Entity utilities
+    getEntityNumber: (entityId: string): number | null => {
+      try {
+        return $env.server.extractNumberFromEntityId(entityId);
+      } catch {
+        return null;
+      }
+    },
+    formatEntityDisplay: $xlnInstance.formatEntityDisplay,
+    formatShortEntityId: $xlnInstance.formatShortEntityId,
+
+    // Avatar generation (using server-side functions)
+    generateEntityAvatar: (entityId: string): string => {
+      try {
+        return $env.server.generateEntityAvatar(entityId);
+      } catch {
+        return '';
+      }
+    },
+
+    generateSignerAvatar: (signerId: string): string => {
+      try {
+        return $env.server.generateSignerAvatar(signerId);
+      } catch {
+        return '';
+      }
+    },
+
+    // Entity display helpers
+    getEntityDisplayInfo: (entityId: string) => {
+      try {
+        return $env.server.getEntityDisplayInfo(entityId);
+      } catch {
+        return { name: entityId, avatar: '', type: 'lazy' };
+      }
+    },
+
+    // Signer display helpers
+    getSignerDisplayInfo: (signerId: string) => {
+      try {
+        return $env.server.getSignerDisplayInfo(signerId);
+      } catch {
+        return { name: signerId, address: signerId, avatar: '' };
+      }
+    }
+  };
+});
