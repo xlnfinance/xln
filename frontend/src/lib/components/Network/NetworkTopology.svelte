@@ -130,6 +130,14 @@
     description: string;
   }> = [];
 
+  // Real-time activity ticker
+  let recentActivity: Array<{
+    id: string;
+    message: string;
+    timestamp: number;
+    type: 'payment' | 'credit' | 'settlement';
+  }> = [];
+
   onMount(() => {
     const initAndSetup = async () => {
       await initThreeJS();
@@ -216,6 +224,8 @@
     renderer.domElement.addEventListener('mousemove', onMouseMove);
     renderer.domElement.addEventListener('mouseout', onMouseOut);
     renderer.domElement.addEventListener('click', onMouseClick);
+    renderer.domElement.addEventListener('dblclick', onMouseDoubleClick);
+
 
     // Handle resize
     window.addEventListener('resize', onWindowResize);
@@ -350,6 +360,9 @@
     console.log('🔵 Created entity node:', entityId, 'at', x.toFixed(1), y.toFixed(1));
 
     scene.add(mesh);
+
+    // Add entity name label
+    createEntityLabel(profile.entityId, x, y + entitySize + 0.5, z);
 
     entities.push({
       id: profile.entityId,
@@ -588,7 +601,16 @@
       return group;
     }
 
-    const tokenDelta = accountData.deltas.get(selectedTokenId);
+
+    // Try both number and string keys to handle type mismatch
+    let tokenDelta = accountData.deltas.get(selectedTokenId);
+    if (!tokenDelta && typeof selectedTokenId === 'number') {
+      tokenDelta = accountData.deltas.get(String(selectedTokenId));
+    }
+    if (!tokenDelta && typeof selectedTokenId === 'string') {
+      tokenDelta = accountData.deltas.get(Number(selectedTokenId));
+    }
+
     if (!tokenDelta) {
       console.log(`📊 No delta data for token ${selectedTokenId} in account ${fromId} ↔ ${toId}`);
       scene.add(group);
@@ -660,8 +682,10 @@
     direction: THREE.Vector3
   ): void {
     // Use totalCapacity for proportional scaling
+    // Use global portfolio scale for consistent visualization
+    const globalScale = $settings.portfolioScale || 5000;
     const maxVisualLength = lineLength * 0.6; // Max 60% of line length for bars
-    const barScale = derived.totalCapacity > 0 ? maxVisualLength / derived.totalCapacity : 0;
+    const barScale = derived.totalCapacity > 0 ? (maxVisualLength / derived.totalCapacity) * (globalScale / 5000) : 0;
 
     // Bar colors for REAL deriveDelta fields
     const colors = {
@@ -731,8 +755,8 @@
       console.log(`📊 Creating bar ${barType}: length=${length.toFixed(3)}`);
 
       if (length > 0.01) { // Lower threshold for visibility
-        // Create VERY THICK cylindrical bar geometry for visibility
-        const radius = barHeight * 3.0; // Much thicker bars
+        // Create ULTRA THICK cylindrical bar geometry for visibility
+        const radius = barHeight * 5.0; // Ultra thick bars
         const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
         const barColor = colors[barType as keyof typeof colors];
         if (!barColor) {
@@ -757,6 +781,10 @@
         bar.quaternion.setFromUnitVectors(axis, targetAxis);
 
         group.add(bar);
+
+        // Add value label on bar - CSS3D text facing camera
+        createBarLabel(group, barCenter, Math.floor(length * derived.totalCapacity / maxVisualLength), barType);
+
         console.log(`✅ Created ${barType} bar at offset ${currentOffset.toFixed(2)}`);
       }
 
@@ -792,6 +820,70 @@
     separator.rotateY(Math.PI / 2); // Make it perpendicular
 
     group.add(separator);
+  }
+
+  function createBarLabel(group: THREE.Group, position: THREE.Vector3, value: number, _barType: string) {
+    // Create canvas for text
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 128;
+    canvas.height = 32;
+
+    // Text styling
+    context.fillStyle = '#ffffff';
+    context.font = 'bold 16px monospace';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    // Format value (short as possible)
+    let text = '';
+    if (value >= 1000000) {
+      text = Math.floor(value / 1000000) + 'M';
+    } else if (value >= 1000) {
+      text = Math.floor(value / 1000) + 'k';
+    } else {
+      text = value.toString();
+    }
+
+    context.fillText(text, 64, 16);
+
+    // Create texture and sprite
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(spriteMaterial);
+
+    sprite.position.copy(position);
+    sprite.scale.set(0.5, 0.25, 1);
+
+    group.add(sprite);
+  }
+
+  function createEntityLabel(entityId: string, x: number, y: number, z: number) {
+    // Create canvas for entity name
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 256;
+    canvas.height = 48;
+
+    // Text styling
+    context.fillStyle = '#00ff88';
+    context.font = 'bold 14px monospace';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+
+    // Short entity name
+    const shortName = entityId.slice(0, 12) + '...';
+    context.fillText(shortName, 128, 24);
+
+    // Create sprite
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(spriteMaterial);
+
+    sprite.position.set(x, y, z);
+    sprite.scale.set(2, 1, 1);
+
+    scene.add(sprite);
   }
 
   function animate() {
@@ -917,6 +1009,10 @@
                 // Pulse entities involved in this transaction
                 triggerEntityActivity(tx.data.fromEntityId);
                 triggerEntityActivity(tx.data.toEntityId);
+
+                // Add to activity ticker
+                addActivityToTicker(tx.data.fromEntityId, tx.data.toEntityId, tx.data.accountTx);
+
                 console.log(`💫 Frame ${timeIndex}: Transaction activity ${tx.data.fromEntityId} → ${tx.data.toEntityId}`);
               }
             });
@@ -1103,6 +1199,82 @@
     animateCamera();
   }
 
+  function onMouseDoubleClick(event: MouseEvent) {
+    // Calculate mouse position
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    // Update raycaster
+    raycaster.setFromCamera(mouse, camera);
+
+    // Check for entity intersections
+    const entityMeshes = entities.map(e => e.mesh);
+    const intersects = raycaster.intersectObjects(entityMeshes);
+
+    if (intersects.length > 0) {
+      const intersectedObject = intersects[0]?.object;
+      if (!intersectedObject) {
+        throw new Error('FINTECH-SAFETY: No intersected object in double-click');
+      }
+      const entity = entities.find(e => e.mesh === intersectedObject);
+
+      if (!entity) {
+        throw new Error('FINTECH-SAFETY: Entity not found for double-clicked object');
+      }
+
+      // Switch to normal panel view and focus this entity
+      console.log(`🎯 Double-clicked entity: ${entity.id} - switching to panel view`);
+
+      // Save bird view as closed and trigger parent switch
+      saveBirdViewSettings(false);
+      if (onBirdViewStateChange) {
+        onBirdViewStateChange(false);
+      }
+
+      // TODO: Focus specific entity panel - would need tabOperations.focusEntity(entity.id)
+    }
+  }
+
+  function addActivityToTicker(fromId: string, toId: string, accountTx: any) {
+    const fromShort = fromId.slice(0, 8);
+    const toShort = toId.slice(0, 8);
+
+    let message = '';
+    let type: 'payment' | 'credit' | 'settlement' = 'payment';
+
+    switch (accountTx.type) {
+      case 'payment':
+        const amount = Number(accountTx.amount || 0n);
+        message = `${fromShort}→${toShort}: ${amount > 1000 ? Math.floor(amount/1000)+'k' : amount}`;
+        type = 'payment';
+        break;
+      case 'credit_limit':
+        message = `${fromShort}↔${toShort}: Credit limit`;
+        type = 'credit';
+        break;
+      case 'settlement':
+        message = `${fromShort}⚖${toShort}: Settlement`;
+        type = 'settlement';
+        break;
+      default:
+        message = `${fromShort}↔${toShort}: ${accountTx.type}`;
+    }
+
+    // Add to beginning of array (newest first)
+    recentActivity.unshift({
+      id: Date.now().toString(),
+      message,
+      timestamp: Date.now(),
+      type
+    });
+
+    // Keep only last 10 activities
+    if (recentActivity.length > 10) {
+      recentActivity = recentActivity.slice(0, 10);
+    }
+  }
+
   function getEntityAccountCount(entityId: string): number {
     const currentReplicas = $visibleReplicas;
     const replica = Array.from(currentReplicas.entries() as [string, any][])
@@ -1150,13 +1322,15 @@
       availableTokens = [0]; // Default fallback
     }
 
-    // Reset selected token if it's not available
+    // Reset selected token if it's not available - prioritize token 0
     if (!availableTokens.includes(selectedTokenId)) {
-      const firstToken = availableTokens[0];
-      if (firstToken === undefined) {
+      // Prefer token 0 if available, else use first available
+      const preferredToken = availableTokens.includes(0) ? 0 : availableTokens[0];
+      if (preferredToken === undefined) {
         throw new Error('FINTECH-SAFETY: No available tokens found');
       }
-      selectedTokenId = firstToken;
+      selectedTokenId = preferredToken;
+      saveBirdViewSettings(); // Persist the change
     }
   }
 
@@ -1178,9 +1352,10 @@
   }
 
   function showPaymentRoutes() {
-    // Auto-switch to LIVE mode before payment
+    // Auto-switch to LIVE mode before payment with user feedback
     if (!$isLive) {
       console.log('🔴 Auto-switching to LIVE mode for payment');
+      alert('Switching to LIVE mode for payment routing...');
       timeOperations.goToLive();
     }
 
@@ -1365,6 +1540,7 @@
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
+
 </script>
 
 <div bind:this={container} class="network-topology-container">
@@ -1482,6 +1658,20 @@
       <small>Scroll to zoom, drag to rotate</small>
     </div>
   </div>
+
+  <!-- Real-time Activity Ticker -->
+  {#if recentActivity.length > 0}
+    <div class="activity-ticker">
+      <h4>⚡ Live Activity</h4>
+      <div class="activity-list">
+        {#each recentActivity as activity (activity.id)}
+          <div class="activity-item {activity.type}">
+            {activity.message}
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   {#if tooltip.visible}
     <div
@@ -1743,5 +1933,55 @@
     color: #9d9d9d;
     font-style: italic;
     padding: 20px;
+  }
+
+  .activity-ticker {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    background: rgba(45, 45, 45, 0.9);
+    border: 1px solid #007acc;
+    border-radius: 8px;
+    padding: 12px;
+    min-width: 300px;
+    max-width: 400px;
+    z-index: 20;
+    backdrop-filter: blur(10px);
+  }
+
+  .activity-ticker h4 {
+    margin: 0 0 8px 0;
+    color: #007acc;
+    font-size: 12px;
+  }
+
+  .activity-list {
+    max-height: 120px;
+    overflow-y: auto;
+  }
+
+  .activity-item {
+    font-family: monospace;
+    font-size: 10px;
+    padding: 2px 0;
+    opacity: 0.9;
+    animation: fadeIn 0.3s ease;
+  }
+
+  .activity-item.payment {
+    color: #ffaa00;
+  }
+
+  .activity-item.credit {
+    color: #0088ff;
+  }
+
+  .activity-item.settlement {
+    color: #ff4444;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 0.9; transform: translateX(0); }
   }
 </style>
