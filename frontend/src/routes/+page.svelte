@@ -18,11 +18,33 @@
   import { get } from 'svelte/store';
 
   let activeTab = 'formation';
-  let birdViewMode = false;
 
-  // Bird view toggle handler
+  // Load bird view state from localStorage
+  function loadBirdViewState(): boolean {
+    try {
+      const saved = localStorage.getItem('xln-bird-view-settings');
+      const settings = saved ? JSON.parse(saved) : null;
+      return settings?.wasLastOpened || false;
+    } catch {
+      return false;
+    }
+  }
+
+  let birdViewMode = loadBirdViewState();
+
+  // Bird view toggle handler with state persistence
   function toggleBirdView() {
     birdViewMode = !birdViewMode;
+
+    // Save bird view state immediately
+    try {
+      const settings = JSON.parse(localStorage.getItem('xln-bird-view-settings') || '{}');
+      settings.wasLastOpened = birdViewMode;
+      localStorage.setItem('xln-bird-view-settings', JSON.stringify(settings));
+    } catch (e) {
+      console.warn('Failed to save bird view state:', e);
+    }
+
     console.log('🗺️ Bird view mode:', birdViewMode ? 'ON' : 'OFF');
   }
 
