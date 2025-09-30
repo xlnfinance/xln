@@ -279,6 +279,25 @@ export async function proposeAccountFrame(
     allEvents.push(...result.events);
   }
 
+  // CRITICAL FIX: Extract FULL delta state from clonedMachine.deltas (after processing)
+  // This was the consensus bug - we were using old currentFrame instead of new deltas
+  const finalTokenIds: number[] = [];
+  const finalDeltas: bigint[] = [];
+
+  // Sort by tokenId for deterministic ordering
+  const sortedTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
+
+  for (const [tokenId, delta] of sortedTokens) {
+    finalTokenIds.push(tokenId);
+    // Calculate net delta: offdelta - ondelta (+ collateral for reserves)
+    const netDelta = delta.offdelta - delta.ondelta;
+    finalDeltas.push(netDelta);
+  }
+
+  console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
+  console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
+  console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
+
   // Create account frame matching the real AccountFrame interface
   const frameData = {
     frameId: accountMachine.currentFrameId + 1,
@@ -294,8 +313,8 @@ export async function proposeAccountFrame(
       deltas: accountMachine.currentFrame.deltas,
     }),
     stateHash: '', // Will be filled after hash calculation
-    tokenIds: clonedMachine.currentFrame.tokenIds, // Keep as number[]
-    deltas: clonedMachine.currentFrame.deltas
+    tokenIds: finalTokenIds, // Use computed state from clonedMachine.deltas
+    deltas: finalDeltas       // Use computed state from clonedMachine.deltas
   };
 
   // Calculate state hash
