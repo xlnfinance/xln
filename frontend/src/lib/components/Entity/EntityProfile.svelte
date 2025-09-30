@@ -4,6 +4,8 @@
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
+
+  // Safety guard for XLN functions
 </script>
 
 <div class="entity-profile-section">
@@ -11,18 +13,18 @@
     <div class="entity-profile">
       <div class="profile-avatar">
         <img
-          src={$xlnFunctions?.generateEntityAvatar(replica.entityId) || ''}
+          src={$xlnFunctions.generateEntityAvatar?.(replica.entityId) || ''}
           alt="Entity Avatar"
           class="avatar-image"
         />
       </div>
       <div class="profile-info">
         <div class="profile-name">
-          Entity #{$xlnFunctions?.getEntityNumber(replica.entityId) || '?'}
+          Entity #{$xlnFunctions.getEntityNumber(replica.entityId)}
         </div>
         <div class="profile-details">
           <img
-            src={$xlnFunctions?.generateSignerAvatar(replica.signerId) || ''}
+            src={$xlnFunctions.generateSignerAvatar?.(replica.signerId) || ''}
             alt="Signer Avatar"
             class="signer-avatar"
           />

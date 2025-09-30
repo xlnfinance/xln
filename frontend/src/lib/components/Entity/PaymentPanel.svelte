@@ -157,7 +157,7 @@
   }
 
   function formatRoute(route: any): string {
-    return route.path.map((id: string) => `E${$xlnFunctions?.getEntityNumber(id) || '?'}`).join(' → ');
+    return route.path.map((id: string) => `E${$xlnFunctions!.getEntityNumber(id)}`).join(' → ');
   }
 
   function formatFee(feePPM: number): string {
@@ -177,7 +177,7 @@
     >
       <option value="">Select entity...</option>
       {#each allEntities as id}
-        <option value={id}>Entity #{$xlnFunctions?.getEntityNumber(id) || '?'}</option>
+        <option value={id}>Entity #{$xlnFunctions!.getEntityNumber(id)}</option>
       {/each}
     </select>
   </div>

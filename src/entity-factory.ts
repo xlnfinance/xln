@@ -111,11 +111,11 @@ export const detectEntityType = (entityId: string): EntityType => {
   return 'lazy';
 };
 
-export const extractNumberFromEntityId = (entityId: string): number | null => {
+export const extractNumberFromEntityId = (entityId: string): number => {
   if (!entityId || typeof entityId !== 'string') {
-    return null;
+    throw new Error(`FINTECH-SAFETY: Invalid entityId type: ${typeof entityId}`);
   }
-  
+
   // Check if this is a hex string (0x followed by hex digits)
   if (entityId.startsWith('0x') && entityId.length === 66) {
     try {
@@ -126,9 +126,13 @@ export const extractNumberFromEntityId = (entityId: string): number | null => {
         return Number(num);
       }
 
-      return null;
-    } catch {
-      return null;
+      // For lazy entities: generate deterministic display number from hash
+      // Take last 4 bytes and convert to display number (always positive)
+      const hashSuffix = entityId.slice(-8); // Last 4 bytes as hex
+      const displayNum = parseInt(hashSuffix, 16) % 9000000 + 1000000; // 1M-10M range
+      return displayNum;
+    } catch (error) {
+      throw new Error(`FINTECH-SAFETY: Invalid entityId format: ${entityId} - ${error}`);
     }
   }
 
@@ -142,13 +146,15 @@ export const extractNumberFromEntityId = (entityId: string): number | null => {
         return Number(num);
       }
 
-      return null;
-    } catch {
-      return null;
+      // Large numeric strings - use modulo for display
+      const displayNum = Number(num % 9000000n + 1000000n);
+      return displayNum;
+    } catch (error) {
+      throw new Error(`FINTECH-SAFETY: Invalid numeric entityId: ${entityId} - ${error}`);
     }
   }
 
-  return null;
+  throw new Error(`FINTECH-SAFETY: EntityId must be hex or numeric, got: ${entityId}`);
 };
 
 // 1. LAZY ENTITIES (Free, instant)

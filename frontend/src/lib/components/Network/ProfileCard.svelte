@@ -7,22 +7,8 @@
   let isJoining = false;
   let joinError: string | null = null;
 
-  // Helper to safely stringify values (handles BigInt)
-  function safeStringify(value: any): string {
-    try {
-      if (typeof value === 'bigint') {
-        return value.toString();
-      }
-      if (typeof value === 'object' && value !== null) {
-        return JSON.stringify(value, (_, val) =>
-          typeof val === 'bigint' ? val.toString() : val
-        );
-      }
-      return String(value);
-    } catch (err) {
-      return String(value);
-    }
-  }
+  // Use central safeStringify from xlnFunctions
+  $: safeStringify = $xlnFunctions.safeStringify;
 
   // Check if this profile is a hub/router
   $: isHub = (profile.capabilities?.includes('hub') || profile.capabilities?.includes('router')) ?? false;
@@ -117,7 +103,7 @@
   <div class="profile-header">
     <div class="entity-id">
       <strong
-        >🏢 {isHub ? profile.metadata?.name || `Hub #${$xlnFunctions?.getEntityNumber(profile.entityId) || '?'}` : `Entity #${$xlnFunctions?.getEntityNumber(profile.entityId) || '?'}`}</strong
+        >🏢 {isHub ? profile.metadata?.name || `Hub #${$xlnFunctions!.getEntityNumber(profile.entityId)}` : `Entity #${$xlnFunctions!.getEntityNumber(profile.entityId)}`}</strong
       >
     </div>
     {#if isHub}

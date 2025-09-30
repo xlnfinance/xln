@@ -172,8 +172,17 @@ export { getXLN };
 
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components
-export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnInstance]) => {
-  if (!$env?.server || !$xlnInstance) return null;
+export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInstance]) => {
+  // XLN is full in-memory snapshots - NO LOADING STATE NEEDED
+
+  // If xlnInstance is missing, return empty functions that throw clear errors
+  if (!$xlnInstance) {
+    console.error('❌ CRITICAL: xlnInstance is null - XLN not initialized');
+    return {
+      getEntityNumber: () => { throw new Error('XLN not initialized'); },
+      isReady: false
+    };
+  }
 
   return {
     // Account utilities
@@ -194,35 +203,46 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnI
     BigIntMath: $xlnInstance.BigIntMath,
     FINANCIAL_CONSTANTS: $xlnInstance.FINANCIAL_CONSTANTS,
 
-    // Entity utilities
-    getEntityNumber: (entityId: string): number | null => {
+    // Entity utilities - UNIFIED ENTITY ACCESS
+    getEntity: (entityId: string) => {
       try {
-        console.log('getEntityNumber called with:', entityId);
-        const result = $env.server.extractNumberFromEntityId(entityId);
-        console.log('extractNumberFromEntityId result:', result);
+        const number = $xlnInstance.getEntityNumber(entityId);
+        if (typeof number !== 'number' || isNaN(number)) {
+          throw new Error(`FINTECH-SAFETY: getEntityNumber returned invalid: ${number}`);
+        }
+        return {
+          id: entityId,
+          number,
+          display: `Entity #${number}`,
+          avatar: $xlnInstance.generateEntityAvatar?.(entityId) || '',
+          info: $xlnInstance.getEntityDisplayInfo?.(entityId) || { name: entityId, avatar: '', type: 'numbered' }
+        };
+      } catch (error) {
+        console.error('FINTECH-SAFETY: Entity access failed:', error);
+        throw error; // Fail fast - don't hide errors
+      }
+    },
+
+    // Legacy functions (use getEntity() instead)
+    getEntityNumber: (entityId: string): number => {
+      try {
+        const result = $xlnInstance.getEntityNumber(entityId);
+        if (typeof result !== 'number' || isNaN(result)) {
+          throw new Error(`FINTECH-SAFETY: getEntityNumber returned invalid: ${result}`);
+        }
         return result;
       } catch (error) {
-        console.error('Error in getEntityNumber:', error);
-        return null;
+        console.error('FINTECH-SAFETY: Entity number extraction failed:', error);
+        throw error; // Fail fast - don't hide errors
       }
     },
     formatEntityDisplay: $xlnInstance.formatEntityDisplay,
     formatShortEntityId: $xlnInstance.formatShortEntityId,
 
-    // Avatar generation (using server-side functions)
+    // Avatar generation (using XLN instance functions)
     generateEntityAvatar: (entityId: string): string => {
       try {
-        console.log('generateEntityAvatar called with:', entityId);
-        if (!$env.server?.generateEntityAvatar) {
-          console.warn('generateEntityAvatar not available on server');
-          return '';
-        }
-        const result = $env.server.generateEntityAvatar(entityId);
-        console.log('generateEntityAvatar result length:', result?.length);
-        if (!result) {
-          console.warn('generateEntityAvatar returned empty result for:', entityId);
-        }
-        return result;
+        return $xlnInstance.generateEntityAvatar?.(entityId) || '';
       } catch (error) {
         console.error('Error generating entity avatar:', error);
         return '';
@@ -231,14 +251,7 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnI
 
     generateSignerAvatar: (signerId: string): string => {
       try {
-        if (!$env.server?.generateSignerAvatar) {
-          console.warn('generateSignerAvatar not available on server');
-          return '';
-        }
-        const result = $env.server.generateSignerAvatar(signerId);
-        if (!result) {
-          console.warn('generateSignerAvatar returned empty result for:', signerId);
-        }
+        const result = $xlnInstance.generateSignerAvatar?.(signerId) || '';
         return result;
       } catch (error) {
         console.error('Error generating signer avatar:', error);
@@ -249,7 +262,7 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnI
     // Entity display helpers
     getEntityDisplayInfo: (entityId: string) => {
       try {
-        return $env.server.getEntityDisplayInfo(entityId);
+        return $xlnInstance.getEntityDisplayInfo?.(entityId) || { name: entityId, avatar: '', type: 'lazy' };
       } catch {
         return { name: entityId, avatar: '', type: 'lazy' };
       }
@@ -258,10 +271,13 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([$env, $xlnI
     // Signer display helpers
     getSignerDisplayInfo: (signerId: string) => {
       try {
-        return $env.server.getSignerDisplayInfo(signerId);
+        return $xlnInstance.getSignerDisplayInfo?.(signerId) || { name: signerId, address: signerId, avatar: '' };
       } catch {
         return { name: signerId, address: signerId, avatar: '' };
       }
-    }
+    },
+
+    // State management - indicates functions are fully loaded
+    isReady: true
   };
 });

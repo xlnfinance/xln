@@ -11,7 +11,8 @@
   let selectedNewEntityId = '';
 
   // Get accounts from entity state
-  $: accounts = replica?.state?.accounts
+  // Safari requires explicit Map check before calling .entries()
+  $: accounts = (replica?.state?.accounts && replica.state.accounts instanceof Map)
     ? Array.from(replica.state.accounts.entries()).map(([counterpartyId, account]) => ({
         counterpartyId,
         ...account,
@@ -19,15 +20,17 @@
     : [];
 
 
+  // Safety guard for XLN functions
+
   // Get ALL entities in the system (excluding self) - reactive to accounts changes
   // This will recompute whenever accounts or replicas change
   $: allEntities = replica && $replicas && accounts ? getAllEntities() : [];
 
   function getAllEntities() {
-    if (!replica || !$replicas) return [];
+    if (!replica || !$replicas || !$xlnFunctions) return [];
 
     const currentEntityId = replica.entityId;
-    const existingAccountIds = new Set(replica.state?.accounts ? Array.from(replica.state.accounts.keys()) : []);
+    const existingAccountIds = new Set((replica.state?.accounts && replica.state.accounts instanceof Map) ? Array.from(replica.state.accounts.keys()) : []);
 
     // Get unique entities from replicas, excluding only current entity
     const entitySet = new Set<string>();
@@ -40,22 +43,22 @@
 
     return Array.from(entitySet).map(entityId => {
       // Try to get a human-readable name for the entity
-      const entityNumber = $xlnFunctions?.getEntityNumber(entityId) || '?';
+      const entityNumber = $xlnFunctions!.getEntityNumber(entityId);
       const hasAccount = existingAccountIds.has(entityId);
       return {
         entityId,
         displayName: `Entity #${entityNumber}`,
-        shortId: $xlnFunctions?.formatEntityDisplay(entityId) || 'Unknown',
+        shortId: $xlnFunctions!.formatEntityDisplay(entityId) || 'Unknown',
         hasAccount
       };
-    }).sort((a, b) => ($xlnFunctions?.getEntityNumber(a.entityId) || 0) - ($xlnFunctions?.getEntityNumber(b.entityId) || 0)); // Sort by entity number
+    }).sort((a, b) => $xlnFunctions!.getEntityNumber(a.entityId) - $xlnFunctions!.getEntityNumber(b.entityId)); // Sort by entity number
   }
 
   async function openAccountWith(targetEntityId: string) {
     if (!replica) return;
 
     try {
-      console.log(`💳 NEW-FLOW: Opening account with Entity #${$xlnFunctions?.getEntityNumber(targetEntityId) || '?'} via entity transaction`);
+      console.log(`💳 NEW-FLOW: Opening account with Entity #${$xlnFunctions!.getEntityNumber(targetEntityId)} via entity transaction`);
 
       const xln = await getXLN();
       const env = $xlnEnvironment;
@@ -74,7 +77,7 @@
       };
 
       await xln.processUntilEmpty(env, [accountRequestInput]);
-      console.log(`✅ Account request sent to local e-machine for Entity #${$xlnFunctions?.getEntityNumber(targetEntityId) || '?'}`);
+      console.log(`✅ Account request sent to local e-machine for Entity #${$xlnFunctions!.getEntityNumber(targetEntityId)}`);
     } catch (error) {
       console.error('Failed to send account request:', error);
       alert(`Failed to send account request: ${(error as Error)?.message || 'Unknown error'}`);
