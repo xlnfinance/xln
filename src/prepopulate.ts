@@ -1,7 +1,7 @@
 /**
- * Prepopulate XLN with a realistic network topology
- * Creates 10 entities: 3 hubs (E1-E3) and 7 users (E4-E10)
- * Hubs connect to each other, users connect to hubs
+ * Prepopulate XLN with H-shaped network topology
+ * Creates 10 entities: 2 hubs (E1-E2) and 8 users (E3-E10)
+ * Visual structure: H-shaped for clean 1px=$1 bars visualization
  */
 
 import type { Env, EntityInput } from './types';
@@ -12,12 +12,12 @@ import { getAvailableJurisdictions } from './evm';
 export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
   console.log('🌐 Starting XLN Prepopulation');
   console.log('================================');
-  console.log('Creating network topology:');
-  console.log('  • 3 Hubs (E1, E2, E3) - fully connected');
-  console.log('  • 7 Users (E4-E10) - connected to hubs');
-  console.log('    - E4, E5 → Hub E1');
-  console.log('    - E6, E7 → Hub E2');
-  console.log('    - E8, E9, E10 → Hub E3');
+  console.log('Creating H-shaped network topology:');
+  console.log('  • 2 Hubs (E1, E2) - connected crossbar');
+  console.log('  • 8 Users (E3-E10) - split between hubs');
+  console.log('    - E3, E4, E5, E6 → Hub E1');
+  console.log('    - E7, E8, E9, E10 → Hub E2');
+  console.log('  Visual: H-letter shape for optimal bar spacing');
   console.log('================================\n');
 
   // Load jurisdiction configuration using the browser-compatible function
@@ -41,7 +41,7 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
 
   for (let i = 1; i <= 10; i++) {
     const signer = `s${i}`;
-    const isHub = i <= 3;
+    const isHub = i <= 2; // Only first 2 entities are hubs (H-shaped topology)
     const entityName = isHub ? `Hub ${i}` : `User ${i}`;
 
     // Create numbered entity through blockchain to get proper ID
@@ -104,39 +104,36 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
     console.log(`    • Entity #${entityNum}: ${e.isHub ? 'HUB' : 'User'} (signer: ${e.signer})`);
   });
 
-  console.log('\n📡 Step 2: Connecting hubs to each other...');
+  console.log('\n📡 Step 2: Connecting the two hubs (H crossbar)...');
 
-  // Step 2: Connect hubs to each other (fully connected mesh)
-  const hubs = entities.slice(0, 3);
-  for (let i = 0; i < hubs.length; i++) {
-    for (let j = i + 1; j < hubs.length; j++) {
-      const hub1 = hubs[i];
-      const hub2 = hubs[j];
-      if (!hub1 || !hub2) continue;
+  // Step 2: Connect Hub 1 and Hub 2 (the crossbar of the H)
+  const hub1 = entities[0];
+  const hub2 = entities[1];
 
-      // Hub1 opens account with Hub2
-      await processUntilEmpty(env, [{
-        entityId: hub1.id,
-        signerId: hub1.signer,
-        entityTxs: [{
-          type: 'openAccount',
-          data: { targetEntityId: hub2.id }
-        }]
-      }]);
-
-      const hub1Num = parseInt(hub1.id.slice(2), 16);
-      const hub2Num = parseInt(hub2.id.slice(2), 16);
-      console.log(`  🔗 Hub E${hub1Num} ←→ Hub E${hub2Num} connected`);
-    }
+  if (!hub1 || !hub2) {
+    throw new Error('Failed to create hubs');
   }
 
-  console.log('\n👥 Step 3: Connecting users to hubs...');
+  // Hub1 opens account with Hub2
+  await processUntilEmpty(env, [{
+    entityId: hub1.id,
+    signerId: hub1.signer,
+    entityTxs: [{
+      type: 'openAccount',
+      data: { targetEntityId: hub2.id }
+    }]
+  }]);
 
-  // Step 3: Connect users to hubs
+  const hub1Num = parseInt(hub1.id.slice(2), 16);
+  const hub2Num = parseInt(hub2.id.slice(2), 16);
+  console.log(`  🔗 Hub E${hub1Num} ←→ Hub E${hub2Num} connected (H crossbar)`);
+
+  console.log('\n👥 Step 3: Connecting users to hubs (H vertical bars)...');
+
+  // Step 3: Connect users to hubs - H shape
   const userHubMapping = [
-    { users: [3, 4], hub: 0 },      // E4, E5 → E1
-    { users: [5, 6], hub: 1 },      // E6, E7 → E2
-    { users: [7, 8, 9], hub: 2 },   // E8, E9, E10 → E3
+    { users: [2, 3, 4, 5], hub: 0 },    // E3, E4, E5, E6 → Hub E1 (left bar)
+    { users: [6, 7, 8, 9], hub: 1 },    // E7, E8, E9, E10 → Hub E2 (right bar)
   ];
 
   for (const mapping of userHubMapping) {
@@ -164,9 +161,7 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   console.log('\n🎯 Step 4: Setting hub profiles with lower fees...');
 
   // Step 4: Update hub profiles with lower routing fees
-  for (let i = 0; i < 3; i++) {
-    const hub = hubs[i];
-    if (!hub) continue;
+  for (const hub of [hub1, hub2]) {
     const hubNum = parseInt(hub.id.slice(2), 16);
 
     // Send profile update to set hub capabilities and lower fees
@@ -193,13 +188,14 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
 
   console.log('\n================================');
   console.log('✅ Prepopulation Complete!');
-  console.log('\nNetwork topology created:');
-  console.log('  • 3 Hubs with full mesh connectivity');
-  console.log('  • 7 Users connected to hubs');
-  console.log('  • Total accounts: 9 (3 hub-to-hub + 6 user-to-hub)');
+  console.log('\nH-shaped network topology created:');
+  console.log('  • 2 Hubs connected (H crossbar)');
+  console.log('  • 8 Users: 4 per hub (H vertical bars)');
+  console.log('  • Total accounts: 9 (1 hub-to-hub + 8 user-to-hub)');
+  console.log('  • Topology: Optimal for 1px=$1 visualization');
   console.log('\nYou can now:');
-  console.log('  1. Send payments between any entities');
-  console.log('  2. Payments will route through hubs automatically');
-  console.log('  3. View the network in the Network Directory');
+  console.log('  1. View clean H-shaped topology in bird view');
+  console.log('  2. Send payments between any entities');
+  console.log('  3. Payments will route through hubs automatically');
   console.log('================================\n');
 }

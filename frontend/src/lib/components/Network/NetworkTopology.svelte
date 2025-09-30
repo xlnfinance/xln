@@ -1163,8 +1163,7 @@
 
           group.add(bar);
 
-          const actualValue = barScale > 0 ? Math.floor(length / barScale) : 0;
-          createBarLabel(group, barCenter, actualValue, barType);
+          // Bar labels removed - shown only on hover
         }
         leftOffset += length;
       });
@@ -1199,8 +1198,7 @@
 
         group.add(bar);
 
-        const actualValue = barScale > 0 ? Math.floor(length / barScale) : 0;
-        createBarLabel(group, barCenter, actualValue, 'ownCredit');
+        // Bar labels removed - shown only on hover
       }
 
       console.log(`🏗️ SPREAD: left bars (${leftBarsLength.toFixed(2)}) from left entity, right bars (${segments.ownCredit.toFixed(2)}) from right entity`);
@@ -1249,8 +1247,7 @@
 
           group.add(bar);
 
-          const actualValue = barScale > 0 ? Math.floor(length / barScale) : 0;
-          createBarLabel(group, barCenter, actualValue, barType);
+          // Bar labels removed - shown only on hover
         }
 
         currentOffset += length;
@@ -1295,41 +1292,10 @@
     group.add(separator);
   }
 
-  function createBarLabel(group: THREE.Group, position: THREE.Vector3, value: number, _barType: string) {
-    // Create canvas for text
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d')!;
-    canvas.width = 128;
-    canvas.height = 32;
-
-    // Text styling
-    context.fillStyle = '#ffffff';
-    context.font = 'bold 16px monospace';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-
-    // Format value (short as possible)
-    let text = '';
-    if (value >= 1000000) {
-      text = Math.floor(value / 1000000) + 'M';
-    } else if (value >= 1000) {
-      text = Math.floor(value / 1000) + 'k';
-    } else {
-      text = value.toString();
-    }
-
-    context.fillText(text, 64, 16);
-
-    // Create texture and sprite
-    const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
-    const sprite = new THREE.Sprite(spriteMaterial);
-
-    sprite.position.copy(position);
-    sprite.scale.set(0.5, 0.25, 1);
-
-    group.add(sprite);
-  }
+  // Bar labels removed per user request - shown only on hover tooltips
+  // function createBarLabel(group: THREE.Group, position: THREE.Vector3, value: number, _barType: string) {
+  //   ...
+  // }
 
   function createEntityLabel(entityId: string): THREE.Sprite {
     // Create canvas for entity name - minimalist, no background, square aspect ratio to avoid skewing

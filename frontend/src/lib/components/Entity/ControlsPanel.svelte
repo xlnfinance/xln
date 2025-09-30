@@ -23,11 +23,12 @@
 
 
   // Get proposals for voting
-  $: proposals = replica?.state?.proposals ? 
+  // Safari requires explicit Map check before calling .entries()
+  $: proposals = (replica?.state?.proposals && replica.state.proposals instanceof Map) ?
     Array.from(replica.state.proposals.entries()).map(([proposalId, proposal]) => ({ ...proposal, id: proposalId })) : [];
 
   // Get available tokens for sending
-  $: availableTokens = replica?.state?.reserves
+  $: availableTokens = (replica?.state?.reserves && replica.state.reserves instanceof Map)
     ? Array.from(replica.state.reserves.entries()).map(([id, reserve]) => ({
         id: id,
         name: `Token #${id}`,

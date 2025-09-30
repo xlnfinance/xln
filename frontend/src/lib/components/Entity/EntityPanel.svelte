@@ -20,6 +20,8 @@
   import { xlnFunctions } from '../../stores/xlnStore';
 
   export let tab: Tab;
+
+  // Safety guard for XLN functions
   export let isLast: boolean = false;
 
   let replica: EntityReplica | null = null;
@@ -110,7 +112,6 @@
       jurisdiction,
       signerId,
       entityId,
-      title: `Entity #${$xlnFunctions?.getEntityNumber(entityId) || '?'}`
     });
   }
 
@@ -119,7 +120,6 @@
     const accountId = event.detail.accountId;
     selectedAccountId = accountId;
     if (accountId) {
-      console.log('📋 Account selected: Entity #', $xlnFunctions?.getEntityNumber(accountId) || '?');
     } else {
       console.log('📋 Account selection cleared - back to entity view');
     }
@@ -206,9 +206,9 @@
     <!-- Focused Account View -->
     <div class="focused-account-view">
       <div class="account-breadcrumb">
-        <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{$xlnFunctions?.getEntityNumber(tab.entityId) || '?'}</button>
+        <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{$xlnFunctions!.getEntityNumber(tab.entityId)}</button>
         <span class="breadcrumb-separator">→</span>
-        <span class="breadcrumb-current">Account with Entity #{$xlnFunctions?.getEntityNumber(selectedAccountId!) || '?'}</span>
+        <span class="breadcrumb-current">Account with Entity #{$xlnFunctions!.getEntityNumber(selectedAccountId!)}</span>
       </div>
       <AccountPanel
         account={selectedAccount}
@@ -246,7 +246,7 @@
       <EntityProfile {replica} {tab} />
 
       <!-- Reserves - Always Visible -->
-      {#if replica?.state?.reserves && replica.state.reserves.size > 0}
+      {#if replica?.state?.reserves && replica.state.reserves instanceof Map && replica.state.reserves.size > 0}
         <div class="entity-reserves-section">
           <div class="reserves-header">
             <h3>Reserves</h3>

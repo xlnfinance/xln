@@ -13,7 +13,7 @@
     .map(([counterpartyId, account]) => ({
       id: counterpartyId,
       account,
-      entityNumber: $xlnFunctions?.getEntityNumber(counterpartyId) || '?',
+      entityNumber: $xlnFunctions.getEntityNumber(counterpartyId),
       hasPending: account.mempool.length > 0,
       status: account.mempool.length > 0 ? 'pending' : 'synced'
     }));
@@ -34,14 +34,19 @@
   class="account-dropdown"
   value={selectedAccountId || ''}
   on:change={handleAccountSelect}
+  disabled={false}
 >
-  <option value="">Select Account...</option>
-  {#each availableAccounts as acc (acc.id)}
-    <option value={acc.id}>
-      Entity #{acc.entityNumber}
-      {acc.hasPending ? `(${acc.account.mempool.length} pending)` : '(Synced)'}
-    </option>
-  {/each}
+  {#if availableAccounts.length === 0}
+    <option value="">No accounts available</option>
+  {:else}
+    <option value="">Select Account...</option>
+    {#each availableAccounts as acc (acc.id)}
+      <option value={acc.id}>
+        Entity #{acc.entityNumber}
+        {acc.hasPending ? `(${acc.account.mempool.length} pending)` : '(Synced)'}
+      </option>
+    {/each}
+  {/if}
 </select>
 
 <style>

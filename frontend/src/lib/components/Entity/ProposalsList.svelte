@@ -52,7 +52,7 @@
 </script>
 
 <div class="scrollable-component proposals-list">
-  {#if replica && replica.state?.proposals?.size > 0}
+  {#if replica && replica.state?.proposals && replica.state.proposals instanceof Map && replica.state.proposals.size > 0}
     {#each Array.from(replica.state.proposals.entries()) as [, proposal]}
       {@const voteInfo = getVoteInfo(proposal, replica.state?.config)}
       <div class="proposal-item">

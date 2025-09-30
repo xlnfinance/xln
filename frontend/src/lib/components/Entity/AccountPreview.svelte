@@ -13,14 +13,13 @@
   const dispatch = createEventDispatcher();
 
   // Validate xlnFunctions availability - fail fast if not ready
-  $: functionsReady = $xlnFunctions?.formatTokenAmount && $xlnFunctions?.deriveDelta;
 
   // Calculate total utilization across all tokens
   $: utilization = calculateUtilization();
 
   function calculateUtilization(): number {
     if (!account.deltas || account.deltas.size === 0) return 0;
-    if (!functionsReady) return 0;
+    // XLN is always ready - no guards needed
 
     let totalCapacity = 0n;
     let totalUsed = 0n;
@@ -86,7 +85,7 @@
   });
 </script>
 
-{#if functionsReady}
+<!-- XLN always ready - no conditional needed -->
 <div
   class="account-preview"
   class:selected={isSelected}
@@ -97,7 +96,7 @@
 >
   <div class="account-header">
     <div class="entity-info">
-      <span class="entity-name">Entity #{$xlnFunctions!.getEntityNumber(counterpartyId) || '?'}</span>
+      <span class="entity-name">Entity #{$xlnFunctions!.getEntityNumber(counterpartyId)}</span>
     </div>
     <div class="account-status">
       {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
@@ -195,18 +194,6 @@
     {/each}
   </div>
 </div>
-{:else}
-  <div class="account-preview loading">
-    <div class="account-header">
-      <div class="entity-info">
-        <span class="entity-name">Entity #{counterpartyId.slice(-4)}</span>
-      </div>
-      <div class="account-status">
-        <span class="status-badge loading">Loading...</span>
-      </div>
-    </div>
-  </div>
-{/if}
 
 <style>
   .account-preview {

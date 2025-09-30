@@ -13,35 +13,9 @@
   $: serverInput = currentSnapshot?.serverInput || { serverTxs: [], entityInputs: [] };
   $: serverOutputs = currentSnapshot?.serverOutputs || [];
 
-  // Enhanced JSON stringify function with proper formatting
+  // Use central safeStringify from xlnFunctions
   function elaborateStringify(obj: any): string {
-    try {
-      return JSON.stringify(obj, (_, value) => {
-        // Handle BigInt
-        if (typeof value === 'bigint') {
-          return `BigInt(${value.toString()})`;
-        }
-        // Handle Map objects
-        if (value instanceof Map) {
-          return Object.fromEntries(value);
-        }
-        // Handle Set objects
-        if (value instanceof Set) {
-          return Array.from(value);
-        }
-        // Handle Buffer objects
-        if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
-          return `Buffer(${value.data.length} bytes)`;
-        }
-        // Handle Functions
-        if (typeof value === 'function') {
-          return `[Function: ${value.name || 'anonymous'}]`;
-        }
-        return value;
-      }, 2);
-    } catch (err: any) {
-      return `[Error stringifying: ${err?.message || 'Unknown error'}]`;
-    }
+    return $xlnFunctions.safeStringify(obj);
   }
 
   let showJsonDetails = {
@@ -115,7 +89,7 @@
                 {#each serverInput.entityInputs as input, index}
                   <div class="input-item">
                     <div class="summary-line">
-                      <strong>Entity #{$xlnFunctions?.getEntityNumber(input.entityId) || '?'}:{input.signerId}</strong>
+                      <strong>Entity #{$xlnFunctions!.getEntityNumber(input.entityId)}:{input.signerId}</strong>
                       {#if input.entityTxs && input.entityTxs.length > 0}
                         <br>📝 <strong>{input.entityTxs.length} transactions:</strong>
                         {#each input.entityTxs as tx, i}
@@ -160,7 +134,7 @@
                 {#each serverOutputs as output, index}
                   <div class="input-item">
                     <div class="summary-line">
-                      <strong>📤 {index + 1}. → Entity #{$xlnFunctions?.getEntityNumber(output.entityId) || '?'}:{output.signerId}</strong>
+                      <strong>📤 {index + 1}. → Entity #{$xlnFunctions!.getEntityNumber(output.entityId)}:{output.signerId}</strong>
                       {#if output.entityTxs && output.entityTxs.length > 0}
                         <br>📝 <strong>{output.entityTxs.length} transactions:</strong>
                         {#each output.entityTxs as tx, i}

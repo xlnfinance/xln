@@ -18,7 +18,7 @@
   function getDropdownText(tab: Tab): string {
     // SIMPLE: Just show the selected entity (like I fixed in CombinedNavigationDropdown)
     if (tab.entityId) {
-      const entityNum = $xlnFunctions?.getEntityNumber(tab.entityId) || '?';
+      const entityNum = $xlnFunctions.getEntityNumber(tab.entityId);
       return `Entity #${entityNum}`;
     }
     return 'Select Entity';
@@ -62,6 +62,10 @@
 
   function updateDropdownResults(resultsContainer: HTMLDivElement, _searchTerm: string) {
     if (!resultsContainer) return;
+    if (!$xlnFunctions) {
+      resultsContainer.innerHTML = '<div class="dropdown-item">Loading XLN functions...</div>';
+      return;
+    }
 
     resultsContainer.innerHTML = '';
 
@@ -122,7 +126,8 @@
         // Add entities for this signer
         signerEntities?.forEach((replica, eIndex) => {
           const isLastEntity = eIndex === (signerEntities?.length || 0) - 1;
-          const entityNum = $xlnFunctions?.getEntityNumber(replica.entityId) || '?';
+          if (!$xlnFunctions) return; // Safety guard
+          const entityNum = $xlnFunctions.getEntityNumber(replica.entityId);
           const entityDisplay = `Entity #${entityNum}`;
 
           const entityItem = createDropdownTreeItem(
@@ -149,7 +154,8 @@
 
       console.log(`🔍 EntityDropdown: ${jurisdiction.name} has ${replicasArray.length} replicas`);
       replicasArray.forEach((replica: any) => {
-        console.log(`  📋 Entity: #${$xlnFunctions?.getEntityNumber(replica.entityId) || '?'} (${replica.signerId})`);
+        if (!$xlnFunctions) return; // Safety guard
+        console.log(`  📋 Entity: #${$xlnFunctions.getEntityNumber(replica.entityId)} (${replica.signerId})`);
       });
 
       if (replicasArray.length === 0) return;
@@ -171,7 +177,8 @@
       entityKeys.forEach((entityId, eIndex) => {
         const entitySigners = entityGroups[entityId];
         const isLastEntity = eIndex === entityKeys.length - 1;
-        const entityNum = $xlnFunctions?.getEntityNumber(entityId) || '?';
+        if (!$xlnFunctions) return; // Safety guard
+        const entityNum = $xlnFunctions.getEntityNumber(entityId);
         const entityDisplay = `Entity #${entityNum}`;
 
         // Add entity
