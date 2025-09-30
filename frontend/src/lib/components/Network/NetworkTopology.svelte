@@ -14,9 +14,13 @@
     id: string;
     position: THREE.Vector3;
     mesh: THREE.Mesh;
+    label?: THREE.Sprite; // Label sprite that follows entity
     profile?: any;
     pulsePhase?: number;
     lastActivity?: number;
+    isPinned?: boolean;  // User has manually positioned this entity
+    isHovered?: boolean; // Mouse is over this entity
+    isDragging?: boolean; // Currently being dragged
   }
 
   interface ConnectionData {
@@ -43,6 +47,12 @@
     entityMode: 'sphere' | 'identicon';
     dataSource: 'replicas' | 'gossip';
     wasLastOpened: boolean;
+    rotationSpeed: number; // 0-100 (0 = stopped, 100 = fast rotation)
+    camera?: {
+      position: {x: number, y: number, z: number};
+      target: {x: number, y: number, z: number};
+      zoom: number;
+    } | undefined;
   }
 
   let container: HTMLDivElement;
@@ -72,18 +82,43 @@
   let hoveredObject: any = null;
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
 
-  // Load saved bird view settings
+  // Drag state
+  let draggedEntity: EntityData | null = null;
+  let dragPlane: THREE.Plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Plane for 3D dragging
+  let dragOffset: THREE.Vector3 = new THREE.Vector3();
+  let isDragging: boolean = false;
+  let justDragged: boolean = false; // Flag to prevent click after drag
+
+  // Load saved bird view settings (including camera state)
   function loadBirdViewSettings(): BirdViewSettings {
     try {
       const saved = localStorage.getItem('xln-bird-view-settings');
-      return saved ? JSON.parse(saved) : {
+      const parsed = saved ? JSON.parse(saved) : {
         barsMode: 'close',
         selectedTokenId: 0,
         viewMode: '3d',
         entityMode: 'sphere',
         dataSource: 'replicas',
-        wasLastOpened: false
+        wasLastOpened: false,
+        rotationSpeed: 0,
+        camera: undefined
       };
+      // FINTECH-SAFETY: Ensure selectedTokenId is number, not string
+      if (typeof parsed.selectedTokenId === 'string') {
+        parsed.selectedTokenId = Number(parsed.selectedTokenId);
+      }
+      // Backward compatibility: convert old autoRotate boolean to rotationSpeed
+      if (parsed.autoRotate !== undefined && parsed.rotationSpeed === undefined) {
+        parsed.rotationSpeed = parsed.autoRotate ? 3000 : 0; // Default to 3000 (Earth-like) if was ON
+        delete parsed.autoRotate;
+      }
+      // Migrate old 0-100000 range to 0-10000 range (divide by 10)
+      if (parsed.rotationSpeed !== undefined && parsed.rotationSpeed > 10000) {
+        parsed.rotationSpeed = Math.floor(parsed.rotationSpeed / 10);
+      }
+      // Provide defaults for new fields if missing
+      if (parsed.rotationSpeed === undefined) parsed.rotationSpeed = 0;
+      return parsed;
     } catch {
       return {
         barsMode: 'close',
@@ -91,7 +126,9 @@
         viewMode: '3d',
         entityMode: 'sphere',
         dataSource: 'replicas',
-        wasLastOpened: false
+        wasLastOpened: false,
+        rotationSpeed: 0,
+        camera: undefined
       };
     }
   }
@@ -103,9 +140,56 @@
       viewMode,
       entityMode,
       dataSource,
-      wasLastOpened: wasOpened
+      wasLastOpened: wasOpened,
+      rotationSpeed,
+      camera: camera && controls ? {
+        position: {x: camera.position.x, y: camera.position.y, z: camera.position.z},
+        target: {x: controls.target.x, y: controls.target.y, z: controls.target.z},
+        zoom: camera.zoom
+      } : undefined
     };
     localStorage.setItem('xln-bird-view-settings', JSON.stringify(settings));
+  }
+
+  // Entity position persistence (CRITICAL: prevents re-intersecting on reload)
+  function loadEntityPositions(): Map<string, THREE.Vector3> | null {
+    try {
+      const saved = localStorage.getItem('xln-entity-positions');
+      if (!saved) return null;
+
+      const data = JSON.parse(saved);
+      const positions = new Map<string, THREE.Vector3>();
+
+      for (const [entityId, pos] of Object.entries(data)) {
+        const posData = pos as {x: number, y: number, z: number};
+        positions.set(entityId, new THREE.Vector3(posData.x, posData.y, posData.z));
+      }
+
+      console.log(`💾 Loaded ${positions.size} saved entity positions`);
+      return positions;
+    } catch (err) {
+      console.warn('Failed to load entity positions:', err);
+      return null;
+    }
+  }
+
+  function saveEntityPositions() {
+    try {
+      const data: Record<string, {x: number, y: number, z: number}> = {};
+
+      entities.forEach(entity => {
+        data[entity.id] = {
+          x: entity.position.x,
+          y: entity.position.y,
+          z: entity.position.z
+        };
+      });
+
+      localStorage.setItem('xln-entity-positions', JSON.stringify(data));
+      console.log(`💾 Saved ${entities.length} entity positions`);
+    } catch (err) {
+      console.warn('Failed to save entity positions:', err);
+    }
   }
 
   // Export bird view state for parent component
@@ -118,7 +202,46 @@
   let viewMode: '2d' | '3d' = savedSettings.viewMode;
   let entityMode: 'sphere' | 'identicon' = savedSettings.entityMode;
   let dataSource: 'replicas' | 'gossip' = savedSettings.dataSource;
-  let availableTokens: number[] = [0]; // Will be populated from data
+  let rotationSpeed: number = savedSettings.rotationSpeed; // 0-10000 (0 = stopped, 10000 = fast)
+  let availableTokens: number[] = []; // Will be populated from actual token data
+
+  // Quick payment form state
+  let paymentFrom: string = '';
+  let paymentTo: string = '';
+  let paymentAmount: string = '100';
+  let paymentTPS: number = 0; // 0-100 TPS (0 = once, 0.1 = every 10s, 100 = max)
+
+  // Auto-select entities when entities list changes
+  $: if (entities.length >= 2 && !paymentFrom && !paymentTo) {
+    const firstEntity = entities[0];
+    const secondEntity = entities[1];
+    if (firstEntity && secondEntity) {
+      paymentFrom = firstEntity.id;
+      paymentTo = secondEntity.id;
+    }
+  }
+
+  // Active payment jobs
+  interface PaymentJob {
+    id: string;
+    from: string;
+    to: string;
+    amount: string;
+    tps: number;
+    sentCount: number;
+    startedAt: number;
+    intervalId?: number;
+  }
+  let activeJobs: PaymentJob[] = [];
+
+  // Ripple effects for balance changes
+  interface Ripple {
+    mesh: THREE.Mesh;
+    startTime: number;
+    duration: number;
+    maxRadius: number;
+  }
+  let activeRipples: Ripple[] = [];
 
   // Payment route selection state
   let showRouteSelection = false;
@@ -206,6 +329,22 @@
       controls.enableZoom = true;
       controls.enableRotate = true;
       controls.enablePan = true;
+
+      // Restore saved camera state if available
+      if (savedSettings.camera) {
+        const cam = savedSettings.camera;
+        camera.position.set(cam.position.x, cam.position.y, cam.position.z);
+        controls.target.set(cam.target.x, cam.target.y, cam.target.z);
+        camera.zoom = cam.zoom;
+        camera.updateProjectionMatrix();
+        controls.update();
+        console.log(`📷 Restored camera state from localStorage`);
+      }
+
+      // CRITICAL: Save camera state after manual user movements (rotate/pan/zoom)
+      controls.addEventListener('end', () => {
+        saveBirdViewSettings();
+      });
     }
 
     // Raycaster for mouse interaction
@@ -221,6 +360,8 @@
     scene.add(directionalLight);
 
     // Mouse events
+    renderer.domElement.addEventListener('mousedown', onMouseDown);
+    renderer.domElement.addEventListener('mouseup', onMouseUp);
     renderer.domElement.addEventListener('mousemove', onMouseMove);
     renderer.domElement.addEventListener('mouseout', onMouseOut);
     renderer.domElement.addEventListener('click', onMouseClick);
@@ -296,10 +437,52 @@
 
     console.log(`🗺️ Frame ${timeIndex}: Updating topology with`, entityData.length, 'entities');
 
+    // Build connection and capacity maps for force-directed layout (always active)
+    const connectionMap = new Map<string, Set<string>>();
+    const capacityMap = new Map<string, number>();
+
+    // Build connection map from replicas
+    if (currentReplicas.size > 0) {
+      for (const [replicaKey, replica] of currentReplicas.entries()) {
+        const [entityId] = replicaKey.split(':');
+        const entityAccounts = replica.state?.accounts;
+
+        if (entityAccounts && entityAccounts.size > 0) {
+          if (!connectionMap.has(entityId)) {
+            connectionMap.set(entityId, new Set());
+          }
+
+          for (const [counterpartyId, accountData] of entityAccounts.entries()) {
+            connectionMap.get(entityId)?.add(counterpartyId);
+
+            // Calculate total capacity for this connection
+            const accountTokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
+            if (accountTokenDelta) {
+              const derived = $xlnFunctions.deriveDelta(accountTokenDelta, entityId < counterpartyId);
+              const capacityKey = [entityId, counterpartyId].sort().join('-');
+              capacityMap.set(capacityKey, derived.totalCapacity);
+            }
+          }
+        }
+      }
+    }
+
+    // Try to load saved positions first (persistence)
+    const savedPositions = loadEntityPositions();
+
+    // Run force-directed layout simulation (fallback if no saved positions)
+    const forceLayoutPositions = savedPositions || applyForceDirectedLayout(entityData, connectionMap, capacityMap);
+
     // Create entity nodes
     entityData.forEach((profile, index) => {
-      createEntityNode(profile, index, entityData.length);
+      createEntityNode(profile, index, entityData.length, forceLayoutPositions);
     });
+
+    // Save positions after layout (for persistence on reload)
+    if (!savedPositions) {
+      // Only save if we computed new layout (not using saved positions)
+      saveEntityPositions();
+    }
 
     // Create connections between entities that have accounts
     createConnections();
@@ -307,12 +490,20 @@
     // Create transaction flow particles and trigger activity pulses
     createTransactionParticles();
     updateEntityActivityFromCurrentFrame();
+
+    // Enforce minimum spacing constraints (200px spread, 100px close)
+    // This pushes entities apart if bars would pierce after initial layout
+    enforceSpacingConstraints();
   }
 
   function clearNetwork() {
-    // Remove entity meshes
+    // Remove entity meshes AND labels
     entities.forEach(entity => {
       scene.remove(entity.mesh);
+      // CRITICAL: Remove labels to prevent orphaned sprites accumulating
+      if (entity.label) {
+        scene.remove(entity.label);
+      }
     });
     entities = [];
 
@@ -332,13 +523,122 @@
     particles = [];
   }
 
-  function createEntityNode(profile: any, index: number, total: number) {
-    // Position entities in a circle for now
-    const radius = 10;
-    const angle = (index / total) * Math.PI * 2;
-    const x = Math.cos(angle) * radius;
-    const y = Math.sin(angle) * radius;
-    const z = 0;
+  // H-shaped layout: 2 vertical columns (hubs + users)
+  function applyForceDirectedLayout(profiles: any[], connectionMap: Map<string, Set<string>>, capacityMap: Map<string, number>) {
+    const positions = new Map<string, THREE.Vector3>();
+
+    // Detect hubs vs users by connection count
+    const connectionCounts = new Map<string, number>();
+    profiles.forEach(profile => {
+      const connections = connectionMap.get(profile.entityId);
+      connectionCounts.set(profile.entityId, connections?.size || 0);
+    });
+
+    // Sort: hubs first (most connections), then users
+    const sorted = [...profiles].sort((a, b) => {
+      const countA = connectionCounts.get(a.entityId) || 0;
+      const countB = connectionCounts.get(b.entityId) || 0;
+      return countB - countA; // Descending - hubs first
+    });
+
+    // Calculate required spacing from FIRST PRINCIPLES (never intersect)
+    // Key insight: Hubs connect horizontally (cross-column), users connect vertically (same-column)
+
+    // First, identify which entities will be in which column
+    const leftColumn = sorted.slice(0, 5);  // Hub1 + 4 users
+    const rightColumn = sorted.slice(5, 10); // Hub2 + 4 users
+
+    const leftIds = new Set(leftColumn.map(p => p.entityId));
+    const rightIds = new Set(rightColumn.map(p => p.entityId));
+
+    let maxHorizontalBarLength = 0;
+    let maxVerticalBarLength = 0;
+    const barRadius = 0.1 * 2.5; // barHeight * 2.5 (actual bar radius)
+    const maxEntitySize = 3; // Approximate max entity sphere radius
+
+    // Scan all connections and classify them
+    for (const [fromId, toIds] of connectionMap.entries()) {
+      for (const toId of toIds) {
+        const capacityKey = [fromId, toId].sort().join('-');
+        const capacity = capacityMap.get(capacityKey) || 0;
+
+        // Convert capacity to visual bar length using SAME scale as bar creation
+        const globalScale = $settings.portfolioScale || 5000;
+        const decimals = 18;
+        const tokensToVisualUnits = 0.00001;
+        const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
+        const barLength = capacity * barScale;
+
+        // Classify connection: horizontal (cross-column) or vertical (same-column)
+        const isHorizontal = (leftIds.has(fromId) && rightIds.has(toId)) ||
+                            (rightIds.has(fromId) && leftIds.has(toId));
+
+        if (isHorizontal) {
+          maxHorizontalBarLength = Math.max(maxHorizontalBarLength, barLength);
+        } else {
+          maxVerticalBarLength = Math.max(maxVerticalBarLength, barLength);
+        }
+      }
+    }
+
+    // FIRST PRINCIPLE SPACING: entityRadius + barRadius + barLength + barRadius + entityRadius + safeGap
+    const safeGap = 1; // Extra safety margin
+    const barSurfaceOffset = barRadius + 0.2; // Space between entity surface and bar start
+
+    // Horizontal spacing (for cross-column connections)
+    const columnSpacing = Math.max(
+      50, // Minimum baseline
+      (maxEntitySize + barSurfaceOffset) * 2 + maxHorizontalBarLength + safeGap
+    );
+
+    // Vertical spacing (for same-column connections)
+    const verticalSpacing = Math.max(
+      10, // Minimum baseline
+      (maxEntitySize + barSurfaceOffset) * 2 + maxVerticalBarLength + safeGap
+    );
+
+    console.log(`📐 FIRST-PRINCIPLE spacing: horizontal=${columnSpacing.toFixed(1)}, vertical=${verticalSpacing.toFixed(1)}, maxHBar=${maxHorizontalBarLength.toFixed(1)}, maxVBar=${maxVerticalBarLength.toFixed(1)}`);
+
+    // Position left column
+    leftColumn.forEach((profile, index) => {
+      positions.set(profile.entityId, new THREE.Vector3(
+        -columnSpacing / 2,
+        (index - leftColumn.length / 2) * verticalSpacing,
+        0
+      ));
+    });
+
+    // Position right column
+    rightColumn.forEach((profile, index) => {
+      positions.set(profile.entityId, new THREE.Vector3(
+        columnSpacing / 2,
+        (index - rightColumn.length / 2) * verticalSpacing,
+        0
+      ));
+    });
+
+    console.log(`🎯 H-shaped layout complete (2 columns, ${leftColumn.length} + ${rightColumn.length} entities)`);
+    return positions;
+  }
+
+  function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>) {
+    // Position entities using force-directed layout (always)
+    let x: number, y: number, z: number;
+
+    if (forceLayoutPositions.has(profile.entityId)) {
+      // Use computed force-directed position
+      const pos = forceLayoutPositions.get(profile.entityId)!;
+      x = pos.x;
+      y = pos.y;
+      z = pos.z;
+    } else {
+      // Fallback: large circle if entity not in force layout
+      const radius = 30;
+      const angle = (index / total) * Math.PI * 2;
+      x = Math.cos(angle) * radius;
+      y = Math.sin(angle) * radius;
+      z = 0;
+    }
 
     // Calculate entity size based on selected token reserves
     const entitySize = getEntitySizeForToken(profile.entityId, selectedTokenId);
@@ -361,13 +661,14 @@
 
     scene.add(mesh);
 
-    // Add entity name label
-    createEntityLabel(profile.entityId, x, y + entitySize + 0.5, z);
+    // Add entity name label (returns sprite to store with entity)
+    const labelSprite = createEntityLabel(profile.entityId);
 
     entities.push({
       id: profile.entityId,
       position: new THREE.Vector3(x, y, z),
       mesh,
+      label: labelSprite, // Store label with entity for dynamic positioning
       profile,
       pulsePhase: Math.random() * Math.PI * 2, // Random start phase
       lastActivity: 0
@@ -435,7 +736,11 @@
           if (entityInput.entityTxs) {
             entityInput.entityTxs.forEach((tx: any) => {
               if (tx.type === 'account_input') {
+                // Unicast: payment through network
                 createParticleForTransaction(tx.data, entityInput.entityId);
+              } else if (['deposit_reserve', 'withdraw_reserve', 'credit_from_reserve', 'debit_to_reserve'].includes(tx.type)) {
+                // Broadcast: jurisdiction event (reserve operations)
+                createBroadcastRipple(entityInput.entityId, tx.type);
               }
             });
           }
@@ -449,7 +754,11 @@
         if (entityInput.entityTxs) {
           entityInput.entityTxs.forEach((tx: any) => {
             if (tx.type === 'account_input') {
+              // Unicast: payment through network
               createParticleForTransaction(tx.data, entityInput.entityId);
+            } else if (['deposit_reserve', 'withdraw_reserve', 'credit_from_reserve', 'debit_to_reserve'].includes(tx.type)) {
+              // Broadcast: jurisdiction event (reserve operations)
+              createBroadcastRipple(entityInput.entityId, tx.type);
             }
           });
         }
@@ -515,20 +824,80 @@
     // Activity pulses are now handled by updateEntityActivityFromCurrentFrame()
   }
 
+  function createBroadcastRipple(entityId: string, txType: string) {
+    // Find entity by ID
+    const entity = entities.find(e => e.id === entityId);
+    if (!entity) {
+      console.log(`⚠️ Cannot create ripple: entity ${entityId.slice(-4)} not found`);
+      return;
+    }
+
+    // Create expanding ring/sphere for broadcast visualization
+    const startRadius = 0.5;
+    const expandSpeed = 0.05;
+
+    // Ring color based on tx type
+    let color = 0x00ffff; // Cyan default
+    switch (txType) {
+      case 'deposit_reserve':
+        color = 0x00ff00; // Green - money coming in
+        break;
+      case 'withdraw_reserve':
+        color = 0xff0000; // Red - money going out
+        break;
+      case 'credit_from_reserve':
+        color = 0xffaa00; // Orange - credit from reserve
+        break;
+      case 'debit_to_reserve':
+        color = 0xff44ff; // Magenta - debit to reserve
+        break;
+    }
+
+    // Create ring geometry (torus for 3D, circle for 2D)
+    const geometry = new THREE.TorusGeometry(startRadius, 0.05, 16, 32);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide
+    });
+    const ripple = new THREE.Mesh(geometry, material);
+
+    // Position at entity location
+    ripple.position.copy(entity.position);
+
+    // Orient ring flat (perpendicular to camera view)
+    ripple.rotation.x = Math.PI / 2;
+
+    scene.add(ripple);
+
+    // Add to particles array for animation (reuse particles system)
+    particles.push({
+      mesh: ripple,
+      connectionIndex: -1, // -1 indicates broadcast ripple (not connection-based)
+      progress: 0,
+      speed: expandSpeed,
+      type: `ripple_${txType}`,
+      amount: 0n // No amount for ripples
+    });
+
+    console.log(`🌊 Created broadcast ripple for ${entityId.slice(-4)} (${txType})`);
+  }
+
   function createConnectionLine(fromEntity: any, toEntity: any, fromId: string, toId: string, replica: any) {
     const geometry = new THREE.BufferGeometry().setFromPoints([
       fromEntity.position,
       toEntity.position
     ]);
 
-    // Create dotted line material
+    // Create dotted line material - more spaced and lightweight (user requirement)
     const material = new THREE.LineDashedMaterial({
       color: 0x00ff44,
-      opacity: 0.6,
+      opacity: 0.3, // Much lighter (was 0.6)
       transparent: true,
       linewidth: 1,
-      dashSize: 0.3,
-      gapSize: 0.1
+      dashSize: 0.2, // Shorter dashes (was 0.3)
+      gapSize: 0.5   // Much larger gaps (was 0.1)
     });
 
     const line = new THREE.Line(geometry, material);
@@ -594,30 +963,38 @@
       return group;
     }
 
-    // Get token-specific delta data EXACTLY like EntityPanel
+    // FINTECH-SAFETY: Get available tokens for THIS specific connection
     if (!accountData.deltas) {
       console.log(`📊 Account has no deltas map for ${fromId} ↔ ${toId}`);
       scene.add(group);
       return group;
     }
 
+    const availableTokens = Array.from(accountData.deltas.keys() as IterableIterator<number>).sort((a, b) => a - b);
 
-    // Try both number and string keys to handle type mismatch
-    let tokenDelta = accountData.deltas.get(selectedTokenId);
-    if (!tokenDelta && typeof selectedTokenId === 'number') {
-      tokenDelta = accountData.deltas.get(String(selectedTokenId));
-    }
-    if (!tokenDelta && typeof selectedTokenId === 'string') {
-      tokenDelta = accountData.deltas.get(Number(selectedTokenId));
-    }
-
-    if (!tokenDelta) {
-      console.log(`📊 No delta data for token ${selectedTokenId} in account ${fromId} ↔ ${toId}`);
+    if (availableTokens.length === 0) {
+      console.log(`📊 Account has no tokens in deltas for ${fromId} ↔ ${toId}`);
       scene.add(group);
       return group;
     }
 
-    console.log(`📊 Token ${selectedTokenId} delta data:`, tokenDelta);
+    // Use single source of truth for delta access
+    let tokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
+    let displayTokenId = selectedTokenId;
+
+    // FINTECH-GRADE: If selected token doesn't exist, use first available (same logic as tooltip)
+    if (!tokenDelta && availableTokens.length > 0) {
+      displayTokenId = availableTokens[0]!;
+      tokenDelta = getAccountTokenDelta(accountData, displayTokenId);
+      console.log(`📊 Token ${selectedTokenId} not in ${fromId.slice(-4)}↔${toId.slice(-4)}, using Token ${displayTokenId}. Available: [${availableTokens.join(', ')}]`);
+    }
+
+    if (!tokenDelta) {
+      // This should never happen after fallback, but fail-fast
+      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found in progress bars despite being in availableTokens: ${availableTokens}`);
+    }
+
+    console.log(`📊 Token ${displayTokenId} delta data:`, tokenDelta);
 
     // Derive channel data using 2019vue logic with REAL token delta
     const derived = deriveEntry(tokenDelta, fromId < toId); // left entity is lexicographically smaller
@@ -637,6 +1014,18 @@
 
     scene.add(group);
     return group;
+  }
+
+  /**
+   * SINGLE SOURCE OF TRUTH: Get token delta from account with type safety
+   * Used by both tooltip and progress bars to ensure consistent data access
+   */
+  function getAccountTokenDelta(accountData: any, tokenId: number): any | null {
+    if (!accountData?.deltas) {
+      return null;
+    }
+    // Type-safe access: both tokenId and Map key are guaranteed numbers
+    return accountData.deltas.get(tokenId) ?? null;
   }
 
   function deriveEntry(tokenDelta: any, isLeft: boolean): DerivedAccountData {
@@ -681,143 +1070,227 @@
     lineLength: number,
     direction: THREE.Vector3
   ): void {
-    // Use totalCapacity for proportional scaling
-    // Use global portfolio scale for consistent visualization
+    // INVARIANT: 1px = 1 unit of value - bars length directly proportional to capacity
+    // Values come with 18 decimals (1e18 = 1 token), scale to visual units
+    // Target: 1M tokens (1e24 with decimals) ≈ 10 visual units
     const globalScale = $settings.portfolioScale || 5000;
-    const maxVisualLength = lineLength * 0.6; // Max 60% of line length for bars
-    const barScale = derived.totalCapacity > 0 ? (maxVisualLength / derived.totalCapacity) * (globalScale / 5000) : 0;
+    const decimals = 18;
+    const tokensToVisualUnits = 0.00001; // 1M tokens → 10 units
+    const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
 
-    // Bar colors for REAL deriveDelta fields
+    // Bar colors matching 2019 visualization
+    // Structure: [peerCredit][collateral][ownCredit] with DELTA separator
     const colors = {
-      inCapacity: 0x5cb85c,      // green - can receive
-      outCapacity: 0xff9c9c,     // light red - can send
-      collateral: 0x0088ff,      // blue - locked collateral
-      ownCredit: 0xdc3545,       // red - our credit usage
-      peerCredit: 0xffaa00       // orange - their credit usage
+      peerCredit: 0xff9c9c,      // light red - their available credit to us
+      collateral: 0x5cb85c,      // green - locked collateral (secured)
+      ownCredit: 0xff9c9c        // light red - our available credit to them
     };
 
-    // Calculate segment lengths using REAL deriveDelta fields
+    // Calculate segment lengths - show LIMITS (invariant structure)
+    // This visualizes [-leftCredit-.collateral-rightCredit] structure
     const segments = {
-      inCapacity: derived.inCapacity * barScale,
-      outCapacity: derived.outCapacity * barScale,
+      peerCredit: derived.peerCreditLimit * barScale,
       collateral: derived.collateral * barScale,
-      ownCredit: derived.ownCreditLimit * barScale,
-      peerCredit: derived.peerCreditLimit * barScale
+      ownCredit: derived.ownCreditLimit * barScale
     };
-
-    // Calculate total bars length
-    const totalBarsLength = Object.values(segments).reduce((sum, length) => sum + length, 0);
 
     // Calculate entity radii to avoid collision
     const fromEntitySize = getEntitySizeForToken(fromId, selectedTokenId);
     const toEntitySize = getEntitySizeForToken(toId, selectedTokenId);
 
-    // Calculate required spacing based on bars length
-    const minGap = 0.5; // Minimum visual gap
+    // ENFORCED MINIMUM GAPS (user requirement):
+    // - Spread mode: 2 visual units gap in middle (no delta separator)
+    // - Close mode: 1 visual unit gap on each side + delta separator in front
+    // Note: These are visual/world units, not screen pixels. At current scale ~40 units = full H-width
+    const minGapSpread = 2; // Small gap in middle (spread mode)
+    const minGapClose = 1; // Small gap on each side (close mode)
+
     const availableSpace = lineLength - fromEntitySize - toEntitySize;
 
-    // Position calculation based on barsMode
-    let startPos: THREE.Vector3;
-    let barDirection: THREE.Vector3;
+    // Calculate total bars length - NO SCALING (maintain invariant: 1px = 1 value unit)
+    const totalBarsLength = Object.values(segments).reduce((sum, length) => sum + length, 0);
 
-    if (barsMode === 'spread') {
-      // Spread mode: bars start AFTER entity edge, extend toward center
-      const fromEdgePos = fromEntity.position.clone().add(direction.clone().normalize().multiplyScalar(fromEntitySize + minGap));
-      startPos = fromEdgePos;
-      barDirection = direction.clone().normalize();
-
-      console.log(`🏗️ SPREAD: bars from edge+gap, total length: ${totalBarsLength.toFixed(2)}`);
-    } else {
-      // Close mode: bars clustered in CENTER, ensuring gaps from entities
-      const centerPoint = fromEntity.position.clone().lerp(toEntity.position, 0.5);
-      const halfBarsLength = totalBarsLength / 2;
-
-      // Ensure bars don't touch entities
-      const safeOffset = Math.max(halfBarsLength, (availableSpace / 2) - minGap);
-      startPos = centerPoint.clone().sub(direction.clone().normalize().multiplyScalar(safeOffset));
-      barDirection = direction.clone().normalize();
-
-      console.log(`🏗️ CLOSE: centered bars, safe offset: ${safeOffset.toFixed(2)}, available space: ${availableSpace.toFixed(2)}`);
+    // Check if bars overflow (for debugging) - but DON'T scale them down
+    const requiredSpace = barsMode === 'spread' ? totalBarsLength + minGapSpread : totalBarsLength + (2 * minGapClose);
+    if (requiredSpace > availableSpace) {
+      console.log(`📏 Bars overflow by ${(requiredSpace - availableSpace).toFixed(2)} units - entities should be farther apart`);
     }
-
-    // Create bars using REAL deriveDelta fields in 2019vue order:
-    // [our_available_credit][our_collateral][our_used_credit] |DELTA| [their_used_credit][their_collateral][their_available_credit]
-    const barOrder = ['outCapacity', 'collateral', 'ownCredit', 'peerCredit', 'inCapacity'] as const;
-    let currentOffset = 0;
 
     console.log(`📊 Creating bars with segments:`, segments);
 
-    barOrder.forEach((barType, index) => {
-      const length = segments[barType as keyof typeof segments];
-      if (length === undefined) {
-        throw new Error(`FINTECH-SAFETY: Missing segment data for bar type: ${barType}`);
-      }
-      console.log(`📊 Creating bar ${barType}: length=${length.toFixed(3)}`);
+    if (barsMode === 'spread') {
+      // SPREAD MODE: bars extend FROM BOTH entities toward middle
+      // Left entity: [peerCredit][collateral] →
+      // Right entity: ← [ownCredit]
+      // Gap in middle (no delta separator in spread mode)
 
-      if (length > 0.01) { // Lower threshold for visibility
-        // Create ULTRA THICK cylindrical bar geometry for visibility
-        const radius = barHeight * 5.0; // Ultra thick bars
-        const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-        const barColor = colors[barType as keyof typeof colors];
-        if (!barColor) {
-          throw new Error(`FINTECH-SAFETY: Unknown bar type: ${barType}`);
+      // FIRST PRINCIPLE: Bars must NEVER pierce entity surface
+      // Bar has radius, so start position must be: entitySurface + barRadius + gap
+      const barRadius = barHeight * 2.5;
+      const safeGap = 0.2; // Small visual gap between entity surface and bar
+
+      // Left-side bars (from left entity rightward) - START OUTSIDE ENTITY SPHERE
+      const leftBarsLength = segments.peerCredit + segments.collateral;
+      const leftStartPos = fromEntity.position.clone().add(
+        direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap)
+      );
+
+      let leftOffset = 0;
+      ['peerCredit', 'collateral'].forEach((barType) => {
+        const length = segments[barType as keyof typeof segments];
+        if (length > 0.01) {
+          const radius = barHeight * 2.5; // 2x thinner (was 5.0)
+          const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
+          const barColor = colors[barType as keyof typeof colors];
+
+          // Credit bars: airy/transparent (unloaded trust), Collateral: solid (actual value)
+          const isCredit = barType === 'peerCredit' || barType === 'ownCredit';
+          const material = new THREE.MeshLambertMaterial({
+            color: barColor,
+            transparent: true,
+            opacity: isCredit ? 0.3 : 0.9, // Credit: very airy (30%), Collateral: solid (90%)
+            emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
+            wireframe: isCredit // Credit shows as wireframe (unloaded trust)
+          });
+          const bar = new THREE.Mesh(geometry, material);
+
+          const barCenter = leftStartPos.clone().add(direction.clone().normalize().multiplyScalar(leftOffset + length/2));
+          bar.position.copy(barCenter);
+
+          const axis = new THREE.Vector3(0, 1, 0);
+          const targetAxis = direction.clone().normalize();
+          bar.quaternion.setFromUnitVectors(axis, targetAxis);
+
+          group.add(bar);
+
+          const actualValue = barScale > 0 ? Math.floor(length / barScale) : 0;
+          createBarLabel(group, barCenter, actualValue, barType);
         }
+        leftOffset += length;
+      });
 
+      // Right-side bars (from right entity leftward) - START OUTSIDE ENTITY SPHERE
+      const rightStartPos = toEntity.position.clone().add(
+        direction.clone().normalize().multiplyScalar(-(toEntitySize + barRadius + safeGap))
+      );
+
+      if (segments.ownCredit > 0.01) {
+        const length = segments.ownCredit;
+        const radius = barHeight * 2.5; // 2x thinner
+        const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
+        const barColor = colors.ownCredit;
+
+        // Credit: airy/transparent wireframe (unloaded trust)
         const material = new THREE.MeshLambertMaterial({
           color: barColor,
           transparent: true,
-          opacity: 0.9,
-          emissive: new THREE.Color(barColor).multiplyScalar(0.1) // Slight glow
+          opacity: 0.3, // Very airy for credit
+          emissive: new THREE.Color(barColor).multiplyScalar(0.05),
+          wireframe: true // Wireframe shows it's unloaded trust
         });
         const bar = new THREE.Mesh(geometry, material);
 
-        // Position bar along the line
-        const barCenter = startPos.clone().add(barDirection.clone().multiplyScalar(currentOffset + length/2));
+        const barCenter = rightStartPos.clone().add(direction.clone().normalize().multiplyScalar(-length/2));
         bar.position.copy(barCenter);
 
-        // Align bar with line direction - PROPER ROTATION
-        const axis = new THREE.Vector3(0, 1, 0); // Cylinder's default axis
-        const targetAxis = barDirection.clone().normalize();
+        const axis = new THREE.Vector3(0, 1, 0);
+        const targetAxis = direction.clone().normalize();
         bar.quaternion.setFromUnitVectors(axis, targetAxis);
 
         group.add(bar);
 
-        // Add value label on bar - CSS3D text facing camera
-        createBarLabel(group, barCenter, Math.floor(length * derived.totalCapacity / maxVisualLength), barType);
-
-        console.log(`✅ Created ${barType} bar at offset ${currentOffset.toFixed(2)}`);
+        const actualValue = barScale > 0 ? Math.floor(length / barScale) : 0;
+        createBarLabel(group, barCenter, actualValue, 'ownCredit');
       }
 
-      currentOffset += length;
+      console.log(`🏗️ SPREAD: left bars (${leftBarsLength.toFixed(2)}) from left entity, right bars (${segments.ownCredit.toFixed(2)}) from right entity`);
 
-      // Add delta separator after ownCredit (index 2)
-      if (index === 2) {
-        const separatorPos = startPos.clone().add(barDirection.clone().multiplyScalar(currentOffset));
-        createDeltaSeparator(group, separatorPos, barDirection, barHeight);
-        currentOffset += 0.15; // Gap for separator
-      }
-    });
+    } else {
+      // CLOSE MODE: bars clustered in CENTER with delta separator
+      const centerPoint = fromEntity.position.clone().lerp(toEntity.position, 0.5);
+      const halfBarsLength = totalBarsLength / 2;
+      const startPos = centerPoint.clone().sub(direction.clone().normalize().multiplyScalar(halfBarsLength));
+      const barDirection = direction.clone().normalize();
+
+      let currentOffset = 0;
+      const barOrder = ['peerCredit', 'collateral', 'ownCredit'] as const;
+
+      barOrder.forEach((barType, index) => {
+        const length = segments[barType as keyof typeof segments];
+        if (length === undefined) {
+          throw new Error(`FINTECH-SAFETY: Missing segment data for bar type: ${barType}`);
+        }
+
+        if (length > 0.01) {
+          const radius = barHeight * 2.5; // 2x thinner (was 5.0)
+          const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
+          const barColor = colors[barType as keyof typeof colors];
+          if (!barColor) {
+            throw new Error(`FINTECH-SAFETY: Unknown bar type: ${barType}`);
+          }
+
+          // Credit bars: airy/transparent wireframe (unloaded trust), Collateral: solid (actual value)
+          const isCredit = barType === 'peerCredit' || barType === 'ownCredit';
+          const material = new THREE.MeshLambertMaterial({
+            color: barColor,
+            transparent: true,
+            opacity: isCredit ? 0.3 : 0.9, // Credit: airy (30%), Collateral: solid (90%)
+            emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
+            wireframe: isCredit // Credit shows as wireframe (unloaded trust)
+          });
+          const bar = new THREE.Mesh(geometry, material);
+
+          const barCenter = startPos.clone().add(barDirection.clone().multiplyScalar(currentOffset + length/2));
+          bar.position.copy(barCenter);
+
+          const axis = new THREE.Vector3(0, 1, 0);
+          const targetAxis = barDirection.clone().normalize();
+          bar.quaternion.setFromUnitVectors(axis, targetAxis);
+
+          group.add(bar);
+
+          const actualValue = barScale > 0 ? Math.floor(length / barScale) : 0;
+          createBarLabel(group, barCenter, actualValue, barType);
+        }
+
+        currentOffset += length;
+
+        // Add delta separator after collateral (index 1) in CLOSE mode only
+        // SEAMLESS: No gap added - delta is part of the continuous bar structure
+        if (index === 1) {
+          const separatorPos = startPos.clone().add(barDirection.clone().multiplyScalar(currentOffset));
+          createDeltaSeparator(group, separatorPos, barDirection, barHeight);
+          // NO gap: currentOffset += 0.2; (removed - bars must be seamless)
+        }
+      });
+
+      console.log(`🏗️ CLOSE: centered bars, total length: ${totalBarsLength.toFixed(2)}`);
+    }
   }
 
   function createDeltaSeparator(group: THREE.Group, position: THREE.Vector3, direction: THREE.Vector3, barHeight: number) {
-    // Flat rectangular separator ===|=== (perpendicular to line)
-    const separatorWidth = barHeight * 3; // 3x wider for visibility
-    const separatorHeight = 0.05; // Very thin
-    const separatorDepth = 0.05;
+    // SHARP DISK separator marking delta (zero point) - sleek knife-like ==|== design
+    const diskRadius = barHeight * 4; // Wide disk for visibility
+    const diskThickness = barHeight * 0.3; // Very thin for sharp knife appearance
 
-    const geometry = new THREE.BoxGeometry(separatorDepth, separatorWidth, separatorHeight);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xff0000,
+    // Create thin disk (very flat cylinder)
+    const geometry = new THREE.CylinderGeometry(diskRadius, diskRadius, diskThickness, 32);
+    const material = new THREE.MeshLambertMaterial({
+      color: 0xff3333, // Bright red for delta marker
       transparent: true,
-      opacity: 0.9
+      opacity: 0.95,
+      emissive: 0xff0000,
+      emissiveIntensity: 0.3
     });
     const separator = new THREE.Mesh(geometry, material);
 
     separator.position.copy(position);
 
-    // Align perpendicular to line direction (180° rotation)
-    separator.lookAt(position.clone().add(direction));
-    separator.rotateY(Math.PI / 2); // Make it perpendicular
+    // Align cylinder axis (Y) with line direction so disk face is perpendicular (splits bars)
+    // Cylinder default axis is Y, we want Y to point along the line direction
+    const axis = new THREE.Vector3(0, 1, 0); // Cylinder's default axis
+    const targetAxis = direction.clone().normalize();
+    separator.quaternion.setFromUnitVectors(axis, targetAxis);
 
     group.add(separator);
   }
@@ -858,36 +1331,108 @@
     group.add(sprite);
   }
 
-  function createEntityLabel(entityId: string, x: number, y: number, z: number) {
-    // Create canvas for entity name
+  function createEntityLabel(entityId: string): THREE.Sprite {
+    // Create canvas for entity name - minimalist, no background, square aspect ratio to avoid skewing
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d')!;
-    canvas.width = 256;
-    canvas.height = 48;
+    // Use square canvas to prevent skewing (128x128 for clean rendering)
+    canvas.width = 128;
+    canvas.height = 128;
 
-    // Text styling
+    // Get short entity name (just number, no prefix)
+    const entityName = getEntityShortName(entityId);
+
+    // NO background - transparent (user requirement: black background is ugly)
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Text styling - minimalist monospace, bright green, larger font
     context.fillStyle = '#00ff88';
-    context.font = 'bold 14px monospace';
+    context.font = 'bold 32px sans-serif'; // Larger, cleaner sans-serif
     context.textAlign = 'center';
     context.textBaseline = 'middle';
 
-    // Short entity name
-    const shortName = entityId.slice(0, 12) + '...';
-    context.fillText(shortName, 128, 24);
+    // Draw text centered in square canvas
+    context.fillText(entityName, 64, 64);
 
-    // Create sprite
+    // Create sprite with texture
     const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    texture.needsUpdate = true;
+
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false, // Always visible on top
+      sizeAttenuation: true // Scale with distance for better depth perception
+    });
     const sprite = new THREE.Sprite(spriteMaterial);
 
-    sprite.position.set(x, y, z);
-    sprite.scale.set(2, 1, 1);
+    // Square sprite (1:1 aspect ratio) to match square canvas - prevents skewing
+    sprite.scale.set(1.5, 1.5, 1);
 
     scene.add(sprite);
+    return sprite; // Return sprite to store with entity
+  }
+
+  function updateEntityLabels() {
+    // Update all entity labels to stay on top of spheres (neat, minimalist, always attached)
+    // FIRST PRINCIPLE: Labels must never disconnect - every entity must have a visible label
+    if (!camera) return;
+
+    entities.forEach(entity => {
+      if (!entity.label) {
+        // Defensive: If label is missing, recreate it (should never happen but fail-safe)
+        console.warn(`⚠️ Entity ${entity.id.slice(-4)} missing label - recreating`);
+        entity.label = createEntityLabel(entity.id);
+      }
+
+      // Verify label is in scene (defensive check)
+      if (!scene.children.includes(entity.label)) {
+        console.warn(`⚠️ Label for ${entity.id.slice(-4)} not in scene - re-adding`);
+        scene.add(entity.label);
+      }
+
+      // Position label above the entity sphere (attached to entity position)
+      const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
+      entity.label.position.set(
+        entity.position.x,
+        entity.position.y + entitySize + 0.8, // Slightly above sphere
+        entity.position.z
+      );
+
+      // CRITICAL: Sprites must always face camera for readable text
+      // Explicitly update rotation quaternion to face camera (billboard effect)
+      entity.label.quaternion.copy(camera.quaternion);
+    });
   }
 
   function animate() {
     animationId = requestAnimationFrame(animate);
+
+    // Auto-rotate (adjustable speed from slider 0-10000)
+    if (rotationSpeed > 0 && controls) {
+      // Map slider value (0-10000) to rotation angle
+      // 1000 = Earth-like slow rotation (~0.001 rad/frame = 1 rotation per ~100 seconds)
+      // 10000 = Fast rotation (~0.01 rad/frame = 1 rotation per ~10 seconds)
+      const maxRotationSpeed = 0.01; // Maximum rotation speed at slider = 10000
+      const angle = (rotationSpeed / 10000) * maxRotationSpeed;
+
+      const currentPosition = camera.position.clone();
+      const target = controls.target.clone();
+
+      // Rotate camera position around target (Y-axis for horizontal rotation)
+      const offset = currentPosition.sub(target);
+      const newX = offset.x * Math.cos(angle) - offset.z * Math.sin(angle);
+      const newZ = offset.x * Math.sin(angle) + offset.z * Math.cos(angle);
+
+      camera.position.x = target.x + newX;
+      camera.position.z = target.z + newZ;
+      camera.lookAt(target);
+
+      // Save camera state periodically during auto-rotation (not every frame)
+      if (Math.random() < 0.01) { // ~1% chance per frame = every few seconds
+        saveBirdViewSettings();
+      }
+    }
 
     // Update controls
     if (controls) {
@@ -899,14 +1444,106 @@
       }
     }
 
+    // Continuous auto-repulsion when entities intersect in space
+    applyCollisionRepulsion();
+
+    // Update entity label positions (always on top of sphere)
+    updateEntityLabels();
+
     // Animate transaction particles
     animateParticles();
 
     // Animate entity pulses
     animateEntityPulses();
 
+    // Update balance change ripples
+    updateRipples();
+
+    // Detect jurisdictional events (j-events) and create ripples (throttled)
+    if (Math.random() < 0.05) { // Check ~5% of frames = 3 times per second at 60fps
+      detectJurisdictionalEvents();
+    }
+
     if (renderer && camera) {
       renderer.render(scene, camera);
+    }
+  }
+
+  // Throttle connection rebuilding (expensive operation)
+  let lastConnectionRebuild = 0;
+  let needsConnectionRebuild = false;
+
+  function applyCollisionRepulsion() {
+    // First principle: entities must never overlap in 3D space
+    // Check all pairs and push apart if they're too close (sphere intersection)
+
+    let anyMoved = false;
+
+    for (let i = 0; i < entities.length; i++) {
+      for (let j = i + 1; j < entities.length; j++) {
+        const entityA = entities[i];
+        const entityB = entities[j];
+        if (!entityA || !entityB) continue;
+
+        // Calculate entity radii (approximate as sphere radius)
+        const radiusA = getEntitySizeForToken(entityA.id, selectedTokenId);
+        const radiusB = getEntitySizeForToken(entityB.id, selectedTokenId);
+
+        // Current distance between centers
+        const distance = entityA.position.distanceTo(entityB.position);
+
+        // Minimum allowed distance (surfaces just touching)
+        const minDistance = radiusA + radiusB;
+
+        // If overlapping, push apart
+        if (distance < minDistance && distance > 0.01) {
+          const overlap = minDistance - distance;
+          const direction = new THREE.Vector3().subVectors(entityB.position, entityA.position).normalize();
+
+          // Push force proportional to overlap (spring-like)
+          const pushStrength = overlap * 0.5; // Gentle continuous push
+
+          // If neither pinned, push both equally
+          if (!entityA.isPinned && !entityB.isPinned) {
+            entityA.position.add(direction.clone().multiplyScalar(-pushStrength / 2));
+            entityB.position.add(direction.clone().multiplyScalar(pushStrength / 2));
+            entityA.mesh.position.copy(entityA.position);
+            entityB.mesh.position.copy(entityB.position);
+            anyMoved = true;
+          }
+          // If A pinned, push B only
+          else if (entityA.isPinned && !entityB.isPinned) {
+            entityB.position.add(direction.clone().multiplyScalar(pushStrength));
+            entityB.mesh.position.copy(entityB.position);
+            anyMoved = true;
+          }
+          // If B pinned, push A only
+          else if (!entityA.isPinned && entityB.isPinned) {
+            entityA.position.add(direction.clone().multiplyScalar(-pushStrength));
+            entityA.mesh.position.copy(entityA.position);
+            anyMoved = true;
+          }
+        }
+      }
+    }
+
+    // Rebuild connections if entities moved (but throttle to avoid performance hit)
+    if (anyMoved) {
+      needsConnectionRebuild = true;
+    }
+
+    const now = Date.now();
+    if (needsConnectionRebuild && (now - lastConnectionRebuild > 100)) { // Max 10 fps for rebuilds
+      connections.forEach(connection => {
+        scene.remove(connection.line);
+        if (connection.progressBars) {
+          scene.remove(connection.progressBars);
+        }
+      });
+      connections = [];
+      createConnections();
+      needsConnectionRebuild = false;
+      lastConnectionRebuild = now;
     }
   }
 
@@ -922,7 +1559,24 @@
         return;
       }
 
-      // Get connection
+      // Broadcast ripple animation (connectionIndex === -1)
+      if (particle.connectionIndex === -1) {
+        // Expand ring and fade out
+        const startRadius = 0.5;
+        const maxRadius = 5.0;
+        const currentRadius = startRadius + (maxRadius - startRadius) * particle.progress;
+
+        // Update ring size (scale the torus)
+        particle.mesh.scale.setScalar(currentRadius / startRadius);
+
+        // Fade out as it expands
+        const material = particle.mesh.material as THREE.MeshBasicMaterial;
+        material.opacity = 0.8 * (1 - particle.progress);
+
+        return;
+      }
+
+      // Unicast particle animation (along connection line)
       const connection = connections[particle.connectionIndex];
       if (!connection) return;
 
@@ -1022,6 +1676,202 @@
     }
   }
 
+  function enforceSpacingConstraints() {
+    // Check all entity pairs and push them apart if bars would pierce or entities intersect
+    // Run multiple iterations to ensure full separation (user requirement: no intersections)
+    let anyAdjusted = true;
+    let iterations = 0;
+    const maxIterations = 10; // Prevent infinite loop
+
+    while (anyAdjusted && iterations < maxIterations) {
+      anyAdjusted = false;
+      iterations++;
+
+    for (let i = 0; i < entities.length; i++) {
+      for (let j = i + 1; j < entities.length; j++) {
+        const entityA = entities[i];
+        const entityB = entities[j];
+        if (!entityA || !entityB) continue;
+
+        // Check if these entities have an account connection
+        const connection = connections.find(c =>
+          (c.from === entityA.id && c.to === entityB.id) ||
+          (c.from === entityB.id && c.to === entityA.id)
+        );
+
+        if (!connection) continue;
+
+        // Calculate required spacing based on bars
+        const entityASizeData = getEntitySizeForToken(entityA.id, selectedTokenId);
+        const entityBSizeData = getEntitySizeForToken(entityB.id, selectedTokenId);
+
+        // Get account data to calculate bar length
+        const currentReplicas = $visibleReplicas;
+        let totalBarsLength = 0;
+
+        const fromReplica = Array.from(currentReplicas.entries() as [string, any][])
+          .find(([key]) => key.startsWith(entityA.id + ':'));
+
+        if (fromReplica?.[1]?.state?.accounts) {
+          const accountData = fromReplica[1].state.accounts.get(entityB.id);
+          if (accountData) {
+            const tokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
+            if (tokenDelta) {
+              const derived = $xlnFunctions.deriveDelta(tokenDelta, entityA.id < entityB.id);
+              const globalScale = $settings.portfolioScale || 5000;
+              const decimals = 18;
+              const tokensToVisualUnits = 0.00001;
+              const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
+
+              totalBarsLength = (Number(derived.peerCreditLimit || 0n) + Number(derived.collateral || 0n) + Number(derived.ownCreditLimit || 0n)) * barScale;
+            }
+          }
+        }
+
+        // Minimum required distance based on mode (visual units, not pixels)
+        const minGapSpread = 2; // Spread mode: small gap in middle
+        const minGapClose = 1; // Close mode: small gap on each side
+
+        const requiredGap = barsMode === 'spread' ? minGapSpread : (2 * minGapClose);
+        const minDistance = entityASizeData + entityBSizeData + totalBarsLength + requiredGap;
+
+        // Current distance
+        const currentDistance = entityA.position.distanceTo(entityB.position);
+
+        // If too close, push entities apart (prioritize non-pinned entities)
+        if (currentDistance < minDistance) {
+          const pushDistance = minDistance - currentDistance;
+          const direction = new THREE.Vector3().subVectors(entityB.position, entityA.position).normalize();
+
+          // Mark that we made an adjustment (need another iteration)
+          anyAdjusted = true;
+
+          // If neither is pinned, push both apart equally
+          if (!entityA.isPinned && !entityB.isPinned) {
+            entityA.position.add(direction.clone().multiplyScalar(-pushDistance / 2));
+            entityB.position.add(direction.clone().multiplyScalar(pushDistance / 2));
+            entityA.mesh.position.copy(entityA.position);
+            entityB.mesh.position.copy(entityB.position);
+          }
+          // If A is pinned, push B away
+          else if (entityA.isPinned && !entityB.isPinned) {
+            entityB.position.add(direction.clone().multiplyScalar(pushDistance));
+            entityB.mesh.position.copy(entityB.position);
+          }
+          // If B is pinned, push A away
+          else if (!entityA.isPinned && entityB.isPinned) {
+            entityA.position.add(direction.clone().multiplyScalar(-pushDistance));
+            entityA.mesh.position.copy(entityA.position);
+          }
+          // If both pinned, show warning (can't fix)
+          else {
+            console.warn(`⚠️ Both entities pinned but too close: ${entityA.id.slice(-4)} ↔ ${entityB.id.slice(-4)}`);
+          }
+        }
+      }
+    }
+    } // End while loop
+
+    if (iterations > 1) {
+      console.log(`🔄 Spacing enforcement completed in ${iterations} iterations`);
+    }
+
+    // Rebuild connections after adjustments (bars need to be repositioned)
+    connections.forEach(connection => {
+      scene.remove(connection.line);
+      if (connection.progressBars) {
+        scene.remove(connection.progressBars);
+      }
+    });
+    connections = [];
+    createConnections();
+  }
+
+  function onMouseDown(event: MouseEvent) {
+    // Prevent default to avoid text selection
+    event.preventDefault();
+
+    // Calculate mouse position
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    // Update raycaster
+    raycaster.setFromCamera(mouse, camera);
+
+    // Check for entity intersections
+    const entityMeshes = entities.map(e => e.mesh);
+    const intersects = raycaster.intersectObjects(entityMeshes);
+
+    if (intersects.length > 0) {
+      const intersectedObject = intersects[0]?.object;
+      if (!intersectedObject) return;
+
+      const entity = entities.find(e => e.mesh === intersectedObject);
+      if (!entity) return;
+
+      // Disable orbit controls during drag
+      if (controls) {
+        controls.enabled = false;
+      }
+
+      // Start dragging
+      isDragging = true;
+      draggedEntity = entity;
+      entity.isDragging = true;
+
+      // Setup drag plane at entity's z position for 3D dragging
+      dragPlane.setFromNormalAndCoplanarPoint(
+        camera.getWorldDirection(new THREE.Vector3()).normalize(),
+        entity.position
+      );
+
+      // Calculate offset between mouse ray intersection and entity position
+      const intersection = new THREE.Vector3();
+      raycaster.ray.intersectPlane(dragPlane, intersection);
+      dragOffset.subVectors(entity.position, intersection);
+
+      // Visual feedback: brighten entity
+      if (entity.mesh.material instanceof THREE.MeshLambertMaterial) {
+        entity.mesh.material.emissive.setHex(0x00ff88);
+      }
+    }
+  }
+
+  function onMouseUp(_event: MouseEvent) {
+    if (draggedEntity && isDragging) {
+      // Mark entity as pinned (user has manually positioned it)
+      draggedEntity.isPinned = true;
+      draggedEntity.isDragging = false;
+
+      // Reset visual feedback
+      if (draggedEntity.mesh.material instanceof THREE.MeshLambertMaterial) {
+        draggedEntity.mesh.material.emissive.setHex(0x002200);
+      }
+
+      // Check if entity violates spacing constraints after drag
+      enforceSpacingConstraints();
+
+      // Save positions after drag (persistence)
+      saveEntityPositions();
+
+      draggedEntity = null;
+      isDragging = false;
+
+      // Set flag to prevent click event from triggering camera refocus
+      justDragged = true;
+      setTimeout(() => {
+        justDragged = false;
+      }, 100); // Clear flag after 100ms
+    }
+
+    // Re-enable orbit controls WITHOUT refocusing
+    if (controls) {
+      controls.enabled = true;
+      // Don't call controls.update() here - prevents annoying refocus
+    }
+  }
+
   function onMouseMove(event: MouseEvent) {
     // Calculate mouse position in normalized device coordinates
     const rect = renderer.domElement.getBoundingClientRect();
@@ -1030,6 +1880,28 @@
 
     // Update the raycaster with the camera and mouse position
     raycaster.setFromCamera(mouse, camera);
+
+    // Handle dragging
+    if (isDragging && draggedEntity) {
+      const intersection = new THREE.Vector3();
+      raycaster.ray.intersectPlane(dragPlane, intersection);
+
+      // Apply offset and update entity position
+      draggedEntity.position.copy(intersection.add(dragOffset));
+      draggedEntity.mesh.position.copy(draggedEntity.position);
+
+      // Rebuild connections in real-time during drag (bars follow entities)
+      connections.forEach(connection => {
+        scene.remove(connection.line);
+        if (connection.progressBars) {
+          scene.remove(connection.progressBars);
+        }
+      });
+      connections = [];
+      createConnections();
+
+      return; // Skip hover logic while dragging
+    }
 
     // Check for intersections with entities
     const entityMeshes = entities.map(e => e.mesh);
@@ -1055,11 +1927,12 @@
 
         // Show entity tooltip with balance details
         const balanceInfo = getEntityBalanceInfo(entity.id);
+        const entityName = getEntityShortName(entity.id);
         tooltip = {
           visible: true,
           x: event.clientX,
           y: event.clientY,
-          content: `🏛️ Entity: ${entity.id.slice(0, 16)}...\n📊 Capabilities: ${entity.profile?.capabilities?.join(', ') || 'N/A'}\n🔗 Accounts: ${getEntityAccountCount(entity.id)}\n💰 Balances:\n${balanceInfo}`
+          content: `🏛️ Entity: ${entityName}\n📊 Capabilities: ${entity.profile?.capabilities?.join(', ') || 'N/A'}\n🔗 Accounts: ${getEntityAccountCount(entity.id)}\n💰 Balances:\n${balanceInfo}`
         };
 
         // Highlight entity with type safety
@@ -1134,6 +2007,11 @@
   }
 
   function onMouseClick(event: MouseEvent) {
+    // Don't trigger click actions if user just finished dragging
+    if (justDragged) {
+      return;
+    }
+
     // Calculate mouse position
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1160,43 +2038,11 @@
       // Trigger activity animation
       triggerEntityActivity(entity.id);
 
-      // Center camera on entity
-      centerCameraOnEntity(entity);
+      // DISABLED: Center camera on entity (user doesn't want ANY refocusing)
+      // centerCameraOnEntity(entity);
 
       console.log(`🎯 Clicked entity: ${entity.id.slice(0, 8)}...`);
     }
-  }
-
-  function centerCameraOnEntity(entity: EntityData) {
-    if (!controls) {
-      throw new Error('FINTECH-SAFETY: Camera controls not initialized');
-    }
-
-    // Smooth camera movement to entity
-    const targetPosition = entity.position.clone();
-    targetPosition.z += 5; // Move camera closer
-
-    // Animate camera to target (simple version)
-    const startPosition = camera.position.clone();
-    const animationDuration = 1000; // 1 second
-    const startTime = Date.now();
-
-    function animateCamera() {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / animationDuration, 1);
-
-      // Smooth easing
-      const eased = 1 - Math.pow(1 - progress, 3);
-
-      camera.position.lerpVectors(startPosition, targetPosition, eased);
-      controls.target.lerp(entity.position, eased);
-
-      if (progress < 1) {
-        requestAnimationFrame(animateCamera);
-      }
-    }
-
-    animateCamera();
   }
 
   function onMouseDoubleClick(event: MouseEvent) {
@@ -1312,8 +2158,12 @@
     for (const [_, replica] of currentReplicas.entries()) {
       if (!replica?.state?.reserves) continue;
 
-      replica.state.reserves.forEach((_: bigint, tokenId: number) => {
-        tokenSet.add(tokenId);
+      // FINTECH-SAFETY: reserves is Map<string, bigint>, so tokenId key is string
+      replica.state.reserves.forEach((_: bigint, tokenIdStr: string) => {
+        const tokenId = Number(tokenIdStr);
+        if (!isNaN(tokenId)) {
+          tokenSet.add(tokenId);
+        }
       });
     }
 
@@ -1344,75 +2194,276 @@
     }
 
     const reserves = replica[1].state.reserves;
-    const tokenAmount = reserves.get(tokenId) || 0n;
+    // FINTECH-SAFETY: reserves Map uses string keys, not number
+    const tokenAmount = reserves.get(String(tokenId)) || 0n;
 
     // Normalize size between 0.3 and 1.5 based on token amount
     const normalizedAmount = Number(tokenAmount) / 10000; // Adjust scale as needed
     return Math.max(0.3, Math.min(1.5, 0.5 + normalizedAmount * 0.001));
   }
 
-  function showPaymentRoutes() {
-    // Auto-switch to LIVE mode before payment with user feedback
-    if (!$isLive) {
-      console.log('🔴 Auto-switching to LIVE mode for payment');
-      alert('Switching to LIVE mode for payment routing...');
-      timeOperations.goToLive();
-    }
-
+  async function sendPayment() {
     try {
-      // Get available entities from LIVE data
-      const liveReplicas = $xlnEnvironment?.replicas || new Map();
-      const entityIds = Array.from(new Set(
-        Array.from(liveReplicas.keys() as string[]).map((key: string) => {
-          const parts = key.split(':');
-          if (!parts[0]) {
-            throw new Error('FINTECH-SAFETY: Invalid replica key format');
-          }
-          return parts[0];
-        })
-      ));
+      console.log('🚀 ============ PAYMENT BUTTON CLICKED ============');
+      console.log(`  From: ${paymentFrom}, To: ${paymentTo}, Amount: ${paymentAmount}, TPS: ${paymentTPS}`);
 
-      if (entityIds.length < 2) {
-        alert('Need at least 2 entities for payments');
+      if (!paymentFrom || !paymentTo) {
+        console.error('❌ Missing from/to entities');
+        alert('Please select from and to entities');
+        return;
+      }
+      if (paymentFrom === paymentTo) {
+        console.error('❌ Same entity selected');
+        alert('Cannot send payment to same entity');
         return;
       }
 
-      // Calculate all possible routes
-      availableRoutes = [];
+      console.log('✅ Validation passed, proceeding with payment');
 
-      for (const fromId of entityIds) {
-        for (const toId of entityIds) {
-          if (fromId === toId) continue;
+      // Ensure we're in LIVE mode for payments
+      if (!$isLive) {
+        console.log('🔴 Auto-switching to LIVE mode for payment');
+        timeOperations.goToLive();
+        await new Promise(resolve => setTimeout(resolve, 100)); // Wait for mode switch
+      }
 
-          // Check for direct connection
-          const fromReplica = Array.from(liveReplicas.entries() as [string, any][])
-            .find(([key]) => key.startsWith(fromId + ':'));
+      const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const job: PaymentJob = {
+        id: jobId,
+        from: paymentFrom,
+        to: paymentTo,
+        amount: paymentAmount,
+        tps: paymentTPS,
+        sentCount: 0,
+        startedAt: Date.now()
+      };
 
-          if (fromReplica?.[1]?.state?.accounts?.has(toId)) {
-            const fromShort = fromId.slice(0, 8);
-            const toShort = toId.slice(0, 8);
+      console.log(`📦 Created job:`, job);
 
-            availableRoutes.push({
-              from: fromId,
-              to: toId,
-              path: [fromId, toId],
-              type: 'direct',
-              description: `${fromShort}... → ${toShort}... (Direct)`
-            });
-          }
+      if (paymentTPS === 0) {
+        console.log('🔵 Single payment mode (TPS=0)');
+        // Send once immediately
+        await executeSinglePayment(job);
+        console.log(`💸 Single payment sent: ${getEntityShortName(paymentFrom)} → ${getEntityShortName(paymentTo)}, amount: ${paymentAmount}`);
+      } else {
+        console.log(`🔵 Recurring payment mode (TPS=${paymentTPS})`);
+        // Create recurring job
+        const intervalMs = 1000 / paymentTPS; // Convert TPS to milliseconds
+        const intervalId = window.setInterval(async () => {
+          await executeSinglePayment(job);
+          job.sentCount++;
+        }, intervalMs);
 
-          // TODO: Add multi-hop route calculation later
+        job.intervalId = intervalId;
+        activeJobs = [...activeJobs, job];
+        console.log(`💸 Payment job started: ${paymentTPS} TPS, ${getEntityShortName(paymentFrom)} → ${getEntityShortName(paymentTo)}`);
+      }
+    } catch (error) {
+      console.error('🔥 CRITICAL ERROR in sendPayment:', error);
+      console.error('Stack:', error instanceof Error ? error.stack : 'No stack');
+      alert(`Payment failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function executeSinglePayment(job: PaymentJob) {
+    try {
+      // COPY EXACT PATTERN FROM PaymentPanel.svelte
+      const xln = await getXLN();
+      if (!xln) {
+        throw new Error('XLN not available');
+      }
+
+      const env = $xlnEnvironment;
+      if (!env) {
+        throw new Error('XLN environment not available');
+      }
+
+      // Debug logging
+      console.log(`💸 Starting payment: ${getEntityShortName(job.from)} (#${job.from.slice(-4)}) → ${getEntityShortName(job.to)} (#${job.to.slice(-4)}), amount: ${job.amount}`);
+
+      // Step 1: Find routes (copy from PaymentPanel findRoutes logic)
+      // Find our replica to check for direct account
+      let ourReplica: any = null;
+      for (const key of env.replicas.keys()) {
+        if (key.startsWith(job.from + ':')) {
+          ourReplica = env.replicas.get(key);
+          console.log(`📡 Found replica: ${key}`);
+          break;
         }
       }
 
-      console.log(`💸 Found ${availableRoutes.length} payment routes`);
-      showRouteSelection = true;
+      if (!ourReplica) {
+        throw new Error(`No replica found for entity ${getEntityShortName(job.from)} (${job.from})`);
+      }
+
+      const hasDirectAccount = ourReplica?.state?.accounts?.has(job.to);
+      console.log(`🔍 Direct account check: ${hasDirectAccount}`);
+
+      if (!hasDirectAccount) {
+        throw new Error(`No direct account from ${getEntityShortName(job.from)} to ${getEntityShortName(job.to)}`);
+      }
+
+      // Convert amount to BigInt with decimals (copy from PaymentPanel)
+      const decimals = 18;
+      const amountStr = String(job.amount);
+      const amountParts = amountStr.split('.');
+      const wholePart = BigInt(amountParts[0] || 0);
+      const decimalPart = amountParts[1] || '';
+      const paddedDecimal = decimalPart.padEnd(decimals, '0').slice(0, decimals);
+      const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(paddedDecimal || 0);
+
+      console.log(`💰 Amount: ${job.amount} → ${amountInSmallestUnit.toString()} (smallest unit)`);
+
+      // Build route object (MUST match PaymentPanel structure)
+      const routePath = [job.from, job.to];
+      console.log(`🗺️ Route path: [${routePath.map(id => getEntityShortName(id)).join(' → ')}]`);
+
+      // Step 2: Find signerId (copy from PaymentPanel)
+      let signerId = 's1'; // default
+      for (const key of env.replicas.keys()) {
+        if (key.startsWith(job.from + ':')) {
+          signerId = key.split(':')[1] || 's1';
+          console.log(`🔑 Found signerId: ${signerId}`);
+          break;
+        }
+      }
+
+      // Step 3: Send payment (copy EXACT structure from PaymentPanel)
+      const paymentInput = {
+        entityId: job.from,
+        signerId,
+        entityTxs: [{
+          type: 'directPayment' as const,
+          data: {
+            targetEntityId: job.to,
+            tokenId: selectedTokenId,
+            amount: amountInSmallestUnit, // Use the converted amount
+            route: routePath,  // Path array
+            description: `Bird view payment: ${job.amount}`,
+          },
+        }],
+      };
+
+      console.log(`📤 Sending payment input:`, JSON.stringify(paymentInput, (_k, v) => typeof v === 'bigint' ? v.toString() : v, 2));
+
+      // Trigger visual feedback BEFORE processing
+      triggerEntityActivity(job.from);
+      triggerEntityActivity(job.to);
+
+      // Process the payment (COPY EXACT CALL from PaymentPanel)
+      await xln.processUntilEmpty(env, [paymentInput]);
+
+      // Add to activity ticker AFTER successful processing
+      recentActivity = [{
+        id: `tx-${Date.now()}`,
+        message: `${getEntityShortName(job.from)} → ${getEntityShortName(job.to)}: ${job.amount}`,
+        timestamp: Date.now(),
+        type: 'payment' as 'payment'
+      }, ...recentActivity].slice(0, 10);
+
+      console.log(`✅ Payment processed: ${getEntityShortName(job.from)} → ${getEntityShortName(job.to)}, ${job.amount} tokens`);
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error('❌ Route calculation failed:', error);
-      throw new Error(`FINTECH-SAFETY: Payment route calculation failed: ${errorMsg}`);
+      console.error('❌ Payment failed:', errorMsg);
+
+      // Show error to user
+      alert(`Payment failed: ${errorMsg}`);
+
+      // If it's a recurring job, cancel it on error
+      if (job.intervalId) {
+        cancelJob(job.id);
+      }
     }
+  }
+
+  function cancelJob(jobId: string) {
+    const job = activeJobs.find(j => j.id === jobId);
+    if (job?.intervalId) {
+      clearInterval(job.intervalId);
+    }
+    activeJobs = activeJobs.filter(j => j.id !== jobId);
+    console.log(`❌ Cancelled payment job: ${jobId}`);
+  }
+
+  function createRipple(entityId: string) {
+    const entity = entities.find(e => e.id === entityId);
+    if (!entity || !scene) return;
+
+    const rippleGeometry = new THREE.RingGeometry(0.1, 0.2, 32);
+    const rippleMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff88,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide
+    });
+
+    const rippleMesh = new THREE.Mesh(rippleGeometry, rippleMaterial);
+    rippleMesh.position.copy(entity.position);
+
+    // Random rotation for variety
+    rippleMesh.rotation.x = Math.random() * Math.PI;
+    rippleMesh.rotation.y = Math.random() * Math.PI;
+    rippleMesh.rotation.z = Math.random() * Math.PI;
+
+    scene.add(rippleMesh);
+
+    const ripple: Ripple = {
+      mesh: rippleMesh,
+      startTime: Date.now(),
+      duration: 1500, // 1.5 seconds
+      maxRadius: 5.0  // Expand to 5 units
+    };
+
+    activeRipples.push(ripple);
+  }
+
+  function updateRipples() {
+    const now = Date.now();
+    activeRipples = activeRipples.filter(ripple => {
+      const elapsed = now - ripple.startTime;
+      const progress = Math.min(elapsed / ripple.duration, 1);
+
+      if (progress >= 1) {
+        // Remove completed ripple
+        scene.remove(ripple.mesh);
+        ripple.mesh.geometry.dispose();
+        (ripple.mesh.material as THREE.Material).dispose();
+        return false;
+      }
+
+      // Animate ripple expansion and fade
+      const scale = 0.1 + progress * ripple.maxRadius;
+      ripple.mesh.scale.set(scale, scale, 1);
+
+      const material = ripple.mesh.material as THREE.MeshBasicMaterial;
+      material.opacity = 0.8 * (1 - progress); // Fade out
+
+      return true;
+    });
+  }
+
+  function detectJurisdictionalEvents() {
+    const env = $xlnEnvironment;
+    if (!env) return;
+
+    // Check the current server frame for jurisdictional events (j-events)
+    const currentFrame = env.serverState?.history?.[env.serverState.history.length - 1];
+    if (!currentFrame) return;
+
+    // Look for entityFrames that contain j-events (reserve/collateral updates)
+    const entityFrames = currentFrame.entityFrames;
+    if (!entityFrames || !(entityFrames instanceof Map)) return;
+
+    entityFrames.forEach((entityFrame: any, entityId: string) => {
+      // Check if this entity frame has j-events (transactions that modify reserves/collateral)
+      const jEvents = entityFrame.jEvents;
+      if (jEvents && jEvents.length > 0) {
+        // This entity experienced a jurisdictional event - create ripple
+        createRipple(entityId);
+        console.log(`🌊 Ripple triggered for entity ${getEntityShortName(entityId)} due to ${jEvents.length} j-events`);
+      }
+    });
   }
 
   async function executePaymentRoute(route: typeof availableRoutes[0]) {
@@ -1433,7 +2484,8 @@
 
       if (fromReplica?.[1]?.state?.reserves) {
         const reserves = fromReplica[1].state.reserves;
-        const tokenReserve = reserves.get(selectedTokenId) || 0n;
+        // FINTECH-SAFETY: reserves Map uses string keys, not number
+        const tokenReserve = reserves.get(String(selectedTokenId)) || 0n;
         paymentAmount = Math.max(100, Number(tokenReserve) / 10); // 10% for visibility
       }
 
@@ -1473,7 +2525,11 @@
     }
 
     // Show all tokens, highlight selected one
-    reserves.forEach((amount: bigint, tokenId: number) => {
+    // FINTECH-SAFETY: reserves is Map<string, bigint>, so tokenId key is string
+    reserves.forEach((amount: bigint, tokenIdStr: string) => {
+      const tokenId = Number(tokenIdStr);
+      if (isNaN(tokenId)) return; // Skip invalid token IDs
+
       const formattedAmount = (Number(amount) / 1000).toFixed(2);
       const marker = tokenId === selectedTokenId ? '👉' : '  ';
       balanceLines.push(`${marker} Token ${tokenId}: ${formattedAmount}k`);
@@ -1482,6 +2538,47 @@
     return balanceLines.join('\n');
   }
 
+  /**
+   * Format financial amounts using same logic as EntityPanel
+   * Example: 1500000000000000000n → "1.5"
+   */
+  function formatFinancialAmount(amount: bigint, decimals: number = 18): string {
+    if (amount === 0n) return '0';
+
+    const isNegative = amount < 0n;
+    const absoluteAmount = isNegative ? -amount : amount;
+
+    const divisor = BigInt(10 ** decimals);
+    const wholePart = absoluteAmount / divisor;
+    const fractionalPart = absoluteAmount % divisor;
+
+    if (fractionalPart === 0n) {
+      return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}`;
+    }
+
+    const fractionalStr = fractionalPart.toString().padStart(decimals, '0');
+    const trimmed = fractionalStr.replace(/0+$/, ''); // Remove trailing zeros
+    const formatted = trimmed.slice(0, 4); // Max 4 decimal places for readability
+    return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
+  }
+
+  /**
+   * Get entity short name (just number, clean - no prefix)
+   */
+  function getEntityShortName(entityId: string): string {
+    if (!$xlnFunctions?.getEntityNumber) return entityId.slice(-4);
+    try {
+      const entityNum = $xlnFunctions.getEntityNumber(entityId);
+      return `${entityNum}`; // Just number, clean - no "#" or "Entity" prefix
+    } catch {
+      return entityId.slice(-4);
+    }
+  }
+
+  /**
+   * FINTECH-GRADE: Get connection info with proper token context
+   * Shows available tokens and auto-selects first available if current selection doesn't exist
+   */
   function getConnectionAccountInfo(fromId: string, toId: string): string {
     const currentReplicas = $visibleReplicas;
 
@@ -1510,26 +2607,49 @@
       return "💱 Credit: No account\n🔒 Collateral: No account\n⚖️ Balance: No account";
     }
 
-    // Get token-specific delta EXACTLY like EntityPanel
-    if (!accountData.deltas) {
-      return "💱 Credit: No deltas map\n🔒 Collateral: No deltas\n⚖️ Balance: No deltas";
+    // FINTECH-SAFETY: Get available tokens for THIS specific connection
+    const availableTokens = accountData.deltas ? Array.from(accountData.deltas.keys() as IterableIterator<number>).sort((a, b) => a - b) : [];
+
+    if (availableTokens.length === 0) {
+      return "💱 Credit: No tokens\n🔒 Collateral: No tokens\n⚖️ Balance: No tokens";
     }
 
-    const tokenDelta = accountData.deltas.get(selectedTokenId);
+    // Use single source of truth for delta access
+    let tokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
+    let displayTokenId = selectedTokenId;
+
+    // FINTECH-GRADE: If selected token doesn't exist in this connection, show first available
+    if (!tokenDelta && availableTokens.length > 0) {
+      displayTokenId = availableTokens[0]!;
+      tokenDelta = getAccountTokenDelta(accountData, displayTokenId);
+      console.log(`ℹ️ Token ${selectedTokenId} not in connection ${fromId.slice(-4)}↔${toId.slice(-4)}, showing Token ${displayTokenId} instead`);
+    }
+
     if (!tokenDelta) {
-      return `💱 Credit: No data for token ${selectedTokenId}\n🔒 Collateral: N/A\n⚖️ Balance: N/A`;
+      // This should never happen after the above fallback, but fail-fast if it does
+      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens: ${availableTokens}`);
     }
 
     // Use REAL deriveDelta calculation
     const derived = deriveEntry(tokenDelta, fromId < toId);
 
-    const inCap = (derived.inCapacity / 1000).toFixed(1) + 'k';
-    const outCap = (derived.outCapacity / 1000).toFixed(1) + 'k';
-    const collateral = (derived.collateral / 1000).toFixed(1) + 'k';
-    const balance = (derived.delta / 1000).toFixed(1) + 'k';
-    const totalCap = (derived.totalCapacity / 1000).toFixed(1) + 'k';
+    // Format using proper BigInt formatting (same as EntityPanel)
+    const inCap = formatFinancialAmount(BigInt(Math.floor(derived.inCapacity)));
+    const outCap = formatFinancialAmount(BigInt(Math.floor(derived.outCapacity)));
+    const collateral = formatFinancialAmount(BigInt(Math.floor(derived.collateral)));
+    const balance = formatFinancialAmount(BigInt(Math.floor(derived.delta)));
+    const totalCap = formatFinancialAmount(BigInt(Math.floor(derived.totalCapacity)));
 
-    return `💚 Can Receive: ${inCap}\n💸 Can Send: ${outCap}\n🔒 Collateral: ${collateral}\n⚖️ Balance: ${balance}\n📊 Total Capacity: ${totalCap}`;
+    // Get entity short names
+    const fromName = getEntityShortName(fromId);
+    const toName = getEntityShortName(toId);
+
+    // Show which token we're displaying + available tokens for context
+    const tokenContext = displayTokenId !== selectedTokenId
+      ? `🪙 Token ${displayTokenId} (Token ${selectedTokenId} not available)\n📋 Available: ${availableTokens.join(', ')}\n\n`
+      : `🪙 Token ${displayTokenId}\n📋 Available: ${availableTokens.join(', ')}\n\n`;
+
+    return `🔗 Account: ${fromName} ↔ ${toName}\n${tokenContext}💚 Can Receive: ${inCap}\n💸 Can Send: ${outCap}\n🔒 Collateral: ${collateral}\n⚖️ Balance: ${balance}\n📊 Total Capacity: ${totalCap}`;
   }
 
 
@@ -1564,7 +2684,15 @@
         <!-- Token Filter -->
         <div class="control-group">
           <label>🪙 Token:</label>
-          <select bind:value={selectedTokenId} on:change={() => { saveBirdViewSettings(); updateNetworkData(); }}>
+          <select
+            bind:value={selectedTokenId}
+            on:change={(e) => {
+              // FINTECH-SAFETY: Coerce string→number from select binding
+              selectedTokenId = Number(e.currentTarget.value);
+              saveBirdViewSettings();
+              updateNetworkData();
+            }}
+          >
             {#each availableTokens as tokenId}
               <option value={tokenId}>Token {tokenId}</option>
             {/each}
@@ -1647,10 +2775,65 @@
           </button>
         </div>
 
-        <!-- Payment Routes -->
+        <!-- Auto-Rotate Speed Slider (0 = stopped, 10000 = fast) -->
         <div class="control-group">
-          <button class="action-btn" on:click={showPaymentRoutes}>
-            💸 Payment Routes
+          <label>🌍 Rotate:</label>
+          <input
+            type="range"
+            min="0"
+            max="10000"
+            bind:value={rotationSpeed}
+            on:change={() => saveBirdViewSettings()}
+            title="Rotation speed: 0=stopped, 1000=slow, 10000=fast"
+            class="rotation-slider"
+          />
+        </div>
+
+        <!-- Quick Payment Form -->
+        <div class="payment-form">
+          <div class="form-row">
+            <label>💸 From:</label>
+            <select bind:value={paymentFrom} class="form-select">
+              <option value="">Select...</option>
+              {#each entities as entity}
+                <option value={entity.id}>{getEntityShortName(entity.id)}</option>
+              {/each}
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label>→ To:</label>
+            <select bind:value={paymentTo} class="form-select">
+              <option value="">Select...</option>
+              {#each entities as entity}
+                {#if entity.id !== paymentFrom}
+                  <option value={entity.id}>{getEntityShortName(entity.id)}</option>
+                {/if}
+              {/each}
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label>💰 Amount:</label>
+            <input type="text" bind:value={paymentAmount} class="form-input" placeholder="100" />
+          </div>
+
+          <div class="form-row">
+            <label>⚡ TPS:</label>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="0.1"
+              bind:value={paymentTPS}
+              class="repeat-slider"
+              title="TPS: 0=once, 0.1=every 10s, 100=max"
+            />
+            <span class="rate-value">{paymentTPS.toFixed(1)}</span>
+          </div>
+
+          <button class="send-btn" on:click={sendPayment}>
+            {paymentTPS === 0 ? '💸 Send Once' : '▶ Start Flow'}
           </button>
         </div>
       </div>
@@ -1667,6 +2850,28 @@
         {#each recentActivity as activity (activity.id)}
           <div class="activity-item {activity.type}">
             {activity.message}
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Active Payment Jobs (Flows) -->
+  {#if activeJobs.length > 0}
+    <div class="active-jobs">
+      <h4>🌊 Active Flows</h4>
+      <div class="jobs-list">
+        {#each activeJobs as job (job.id)}
+          <div class="job-item">
+            <div class="job-info">
+              <span class="job-route">{getEntityShortName(job.from)} → {getEntityShortName(job.to)}</span>
+              <span class="job-amount">💰 {job.amount}</span>
+              <span class="job-rate">⚡ {job.tps} TPS</span>
+              <span class="job-count">📊 {job.sentCount} sent</span>
+            </div>
+            <button class="job-cancel" on:click={() => cancelJob(job.id)} title="Cancel flow">
+              ✕
+            </button>
           </div>
         {/each}
       </div>
@@ -1827,6 +3032,190 @@
     font-weight: bold;
   }
 
+  .rotation-slider {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(90deg,
+      rgba(0, 100, 255, 0.3) 0%,
+      rgba(0, 255, 136, 0.5) 50%,
+      rgba(255, 0, 255, 0.7) 100%
+    );
+    outline: none;
+    opacity: 0.8;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 255, 68, 0.3);
+  }
+
+  .rotation-slider:hover {
+    opacity: 1;
+    box-shadow: 0 2px 12px rgba(0, 255, 68, 0.6);
+    transform: scaleY(1.2);
+  }
+
+  .rotation-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #00ff88, #00ccff);
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 1), 0 0 16px rgba(0, 255, 136, 0.5);
+    border: 2px solid #ffffff;
+    transition: all 0.2s ease;
+  }
+
+  .rotation-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+    box-shadow: 0 0 12px rgba(0, 255, 136, 1), 0 0 24px rgba(0, 255, 136, 0.8);
+  }
+
+  .rotation-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #00ff88, #00ccff);
+    cursor: pointer;
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 1), 0 0 16px rgba(0, 255, 136, 0.5);
+    transition: all 0.2s ease;
+  }
+
+  .rotation-slider::-moz-range-thumb:hover {
+    transform: scale(1.3);
+    box-shadow: 0 0 12px rgba(0, 255, 136, 1), 0 0 24px rgba(0, 255, 136, 0.8);
+  }
+
+  .payment-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(0, 255, 68, 0.3);
+    border-radius: 6px;
+    margin-top: 8px;
+  }
+
+  .form-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .form-row label {
+    font-size: 9px;
+    color: #00ff88;
+    min-width: 60px;
+    font-family: monospace;
+  }
+
+  .form-select,
+  .form-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(0, 255, 68, 0.4);
+    border-radius: 3px;
+    color: #ffffff;
+    padding: 4px 6px;
+    font-size: 9px;
+    font-family: monospace;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+
+  .form-select:hover,
+  .form-input:hover {
+    border-color: #00ff88;
+    box-shadow: 0 0 4px rgba(0, 255, 136, 0.3);
+  }
+
+  .form-select:focus,
+  .form-input:focus {
+    border-color: #00ff88;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+  }
+
+  .repeat-slider {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg,
+      rgba(100, 100, 100, 0.3) 0%,
+      rgba(0, 255, 136, 0.5) 100%
+    );
+    outline: none;
+    cursor: pointer;
+  }
+
+  .repeat-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #00ff88;
+    cursor: pointer;
+    box-shadow: 0 0 4px rgba(0, 255, 136, 0.8);
+    transition: all 0.2s ease;
+  }
+
+  .repeat-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 8px rgba(0, 255, 136, 1);
+  }
+
+  .repeat-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #00ff88;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 4px rgba(0, 255, 136, 0.8);
+    transition: all 0.2s ease;
+  }
+
+  .repeat-slider::-moz-range-thumb:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 8px rgba(0, 255, 136, 1);
+  }
+
+  .rate-value {
+    font-size: 9px;
+    font-family: monospace;
+    color: #00ff88;
+    min-width: 32px;
+    text-align: right;
+  }
+
+  .send-btn {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 200, 255, 0.2));
+    border: 1px solid #00ff88;
+    border-radius: 4px;
+    color: #00ff88;
+    padding: 6px 12px;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: monospace;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .send-btn:hover {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.4), rgba(0, 200, 255, 0.4));
+    box-shadow: 0 0 12px rgba(0, 255, 136, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .send-btn:active {
+    transform: translateY(0);
+  }
+
   .action-btn {
     background: rgba(255, 175, 0, 0.2);
     border: 1px solid #ffaf00;
@@ -1978,6 +3367,109 @@
 
   .activity-item.settlement {
     color: #ff4444;
+  }
+
+  .active-jobs {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(0, 255, 136, 0.05);
+    border: 2px solid rgba(0, 255, 136, 0.4);
+    border-radius: 8px;
+    padding: 12px;
+    min-width: 400px;
+    max-width: 600px;
+    z-index: 20;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 16px rgba(0, 255, 136, 0.2);
+  }
+
+  .active-jobs h4 {
+    margin: 0 0 12px 0;
+    color: #00ff88;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .jobs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .job-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    border-radius: 4px;
+    padding: 8px 12px;
+    transition: all 0.2s ease;
+    animation: slideIn 0.3s ease;
+  }
+
+  .job-item:hover {
+    background: rgba(0, 255, 136, 0.1);
+    border-color: #00ff88;
+    box-shadow: 0 0 8px rgba(0, 255, 136, 0.3);
+  }
+
+  .job-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: monospace;
+    font-size: 10px;
+  }
+
+  .job-route {
+    color: #00ff88;
+    font-weight: bold;
+    min-width: 100px;
+  }
+
+  .job-amount {
+    color: #ffaa00;
+  }
+
+  .job-rate {
+    color: #00ccff;
+  }
+
+  .job-count {
+    color: #9d9d9d;
+    font-style: italic;
+  }
+
+  .job-cancel {
+    background: rgba(255, 68, 68, 0.2);
+    border: 1px solid #ff4444;
+    border-radius: 3px;
+    color: #ff4444;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .job-cancel:hover {
+    background: rgba(255, 68, 68, 0.4);
+    box-shadow: 0 0 8px rgba(255, 68, 68, 0.5);
+    transform: scale(1.1);
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   @keyframes fadeIn {
