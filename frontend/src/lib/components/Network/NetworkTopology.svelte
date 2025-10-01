@@ -45,7 +45,6 @@
     selectedTokenId: number;
     viewMode: '2d' | '3d';
     entityMode: 'sphere' | 'identicon';
-    dataSource: 'replicas' | 'gossip';
     wasLastOpened: boolean;
     rotationSpeed: number; // 0-100 (0 = stopped, 100 = fast rotation)
     camera?: {
@@ -82,6 +81,17 @@
   let hoveredObject: any = null;
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
 
+  // Dual tooltip for connections (showing both perspectives)
+  let dualTooltip = {
+    visible: false,
+    x: 0,
+    y: 0,
+    leftContent: '',
+    rightContent: '',
+    leftEntity: '',
+    rightEntity: ''
+  };
+
   // Drag state
   let draggedEntity: EntityData | null = null;
   let dragPlane: THREE.Plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Plane for 3D dragging
@@ -98,7 +108,6 @@
         selectedTokenId: 0,
         viewMode: '3d',
         entityMode: 'sphere',
-        dataSource: 'replicas',
         wasLastOpened: false,
         rotationSpeed: 0,
         camera: undefined
@@ -125,7 +134,6 @@
         selectedTokenId: 0,
         viewMode: '3d',
         entityMode: 'sphere',
-        dataSource: 'replicas',
         wasLastOpened: false,
         rotationSpeed: 0,
         camera: undefined
@@ -139,7 +147,6 @@
       selectedTokenId,
       viewMode,
       entityMode,
-      dataSource,
       wasLastOpened: wasOpened,
       rotationSpeed,
       camera: camera && controls ? {
@@ -201,14 +208,13 @@
   let selectedTokenId = savedSettings.selectedTokenId;
   let viewMode: '2d' | '3d' = savedSettings.viewMode;
   let entityMode: 'sphere' | 'identicon' = savedSettings.entityMode;
-  let dataSource: 'replicas' | 'gossip' = savedSettings.dataSource;
   let rotationSpeed: number = savedSettings.rotationSpeed; // 0-10000 (0 = stopped, 10000 = fast)
   let availableTokens: number[] = []; // Will be populated from actual token data
 
   // Quick payment form state
   let paymentFrom: string = '';
   let paymentTo: string = '';
-  let paymentAmount: string = '100';
+  let paymentAmount: string = '200000';
   let paymentTPS: number = 0; // 0-100 TPS (0 = once, 0.1 = every 10s, 100 = max)
 
   // Auto-select entities when entities list changes
@@ -349,6 +355,9 @@
 
     // Raycaster for mouse interaction
     raycaster = new THREE.Raycaster();
+    // Increase line threshold so connections can be hovered from further away
+    // Default is 1, we increase to 5 for better UX (hover activates ~5 units from line)
+    raycaster.params.Line = { threshold: 5 };
     mouse = new THREE.Vector2();
 
     // Lights
@@ -389,14 +398,9 @@
     // Use time-aware data sources
     let entityData: any[] = [];
     let currentReplicas = $visibleReplicas;
-    let currentGossip = $visibleGossip;
 
-    // Choose data source based on toggle
-    if (dataSource === 'gossip' && currentGossip?.profiles) {
-      entityData = Object.values(currentGossip.profiles) as any[];
-      console.log(`📡 Using gossip profiles at frame ${timeIndex}:`, entityData.length);
-    } else if (currentReplicas.size > 0) {
-      // Use replicas (default and more reliable)
+    // Always use replicas (ground truth)
+    if (currentReplicas.size > 0) {
       const replicaEntries = Array.from(currentReplicas.entries());
       console.log(`🔄 Using replicas at frame ${timeIndex}:`, replicaEntries.length);
 
@@ -467,6 +471,19 @@
       }
     }
 
+    // Calculate connection degrees and find top-3 hubs
+    const connectionDegrees = new Map<string, number>();
+    entityData.forEach(profile => {
+      const degree = connectionMap.get(profile.entityId)?.size || 0;
+      connectionDegrees.set(profile.entityId, degree);
+    });
+
+    // Find top-3 hubs (most connected entities)
+    const sortedByDegree = [...connectionDegrees.entries()].sort((a, b) => b[1] - a[1]);
+    const top3Hubs = new Set(sortedByDegree.slice(0, 3).map(([id]) => id));
+
+    console.log(`🌟 Top-3 Hubs:`, Array.from(top3Hubs).map(id => `${id.slice(0,8)} (${connectionDegrees.get(id)} connections)`));
+
     // Try to load saved positions first (persistence)
     const savedPositions = loadEntityPositions();
 
@@ -475,7 +492,9 @@
 
     // Create entity nodes
     entityData.forEach((profile, index) => {
-      createEntityNode(profile, index, entityData.length, forceLayoutPositions);
+      const isHub = top3Hubs.has(profile.entityId);
+      const degree = connectionDegrees.get(profile.entityId) || 0;
+      createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub, degree);
     });
 
     // Save positions after layout (for persistence on reload)
@@ -523,8 +542,8 @@
     particles = [];
   }
 
-  // H-shaped layout: 2 vertical columns (hubs + users)
-  function applyForceDirectedLayout(profiles: any[], connectionMap: Map<string, Set<string>>, capacityMap: Map<string, number>) {
+  // Radial hub-centric layout: Hubs in center, leaves on periphery
+  function applyForceDirectedLayout(profiles: any[], connectionMap: Map<string, Set<string>>, _capacityMap: Map<string, number>) {
     const positions = new Map<string, THREE.Vector3>();
 
     // Detect hubs vs users by connection count
@@ -541,87 +560,37 @@
       return countB - countA; // Descending - hubs first
     });
 
-    // Calculate required spacing from FIRST PRINCIPLES (never intersect)
-    // Key insight: Hubs connect horizontally (cross-column), users connect vertically (same-column)
+    // Radial layout: distance from center inversely proportional to degree
+    // Hubs (high degree) stay near center, leaves (low degree) spread out
+    const baseRadius = 5; // Minimum distance for hubs
+    const maxRadius = 50; // Maximum distance for leaves
+    const angleStep = (Math.PI * 2) / profiles.length;
 
-    // First, identify which entities will be in which column
-    const leftColumn = sorted.slice(0, 5);  // Hub1 + 4 users
-    const rightColumn = sorted.slice(5, 10); // Hub2 + 4 users
+    sorted.forEach((profile, index) => {
+      const degree = connectionCounts.get(profile.entityId) || 0;
 
-    const leftIds = new Set(leftColumn.map(p => p.entityId));
-    const rightIds = new Set(rightColumn.map(p => p.entityId));
+      // Calculate radius: hubs close to center, leaves far away
+      // Using inverse relationship: radius = maxRadius / (degree + 1)
+      const radius = degree > 0
+        ? Math.max(baseRadius, maxRadius / (degree + 1))
+        : maxRadius;
 
-    let maxHorizontalBarLength = 0;
-    let maxVerticalBarLength = 0;
-    const barRadius = 0.1 * 2.5; // barHeight * 2.5 (actual bar radius)
-    const maxEntitySize = 3; // Approximate max entity sphere radius
+      // Arrange in circle at calculated radius
+      const angle = index * angleStep;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      const z = 0;
 
-    // Scan all connections and classify them
-    for (const [fromId, toIds] of connectionMap.entries()) {
-      for (const toId of toIds) {
-        const capacityKey = [fromId, toId].sort().join('-');
-        const capacity = capacityMap.get(capacityKey) || 0;
+      positions.set(profile.entityId, new THREE.Vector3(x, y, z));
 
-        // Convert capacity to visual bar length using SAME scale as bar creation
-        const globalScale = $settings.portfolioScale || 5000;
-        const decimals = 18;
-        const tokensToVisualUnits = 0.00001;
-        const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
-        const barLength = capacity * barScale;
-
-        // Classify connection: horizontal (cross-column) or vertical (same-column)
-        const isHorizontal = (leftIds.has(fromId) && rightIds.has(toId)) ||
-                            (rightIds.has(fromId) && leftIds.has(toId));
-
-        if (isHorizontal) {
-          maxHorizontalBarLength = Math.max(maxHorizontalBarLength, barLength);
-        } else {
-          maxVerticalBarLength = Math.max(maxVerticalBarLength, barLength);
-        }
-      }
-    }
-
-    // FIRST PRINCIPLE SPACING: entityRadius + barRadius + barLength + barRadius + entityRadius + safeGap
-    const safeGap = 1; // Extra safety margin
-    const barSurfaceOffset = barRadius + 0.2; // Space between entity surface and bar start
-
-    // Horizontal spacing (for cross-column connections)
-    const columnSpacing = Math.max(
-      50, // Minimum baseline
-      (maxEntitySize + barSurfaceOffset) * 2 + maxHorizontalBarLength + safeGap
-    );
-
-    // Vertical spacing (for same-column connections)
-    const verticalSpacing = Math.max(
-      10, // Minimum baseline
-      (maxEntitySize + barSurfaceOffset) * 2 + maxVerticalBarLength + safeGap
-    );
-
-    console.log(`📐 FIRST-PRINCIPLE spacing: horizontal=${columnSpacing.toFixed(1)}, vertical=${verticalSpacing.toFixed(1)}, maxHBar=${maxHorizontalBarLength.toFixed(1)}, maxVBar=${maxVerticalBarLength.toFixed(1)}`);
-
-    // Position left column
-    leftColumn.forEach((profile, index) => {
-      positions.set(profile.entityId, new THREE.Vector3(
-        -columnSpacing / 2,
-        (index - leftColumn.length / 2) * verticalSpacing,
-        0
-      ));
+      console.log(`📍 ${profile.entityId.slice(0,8)}: degree=${degree}, radius=${radius.toFixed(1)}`);
     });
 
-    // Position right column
-    rightColumn.forEach((profile, index) => {
-      positions.set(profile.entityId, new THREE.Vector3(
-        columnSpacing / 2,
-        (index - rightColumn.length / 2) * verticalSpacing,
-        0
-      ));
-    });
-
-    console.log(`🎯 H-shaped layout complete (2 columns, ${leftColumn.length} + ${rightColumn.length} entities)`);
+    console.log(`🎯 Radial hub-centric layout complete (${profiles.length} entities)`);
     return positions;
   }
 
-  function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>) {
+  function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>, isHub: boolean, degree: number) {
     // Position entities using force-directed layout (always)
     let x: number, y: number, z: number;
 
@@ -645,15 +614,26 @@
 
     // Create entity geometry - size based on token reserves
     const geometry = new THREE.SphereGeometry(entitySize, 32, 32);
+
+    // Hub glow effect: Top-3 hubs get bright emissive glow
+    const baseColor = 0x00ff88; // Bright green
+    const emissiveColor = isHub ? 0x00ff88 : 0x002200; // Bright glow for hubs, subtle for others
+    const emissiveIntensity = isHub ? 0.6 : 0.1; // Much brighter for hubs
+
     const material = new THREE.MeshLambertMaterial({
-      color: 0x00ff88, // Bright green
-      emissive: 0x002200, // Slight green glow
+      color: baseColor,
+      emissive: emissiveColor,
+      emissiveIntensity: emissiveIntensity,
       transparent: true,
       opacity: 0.9
     });
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
+
+    if (isHub) {
+      console.log(`🌟 Created hub node: ${profile.entityId.slice(0,8)} with ${degree} connections (bright glow)`);
+    }
 
     // Add entity label
     const entityId = profile.entityId.slice(0, 8) + '...';
@@ -1923,14 +1903,20 @@
       if (hoveredObject !== intersectedLine) {
         hoveredObject = intersectedLine;
 
-        // Show connection tooltip with account details
-        const accountInfo = getConnectionAccountInfo(connection.from, connection.to);
-        tooltip = {
+        // Show dual connection tooltips (both perspectives)
+        const dualInfo = getDualConnectionAccountInfo(connection.from, connection.to);
+        dualTooltip = {
           visible: true,
           x: event.clientX,
           y: event.clientY,
-          content: `🔗 Account: ${connection.from.slice(0, 8)}...↔${connection.to.slice(0, 8)}...\n${accountInfo}`
+          leftContent: dualInfo.left,
+          rightContent: dualInfo.right,
+          leftEntity: dualInfo.leftEntity,
+          rightEntity: dualInfo.rightEntity
         };
+
+        // Hide single tooltip (not used for connections anymore)
+        tooltip.visible = false;
 
         // Highlight connection with type safety
         const lineMesh = intersectedLine as THREE.Line;
@@ -1954,6 +1940,7 @@
         }
         hoveredObject = null;
         tooltip.visible = false;
+        dualTooltip.visible = false;
       }
     }
   }
@@ -1970,6 +1957,7 @@
       hoveredObject = null;
     }
     tooltip.visible = false;
+    dualTooltip.visible = false;
   }
 
   function onMouseClick(event: MouseEvent) {
@@ -2284,6 +2272,21 @@
       const routePath = [job.from, job.to];
       console.log(`🗺️ Route path: [${routePath.map(id => getEntityShortName(id)).join(' → ')}]`);
 
+      // VALIDATE route construction
+      if (!routePath || routePath.length !== 2) {
+        throw new Error(`Invalid route: expected 2 entities, got ${routePath?.length || 0}`);
+      }
+      if (!job.from || !job.to) {
+        throw new Error(`Invalid route: from=${job.from}, to=${job.to}`);
+      }
+      if (job.from === job.to) {
+        throw new Error(`Invalid route: cannot send to same entity`);
+      }
+      if (routePath[0] !== job.from || routePath[1] !== job.to) {
+        throw new Error(`Route mismatch: expected [${job.from}, ${job.to}], got [${routePath[0]}, ${routePath[1]}]`);
+      }
+      console.log(`✅ Route validation passed: ${job.from.slice(-4)} → ${job.to.slice(-4)}`);
+
       // Step 2: Find signerId (copy from PaymentPanel)
       let signerId = 's1'; // default
       for (const key of env.replicas.keys()) {
@@ -2331,7 +2334,9 @@
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error('❌ Payment failed:', errorMsg);
+      console.error('❌ Payment failed:', error); // Log full error object
+      console.error('❌ Error message:', errorMsg);
+      console.error('❌ Stack trace:', error instanceof Error ? error.stack : 'No stack');
 
       // Show error to user
       alert(`Payment failed: ${errorMsg}`);
@@ -2542,82 +2547,103 @@
   }
 
   /**
-   * FINTECH-GRADE: Get connection info with proper token context
-   * Shows available tokens and auto-selects first available if current selection doesn't exist
+   * Get dual perspective account info (for connection hover tooltips)
+   * Shows both left and right entity's view of the same account
    */
-  function getConnectionAccountInfo(fromId: string, toId: string): string {
+  function getDualConnectionAccountInfo(entityA: string, entityB: string): { left: string, right: string, leftEntity: string, rightEntity: string } {
     const currentReplicas = $visibleReplicas;
 
-    // Find the replica that has this account (try both directions)
-    let replica = Array.from(currentReplicas.entries() as [string, any][])
-      .find(([key]) => key.startsWith(fromId + ':'));
+    // Determine canonical ordering (left is always smaller ID)
+    const isALeft = entityA < entityB;
+    const leftId = isALeft ? entityA : entityB;
+    const rightId = isALeft ? entityB : entityA;
 
-    if (!replica) {
-      replica = Array.from(currentReplicas.entries() as [string, any][])
-        .find(([key]) => key.startsWith(toId + ':'));
+    // Find account data by checking BOTH replicas (same logic as createProgressBars)
+    let accountData: any = null;
+
+    // Try left entity's replica first
+    const leftReplica = Array.from(currentReplicas.entries() as [string, any][])
+      .find(([key]) => key.startsWith(leftId + ':'));
+
+    if (leftReplica?.[1]?.state?.accounts) {
+      // Account key is the counterparty ID
+      accountData = leftReplica[1].state.accounts.get(rightId);
     }
 
-    if (!replica?.[1]?.state?.accounts) {
-      return "💱 Credit: No replica state\n🔒 Collateral: No data\n⚖️ Balance: No data";
-    }
-
-    const accounts = replica[1].state.accounts;
-
-    // Try to find account using counterparty ID as key (not tokenId)
-    let accountData = accounts.get(toId);
+    // Try right entity's replica if not found
     if (!accountData) {
-      accountData = accounts.get(fromId);
+      const rightReplica = Array.from(currentReplicas.entries() as [string, any][])
+        .find(([key]) => key.startsWith(rightId + ':'));
+
+      if (rightReplica?.[1]?.state?.accounts) {
+        accountData = rightReplica[1].state.accounts.get(leftId);
+      }
     }
 
     if (!accountData) {
-      return "💱 Credit: No account\n🔒 Collateral: No account\n⚖️ Balance: No account";
+      return {
+        left: "No account",
+        right: "No account",
+        leftEntity: getEntityShortName(leftId),
+        rightEntity: getEntityShortName(rightId)
+      };
     }
 
-    // FINTECH-SAFETY: Get available tokens for THIS specific connection
+    // Get available tokens for this connection
     const availableTokens = accountData.deltas ? Array.from(accountData.deltas.keys() as IterableIterator<number>).sort((a, b) => a - b) : [];
 
     if (availableTokens.length === 0) {
-      return "💱 Credit: No tokens\n🔒 Collateral: No tokens\n⚖️ Balance: No tokens";
+      return {
+        left: "No tokens",
+        right: "No tokens",
+        leftEntity: getEntityShortName(leftId),
+        rightEntity: getEntityShortName(rightId)
+      };
     }
 
-    // Use single source of truth for delta access
+    // Get token delta (use selected or fallback to first available)
     let tokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
     let displayTokenId = selectedTokenId;
 
-    // FINTECH-GRADE: If selected token doesn't exist in this connection, show first available
     if (!tokenDelta && availableTokens.length > 0) {
       displayTokenId = availableTokens[0]!;
       tokenDelta = getAccountTokenDelta(accountData, displayTokenId);
-      console.log(`ℹ️ Token ${selectedTokenId} not in connection ${fromId.slice(-4)}↔${toId.slice(-4)}, showing Token ${displayTokenId} instead`);
     }
 
     if (!tokenDelta) {
-      // This should never happen after the above fallback, but fail-fast if it does
-      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens: ${availableTokens}`);
+      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens`);
     }
 
-    // Use REAL deriveDelta calculation
-    const derived = deriveEntry(tokenDelta, fromId < toId);
+    // Derive data for BOTH perspectives
+    const leftDerived = deriveEntry(tokenDelta, true);  // Left entity's view
+    const rightDerived = deriveEntry(tokenDelta, false); // Right entity's view
 
-    // Format using proper BigInt formatting (same as EntityPanel)
-    const inCap = formatFinancialAmount(BigInt(Math.floor(derived.inCapacity)));
-    const outCap = formatFinancialAmount(BigInt(Math.floor(derived.outCapacity)));
-    const collateral = formatFinancialAmount(BigInt(Math.floor(derived.collateral)));
-    const balance = formatFinancialAmount(BigInt(Math.floor(derived.delta)));
-    const totalCap = formatFinancialAmount(BigInt(Math.floor(derived.totalCapacity)));
+    // Format left entity's view
+    const leftCollateral = formatFinancialAmount(BigInt(Math.floor(leftDerived.collateral)));
+    const leftNet = formatFinancialAmount(BigInt(Math.floor(leftDerived.delta)));
+    const leftPeerCredit = formatFinancialAmount(BigInt(Math.floor(leftDerived.peerCreditLimit)));
+    const leftOwnCredit = formatFinancialAmount(BigInt(Math.floor(leftDerived.ownCreditLimit)));
 
-    // Get entity short names
-    const fromName = getEntityShortName(fromId);
-    const toName = getEntityShortName(toId);
+    // Format right entity's view
+    const rightCollateral = formatFinancialAmount(BigInt(Math.floor(rightDerived.collateral)));
+    const rightNet = formatFinancialAmount(BigInt(Math.floor(rightDerived.delta)));
+    const rightPeerCredit = formatFinancialAmount(BigInt(Math.floor(rightDerived.peerCreditLimit)));
+    const rightOwnCredit = formatFinancialAmount(BigInt(Math.floor(rightDerived.ownCreditLimit)));
 
-    // Show which token we're displaying + available tokens for context
-    const tokenContext = displayTokenId !== selectedTokenId
-      ? `🪙 Token ${displayTokenId} (Token ${selectedTokenId} not available)\n📋 Available: ${availableTokens.join(', ')}\n\n`
-      : `🪙 Token ${displayTokenId}\n📋 Available: ${availableTokens.join(', ')}\n\n`;
+    const leftName = getEntityShortName(leftId);
+    const rightName = getEntityShortName(rightId);
 
-    return `🔗 Account: ${fromName} ↔ ${toName}\n${tokenContext}💚 Can Receive: ${inCap}\n💸 Can Send: ${outCap}\n🔒 Collateral: ${collateral}\n⚖️ Balance: ${balance}\n📊 Total Capacity: ${totalCap}`;
+    // Build tooltip content for each perspective
+    const leftContent = `🪙 Token ${displayTokenId}\n\n💚 Their Credit: ${leftPeerCredit}\n🔒 Collateral: ${leftCollateral}\n💙 Our Credit: ${leftOwnCredit}\n\n⚖️ Net: ${leftNet}${leftDerived.delta < 0 ? ' (owe)' : leftDerived.delta > 0 ? ' (owed)' : ''}`;
+    const rightContent = `🪙 Token ${displayTokenId}\n\n💙 Our Credit: ${rightOwnCredit}\n🔒 Collateral: ${rightCollateral}\n💚 Their Credit: ${rightPeerCredit}\n\n⚖️ Net: ${rightNet}${rightDerived.delta < 0 ? ' (owe)' : rightDerived.delta > 0 ? ' (owed)' : ''}`;
+
+    return {
+      left: leftContent,
+      right: rightContent,
+      leftEntity: leftName,
+      rightEntity: rightName
+    };
   }
-
 
   function onWindowResize() {
     if (!camera || !renderer) return;
@@ -2703,25 +2729,6 @@
           </button>
         </div>
 
-        <!-- Data Source -->
-        <div class="control-group">
-          <label>📡 Data:</label>
-          <button
-            class="toggle-btn"
-            class:active={dataSource === 'replicas'}
-            on:click={() => { dataSource = 'replicas'; saveBirdViewSettings(); updateNetworkData(); }}
-          >
-            Replicas
-          </button>
-          <button
-            class="toggle-btn"
-            class:active={dataSource === 'gossip'}
-            on:click={() => { dataSource = 'gossip'; saveBirdViewSettings(); updateNetworkData(); }}
-          >
-            Gossip
-          </button>
-        </div>
-
         <!-- Entity Display Mode -->
         <div class="control-group">
           <label>👤 Entity:</label>
@@ -2781,7 +2788,7 @@
 
           <div class="form-row">
             <label>💰 Amount:</label>
-            <input type="text" bind:value={paymentAmount} class="form-input" placeholder="100" />
+            <input type="text" bind:value={paymentAmount} class="form-input" placeholder="200000" />
           </div>
 
           <div class="form-row">
@@ -2852,6 +2859,23 @@
       {#each tooltip.content.split('\n') as line}
         <div>{line}</div>
       {/each}
+    </div>
+  {/if}
+
+  {#if dualTooltip.visible}
+    <div class="dual-tooltip-container" style="left: {dualTooltip.x}px; top: {dualTooltip.y}px;">
+      <div class="dual-tooltip left">
+        <div class="tooltip-header">{dualTooltip.leftEntity} View</div>
+        {#each dualTooltip.leftContent.split('\n') as line}
+          <div>{line}</div>
+        {/each}
+      </div>
+      <div class="dual-tooltip right">
+        <div class="tooltip-header">{dualTooltip.rightEntity} View</div>
+        {#each dualTooltip.rightContent.split('\n') as line}
+          <div>{line}</div>
+        {/each}
+      </div>
     </div>
   {/if}
 
@@ -2943,6 +2967,58 @@
     pointer-events: none;
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 12px rgba(0, 255, 68, 0.3);
+  }
+
+  .dual-tooltip-container {
+    position: fixed;
+    display: flex;
+    gap: 20px;
+    z-index: 30;
+    pointer-events: none;
+    transform: translate(-50%, -100%);
+    margin-top: -20px;
+  }
+
+  .dual-tooltip {
+    background: rgba(0, 0, 0, 0.95);
+    color: #00ff88;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 2px solid #00ff44;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 16px rgba(0, 255, 68, 0.4);
+    min-width: 180px;
+  }
+
+  .dual-tooltip.left {
+    border-color: #00aaff;
+    box-shadow: 0 4px 16px rgba(0, 170, 255, 0.4);
+  }
+
+  .dual-tooltip.right {
+    border-color: #ff8800;
+    box-shadow: 0 4px 16px rgba(255, 136, 0, 0.4);
+  }
+
+  .tooltip-header {
+    font-weight: bold;
+    font-size: 12px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(0, 255, 68, 0.3);
+  }
+
+  .dual-tooltip.left .tooltip-header {
+    color: #00ccff;
+    border-bottom-color: rgba(0, 170, 255, 0.3);
+  }
+
+  .dual-tooltip.right .tooltip-header {
+    color: #ffaa00;
+    border-bottom-color: rgba(255, 136, 0, 0.3);
   }
 
   .topology-controls {
