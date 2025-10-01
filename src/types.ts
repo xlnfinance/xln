@@ -131,6 +131,20 @@ export type EntityTx =
         route: string[]; // Full path from source to target
         description?: string;
       };
+    }
+  | {
+      type: 'settleDiffs';
+      data: {
+        counterpartyEntityId: string;
+        diffs: Array<{
+          tokenId: number;
+          leftDiff: bigint;   // Positive = credit, Negative = debit
+          rightDiff: bigint;
+          collateralDiff: bigint;
+          ondeltaDiff: bigint;
+        }>;
+        description?: string; // e.g., "Fund collateral from reserve"
+      };
     };
 
 export interface AssetBalance {
@@ -276,7 +290,7 @@ export interface DerivedDelta {
 // Account transaction types
 export type AccountTx =
   | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
-  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string } }
+  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint; isForSelf: boolean } }
   | { type: 'account_frame'; data: { frame: AccountFrame; processedTransactions: number; fromEntity: string } }
   | {

@@ -167,7 +167,6 @@ export const FINANCIAL_CONSTANTS = {
   ONE: 1n,
   WEI_PER_ETH: 10n ** 18n,
   USDC_DECIMALS: 6,
-  USDT_DECIMALS: 6,
   ETH_DECIMALS: 18,
   DEFAULT_DECIMALS: 18,
 } as const;

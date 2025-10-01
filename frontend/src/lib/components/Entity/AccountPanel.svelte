@@ -103,9 +103,9 @@
 
     const derived = $xlnFunctions.deriveDelta(delta, isLeftEntity);
     const tokenInfo = {
-      symbol: tokenId === 1 ? 'ETH' : tokenId === 2 ? 'USDT' : tokenId === 3 ? 'USDC' : `TKN${tokenId}`,
-      color: tokenId === 1 ? '#627eea' : tokenId === 2 ? '#26a17b' : tokenId === 3 ? '#2775ca' : '#999',
-      name: tokenId === 1 ? 'Ethereum' : tokenId === 2 ? 'Tether USD' : tokenId === 3 ? 'USD Coin' : `Token ${tokenId}`,
+      symbol: tokenId === 1 ? 'ETH' : tokenId === 2 ? 'USDC' : `TKN${tokenId}`,
+      color: tokenId === 1 ? '#627eea' : tokenId === 2 ? '#2775ca' : '#999',
+      name: tokenId === 1 ? 'Ethereum' : tokenId === 2 ? 'USD Coin' : `Token ${tokenId}`,
       decimals: 18
     };
 

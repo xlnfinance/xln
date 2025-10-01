@@ -201,14 +201,26 @@
 <div class="admin-topbar">
   <div class="admin-logo">
     <span class="logo-text">xln</span>
-    <button
-      class="bird-view-toggle"
-      class:active={birdViewMode}
-      on:click={onToggleBirdView}
-      title="Toggle Network Topology View"
-    >
-      🗺️
-    </button>
+    <div class="view-switcher">
+      <button
+        class="view-switch-btn"
+        class:active={!birdViewMode}
+        on:click={() => { if (birdViewMode && onToggleBirdView) onToggleBirdView(); }}
+        title="Entity Panels View"
+      >
+        <span class="view-icon">📊</span>
+        <span class="view-label">Panels</span>
+      </button>
+      <button
+        class="view-switch-btn"
+        class:active={birdViewMode}
+        on:click={() => { if (!birdViewMode && onToggleBirdView) onToggleBirdView(); }}
+        title="Network Topology View (3D)"
+      >
+        <span class="view-icon">🗺️</span>
+        <span class="view-label">Graph</span>
+      </button>
+    </div>
     <div class="j-machine-status">
       <span class="j-status-item" title="Last Synced J-machine Block">
         🔭 J-Block: {jMachineStatus.block}
@@ -634,31 +646,76 @@
     cursor: pointer;
   }
 
-  .bird-view-toggle {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
-    padding: 6px 8px;
-    color: #d4d4d4;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 16px;
-    margin-left: 12px;
+  /* Liquid Glass Morphism View Switcher */
+  .view-switcher {
+    display: flex;
+    gap: 4px;
+    margin-left: 16px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .view-switch-btn {
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 13px;
+    font-weight: 500;
+    position: relative;
+    overflow: hidden;
   }
 
-  .bird-view-toggle:hover {
-    background: rgba(0, 122, 204, 0.1);
-    border-color: #007acc;
-    color: #007acc;
+  .view-switch-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(0, 122, 204, 0) 0%, rgba(0, 122, 204, 0.1) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
   }
 
-  .bird-view-toggle.active {
-    background: rgba(0, 122, 204, 0.2);
-    border-color: #007acc;
-    color: #007acc;
-    box-shadow: 0 0 8px rgba(0, 122, 204, 0.3);
+  .view-switch-btn:hover::before {
+    opacity: 1;
+  }
+
+  .view-switch-btn:hover {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .view-switch-btn.active {
+    background: linear-gradient(135deg, rgba(0, 122, 204, 0.2) 0%, rgba(0, 180, 255, 0.15) 100%);
+    color: #00ccff;
+    box-shadow:
+      0 2px 12px rgba(0, 122, 204, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .view-switch-btn.active::before {
+    opacity: 0;
+  }
+
+  .view-icon {
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .view-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
   }
 </style>

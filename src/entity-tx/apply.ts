@@ -13,6 +13,7 @@ import { handleJEvent } from './j-events';
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState } from '../state-helpers';
+import { submitSettle } from '../evm';
 
 export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
   if (!entityTx) {
@@ -386,6 +387,70 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       return { newState, outputs };
+    }
+
+    if (entityTx.type === 'settleDiffs') {
+      console.log(`🏦 SETTLE-DIFFS: Processing settlement with ${entityTx.data.counterpartyEntityId}`);
+
+      const newState = cloneEntityState(entityState);
+      const { counterpartyEntityId, diffs, description } = entityTx.data;
+
+      // Step 1: Validate invariant for all diffs
+      for (const diff of diffs) {
+        const sum = diff.leftDiff + diff.rightDiff + diff.collateralDiff;
+        if (sum !== 0n) {
+          console.error(`❌ INVARIANT-VIOLATION: leftDiff + rightDiff + collateralDiff = ${sum} (must be 0)`);
+          throw new Error(`Settlement invariant violation: ${sum} !== 0`);
+        }
+      }
+
+      // Step 2: Validate account exists
+      if (!newState.accounts.has(counterpartyEntityId)) {
+        console.error(`❌ No account exists with ${formatEntityId(counterpartyEntityId)}`);
+        throw new Error(`No account with ${counterpartyEntityId}`);
+      }
+
+      // Step 3: Determine canonical left/right order
+      const isLeft = entityState.entityId < counterpartyEntityId;
+      const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
+      const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
+
+      console.log(`🏦 Canonical order: left=${leftEntity.slice(0,10)}..., right=${rightEntity.slice(0,10)}...`);
+      console.log(`🏦 We are: ${isLeft ? 'LEFT' : 'RIGHT'}`);
+
+      // Step 4: Get jurisdiction config
+      const jurisdiction = entityState.config.jurisdiction;
+      if (!jurisdiction) {
+        throw new Error('No jurisdiction configured for this entity');
+      }
+
+      // Step 5: Convert diffs to contract format (preserve perspective)
+      const contractDiffs = diffs.map(d => ({
+        tokenId: d.tokenId,
+        leftDiff: d.leftDiff.toString(),
+        rightDiff: d.rightDiff.toString(),
+        collateralDiff: d.collateralDiff.toString(),
+        ondeltaDiff: d.ondeltaDiff.toString(),
+      }));
+
+      console.log(`🏦 Calling submitSettle with diffs:`, safeStringify(contractDiffs, 2));
+
+      // Step 6: Call Depository.settle() - fire and forget (j-watcher handles result)
+      try {
+        const result = await submitSettle(jurisdiction, leftEntity, rightEntity, contractDiffs);
+        console.log(`✅ Settlement transaction sent: ${result.txHash}`);
+
+        // Add message to chat
+        newState.messages.push(
+          `🏦 ${description || 'Settlement'} tx: ${result.txHash.slice(0, 10)}... (block ${result.blockNumber})`
+        );
+      } catch (error) {
+        console.error(`❌ Settlement transaction failed:`, error);
+        newState.messages.push(`❌ Settlement failed: ${(error as Error).message}`);
+        throw error; // Re-throw to trigger outer catch
+      }
+
+      return { newState, outputs: [] };
     }
 
     return { newState: entityState, outputs: [] };

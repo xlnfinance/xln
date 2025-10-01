@@ -7,7 +7,10 @@
 const USE_MSGPACK = false;
 
 // JSON encoder imports and setup
-const jsonReplacer = (_key: string, value: any) => {
+const jsonReplacer = (key: string, value: any) => {
+  if (key === 'clonedForValidation') {
+    return undefined;
+  }
   if (value instanceof Map) {
     return { _dataType: 'Map', value: Array.from(value.entries()) };
   }

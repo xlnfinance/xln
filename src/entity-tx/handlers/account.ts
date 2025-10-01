@@ -22,9 +22,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // Get or create account machine for this counterparty (fromEntityId is who we're creating an account WITH)
   let accountMachine = newState.accounts.get(input.fromEntityId);
   if (!accountMachine) {
-    // Initialize with default USDT delta showing credit limits (no collateral initially)
+    // Initialize with default USDC delta showing credit limits (no collateral initially)
     const initialDeltas = new Map();
-    initialDeltas.set(2, createDemoDelta(2, 0n, 0n)); // USDT token
+    initialDeltas.set(2, createDemoDelta(2, 0n, 0n));
 
     accountMachine = {
       counterpartyEntityId: input.fromEntityId,
@@ -39,8 +39,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       ackedTransitions: 0,
       deltas: initialDeltas,
       globalCreditLimits: {
-        ownLimit: getDefaultCreditLimit(3), // We extend 1M USD credit (USDC) to counterparty
-        peerLimit: getDefaultCreditLimit(3), // Counterparty extends same credit to us
+        ownLimit: getDefaultCreditLimit(2),
+        peerLimit: getDefaultCreditLimit(2),
       },
       // Frame-based consensus fields
       currentFrameId: 0,
@@ -212,6 +212,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               amount: paymentData.amount,
               route: remainingRoute,
               ...(paymentData.description ? { description: paymentData.description } : {}),
+              fromEntityId: state.entityId,
+              toEntityId: nextHop,
             },
           };
 

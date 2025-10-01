@@ -17,6 +17,7 @@
   import AccountList from './AccountList.svelte';
   import AccountDropdown from './AccountDropdown.svelte';
   import PaymentPanel from './PaymentPanel.svelte';
+  import SettlementPanel from './SettlementPanel.svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
 
   export let tab: Tab;
@@ -60,12 +61,8 @@
 
   // Token registry for consistent naming (matches contract prefunding)
   const TOKEN_REGISTRY: Record<string, { symbol: string; name: string; decimals: number; price: number }> = {
-    '0': { symbol: 'NULL', name: 'Null Token', decimals: 18, price: 0 },
-    '1': { symbol: 'ETH', name: 'Ethereum', decimals: 18, price: 2500 },       // Contract prefunds 1M
-    '2': { symbol: 'USDT', name: 'Tether USD', decimals: 18, price: 1 },       // Contract prefunds 1M
-    '3': { symbol: 'USDC', name: 'USD Coin', decimals: 18, price: 1 },         // Contract prefunds 1M
-    '4': { symbol: 'ACME', name: 'ACME Corp Shares', decimals: 18, price: 15.50 },
-    '5': { symbol: 'BTC', name: 'Bitcoin Shares', decimals: 8, price: 45000 },
+    '1': { symbol: 'ETH', name: 'Ethereum', decimals: 18, price: 2500 },
+    '2': { symbol: 'USDC', name: 'USD Coin', decimals: 18, price: 1 },
   };
 
   const getTokenInfo = (tokenId: string) => TOKEN_REGISTRY[tokenId] || { symbol: `TKN${tokenId}`, decimals: 18, price: 0 };
@@ -264,7 +261,7 @@
 
               <div class="reserve-card">
                 <div class="reserve-info">
-                  <span class="reserve-symbol" style="color: {tokenInfo.symbol === 'ETH' ? '#627eea' : tokenInfo.symbol === 'USDT' ? '#26a17b' : '#007acc'}">{tokenInfo.symbol}</span>
+                  <span class="reserve-symbol" style="color: {tokenInfo.symbol === 'ETH' ? '#627eea' : '#2775ca'}">{tokenInfo.symbol}</span>
                   <span class="reserve-amount">{formatAssetDisplay(tokenId, amount)}</span>
                   <span class="reserve-value">${assetValue.toFixed(2)} ({portfolioPercentage.toFixed(1)}% of entity)</span>
                 </div>
@@ -441,6 +438,29 @@
       style="max-height: 600px;"
     >
       <PaymentPanel entityId={replica?.entityId || tab.entityId} />
+    </div>
+  </div>
+
+  <!-- Settlement Component -->
+  <div class="panel-component" id="settlement-{tab.id}">
+    <div
+      class="component-header"
+      on:click={() => toggleComponent(`settlement-${tab.id}`)}
+      role="button"
+      tabindex="0"
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`settlement-${tab.id}`)}
+    >
+      <div class="component-title">
+        <span>🏦</span>
+        <span>Settlement</span>
+      </div>
+      <div class="component-toggle">▼</div>
+    </div>
+    <div
+      class="component-content"
+      style="max-height: 600px;"
+    >
+      <SettlementPanel entityId={replica?.entityId || tab.entityId} />
     </div>
   </div>
     {/if}
