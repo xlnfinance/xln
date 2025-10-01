@@ -155,8 +155,9 @@ bun install
 
 # CRITICAL: Build server.js with bundled dependencies for browser
 echo "🔧 Building server.js with bundled dependencies..."
-mkdir -p frontend/static
-bun build src/server.ts --target browser --outfile frontend/static/server.js --bundle
+mkdir -p frontend/static dist
+bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util
+cp dist/server.js frontend/static/server.js
 
 # Build frontend with Bun
 echo "🏗️  Building frontend..."

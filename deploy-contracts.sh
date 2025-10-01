@@ -254,7 +254,7 @@ deploy_to_network() {
     # Build and update frontend bundle with latest server.js
     echo "   🔧 Updating frontend bundle with latest server code..."
     cd ..
-    if bun build src/server.ts --outdir dist --target node; then
+    if bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util; then
         echo "   ✅ Server built successfully"
         if cp dist/server.js frontend/static/server.js; then
             echo "   ✅ Frontend bundle updated with latest server.js"

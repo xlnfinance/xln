@@ -14,10 +14,10 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   console.log('================================');
   console.log('Creating H-shaped network topology:');
   console.log('  • 2 Hubs (E1, E2) - connected crossbar');
-  console.log('  • 8 Users (E3-E10) - split between hubs');
-  console.log('    - E3, E4, E5, E6 → Hub E1');
-  console.log('    - E7, E8, E9, E10 → Hub E2');
-  console.log('  Visual: H-letter shape for optimal bar spacing');
+  console.log('  • 4 Users (E3-E6) - split between hubs');
+  console.log('    - E3, E4 → Hub E1');
+  console.log('    - E5, E6 → Hub E2');
+  console.log('  Visual: Clean H-shape with 6 entities total');
   console.log('================================\n');
 
   // Load jurisdiction configuration using the browser-compatible function
@@ -32,14 +32,14 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   console.log(`  ├─ EntityProvider: ${ethereum.entityProviderAddress}`);
   console.log(`  └─ Depository: ${ethereum.depositoryAddress}`);
 
-  // Step 1: Create 10 entities by getting proper entity IDs from blockchain
-  console.log('📦 Step 1: Creating 10 entities with blockchain-assigned IDs...');
+  // Step 1: Create 6 entities by getting proper entity IDs from blockchain
+  console.log('📦 Step 1: Creating 6 entities with blockchain-assigned IDs...');
   console.log('  Each entity will get sequential ID from the blockchain');
 
   const entities: Array<{id: string, signer: string, isHub: boolean}> = [];
   const createEntityTxs = [];
 
-  for (let i = 1; i <= 10; i++) {
+  for (let i = 1; i <= 6; i++) {
     const signer = `s${i}`;
     const isHub = i <= 2; // Only first 2 entities are hubs (H-shaped topology)
     const entityName = isHub ? `Hub ${i}` : `User ${i}`;
@@ -132,8 +132,8 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
 
   // Step 3: Connect users to hubs - H shape
   const userHubMapping = [
-    { users: [2, 3, 4, 5], hub: 0 },    // E3, E4, E5, E6 → Hub E1 (left bar)
-    { users: [6, 7, 8, 9], hub: 1 },    // E7, E8, E9, E10 → Hub E2 (right bar)
+    { users: [2, 3], hub: 0 },    // E3, E4 → Hub E1 (left bar)
+    { users: [4, 5], hub: 1 },    // E5, E6 → Hub E2 (right bar)
   ];
 
   for (const mapping of userHubMapping) {
@@ -190,9 +190,9 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   console.log('✅ Prepopulation Complete!');
   console.log('\nH-shaped network topology created:');
   console.log('  • 2 Hubs connected (H crossbar)');
-  console.log('  • 8 Users: 4 per hub (H vertical bars)');
-  console.log('  • Total accounts: 9 (1 hub-to-hub + 8 user-to-hub)');
-  console.log('  • Topology: Optimal for 1px=$1 visualization');
+  console.log('  • 4 Users: 2 per hub (H vertical bars)');
+  console.log('  • Total accounts: 5 (1 hub-to-hub + 4 user-to-hub)');
+  console.log('  • Topology: Clean 6-entity visualization (perfect number)');
   console.log('\nYou can now:');
   console.log('  1. View clean H-shaped topology in bird view');
   console.log('  2. Send payments between any entities');

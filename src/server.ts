@@ -635,6 +635,12 @@ const main = async (): Promise<Env> => {
     if (snapshots.length > 0) {
       const latestSnapshot = snapshots[snapshots.length - 1];
 
+      // CRITICAL: Validate snapshot has proper replicas data
+      if (!latestSnapshot.replicas) {
+        console.warn('⚠️ Latest snapshot missing replicas data, using fresh environment');
+        throw new Error('LEVEL_NOT_FOUND');
+      }
+
       // Restore gossip profiles from snapshot
       const gossipLayer = createGossipLayer();
       if (latestSnapshot.gossip?.profiles) {
@@ -644,9 +650,27 @@ const main = async (): Promise<Env> => {
         console.log(`📡 Restored gossip profiles: ${Object.keys(latestSnapshot.gossip.profiles).length} entries`);
       }
 
+      // CRITICAL: Convert replicas to proper Map if needed (handle deserialization from DB)
+      let replicasMap: Map<string, EntityReplica>;
+      try {
+        if (latestSnapshot.replicas instanceof Map) {
+          replicasMap = latestSnapshot.replicas;
+        } else if (latestSnapshot.replicas && typeof latestSnapshot.replicas === 'object') {
+          // Deserialized from DB - convert object to Map
+          replicasMap = new Map(Object.entries(latestSnapshot.replicas));
+        } else {
+          console.warn('⚠️ Invalid replicas format in snapshot, using fresh environment');
+          throw new Error('LEVEL_NOT_FOUND');
+        }
+      } catch (conversionError) {
+        console.error('❌ Failed to convert replicas to Map:', conversionError);
+        console.warn('⚠️ Falling back to fresh environment');
+        throw new Error('LEVEL_NOT_FOUND');
+      }
+
       env = {
         // CRITICAL: Clone the replicas Map to avoid mutating snapshot data!
-        replicas: new Map(Array.from(latestSnapshot.replicas as Map<string, EntityReplica>).map(([key, replica]): [string, EntityReplica] => {
+        replicas: new Map(Array.from(replicasMap).map(([key, replica]): [string, EntityReplica] => {
           return [key, cloneEntityReplica(replica)];
         })),
         height: latestSnapshot.height,
@@ -669,23 +693,37 @@ const main = async (): Promise<Env> => {
       });
     }
   } catch (error: any) {
-    if (error.code === 'LEVEL_NOT_FOUND') {
-      console.log('📦 BROWSER-DEBUG: No saved state found, using fresh environment');
+    // Handle various "not found" error conditions gracefully
+    const isNotFoundError =
+      error.code === 'LEVEL_NOT_FOUND' ||
+      error.message?.includes('LEVEL_NOT_FOUND') ||
+      error.message?.includes('NotFoundError') ||
+      error.name === 'NotFoundError';
+
+    if (isNotFoundError) {
+      console.log('📦 No saved state found, using fresh environment');
       if (isBrowser) {
-        console.log('💡 BROWSER-DEBUG: This is normal for first-time use. IndexedDB will be created automatically.');
-        console.log('🔍 BROWSER-DEBUG: Fresh environment means entities will start with jBlock=0');
+        console.log('💡 This is normal for first-time use. IndexedDB will be created automatically.');
       } else {
         console.log('💡 Node.js: No existing snapshots in db directory.');
       }
     } else {
-      console.error('❌ Failed to load state from LevelDB:', error);
-      console.error('🔍 Error details:', {
-        code: error.code,
-        message: error.message,
-        isBrowser,
-        dbLocation: isBrowser ? 'IndexedDB: db' : 'db',
-      });
-      throw error;
+      // Log the error but don't crash - fall back to fresh environment
+      console.warn('⚠️ Error loading state from LevelDB (falling back to fresh environment):', error.message);
+      console.log('🔍 Error type:', error.code || error.name || 'Unknown');
+
+      if (DEBUG) {
+        console.error('🔍 Full error details:', {
+          code: error.code,
+          name: error.name,
+          message: error.message,
+          isBrowser,
+          dbLocation: isBrowser ? 'IndexedDB: db' : 'db',
+        });
+      }
+
+      // Don't throw - just use fresh environment
+      console.log('✅ Using fresh environment to continue startup');
     }
   }
 

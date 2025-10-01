@@ -106,7 +106,9 @@
       // Check if already voted (same logic as legacy)
       const currentProposal = replica?.state?.proposals?.get(selectedProposalId);
       if (currentProposal && currentProposal.votes.has(tab.signerId)) {
-        alert(`You have already voted on this proposal as "${currentProposal.votes.get(tab.signerId)}".`);
+        const msg = `You have already voted on this proposal as "${currentProposal.votes.get(tab.signerId)}".`;
+        console.error('❌ Vote validation failed:', msg);
+        alert(msg);
         return;
       }
 
@@ -201,7 +203,9 @@
 
   async function submitJtx() {
     if (!tab.entityId || !tab.signerId || !jtxRecipient.trim() || !jtxAmount || !jtxTokenId) {
-      alert('Please fill in all fields for the transfer.');
+      const msg = 'Please fill in all fields for the transfer.';
+      console.error('❌ Transfer validation failed:', msg);
+      alert(msg);
       return;
     }
 
@@ -215,17 +219,23 @@
     console.log('  Amount:', jtxAmount);
 
     if (isNaN(tokenIdNum)) {
-      alert('Invalid token selected. Please ensure the dropdown value is a number.');
+      const msg = 'Invalid token selected. Please ensure the dropdown value is a number.';
+      console.error('❌ Transfer validation failed:', msg);
+      alert(msg);
       return;
     }
     if (jtxAmount <= 0) {
-      alert('Amount must be greater than zero.');
+      const msg = 'Amount must be greater than zero.';
+      console.error('❌ Transfer validation failed:', msg);
+      alert(msg);
       return;
     }
 
     // Check for self-transfer
     if (tab.entityId === recipientAddress) {
-      alert(`Cannot transfer to yourself!\n\nYou are Entity #1 (${tab.entityId})\nTrying to send to: ${recipientAddress}\n\nTip: Try entering "2" to send to Entity #2 instead.`);
+      const msg = `Cannot transfer to yourself!\n\nYou are Entity #1 (${tab.entityId})\nTrying to send to: ${recipientAddress}\n\nTip: Try entering "2" to send to Entity #2 instead.`;
+      console.error('❌ Transfer validation failed:', msg);
+      alert(msg);
       return;
     }
 

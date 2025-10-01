@@ -25,6 +25,10 @@ dist/
 .env.local
 .env.*.local
 bun.lockb
+
+# Contract deployment artifacts (local only)
+contracts/ignition/deployments/chain-1337/
+jurisdictions.json
 # Local database files
 db/
 nul

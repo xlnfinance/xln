@@ -86,7 +86,9 @@
 
   async function sendSettlement() {
     if (!invariantValid) {
-      alert('Invariant violation: leftDiff + rightDiff + collateralDiff must equal 0');
+      const error = 'Invariant violation: leftDiff + rightDiff + collateralDiff must equal 0';
+      console.error('❌ Settlement validation failed:', error);
+      alert(error);
       return;
     }
 

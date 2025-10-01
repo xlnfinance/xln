@@ -16,6 +16,7 @@
     mesh: THREE.Mesh;
     label?: THREE.Sprite; // Label sprite that follows entity
     profile?: any;
+    isHub?: boolean; // Hub entity (gets pulsing glow animation)
     pulsePhase?: number;
     lastActivity?: number;
     isPinned?: boolean;  // User has manually positioned this entity
@@ -46,7 +47,9 @@
     viewMode: '2d' | '3d';
     entityMode: 'sphere' | 'identicon';
     wasLastOpened: boolean;
-    rotationSpeed: number; // 0-100 (0 = stopped, 100 = fast rotation)
+    rotationX: number; // 0-10000 (0 = stopped, 10000 = fast rotation around X-axis)
+    rotationY: number; // 0-10000 (0 = stopped, 10000 = fast rotation around Y-axis)
+    rotationZ: number; // 0-10000 (0 = stopped, 10000 = fast rotation around Z-axis)
     camera?: {
       position: {x: number, y: number, z: number};
       target: {x: number, y: number, z: number};
@@ -109,24 +112,29 @@
         viewMode: '3d',
         entityMode: 'sphere',
         wasLastOpened: false,
-        rotationSpeed: 0,
+        rotationX: 0,
+        rotationY: 0,
+        rotationZ: 0,
         camera: undefined
       };
       // FINTECH-SAFETY: Ensure selectedTokenId is number, not string
       if (typeof parsed.selectedTokenId === 'string') {
         parsed.selectedTokenId = Number(parsed.selectedTokenId);
       }
-      // Backward compatibility: convert old autoRotate boolean to rotationSpeed
-      if (parsed.autoRotate !== undefined && parsed.rotationSpeed === undefined) {
-        parsed.rotationSpeed = parsed.autoRotate ? 3000 : 0; // Default to 3000 (Earth-like) if was ON
+      // Backward compatibility: convert old rotationSpeed to rotationY
+      if (parsed.rotationSpeed !== undefined) {
+        parsed.rotationY = parsed.rotationSpeed;
+        delete parsed.rotationSpeed;
+      }
+      // Backward compatibility: convert old autoRotate boolean to rotationY
+      if (parsed.autoRotate !== undefined && parsed.rotationY === undefined) {
+        parsed.rotationY = parsed.autoRotate ? 3000 : 0;
         delete parsed.autoRotate;
       }
-      // Migrate old 0-100000 range to 0-10000 range (divide by 10)
-      if (parsed.rotationSpeed !== undefined && parsed.rotationSpeed > 10000) {
-        parsed.rotationSpeed = Math.floor(parsed.rotationSpeed / 10);
-      }
       // Provide defaults for new fields if missing
-      if (parsed.rotationSpeed === undefined) parsed.rotationSpeed = 0;
+      if (parsed.rotationX === undefined) parsed.rotationX = 0;
+      if (parsed.rotationY === undefined) parsed.rotationY = 0;
+      if (parsed.rotationZ === undefined) parsed.rotationZ = 0;
       return parsed;
     } catch {
       return {
@@ -135,7 +143,9 @@
         viewMode: '3d',
         entityMode: 'sphere',
         wasLastOpened: false,
-        rotationSpeed: 0,
+        rotationX: 0,
+        rotationY: 0,
+        rotationZ: 0,
         camera: undefined
       };
     }
@@ -148,7 +158,9 @@
       viewMode,
       entityMode,
       wasLastOpened: wasOpened,
-      rotationSpeed,
+      rotationX,
+      rotationY,
+      rotationZ,
       camera: camera && controls ? {
         position: {x: camera.position.x, y: camera.position.y, z: camera.position.z},
         target: {x: controls.target.x, y: controls.target.y, z: controls.target.z},
@@ -208,8 +220,12 @@
   let selectedTokenId = savedSettings.selectedTokenId;
   let viewMode: '2d' | '3d' = savedSettings.viewMode;
   let entityMode: 'sphere' | 'identicon' = savedSettings.entityMode;
-  let rotationSpeed: number = savedSettings.rotationSpeed; // 0-10000 (0 = stopped, 10000 = fast)
+  let rotationX: number = savedSettings.rotationX; // 0-10000 (0 = stopped, 10000 = fast)
+  let rotationY: number = savedSettings.rotationY; // 0-10000 (0 = stopped, 10000 = fast)
+  let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 = fast)
   let availableTokens: number[] = []; // Will be populated from actual token data
+  let showPanel: boolean = true; // Mobile-friendly panel toggle - start visible
+  let labelScale: number = 3.0; // Entity label size multiplier (1.0 = 32px font, 3.0 = 96px font)
 
   // Quick payment form state
   let paymentFrom: string = '';
@@ -376,6 +392,10 @@
     renderer.domElement.addEventListener('click', onMouseClick);
     renderer.domElement.addEventListener('dblclick', onMouseDoubleClick);
 
+    // Touch events for mobile (iPhone support)
+    renderer.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+    renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+    renderer.domElement.addEventListener('touchend', onTouchEnd);
 
     // Handle resize
     window.addEventListener('resize', onWindowResize);
@@ -618,7 +638,7 @@
     // Hub glow effect: Top-3 hubs get bright emissive glow
     const baseColor = 0x00ff88; // Bright green
     const emissiveColor = isHub ? 0x00ff88 : 0x002200; // Bright glow for hubs, subtle for others
-    const emissiveIntensity = isHub ? 0.6 : 0.1; // Much brighter for hubs
+    const emissiveIntensity = isHub ? 1.5 : 0.1; // Much brighter for hubs (increased from 0.6 to 1.5)
 
     const material = new THREE.MeshLambertMaterial({
       color: baseColor,
@@ -631,8 +651,12 @@
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
 
+    // Store material for animation (hubs will pulse)
+    mesh.userData['isHub'] = isHub;
+    mesh.userData['baseMaterial'] = material;
+
     if (isHub) {
-      console.log(`🌟 Created hub node: ${profile.entityId.slice(0,8)} with ${degree} connections (bright glow)`);
+      console.log(`🌟 Created hub node: ${profile.entityId.slice(0,8)} with ${degree} connections (bright glow + pulse)`);
     }
 
     // Add entity label
@@ -650,7 +674,8 @@
       mesh,
       label: labelSprite, // Store label with entity for dynamic positioning
       profile,
-      pulsePhase: Math.random() * Math.PI * 2, // Random start phase
+      isHub, // Store hub status for pulse animation
+      pulsePhase: Math.random() * Math.PI * 2, // Random start phase for pulse
       lastActivity: 0
     });
   }
@@ -1291,9 +1316,9 @@
     // NO background - transparent (user requirement: black background is ugly)
     context.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Text styling - minimalist monospace, bright green, larger font
+    // Text styling - minimalist monospace, bright green, dynamic font size based on labelScale
     context.fillStyle = '#00ff88';
-    context.font = 'bold 32px sans-serif'; // Larger, cleaner sans-serif
+    context.font = `bold ${32 * labelScale}px sans-serif`; // Dynamic: 32px * labelScale
     context.textAlign = 'center';
     context.textBaseline = 'middle';
 
@@ -1312,8 +1337,8 @@
     });
     const sprite = new THREE.Sprite(spriteMaterial);
 
-    // Square sprite (1:1 aspect ratio) to match square canvas - prevents skewing
-    sprite.scale.set(1.5, 1.5, 1);
+    // Sprite scale proportional to labelScale: 1.5 * labelScale
+    sprite.scale.set(1.5 * labelScale, 1.5 * labelScale, 1);
 
     scene.add(sprite);
     return sprite; // Return sprite to store with entity
@@ -1354,24 +1379,59 @@
   function animate() {
     animationId = requestAnimationFrame(animate);
 
-    // Auto-rotate (adjustable speed from slider 0-10000)
-    if (rotationSpeed > 0 && controls) {
+    // Pulse animation for hubs (24/7 always-on effect)
+    const time = Date.now() * 0.001; // Convert to seconds
+    entities.forEach(entity => {
+      if (entity.isHub && entity.mesh.material && entity.pulsePhase !== undefined) {
+        // Pulsing glow: oscillate between 1.0 and 2.5 emissive intensity
+        const pulseIntensity = 1.5 + 1.0 * Math.sin(time * 2 + entity.pulsePhase);
+        (entity.mesh.material as THREE.MeshLambertMaterial).emissiveIntensity = pulseIntensity;
+      }
+    });
+
+    // Auto-rotate (adjustable speed from slider 0-10000 per axis)
+    if ((rotationX > 0 || rotationY > 0 || rotationZ > 0) && controls) {
       // Map slider value (0-10000) to rotation angle
       // 1000 = Earth-like slow rotation (~0.001 rad/frame = 1 rotation per ~100 seconds)
       // 10000 = Fast rotation (~0.01 rad/frame = 1 rotation per ~10 seconds)
       const maxRotationSpeed = 0.01; // Maximum rotation speed at slider = 10000
-      const angle = (rotationSpeed / 10000) * maxRotationSpeed;
 
       const currentPosition = camera.position.clone();
       const target = controls.target.clone();
-
-      // Rotate camera position around target (Y-axis for horizontal rotation)
       const offset = currentPosition.sub(target);
-      const newX = offset.x * Math.cos(angle) - offset.z * Math.sin(angle);
-      const newZ = offset.x * Math.sin(angle) + offset.z * Math.cos(angle);
 
-      camera.position.x = target.x + newX;
-      camera.position.z = target.z + newZ;
+      let newOffset = offset.clone();
+
+      // Apply X-axis rotation (pitch - rotating around horizontal axis)
+      if (rotationX > 0) {
+        const angleX = (rotationX / 10000) * maxRotationSpeed;
+        const newY = newOffset.y * Math.cos(angleX) - newOffset.z * Math.sin(angleX);
+        const newZ = newOffset.y * Math.sin(angleX) + newOffset.z * Math.cos(angleX);
+        newOffset.y = newY;
+        newOffset.z = newZ;
+      }
+
+      // Apply Y-axis rotation (yaw - rotating around vertical axis)
+      if (rotationY > 0) {
+        const angleY = (rotationY / 10000) * maxRotationSpeed;
+        const newX = newOffset.x * Math.cos(angleY) - newOffset.z * Math.sin(angleY);
+        const newZ = newOffset.x * Math.sin(angleY) + newOffset.z * Math.cos(angleY);
+        newOffset.x = newX;
+        newOffset.z = newZ;
+      }
+
+      // Apply Z-axis rotation (roll - rotating around depth axis)
+      if (rotationZ > 0) {
+        const angleZ = (rotationZ / 10000) * maxRotationSpeed;
+        const newX = newOffset.x * Math.cos(angleZ) - newOffset.y * Math.sin(angleZ);
+        const newY = newOffset.x * Math.sin(angleZ) + newOffset.y * Math.cos(angleZ);
+        newOffset.x = newX;
+        newOffset.y = newY;
+      }
+
+      camera.position.x = target.x + newOffset.x;
+      camera.position.y = target.y + newOffset.y;
+      camera.position.z = target.z + newOffset.z;
       camera.lookAt(target);
 
       // Save camera state periodically during auto-rotation (not every frame)
@@ -2036,6 +2096,100 @@
     }
   }
 
+  // Touch event handlers for iPhone/mobile support
+  function onTouchStart(event: TouchEvent) {
+    event.preventDefault();
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((touch!.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((touch!.clientY - rect.top) / rect.height) * 2 + 1;
+
+      // Simulate mousedown
+      raycaster.setFromCamera(mouse, camera);
+      const entityMeshes = entities.map(e => e.mesh);
+      const intersects = raycaster.intersectObjects(entityMeshes);
+
+      if (intersects.length > 0) {
+        const intersectedObject = intersects[0]?.object;
+        if (!intersectedObject) return;
+
+        const entity = entities.find(e => e.mesh === intersectedObject);
+        if (!entity) return;
+
+        if (controls) {
+          controls.enabled = false;
+        }
+
+        isDragging = true;
+        draggedEntity = entity;
+        entity.isDragging = true;
+
+        dragPlane.setFromNormalAndCoplanarPoint(
+          camera.getWorldDirection(new THREE.Vector3()).normalize(),
+          entity.position
+        );
+
+        const intersection = new THREE.Vector3();
+        raycaster.ray.intersectPlane(dragPlane, intersection);
+        dragOffset.subVectors(entity.position, intersection);
+
+        if (entity.mesh.material instanceof THREE.MeshLambertMaterial) {
+          entity.mesh.material.emissive.setHex(0x00ff88);
+        }
+      }
+    }
+  }
+
+  function onTouchMove(event: TouchEvent) {
+    event.preventDefault();
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((touch!.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((touch!.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+
+      if (isDragging && draggedEntity) {
+        const intersection = new THREE.Vector3();
+        raycaster.ray.intersectPlane(dragPlane, intersection);
+        draggedEntity.position.copy(intersection.add(dragOffset));
+        draggedEntity.mesh.position.copy(draggedEntity.position);
+      }
+    }
+  }
+
+  function onTouchEnd(event: TouchEvent) {
+    event.preventDefault();
+
+    if (draggedEntity && isDragging) {
+      draggedEntity.isPinned = true;
+      draggedEntity.isDragging = false;
+
+      if (draggedEntity.mesh.material instanceof THREE.MeshLambertMaterial) {
+        draggedEntity.mesh.material.emissive.setHex(0x002200);
+      }
+
+      enforceSpacingConstraints();
+      saveEntityPositions();
+
+      draggedEntity = null;
+      isDragging = false;
+
+      justDragged = true;
+      setTimeout(() => {
+        justDragged = false;
+      }, 100);
+    }
+
+    if (controls) {
+      controls.enabled = true;
+    }
+  }
+
   function addActivityToTicker(fromId: string, toId: string, accountTx: any) {
     const fromShort = fromId.slice(0, 8);
     const toShort = toId.slice(0, 8);
@@ -2656,7 +2810,23 @@
 </script>
 
 <div bind:this={container} class="network-topology-container">
-  <div class="topology-overlay">
+  <!-- Toggle button - IDE-style vertical tab -->
+  <button
+    class="panel-toggle-btn"
+    class:panel-open={showPanel}
+    on:click={() => showPanel = !showPanel}
+    title="{showPanel ? 'Hide' : 'Show'} Controls"
+  >
+    {#if showPanel}
+      Hide ▶
+    {:else}
+      ◀ Controls
+    {/if}
+  </button>
+
+  <!-- Sliding panel (mobile-friendly) -->
+  {#if showPanel}
+  <div class="topology-overlay" class:panel-open={showPanel}>
     <div class="topology-info">
       <h3>🗺️ Network Topology</h3>
 
@@ -2748,16 +2918,55 @@
           </button>
         </div>
 
-        <!-- Auto-Rotate Speed Slider (0 = stopped, 10000 = fast) -->
+        <!-- Auto-Rotate Speed Sliders (0 = stopped, 10000 = fast) -->
         <div class="control-group">
-          <label>🌍 Rotate:</label>
+          <label>🔄 Rotate X:</label>
           <input
             type="range"
             min="0"
             max="10000"
-            bind:value={rotationSpeed}
+            bind:value={rotationX}
             on:change={() => saveBirdViewSettings()}
-            title="Rotation speed: 0=stopped, 1000=slow, 10000=fast"
+            title="X-axis rotation (pitch): 0=stopped, 10000=fast"
+            class="rotation-slider"
+          />
+        </div>
+        <div class="control-group">
+          <label>🔄 Rotate Y:</label>
+          <input
+            type="range"
+            min="0"
+            max="10000"
+            bind:value={rotationY}
+            on:change={() => saveBirdViewSettings()}
+            title="Y-axis rotation (yaw): 0=stopped, 10000=fast"
+            class="rotation-slider"
+          />
+        </div>
+        <div class="control-group">
+          <label>🔄 Rotate Z:</label>
+          <input
+            type="range"
+            min="0"
+            max="10000"
+            bind:value={rotationZ}
+            on:change={() => saveBirdViewSettings()}
+            title="Z-axis rotation (roll): 0=stopped, 10000=fast"
+            class="rotation-slider"
+          />
+        </div>
+
+        <!-- Label Size Slider -->
+        <div class="control-group">
+          <label>🏷️ Label Size: {labelScale.toFixed(1)}x</label>
+          <input
+            type="range"
+            min="0.5"
+            max="5.0"
+            step="0.1"
+            bind:value={labelScale}
+            on:input={() => updateNetworkData()}
+            title="Entity label size: 0.5x to 5.0x"
             class="rotation-slider"
           />
         </div>
@@ -2814,6 +3023,7 @@
       <small>Scroll to zoom, drag to rotate</small>
     </div>
   </div>
+  {/if}
 
   <!-- Real-time Activity Ticker -->
   {#if recentActivity.length > 0}
@@ -2916,41 +3126,128 @@
     background: #0a0a0a;
   }
 
+  /* Panel toggle button - IDE-style vertical tab on sidebar edge */
+  .panel-toggle-btn {
+    position: fixed;
+    top: 50%;
+    right: 400px; /* Sidebar width */
+    transform: translateY(-50%);
+    z-index: 30;
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.3), rgba(0, 255, 136, 0.2));
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 2px solid rgba(0, 255, 136, 0.5);
+    border-right: none;
+    border-radius: 12px 0 0 12px;
+    padding: 40px 10px;
+    color: #00ff88;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    writing-mode: vertical-rl;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow:
+      -4px 4px 16px rgba(0, 255, 136, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  /* When panel is hidden, move button to screen edge */
+  .panel-toggle-btn:not(.panel-open) {
+    right: 0;
+  }
+
+  .panel-toggle-btn:hover {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.4), rgba(0, 255, 136, 0.3));
+    border-color: rgba(0, 255, 136, 0.7);
+    transform: translateY(-50%) translateX(-4px);
+    box-shadow:
+      -6px 6px 24px rgba(0, 255, 136, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
+
+  /* Mobile: horizontal button at top */
+  @media (max-width: 768px) {
+    .panel-toggle-btn {
+      top: 20px;
+      right: 20px;
+      transform: none;
+      writing-mode: horizontal-tb;
+      padding: 14px 20px;
+      border-radius: 12px;
+      border: 2px solid rgba(0, 255, 136, 0.5);
+    }
+    .panel-toggle-btn:not(.panel-open) {
+      right: 20px;
+    }
+    .panel-toggle-btn:hover {
+      transform: translateY(-2px);
+    }
+  }
+
   .topology-overlay {
-    position: absolute;
-    top: 80px;
-    right: 20px;
-    background: rgba(45, 45, 45, 0.9);
-    border: 1px solid #007acc;
-    border-radius: 8px;
-    padding: 16px;
-    color: #d4d4d4;
-    z-index: 20;
-    backdrop-filter: blur(10px);
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 400px;
+    /* Solid sidebar background - not floating glass */
+    background: linear-gradient(
+      135deg,
+      rgba(20, 20, 20, 0.98) 0%,
+      rgba(15, 15, 15, 0.98) 100%
+    );
+    border-left: 2px solid rgba(0, 255, 136, 0.3);
+    padding: 20px 20px 20px 20px;
+    color: #ffffff;
+    z-index: 25;
+    overflow-y: auto;
+    /* Subtle inner glow */
+    box-shadow:
+      -4px 0 32px rgba(0, 0, 0, 0.8),
+      inset 2px 0 0 rgba(0, 255, 136, 0.1);
+    /* Slide-in animation */
+    transform: translateX(0);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Mobile: narrower sidebar and push from top */
+  @media (max-width: 768px) {
+    .topology-overlay {
+      width: 90vw;
+      max-width: 350px;
+      padding-top: 80px;
+    }
   }
 
   .topology-info h3 {
-    margin: 0 0 8px 0;
-    color: #007acc;
-    font-size: 16px;
+    margin: 0 0 12px 0;
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    text-shadow: 0 2px 8px rgba(0, 122, 255, 0.5);
   }
 
   .topology-info p {
-    margin: 4px 0;
-    font-family: monospace;
-    font-size: 12px;
+    margin: 6px 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
   }
 
   .topology-info small {
-    color: #9d9d9d;
-    font-size: 10px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 11px;
+    font-weight: 400;
   }
 
   .frame-info {
     color: #00ff88;
-    font-weight: bold;
-    font-size: 11px;
-    font-family: monospace;
+    font-weight: 600;
+    font-size: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
+    text-shadow: 0 0 20px rgba(0, 255, 136, 0.6);
   }
 
   .tooltip {
@@ -3022,105 +3319,154 @@
   }
 
   .topology-controls {
-    margin-top: 12px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(0, 255, 68, 0.3);
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
   }
 
   .control-group {
     display: flex;
     align-items: center;
-    margin-bottom: 8px;
-    gap: 8px;
+    margin-bottom: 10px;
+    gap: 10px;
   }
 
   .control-group label {
-    font-size: 10px;
-    color: #9d9d9d;
-    min-width: 45px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.85);
+    min-width: 70px;
+    font-weight: 500;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
   }
 
   .control-group select {
-    background: rgba(0, 0, 0, 0.7);
-    border: 1px solid #00ff44;
-    border-radius: 4px;
-    color: #00ff88;
-    font-size: 10px;
-    padding: 2px 4px;
-    font-family: monospace;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 11px;
+    padding: 6px 10px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .control-group select:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  }
+
+  .control-group select:focus {
+    outline: none;
+    border-color: rgba(0, 122, 255, 0.6);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
   }
 
   .toggle-btn {
-    background: rgba(0, 0, 0, 0.7);
-    border: 1px solid rgba(0, 255, 68, 0.5);
-    border-radius: 4px;
-    color: #9d9d9d;
-    padding: 2px 6px;
-    font-size: 9px;
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 6px 12px;
+    font-size: 10px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: monospace;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+    font-weight: 500;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   }
 
   .toggle-btn:hover {
-    border-color: #00ff44;
-    color: #00ff88;
+    background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.95);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   .toggle-btn.active {
-    background: rgba(0, 255, 68, 0.2);
-    border-color: #00ff44;
-    color: #00ff88;
-    font-weight: bold;
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.5), rgba(0, 180, 255, 0.4));
+    border-color: rgba(0, 122, 255, 0.6);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow:
+      0 4px 16px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .toggle-btn.active:hover {
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.6), rgba(0, 180, 255, 0.5));
+    transform: translateY(-1px);
   }
 
   .rotation-slider {
     width: 100%;
-    height: 6px;
-    border-radius: 3px;
-    background: linear-gradient(90deg,
-      rgba(0, 100, 255, 0.3) 0%,
-      rgba(0, 255, 136, 0.5) 50%,
-      rgba(255, 0, 255, 0.7) 100%
-    );
+    height: 4px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.15);
     outline: none;
-    opacity: 0.8;
-    transition: all 0.3s ease;
+    opacity: 0.9;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 255, 68, 0.3);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+    -webkit-appearance: none;
+    appearance: none;
   }
 
   .rotation-slider:hover {
     opacity: 1;
-    box-shadow: 0 2px 12px rgba(0, 255, 68, 0.6);
-    transform: scaleY(1.2);
+    background: rgba(255, 255, 255, 0.2);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
   }
 
   .rotation-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #00ff88, #00ccff);
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
     cursor: pointer;
-    box-shadow: 0 0 8px rgba(0, 255, 136, 1), 0 0 16px rgba(0, 255, 136, 0.5);
-    border: 2px solid #ffffff;
-    transition: all 0.2s ease;
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    border: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .rotation-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.3);
-    box-shadow: 0 0 12px rgba(0, 255, 136, 1), 0 0 24px rgba(0, 255, 136, 0.8);
+    transform: scale(1.2);
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.4),
+      0 0 0 3px rgba(0, 122, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  }
+
+  .rotation-slider::-webkit-slider-thumb:active {
+    transform: scale(1.1);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.5),
+      0 0 0 4px rgba(0, 122, 255, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
   }
 
   .rotation-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #00ff88, #00ccff);
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
     cursor: pointer;
-    border: 2px solid #ffffff;
+    border: none;
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
     box-shadow: 0 0 8px rgba(0, 255, 136, 1), 0 0 16px rgba(0, 255, 136, 0.5);
     transition: all 0.2s ease;
   }
@@ -3133,129 +3479,157 @@
   .payment-form {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(0, 255, 68, 0.3);
-    border-radius: 6px;
-    margin-top: 8px;
+    gap: 10px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    margin-top: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   .form-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
 
   .form-row label {
-    font-size: 9px;
-    color: #00ff88;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.85);
     min-width: 60px;
-    font-family: monospace;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+    font-weight: 500;
   }
 
   .form-select,
   .form-input {
     flex: 1;
-    background: rgba(0, 0, 0, 0.7);
-    border: 1px solid rgba(0, 255, 68, 0.4);
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 8px;
     color: #ffffff;
-    padding: 4px 6px;
-    font-size: 9px;
-    font-family: monospace;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
+    font-weight: 500;
     outline: none;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   }
 
   .form-select:hover,
   .form-input:hover {
-    border-color: #00ff88;
-    box-shadow: 0 0 4px rgba(0, 255, 136, 0.3);
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   .form-select:focus,
   .form-input:focus {
-    border-color: #00ff88;
-    box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+    background: rgba(255, 255, 255, 0.22);
+    border-color: rgba(0, 122, 255, 0.6);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
   }
 
   .repeat-slider {
     flex: 1;
     height: 4px;
-    border-radius: 2px;
-    background: linear-gradient(90deg,
-      rgba(100, 100, 100, 0.3) 0%,
-      rgba(0, 255, 136, 0.5) 100%
-    );
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.15);
     outline: none;
     cursor: pointer;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+    -webkit-appearance: none;
+    appearance: none;
   }
 
   .repeat-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    background: #00ff88;
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
     cursor: pointer;
-    box-shadow: 0 0 4px rgba(0, 255, 136, 0.8);
-    transition: all 0.2s ease;
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 255, 136, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    border: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .repeat-slider::-webkit-slider-thumb:hover {
     transform: scale(1.2);
-    box-shadow: 0 0 8px rgba(0, 255, 136, 1);
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.4),
+      0 0 0 3px rgba(0, 255, 136, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
   }
 
   .repeat-slider::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    background: #00ff88;
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
     cursor: pointer;
     border: none;
-    box-shadow: 0 0 4px rgba(0, 255, 136, 0.8);
-    transition: all 0.2s ease;
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 255, 136, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .repeat-slider::-moz-range-thumb:hover {
     transform: scale(1.2);
-    box-shadow: 0 0 8px rgba(0, 255, 136, 1);
   }
 
   .rate-value {
-    font-size: 9px;
-    font-family: monospace;
-    color: #00ff88;
-    min-width: 32px;
+    font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
+    color: rgba(255, 255, 255, 0.85);
+    min-width: 36px;
     text-align: right;
+    font-weight: 600;
   }
 
   .send-btn {
-    background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 200, 255, 0.2));
-    border: 1px solid #00ff88;
-    border-radius: 4px;
-    color: #00ff88;
-    padding: 6px 12px;
-    font-size: 10px;
-    font-weight: bold;
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.3), rgba(0, 200, 255, 0.25));
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(0, 255, 136, 0.5);
+    border-radius: 10px;
+    color: #ffffff;
+    padding: 10px 16px;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: monospace;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
+    box-shadow:
+      0 4px 16px rgba(0, 255, 136, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
   }
 
   .send-btn:hover {
-    background: linear-gradient(135deg, rgba(0, 255, 136, 0.4), rgba(0, 200, 255, 0.4));
-    box-shadow: 0 0 12px rgba(0, 255, 136, 0.6);
-    transform: translateY(-1px);
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.4), rgba(0, 200, 255, 0.35));
+    border-color: rgba(0, 255, 136, 0.7);
+    box-shadow:
+      0 6px 24px rgba(0, 255, 136, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
   }
 
   .send-btn:active {
-    transform: translateY(0);
+    transform: translateY(-1px);
+    box-shadow:
+      0 4px 16px rgba(0, 255, 136, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
   }
 
   .action-btn {
