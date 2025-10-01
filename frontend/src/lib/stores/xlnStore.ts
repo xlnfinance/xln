@@ -132,6 +132,19 @@ export async function initializeXLN() {
       }
     } else {
       console.log(`🔍 BROWSER-DEBUG: No replicas loaded - starting with fresh state`);
+
+      // AUTO-PREPOPULATE: If clean slate (no server frames), run prepopulate automatically
+      if (!env.history || env.history.length === 0) {
+        console.log('🚀 AUTO-PREPOPULATE: Clean slate detected - running prepopulation automatically...');
+        try {
+          await xln.prepopulate(env, xln.processUntilEmpty);
+          console.log('✅ AUTO-PREPOPULATE: Prepopulation completed successfully');
+          console.log(`🔍 AUTO-PREPOPULATE: Env now has ${env.replicas?.size || 0} replicas and ${env.history?.length || 0} frames`);
+        } catch (err) {
+          console.error('❌ AUTO-PREPOPULATE: Failed to prepopulate:', err);
+          // Continue anyway - not a fatal error
+        }
+      }
     }
 
     // History is now guaranteed to be included in env

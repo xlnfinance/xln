@@ -115,39 +115,51 @@ export function processAccountTx(
         accountMachine.deltas.set(tokenId, delta);
       }
 
-      // CANONICAL BILATERAL CONSENSUS: Both sides compute identical state (like Channel.ts)
-      // The delta is always from left entity's perspective canonically
-      const isLeftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+      // Determine canonical direction relative to left/right entities
+      const leftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity
+        ? accountMachine.proofHeader.fromEntity
+        : accountMachine.proofHeader.toEntity;
+      const rightEntity = leftEntity === accountMachine.proofHeader.fromEntity
+        ? accountMachine.proofHeader.toEntity
+        : accountMachine.proofHeader.fromEntity;
 
-      // FINTECH TYPE SAFETY: Route must be defined for payments
-      if (!route || route.length === 0) {
-        return {
-          success: false,
-          error: `FINANCIAL-SAFETY: Route is required for direct payment`,
-          events,
-        };
-      }
-
-      // Determine canonical delta direction based on payment sender
-      const paymentFromEntity = route[0];
+      // Identify payer entity explicitly (fallback to heuristics for legacy frames)
+      let paymentFromEntity = accountTx.data.fromEntityId;
       if (!paymentFromEntity) {
+        if (isOurFrame) {
+          paymentFromEntity = accountMachine.proofHeader.fromEntity;
+        } else {
+          paymentFromEntity = accountMachine.counterpartyEntityId;
+        }
+      }
+
+      let paymentToEntity = accountTx.data.toEntityId;
+      if (!paymentToEntity) {
+        paymentToEntity = paymentFromEntity === accountMachine.proofHeader.fromEntity
+          ? accountMachine.proofHeader.toEntity
+          : accountMachine.proofHeader.fromEntity;
+      }
+
+      if (!paymentFromEntity || !paymentToEntity) {
         return {
           success: false,
-          error: `FINANCIAL-SAFETY: Payment sender entity (route[0]) is required`,
+          error: 'FINANCIAL-SAFETY: Unable to determine payment endpoints',
           events,
         };
       }
-      const paymentToEntity = accountMachine.counterpartyEntityId;
 
       // Canonical delta: always relative to left entity (like Channel.ts reference)
       let canonicalDelta: bigint;
-      if (paymentFromEntity < paymentToEntity) {
-        // Payment from left to right: positive offdelta (left owes right)
-        canonicalDelta = amount;
+      if (paymentFromEntity === leftEntity && paymentToEntity === rightEntity) {
+        canonicalDelta = amount; // left paying right
+      } else if (paymentFromEntity === rightEntity && paymentToEntity === leftEntity) {
+        canonicalDelta = -amount; // right paying left
       } else {
-        // Payment from right to left: negative offdelta (right owes left)
-        canonicalDelta = -amount;
+        // As a fallback, compare IDs for deterministic ordering
+        canonicalDelta = paymentFromEntity < paymentToEntity ? amount : -amount;
       }
+
+      const isLeftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
 
       // Check capacity using deriveDelta (perspective-aware)
       const derived = deriveDelta(delta, isLeftEntity);
@@ -159,9 +171,9 @@ export function processAccountTx(
         };
       }
 
-      // Check global credit limits for USDC (token 3)
+      // Check global credit limits for the USD-denominated token (token 2)
       const newDelta = delta.ondelta + delta.offdelta + canonicalDelta;
-      if (isOurFrame && tokenId === 3 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
+      if (isOurFrame && tokenId === 2 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
         return {
           success: false,
           error: `Exceeds global credit limit: ${newDelta.toString()} > ${accountMachine.globalCreditLimits.peerLimit.toString()}`,

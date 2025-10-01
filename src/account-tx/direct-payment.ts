@@ -65,7 +65,7 @@ export function applyDirectPayment(
     console.log(`💳 Capacity check passed: using ${payment.amount.toString()}/${derived.outCapacity.toString()} capacity`);
 
     // Also check global credit limits for USD-denominated credit
-    if (payment.tokenId === 3 && newTotalDelta > 0n) { // Token 3 = USDC
+    if (payment.tokenId === 2 && newTotalDelta > 0n) {
       const creditUsed = newTotalDelta;
       const availableCredit = accountMachine.globalCreditLimits.peerLimit;
 

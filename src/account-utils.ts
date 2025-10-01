@@ -141,12 +141,8 @@ export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, del
  * Get token information for display
  */
 export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> = {
-  0: { symbol: 'NULL', name: 'Null Token', decimals: 18, color: '#777' },
   1: { symbol: 'ETH', name: 'Ethereum', decimals: 18, color: '#627eea' },
-  2: { symbol: 'USDT', name: 'Tether USD', decimals: 18, color: '#26a17b' },
-  3: { symbol: 'USDC', name: 'USD Coin', decimals: 18, color: '#2775ca' },
-  4: { symbol: 'ACME', name: 'ACME Corp Shares', decimals: 18, color: '#ff6b6b' },
-  5: { symbol: 'BTC', name: 'Bitcoin Shares', decimals: 8, color: '#f7931a' },
+  2: { symbol: 'USDC', name: 'USD Coin', decimals: 18, color: '#2775ca' },
 };
 
 export function getTokenInfo(tokenId: number) {

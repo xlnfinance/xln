@@ -4,12 +4,8 @@ import { cloneEntityState } from '../state-helpers';
 
 // Token registry for consistent naming (matches contract prefunding)
 const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number }> = {
-  0: { symbol: 'NULL', name: 'Null Token', decimals: 18 }, // Contract reserves slot 0 but doesn't prefund
-  1: { symbol: 'ETH', name: 'Ethereum', decimals: 18 },    // Contract prefunds token 1
-  2: { symbol: 'USDT', name: 'Tether USD', decimals: 18 }, // Contract prefunds token 2  
-  3: { symbol: 'USDC', name: 'USD Coin', decimals: 18 },   // Contract prefunds token 3
-  4: { symbol: 'ACME', name: 'ACME Corp Shares', decimals: 18 },
-  5: { symbol: 'BTC', name: 'Bitcoin Shares', decimals: 8 },
+  1: { symbol: 'ETH', name: 'Ethereum', decimals: 18 },
+  2: { symbol: 'USDC', name: 'USD Coin', decimals: 18 },
 };
 
 const getTokenSymbol = (tokenId: number): string => {

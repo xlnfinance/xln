@@ -11,9 +11,7 @@ export interface TokenInfo {
 // Common token configurations
 export const TOKEN_CONFIGS: Record<number, TokenInfo> = {
   1: { symbol: 'ETH', decimals: 18 },
-  2: { symbol: 'USDT', decimals: 6 },
-  3: { symbol: 'USDC', decimals: 6 },
-  4: { symbol: 'DAI', decimals: 18 },
+  2: { symbol: 'USDC', decimals: 6 },
 };
 
 /**

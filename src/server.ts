@@ -382,6 +382,8 @@ const applyServerInput = async (
         }
 
         const { newState, outputs } = await applyEntityInput(env, entityReplica, entityInput);
+        console.log(`🔍 APPLY-ENTITY-INPUT-RESULT: Got ${outputs.length} outputs from ${replicaKey}`);
+
         // CRITICAL FIX: Update the replica in the environment with the new state
         env.replicas.set(replicaKey, { ...entityReplica, state: newState });
 
@@ -399,6 +401,7 @@ const applyServerInput = async (
         });
 
         entityOutbox.push(...outputs);
+        console.log(`🔍 ENTITY-OUTBOX-AFTER-PUSH: entityOutbox now has ${entityOutbox.length} outputs`);
       }
     }
 
@@ -545,6 +548,7 @@ const applyServerInput = async (
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
     }
 
+    console.log(`🔍 APPLY-SERVER-INPUT-FINAL-RETURN: Returning ${entityOutbox.length} outputs, ${mergedInputs.length} mergedInputs`);
     return { entityOutbox, mergedInputs };
   } catch (error) {
     log.error(`❌ Error processing server input:`, error);
@@ -1036,6 +1040,12 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   // Only log cascade details if there are outputs to process
   if (outputs.length > 0) {
     console.log('🔥 PROCESS-CASCADE: Starting with', outputs.length, 'initial outputs');
+
+    // Log FULL entityIds for debugging routing issues
+    outputs.forEach((o, idx) => {
+      console.log(`📤 CASCADE-INPUT[${idx}]: FULL entityId="${o.entityId}", signerId="${o.signerId}", replicaKey="${o.entityId}:${o.signerId}"`);
+    });
+
     console.log(
       '🔥 PROCESS-CASCADE: Initial outputs:',
       outputs.map(o => {
