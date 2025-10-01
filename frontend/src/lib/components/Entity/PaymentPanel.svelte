@@ -7,7 +7,7 @@
   // Payment form state
   let targetEntityId = '';
   let amount = '';
-  let tokenId = 2; // Default to USDT
+  let tokenId = 2; // Default to USDC
   let description = '';
   let findingRoutes = false;
   let sendingPayment = false;
@@ -26,6 +26,70 @@
     )
     .sort() : [];
 
+  /**
+   * Find paths through the network using actual account connections (BFS)
+   * Replaces gossip-based pathfinding with ground truth from entity states
+   */
+  function findPathsThroughAccounts(replicas: Map<string, any>, startId: string, targetId: string): Array<{ path: string[], probability: number }> {
+    // Build adjacency map from actual accounts
+    const adjacency = new Map<string, Set<string>>();
+
+    for (const [replicaKey, replica] of replicas.entries()) {
+      const [entityId] = replicaKey.split(':');
+      if (!entityId || !replica.state?.accounts) continue;
+
+      if (!adjacency.has(entityId)) {
+        adjacency.set(entityId, new Set());
+      }
+
+      // Add all counterparties this entity has accounts with
+      for (const counterpartyId of replica.state.accounts.keys()) {
+        adjacency.get(entityId)!.add(String(counterpartyId));
+      }
+    }
+
+    // BFS to find all paths (up to max depth 5)
+    const maxDepth = 5;
+    const foundPaths: Array<{ path: string[], probability: number }> = [];
+    const queue: Array<{ current: string, path: string[], depth: number }> = [
+      { current: startId, path: [startId], depth: 0 }
+    ];
+    const visited = new Set<string>();
+
+    while (queue.length > 0 && foundPaths.length < 5) {
+      const { current, path, depth } = queue.shift()!;
+
+      if (depth > maxDepth) continue;
+      if (current === targetId) {
+        foundPaths.push({
+          path: path,
+          probability: 1.0 / (path.length - 1), // Shorter path = higher probability
+        });
+        continue;
+      }
+
+      const visitKey = `${current}-${depth}`;
+      if (visited.has(visitKey)) continue;
+      visited.add(visitKey);
+
+      const neighbors = adjacency.get(current);
+      if (!neighbors) continue;
+
+      for (const neighbor of neighbors) {
+        if (!path.includes(neighbor)) {
+          queue.push({
+            current: neighbor,
+            path: [...path, neighbor],
+            depth: depth + 1,
+          });
+        }
+      }
+    }
+
+    // Sort by path length (shortest first)
+    return foundPaths.sort((a, b) => a.path.length - b.path.length);
+  }
+
   async function findRoutes() {
     if (!targetEntityId || !amount) return;
 
@@ -34,23 +98,9 @@
     selectedRouteIndex = -1;
 
     try {
-      // For now, create a simple direct route if account exists
-      // TODO: Implement proper Dijkstra pathfinding using gossip profiles
-
       await getXLN();
       const env = $xlnEnvironment;
       if (!env) throw new Error('Environment not ready');
-
-      // Check if we have a direct account with target
-      // Find the correct replica key for this entity
-      let ourReplica = null;
-      for (const [key, replica] of env.replicas.entries()) {
-        if (key.startsWith(entityId + ':')) {
-          ourReplica = replica;
-          break;
-        }
-      }
-      const hasDirectAccount = ourReplica?.state?.accounts?.has(targetEntityId);
 
       // Convert decimal amount to smallest unit (wei/cents)
       // Assuming 18 decimals for most tokens
@@ -62,43 +112,52 @@
       const paddedDecimal = decimalPart.padEnd(decimals, '0').slice(0, decimals);
       const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(paddedDecimal || 0);
 
-      if (hasDirectAccount) {
-        // Simple direct route
-        routes = [{
-          path: [entityId, targetEntityId],
-          hops: [{
-            from: entityId,
-            to: targetEntityId,
-            fee: 0n,
-            feePPM: 0,
-          }],
-          totalFee: 0n,
-          totalAmount: amountInSmallestUnit,
-          probability: 1.0,
-        }];
-      } else {
-        // Try to find intermediate hops (simplified for now)
-        // TODO: Use actual routing module
-        routes = [{
-          path: [entityId, targetEntityId],
-          hops: [{
-            from: entityId,
-            to: targetEntityId,
-            fee: 0n,
-            feePPM: 100,
-          }],
-          totalFee: 0n,
-          totalAmount: amountInSmallestUnit,
-          probability: 0.5,
-          warning: 'No direct account - payment may fail',
-        }];
+      // Use account-based pathfinding (replaces gossip)
+      const foundPaths = findPathsThroughAccounts(env.replicas, entityId, targetEntityId);
+
+      if (foundPaths.length === 0) {
+        throw new Error(`No route found from ${entityId.slice(0, 10)}... to ${targetEntityId.slice(0, 10)}...`);
       }
+
+      // Convert found paths to route objects
+      routes = foundPaths.map((pathInfo) => {
+        const hops = [];
+        let totalFeePPM = 0;
+
+        for (let i = 0; i < pathInfo.path.length - 1; i++) {
+          const from = pathInfo.path[i]!;
+          const to = pathInfo.path[i + 1]!;
+          const feePPM = 0; // No fees for now (can be added later from account settings)
+
+          hops.push({
+            from,
+            to,
+            fee: 0n,
+            feePPM,
+          });
+
+          totalFeePPM += feePPM;
+        }
+
+        // Estimate total fee (zero for now)
+        const estimatedTotalFee = 0n;
+
+        return {
+          path: pathInfo.path,
+          hops,
+          totalFee: estimatedTotalFee,
+          totalAmount: amountInSmallestUnit + estimatedTotalFee,
+          probability: pathInfo.probability,
+        };
+      });
 
       if (routes.length > 0) {
         selectedRouteIndex = 0; // Auto-select first route
       }
     } catch (error) {
-      console.error('Failed to find routes:', error);
+      console.error('❌ Failed to find routes - Full error:', error);
+      console.error('❌ Error message:', (error as Error)?.message || 'Unknown error');
+      console.error('❌ Stack:', (error as Error)?.stack);
       alert(`Failed to find routes: ${(error as Error)?.message || 'Unknown error'}`);
     } finally {
       findingRoutes = false;
@@ -149,7 +208,9 @@
       routes = [];
       selectedRouteIndex = -1;
     } catch (error) {
-      console.error('Failed to send payment:', error);
+      console.error('❌ Failed to send payment - Full error:', error);
+      console.error('❌ Error message:', (error as Error)?.message || 'Unknown error');
+      console.error('❌ Stack:', (error as Error)?.stack);
       alert(`Failed to send payment: ${(error as Error)?.message || 'Unknown error'}`);
     } finally {
       sendingPayment = false;
@@ -204,8 +265,7 @@
         disabled={findingRoutes || sendingPayment}
       >
         <option value={1}>ETH</option>
-        <option value={2}>USDT</option>
-        <option value={3}>USDC</option>
+        <option value={2}>USDC</option>
       </select>
     </div>
   </div>
