@@ -69,7 +69,7 @@ FRONTEND_TS_PID=$!
 
 # Build server once for frontend (use same command as build.sh)
 echo "📦 Building server for frontend..."
-bun build src/server.ts --target=browser --outdir=dist --minify
+bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util
 cp dist/server.js frontend/static/server.js
 
 # FINTECH PIPELINE: Test browser compatibility immediately
@@ -106,7 +106,7 @@ echo "📦 Starting server watch (ONLY src/server.ts)..."
 echo "   ⚠️  NOTE: This will ONLY rebuild server.js when src/server.ts changes"
 echo "   ⚠️  NOTE: jurisdictions.json is NEVER overwritten by this watcher"
 echo "   🔧 NOTE: Using same build command as build.sh for consistency"
-bun build src/server.ts --target=browser --outdir=dist --minify --watch &
+bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util --watch &
 WATCH_PID=$!
 # Note: Auto-copy handled by bun build --watch to dist, then manual copy
 

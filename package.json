@@ -4,10 +4,10 @@
   "main": "index.js",
   "scripts": {
     "dev": "./dev-full.sh",
-    "build": "bun build src/server.ts --target=browser --outdir=dist --minify && cp dist/server.js frontend/static/server.js",
+    "build": "bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util && cp dist/server.js frontend/static/server.js",
     "dev:ci": "./dev-ci.sh",
     "serve": "bun run serve.ts",
-    "serve:dev": "bun build src/server.ts --target browser --outfile dist/server.js --bundle && bun run serve.ts",
+    "serve:dev": "bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util && cp dist/server.js frontend/static/server.js && bun run serve.ts",
     "notify:done": "bash ./scripts/notify.sh 'Task complete' 'XLN Agent' 'All done'",
     "notify:fail": "bash ./scripts/notify.sh 'Task failed' 'XLN Agent' 'Check logs' 'Basso'",
     "ui:dev": "cd ui && bun run dev",

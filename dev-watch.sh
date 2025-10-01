@@ -32,8 +32,9 @@ echo "📦 Starting TypeScript watch compilation..."
 
 # Initial build with notification
 show_rebuild
-bun build src/server.ts --target browser --outfile dist/server.js
+bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util
 if [ $? -eq 0 ]; then
+    cp dist/server.js frontend/static/server.js
     show_rebuild_complete
 else
     echo "❌ $(date '+%H:%M:%S') - Build failed!"
@@ -45,8 +46,9 @@ if command -v fswatch >/dev/null 2>&1; then
     # Use fswatch if available (more reliable)
     fswatch -o src/server.ts src/state-encoder.ts src/state-serde.ts src/snapshot-coder.ts 2>/dev/null | while read num; do
         show_rebuild
-        bun build src/server.ts --target browser --outfile dist/server.js
+        bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util
         if [ $? -eq 0 ]; then
+            cp dist/server.js frontend/static/server.js
             show_rebuild_complete
         else
             echo "❌ $(date '+%H:%M:%S') - Build failed!"
@@ -58,10 +60,12 @@ if command -v fswatch >/dev/null 2>&1; then
 else
     # Fallback to bun's built-in watch with custom monitoring
     (
-        bun build src/server.ts --target browser --outfile dist/server.js --watch 2>&1 | while IFS= read -r line; do
+        bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util --watch 2>&1 | while IFS= read -r line; do
             if [[ "$line" == *"[watch]"* ]] || [[ "$line" == *"Rebuilt"* ]] || [[ "$line" == *"Built"* ]]; then
+                cp dist/server.js frontend/static/server.js 2>/dev/null
                 show_rebuild_complete
             fi
+            echo "$line"
         done
     ) &
     WATCH_PID=$!

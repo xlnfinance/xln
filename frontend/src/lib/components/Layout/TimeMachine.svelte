@@ -1,7 +1,8 @@
 <script lang="ts">
   import { timeOperations, timeState } from '../../stores/timeStore';
   import { history, currentHeight } from '../../stores/xlnStore';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
+  import { SkipBack, ChevronLeft, ChevronRight, Play, Pause, Zap, RotateCcw } from 'lucide-svelte';
 
   // Player state
   let isPlaying = false;
@@ -42,6 +43,10 @@
 
   function getProgressPercent(state: any) {
     if (state.isLive) {
+      return 100;
+    }
+    // When at maxTimeIndex, we're at 100% (last historical frame)
+    if (state.currentTimeIndex >= state.maxTimeIndex && state.maxTimeIndex > 0) {
       return 100;
     }
     const sliderMax = state.maxTimeIndex + 1;
@@ -86,13 +91,16 @@
     }
   }
 
-  function startPlayback() {
+  async function startPlayback() {
     // If no history, can't play
     if ($history.length === 0) return;
 
     // If we're live or at the end, jump to start before playing
     if ($timeState.isLive || $timeState.currentTimeIndex >= $timeState.maxTimeIndex) {
       timeOperations.goToHistoryStart();
+      // Wait for both DOM and store updates to complete
+      await tick();
+      await new Promise(resolve => setTimeout(resolve, 50)); // Small delay for store propagation
     }
 
     isPlaying = true;
@@ -183,37 +191,64 @@
 
 <div class="time-machine">
   <div class="time-machine-main">
+    <!-- Left: Time info -->
     <div class="time-info-compact" class:current={$timeState.isLive}>
       <span>{timeInfo.status}</span>
       <span>{timeInfo.frameInfo}</span>
-      <span>{timeInfo.totalFrames}</span>
     </div>
+
+    <!-- Center: Navigation controls -->
     <div class="time-nav-controls">
-      <button class="time-btn-mini" on:click={handleGoToStart} title="Go to Start (Home key)">
-        ⏮️
+      <button class="icon-btn" on:click={handleGoToStart} title="Go to Start (Home)">
+        <SkipBack size={14} />
       </button>
-      <button class="time-btn-compact" on:click={handleStepBackward} title="Step Back (← or J)">
-        ⏪
+      <button class="icon-btn" on:click={handleStepBackward} title="Step Back (← or J)">
+        <ChevronLeft size={14} />
       </button>
+      <button class="icon-btn" on:click={handleStepForward} title="Step Forward (→ or L)">
+        <ChevronRight size={14} />
+      </button>
+    </div>
+
+    <!-- Timeline slider -->
+    <div class="time-slider-container" style="--progress: {progressPercent}%">
+      <input
+        type="range"
+        id="timeSlider"
+        class="time-slider"
+        min="0"
+        max={$timeState.maxTimeIndex + 1}
+        value={sliderValue}
+        disabled={$history.length === 0}
+        on:input={handleSliderChange}
+      />
+    </div>
+
+    <!-- Right: Playback controls -->
+    <div class="time-playback-controls">
       <button
-        class="time-btn-compact play-pause"
+        class="icon-btn play-btn"
         class:playing={isPlaying}
         on:click={togglePlayPause}
         title="Play/Pause (Space or K)"
         disabled={$history.length === 0}
       >
-        {isPlaying ? '⏸' : '▶️'}
+        {#if isPlaying}
+          <Pause size={14} />
+        {:else}
+          <Play size={14} />
+        {/if}
       </button>
-      <button class="time-btn-compact" on:click={handleStepForward} title="Step Forward (→ or L)">
-        ⏩
+      <button
+        class="icon-btn loop-btn"
+        class:active={loopEnabled}
+        on:click={toggleLoop}
+        title="Loop Playback (Shift+L)"
+      >
+        <RotateCcw size={13} />
       </button>
-      <button class="time-btn-compact live" on:click={handleGoToLive} title="Go to Current (End key)">
-        ⚡ LIVE
-      </button>
-    </div>
-    <div class="time-utility-controls">
       <div class="speed-control">
-        <label class="speed-label">{playbackSpeed}x</label>
+        <span class="speed-label">{playbackSpeed}x</span>
         <input
           type="range"
           class="speed-slider"
@@ -222,30 +257,16 @@
           step="0.25"
           value={playbackSpeed}
           on:input={handleSpeedChange}
-          title="Playback Speed (0.25x - 10x)"
+          title="Playback Speed"
         />
       </div>
-      <button
-        class="time-btn-mini loop"
-        class:active={loopEnabled}
-        on:click={toggleLoop}
-        title="Loop Playback (Shift+L)"
-      >
-        🔁
-      </button>
     </div>
-  </div>
-  <div class="time-slider-container" style="--progress: {progressPercent}%">
-    <input
-      type="range"
-      id="timeSlider"
-      class="time-slider"
-      min="0"
-      max={$timeState.maxTimeIndex + 1}
-      value={sliderValue}
-      disabled={$history.length === 0}
-      on:input={handleSliderChange}
-    />
+
+    <!-- Far right: LIVE button -->
+    <button class="live-btn" on:click={handleGoToLive} title="Go to Live (End)">
+      <Zap size={12} />
+      <span>LIVE</span>
+    </button>
   </div>
 </div>
 
@@ -255,188 +276,230 @@
     bottom: 0;
     left: 0;
     right: 0;
-    background: rgba(15, 15, 15, 0.96);
-    backdrop-filter: blur(20px);
-    padding: 12px 20px;
-    border-top: 1px solid #007bff;
+    /* Apple liquid glass ribbon - ultra thin */
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.15) 0%,
+      rgba(255, 255, 255, 0.12) 100%
+    );
+    backdrop-filter: blur(60px) saturate(180%);
+    -webkit-backdrop-filter: blur(60px) saturate(180%);
+    padding: 6px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
     z-index: 1000;
-    box-shadow: 0 -2px 15px rgba(0,0,0,0.4);
+    box-shadow:
+      0 -8px 32px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15),
+      0 0 0 0.5px rgba(255, 255, 255, 0.1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .time-machine-main {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
-    gap: 15px;
+    gap: 12px;
+    width: 100%;
+    margin: 0 auto;
   }
 
   .time-info-compact {
     display: flex;
     align-items: center;
-    font-family: 'Monaco', 'Menlo', monospace;
-    font-size: 0.75em;
-    color: #aaa;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
+    font-size: 0.7em;
+    color: rgba(255, 255, 255, 0.75);
     gap: 8px;
-    flex: 1;
-    min-width: 0;
+    min-width: 140px;
+    font-weight: 500;
+    flex-shrink: 0;
   }
 
   .time-info-compact.current {
     color: #00ff88;
-    font-weight: bold;
+    font-weight: 600;
+    text-shadow: 0 0 20px rgba(0, 255, 136, 0.6);
   }
 
   .time-nav-controls {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
+    flex-shrink: 0;
   }
 
-  .time-utility-controls {
+  .time-playback-controls {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    flex-shrink: 0;
   }
 
-  .time-btn-compact {
-    background: #2a2a2a;
-    color: white;
-    border: 1px solid #444;
-    padding: 4px 8px;
-    border-radius: 4px;
+  /* Icon button base style - ultra minimal */
+  .icon-btn {
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(20px);
+    color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 4px;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 0.75em;
-    transition: all 0.15s ease;
-    min-width: 28px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 24px;
     height: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   }
 
-  .time-btn-compact:hover {
-    background: #007bff;
-    border-color: #007bff;
+  .icon-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 1);
     transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   }
 
+  .icon-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
 
-  .time-btn-compact.live {
-    background: #00ff88;
-    color: #000;
-    border-color: #00ff88;
-    font-weight: bold;
+  /* Play button - highlighted */
+  .icon-btn.play-btn {
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.4), rgba(0, 180, 255, 0.3));
+    border-color: rgba(0, 122, 255, 0.5);
+    color: #ffffff;
+    box-shadow:
+      0 2px 10px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .icon-btn.play-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.5), rgba(0, 180, 255, 0.4));
+    border-color: rgba(0, 122, 255, 0.6);
+    transform: translateY(-1px) scale(1.05);
+    box-shadow:
+      0 4px 16px rgba(0, 122, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+
+  .icon-btn.play-btn.playing {
+    background: linear-gradient(135deg, rgba(255, 136, 0, 0.4), rgba(204, 102, 0, 0.3));
+    border-color: rgba(255, 136, 0, 0.5);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  /* Loop button - active state */
+  .icon-btn.loop-btn.active {
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.4), rgba(0, 180, 255, 0.3));
+    border-color: rgba(0, 122, 255, 0.5);
+    color: #ffffff;
+    box-shadow:
+      0 2px 10px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  /* LIVE button */
+  .live-btn {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.35), rgba(0, 200, 255, 0.25));
+    backdrop-filter: blur(20px);
+    color: #ffffff;
+    border: 1px solid rgba(0, 255, 136, 0.5);
+    border-radius: 6px;
     padding: 4px 10px;
-    min-width: 45px;
-  }
-
-  .time-btn-compact.live:hover {
-    background: #00cc6a;
-    border-color: #00cc6a;
-  }
-
-  .time-btn-mini {
-    background: #333;
-    color: #aaa;
-    border: 1px solid #555;
-    padding: 2px 6px;
-    border-radius: 3px;
-    cursor: pointer;
     font-size: 0.7em;
-    transition: all 0.15s ease;
-    min-width: 22px;
-    height: 20px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+    cursor: pointer;
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 4px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0;
+    box-shadow:
+      0 2px 10px rgba(0, 255, 136, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
   }
 
-  .time-btn-mini:hover {
-    background: #555;
-    color: white;
+  .live-btn:hover {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.45), rgba(0, 200, 255, 0.35));
+    border-color: rgba(0, 255, 136, 0.6);
+    transform: translateY(-1px);
+    box-shadow:
+      0 4px 16px rgba(0, 255, 136, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
   }
 
+  /* Timeline slider */
   .time-slider-container {
     position: relative;
-    width: 100%;
-    max-width: 100%;
+    flex: 1 1 auto;
+    min-width: 150px;
     --progress: 0%;
   }
 
   .time-slider {
     width: 100%;
-    height: 6px;
-    border-radius: 3px;
-    background: linear-gradient(90deg,
-        #007acc 0%,
-        #00ff88 var(--progress),
-        #404040 var(--progress),
-        #555 100%);
+    height: 3px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.18);
     outline: none;
     -webkit-appearance: none;
     appearance: none;
     cursor: pointer;
-    transition: background 0.1s ease;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+
+  .time-slider:hover {
+    background: rgba(255, 255, 255, 0.22);
   }
 
   .time-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
-    background: linear-gradient(45deg, #007acc, #005a9a);
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.95) 100%);
     cursor: pointer;
-    box-shadow: 0 1px 4px rgba(0,122,204,0.4);
-    transition: all 0.2s ease;
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    border: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .time-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.1);
-    box-shadow: 0 2px 8px rgba(0,122,204,0.6);
+    transform: scale(1.2);
+    box-shadow:
+      0 4px 10px rgba(0, 0, 0, 0.4),
+      0 0 0 3px rgba(0, 122, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
   }
 
   .time-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
-    background: linear-gradient(45deg, #007acc, #005a9a);
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.95) 100%);
     cursor: pointer;
     border: none;
-    box-shadow: 0 1px 4px rgba(0,122,204,0.4);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .time-slider:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* Player Controls */
-  .time-btn-compact.play-pause {
-    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-    border-color: #007bff;
-    font-size: 14px;
-    min-width: 32px;
-  }
-
-  .time-btn-compact.play-pause:hover {
-    background: linear-gradient(135deg, #0056b3 0%, #003d82 100%);
-    transform: translateY(-1px) scale(1.05);
-  }
-
-  .time-btn-compact.play-pause.playing {
-    background: linear-gradient(135deg, #ff8800 0%, #cc6600 100%);
-    border-color: #ff8800;
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-
-  .time-btn-compact.play-pause:disabled {
     opacity: 0.3;
     cursor: not-allowed;
-    transform: none !important;
   }
 
+  /* Speed control */
   .speed-control {
     display: flex;
     align-items: center;
@@ -444,23 +507,25 @@
   }
 
   .speed-label {
-    font-family: monospace;
-    font-size: 0.7em;
-    color: #aaa;
-    min-width: 32px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
+    font-size: 0.65em;
+    color: rgba(255, 255, 255, 0.75);
+    min-width: 28px;
     text-align: right;
     font-weight: 600;
   }
 
   .speed-slider {
-    width: 80px;
-    height: 3px;
+    width: 50px;
+    height: 2px;
     -webkit-appearance: none;
     appearance: none;
-    background: linear-gradient(90deg, #555 0%, #007bff 100%);
-    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
     outline: none;
     cursor: pointer;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .speed-slider::-webkit-slider-thumb {
@@ -469,34 +534,36 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #007bff;
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
     cursor: pointer;
-    transition: all 0.2s ease;
+    box-shadow:
+      0 1px 4px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    border: none;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .speed-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
-    background: #00a0ff;
+    transform: scale(1.15);
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.4),
+      0 0 0 2px rgba(0, 122, 255, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
   }
 
   .speed-slider::-moz-range-thumb {
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #007bff;
+    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
     cursor: pointer;
     border: none;
-  }
-
-  .time-btn-mini.loop {
-    font-size: 14px;
-  }
-
-  .time-btn-mini.loop.active {
-    background: #007bff;
-    color: white;
-    border-color: #007bff;
-    box-shadow: 0 0 8px rgba(0, 122, 204, 0.4);
+    box-shadow:
+      0 1px 4px rgba(0, 0, 0, 0.3),
+      0 0 0 2px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   @keyframes pulse {

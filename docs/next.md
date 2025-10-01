@@ -1,35 +1,6 @@
 # XLN Next Development Session
 
-## 🎯 Current Status (Updated 2025-09-30)
-
-### ✅ Accomplished This Session
-
-#### **🐛 Critical Consensus Bug Fixed**
-- **Bilateral consensus failure resolved**: `proposeAccountFrame` was using old `currentFrame.deltas` instead of extracting from `clonedMachine.deltas` after processing transactions
-- **Payments now commit properly**: Frames no longer stuck at "Awaiting Consensus"
-- **Proper state serialization**: Extract full delta state from Map → arrays for frame hashing
-
-#### **🎨 UI/UX Improvements**
-- **Removed bar labels**: Clean visualization, numbers only on hover (planned)
-- **Label alignment fixed**: Sprites now properly face camera (billboard effect)
-- **Removed noisy logs**: No more "💾 Saved" spam in console
-- **Added comprehensive debug logging**: Full payment flow tracing with clear markers
-
-#### **💸 Payment Flow Fixed**
-- **Proper route construction**: `[fromEntity, toEntity]` instead of single entity
-- **Amount conversion**: 18-decimal BigInt handling matching PaymentPanel
-- **SignerId extraction**: From replica key format `entityId:signerId`
-- **Fail-fast validation**: Early error detection with detailed logging
-
-#### **✅ Architecture Confirmed Correct**
-- **ACK→RECEIVE→ACK blocking**: This is the CORRECT pattern (not a bug!)
-- **Sequential frame processing**: Strictly one pending frame at a time (blockchain-like)
-- **Simultaneous proposals**: Already handled with hash tie-breaking
-- **No out-of-order messages**: Account framechain is sequential by design
-
----
-
-## 🚨 **PLANNED FOR NEXT SESSION**
+## 🚨 **IMMEDIATE PRIORITIES**
 
 ### **🔥 Priority 1: Dual Hover Tooltips**
 On connection hover, show TWO tooltips (one for each side):
@@ -136,54 +107,11 @@ Default to clean H-shaped layout on fresh start:
 
 ---
 
-## 📝 **Technical Notes**
+## 🎯 **NEXT ACTIONS**
 
-### Bilateral Consensus Pattern (CORRECT)
-```
-Sender                    Receiver
-  |                          |
-  |--- Frame #1 + Sig --->   |
-  |                          | (validate, sign)
-  |   <--- ACK + Sig ----    |
-  | (commit)                 | (commit)
-  |                          |
-  |--- Frame #2 + Sig --->   |  (blocked until #1 ACK received)
-```
-
-- **Strictly sequential**: One pending frame at a time
-- **No pipelining**: Wait for ACK before sending next frame
-- **Deterministic**: Hash-based tie-breaking for simultaneous proposals
-- **Blockchain-like**: Account framechain must be sequential
-
-### State Serialization
-```typescript
-// CORRECT: Use clonedMachine.deltas (after processing txs)
-const sortedTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
-const finalTokenIds = sortedTokens.map(([id]) => id);
-const finalDeltas = sortedTokens.map(([, d]) => d.offdelta - d.ondelta);
-
-// WRONG: Using currentFrame (old state)
-tokenIds: clonedMachine.currentFrame.tokenIds // ❌ Old state
-```
-
-### Payment Flow
-1. Find replica for sender entity
-2. Check direct account exists
-3. Convert amount to 18-decimal BigInt
-4. Build route: `[fromEntity, toEntity]`
-5. Extract signerId from replica key
-6. Create `directPayment` EntityTx
-7. Call `xln.processUntilEmpty(env, [paymentInput])`
-8. Visualization updates automatically from server frames
-
----
-
-## 🎯 **Next Immediate Actions**
-
-1. ~~**Implement dual hover tooltips**~~ - ✅ COMPLETED
-2. ~~**Add j-event ripples**~~ - Visual feedback for state changes
-3. **Test payment flows** - Verify consensus fix works end-to-end
-4. **Implement reserve-to-collateral flow** - See detailed plan below
+1. **Add j-event ripples** - Visual feedback for reserve/collateral changes
+2. **Test payment flows end-to-end** - Verify consensus and UI updates
+3. **Implement reserve-to-collateral flow** - See detailed plan below
 
 ---
 
@@ -689,11 +617,3 @@ The end-to-end flow:
 7. ✅ Verify j-watcher integration works (should already work!)
 
 **Estimated effort**: 3-4 hours for full implementation + testing.
-
----
-
-## 🎯 **Updated Next Actions**
-
-1. **Implement reserve-to-collateral flow** - Follow plan above
-2. **Test payment flows** - Verify consensus fix works end-to-end
-3. **Add j-event ripples** - Visual feedback for settlement events
