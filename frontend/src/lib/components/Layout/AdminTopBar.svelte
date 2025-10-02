@@ -138,16 +138,38 @@
         localStorage.clear();
         sessionStorage.clear();
         
-        // Clear IndexedDB databases
+        // Clear ALL IndexedDB databases
         if (typeof indexedDB !== 'undefined') {
-          const dbNames = ['db', 'level-js-db', 'level-db', 'xln-db'];
-          for (const dbName of dbNames) {
+          // Get all database names dynamically
+          let allDatabases: string[] = [];
+
+          // Try modern API first (Chrome 71+)
+          if ('databases' in indexedDB) {
+            try {
+              const dbs = await (indexedDB as any).databases();
+              allDatabases = dbs.map((db: any) => db.name);
+              console.log(`📋 Found ${allDatabases.length} IndexedDB databases:`, allDatabases);
+            } catch (err) {
+              console.log('⚠️ Could not enumerate databases, using fallback list');
+            }
+          }
+
+          // Fallback: known database names from Level.js and our app
+          if (allDatabases.length === 0) {
+            allDatabases = ['db', 'level-js-db', 'level-db', 'xln-db', '_pouch_db'];
+          }
+
+          // Delete all databases
+          for (const dbName of allDatabases) {
             try {
               await new Promise<void>((resolve, reject) => {
                 const deleteReq = indexedDB.deleteDatabase(dbName);
                 deleteReq.onsuccess = () => resolve();
                 deleteReq.onerror = () => reject(deleteReq.error);
-                deleteReq.onblocked = () => resolve(); // Continue anyway
+                deleteReq.onblocked = () => {
+                  console.log(`⚠️ Database ${dbName} deletion blocked, forcing...`);
+                  resolve(); // Continue anyway
+                };
               });
               console.log(`✅ Cleared IndexedDB: ${dbName}`);
             } catch (err) {

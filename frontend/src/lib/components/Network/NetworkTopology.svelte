@@ -84,6 +84,11 @@
   let hoveredObject: any = null;
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
 
+  // Track previous network state for smart incremental updates
+  let previousEntityIds: Set<string> = new Set();
+  let previousConnectionKeys: Set<string> = new Set();
+  let updateDebounceTimer: number | null = null;
+
   // Dual tooltip for connections (showing both perspectives)
   let dualTooltip = {
     visible: false,
@@ -113,7 +118,7 @@
         entityMode: 'sphere',
         wasLastOpened: false,
         rotationX: 0,
-        rotationY: 0,
+        rotationY: 5000, // Default to Spin mode
         rotationZ: 0,
         camera: undefined
       };
@@ -144,7 +149,7 @@
         entityMode: 'sphere',
         wasLastOpened: false,
         rotationX: 0,
-        rotationY: 0,
+        rotationY: 5000, // Default to Spin mode
         rotationZ: 0,
         camera: undefined
       };
@@ -225,7 +230,7 @@
   let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 = fast)
   let availableTokens: number[] = []; // Will be populated from actual token data
   let showPanel: boolean = true; // Mobile-friendly panel toggle - start visible
-  let labelScale: number = 3.0; // Entity label size multiplier (1.0 = 32px font, 3.0 = 96px font)
+  let labelScale: number = 2.0; // Entity label size multiplier (1.0 = 32px font, 2.0 = 64px font)
 
   // Quick payment form state
   let paymentFrom: string = '';
@@ -335,7 +340,7 @@
       0.1,
       1000
     );
-    camera.position.set(0, 0, 25);
+    camera.position.set(0, 0, 100); // Zoom out for better H visibility
 
     // Renderer setup
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -408,9 +413,6 @@
     const liveMode = $isLive;
 
     console.log(`🗺️ Updating topology - ${liveMode ? 'LIVE' : `Frame ${timeIndex}`}`);
-
-    // Clear existing entities and connections
-    clearNetwork();
 
     // Update available tokens
     updateAvailableTokens();
@@ -504,6 +506,9 @@
 
     console.log(`🌟 Top-3 Hubs:`, Array.from(top3Hubs).map(id => `${id.slice(0,8)} (${connectionDegrees.get(id)} connections)`));
 
+    // Clear and rebuild - simple and reliable
+    clearNetwork();
+
     // Try to load saved positions first (persistence)
     const savedPositions = loadEntityPositions();
 
@@ -562,7 +567,7 @@
     particles = [];
   }
 
-  // Radial hub-centric layout: Hubs in center, leaves on periphery
+  // H-shape layout: Letter H for Homakov 😎
   function applyForceDirectedLayout(profiles: any[], connectionMap: Map<string, Set<string>>, _capacityMap: Map<string, number>) {
     const positions = new Map<string, THREE.Vector3>();
 
@@ -573,40 +578,73 @@
       connectionCounts.set(profile.entityId, connections?.size || 0);
     });
 
-    // Sort: hubs first (most connections), then users
+    // Sort: hubs first (most connections), then by entityId for deterministic ordering
     const sorted = [...profiles].sort((a, b) => {
       const countA = connectionCounts.get(a.entityId) || 0;
       const countB = connectionCounts.get(b.entityId) || 0;
-      return countB - countA; // Descending - hubs first
+      if (countB !== countA) {
+        return countB - countA; // Descending - hubs first
+      }
+      // Tiebreaker: sort by entityId for stable, deterministic layout
+      return a.entityId.localeCompare(b.entityId);
     });
 
-    // Radial layout: distance from center inversely proportional to degree
-    // Hubs (high degree) stay near center, leaves (low degree) spread out
-    const baseRadius = 5; // Minimum distance for hubs
-    const maxRadius = 50; // Maximum distance for leaves
-    const angleStep = (Math.PI * 2) / profiles.length;
+    // H-shape layout for exactly 6 nodes (vertical H for Homakov):
+    // First 2 sorted = hubs (most connections) → horizontal center line
+    // Next 4 sorted = leaves → vertical edges
+    //
+    //  leaf        leaf
+    //   |           |
+    //  hub1 ------ hub2
+    //   |           |
+    //  leaf        leaf
+    const spacing = 30;
+    const verticalSpacing = 40;
 
     sorted.forEach((profile, index) => {
       const degree = connectionCounts.get(profile.entityId) || 0;
 
-      // Calculate radius: hubs close to center, leaves far away
-      // Using inverse relationship: radius = maxRadius / (degree + 1)
-      const radius = degree > 0
-        ? Math.max(baseRadius, maxRadius / (degree + 1))
-        : maxRadius;
+      // Use H-shape positions if we have exactly 6 nodes
+      if (sorted.length === 6) {
+        let pos: { x: number; y: number; z: number };
 
-      // Arrange in circle at calculated radius
-      const angle = index * angleStep;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      const z = 0;
+        if (index === 0) {
+          // Hub 1: left center
+          pos = { x: -spacing, y: 0, z: 0 };
+        } else if (index === 1) {
+          // Hub 2: right center
+          pos = { x: spacing, y: 0, z: 0 };
+        } else if (index === 2) {
+          // Leaf 1: top left
+          pos = { x: -spacing, y: verticalSpacing, z: 0 };
+        } else if (index === 3) {
+          // Leaf 2: top right
+          pos = { x: spacing, y: verticalSpacing, z: 0 };
+        } else if (index === 4) {
+          // Leaf 3: bottom left
+          pos = { x: -spacing, y: -verticalSpacing, z: 0 };
+        } else {
+          // Leaf 4: bottom right (index === 5)
+          pos = { x: spacing, y: -verticalSpacing, z: 0 };
+        }
 
-      positions.set(profile.entityId, new THREE.Vector3(x, y, z));
-
-      console.log(`📍 ${profile.entityId.slice(0,8)}: degree=${degree}, radius=${radius.toFixed(1)}`);
+        positions.set(profile.entityId, new THREE.Vector3(pos.x, pos.y, pos.z));
+        console.log(`📍 ${profile.entityId.slice(0,8)}: H-position (${pos.x}, ${pos.y}), degree=${degree}, role=${index < 2 ? 'HUB' : 'LEAF'}`);
+      } else {
+        // Fallback to radial for other counts
+        const baseRadius = 5;
+        const maxRadius = 50;
+        const angleStep = (Math.PI * 2) / profiles.length;
+        const radius = degree > 0 ? Math.max(baseRadius, maxRadius / (degree + 1)) : maxRadius;
+        const angle = index * angleStep;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        positions.set(profile.entityId, new THREE.Vector3(x, y, 0));
+        console.log(`📍 ${profile.entityId.slice(0,8)}: radial fallback, degree=${degree}`);
+      }
     });
 
-    console.log(`🎯 Radial hub-centric layout complete (${profiles.length} entities)`);
+    console.log(`🎯 H-layout complete (${profiles.length} entities) - Homakov signature 🔥`);
     return positions;
   }
 
@@ -725,6 +763,51 @@
     // NO DEMO CONNECTIONS - only show real bilateral accounts
 
     console.log(`🔗 Frame ${$currentTimeIndex}: Created ${connections.length} connections`);
+  }
+
+  // Update only progress bars without rebuilding entire scene (performance optimization)
+  function updateProgressBarsOnly() {
+    if (!scene) return;
+
+    const currentReplicas = $visibleReplicas;
+
+    // Update existing progress bars with new data
+    connections.forEach(connection => {
+      if (!connection.progressBars) return;
+
+      const fromId = connection.from;
+      const toId = connection.to;
+
+      // Find the account data for this connection
+      const fromReplica = Array.from(currentReplicas.entries()).find(([key]) => key.startsWith(fromId + ':'));
+      if (!fromReplica || !fromReplica[1]?.state?.accounts) {
+        console.warn(`⚠️ No replica found for ${fromId} - keeping existing bars`);
+        return;
+      }
+
+      const accountData = fromReplica[1].state.accounts.get(toId);
+      if (!accountData) {
+        console.warn(`⚠️ No account data for ${fromId}↔${toId} - keeping existing bars`);
+        return;
+      }
+
+      // Find entities (needed to recreate bars)
+      const fromEntity = entities.find(e => e.id === fromId);
+      const toEntity = entities.find(e => e.id === toId);
+      if (!fromEntity || !toEntity) {
+        console.warn(`⚠️ Entities not found for ${fromId}↔${toId} - keeping existing bars`);
+        return;
+      }
+
+      // Only remove old bars after confirming we can create new ones
+      scene.remove(connection.progressBars);
+
+      // Create new progress bars with updated data
+      connection.progressBars = createProgressBars(fromEntity, toEntity, accountData);
+      scene.add(connection.progressBars);
+    });
+
+    console.log('📊 Updated progress bars without scene rebuild');
   }
 
   function createTransactionParticles() {
@@ -2280,15 +2363,17 @@
       availableTokens = [0]; // Default fallback
     }
 
-    // Reset selected token if it's not available - prioritize token 0
-    if (!availableTokens.includes(selectedTokenId)) {
-      // Prefer token 0 if available, else use first available
-      const preferredToken = availableTokens.includes(0) ? 0 : availableTokens[0];
-      if (preferredToken === undefined) {
-        throw new Error('FINTECH-SAFETY: No available tokens found');
-      }
-      selectedTokenId = preferredToken;
+    // FORCE TOKEN 0 ALWAYS - Never switch tokens during playback
+    // This prevents the token 0 → token 1 jumping bug
+    if (selectedTokenId !== 0) {
+      selectedTokenId = 0;
       saveBirdViewSettings(); // Persist the change
+    }
+
+    // ALWAYS include token 0 in availableTokens for UI stability
+    // This prevents dropdown from showing "empty" during playback
+    if (!availableTokens.includes(0)) {
+      availableTokens = [0, ...availableTokens].sort((a, b) => a - b);
     }
   }
 
@@ -2918,43 +3003,67 @@
           </button>
         </div>
 
-        <!-- Auto-Rotate Speed Sliders (0 = stopped, 10000 = fast) -->
+        <!-- Rotation Presets -->
         <div class="control-group">
-          <label>🔄 Rotate X:</label>
+          <label>🔄 Rotation:</label>
+          <div class="preset-buttons">
+            <button
+              class="preset-btn"
+              class:active={rotationX === 0 && rotationY === 0 && rotationZ === 0}
+              on:click={() => { rotationX = 0; rotationY = 0; rotationZ = 0; saveBirdViewSettings(); }}
+              title="Stop all rotation"
+            >
+              ⭕ Stop
+            </button>
+            <button
+              class="preset-btn"
+              class:active={rotationX === 0 && rotationY === 5000 && rotationZ === 0}
+              on:click={() => { rotationX = 0; rotationY = 5000; rotationZ = 0; saveBirdViewSettings(); }}
+              title="Spin around Y-axis (carousel)"
+            >
+              ↻ Spin
+            </button>
+            <button
+              class="preset-btn"
+              class:active={rotationX === 3000 && rotationY === 3000 && rotationZ === 0}
+              on:click={() => { rotationX = 3000; rotationY = 3000; rotationZ = 0; saveBirdViewSettings(); }}
+              title="Tumble slowly (X+Y)"
+            >
+              🌀 Tumble
+            </button>
+            <button
+              class="preset-btn"
+              class:active={rotationX === 0 && rotationY === 8000 && rotationZ === 0}
+              on:click={() => { rotationX = 0; rotationY = 8000; rotationZ = 0; saveBirdViewSettings(); }}
+              title="Fast spin (demo mode)"
+            >
+              🎡 Fast
+            </button>
+          </div>
+        </div>
+
+        <!-- Speed Control (if not stopped) -->
+        {#if rotationX > 0 || rotationY > 0 || rotationZ > 0}
+        <div class="control-group">
+          <label>⚡ Speed: {Math.round((rotationY || rotationX || rotationZ) / 100)}%</label>
           <input
             type="range"
-            min="0"
+            min="1000"
             max="10000"
-            bind:value={rotationX}
+            step="500"
+            value={rotationY || rotationX || rotationZ}
+            on:input={(e) => {
+              const newSpeed = Number(e.currentTarget.value);
+              if (rotationY > 0) rotationY = newSpeed;
+              if (rotationX > 0) rotationX = newSpeed;
+              if (rotationZ > 0) rotationZ = newSpeed;
+            }}
             on:change={() => saveBirdViewSettings()}
-            title="X-axis rotation (pitch): 0=stopped, 10000=fast"
+            title="Adjust rotation speed"
             class="rotation-slider"
           />
         </div>
-        <div class="control-group">
-          <label>🔄 Rotate Y:</label>
-          <input
-            type="range"
-            min="0"
-            max="10000"
-            bind:value={rotationY}
-            on:change={() => saveBirdViewSettings()}
-            title="Y-axis rotation (yaw): 0=stopped, 10000=fast"
-            class="rotation-slider"
-          />
-        </div>
-        <div class="control-group">
-          <label>🔄 Rotate Z:</label>
-          <input
-            type="range"
-            min="0"
-            max="10000"
-            bind:value={rotationZ}
-            on:change={() => saveBirdViewSettings()}
-            title="Z-axis rotation (roll): 0=stopped, 10000=fast"
-            class="rotation-slider"
-          />
-        </div>
+        {/if}
 
         <!-- Label Size Slider -->
         <div class="control-group">
@@ -3400,6 +3509,52 @@
   }
 
   .toggle-btn.active:hover {
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.6), rgba(0, 180, 255, 0.5));
+    transform: translateY(-1px);
+  }
+
+  /* Preset buttons layout */
+  .preset-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .preset-btn {
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 10px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+    font-weight: 500;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .preset-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.95);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .preset-btn.active {
+    background: linear-gradient(135deg, rgba(0, 122, 255, 0.5), rgba(0, 180, 255, 0.4));
+    border-color: rgba(0, 122, 255, 0.6);
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow:
+      0 4px 16px rgba(0, 122, 255, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .preset-btn.active:hover {
     background: linear-gradient(135deg, rgba(0, 122, 255, 0.6), rgba(0, 180, 255, 0.5));
     transform: translateY(-1px);
   }

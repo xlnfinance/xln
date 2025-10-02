@@ -24,9 +24,10 @@
     try {
       const saved = localStorage.getItem('xln-bird-view-settings');
       const settings = saved ? JSON.parse(saved) : null;
-      return settings?.wasLastOpened || false;
+      // Default to graph view (true) on first load
+      return settings?.wasLastOpened !== undefined ? settings.wasLastOpened : true;
     } catch {
-      return false;
+      return true; // Default to graph view
     }
   }
 

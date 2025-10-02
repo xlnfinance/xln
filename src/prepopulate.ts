@@ -130,32 +130,42 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
 
   console.log('\n👥 Step 3: Connecting users to hubs (H vertical bars)...');
 
-  // Step 3: Connect users to hubs - H shape
-  const userHubMapping = [
-    { users: [2, 3], hub: 0 },    // E3, E4 → Hub E1 (left bar)
-    { users: [4, 5], hub: 1 },    // E5, E6 → Hub E2 (right bar)
-  ];
+  // Step 3: Connect users to hubs - Vertical H shape
+  // Layout sorts by: degree DESC, then entityId ASC
+  // After sorting (assuming entities created as E1, E2, E3, E4, E5, E6):
+  //   sorted[0] = E1 (hub, left) - degree 3
+  //   sorted[1] = E2 (hub, right) - degree 3
+  //   sorted[2] = E3 (user, top-left) - degree 1
+  //   sorted[3] = E4 (user, top-right) - degree 1
+  //   sorted[4] = E5 (user, bottom-left) - degree 1
+  //   sorted[5] = E6 (user, bottom-right) - degree 1
+  //
+  // For H pattern:
+  //   E3 (top-left) ──── E1 (hub left)
+  //   E5 (bottom-left) ─ E1 (hub left)
+  //   E4 (top-right) ─── E2 (hub right)
+  //   E6 (bottom-right) ─ E2 (hub right)
 
-  for (const mapping of userHubMapping) {
-    for (const userIndex of mapping.users) {
-      const user = entities[userIndex];
-      const hub = entities[mapping.hub];
-      if (!user || !hub) continue;
+  const users = entities.slice(2); // [E3, E4, E5, E6]
 
-      // User opens account with hub
-      await processUntilEmpty(env, [{
-        entityId: user.id,
-        signerId: user.signer,
-        entityTxs: [{
-          type: 'openAccount',
-          data: { targetEntityId: hub.id }
-        }]
-      }]);
+  // Alternate users between hubs: E3→hub1, E4→hub2, E5→hub1, E6→hub2
+  for (let i = 0; i < users.length; i++) {
+    const user = users[i];
+    const hub = (i % 2 === 0) ? hub1 : hub2; // Even index → hub1, odd → hub2
 
-      const userNum = parseInt(user.id.slice(2), 16);
-      const hubNum = parseInt(hub.id.slice(2), 16);
-      console.log(`  👤 User E${userNum} → Hub E${hubNum} connected`);
-    }
+    // User opens account with hub
+    await processUntilEmpty(env, [{
+      entityId: user.id,
+      signerId: user.signer,
+      entityTxs: [{
+        type: 'openAccount',
+        data: { targetEntityId: hub.id }
+      }]
+    }]);
+
+    const userNum = parseInt(user.id.slice(2), 16);
+    const hubNum = parseInt(hub.id.slice(2), 16);
+    console.log(`  👤 User E${userNum} → Hub E${hubNum} connected (vertical bar)`);
   }
 
   console.log('\n🎯 Step 4: Setting hub profiles with lower fees...');

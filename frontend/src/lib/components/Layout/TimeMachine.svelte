@@ -1,13 +1,13 @@
 <script lang="ts">
   import { timeOperations, timeState } from '../../stores/timeStore';
   import { history, currentHeight } from '../../stores/xlnStore';
-  import { onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { SkipBack, ChevronLeft, ChevronRight, Play, Pause, Zap, RotateCcw } from 'lucide-svelte';
 
   // Player state
-  let isPlaying = false;
+  let isPlaying = true; // Start in play mode by default
   let playbackSpeed = 1; // 0.25x, 0.5x, 1x, 2x, 4x
-  let loopEnabled = false;
+  let loopEnabled = true; // Loop by default
   let playbackInterval: number | null = null;
 
   // Reactive values
@@ -108,10 +108,14 @@
     const interval = baseInterval / playbackSpeed;
 
     playbackInterval = window.setInterval(() => {
+      // Allow stepping forward until we're AT maxTimeIndex (inclusive)
+      // This ensures the last frame is shown before stopping
       if ($timeState.currentTimeIndex < $timeState.maxTimeIndex) {
         timeOperations.stepForward();
-      } else {
-        // Reached the end
+      } else if ($timeState.currentTimeIndex === $timeState.maxTimeIndex) {
+        // We're at the last historical frame, take one more step to LIVE
+        timeOperations.stepForward(); // This will transition to LIVE
+        // Then handle end-of-playback
         if (loopEnabled) {
           timeOperations.goToHistoryStart();
         } else {
@@ -143,6 +147,16 @@
   function toggleLoop() {
     loopEnabled = !loopEnabled;
   }
+
+  // Auto-start playback on mount
+  onMount(() => {
+    // Start playback automatically after component mounts and history loads
+    setTimeout(() => {
+      if ($history.length > 0 && isPlaying) {
+        startPlayback();
+      }
+    }, 500); // Small delay to ensure history is loaded
+  });
 
   // Cleanup on component destroy
   onDestroy(() => {
