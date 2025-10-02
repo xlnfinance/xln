@@ -5,6 +5,7 @@ e2e/playwright-report/
 e2e/screenshots/
 playwright-report/
 test-results/
+.playwright-mcp/
 
 # OS/editor noise
 .DS_Store
