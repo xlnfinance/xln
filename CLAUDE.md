@@ -35,6 +35,15 @@ bun build src/server.ts --target=browser --outdir=dist --minify \
 - Missing `--external` flags ❌
 - `--bundle` without externals ❌
 
+## 🎭 PLAYWRIGHT USAGE RULE
+
+**CRITICAL: Try Playwright ONCE only. If it fails, STOP immediately and ask the user.**
+
+- Never retry Playwright commands automatically
+- Never attempt to fix/restart browser sessions without asking
+- If browser shows about:blank or errors, STOP and report to user
+- This prevents accumulating multiple stuck browser tabs
+
 Everywhere in code fail-fast and loud (with full stop of actions and throw a popup)
   1. "VERIFY FIRST" Protocol
 

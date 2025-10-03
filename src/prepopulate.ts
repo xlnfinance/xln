@@ -4,10 +4,198 @@
  * Visual structure: H-shaped for clean 1px=$1 bars visualization
  */
 
-import type { Env, EntityInput } from './types';
+import type { Env, EntityInput, AccountMachine, EnvSnapshot, EntityReplica } from './types';
 import { applyServerInput } from './server';
 import { createNumberedEntity } from './entity-factory';
 import { getAvailableJurisdictions } from './evm';
+import { createDemoDelta } from './account-utils';
+import { buildEntityProfile } from './gossip-helper';
+import { cloneEntityReplica } from './state-helpers';
+import type { Profile } from './gossip';
+
+const USDC_TOKEN_ID = 2;
+const DECIMALS = 18n;
+const ONE_TOKEN = 10n ** DECIMALS;
+
+type AccountProfile = NonNullable<Profile['accounts']>[number];
+
+const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
+
+type ReplicaEntry = [string, EntityReplica];
+
+function findReplica(env: Env, entityId: string): ReplicaEntry {
+  const entry = Array.from(env.replicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
+  if (!entry) {
+    throw new Error(`PREPOPULATE: Replica for entity ${entityId} not found`);
+  }
+  return entry as ReplicaEntry;
+}
+
+function cloneProfilesForSnapshot(env: Env): { profiles: Profile[] } | undefined {
+  if (!env.gossip || typeof env.gossip.getProfiles !== 'function') {
+    return undefined;
+  }
+
+  const profiles = env.gossip.getProfiles().map((profile: Profile): Profile => {
+    let clonedMetadata: Profile['metadata'] = undefined;
+    if (profile.metadata) {
+      clonedMetadata = { ...profile.metadata };
+      clonedMetadata.lastUpdated = clonedMetadata.lastUpdated ?? Date.now();
+      if (clonedMetadata.baseFee !== undefined) {
+        clonedMetadata.baseFee = BigInt(clonedMetadata.baseFee.toString());
+      }
+    }
+
+    const clonedAccounts: AccountProfile[] = profile.accounts
+      ? profile.accounts.map((account): AccountProfile => {
+          const tokenCapacities = new Map<number, { inCapacity: bigint; outCapacity: bigint }>();
+          if (account.tokenCapacities) {
+            for (const [tokenId, capacities] of account.tokenCapacities.entries()) {
+              tokenCapacities.set(tokenId, {
+                inCapacity: capacities.inCapacity,
+                outCapacity: capacities.outCapacity,
+              });
+            }
+          }
+
+          return {
+            counterpartyId: account.counterpartyId,
+            tokenCapacities,
+          };
+        })
+      : [];
+
+    const profileClone: Profile = {
+      entityId: profile.entityId,
+      capabilities: [...profile.capabilities],
+      hubs: [...profile.hubs],
+      accounts: clonedAccounts,
+    };
+
+    if (clonedMetadata) {
+      profileClone.metadata = clonedMetadata;
+    }
+
+    return profileClone;
+  });
+
+  return { profiles };
+}
+
+function upsertAccount(
+  replica: EntityReplica,
+  counterpartyId: string,
+  ownCreditLimit: bigint,
+  peerCreditLimit: bigint,
+  collateral: bigint,
+  deltaValue: bigint,
+) {
+  const accountMachine: AccountMachine = {
+    counterpartyEntityId: counterpartyId,
+    mempool: [],
+    currentFrame: {
+      frameId: 0,
+      timestamp: Date.now(),
+      tokenIds: [USDC_TOKEN_ID],
+      deltas: [deltaValue],
+    },
+    sentTransitions: 0,
+    ackedTransitions: 0,
+    deltas: new Map([[USDC_TOKEN_ID, (() => {
+      const delta = createDemoDelta(USDC_TOKEN_ID, collateral, deltaValue);
+      delta.leftCreditLimit = ownCreditLimit;
+      delta.rightCreditLimit = peerCreditLimit;
+      return delta;
+    })()]]),
+    globalCreditLimits: {
+      ownLimit: ownCreditLimit,
+      peerLimit: peerCreditLimit,
+    },
+    currentFrameId: 0,
+    pendingSignatures: [],
+    rollbackCount: 0,
+    sendCounter: 0,
+    receiveCounter: 0,
+    proofHeader: {
+      fromEntity: replica.state.entityId,
+      toEntity: counterpartyId,
+      cooperativeNonce: 0,
+      disputeNonce: 0,
+    },
+    proofBody: {
+      tokenIds: [USDC_TOKEN_ID],
+      deltas: [deltaValue],
+    },
+    frameHistory: [],
+  };
+
+  replica.state.accounts.set(counterpartyId, accountMachine);
+}
+
+function ensureReserves(replica: EntityReplica, reserveAmount: bigint) {
+  if (!replica.state.reserves) {
+    replica.state.reserves = new Map();
+  }
+  replica.state.reserves.set(String(USDC_TOKEN_ID), reserveAmount);
+}
+
+function ensureMutualCredit(
+  env: Env,
+  leftEntityId: string,
+  rightEntityId: string,
+  options: {
+    leftCredit: bigint;
+    rightCredit: bigint;
+    leftCollateral: bigint;
+    rightCollateral: bigint;
+    leftReserve: bigint;
+    rightReserve: bigint;
+    delta?: bigint;
+  },
+) {
+  const [leftKey, leftReplica] = findReplica(env, leftEntityId);
+  const [rightKey, rightReplica] = findReplica(env, rightEntityId);
+
+  const deltaValue = options.delta ?? 0n;
+
+  upsertAccount(leftReplica, rightEntityId, options.leftCredit, options.rightCredit, options.leftCollateral, deltaValue);
+  upsertAccount(rightReplica, leftEntityId, options.rightCredit, options.leftCredit, options.rightCollateral, -deltaValue);
+
+  ensureReserves(leftReplica, options.leftReserve);
+  ensureReserves(rightReplica, options.rightReserve);
+
+  if (env.gossip) {
+    env.gossip.announce(buildEntityProfile(leftReplica.state));
+    env.gossip.announce(buildEntityProfile(rightReplica.state));
+  }
+
+  console.log(`🤝 Ensured mutual credit: ${leftKey.slice(0, 10)}… ↔ ${rightKey.slice(0, 10)}…`);
+}
+
+function pushFinalSnapshot(env: Env, description: string) {
+  const gossipSnapshot = cloneProfilesForSnapshot(env);
+
+  const snapshot: EnvSnapshot = {
+    height: env.height,
+    timestamp: Date.now(),
+    replicas: new Map(
+      Array.from(env.replicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
+    ),
+    serverInput: {
+      serverTxs: [],
+      entityInputs: [],
+    },
+    serverOutputs: [],
+    description,
+    ...(gossipSnapshot ? { gossip: gossipSnapshot } : {}),
+  };
+
+  if (!env.history) {
+    env.history = [];
+  }
+
+  env.history.push(snapshot);
+}
 
 export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
   console.log('🌐 Starting XLN Prepopulation');
@@ -149,8 +337,7 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   const users = entities.slice(2); // [E3, E4, E5, E6]
 
   // Alternate users between hubs: E3→hub1, E4→hub2, E5→hub1, E6→hub2
-  for (let i = 0; i < users.length; i++) {
-    const user = users[i];
+  for (const [i, user] of users.entries()) {
     const hub = (i % 2 === 0) ? hub1 : hub2; // Even index → hub1, odd → hub2
 
     // User opens account with hub
@@ -196,6 +383,44 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
     console.log(`  💰 Hub E${hubNum} - routing fee: 50 PPM (0.005%)`);
   }
 
+  console.log('\n🏦 Step 5: Seeding mutual credit, collateral, and reserves...');
+
+  const HUB_CREDIT = usd(250_000);
+  const HUB_COLLATERAL = usd(120_000);
+  const HUB_RESERVE = usd(420_000);
+  const USER_CREDIT = usd(90_000);
+  const USER_COLLATERAL = usd(25_000);
+  const USER_RESERVE = usd(80_000);
+
+  // Crossbar between hubs: balanced channel with substantial collateral
+  ensureMutualCredit(env, hub1.id, hub2.id, {
+    leftCredit: HUB_CREDIT,
+    rightCredit: HUB_CREDIT,
+    leftCollateral: HUB_COLLATERAL,
+    rightCollateral: HUB_COLLATERAL,
+    leftReserve: HUB_RESERVE,
+    rightReserve: HUB_RESERVE,
+    delta: 0n,
+  });
+
+  // Vertical bars: users lean on hubs for inbound credit
+  users.forEach((user, index) => {
+    const hub = index % 2 === 0 ? hub1 : hub2;
+    const skew = index % 2 === 0 ? -usd(5_000) : usd(7_500);
+    ensureMutualCredit(env, hub.id, user.id, {
+      leftCredit: HUB_CREDIT,
+      rightCredit: USER_CREDIT,
+      leftCollateral: HUB_COLLATERAL,
+      rightCollateral: USER_COLLATERAL,
+      leftReserve: HUB_RESERVE,
+      rightReserve: USER_RESERVE,
+      delta: skew,
+    });
+  });
+
+  console.log('🗂️ Capturing final snapshot for time machine playback...');
+  pushFinalSnapshot(env, 'Prepopulate seeded H-topology');
+
   console.log('\n================================');
   console.log('✅ Prepopulation Complete!');
   console.log('\nH-shaped network topology created:');
@@ -209,3 +434,4 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   console.log('  3. Payments will route through hubs automatically');
   console.log('================================\n');
 }
+

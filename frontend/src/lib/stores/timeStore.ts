@@ -55,15 +55,31 @@ export const visibleReplicas = derived(
 );
 
 // Derived store for getting current visible gossip (based on time index)
+function normalizeGossip(gossip: any) {
+  if (!gossip) return null;
+  if (typeof gossip.getProfiles === 'function') {
+    return gossip;
+  }
+
+  if (Array.isArray(gossip.profiles)) {
+    const cachedProfiles = gossip.profiles.map((profile: any) => ({ ...profile }));
+    return {
+      getProfiles: () => cachedProfiles
+    };
+  }
+
+  return null;
+}
+
 export const visibleGossip = derived(
   [timeState, history, xlnEnvironment],
   ([$timeState, $history, $env]) => {
     if ($timeState.isLive) {
-      return $env?.gossip || null;
+      return normalizeGossip($env?.gossip);
     }
     const idx = $timeState.currentTimeIndex;
     if (idx >= 0 && idx < $history.length) {
-      return $history[idx]?.gossip || null;
+      return normalizeGossip($history[idx]?.gossip);
     }
     return null;
   }

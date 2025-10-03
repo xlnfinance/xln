@@ -2,15 +2,21 @@
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
-
-  // Bird view toggle state
-  export let birdViewMode = false;
-  export let onToggleBirdView: (() => void) | undefined = undefined;
+  import { viewMode, viewModeOperations, type ViewMode } from '../../stores/viewModeStore';
 
   let showSettingsModal = false;
 
+  const viewTabs: Array<{ mode: ViewMode; icon: string; label: string; title: string }> = [
+    { mode: 'home', icon: '🏠', label: 'Home', title: 'XLN Overview' },
+    { mode: 'graph3d', icon: '🗺️', label: 'Graph 3D', title: '3D Network Topology' },
+    { mode: 'graph2d', icon: '🛰️', label: 'Graph 2D', title: '2D Network Topology' },
+    { mode: 'panels', icon: '📊', label: 'Panels', title: 'Entity Panels' },
+    { mode: 'terminal', icon: '💻', label: 'Terminal', title: 'Console View' }
+  ];
+
   // Reactive theme icon
   $: themeIcon = $settings.theme === 'dark' ? '🌙' : '☀️';
+  $: activeView = $viewMode;
 
   // J-machine status (derived from environment)
   $: jMachineStatus = (() => {
@@ -214,6 +220,12 @@
     tabOperations.addTab();
   }
 
+  function handleChangeView(mode: ViewMode) {
+    if (activeView !== mode) {
+      viewModeOperations.set(mode);
+    }
+  }
+
   function handleServerDelayChange(event: Event) {
     const target = event.target as HTMLInputElement;
     settingsOperations.setServerDelay(parseInt(target.value));
@@ -224,24 +236,17 @@
   <div class="admin-logo">
     <span class="logo-text">xln</span>
     <div class="view-switcher">
-      <button
-        class="view-switch-btn"
-        class:active={!birdViewMode}
-        on:click={() => { if (birdViewMode && onToggleBirdView) onToggleBirdView(); }}
-        title="Entity Panels View"
-      >
-        <span class="view-icon">📊</span>
-        <span class="view-label">Panels</span>
-      </button>
-      <button
-        class="view-switch-btn"
-        class:active={birdViewMode}
-        on:click={() => { if (!birdViewMode && onToggleBirdView) onToggleBirdView(); }}
-        title="Network Topology View (3D)"
-      >
-        <span class="view-icon">🗺️</span>
-        <span class="view-label">Graph</span>
-      </button>
+      {#each viewTabs as tab}
+        <button
+          class="view-switch-btn"
+          class:active={activeView === tab.mode}
+          on:click={() => handleChangeView(tab.mode)}
+          title={tab.title}
+        >
+          <span class="view-icon">{tab.icon}</span>
+          <span class="view-label">{tab.label}</span>
+        </button>
+      {/each}
     </div>
     <div class="j-machine-status">
       <span class="j-status-item" title="Last Synced J-machine Block">

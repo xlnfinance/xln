@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XLN Wallet Generator</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 480px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+            font-size: 28px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+            background: #f1f5f9;
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+
+        .tab.active {
+            background: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #374151;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        input:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .mnemonic-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .mnemonic-group textarea {
+            flex: 1;
+        }
+
+        .icon-btn {
+            padding: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .icon-btn:hover {
+            background: #5568d3;
+        }
+
+        .slider-group {
+            margin-top: 8px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .slider-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .slider-labels span:first-child {
+            color: #ef4444;
+        }
+
+        .slider-labels span:last-child {
+            color: #10b981;
+        }
+
+        .time-estimate {
+            margin-top: 8px;
+            font-size: 13px;
+            color: #6b7280;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .info-text {
+            font-size: 13px;
+            color: #6b7280;
+            line-height: 1.5;
+            margin-top: 8px;
+        }
+
+        .generate-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 24px;
+            transition: transform 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .generate-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+
+        .generate-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            margin-top: 20px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.3s;
+        }
+
+        .matrix-box {
+            margin-top: 12px;
+            background: #000;
+            color: #00ff00;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            line-height: 1.4;
+            overflow: hidden;
+            white-space: pre;
+        }
+
+        .tip-text {
+            margin-top: 12px;
+            font-size: 13px;
+            color: #6b7280;
+            line-height: 1.5;
+        }
+
+        .wallets-section {
+            margin-top: 30px;
+        }
+
+        .wallets-section h2 {
+            font-size: 20px;
+            margin-bottom: 16px;
+            color: #333;
+        }
+
+        .wallet-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .wallet-address {
+            font-size: 13px;
+            color: #374151;
+            word-break: break-all;
+        }
+
+        .login-btn {
+            padding: 8px 16px;
+            background: #10b981;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .login-btn:hover {
+            background: #059669;
+        }
+
+        .icon {
+            width: 16px;
+            height: 16px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>XLN Wallet</h1>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="brainwallet">
+                <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                </svg>
+                Brainwallet
+            </button>
+            <button class="tab" data-tab="mnemonic">
+                <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                Mnemonic
+            </button>
+        </div>
+
+        <div id="brainwallet" class="tab-content active">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" placeholder="Enter username">
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter password">
+            </div>
+
+            <div class="form-group">
+                <label>Derivation Complexity: <span id="complexity-value">5</span></label>
+                <div class="slider-group">
+                    <input type="range" id="complexity" min="1" max="10" value="5">
+                    <div class="slider-labels">
+                        <span>Quick (Demo)</span>
+                        <span>Balanced</span>
+                        <span>Secure</span>
+                    </div>
+                    <div class="time-estimate">
+                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Estimated time: <span id="time-estimate">2 minutes</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="mnemonic" class="tab-content">
+            <div class="form-group">
+                <label for="mnemonic-input">Mnemonic (16 words)</label>
+                <div class="mnemonic-group">
+                    <textarea id="mnemonic-input" rows="4" placeholder="Enter 16-word mnemonic"></textarea>
+                    <button class="icon-btn" onclick="generateMnemonic()">
+                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                    </button>
+                </div>
+                <p class="info-text">
+                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align: middle;">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                    </svg>
+                    Store your mnemonic securely. It's the only way to recover your wallet.
+                </p>
+            </div>
+        </div>
+
+        <button class="generate-btn" id="generate-btn" onclick="generateWallet()">
+            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+            Generate Wallet
+        </button>
+
+        <div class="progress-container" id="progress-container" style="display: none;">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="matrix-box" id="matrix-box"></div>
+            <p class="tip-text" id="tip-text"></p>
+        </div>
+
+        <div class="wallets-section" id="wallets-section" style="display: none;">
+            <h2>Generated Wallets</h2>
+            <div id="wallets-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const wordList = ["abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access", "accident", "account", "accuse", "achieve", "acid", "acoustic", "acquire", "across", "act", "action", "actor", "actress", "actual", "adapt", "add", "addict", "address", "adjust", "admit", "adult", "advance", "advice", "aerobic", "affair", "afford", "afraid", "again", "age", "agent", "agree", "ahead", "aim", "air", "airport", "aisle", "alarm", "album", "alcohol", "alert", "alien", "all", "alley", "allow", "almost", "alone", "alpha", "already", "also", "alter", "always", "amateur", "amazing", "among", "amount", "amused", "analyst", "anchor", "ancient", "anger", "angle", "angry", "animal", "ankle", "announce", "annual", "another", "answer", "antenna", "antique", "anxiety", "any", "apart", "apology", "appear", "apple", "approve", "april", "arch", "arctic"];
+
+        const tips = [
+            "Channels allow for instant, fee-less transactions off-chain.",
+            "Brainwallets use your username as a public salt, enhancing security.",
+            "Higher derivation complexity protects against brute-force attacks.",
+            "State channels can handle complex logic beyond simple transfers.",
+            "Your username in a brainwallet is public, but your password should remain secret.",
+            "Channels can be closed cooperatively or through on-chain dispute resolution.",
+            "Brainwallets eliminate the need to store a recovery phrase.",
+            "State channels can interact with smart contracts off-chain.",
+            "The derivation process in brainwallets can be adjusted for better security.",
+            "Channels can be used for microtransactions without incurring blockchain fees.",
+            "Brainwallets combine something you know (password) with something public (username).",
+            "State channels can be used for non-financial applications like gaming.",
+            "The security of a brainwallet depends on the strength of your password and derivation complexity.",
+            "Channels can be part of a network, enabling multi-hop payments.",
+            "Brainwallets can be accessed from any device without needing to sync blockchain data.",
+            "State channels can significantly increase blockchain scalability.",
+            "The username in a brainwallet helps prevent rainbow table attacks.",
+            "Channels can have multiple participants, not just two.",
+            "Brainwallets can be a good option for cold storage when used with high security settings.",
+            "State channels can reduce congestion on the main blockchain."
+        ];
+
+        let wallets = [];
+        let activeTab = 'brainwallet';
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabName = this.dataset.tab;
+                activeTab = tabName;
+                
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+                
+                this.classList.add('active');
+                document.getElementById(tabName).classList.add('active');
+            });
+        });
+
+        // Complexity slider
+        const complexitySlider = document.getElementById('complexity');
+        const complexityValue = document.getElementById('complexity-value');
+        const timeEstimate = document.getElementById('time-estimate');
+        const times = ['5 seconds', '10 seconds', '30 seconds', '1 minute', '2 minutes', '5 minutes', '10 minutes', '20 minutes', '40 minutes', '1 hour'];
+        const colors = ['#ff0000', '#ff5e00', '#ff9a00', '#ffd000', '#dbff00', '#84ff00', '#30ff00', '#00ff33', '#00ff84', '#00ffd5'];
+
+        complexitySlider.addEventListener('input', function() {
+            const value = this.value;
+            complexityValue.textContent = value;
+            timeEstimate.textContent = times[value - 1];
+            this.style.background = `linear-gradient(to right, ${colors[0]} 0%, ${colors[value - 1]} 100%)`;
+        });
+
+        // Initialize slider color
+        complexitySlider.style.background = `linear-gradient(to right, ${colors[0]} 0%, ${colors[4]} 100%)`;
+
+        function generateMnemonic() {
+            const mnemonic = Array(16).fill(0).map(() => wordList[Math.floor(Math.random() * wordList.length)]).join(' ');
+            document.getElementById('mnemonic-input').value = mnemonic;
+        }
+
+        function generateMatrixAnimation() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%^&*()_+-=[]{}|;:,.<>?';
+            const width = 60;
+            const height = 5;
+            return Array(height).fill(0).map(() => 
+                Array(width).fill(0).map(() => Math.random() > 0.7 ? chars[Math.floor(Math.random() * chars.length)] : ' ').join('')
+            ).join('\n');
+        }
+
+        function generateWallet() {
+            const generateBtn = document.getElementById('generate-btn');
+            const progressContainer = document.getElementById('progress-container');
+            const progressFill = document.getElementById('progress-fill');
+            const matrixBox = document.getElementById('matrix-box');
+            const tipText = document.getElementById('tip-text');
+
+            if (activeTab === 'mnemonic') {
+                const mnemonic = document.getElementById('mnemonic-input').value.trim();
+                if (!mnemonic) {
+                    alert('Please enter a mnemonic');
+                    return;
+                }
+                
+                // Instant generation for mnemonic
+                const address = '0x' + Array(40).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+                wallets.push({ address, type: 'mnemonic' });
+                document.getElementById('mnemonic-input').value = '';
+                updateWalletsList();
+            } else {
+                const username = document.getElementById('username').value.trim();
+                const password = document.getElementById('password').value.trim();
+                
+                if (!username || !password) {
+                    alert('Please enter username and password');
+                    return;
+                }
+
+                const complexity = parseInt(complexitySlider.value);
+                const totalSteps = complexity * 20;
+                let currentStep = 0;
+
+                generateBtn.disabled = true;
+                progressContainer.style.display = 'block';
+                progressFill.style.width = '0%';
+
+                // Start tip rotation
+                tipText.textContent = tips[Math.floor(Math.random() * tips.length)];
+                const tipInterval = setInterval(() => {
+                    tipText.textContent = tips[Math.floor(Math.random() * tips.length)];
+                }, 3000);
+
+                // Start matrix animation
+                const matrixInterval = setInterval(() => {
+                    matrixBox.textContent = generateMatrixAnimation();
+                }, 200);
+
+                const generationInterval = setInterval(() => {
+                    currentStep++;
+                    const progress = (currentStep / totalSteps) * 100;
+                    progressFill.style.width = progress + '%';
+
+                    if (currentStep >= totalSteps) {
+                        clearInterval(generationInterval);
+                        clearInterval(tipInterval);
+                        clearInterval(matrixInterval);
+                        
+                        const address = '0x' + Array(40).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+                        wallets.push({ address, type: 'brainwallet' });
+                        
+                        document.getElementById('username').value = '';
+                        document.getElementById('password').value = '';
+                        
+                        setTimeout(() => {
+                            progressContainer.style.display = 'none';
+                            generateBtn.disabled = false;
+                            updateWalletsList();
+                        }, 500);
+                    }
+                }, complexity === 1 ? 50 : 250);
+            }
+        }
+
+        function updateWalletsList() {
+            const walletsSection = document.getElementById('wallets-section');
+            const walletsList = document.getElementById('wallets-list');
+            
+            if (wallets.length > 0) {
+                walletsSection.style.display = 'block';
+                walletsList.innerHTML = wallets.map((wallet, index) => `
+                    <div class="wallet-item">
+                        <span class="wallet-address">${wallet.address} (${wallet.type})</span>
+                        <button class="login-btn" onclick="loginWallet(${index})">Login</button>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function loginWallet(index) {
+            alert('Login functionality for wallet: ' + wallets[index].address);
+            // Implement actual login logic here
+        }
+    </script>
+</body>
+</html>

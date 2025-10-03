@@ -370,7 +370,20 @@ export interface EnvSnapshot {
   serverOutputs: EntityInput[];
   description: string;
   gossip?: {
-    profiles: Record<string, Profile>;
+    profiles: Profile[];
+  };
+  // Interactive storytelling narrative
+  title?: string; // Short headline (e.g., "Bank Run Begins")
+  narrative?: string; // Detailed explanation of what's happening in this frame
+  // Cinematic view state for scenario playback
+  viewState?: {
+    camera?: 'orbital' | 'overview' | 'follow' | 'free';
+    zoom?: number;
+    focus?: string; // Entity ID to center on
+    panel?: 'accounts' | 'transactions' | 'consensus' | 'network';
+    speed?: number; // Playback speed multiplier
+    position?: { x: number; y: number; z: number }; // Camera position
+    rotation?: { x: number; y: number; z: number }; // Camera rotation
   };
 }
 
