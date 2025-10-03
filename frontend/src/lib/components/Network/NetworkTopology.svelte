@@ -685,6 +685,10 @@
     mesh.userData['baseMaterial'] = material;
 
     if (isHub) {
+      // Add lightning particles for hubs
+      const lightningGroup = new THREE.Group();
+      mesh.add(lightningGroup);
+      mesh.userData['lightningGroup'] = lightningGroup;
     }
 
     scene.add(mesh);
@@ -1494,9 +1498,96 @@
     const time = Date.now() * 0.001; // Convert to seconds
     entities.forEach(entity => {
       if (entity.isHub && entity.mesh.material && entity.pulsePhase !== undefined) {
-        // Pulsing glow: oscillate between 1.0 and 2.5 emissive intensity
-        const pulseIntensity = 1.5 + 1.0 * Math.sin(time * 2 + entity.pulsePhase);
-        (entity.mesh.material as THREE.MeshLambertMaterial).emissiveIntensity = pulseIntensity;
+        // Aurora borealis effect: multi-frequency pulsing with color shift
+        const material = entity.mesh.material as THREE.MeshLambertMaterial;
+
+        // Primary slow pulse (breathing)
+        const slowPulse = Math.sin(time * 0.8 + entity.pulsePhase);
+        // Secondary fast shimmer
+        const fastShimmer = Math.sin(time * 3.5 + entity.pulsePhase * 0.7);
+        // Tertiary ultra-slow wave
+        const wave = Math.sin(time * 0.3 + entity.pulsePhase * 1.3);
+
+        // Combine frequencies for aurora-like complexity
+        const pulseIntensity = 2.0 + 1.5 * slowPulse + 0.5 * fastShimmer + 0.3 * wave;
+        material.emissiveIntensity = pulseIntensity;
+
+        // Color shift: cyan → green → cyan (polar lights)
+        const colorShift = (slowPulse + 1) * 0.5; // 0 to 1
+        const r = 0;
+        const g = Math.floor(255 * (0.8 + 0.2 * colorShift));
+        const b = Math.floor(255 * (0.5 + 0.5 * (1 - colorShift)));
+        material.emissive.setRGB(r / 255, g / 255, b / 255);
+
+        // Lightning bolts from hub to connected entities
+        const lightningGroup = entity.mesh.userData['lightningGroup'];
+        if (lightningGroup) {
+          // Clear old lightning every 150ms (faster refresh for more chaos)
+          if (Math.floor(time * 6.67) !== Math.floor((time - 0.016) * 6.67)) {
+            while (lightningGroup.children.length > 0) {
+              const child = lightningGroup.children[0];
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) (child.material as any).dispose();
+              lightningGroup.remove(child);
+            }
+
+            // Find all entities connected to this hub
+            const connectedEntities = entities.filter(e => {
+              if (e.id === entity.id) return false;
+              // Check if there's a connection between hub and this entity
+              return connections.some(c =>
+                (c.from === entity.id && c.to === e.id) ||
+                (c.to === entity.id && c.from === e.id)
+              );
+            });
+
+            // Fire lightning to 1-3 random connected entities
+            const targetCount = Math.min(3, connectedEntities.length);
+            const shuffled = [...connectedEntities].sort(() => Math.random() - 0.5);
+            const targets = shuffled.slice(0, targetCount);
+
+            targets.forEach(target => {
+              // Calculate relative position
+              const hubPos = entity.mesh.position;
+              const targetPos = target.mesh.position;
+
+              const relX = targetPos.x - hubPos.x;
+              const relY = targetPos.y - hubPos.y;
+              const relZ = targetPos.z - hubPos.z;
+
+              // Create jagged lightning path
+              const points: THREE.Vector3[] = [];
+              points.push(new THREE.Vector3(0, 0, 0));
+
+              const segments = 8; // More segments = more jagged
+              for (let s = 1; s < segments; s++) {
+                const t = s / segments;
+                const jitterScale = 1.5; // Higher = more chaos
+                const jitterX = (Math.random() - 0.5) * jitterScale;
+                const jitterY = (Math.random() - 0.5) * jitterScale;
+                const jitterZ = (Math.random() - 0.5) * jitterScale;
+
+                points.push(new THREE.Vector3(
+                  relX * t + jitterX,
+                  relY * t + jitterY,
+                  relZ * t + jitterZ
+                ));
+              }
+              points.push(new THREE.Vector3(relX, relY, relZ));
+
+              const geometry = new THREE.BufferGeometry().setFromPoints(points);
+              const material = new THREE.LineBasicMaterial({
+                color: 0x00ffff,
+                opacity: 0.7 + Math.random() * 0.3,
+                transparent: true,
+                linewidth: 3
+              });
+
+              const lightning = new THREE.Line(geometry, material);
+              lightningGroup.add(lightning);
+            });
+          }
+        }
       }
     });
 
@@ -2035,7 +2126,10 @@
       const entity = entities.find(e => e.mesh === intersectedObject);
 
       if (!entity) {
-        throw new Error('FINTECH-SAFETY: Entity not found for intersected object');
+        // Might be lightning bolt or other non-entity object - skip silently
+        tooltip.visible = false;
+        dualTooltip.visible = false;
+        return;
       }
 
       if (hoveredObject !== intersectedObject) {
@@ -2155,7 +2249,8 @@
       const entity = entities.find(e => e.mesh === intersectedObject);
 
       if (!entity) {
-        throw new Error('FINTECH-SAFETY: Entity not found for clicked object');
+        // Clicked on lightning or other non-entity - ignore
+        return;
       }
 
       // Trigger activity animation
