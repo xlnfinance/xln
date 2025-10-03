@@ -513,32 +513,6 @@ const applyServerInput = async (
       });
     }
 
-    // Only create snapshots when there are meaningful changes AND we're not being called from processUntilEmpty
-    // processUntilEmpty handles its own snapshot management to avoid duplicates
-    const isProcessUntilEmptyCall = serverInput.serverTxs.length === 0 && serverInput.entityInputs.length > 0;
-
-    if (!isProcessUntilEmptyCall && (serverInput.serverTxs.length > 0 || mergedInputs.length > 0)) {
-      // Create a snapshot of the current environment state
-      const snapshot = {
-        replicas: new Map(env.replicas),
-        height: env.height,
-        timestamp: env.timestamp,
-        serverInput: { serverTxs: [], entityInputs: [] },
-        serverOutputs: [],
-        description: `Frame ${env.height} snapshot`,
-        gossip: env.gossip, // Include gossip for time-aware network tab
-      };
-
-      // Initialize history if needed
-      if (!env.history) {
-        env.history = [];
-      }
-
-      // Add snapshot to history
-      env.history.push(snapshot);
-      console.log(`📸 Frame ${env.height}: Snapshot added to history (${serverInput.serverTxs.length} serverTxs, ${mergedInputs.length} entityInputs)`);
-    }
-
     // Always notify UI after processing a frame (this is the discrete simulation step)
     notifyEnvChange(env);
 
@@ -1141,28 +1115,6 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
     }
   }
 
-  // Create a single snapshot after all iterations complete
-  if (iterationCount > 0) {
-    const snapshot = {
-      replicas: new Map(env.replicas),
-      height: env.height,
-      timestamp: env.timestamp,
-      serverInput: { serverTxs: [], entityInputs: [] },
-      serverOutputs: [],
-      description: `ProcessUntilEmpty frame ${env.height}`,
-      gossip: env.gossip, // Include gossip for time-aware network tab
-    };
-
-    // Initialize history if needed
-    if (!env.history) {
-      env.history = [];
-    }
-
-    // Add snapshot to history
-    env.history.push(snapshot);
-    console.log(`📸 Frame ${env.height}: ProcessUntilEmpty snapshot added (after ${iterationCount} iterations)`);
-  }
-
   if (iterationCount >= maxIterations) {
     console.warn('⚠️ processUntilEmpty reached maximum iterations');
   } else if (iterationCount > 0) {
@@ -1175,6 +1127,11 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
 // === PREPOPULATE FUNCTION ===
 import { prepopulate } from './prepopulate';
 export { prepopulate };
+
+// === SCENARIO SYSTEM ===
+export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
+export { executeScenario } from './scenarios/executor.js';
+export { loadScenarioFromFile, loadScenarioFromText } from './scenarios/loader.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);

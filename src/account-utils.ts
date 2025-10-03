@@ -3,7 +3,7 @@
  * Based on old_src/app/Channel.ts deriveDelta logic
  */
 
-import { Delta, DerivedDelta } from './types';
+import type { Delta, DerivedDelta } from './types';
 import { validateDelta } from './validation-utils';
 
 /**

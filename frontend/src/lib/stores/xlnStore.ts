@@ -133,16 +133,43 @@ export async function initializeXLN() {
     } else {
       console.log(`🔍 BROWSER-DEBUG: No replicas loaded - starting with fresh state`);
 
-      // AUTO-PREPOPULATE: If clean slate (no server frames), run prepopulate automatically
+      // AUTO-SCENARIO: If clean slate, run h-network scenario automatically
       if (!env.history || env.history.length === 0) {
-        console.log('🚀 AUTO-PREPOPULATE: Clean slate detected - running prepopulation automatically...');
+        console.log('🚀 AUTO-SCENARIO: Clean slate detected - running h-network scenario...');
         try {
-          await xln.prepopulate(env, xln.processUntilEmpty);
-          console.log('✅ AUTO-PREPOPULATE: Prepopulation completed successfully');
-          console.log(`🔍 AUTO-PREPOPULATE: Env now has ${env.replicas?.size || 0} replicas and ${env.history?.length || 0} frames`);
+          // Load h-network scenario
+          const response = await fetch('/scenarios/h-network.scenario.txt');
+          if (!response.ok) {
+            throw new Error(`Failed to load h-network scenario: ${response.statusText}`);
+          }
+
+          const scenarioText = await response.text();
+          console.log('📜 Loaded h-network scenario');
+
+          // Parse and execute scenario
+          const parsed = xln.parseScenario(scenarioText);
+          if (parsed.errors.length > 0) {
+            console.error('❌ Scenario parse errors:', parsed.errors);
+            throw new Error('Failed to parse h-network scenario');
+          }
+
+          const result = await xln.executeScenario(env, parsed.scenario);
+
+          if (result.success) {
+            console.log('✅ AUTO-SCENARIO: H-network scenario completed successfully');
+            console.log(`🔍 AUTO-SCENARIO: Generated ${result.framesGenerated} frames`);
+          } else {
+            console.error('❌ AUTO-SCENARIO: Scenario execution errors:', result.errors);
+          }
         } catch (err) {
-          console.error('❌ AUTO-PREPOPULATE: Failed to prepopulate:', err);
-          // Continue anyway - not a fatal error
+          console.error('❌ AUTO-SCENARIO: Failed to run scenario:', err);
+          // Fallback to old prepopulate
+          console.log('⚠️ Falling back to legacy prepopulate...');
+          try {
+            await xln.prepopulate(env, xln.processUntilEmpty);
+          } catch (fallbackErr) {
+            console.error('❌ Fallback prepopulate also failed:', fallbackErr);
+          }
         }
       }
     }
@@ -182,6 +209,11 @@ export async function initializeXLN() {
 
 // Export XLN for direct use in components (like legacy index.html)
 export { getXLN };
+
+// Helper to get current environment
+export function getEnv() {
+  return get(xlnEnvironment);
+}
 
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components

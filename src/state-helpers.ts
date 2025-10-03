@@ -5,6 +5,7 @@
 
 import { encode } from './snapshot-coder';
 import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerInput, AccountMachine } from './types';
+import type { Profile } from './gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
 
@@ -124,6 +125,21 @@ export const captureSnapshot = (
   serverOutputs: EntityInput[],
   description: string,
 ): void => {
+  const gossipProfiles = env.gossip?.getProfiles
+    ? env.gossip.getProfiles().map((profile: Profile) => {
+        try {
+          // structuredClone keeps nested data without mutating live gossip state
+          return structuredClone(profile);
+        } catch (error) {
+          try {
+            return JSON.parse(JSON.stringify(profile));
+          } catch {
+            return profile;
+          }
+        }
+      })
+    : [];
+
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
@@ -146,6 +162,7 @@ export const captureSnapshot = (
       ...(output.proposedFrame && { proposedFrame: output.proposedFrame }),
     })),
     description,
+    gossip: { profiles: gossipProfiles },
   };
 
   envHistory.push(snapshot);

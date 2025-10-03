@@ -10,43 +10,22 @@
   import NetworkTopology from '../lib/components/Network/NetworkTopology.svelte';
   import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
   import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
+  import ScenarioPanel from '../lib/components/Scenario/ScenarioPanel.svelte';
   import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
   import { timeOperations } from '../lib/stores/timeStore';
   import { history } from '../lib/stores/xlnStore';
+  import { viewMode } from '../lib/stores/viewModeStore';
   import { get } from 'svelte/store';
 
   let activeTab = 'formation';
+  let zenMode = false; // Zen mode: hide all UI chrome for pure graph immersion
 
-  // Load bird view state from localStorage
-  function loadBirdViewState(): boolean {
-    try {
-      const saved = localStorage.getItem('xln-bird-view-settings');
-      const settings = saved ? JSON.parse(saved) : null;
-      // Default to graph view (true) on first load
-      return settings?.wasLastOpened !== undefined ? settings.wasLastOpened : true;
-    } catch {
-      return true; // Default to graph view
-    }
-  }
-
-  let birdViewMode = loadBirdViewState();
-
-  // Bird view toggle handler with state persistence
-  function toggleBirdView() {
-    birdViewMode = !birdViewMode;
-
-    // Save bird view state immediately
-    try {
-      const settings = JSON.parse(localStorage.getItem('xln-bird-view-settings') || '{}');
-      settings.wasLastOpened = birdViewMode;
-      localStorage.setItem('xln-bird-view-settings', JSON.stringify(settings));
-    } catch (e) {
-      console.warn('Failed to save bird view state:', e);
-    }
-
-    console.log('🗺️ Bird view mode:', birdViewMode ? 'ON' : 'OFF');
+  // Zen mode toggle - hide all UI chrome for pure immersion
+  function toggleZenMode() {
+    zenMode = !zenMode;
+    console.log('🧘 Zen mode:', zenMode ? 'ON' : 'OFF');
   }
 
   // SEQUENTIAL LOADING: Wait for history to be populated
@@ -141,8 +120,10 @@
   <meta name="description" content="XLN Visual Debugger - Real-time consensus monitoring and debugging interface" />
 </svelte:head>
 
-<main class="app">
-  <AdminTopBar {birdViewMode} onToggleBirdView={toggleBirdView} />
+<main class="app" class:zen-mode={zenMode}>
+  {#if !zenMode}
+    <AdminTopBar />
+  {/if}
   <ErrorDisplay />
 
   {#if $isLoading}
@@ -158,11 +139,93 @@
       <button class="retry-btn" on:click={() => initializeXLN()}> Retry </button>
     </div>
   {:else}
-    {#if birdViewMode}
-      <!-- Bird View Mode: Show Network Topology -->
-      <NetworkTopology onBirdViewStateChange={(isOpen) => { if (!isOpen) birdViewMode = false; }} />
-    {:else}
-      <!-- Normal Mode: Show Entity Panels -->
+    {#if $viewMode === 'home'}
+      <!-- Home View: Whitepaper & Introduction -->
+      <div class="home-container">
+        <h1>xln</h1>
+        <p class="subtitle">Reserve-Credit Provable Account Network</p>
+
+        <div class="whitepaper-content">
+          <h2>The Problem</h2>
+          <p>For centuries, finance ran on <strong>FCUAN</strong> (Full-Credit Unprovable Account Networks): traditional banking, CEXs, brokers. Pure credit scales phenomenally but offers weak security—assets can be seized, hubs can default.</p>
+
+          <p>In 2017, Lightning introduced <strong>FRPAP</strong> (Full-Reserve Provable Account Primitives): payment channels with cryptographic proofs. Full security but hits the <em>inbound liquidity wall</em>—an architectural limit, not a bug.</p>
+
+          <h2>The Solution</h2>
+          <p><strong>xln</strong> is the first <strong>RCPAN</strong> (Reserve-Credit Provable Account Network): credit where it scales, collateral where it secures. A principled hybrid.</p>
+
+          <div class="invariant-box">
+            <p><strong>FCUAN:</strong> −leftCredit ≤ Δ ≤ rightCredit</p>
+            <p><strong>FRPAP:</strong> 0 ≤ Δ ≤ collateral</p>
+            <p><strong>RCPAN:</strong> −leftCredit ≤ Δ ≤ collateral + rightCredit</p>
+          </div>
+
+          <h2>Key Properties</h2>
+          <ul>
+            <li>Infinite scalability: O(1) per-hop updates vs O(n) broadcast</li>
+            <li>No inbound liquidity problem: credit + collateral hybrid</li>
+            <li>Bounded risk: counterparty loss capped at collateral + credit</li>
+            <li>Local state: no sequencers, no data availability dependencies</li>
+          </ul>
+
+          <h2>Interactive Tutorials</h2>
+          <p>Click "Graph 3D" above, then select a scenario from the sidebar:</p>
+
+          <div class="tutorial-grid">
+            <div class="tutorial-item">
+              <strong>1. H-Network (Default)</strong>
+              <p>Basic topology: 2 hubs, 4 users</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>2. Diamond-Dybvig Bank Run</strong>
+              <p>Fractional reserve instability demonstration</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>3. Lightning Inbound Capacity Problem</strong>
+              <p>Why full-reserve hits liquidity walls</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>4. Credit Line Expansion</strong>
+              <p>FCUAN-style trust-based scaling</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>5. Collateral Backstop</strong>
+              <p>How reserves limit counterparty risk</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>6. Multi-Hop Routing</strong>
+              <p>Payment paths through network topology</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>7. Hub Liquidity Crisis</strong>
+              <p>Cascading failures in hub-spoke networks</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>8. Bilateral Settlement</strong>
+              <p>Netting and on-chain finalization</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>9. Credit-Collateral Rebalancing</strong>
+              <p>Dynamic adjustment of risk parameters</p>
+            </div>
+            <div class="tutorial-item">
+              <strong>10. Multi-Jurisdiction Flow</strong>
+              <p>Cross-chain settlement coordination</p>
+            </div>
+          </div>
+
+          <h2>Get Started</h2>
+          <p>Click "Graph 3D" to explore the network, or "Panels" to manage entities directly. Use the time machine to replay any state transition.</p>
+        </div>
+      </div>
+    {:else if $viewMode === 'graph3d' || $viewMode === 'graph2d'}
+      <!-- Graph View Mode: Show Network Topology -->
+      <NetworkTopology
+        {zenMode}
+        onToggleZenMode={toggleZenMode}
+      />
+    {:else if $viewMode === 'panels'}
+      <!-- Panels Mode: Show Entity Panels -->
       <div class="main-content">
         <!-- Entity Panels Container -->
         {#if $tabs.length > 0}
@@ -202,6 +265,14 @@
           >
             🌐 Network
           </button>
+          <button
+            class="tab-button"
+            class:active={activeTab === 'scenarios'}
+            on:click={() => switchTab('scenarios')}
+            id="scenariosTab"
+          >
+            🎬 Scenarios
+          </button>
         </div>
 
         <div id="formationTabContent" class="tab-content" class:active={activeTab === 'formation'}>
@@ -214,13 +285,19 @@
 
         <div id="networkTabContent" class="tab-content" class:active={activeTab === 'network'}>
           <NetworkDirectory />
-          </div>
+        </div>
+
+        <div id="scenariosTabContent" class="tab-content" class:active={activeTab === 'scenarios'}>
+          <ScenarioPanel />
+        </div>
         </div>
       </div>
     {/if}
 
-    <!-- Time Machine (always visible) -->
-    <TimeMachine />
+    <!-- Time Machine (hidden in zen mode and home view) -->
+    {#if !zenMode && $viewMode !== 'home'}
+      <TimeMachine />
+    {/if}
 
     <!-- Error Popup -->
     <ErrorPopup />
@@ -470,5 +547,135 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  /* Zen Mode - Complete UI immersion */
+  .app.zen-mode {
+    /* Full screen, no chrome */
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .app.zen-mode :global(.network-topology-container) {
+    /* Graph fills entire viewport in zen mode */
+    width: 100vw !important;
+    height: 100vh !important;
+  }
+
+  /* Home Page */
+  .home-container {
+    max-width: 900px;
+    margin: 60px auto;
+    padding: 40px;
+    background: rgba(30, 30, 30, 0.8);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .home-container h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: #00d9ff;
+    margin: 0 0 12px 0;
+    text-align: center;
+    text-shadow: 0 0 30px rgba(0, 217, 255, 0.5);
+  }
+
+  .home-container .subtitle {
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.7);
+    text-align: center;
+    margin: 0 0 40px 0;
+  }
+
+  .whitepaper-content h2 {
+    font-size: 24px;
+    color: #ffffff;
+    margin: 32px 0 16px 0;
+    font-weight: 600;
+  }
+
+  .whitepaper-content p {
+    font-size: 16px;
+    line-height: 1.8;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0 0 16px 0;
+  }
+
+  .whitepaper-content ul {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0;
+  }
+
+  .whitepaper-content li {
+    font-size: 16px;
+    line-height: 1.8;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 8px 0;
+    padding-left: 24px;
+    position: relative;
+  }
+
+  .whitepaper-content li:before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: #00ff88;
+  }
+
+  .invariant-box {
+    background: rgba(0, 122, 204, 0.1);
+    border-left: 3px solid #007acc;
+    padding: 16px 20px;
+    margin: 24px 0;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+
+  .invariant-box p {
+    margin: 8px 0;
+    color: #00d9ff;
+  }
+
+  .tutorial-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+  }
+
+  .tutorial-item {
+    background: rgba(40, 40, 40, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 16px;
+    transition: all 0.2s ease;
+  }
+
+  .tutorial-item:hover {
+    background: rgba(50, 50, 50, 0.8);
+    border-color: rgba(0, 122, 204, 0.5);
+    transform: translateY(-2px);
+  }
+
+  .tutorial-item strong {
+    display: block;
+    color: #00d9ff;
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+
+  .tutorial-item p {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+    line-height: 1.5;
   }
 </style>

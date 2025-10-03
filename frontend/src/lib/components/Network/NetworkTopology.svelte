@@ -1,10 +1,14 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { get } from 'svelte/store';
+  import NarrativeSubtitle from './NarrativeSubtitle.svelte';
   import * as THREE from 'three';
-  import { xlnEnvironment, getXLN, xlnFunctions } from '../../stores/xlnStore';
+  import { xlnEnvironment, getXLN, xlnFunctions, history } from '../../stores/xlnStore';
   import { visibleReplicas, visibleGossip, currentTimeIndex, isLive } from '../../stores/timeStore';
   import { timeOperations } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
+  import { debug } from '../../utils/debug';
+  import { TOKEN_REGISTRY } from '../../../../../src/account-utils';
 
   // OrbitControls import (will be loaded dynamically)
   let OrbitControls: any;
@@ -39,6 +43,13 @@
     inCapacity: number;
     outCapacity: number;
     collateral: number;
+    // 7-region visualization fields
+    outOwnCredit: number;      // our unused credit
+    inCollateral: number;      // our collateral
+    outPeerCredit: number;     // their used credit
+    inOwnCredit: number;       // our used credit
+    outCollateral: number;     // their collateral
+    inPeerCredit: number;      // their unused credit
   }
 
   interface BirdViewSettings {
@@ -83,11 +94,6 @@
   let animationId: number;
   let hoveredObject: any = null;
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
-
-  // Track previous network state for smart incremental updates
-  let previousEntityIds: Set<string> = new Set();
-  let previousConnectionKeys: Set<string> = new Set();
-  let updateDebounceTimer: number | null = null;
 
   // Dual tooltip for connections (showing both perspectives)
   let dualTooltip = {
@@ -175,28 +181,6 @@
     localStorage.setItem('xln-bird-view-settings', JSON.stringify(settings));
   }
 
-  // Entity position persistence (CRITICAL: prevents re-intersecting on reload)
-  function loadEntityPositions(): Map<string, THREE.Vector3> | null {
-    try {
-      const saved = localStorage.getItem('xln-entity-positions');
-      if (!saved) return null;
-
-      const data = JSON.parse(saved);
-      const positions = new Map<string, THREE.Vector3>();
-
-      for (const [entityId, pos] of Object.entries(data)) {
-        const posData = pos as {x: number, y: number, z: number};
-        positions.set(entityId, new THREE.Vector3(posData.x, posData.y, posData.z));
-      }
-
-      console.log(`💾 Loaded ${positions.size} saved entity positions`);
-      return positions;
-    } catch (err) {
-      console.warn('Failed to load entity positions:', err);
-      return null;
-    }
-  }
-
   function saveEntityPositions() {
     try {
       const data: Record<string, {x: number, y: number, z: number}> = {};
@@ -210,14 +194,14 @@
       });
 
       localStorage.setItem('xln-entity-positions', JSON.stringify(data));
-      console.log(`💾 Saved ${entities.length} entity positions`);
     } catch (err) {
-      console.warn('Failed to save entity positions:', err);
+      debug.warn('Failed to save entity positions:', err);
     }
   }
 
-  // Export bird view state for parent component
-  export let onBirdViewStateChange: ((isOpen: boolean) => void) | undefined = undefined;
+  // Zen mode props
+  export let zenMode: boolean = false;
+  export let onToggleZenMode: (() => void) | undefined = undefined;
 
   // Topology control state with persistence
   const savedSettings = loadBirdViewSettings();
@@ -231,6 +215,12 @@
   let availableTokens: number[] = []; // Will be populated from actual token data
   let showPanel: boolean = true; // Mobile-friendly panel toggle - start visible
   let labelScale: number = 2.0; // Entity label size multiplier (1.0 = 32px font, 2.0 = 64px font)
+  let lightningSpeed: number = 100; // Lightning animation speed in ms per hop (default 100ms)
+
+  // Helper to get token symbol from TOKEN_REGISTRY
+  function getTokenSymbol(tokenId: number): string {
+    return TOKEN_REGISTRY[tokenId]?.symbol || `TKN${tokenId}`;
+  }
 
   // Quick payment form state
   let paymentFrom: string = '';
@@ -259,7 +249,25 @@
     startedAt: number;
     intervalId?: number;
   }
+
+  // Scenario state
+  let selectedScenarioFile: string = '';
+  let isLoadingScenario: boolean = false;
   let activeJobs: PaymentJob[] = [];
+
+  // Live command builder state
+  let commandAction: string = '';
+  let commandText: string = '';
+
+  // Slice & export state
+  let sliceStart: number = 0;
+  let sliceEnd: number = 0;
+  let exportUrl: string = '';
+
+  // ASCII formation tool state
+  let asciiText: string = '';
+  let asciiScale: number = 100;
+  let asciiScenario: string = '';
 
   // Ripple effects for balance changes
   interface Ripple {
@@ -326,7 +334,7 @@
       const { OrbitControls: OC } = await import('three/examples/jsm/controls/OrbitControls.js');
       OrbitControls = OC;
     } catch (error) {
-      console.warn('OrbitControls not available:', error);
+      debug.warn('OrbitControls not available:', error);
     }
 
     // Scene setup
@@ -365,7 +373,6 @@
         camera.zoom = cam.zoom;
         camera.updateProjectionMatrix();
         controls.update();
-        console.log(`📷 Restored camera state from localStorage`);
       }
 
       // CRITICAL: Save camera state after manual user movements (rotate/pan/zoom)
@@ -410,9 +417,7 @@
     if (!scene) return;
 
     const timeIndex = $currentTimeIndex;
-    const liveMode = $isLive;
 
-    console.log(`🗺️ Updating topology - ${liveMode ? 'LIVE' : `Frame ${timeIndex}`}`);
 
     // Update available tokens
     updateAvailableTokens();
@@ -424,7 +429,6 @@
     // Always use replicas (ground truth)
     if (currentReplicas.size > 0) {
       const replicaEntries = Array.from(currentReplicas.entries());
-      console.log(`🔄 Using replicas at frame ${timeIndex}:`, replicaEntries.length);
 
       // Extract unique entity IDs from replica keys with fail-fast validation
       const uniqueEntityIds = new Set<string>();
@@ -452,16 +456,15 @@
         capabilities: ['consensus'],
         metadata: { name: entityId.slice(0, 8) + '...' }
       }));
-      console.log('🎯 Created entity data from time-aware replicas:', entityData.length);
     }
 
     // NO DEMO DATA - only show what actually exists
     if (entityData.length === 0) {
-      console.warn(`⚠️ No entity data found at frame ${timeIndex} - nothing to display`);
+      debug.warn(`⚠️ No entity data found at frame ${timeIndex} - nothing to display`);
+      clearNetwork(); // Clear stale geometry before returning
       return; // Don't create fake entities
     }
 
-    console.log(`🗺️ Frame ${timeIndex}: Updating topology with`, entityData.length, 'entities');
 
     // Build connection and capacity maps for force-directed layout (always active)
     const connectionMap = new Map<string, Set<string>>();
@@ -504,29 +507,21 @@
     const sortedByDegree = [...connectionDegrees.entries()].sort((a, b) => b[1] - a[1]);
     const top3Hubs = new Set(sortedByDegree.slice(0, 3).map(([id]) => id));
 
-    console.log(`🌟 Top-3 Hubs:`, Array.from(top3Hubs).map(id => `${id.slice(0,8)} (${connectionDegrees.get(id)} connections)`));
 
     // Clear and rebuild - simple and reliable
     clearNetwork();
 
-    // Try to load saved positions first (persistence)
-    const savedPositions = loadEntityPositions();
-
-    // Run force-directed layout simulation (fallback if no saved positions)
-    const forceLayoutPositions = savedPositions || applyForceDirectedLayout(entityData, connectionMap, capacityMap);
+    // ALWAYS use H-shape layout for 6 entities (demo mode)
+    // Don't load saved positions - they break the H-shape
+    const forceLayoutPositions = applyForceDirectedLayout(entityData, connectionMap, capacityMap);
 
     // Create entity nodes
     entityData.forEach((profile, index) => {
       const isHub = top3Hubs.has(profile.entityId);
-      const degree = connectionDegrees.get(profile.entityId) || 0;
-      createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub, degree);
+      createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
     });
 
-    // Save positions after layout (for persistence on reload)
-    if (!savedPositions) {
-      // Only save if we computed new layout (not using saved positions)
-      saveEntityPositions();
-    }
+    // Don't save positions - we want fresh H-shape every time
 
     // Create connections between entities that have accounts
     createConnections();
@@ -535,9 +530,8 @@
     createTransactionParticles();
     updateEntityActivityFromCurrentFrame();
 
-    // Enforce minimum spacing constraints (200px spread, 100px close)
-    // This pushes entities apart if bars would pierce after initial layout
-    enforceSpacingConstraints();
+    // Don't enforce spacing constraints - they break the H-shape
+    // enforceSpacingConstraints();
   }
 
   function clearNetwork() {
@@ -629,7 +623,6 @@
         }
 
         positions.set(profile.entityId, new THREE.Vector3(pos.x, pos.y, pos.z));
-        console.log(`📍 ${profile.entityId.slice(0,8)}: H-position (${pos.x}, ${pos.y}), degree=${degree}, role=${index < 2 ? 'HUB' : 'LEAF'}`);
       } else {
         // Fallback to radial for other counts
         const baseRadius = 5;
@@ -640,15 +633,13 @@
         const x = Math.cos(angle) * radius;
         const y = Math.sin(angle) * radius;
         positions.set(profile.entityId, new THREE.Vector3(x, y, 0));
-        console.log(`📍 ${profile.entityId.slice(0,8)}: radial fallback, degree=${degree}`);
       }
     });
 
-    console.log(`🎯 H-layout complete (${profiles.length} entities) - Homakov signature 🔥`);
     return positions;
   }
 
-  function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>, isHub: boolean, degree: number) {
+  function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>, isHub: boolean) {
     // Position entities using force-directed layout (always)
     let x: number, y: number, z: number;
 
@@ -694,12 +685,7 @@
     mesh.userData['baseMaterial'] = material;
 
     if (isHub) {
-      console.log(`🌟 Created hub node: ${profile.entityId.slice(0,8)} with ${degree} connections (bright glow + pulse)`);
     }
-
-    // Add entity label
-    const entityId = profile.entityId.slice(0, 8) + '...';
-    console.log('🔵 Created entity node:', entityId, 'at', x.toFixed(1), y.toFixed(1));
 
     scene.add(mesh);
 
@@ -722,8 +708,6 @@
     const processedConnections = new Set<string>();
     const currentReplicas = $visibleReplicas;
 
-    console.log(`🔗 Creating connections for frame ${$currentTimeIndex}:`);
-    console.log(`🔗 Replicas available:`, currentReplicas.size);
 
     // Method 1: Real connections from time-aware replicas
     if (currentReplicas.size > 0) {
@@ -731,7 +715,6 @@
         const [entityId] = replicaKey.split(':');
         const entityAccounts = replica.state?.accounts;
 
-        console.log(`🔗 Processing replica ${replicaKey}: accounts=${entityAccounts?.size || 0}`);
 
         if (!entityAccounts || !entityId) continue;
 
@@ -751,10 +734,9 @@
           const toEntity = entities.find(e => e.id === counterpartyId);
 
           if (fromEntity && toEntity) {
-            console.log(`🔗 Creating connection: ${entityId} ↔ ${counterpartyId}`);
             createConnectionLine(fromEntity, toEntity, entityId, counterpartyId, replica);
           } else {
-            console.warn(`🔗 Missing entity for connection: ${entityId} ↔ ${counterpartyId}`);
+            debug.warn(`🔗 Missing entity for connection: ${entityId} ↔ ${counterpartyId}`);
           }
         }
       }
@@ -762,52 +744,6 @@
 
     // NO DEMO CONNECTIONS - only show real bilateral accounts
 
-    console.log(`🔗 Frame ${$currentTimeIndex}: Created ${connections.length} connections`);
-  }
-
-  // Update only progress bars without rebuilding entire scene (performance optimization)
-  function updateProgressBarsOnly() {
-    if (!scene) return;
-
-    const currentReplicas = $visibleReplicas;
-
-    // Update existing progress bars with new data
-    connections.forEach(connection => {
-      if (!connection.progressBars) return;
-
-      const fromId = connection.from;
-      const toId = connection.to;
-
-      // Find the account data for this connection
-      const fromReplica = Array.from(currentReplicas.entries()).find(([key]) => key.startsWith(fromId + ':'));
-      if (!fromReplica || !fromReplica[1]?.state?.accounts) {
-        console.warn(`⚠️ No replica found for ${fromId} - keeping existing bars`);
-        return;
-      }
-
-      const accountData = fromReplica[1].state.accounts.get(toId);
-      if (!accountData) {
-        console.warn(`⚠️ No account data for ${fromId}↔${toId} - keeping existing bars`);
-        return;
-      }
-
-      // Find entities (needed to recreate bars)
-      const fromEntity = entities.find(e => e.id === fromId);
-      const toEntity = entities.find(e => e.id === toId);
-      if (!fromEntity || !toEntity) {
-        console.warn(`⚠️ Entities not found for ${fromId}↔${toId} - keeping existing bars`);
-        return;
-      }
-
-      // Only remove old bars after confirming we can create new ones
-      scene.remove(connection.progressBars);
-
-      // Create new progress bars with updated data
-      connection.progressBars = createProgressBars(fromEntity, toEntity, accountData);
-      scene.add(connection.progressBars);
-    });
-
-    console.log('📊 Updated progress bars without scene rebuild');
   }
 
   function createTransactionParticles() {
@@ -818,7 +754,6 @@
       const currentFrame = $xlnEnvironment.history[timeIndex];
 
       if (currentFrame?.serverInput?.entityInputs) {
-        console.log(`💫 Analyzing frame ${timeIndex} for transaction particles`);
 
         currentFrame.serverInput.entityInputs.forEach((entityInput: any) => {
           if (entityInput.entityTxs) {
@@ -836,7 +771,6 @@
       }
     } else if ($isLive && $xlnEnvironment?.serverInput?.entityInputs) {
       // Live mode - use current server input
-      console.log('💫 Analyzing live frame for transaction particles');
 
       $xlnEnvironment.serverInput.entityInputs.forEach((entityInput: any) => {
         if (entityInput.entityTxs) {
@@ -853,7 +787,6 @@
       });
     }
 
-    console.log(`💫 Created ${particles.length} transaction particles`);
   }
 
   function createParticleForTransaction(accountTxInput: any, _sourceEntityId: string) {
@@ -916,7 +849,6 @@
     // Find entity by ID
     const entity = entities.find(e => e.id === entityId);
     if (!entity) {
-      console.log(`⚠️ Cannot create ripple: entity ${entityId.slice(-4)} not found`);
       return;
     }
 
@@ -969,7 +901,97 @@
       amount: 0n // No amount for ripples
     });
 
-    console.log(`🌊 Created broadcast ripple for ${entityId.slice(-4)} (${txType})`);
+  }
+
+  /**
+   * Create lightning strike animation that propagates hop-by-hop through the route
+   * @param route - Array of entity IDs representing the payment path
+   * @param amount - Payment amount (for visual sizing)
+   */
+  async function createLightningStrike(route: string[], amount: bigint) {
+    if (!route || route.length < 2) return;
+
+    debug.network('⚡ Lightning strike:', { route, amount: amount.toString() });
+
+    // Animate each hop sequentially
+    for (let i = 0; i < route.length - 1; i++) {
+      const fromId = route[i];
+      const toId = route[i + 1];
+
+      if (!fromId || !toId) {
+        debug.warn(`⚡ Lightning hop ${i}: missing route entity ID`);
+        continue;
+      }
+
+      // Find entities
+      const fromEntity = entities.find(e => e.id === fromId);
+      const toEntity = entities.find(e => e.id === toId);
+
+      if (!fromEntity || !toEntity) {
+        debug.warn(`⚡ Lightning hop ${i}: entity not found`, { fromId, toId });
+        continue;
+      }
+
+      // Create lightning bolt geometry
+      const lightningBolt = createLightningBolt(fromEntity.position, toEntity.position, amount);
+      scene.add(lightningBolt);
+
+      // Pulse both entities
+      triggerEntityActivity(fromId);
+      triggerEntityActivity(toId);
+
+      // Wait for lightningSpeed ms before next hop
+      await new Promise(resolve => setTimeout(resolve, lightningSpeed));
+
+      // Remove lightning bolt after brief display
+      setTimeout(() => {
+        scene.remove(lightningBolt);
+      }, lightningSpeed * 0.5); // Display for half the hop duration
+    }
+  }
+
+  /**
+   * Create a single lightning bolt mesh between two points
+   */
+  function createLightningBolt(start: THREE.Vector3, end: THREE.Vector3, amount: bigint): THREE.Group {
+    const group = new THREE.Group();
+
+    // Main bolt line (bright electric blue)
+    const boltGeometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+    const boltMaterial = new THREE.LineBasicMaterial({
+      color: 0x00d9ff, // Electric blue
+      linewidth: 3,
+      opacity: 1.0,
+      transparent: false
+    });
+    const bolt = new THREE.Line(boltGeometry, boltMaterial);
+    group.add(bolt);
+
+    // Glow effect (wider, semi-transparent)
+    const glowMaterial = new THREE.LineBasicMaterial({
+      color: 0x00d9ff,
+      linewidth: 8,
+      opacity: 0.3,
+      transparent: true
+    });
+    const glow = new THREE.Line(boltGeometry.clone(), glowMaterial);
+    group.add(glow);
+
+    // Add sparks at midpoint
+    const midpoint = new THREE.Vector3().lerpVectors(start, end, 0.5);
+    const sparkSize = Math.min(0.3, 0.1 + Number(amount) / 1000000);
+
+    const sparkGeometry = new THREE.SphereGeometry(sparkSize, 8, 8);
+    const sparkMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9
+    });
+    const spark = new THREE.Mesh(sparkGeometry, sparkMaterial);
+    spark.position.copy(midpoint);
+    group.add(spark);
+
+    return group;
   }
 
   function createConnectionLine(fromEntity: any, toEntity: any, fromId: string, toId: string, replica: any) {
@@ -1011,7 +1033,6 @@
 
     // Find the replica that actually contains this account
     let accountData: any = null;
-    let foundInReplica: string = '';
 
     // Read accounts THE SAME WAY as EntityPanel - key is just counterpartyId!
     const fromReplica = Array.from(currentReplicas.entries() as [string, any][])
@@ -1021,11 +1042,6 @@
       // Account key is just the counterparty ID, not counterpartyId:tokenId
       const accountKey = toId;
       accountData = fromReplica[1].state.accounts.get(accountKey);
-      if (accountData) {
-        foundInReplica = fromReplica[0];
-        console.log(`📊 Found account ${accountKey} in replica ${foundInReplica}`);
-        console.log(`📊 Account data:`, accountData);
-      }
     }
 
     // Try reverse direction if not found
@@ -1036,24 +1052,17 @@
       if (toReplica?.[1]?.state?.accounts) {
         const reverseAccountKey = fromId;
         accountData = toReplica[1].state.accounts.get(reverseAccountKey);
-        if (accountData) {
-          foundInReplica = toReplica[0];
-          console.log(`📊 Found reverse account ${reverseAccountKey} in replica ${foundInReplica}`);
-          console.log(`📊 Reverse account data:`, accountData);
-        }
       }
     }
 
     // NO BARS if no real account data
     if (!accountData) {
-      console.log(`📊 No real account data for ${fromId} ↔ ${toId} - no bars created`);
       scene.add(group);
       return group;
     }
 
     // FINTECH-SAFETY: Get available tokens for THIS specific connection
     if (!accountData.deltas) {
-      console.log(`📊 Account has no deltas map for ${fromId} ↔ ${toId}`);
       scene.add(group);
       return group;
     }
@@ -1061,7 +1070,6 @@
     const availableTokens = Array.from(accountData.deltas.keys() as IterableIterator<number>).sort((a, b) => a - b);
 
     if (availableTokens.length === 0) {
-      console.log(`📊 Account has no tokens in deltas for ${fromId} ↔ ${toId}`);
       scene.add(group);
       return group;
     }
@@ -1074,7 +1082,6 @@
     if (!tokenDelta && availableTokens.length > 0) {
       displayTokenId = availableTokens[0]!;
       tokenDelta = getAccountTokenDelta(accountData, displayTokenId);
-      console.log(`📊 Token ${selectedTokenId} not in ${fromId.slice(-4)}↔${toId.slice(-4)}, using Token ${displayTokenId}. Available: [${availableTokens.join(', ')}]`);
     }
 
     if (!tokenDelta) {
@@ -1082,7 +1089,6 @@
       throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found in progress bars despite being in availableTokens: ${availableTokens}`);
     }
 
-    console.log(`📊 Token ${displayTokenId} delta data:`, tokenDelta);
 
     // Derive channel data using 2019vue logic with REAL token delta
     const derived = deriveEntry(tokenDelta, fromId < toId); // left entity is lexicographically smaller
@@ -1126,12 +1132,10 @@
       throw new Error('FINTECH-SAFETY: Cannot derive from null token delta');
     }
 
-    console.log(`💰 REAL Token delta before deriveDelta:`, tokenDelta);
 
     // Use the SAME deriveDelta function as AccountPanel
     const derived = $xlnFunctions.deriveDelta(tokenDelta, isLeft);
 
-    console.log(`💰 REAL Derived data:`, derived);
 
     // Convert BigInt to numbers for 3D visualization - USE REAL FIELD NAMES!
     const result: DerivedAccountData = {
@@ -1141,7 +1145,14 @@
       peerCreditLimit: Number(derived.peerCreditLimit || 0n),
       inCapacity: Number(derived.inCapacity || 0n),
       outCapacity: Number(derived.outCapacity || 0n),
-      collateral: Number(derived.collateral || 0n)
+      collateral: Number(derived.collateral || 0n),
+      // 7-region visualization
+      outOwnCredit: Number(derived.outOwnCredit || 0n),
+      inCollateral: Number(derived.inCollateral || 0n),
+      outPeerCredit: Number(derived.outPeerCredit || 0n),
+      inOwnCredit: Number(derived.inOwnCredit || 0n),
+      outCollateral: Number(derived.outCollateral || 0n),
+      inPeerCredit: Number(derived.inPeerCredit || 0n)
     };
 
     return result;
@@ -1158,28 +1169,35 @@
     lineLength: number,
     direction: THREE.Vector3
   ): void {
-    // INVARIANT: 1px = 1 unit of value - bars length directly proportional to capacity
+    // INVARIANT: 1px = $1 - bars length directly proportional to value
     // Values come with 18 decimals (1e18 = 1 token), scale to visual units
-    // Target: 1M tokens (1e24 with decimals) ≈ 10 visual units
     const globalScale = $settings.portfolioScale || 5000;
     const decimals = 18;
-    const tokensToVisualUnits = 0.00001; // 1M tokens → 10 units
+    const tokensToVisualUnits = 0.00001; // 1M tokens → 10 visual units
     const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
 
-    // Bar colors matching 2019 visualization
-    // Structure: [peerCredit][collateral][ownCredit] with DELTA separator
+    // 2019vue.txt 7-region colors
     const colors = {
-      peerCredit: 0xff9c9c,      // light red - their available credit to us
-      collateral: 0x5cb85c,      // green - locked collateral (secured)
-      ownCredit: 0xff9c9c        // light red - our available credit to them
+      availableCredit: 0xff9c9c,  // light red - unused credit
+      secured: 0x5cb85c,          // green - collateral
+      unsecured: 0xdc3545         // red - used credit
     };
 
-    // Calculate segment lengths - show LIMITS (invariant structure)
-    // This visualizes [-leftCredit-.collateral-rightCredit] structure
+    // 7-region stack (left to right):
+    // 1. outOwnCredit (our unused credit)
+    // 2. inCollateral (our collateral)
+    // 3. outPeerCredit (their used credit)
+    // 4. DELTA SEPARATOR
+    // 5. inOwnCredit (our used credit)
+    // 6. outCollateral (their collateral)
+    // 7. inPeerCredit (their unused credit)
     const segments = {
-      peerCredit: derived.peerCreditLimit * barScale,
-      collateral: derived.collateral * barScale,
-      ownCredit: derived.ownCreditLimit * barScale
+      outOwnCredit: derived.outOwnCredit * barScale,
+      inCollateral: derived.inCollateral * barScale,
+      outPeerCredit: derived.outPeerCredit * barScale,
+      inOwnCredit: derived.inOwnCredit * barScale,
+      outCollateral: derived.outCollateral * barScale,
+      inPeerCredit: derived.inPeerCredit * barScale
     };
 
     // Calculate entity radii to avoid collision
@@ -1201,15 +1219,13 @@
     // Check if bars overflow (for debugging) - but DON'T scale them down
     const requiredSpace = barsMode === 'spread' ? totalBarsLength + minGapSpread : totalBarsLength + (2 * minGapClose);
     if (requiredSpace > availableSpace) {
-      console.log(`📏 Bars overflow by ${(requiredSpace - availableSpace).toFixed(2)} units - entities should be farther apart`);
     }
 
-    console.log(`📊 Creating bars with segments:`, segments);
 
     if (barsMode === 'spread') {
       // SPREAD MODE: bars extend FROM BOTH entities toward middle
-      // Left entity: [peerCredit][collateral] →
-      // Right entity: ← [ownCredit]
+      // Left entity (our perspective): [outOwnCredit][inCollateral][outPeerCredit] →
+      // Right entity (their perspective): ← [inOwnCredit][outCollateral][inPeerCredit]
       // Gap in middle (no delta separator in spread mode)
 
       // FIRST PRINCIPLE: Bars must NEVER pierce entity surface
@@ -1218,21 +1234,26 @@
       const safeGap = 0.2; // Small visual gap between entity surface and bar
 
       // Left-side bars (from left entity rightward) - START OUTSIDE ENTITY SPHERE
-      const leftBarsLength = segments.peerCredit + segments.collateral;
       const leftStartPos = fromEntity.position.clone().add(
         direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap)
       );
 
       let leftOffset = 0;
-      ['peerCredit', 'collateral'].forEach((barType) => {
-        const length = segments[barType as keyof typeof segments];
+      const leftBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
+        { key: 'outOwnCredit', colorType: 'availableCredit' },
+        { key: 'inCollateral', colorType: 'secured' },
+        { key: 'outPeerCredit', colorType: 'unsecured' }
+      ];
+
+      leftBars.forEach((barSpec) => {
+        const length = segments[barSpec.key];
         if (length > 0.01) {
-          const radius = barHeight * 2.5; // 2x thinner (was 5.0)
+          const radius = barHeight * 2.5;
           const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-          const barColor = colors[barType as keyof typeof colors];
+          const barColor = colors[barSpec.colorType];
 
           // Credit bars: airy/transparent (unloaded trust), Collateral: solid (actual value)
-          const isCredit = barType === 'peerCredit' || barType === 'ownCredit';
+          const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
           const material = new THREE.MeshLambertMaterial({
             color: barColor,
             transparent: true,
@@ -1250,8 +1271,6 @@
           bar.quaternion.setFromUnitVectors(axis, targetAxis);
 
           group.add(bar);
-
-          // Bar labels removed - shown only on hover
         }
         leftOffset += length;
       });
@@ -1261,68 +1280,84 @@
         direction.clone().normalize().multiplyScalar(-(toEntitySize + barRadius + safeGap))
       );
 
-      if (segments.ownCredit > 0.01) {
-        const length = segments.ownCredit;
-        const radius = barHeight * 2.5; // 2x thinner
-        const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-        const barColor = colors.ownCredit;
+      let rightOffset = 0;
+      const rightBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
+        { key: 'inOwnCredit', colorType: 'unsecured' },
+        { key: 'outCollateral', colorType: 'secured' },
+        { key: 'inPeerCredit', colorType: 'availableCredit' }
+      ];
 
-        // Credit: airy/transparent wireframe (unloaded trust)
-        const material = new THREE.MeshLambertMaterial({
-          color: barColor,
-          transparent: true,
-          opacity: 0.3, // Very airy for credit
-          emissive: new THREE.Color(barColor).multiplyScalar(0.05),
-          wireframe: true // Wireframe shows it's unloaded trust
-        });
-        const bar = new THREE.Mesh(geometry, material);
+      rightBars.forEach((barSpec) => {
+        const length = segments[barSpec.key];
+        if (length > 0.01) {
+          const radius = barHeight * 2.5;
+          const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
+          const barColor = colors[barSpec.colorType];
 
-        const barCenter = rightStartPos.clone().add(direction.clone().normalize().multiplyScalar(-length/2));
-        bar.position.copy(barCenter);
+          // Credit bars: airy/transparent wireframe (unloaded trust)
+          const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
+          const material = new THREE.MeshLambertMaterial({
+            color: barColor,
+            transparent: true,
+            opacity: isCredit ? 0.3 : 0.9,
+            emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
+            wireframe: isCredit
+          });
+          const bar = new THREE.Mesh(geometry, material);
 
-        const axis = new THREE.Vector3(0, 1, 0);
-        const targetAxis = direction.clone().normalize();
-        bar.quaternion.setFromUnitVectors(axis, targetAxis);
+          const barCenter = rightStartPos.clone().add(direction.clone().normalize().multiplyScalar(-(rightOffset + length/2)));
+          bar.position.copy(barCenter);
 
-        group.add(bar);
+          const axis = new THREE.Vector3(0, 1, 0);
+          const targetAxis = direction.clone().normalize();
+          bar.quaternion.setFromUnitVectors(axis, targetAxis);
 
-        // Bar labels removed - shown only on hover
-      }
+          group.add(bar);
+        }
+        rightOffset += length;
+      });
 
-      console.log(`🏗️ SPREAD: left bars (${leftBarsLength.toFixed(2)}) from left entity, right bars (${segments.ownCredit.toFixed(2)}) from right entity`);
 
     } else {
-      // CLOSE MODE: bars clustered in CENTER with delta separator
+      // CLOSE MODE: 7-region stack with delta separator
+      // Total length before delta: outOwnCredit + inCollateral + outPeerCredit
+      // Total length after delta: inOwnCredit + outCollateral + inPeerCredit
+      const totalBarsLength = segments.outOwnCredit + segments.inCollateral + segments.outPeerCredit +
+                               segments.inOwnCredit + segments.outCollateral + segments.inPeerCredit;
+
       const centerPoint = fromEntity.position.clone().lerp(toEntity.position, 0.5);
       const halfBarsLength = totalBarsLength / 2;
       const startPos = centerPoint.clone().sub(direction.clone().normalize().multiplyScalar(halfBarsLength));
       const barDirection = direction.clone().normalize();
 
       let currentOffset = 0;
-      const barOrder = ['peerCredit', 'collateral', 'ownCredit'] as const;
+      // 7-region order from 2019vue.txt
+      const barOrder: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
+        { key: 'outOwnCredit', colorType: 'availableCredit' },  // our unused credit - light red
+        { key: 'inCollateral', colorType: 'secured' },          // our collateral - green
+        { key: 'outPeerCredit', colorType: 'unsecured' },       // their used credit - red
+        // DELTA SEPARATOR HERE
+        { key: 'inOwnCredit', colorType: 'unsecured' },         // our used credit - red
+        { key: 'outCollateral', colorType: 'secured' },         // their collateral - green
+        { key: 'inPeerCredit', colorType: 'availableCredit' }   // their unused credit - light red
+      ];
 
-      barOrder.forEach((barType, index) => {
-        const length = segments[barType as keyof typeof segments];
-        if (length === undefined) {
-          throw new Error(`FINTECH-SAFETY: Missing segment data for bar type: ${barType}`);
-        }
+      barOrder.forEach((barSpec, index) => {
+        const length = segments[barSpec.key];
 
         if (length > 0.01) {
-          const radius = barHeight * 2.5; // 2x thinner (was 5.0)
+          const radius = barHeight * 2.5;
           const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-          const barColor = colors[barType as keyof typeof colors];
-          if (!barColor) {
-            throw new Error(`FINTECH-SAFETY: Unknown bar type: ${barType}`);
-          }
+          const barColor = colors[barSpec.colorType];
 
-          // Credit bars: airy/transparent wireframe (unloaded trust), Collateral: solid (actual value)
-          const isCredit = barType === 'peerCredit' || barType === 'ownCredit';
+          // Credit: wireframe/transparent, Collateral: solid
+          const isCredit = barSpec.colorType === 'availableCredit';
           const material = new THREE.MeshLambertMaterial({
             color: barColor,
             transparent: true,
-            opacity: isCredit ? 0.3 : 0.9, // Credit: airy (30%), Collateral: solid (90%)
+            opacity: isCredit ? 0.3 : (barSpec.colorType === 'secured' ? 0.9 : 0.6),
             emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
-            wireframe: isCredit // Credit shows as wireframe (unloaded trust)
+            wireframe: isCredit
           });
           const bar = new THREE.Mesh(geometry, material);
 
@@ -1330,26 +1365,19 @@
           bar.position.copy(barCenter);
 
           const axis = new THREE.Vector3(0, 1, 0);
-          const targetAxis = barDirection.clone().normalize();
-          bar.quaternion.setFromUnitVectors(axis, targetAxis);
+          bar.quaternion.setFromUnitVectors(axis, barDirection);
 
           group.add(bar);
-
-          // Bar labels removed - shown only on hover
         }
 
         currentOffset += length;
 
-        // Add delta separator after collateral (index 1) in CLOSE mode only
-        // SEAMLESS: No gap added - delta is part of the continuous bar structure
-        if (index === 1) {
+        // Add delta separator after outPeerCredit (index 2)
+        if (index === 2) {
           const separatorPos = startPos.clone().add(barDirection.clone().multiplyScalar(currentOffset));
           createDeltaSeparator(group, separatorPos, barDirection, barHeight);
-          // NO gap: currentOffset += 0.2; (removed - bars must be seamless)
         }
       });
-
-      console.log(`🏗️ CLOSE: centered bars, total length: ${totalBarsLength.toFixed(2)}`);
     }
   }
 
@@ -1435,13 +1463,13 @@
     entities.forEach(entity => {
       if (!entity.label) {
         // Defensive: If label is missing, recreate it (should never happen but fail-safe)
-        console.warn(`⚠️ Entity ${entity.id.slice(-4)} missing label - recreating`);
+        debug.warn(`⚠️ Entity ${entity.id.slice(-4)} missing label - recreating`);
         entity.label = createEntityLabel(entity.id);
       }
 
       // Verify label is in scene (defensive check)
       if (!scene.children.includes(entity.label)) {
-        console.warn(`⚠️ Label for ${entity.id.slice(-4)} not in scene - re-adding`);
+        debug.warn(`⚠️ Label for ${entity.id.slice(-4)} not in scene - re-adding`);
         scene.add(entity.label);
       }
 
@@ -1726,7 +1754,6 @@
     const entity = entities.find(e => e.id === entityId);
     if (entity) {
       entity.lastActivity = Date.now();
-      console.log(`💫 Triggered activity pulse for entity: ${entityId.slice(0, 8)}...`);
     }
   }
 
@@ -1743,7 +1770,6 @@
       const currentFrame = $xlnEnvironment.history[timeIndex];
 
       if (currentFrame?.serverInput?.entityInputs) {
-        console.log(`💫 Checking frame ${timeIndex} for entity activity`);
 
         currentFrame.serverInput.entityInputs.forEach((entityInput: any) => {
           if (entityInput.entityTxs) {
@@ -1756,7 +1782,9 @@
                 // Add to activity ticker
                 addActivityToTicker(tx.data.fromEntityId, tx.data.toEntityId, tx.data.accountTx);
 
-                console.log(`💫 Frame ${timeIndex}: Transaction activity ${tx.data.fromEntityId} → ${tx.data.toEntityId}`);
+              } else if (tx.type === 'directPayment' && tx.data.route) {
+                // Lightning strike animation for direct payments
+                createLightningStrike(tx.data.route, tx.data.amount);
               }
             });
           }
@@ -1854,7 +1882,7 @@
           }
           // If both pinned, show warning (can't fix)
           else {
-            console.warn(`⚠️ Both entities pinned but too close: ${entityA.id.slice(-4)} ↔ ${entityB.id.slice(-4)}`);
+            debug.warn(`⚠️ Both entities pinned but too close: ${entityA.id.slice(-4)} ↔ ${entityB.id.slice(-4)}`);
           }
         }
       }
@@ -1862,7 +1890,6 @@
     } // End while loop
 
     if (iterations > 1) {
-      console.log(`🔄 Spacing enforcement completed in ${iterations} iterations`);
     }
 
     // Rebuild connections after adjustments (bars need to be repositioned)
@@ -2014,14 +2041,13 @@
       if (hoveredObject !== intersectedObject) {
         hoveredObject = intersectedObject;
 
-        // Show entity tooltip with balance details
+        // Show concise entity tooltip - just balances
         const balanceInfo = getEntityBalanceInfo(entity.id);
-        const entityName = getEntityShortName(entity.id);
         tooltip = {
           visible: true,
           x: event.clientX,
           y: event.clientY,
-          content: `🏛️ Entity: ${entityName}\n📊 Capabilities: ${entity.profile?.capabilities?.join(', ') || 'N/A'}\n🔗 Accounts: ${getEntityAccountCount(entity.id)}\n💰 Balances:\n${balanceInfo}`
+          content: balanceInfo || 'No reserves'
         };
 
         // Highlight entity with type safety
@@ -2079,7 +2105,7 @@
             hoveredObject.material.color.setHex(0x00ff44);
           }
         } catch (e) {
-          console.warn('Failed to reset highlight:', e);
+          debug.warn('Failed to reset highlight:', e);
         }
         hoveredObject = null;
         tooltip.visible = false;
@@ -2095,7 +2121,7 @@
           hoveredObject.material.emissive.setHex(0x002200);
         }
       } catch (e) {
-        console.warn('Failed to reset highlight on mouse out:', e);
+        debug.warn('Failed to reset highlight on mouse out:', e);
       }
       hoveredObject = null;
     }
@@ -2138,7 +2164,6 @@
       // DISABLED: Center camera on entity (user doesn't want ANY refocusing)
       // centerCameraOnEntity(entity);
 
-      console.log(`🎯 Clicked entity: ${entity.id.slice(0, 8)}...`);
     }
   }
 
@@ -2167,15 +2192,11 @@
       }
 
       // Switch to normal panel view and focus this entity
-      console.log(`🎯 Double-clicked entity: ${entity.id} - switching to panel view`);
 
-      // Save bird view as closed and trigger parent switch
+      // Save bird view as closed
       saveBirdViewSettings(false);
-      if (onBirdViewStateChange) {
-        onBirdViewStateChange(false);
-      }
 
-      // TODO: Focus specific entity panel - would need tabOperations.focusEntity(entity.id)
+      // TODO: Switch to panels view and focus specific entity
     }
   }
 
@@ -2312,14 +2333,6 @@
     }
   }
 
-  function getEntityAccountCount(entityId: string): number {
-    const currentReplicas = $visibleReplicas;
-    const replica = Array.from(currentReplicas.entries() as [string, any][])
-      .find(([key]) => key.startsWith(entityId + ':'));
-
-    return replica?.[1]?.state?.accounts?.size || 0;
-  }
-
   function update3DMode() {
     if (!camera) return;
 
@@ -2391,31 +2404,28 @@
     const tokenAmount = reserves.get(String(tokenId)) || 0n;
 
     // Normalize size between 0.3 and 1.5 based on token amount
-    const normalizedAmount = Number(tokenAmount) / 10000; // Adjust scale as needed
+    // FINTECH-SAFETY: Divide BigInt before casting to preserve precision
+    const normalizedAmount = Number(tokenAmount / 10000n);
     return Math.max(0.3, Math.min(1.5, 0.5 + normalizedAmount * 0.001));
   }
 
   async function sendPayment() {
     try {
-      console.log('🚀 ============ PAYMENT BUTTON CLICKED ============');
-      console.log(`  From: ${paymentFrom}, To: ${paymentTo}, Amount: ${paymentAmount}, TPS: ${paymentTPS}`);
 
       if (!paymentFrom || !paymentTo) {
-        console.error('❌ Missing from/to entities');
+        debug.error('❌ Missing from/to entities');
         alert('Please select from and to entities');
         return;
       }
       if (paymentFrom === paymentTo) {
-        console.error('❌ Same entity selected');
+        debug.error('❌ Same entity selected');
         alert('Cannot send payment to same entity');
         return;
       }
 
-      console.log('✅ Validation passed, proceeding with payment');
 
       // Ensure we're in LIVE mode for payments
       if (!$isLive) {
-        console.log('🔴 Auto-switching to LIVE mode for payment');
         timeOperations.goToLive();
         await new Promise(resolve => setTimeout(resolve, 100)); // Wait for mode switch
       }
@@ -2431,15 +2441,11 @@
         startedAt: Date.now()
       };
 
-      console.log(`📦 Created job:`, job);
 
       if (paymentTPS === 0) {
-        console.log('🔵 Single payment mode (TPS=0)');
         // Send once immediately
         await executeSinglePayment(job);
-        console.log(`💸 Single payment sent: ${getEntityShortName(paymentFrom)} → ${getEntityShortName(paymentTo)}, amount: ${paymentAmount}`);
       } else {
-        console.log(`🔵 Recurring payment mode (TPS=${paymentTPS})`);
         // Create recurring job
         const intervalMs = 1000 / paymentTPS; // Convert TPS to milliseconds
         const intervalId = window.setInterval(async () => {
@@ -2449,11 +2455,10 @@
 
         job.intervalId = intervalId;
         activeJobs = [...activeJobs, job];
-        console.log(`💸 Payment job started: ${paymentTPS} TPS, ${getEntityShortName(paymentFrom)} → ${getEntityShortName(paymentTo)}`);
       }
     } catch (error) {
-      console.error('🔥 CRITICAL ERROR in sendPayment:', error);
-      console.error('Stack:', error instanceof Error ? error.stack : 'No stack');
+      debug.error('🔥 CRITICAL ERROR in sendPayment:', error);
+      debug.error('Stack:', error instanceof Error ? error.stack : 'No stack');
       alert(`Payment failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -2472,7 +2477,6 @@
       }
 
       // Debug logging
-      console.log(`💸 Starting payment: ${getEntityShortName(job.from)} (#${job.from.slice(-4)}) → ${getEntityShortName(job.to)} (#${job.to.slice(-4)}), amount: ${job.amount}`);
 
       // Step 1: Find routes (copy from PaymentPanel findRoutes logic)
       // Find our replica to check for direct account
@@ -2480,7 +2484,6 @@
       for (const key of env.replicas.keys()) {
         if (key.startsWith(job.from + ':')) {
           ourReplica = env.replicas.get(key);
-          console.log(`📡 Found replica: ${key}`);
           break;
         }
       }
@@ -2490,7 +2493,6 @@
       }
 
       const hasDirectAccount = ourReplica?.state?.accounts?.has(job.to);
-      console.log(`🔍 Direct account check: ${hasDirectAccount}`);
 
       if (!hasDirectAccount) {
         throw new Error(`No direct account from ${getEntityShortName(job.from)} to ${getEntityShortName(job.to)}`);
@@ -2505,11 +2507,9 @@
       const paddedDecimal = decimalPart.padEnd(decimals, '0').slice(0, decimals);
       const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(paddedDecimal || 0);
 
-      console.log(`💰 Amount: ${job.amount} → ${amountInSmallestUnit.toString()} (smallest unit)`);
 
       // Build route object (MUST match PaymentPanel structure)
       const routePath = [job.from, job.to];
-      console.log(`🗺️ Route path: [${routePath.map(id => getEntityShortName(id)).join(' → ')}]`);
 
       // VALIDATE route construction
       if (!routePath || routePath.length !== 2) {
@@ -2524,14 +2524,12 @@
       if (routePath[0] !== job.from || routePath[1] !== job.to) {
         throw new Error(`Route mismatch: expected [${job.from}, ${job.to}], got [${routePath[0]}, ${routePath[1]}]`);
       }
-      console.log(`✅ Route validation passed: ${job.from.slice(-4)} → ${job.to.slice(-4)}`);
 
       // Step 2: Find signerId (copy from PaymentPanel)
       let signerId = 's1'; // default
       for (const key of env.replicas.keys()) {
         if (key.startsWith(job.from + ':')) {
           signerId = key.split(':')[1] || 's1';
-          console.log(`🔑 Found signerId: ${signerId}`);
           break;
         }
       }
@@ -2552,7 +2550,6 @@
         }],
       };
 
-      console.log(`📤 Sending payment input:`, JSON.stringify(paymentInput, (_k, v) => typeof v === 'bigint' ? v.toString() : v, 2));
 
       // Trigger visual feedback BEFORE processing
       triggerEntityActivity(job.from);
@@ -2569,13 +2566,12 @@
         type: 'payment' as 'payment'
       }, ...recentActivity].slice(0, 10);
 
-      console.log(`✅ Payment processed: ${getEntityShortName(job.from)} → ${getEntityShortName(job.to)}, ${job.amount} tokens`);
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error('❌ Payment failed:', error); // Log full error object
-      console.error('❌ Error message:', errorMsg);
-      console.error('❌ Stack trace:', error instanceof Error ? error.stack : 'No stack');
+      debug.error('❌ Payment failed:', error); // Log full error object
+      debug.error('❌ Error message:', errorMsg);
+      debug.error('❌ Stack trace:', error instanceof Error ? error.stack : 'No stack');
 
       // Show error to user
       alert(`Payment failed: ${errorMsg}`);
@@ -2593,7 +2589,6 @@
       clearInterval(job.intervalId);
     }
     activeJobs = activeJobs.filter(j => j.id !== jobId);
-    console.log(`❌ Cancelled payment job: ${jobId}`);
   }
 
   function createRipple(entityId: string) {
@@ -2671,7 +2666,6 @@
       if (jEvents && jEvents.length > 0) {
         // This entity experienced a jurisdictional event - create ripple
         createRipple(entityId);
-        console.log(`🌊 Ripple triggered for entity ${getEntityShortName(entityId)} due to ${jEvents.length} j-events`);
       }
     });
   }
@@ -2686,21 +2680,6 @@
       await getXLN(); // Validate XLN available
 
       // Calculate 10% of available capacity
-      const liveReplicas = $xlnEnvironment?.replicas || new Map();
-      const fromReplica = Array.from(liveReplicas.entries() as [string, any][])
-        .find(([key]) => key.startsWith(route.from + ':'));
-
-      let paymentAmount = 100; // Fallback
-
-      if (fromReplica?.[1]?.state?.reserves) {
-        const reserves = fromReplica[1].state.reserves;
-        // FINTECH-SAFETY: reserves Map uses string keys, not number
-        const tokenReserve = reserves.get(String(selectedTokenId)) || 0n;
-        paymentAmount = Math.max(100, Number(tokenReserve) / 10); // 10% for visibility
-      }
-
-      console.log(`💸 Executing payment: ${route.description}, amount: ${paymentAmount}`);
-
       // Trigger visual activity
       triggerEntityActivity(route.from);
       triggerEntityActivity(route.to);
@@ -2713,8 +2692,267 @@
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error('❌ Payment execution failed:', error);
+      debug.error('❌ Payment execution failed:', error);
       throw new Error(`FINTECH-SAFETY: Payment execution failed: ${errorMsg}`);
+    }
+  }
+
+  async function executeScenario() {
+    if (!selectedScenarioFile) {
+      debug.warn('No scenario selected');
+      return;
+    }
+
+    isLoadingScenario = true;
+
+    try {
+      // Fetch scenario file
+      const response = await fetch(`/scenarios/${selectedScenarioFile}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load scenario: ${response.statusText}`);
+      }
+
+      const scenarioText = await response.text();
+      console.log(`Loaded scenario: ${selectedScenarioFile}`);
+
+      // Import XLN server module
+      const serverUrl = new URL('/server.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ serverUrl);
+
+      // Parse scenario
+      const parsed = XLN.parseScenario(scenarioText);
+
+      if (parsed.errors.length > 0) {
+        console.error('Scenario parse errors:', parsed.errors);
+        debug.error('Scenario has errors - check console');
+        return;
+      }
+
+      console.log(`Executing scenario with ${parsed.scenario.events.length} events`);
+
+      // Execute scenario
+      const result = await XLN.executeScenario($xlnEnvironment, parsed.scenario);
+
+      if (result.success) {
+        console.log(`Scenario executed: ${result.framesGenerated} frames generated`);
+
+        // Go to start of new frames to watch scenario unfold
+        timeOperations.goToTimeIndex(0);
+      } else {
+        console.error('Scenario execution errors:', result.errors);
+        debug.error('Scenario execution failed - check console');
+      }
+    } catch (error) {
+      console.error('Failed to execute scenario:', error);
+      debug.error('Scenario failed: ' + (error as Error).message);
+    } finally {
+      isLoadingScenario = false;
+    }
+  }
+
+  async function executeLiveCommand() {
+    if (!commandText.trim()) {
+      debug.warn('No command entered');
+      return;
+    }
+
+    try {
+      // Ensure LIVE mode
+      if (!$isLive) {
+        timeOperations.goToLive();
+      }
+
+      console.log(`🎬 Executing live command: ${commandText}`);
+
+      // Parse as single-line scenario
+      const scenarioText = `SEED live-${Date.now()}\n\n0: Live Command\n${commandText}`;
+
+      const serverUrl = new URL('/server.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ serverUrl);
+
+      const parsed = XLN.parseScenario(scenarioText);
+
+      if (parsed.errors.length > 0) {
+        console.error('Command parse errors:', parsed.errors);
+        debug.error('Invalid command syntax');
+        return;
+      }
+
+      // Execute command
+      const result = await XLN.executeScenario($xlnEnvironment, parsed.scenario);
+
+      if (result.success) {
+        console.log(`✅ Live command executed`);
+        commandText = ''; // Clear input
+      } else {
+        debug.error('Command execution failed');
+      }
+    } catch (error) {
+      console.error('Failed to execute command:', error);
+      debug.error('Command failed: ' + (error as Error).message);
+    }
+  }
+
+  function generateSliceURL() {
+    const currentHistory = get(history);
+    const start = Math.max(0, sliceStart);
+    const end = Math.min(currentHistory.length - 1, sliceEnd);
+
+    if (start >= end) {
+      debug.warn('Invalid slice range');
+      return;
+    }
+
+    // Build complete scenario from sliced frames
+    const scenarioLines: string[] = [];
+    scenarioLines.push(`SEED slice-${Date.now()}`);
+    scenarioLines.push('');
+
+    // Extract narrative and actions from each frame
+    for (let i = start; i <= end; i++) {
+      const frame = currentHistory[i];
+      if (!frame) continue;
+
+      const timestamp = i - start; // Relative time from slice start
+
+      if (frame.title || frame.narrative) {
+        scenarioLines.push(`${timestamp}: ${frame.title || 'Frame ' + i}`);
+        if (frame.narrative) {
+          scenarioLines.push(frame.narrative);
+        }
+        scenarioLines.push('');
+        scenarioLines.push('===');
+        scenarioLines.push('');
+      }
+    }
+
+    // Encode complete scenario as base64
+    const scenarioText = scenarioLines.join('\n');
+    const base64Scenario = btoa(scenarioText);
+
+    // Build URL with encoded scenario and loop suggestion
+    const baseUrl = window.location.origin;
+    exportUrl = `${baseUrl}/?s=${base64Scenario}&loop=${start}:${end}`;
+
+    console.log(`📋 Generated slice URL: frames ${start}-${end}, scenario ${scenarioText.length} chars`);
+  }
+
+  function generateASCIIScenario() {
+    if (!asciiText.trim()) {
+      debug.warn('No ASCII text entered');
+      return;
+    }
+
+    // Parse ASCII grid
+    const textLines = asciiText.split('\n');
+    const positions: Array<{x: number; y: number; char: string}> = [];
+
+    textLines.forEach((line, y) => {
+      [...line].forEach((char, x) => {
+        if (char !== ' ' && char.trim().length > 0) {
+          positions.push({ x, y, char });
+        }
+      });
+    });
+
+    if (positions.length === 0) {
+      debug.warn('No entities found in ASCII text');
+      return;
+    }
+
+    // Center the formation
+    const centerX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
+    const centerY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
+
+    // Convert to world coordinates
+    const entityPositions = positions.map((p, i) => ({
+      id: i + 1,
+      x: (p.x - centerX) * asciiScale,
+      y: (centerY - p.y) * asciiScale, // Flip Y for screen coords
+      z: 0
+    }));
+
+    // Generate connections (connect adjacent entities)
+    const connections: Array<{from: number; to: number}> = [];
+    entityPositions.forEach((p1, i) => {
+      entityPositions.forEach((p2, j) => {
+        if (i >= j) return;
+
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        const distance = Math.sqrt(dx*dx + dy*dy);
+
+        // Connect if distance ≈ 1 grid unit (with tolerance)
+        if (distance < asciiScale * 1.5) {
+          connections.push({ from: p1.id, to: p2.id });
+        }
+      });
+    });
+
+    // Build scenario text
+    const scenarioLines: string[] = [];
+    scenarioLines.push(`SEED ascii-${Date.now()}`);
+    scenarioLines.push('');
+    scenarioLines.push('0: ASCII Formation');
+    scenarioLines.push(`${entityPositions.length} entities form the pattern`);
+    scenarioLines.push(`import 1..${entityPositions.length}`);
+    scenarioLines.push('');
+    scenarioLines.push('===');
+    scenarioLines.push('');
+    scenarioLines.push('1: Position Entities');
+    scenarioLines.push('Entities placed in ASCII grid pattern');
+
+    // Add position data as VIEW param
+    const posStr = entityPositions
+      .map(p => `${p.id}:${p.x.toFixed(0)},${p.y.toFixed(0)},${p.z}`)
+      .join(';');
+    scenarioLines.push(`VIEW entity_positions="${posStr}"`);
+    scenarioLines.push('');
+    scenarioLines.push('===');
+    scenarioLines.push('');
+    scenarioLines.push('2: Link Structure');
+    scenarioLines.push(`${connections.length} connections form the shape`);
+
+    connections.forEach(c => {
+      scenarioLines.push(`${c.from} openAccount ${c.to}`);
+    });
+
+    asciiScenario = scenarioLines.join('\n');
+
+    console.log(`🎨 Generated ASCII scenario: ${entityPositions.length} entities, ${connections.length} connections`);
+  }
+
+  async function executeASCIIScenario() {
+    if (!asciiScenario) {
+      debug.warn('No ASCII scenario generated');
+      return;
+    }
+
+    try {
+      const serverUrl = new URL('/server.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ serverUrl);
+
+      const parsed = XLN.parseScenario(asciiScenario);
+
+      if (parsed.errors.length > 0) {
+        console.error('ASCII scenario parse errors:', parsed.errors);
+        debug.error('Failed to parse generated scenario');
+        return;
+      }
+
+      const result = await XLN.executeScenario($xlnEnvironment, parsed.scenario);
+
+      if (result.success) {
+        console.log(`✅ ASCII formation executed: ${result.framesGenerated} frames`);
+        timeOperations.goToTimeIndex(0);
+        asciiText = ''; // Clear input
+        asciiScenario = ''; // Clear output
+      } else {
+        debug.error('ASCII formation failed');
+      }
+    } catch (error) {
+      console.error('Failed to execute ASCII formation:', error);
+      debug.error('Formation failed: ' + (error as Error).message);
     }
   }
 
@@ -2741,8 +2979,8 @@
       if (isNaN(tokenId)) return; // Skip invalid token IDs
 
       const formattedAmount = (Number(amount) / 1000).toFixed(2);
-      const marker = tokenId === selectedTokenId ? '👉' : '  ';
-      balanceLines.push(`${marker} Token ${tokenId}: ${formattedAmount}k`);
+      const marker = tokenId === selectedTokenId ? '▸ ' : '  ';
+      balanceLines.push(`${marker}${getTokenSymbol(tokenId)}: ${formattedAmount}k`);
     });
 
     return balanceLines.join('\n');
@@ -2872,9 +3110,9 @@
     const leftName = getEntityShortName(leftId);
     const rightName = getEntityShortName(rightId);
 
-    // Build tooltip content for each perspective
-    const leftContent = `🪙 Token ${displayTokenId}\n\n💚 Their Credit: ${leftPeerCredit}\n🔒 Collateral: ${leftCollateral}\n💙 Our Credit: ${leftOwnCredit}\n\n⚖️ Net: ${leftNet}${leftDerived.delta < 0 ? ' (owe)' : leftDerived.delta > 0 ? ' (owed)' : ''}`;
-    const rightContent = `🪙 Token ${displayTokenId}\n\n💙 Our Credit: ${rightOwnCredit}\n🔒 Collateral: ${rightCollateral}\n💚 Their Credit: ${rightPeerCredit}\n\n⚖️ Net: ${rightNet}${rightDerived.delta < 0 ? ' (owe)' : rightDerived.delta > 0 ? ' (owed)' : ''}`;
+    // Build concise tooltip content - just the numbers
+    const leftContent = `Their Credit: ${leftPeerCredit}\nCollateral: ${leftCollateral}\nOur Credit: ${leftOwnCredit}\nNet: ${leftNet}`;
+    const rightContent = `Our Credit: ${rightOwnCredit}\nCollateral: ${rightCollateral}\nTheir Credit: ${rightPeerCredit}\nNet: ${rightNet}`;
 
     return {
       left: leftContent,
@@ -2899,13 +3137,26 @@
   <button
     class="panel-toggle-btn"
     class:panel-open={showPanel}
-    on:click={() => showPanel = !showPanel}
-    title="{showPanel ? 'Hide' : 'Show'} Controls"
+    on:click={() => {
+      showPanel = !showPanel;
+
+      // Sync zen mode with sidebar visibility
+      if (onToggleZenMode) {
+        // Sidebar hidden = zen mode on
+        // Sidebar visible = zen mode off
+        if (!showPanel && !zenMode) {
+          onToggleZenMode(); // Enter zen mode (hiding sidebar)
+        } else if (showPanel && zenMode) {
+          onToggleZenMode(); // Exit zen mode (showing sidebar)
+        }
+      }
+    }}
+    title="{showPanel ? 'Hide All UI (Zen Mode)' : 'Show Controls (Exit Zen)'}"
   >
     {#if showPanel}
       Hide ▶
     {:else}
-      ◀ Controls
+      ◀ {zenMode ? '🧘 Exit Zen' : 'Controls'}
     {/if}
   </button>
 
@@ -2913,16 +3164,33 @@
   {#if showPanel}
   <div class="topology-overlay" class:panel-open={showPanel}>
     <div class="topology-info">
-      <h3>🗺️ Network Topology</h3>
+      <h3>Network Topology</h3>
+
+      <!-- Scenarios Section -->
+      <div class="scenarios-section">
+        <h4>Scenarios</h4>
+        <select class="scenario-select" bind:value={selectedScenarioFile}>
+          <option value="">Select scenario...</option>
+          <option value="h-network.scenario.txt">H-Network (Default)</option>
+          <option value="diamond-dybvig.scenario.txt">Diamond-Dybvig Bank Run</option>
+        </select>
+        <button
+          class="scenario-execute-btn"
+          on:click={executeScenario}
+          disabled={!selectedScenarioFile || isLoadingScenario}
+        >
+          {isLoadingScenario ? 'Loading...' : 'Execute'}
+        </button>
+      </div>
 
       <!-- Stats -->
       <p>Entities: {entities.length}</p>
       <p>Connections: {connections.length}</p>
       <p class="frame-info">
         {#if $isLive}
-          🔴 LIVE Mode
+          LIVE Mode
         {:else}
-          📼 Frame {$currentTimeIndex + 1}
+          Frame {$currentTimeIndex + 1}
         {/if}
       </p>
 
@@ -2941,7 +3209,7 @@
             }}
           >
             {#each availableTokens as tokenId}
-              <option value={tokenId}>Token {tokenId}</option>
+              <option value={tokenId}>{getTokenSymbol(tokenId)}</option>
             {/each}
           </select>
         </div>
@@ -3080,6 +3348,20 @@
           />
         </div>
 
+        <!-- Lightning Speed Slider -->
+        <div class="control-group">
+          <label>⚡ Lightning: {lightningSpeed}ms/hop</label>
+          <input
+            type="range"
+            min="10"
+            max="500"
+            step="10"
+            bind:value={lightningSpeed}
+            title="Lightning animation speed per hop (10-500ms)"
+            class="rotation-slider"
+          />
+        </div>
+
         <!-- Quick Payment Form -->
         <div class="payment-form">
           <div class="form-row">
@@ -3126,6 +3408,78 @@
           <button class="send-btn" on:click={sendPayment}>
             {paymentTPS === 0 ? '💸 Send Once' : '▶ Start Flow'}
           </button>
+        </div>
+
+        <!-- Live Command Builder -->
+        <div class="command-builder">
+          <h4>Live Command</h4>
+          <div class="command-form">
+            <select class="command-action-select" bind:value={commandAction}>
+              <option value="">Select action...</option>
+              <option value="openAccount">Open Account</option>
+              <option value="deposit">Deposit</option>
+              <option value="withdraw">Withdraw</option>
+              <option value="transfer">Transfer</option>
+              <option value="chat">Chat</option>
+            </select>
+            <input
+              type="text"
+              class="command-input"
+              bind:value={commandText}
+              placeholder="e.g. 2 deposit 1 1000"
+            />
+            <button class="command-execute-btn" on:click={executeLiveCommand}>
+              Execute Live
+            </button>
+          </div>
+        </div>
+
+        <!-- Slice & Export -->
+        <div class="slice-export">
+          <h4>Slice & Export</h4>
+          <div class="slice-controls">
+            <input type="number" class="slice-input" bind:value={sliceStart} placeholder="Start" min="0" />
+            <span>:</span>
+            <input type="number" class="slice-input" bind:value={sliceEnd} placeholder="End" min="0" />
+            <button class="slice-btn" on:click={generateSliceURL}>Generate URL</button>
+          </div>
+          <textarea
+            class="export-url"
+            bind:value={exportUrl}
+            placeholder="Shareable URL will appear here..."
+            readonly
+            rows="3"
+          ></textarea>
+        </div>
+
+        <!-- ASCII Formation Tool -->
+        <div class="ascii-tool">
+          <h4>ASCII → Scenario</h4>
+          <textarea
+            class="ascii-input"
+            bind:value={asciiText}
+            placeholder="Type ASCII art here..."
+            rows="4"
+          ></textarea>
+          <div class="ascii-controls">
+            <label>Scale:</label>
+            <input type="number" class="ascii-scale-input" bind:value={asciiScale} min="10" max="500" />
+            <span>px</span>
+          </div>
+          <button class="ascii-generate-btn" on:click={generateASCIIScenario}>
+            Generate Scenario
+          </button>
+          {#if asciiScenario}
+            <textarea
+              class="ascii-scenario-output"
+              bind:value={asciiScenario}
+              readonly
+              rows="6"
+            ></textarea>
+            <button class="ascii-execute-btn" on:click={() => executeASCIIScenario()}>
+              Execute Formation
+            </button>
+          {/if}
         </div>
       </div>
 
@@ -3184,13 +3538,11 @@
   {#if dualTooltip.visible}
     <div class="dual-tooltip-container" style="left: {dualTooltip.x}px; top: {dualTooltip.y}px;">
       <div class="dual-tooltip left">
-        <div class="tooltip-header">{dualTooltip.leftEntity} View</div>
         {#each dualTooltip.leftContent.split('\n') as line}
           <div>{line}</div>
         {/each}
       </div>
       <div class="dual-tooltip right">
-        <div class="tooltip-header">{dualTooltip.rightEntity} View</div>
         {#each dualTooltip.rightContent.split('\n') as line}
           <div>{line}</div>
         {/each}
@@ -3222,6 +3574,9 @@
       </div>
     </div>
   {/if}
+
+  <!-- Narrative Subtitle Overlay -->
+  <NarrativeSubtitle />
 </div>
 
 <style>
@@ -3295,7 +3650,7 @@
 
   .topology-overlay {
     position: fixed;
-    top: 0;
+    top: 60px; /* Start below topbar */
     right: 0;
     bottom: 0;
     width: 400px;
@@ -3359,20 +3714,75 @@
     text-shadow: 0 0 20px rgba(0, 255, 136, 0.6);
   }
 
+  /* Scenarios Section */
+  .scenarios-section {
+    margin: 16px 0;
+    padding: 12px;
+    background: rgba(40, 40, 40, 0.6);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .scenarios-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .scenario-select {
+    width: 100%;
+    padding: 6px 8px;
+    background: rgba(50, 50, 50, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+
+  .scenario-select:focus {
+    outline: none;
+    border-color: #007acc;
+  }
+
+  .scenario-execute-btn {
+    width: 100%;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #007acc 0%, #005a9e 100%);
+    border: none;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .scenario-execute-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #0086e6 0%, #006bb3 100%);
+  }
+
+  .scenario-execute-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .tooltip {
     position: fixed;
-    background: rgba(0, 0, 0, 0.9);
-    color: #00ff88;
-    padding: 8px 12px;
-    border-radius: 6px;
-    border: 1px solid #00ff44;
+    background: rgba(0, 0, 0, 0.7);
+    color: rgba(0, 255, 136, 0.9);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 255, 68, 0.3);
     font-family: monospace;
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: 11px;
+    line-height: 1.3;
     z-index: 30;
     pointer-events: none;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 4px 12px rgba(0, 255, 68, 0.3);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   }
 
   .dual-tooltip-container {
@@ -3386,45 +3796,27 @@
   }
 
   .dual-tooltip {
-    background: rgba(0, 0, 0, 0.95);
-    color: #00ff88;
-    padding: 10px 14px;
-    border-radius: 8px;
-    border: 2px solid #00ff44;
+    background: rgba(0, 0, 0, 0.65);
+    color: rgba(0, 255, 136, 0.85);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 255, 68, 0.25);
     font-family: monospace;
-    font-size: 11px;
-    line-height: 1.5;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 4px 16px rgba(0, 255, 68, 0.4);
-    min-width: 180px;
+    font-size: 10px;
+    line-height: 1.4;
+    backdrop-filter: blur(3px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    min-width: 100px;
   }
 
   .dual-tooltip.left {
-    border-color: #00aaff;
-    box-shadow: 0 4px 16px rgba(0, 170, 255, 0.4);
+    border-color: rgba(0, 170, 255, 0.3);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   }
 
   .dual-tooltip.right {
-    border-color: #ff8800;
-    box-shadow: 0 4px 16px rgba(255, 136, 0, 0.4);
-  }
-
-  .tooltip-header {
-    font-weight: bold;
-    font-size: 12px;
-    margin-bottom: 6px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid rgba(0, 255, 68, 0.3);
-  }
-
-  .dual-tooltip.left .tooltip-header {
-    color: #00ccff;
-    border-bottom-color: rgba(0, 170, 255, 0.3);
-  }
-
-  .dual-tooltip.right .tooltip-header {
-    color: #ffaa00;
-    border-bottom-color: rgba(255, 136, 0, 0.3);
+    border-color: rgba(255, 136, 0, 0.3);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   }
 
   .topology-controls {
@@ -3769,6 +4161,193 @@
     box-shadow:
       0 4px 16px rgba(0, 255, 136, 0.25),
       inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  /* Live Command Builder */
+  .command-builder {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(40, 40, 40, 0.6);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .command-builder h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .command-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .command-action-select,
+  .command-input {
+    width: 100%;
+    padding: 6px 8px;
+    background: rgba(50, 50, 50, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+  }
+
+  .command-execute-btn {
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #00ff88 0%, #00cc66 100%);
+    border: none;
+    border-radius: 4px;
+    color: #000;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .command-execute-btn:hover {
+    background: linear-gradient(135deg, #00ffaa 0%, #00dd77 100%);
+  }
+
+  /* Slice & Export */
+  .slice-export {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(40, 40, 40, 0.6);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .slice-export h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .slice-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .slice-input {
+    width: 60px;
+    padding: 4px 6px;
+    background: rgba(50, 50, 50, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    text-align: center;
+  }
+
+  .slice-btn {
+    flex: 1;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #007acc 0%, #005a9e 100%);
+    border: none;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .export-url {
+    width: 100%;
+    padding: 8px;
+    background: rgba(20, 20, 20, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #00ff88;
+    font-size: 10px;
+    font-family: 'Courier New', monospace;
+    resize: vertical;
+    min-height: 60px;
+  }
+
+  /* ASCII Formation Tool */
+  .ascii-tool {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(40, 40, 40, 0.6);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .ascii-tool h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .ascii-input,
+  .ascii-scenario-output {
+    width: 100%;
+    padding: 8px;
+    background: rgba(20, 20, 20, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+    resize: vertical;
+    margin-bottom: 8px;
+  }
+
+  .ascii-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .ascii-scale-input {
+    width: 60px;
+    padding: 4px 6px;
+    background: rgba(50, 50, 50, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .ascii-generate-btn,
+  .ascii-execute-btn {
+    width: 100%;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #ff8800 0%, #ff6600 100%);
+    border: none;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+
+  .ascii-execute-btn {
+    background: linear-gradient(135deg, #00ff88 0%, #00cc66 100%);
+    color: #000;
+  }
+
+  .ascii-generate-btn:hover {
+    background: linear-gradient(135deg, #ffaa00 0%, #ff8800 100%);
+  }
+
+  .ascii-execute-btn:hover {
+    background: linear-gradient(135deg, #00ffaa 0%, #00dd77 100%);
   }
 
   .send-btn:hover {
