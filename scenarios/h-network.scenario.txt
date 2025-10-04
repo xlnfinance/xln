@@ -1,0 +1,26 @@
+SEED h-network-default
+
+0: Genesis
+Six entities emerge from the void
+import 1..6
+
+===
+
+1: The First Connection
+Hub entities reach out to form the crossbar
+1 openAccount 2
+
+===
+
+2: Network Takes Shape
+Users connect to their chosen hubs, forming the H
+3 openAccount 1
+4 openAccount 2
+5 openAccount 1
+6 openAccount 2
+
+===
+
+3: H-Network Complete
+The topology is established, ready for value flow
+VIEW camera=overview zoom=1.2

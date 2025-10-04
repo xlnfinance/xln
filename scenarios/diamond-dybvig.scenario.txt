@@ -1,0 +1,62 @@
+SEED diamond-dybvig-2024
+
+0: A Bank Is Born
+Six entities: one bank, five depositors
+import 1..6
+
+===
+
+1: Accounts Open
+The bank establishes bilateral relationships with all depositors
+2..6 openAccount 1
+
+===
+
+5: First Deposits
+Trust begins. Customers deposit their savings.
+VIEW camera=orbital zoom=1.5 focus=1
+2 deposit 1 500
+3 deposit 1 500
+
+===
+
+8: More Capital Flows In
+Growing confidence. More depositors join.
+4 deposit 1 300
+5 deposit 1 400
+6 deposit 1 300
+
+===
+
+12: The Bank Lends
+Fractional reserve begins. 80% deployed, 20% held.
+VIEW camera=overview zoom=2.0
+1 transfer 2 800
+
+===
+
+18: First Withdrawal
+One customer needs funds. Normal operations.
+2 withdraw 1 250
+
+===
+
+20: Panic Spreads
+Simultaneous withdrawals. The run begins.
+VIEW camera=follow focus=1 zoom=2.5 speed=0.5
+3 withdraw 1 500
+4 withdraw 1 300
+
+===
+
+22: Liquidity Crisis
+Everyone rushes for the exits. Reserves depleting fast.
+VIEW camera=orbital zoom=3.0
+5 withdraw 1 400
+6 withdraw 1 300
+
+===
+
+25: Aftermath
+The fragility of fractional reserve, revealed.
+VIEW camera=overview zoom=1.0 speed=1.0
