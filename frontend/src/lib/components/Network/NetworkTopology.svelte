@@ -3749,10 +3749,11 @@
         </div>
 
         <!-- VR Mode -->
-        {#if isVRSupported}
         <div class="vr-section">
           <h4>VR Mode</h4>
-          {#if isVRActive}
+          {#if !isVRSupported}
+            <p class="vr-hint">VR requires Quest 3 or compatible headset</p>
+          {:else if isVRActive}
             <button class="vr-exit-btn" on:click={exitVR}>
               Exit VR
             </button>
@@ -3764,13 +3765,12 @@
                 <span>Passthrough (mixed reality)</span>
               </label>
             </div>
-            <button class="vr-enter-btn" on:click={enterVR}>
+            <button class="vr-enter-btn" on:click={enterVR} disabled={!isVRSupported}>
               Enter VR
             </button>
             <p class="vr-hint">Quest 3: Point + trigger to grab entities</p>
           {/if}
         </div>
-        {/if}
       </div>
 
       <small>Scroll to zoom, drag to rotate</small>
