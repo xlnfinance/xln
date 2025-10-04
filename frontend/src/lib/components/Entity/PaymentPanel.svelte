@@ -7,12 +7,26 @@
   // Payment form state
   let targetEntityId = '';
   let amount = '';
-  let tokenId = 2; // Default to USDC
+  let tokenId = 1; // Default to first token (ETH)
   let description = '';
   let findingRoutes = false;
   let sendingPayment = false;
   let routes: any[] = [];
   let selectedRouteIndex = -1;
+
+  // Auto-select first available token from entity's reserves
+  $: {
+    const replica = $replicas?.get(`${entityId}:s1`) || $replicas?.get(`${entityId}:s2`);
+    if (replica?.state?.reserves) {
+      const availableTokens = Array.from(replica.state.reserves.keys());
+      if (availableTokens.length > 0 && !availableTokens.includes(tokenId)) {
+        const firstToken = availableTokens[0];
+        if (firstToken !== undefined) {
+          tokenId = firstToken as number; // Use first available
+        }
+      }
+    }
+  }
 
   // Get all entities for dropdown - guaranteed non-null entity IDs
   $: allEntities = $replicas ? Array.from($replicas.keys() as IterableIterator<string>)

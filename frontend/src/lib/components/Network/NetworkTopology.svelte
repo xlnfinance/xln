@@ -130,7 +130,7 @@
         entityMode: 'sphere',
         wasLastOpened: false,
         rotationX: 0,
-        rotationY: 5000, // Default to Spin mode
+        rotationY: 0, // No rotation by default
         rotationZ: 0,
         camera: undefined
       };
@@ -161,7 +161,7 @@
         entityMode: 'sphere',
         wasLastOpened: false,
         rotationX: 0,
-        rotationY: 5000, // Default to Spin mode
+        rotationY: 0, // No rotation by default
         rotationZ: 0,
         camera: undefined
       };
@@ -279,7 +279,52 @@
   // Scenario state
   let selectedScenarioFile: string = '';
   let isLoadingScenario: boolean = false;
+  let scenarioSteps: Array<{timestamp: number; title: string; description: string; actions: any[]}> = [];
   let activeJobs: PaymentJob[] = [];
+
+  // Auto-load and parse scenario when selected
+  $: if (selectedScenarioFile) {
+    loadScenarioSteps(selectedScenarioFile);
+  }
+
+  async function loadScenarioSteps(filename: string) {
+    try {
+      const response = await fetch(`/scenarios/${filename}`);
+      if (!response.ok) return;
+
+      const text = await response.text();
+      const parsed: typeof scenarioSteps = [];
+      const sections = text.split('===').filter(s => s.trim());
+
+      for (const section of sections) {
+        const lines = section.trim().split('\n');
+        let timestamp = 0;
+        let title = '';
+        let description = '';
+        const actions: string[] = [];
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('t=')) timestamp = parseInt(trimmed.slice(2));
+          else if (trimmed.startsWith('title:')) title = trimmed.slice(6).trim();
+          else if (trimmed.startsWith('description:')) description = trimmed.slice(12).trim();
+          else if (trimmed && !trimmed.startsWith('#') && !trimmed.match(/^[A-Z]/)) {
+            actions.push(trimmed);
+          }
+        }
+
+        if (title) {
+          parsed.push({ timestamp, title, description, actions });
+        }
+      }
+
+      scenarioSteps = parsed;
+      console.log(`📜 Loaded ${parsed.length} scenario steps`);
+    } catch (error) {
+      console.error('Failed to load scenario steps:', error);
+      scenarioSteps = [];
+    }
+  }
 
   // Live command builder state
   let commandAction: string = '';
@@ -329,7 +374,7 @@
     id: string;
     message: string;
     timestamp: number;
-    type: 'payment' | 'credit' | 'settlement';
+    type: 'payment' | 'credit' | 'settlement' | 'j-event' | 'commit';
   }> = [];
 
   onMount(() => {
@@ -2829,43 +2874,65 @@
   }
 
   function addActivityToTicker(fromId: string, toId: string, accountTx: any) {
-    const fromShort = fromId.slice(0, 8);
-    const toShort = toId.slice(0, 8);
+    const fromShort = getEntityShortName(fromId);
+    const toShort = getEntityShortName(toId);
 
     let message = '';
-    let type: 'payment' | 'credit' | 'settlement' = 'payment';
+    let type: 'payment' | 'credit' | 'settlement' | 'j-event' | 'commit' = 'payment';
 
     switch (accountTx.type) {
-      case 'payment':
-        const amount = Number(accountTx.amount || 0n);
-        message = `${fromShort}→${toShort}: ${amount > 1000 ? Math.floor(amount/1000)+'k' : amount}`;
+      case 'direct_payment':
+        const amt = accountTx.data?.amount ? Number(accountTx.data.amount) : 0;
+        const hops = accountTx.data?.route?.length || 0;
+        message = hops > 0
+          ? `💸 ${fromShort} → ${toShort}: ${amt} (${hops} hops)`
+          : `💸 ${fromShort} → ${toShort}: ${amt}`;
         type = 'payment';
         break;
-      case 'credit_limit':
-        message = `${fromShort}↔${toShort}: Credit limit`;
-        type = 'credit';
-        break;
-      case 'settlement':
-        message = `${fromShort}⚖${toShort}: Settlement`;
+      case 'account_settle':
+        message = `⚖️ ${fromShort} ⟷ ${toShort}: settlement`;
         type = 'settlement';
         break;
+      case 'account_deposit':
+        message = `🏦 ${fromShort} deposit (j-event)`;
+        type = 'j-event';
+        break;
+      case 'account_withdraw':
+        message = `🏦 ${fromShort} withdraw (j-event)`;
+        type = 'j-event';
+        break;
       default:
-        message = `${fromShort}↔${toShort}: ${accountTx.type}`;
+        message = `${fromShort} ↔ ${toShort}: ${accountTx.type}`;
     }
 
     // Add to beginning of array (newest first)
     recentActivity.unshift({
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random()}`,
       message,
       timestamp: Date.now(),
       type
     });
 
-    // Keep only last 10 activities
-    if (recentActivity.length > 10) {
-      recentActivity = recentActivity.slice(0, 10);
+    // Keep only last 30 activities (verbose mode)
+    if (recentActivity.length > 30) {
+      recentActivity = recentActivity.slice(0, 30);
     }
   }
+
+  // Helper to log frame commits (currently unused, will be called from frame processing)
+  // function logFrameCommit(entity1: string, entity2: string, frameId: number) {
+  //   const e1 = getEntityShortName(entity1);
+  //   const e2 = getEntityShortName(entity2);
+  //   recentActivity.unshift({
+  //     id: `commit-${Date.now()}-${Math.random()}`,
+  //     message: `✅ ${e1} ⟷ ${e2}: frame ${frameId} committed`,
+  //     timestamp: Date.now(),
+  //     type: 'commit'
+  //   });
+  //   if (recentActivity.length > 30) {
+  //     recentActivity = recentActivity.slice(0, 30);
+  //   }
+  // }
 
   function update3DMode() {
     if (!camera) return;
@@ -3746,6 +3813,7 @@
           <option value="">Select scenario...</option>
           <option value="h-network.scenario.txt">H-Network (Default)</option>
           <option value="diamond-dybvig.scenario.txt">Diamond-Dybvig Bank Run</option>
+          <option value="phantom-grid.scenario.txt">Phantom Grid</option>
         </select>
         <button
           class="scenario-execute-btn"
@@ -3754,6 +3822,25 @@
         >
           {isLoadingScenario ? 'Loading...' : 'Execute'}
         </button>
+
+        <!-- Scenario Steps Display -->
+        {#if scenarioSteps.length > 0}
+          <div class="scenario-steps">
+            <div class="steps-header">
+              <span>Steps ({scenarioSteps.length})</span>
+            </div>
+            <div class="steps-list">
+              {#each scenarioSteps as step}
+                <div class="step-item">
+                  <div class="step-time">t={step.timestamp}s</div>
+                  <div class="step-title">{step.title}</div>
+                  <div class="step-desc">{step.description}</div>
+                  <div class="step-actions">{step.actions.length} actions</div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
 
       <!-- Stats -->
@@ -4400,6 +4487,62 @@
 
   .scenario-execute-btn:hover:not(:disabled) {
     background: linear-gradient(135deg, #0086e6 0%, #006bb3 100%);
+  }
+
+  .scenario-execute-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Scenario Steps Display */
+  .scenario-steps {
+    margin-top: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .steps-header {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 8px;
+    font-family: 'Monaco', 'Courier New', monospace;
+  }
+
+  .steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .step-item {
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.4);
+    border-left: 2px solid #333;
+    font-size: 11px;
+    font-family: 'Monaco', 'Courier New', monospace;
+  }
+
+  .step-time {
+    color: #666;
+    font-size: 10px;
+    margin-bottom: 2px;
+  }
+
+  .step-title {
+    color: #888;
+    margin-bottom: 2px;
+    font-weight: 500;
+  }
+
+  .step-desc {
+    color: #666;
+    font-size: 10px;
+    margin-bottom: 4px;
+  }
+
+  .step-actions {
+    color: #555;
+    font-size: 10px;
   }
 
   .scenario-execute-btn:disabled {

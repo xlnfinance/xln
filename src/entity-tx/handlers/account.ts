@@ -2,7 +2,7 @@ import { AccountInput, EntityState, Env, EntityInput } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState } from '../../state-helpers';
 import { formatEntityId } from '../../entity-helpers';
-import { createDemoDelta, getDefaultCreditLimit } from '../../account-utils';
+import { createDemoDelta, getDefaultCreditLimit, deriveDelta } from '../../account-utils';
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId} → ${input.toEntityId}`, input.accountTx);
@@ -228,9 +228,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
           // Check capacity using deriveDelta
           const isLeft = state.entityId < nextHop;
-          const derived = env.xlnFunctions?.deriveDelta(nextDelta, isLeft);
-          if (!derived || forwardAmount > derived.outCapacity) {
-            console.error(`❌ Next hop insufficient capacity: ${derived?.outCapacity || 0n} < ${forwardAmount}`);
+          const derived = deriveDelta(nextDelta, isLeft);
+          if (forwardAmount > derived.outCapacity) {
+            console.error(`❌ Next hop insufficient capacity: ${derived.outCapacity} < ${forwardAmount}`);
             newState.messages.push(`❌ Payment routing failed: Insufficient capacity at next hop`);
             return { newState, outputs };
           }

@@ -51,12 +51,13 @@ const handler = async (request: Request): Promise<Response> => {
     });
   }
 
-  // RPC Proxy - forward JSON-RPC requests to local Hardhat node
+  // RPC Proxy - forward JSON-RPC requests to local Hardhat node (internal port)
   // CRITICAL: Enables HTTPS → HTTP RPC calls (Safari mixed content fix)
+  // Internal port 18545 (Hardhat) proxied to public HTTPS port 8545 (nginx)
   if (path === '/rpc' && request.method === 'POST') {
     try {
       const body = await request.json();
-      const rpcResponse = await fetch('http://localhost:8545', {
+      const rpcResponse = await fetch('http://localhost:18545', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
