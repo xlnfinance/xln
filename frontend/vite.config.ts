@@ -6,6 +6,8 @@ export default defineConfig({
 	server: {
 		host: '0.0.0.0',
 		port: 8080,
+		// Allow ngrok and other tunnel hosts (for Oculus/mobile access)
+		allowedHosts: ['all'],
 		fs: {
 			// Allow serving files from the parent directory (to access ../dist/)
 			allow: ['..']

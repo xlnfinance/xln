@@ -18,20 +18,25 @@ module.exports = {
     },
     hardhat: {
       chainId: 1337,
-      allowUnlimitedContractSize: true
+      allowUnlimitedContractSize: true,
+      // Bind to 0.0.0.0 to allow network access (Oculus, mobile devices)
+      mining: {
+        auto: true,
+        interval: 0
+      }
     },
     ethereum: {
-      url: "http://127.0.0.1:8545",
+      url: "http://0.0.0.0:8545",
       chainId: 1337,
       allowUnlimitedContractSize: true
     },
     polygon: {
-      url: "http://127.0.0.1:8546",
+      url: "http://0.0.0.0:8546",
       chainId: 1337,
       allowUnlimitedContractSize: true
     },
     arbitrum: {
-      url: "http://127.0.0.1:8547",
+      url: "http://0.0.0.0:8547",
       chainId: 1337,
       allowUnlimitedContractSize: true
     },
