@@ -93,11 +93,23 @@ export const db: Level<Buffer, Buffer> = new Level('db', {
   keyEncoding: 'binary',
 });
 
-// CRITICAL: Explicitly open database (Level doesn't auto-open in browser)
+// CRITICAL: Detect if IndexedDB is available (Safari incognito/Oculus browser may block it)
+export let dbAvailable = true;
 let dbOpenPromise: Promise<void> | null = null;
+
 async function ensureDbOpen() {
+  if (!dbAvailable) return; // Skip if DB is unavailable
+
   if (!dbOpenPromise) {
-    dbOpenPromise = db.open();
+    dbOpenPromise = (async () => {
+      try {
+        await db.open();
+        console.log('✅ Database available and opened');
+      } catch (error) {
+        dbAvailable = false;
+        console.log('⚠️ IndexedDB unavailable (incognito/private mode?) - running in-memory only');
+      }
+    })();
   }
   await dbOpenPromise;
 }
@@ -580,8 +592,14 @@ const main = async (): Promise<Env> => {
     gossip: gossipLayer,
   };
 
-  // Then try to load saved state if available
+  // Then try to load saved state if available (skip if IndexedDB unavailable)
+  if (!dbAvailable) {
+    console.log('💾 Database unavailable - skipping snapshot loading, running in-memory only');
+  }
+
   try {
+    if (!dbAvailable) throw new Error('DB_UNAVAILABLE');
+
     if (isBrowser) {
       console.log('🌐 BROWSER-DEBUG: Starting IndexedDB snapshot loading process...');
     } else {
@@ -695,13 +713,16 @@ const main = async (): Promise<Env> => {
       error.message?.includes('LEVEL_NOT_FOUND') ||
       error.message?.includes('NotFoundError') ||
       error.message?.includes('DB_TIMEOUT') ||
+      error.message?.includes('DB_UNAVAILABLE') ||
       error.name === 'NotFoundError';
 
     if (isNotFoundError) {
       const reason = error.message?.includes('DB_TIMEOUT')
-        ? 'IndexedDB timeout - starting fresh'
+        ? 'IndexedDB timeout'
+        : error.message?.includes('DB_UNAVAILABLE')
+        ? 'IndexedDB unavailable (incognito/private mode)'
         : 'No saved state found';
-      console.log(`📦 ${reason}, using fresh environment`);
+      console.log(`📦 ${reason} - starting fresh, running in-memory only`);
       if (isBrowser) {
         console.log('💡 This is normal for first-time use. IndexedDB will be created automatically.');
       } else {

@@ -329,7 +329,7 @@ if [ $success_count -gt 0 ]; then
     echo ""
 
     # Create fresh jurisdictions.json with actual deployed addresses (NO placeholders!)
-    # CRITICAL: Use relative port :8545 to work from any origin (xln.finance, localhost, etc)
+    # CRITICAL: Use :8545 for local dev, code will auto-detect and use proxy for production
     cat > jurisdictions.json << EOF
 {
   "version": "1.0.0",
