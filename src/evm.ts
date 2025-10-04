@@ -595,26 +595,12 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       }
       const jData = data as Record<string, any>;
 
-      // CRITICAL: Smart RPC URL expansion
-      // Localhost → direct :8545, Production → /rpc proxy (avoids HTTPS→HTTP blocking)
+      // CRITICAL: Expand RPC URLs - nginx handles HTTPS proxy on :8545
       let rpcUrl = jData['rpc'];
-      if (isBrowser) {
-        if (rpcUrl.startsWith('/')) {
-          // Proxy path - use same origin (works with HTTPS)
-          rpcUrl = `${window.location.origin}${rpcUrl}`;
-          console.log(`🔧 Using RPC proxy: ${jData['rpc']} → ${rpcUrl}`);
-        } else if (rpcUrl.startsWith(':')) {
-          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-          if (isLocalhost) {
-            // Localhost - use direct port
-            rpcUrl = `${window.location.origin.replace(/:\d+$/, '')}${rpcUrl}`;
-            console.log(`🔧 Local dev: ${jData['rpc']} → ${rpcUrl}`);
-          } else {
-            // Production domain - use /rpc proxy instead (HTTPS-safe)
-            rpcUrl = `${window.location.origin}/rpc`;
-            console.log(`🔧 Production: Using proxy ${rpcUrl} (original: ${jData['rpc']})`);
-          }
-        }
+      if (isBrowser && rpcUrl.startsWith(':')) {
+        // Use location.origin + port (nginx proxies HTTPS on xln.finance:8545)
+        rpcUrl = `${window.location.origin.replace(/:\d+$/, '')}${rpcUrl}`;
+        console.log(`🔧 RPC URL: ${jData['rpc']} → ${rpcUrl}`);
       } else if (!isBrowser && rpcUrl.startsWith(':')) {
         // Node.js: Default to localhost
         rpcUrl = `http://localhost${rpcUrl}`;
