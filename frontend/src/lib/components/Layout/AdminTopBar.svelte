@@ -248,36 +248,9 @@
         </button>
       {/each}
     </div>
-  </div>
-  
-  <div class="admin-navigation">
-    <!-- Navigation content can be added here -->
-  </div>
-  
-  <div class="admin-controls">
-    <button class="admin-btn" on:click={handleRunDemo} title="Run Demo">
-      <span>▶️</span>
-    </button>
-    <button class="admin-btn" on:click={handlePrepopulate} title="Prepopulate Network">
-      <span>🌐</span>
-    </button>
-    <button class="admin-btn" on:click={handleClearDatabase} title="Clear Database">
-      <span>🗑️</span>
-    </button>
-    <button class="admin-btn" on:click={handleCreateEntity} title="Create New Entity">
-      <span>➕</span>
-    </button>
-    <button class="admin-btn" on:click={handleAddPanel} title="Add Entity Panel">
-      <span>📋</span>
-    </button>
-    <button class="admin-btn" on:click={handleToggleTheme} title="Toggle theme">
-      <span id="theme-icon">{themeIcon}</span>
-    </button>
-    <button class="admin-btn" on:click={handleShowSettings} title="Settings">
+    </div>
+    <button class="settings-btn" on:click={handleShowSettings} title="Settings">
       <span>⚙️</span>
-    </button>
-    <button class="admin-btn" on:click={handleToggleDropdownMode} title="Toggle Dropdown Mode">
-      <span>🔄</span>
     </button>
   </div>
 </div>
@@ -291,43 +264,22 @@
         <button class="modal-close" on:click={handleCloseSettings}>&times;</button>
       </div>
       <div class="modal-body">
+        <!-- Admin Actions Section -->
         <div class="setting-group">
-          <label for="dropdownModeToggle">
-            <strong>Dropdown Hierarchy Mode</strong>
-            <br><small>Toggle between Jurisdiction→Signer→Entity vs Jurisdiction→Entity→Signers</small>
-          </label>
-          <div class="toggle-switch">
-            <input 
-              type="checkbox" 
-              id="dropdownModeToggle" 
-              checked={$settings.dropdownMode === 'entity-first'}
-              on:change={handleToggleDropdownMode}
-            >
-            <span class="toggle-slider"></span>
-          </div>
-          <div class="toggle-labels">
-            <span>Jur→Signer→Entity</span>
-            <span>Jur→Entity→Signers</span>
-          </div>
-        </div>
-        
-        <div class="setting-group">
-          <label for="serverDelaySlider">
-            <strong>Server Processing Delay</strong>
-            <br><small>Simulate network delay in consensus processing (0ms = instant)</small>
-          </label>
-          <div class="slider-container">
-            <input 
-              type="range" 
-              id="serverDelaySlider" 
-              min="0" 
-              max="1000" 
-              value={$settings.serverDelay}
-              on:input={handleServerDelayChange}
-            >
-            <div class="slider-value">
-              <span>{$settings.serverDelay}</span> ms
-            </div>
+          <label><strong>Admin Actions</strong></label>
+          <div class="action-buttons">
+            <button class="action-btn" on:click={handleRunDemo}>
+              <span>▶️</span> Run Demo
+            </button>
+            <button class="action-btn" on:click={handlePrepopulate}>
+              <span>🌐</span> Prepopulate Network
+            </button>
+            <button class="action-btn" on:click={handleClearDatabase}>
+              <span>🗑️</span> Clear Database
+            </button>
+            <button class="action-btn" on:click={handleAddPanel}>
+              <span>📋</span> Add Entity Panel
+            </button>
           </div>
         </div>
 
@@ -366,11 +318,28 @@
 
         <!-- UI Preferences Section -->
         <div class="setting-group">
-          <label for="portfolioScaleSlider">
-            <strong>Portfolio Bar Scale</strong>
-            <br><small>Adjust scale for better comparison ($1k - $10k)</small>
-          </label>
-          <div class="slider-container">
+          <label><strong>UI Preferences</strong></label>
+
+          <!-- Dropdown Mode -->
+          <div class="preference-item">
+            <span>Dropdown Hierarchy</span>
+            <div class="toggle-switch">
+              <input
+                type="checkbox"
+                id="dropdownModeToggle"
+                checked={$settings.dropdownMode === 'entity-first'}
+                on:change={handleToggleDropdownMode}
+              />
+              <span class="toggle-slider"></span>
+            </div>
+          </div>
+          <div class="toggle-labels">
+            <small>Jur→Signer→Entity | Jur→Entity→Signers</small>
+          </div>
+
+          <!-- Portfolio Scale -->
+          <div class="preference-item">
+            <label for="portfolioScaleSlider">Portfolio Bar Scale: ${$settings.portfolioScale.toLocaleString()}</label>
             <input
               type="range"
               id="portfolioScaleSlider"
@@ -379,10 +348,35 @@
               step="500"
               value={$settings.portfolioScale}
               on:input={(e) => settingsOperations.setPortfolioScale(Number((e.target as HTMLInputElement)?.value || 0))}
+              class="settings-slider"
             />
-            <div class="slider-value">
-              <span>${$settings.portfolioScale.toLocaleString()}</span>
-            </div>
+          </div>
+
+          <!-- Theme -->
+          <div class="preference-item">
+            <span>Theme</span>
+            <button class="theme-toggle-btn" on:click={handleToggleTheme}>
+              {themeIcon} {$settings.theme === 'dark' ? 'Dark' : 'Light'}
+            </button>
+          </div>
+        </div>
+
+        <!-- Developer Tools Section -->
+        <div class="setting-group">
+          <label><strong>Developer Tools</strong></label>
+
+          <div class="preference-item">
+            <label for="serverDelaySlider">Server Processing Delay: {$settings.serverDelay}ms</label>
+            <input
+              type="range"
+              id="serverDelaySlider"
+              min="0"
+              max="1000"
+              step="50"
+              value={$settings.serverDelay}
+              on:input={handleServerDelayChange}
+              class="settings-slider"
+            />
           </div>
         </div>
       </div>
@@ -395,13 +389,12 @@
     background: rgba(20, 20, 20, 0.95);
     backdrop-filter: blur(20px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 16px 24px;
+    padding: 12px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 24px;
-    margin-bottom: 24px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+    gap: 16px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     position: sticky;
     top: 0;
     z-index: 100;
@@ -410,9 +403,8 @@
   .admin-logo {
     display: flex;
     align-items: center;
-    gap: 12px;
-    color: #007acc;
-    font-weight: 600;
+    gap: 16px;
+    flex: 1;
   }
 
   .logo-text {
@@ -804,5 +796,73 @@
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.3px;
+  }
+
+  /* Settings Button */
+  .settings-btn {
+    padding: 8px 12px;
+    background: rgba(40, 40, 40, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .settings-btn:hover {
+    background: rgba(50, 50, 50, 0.9);
+    color: #ffffff;
+    border-color: rgba(0, 122, 204, 0.5);
+  }
+
+  /* Action Buttons in Settings */
+  .action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .action-btn {
+    padding: 8px 12px;
+    background: rgba(0, 122, 204, 0.2);
+    border: 1px solid rgba(0, 122, 204, 0.3);
+    border-radius: 4px;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .action-btn:hover {
+    background: rgba(0, 122, 204, 0.3);
+    border-color: rgba(0, 122, 204, 0.5);
+  }
+
+  /* Preference Items */
+  .preference-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+  }
+
+  .settings-slider {
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .theme-toggle-btn {
+    padding: 4px 12px;
+    background: rgba(40, 40, 40, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    font-size: 12px;
   }
 </style>
