@@ -595,14 +595,13 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       }
       const jData = data as Record<string, any>;
 
-      // CRITICAL: Expand relative port references to full URLs based on current origin
+      // CRITICAL: Expand relative port references using location.origin
       // This allows jurisdictions.json to work from any domain (xln.finance, localhost, etc)
       let rpcUrl = jData['rpc'];
       if (isBrowser && rpcUrl.startsWith(':')) {
-        // Browser: Use current origin + port
-        const protocol = window.location.protocol; // http: or https:
-        const hostname = window.location.hostname; // xln.finance or localhost
-        rpcUrl = `${protocol}//${hostname}${rpcUrl}`;
+        // Browser: location.protocol + location.hostname + port
+        const baseOrigin = `${window.location.protocol}//${window.location.hostname}`;
+        rpcUrl = `${baseOrigin}${rpcUrl}`;
         console.log(`🔧 Expanded RPC URL: ${jData['rpc']} → ${rpcUrl}`);
       } else if (!isBrowser && rpcUrl.startsWith(':')) {
         // Node.js: Default to localhost
