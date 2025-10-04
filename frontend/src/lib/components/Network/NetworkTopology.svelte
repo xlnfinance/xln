@@ -3074,10 +3074,10 @@
         throw new Error(`No replica found for entity ${getEntityShortName(job.from)} (${job.from})`);
       }
 
+      // Multi-hop routing: Backend will find route if no direct account exists
       const hasDirectAccount = ourReplica?.state?.accounts?.has(job.to);
-
       if (!hasDirectAccount) {
-        throw new Error(`No direct account from ${getEntityShortName(job.from)} to ${getEntityShortName(job.to)}`);
+        console.log(`🔀 No direct account from ${getEntityShortName(job.from)} to ${getEntityShortName(job.to)} - backend will find multi-hop route`);
       }
 
       // Convert amount to BigInt with decimals (copy from PaymentPanel)

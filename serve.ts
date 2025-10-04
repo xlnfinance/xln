@@ -40,6 +40,17 @@ const handler = async (request: Request): Promise<Response> => {
 
   console.log(`➡️  ${request.method} ${path}`);
 
+  // Handle CORS preflight for /rpc
+  if (path === '/rpc' && request.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      }
+    });
+  }
+
   // RPC Proxy - forward JSON-RPC requests to local Hardhat node
   // CRITICAL: Enables HTTPS → HTTP RPC calls (Safari mixed content fix)
   if (path === '/rpc' && request.method === 'POST') {
@@ -52,7 +63,12 @@ const handler = async (request: Request): Promise<Response> => {
       });
       const data = await rpcResponse.json();
       return new Response(JSON.stringify(data), {
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type'
+        }
       });
     } catch (error) {
       console.error('❌ RPC proxy error:', error);
