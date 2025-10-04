@@ -194,12 +194,6 @@
     }
   }
 
-  function handleCreateEntity() {
-    // TODO: Show entity creation modal
-    alert('Entity Creator coming soon! Use the Controls section in any panel for now.');
-  }
-
-
   function handleToggleTheme() {
     settingsOperations.toggleTheme();
   }
@@ -248,11 +242,10 @@
         </button>
       {/each}
     </div>
-    </div>
-    <button class="settings-btn" on:click={handleShowSettings} title="Settings">
-      <span>⚙️</span>
-    </button>
   </div>
+  <button class="settings-btn" on:click={handleShowSettings} title="Settings">
+    <span>⚙️</span>
+  </button>
 </div>
 
 <!-- Settings Modal -->

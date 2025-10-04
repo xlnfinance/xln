@@ -272,7 +272,6 @@
   let isVRSupported: boolean = false;
   let isVRActive: boolean = false;
   let passthroughEnabled: boolean = false;
-  let _vrControllers: any[] = []; // Stored for future controller visualization
 
   // Visual effects toggles
   let lightningEnabled: boolean = false; // Disabled by default (performance)
@@ -468,8 +467,6 @@
 
     controller1.add(ray1);
     controller2.add(ray2);
-
-    _vrControllers = [controller1, controller2];
 
     console.log('🥽 VR Controllers initialized');
   }
