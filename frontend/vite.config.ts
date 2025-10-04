@@ -8,6 +8,14 @@ export default defineConfig({
 		port: 8080,
 		// Allow ngrok and other tunnel hosts (for Oculus/mobile access)
 		allowedHosts: ['all'],
+		// RPC Proxy - forward /rpc to Hardhat (HTTPS-safe for production)
+		proxy: {
+			'/rpc': {
+				target: 'http://localhost:8545',
+				changeOrigin: true,
+				rewrite: (_path) => '' // Forward to root of Hardhat RPC
+			}
+		},
 		fs: {
 			// Allow serving files from the parent directory (to access ../dist/)
 			allow: ['..']

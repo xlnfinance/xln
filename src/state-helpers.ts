@@ -168,6 +168,13 @@ export const captureSnapshot = (
   envHistory.push(snapshot);
 
   // --- PERSISTENCE WITH BATCH OPERATIONS ---
+  // Skip saving if IndexedDB is unavailable (incognito mode, etc)
+  const { dbAvailable } = await import('./server');
+  if (!dbAvailable) {
+    // In-memory only mode - no persistence
+    return;
+  }
+
   // Use batch operations for better performance
   try {
     const batch = db.batch();
