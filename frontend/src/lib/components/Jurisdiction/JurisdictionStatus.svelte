@@ -25,20 +25,10 @@
       const config = await loadJurisdictions();
 
       jurisdictions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => {
-        // Expand relative RPC URLs (same logic as evm.ts)
+        // Expand relative RPC URLs (nginx proxies HTTPS on :8545)
         let rpcUrl = data.rpc;
-        if (rpcUrl.startsWith('/')) {
-          // Proxy path - use same origin
-          rpcUrl = `${window.location.origin}${rpcUrl}`;
-        } else if (rpcUrl.startsWith(':')) {
-          const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-          if (isLocalhost) {
-            // Localhost - direct port
-            rpcUrl = `${window.location.origin.replace(/:\d+$/, '')}${rpcUrl}`;
-          } else {
-            // Production - use proxy
-            rpcUrl = `${window.location.origin}/rpc`;
-          }
+        if (rpcUrl.startsWith(':')) {
+          rpcUrl = `${window.location.origin.replace(/:\d+$/, '')}${rpcUrl}`;
         }
 
         return {
