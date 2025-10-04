@@ -14,7 +14,7 @@ test-results/
 node_modules
 .DS_Store
 logs/*
-*.txt
+logs/*.txt
 
 # Generated files
 frontend/static/server.js
