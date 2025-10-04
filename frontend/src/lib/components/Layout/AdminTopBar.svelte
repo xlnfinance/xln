@@ -248,34 +248,6 @@
         </button>
       {/each}
     </div>
-    <div class="j-machine-status">
-      <span class="j-status-item" title="Last Synced J-machine Block">
-        🔭 J-Block: {jMachineStatus.block}
-      </span>
-      <span class="j-status-item" title="Pending J-machine Events">
-        ⚡ J-Events: {jMachineStatus.events}
-      </span>
-      <span class="j-status-item" title="Server Height (E-machine Frames)">
-        📊 S-Block: {jMachineStatus.height}
-      </span>
-      {#if jWatcherStatus && jWatcherStatus.proposers.length > 0}
-        <span class="j-status-item" title="J-Watcher Proposer Status">
-          🔄 Proposers: {jWatcherStatus.proposers.map((p: any) => `${p.signerId}@${p.jBlock}`).join(', ')} | Next: {nextSyncTimer.toFixed(1)}s
-        </span>
-      {/if}
-      <div class="scale-control" title="Adjust portfolio bar scale for better comparison">
-        <span class="scale-label">📊 Scale: ${$settings.portfolioScale}</span>
-        <input
-          type="range"
-          min="1000"
-          max="10000"
-          step="500"
-          bind:value={$settings.portfolioScale}
-          on:input={(e) => settingsOperations.setPortfolioScale(Number((e.target as HTMLInputElement)?.value || 0))}
-          class="scale-slider"
-        />
-      </div>
-    </div>
   </div>
   
   <div class="admin-navigation">
@@ -355,6 +327,61 @@
             >
             <div class="slider-value">
               <span>{$settings.serverDelay}</span> ms
+            </div>
+          </div>
+        </div>
+
+        <!-- Network Statistics Section -->
+        <div class="setting-group">
+          <label>
+            <strong>Network Statistics</strong>
+          </label>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-label">J-Block:</span>
+              <span class="stat-value">{jMachineStatus.block}</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">J-Events:</span>
+              <span class="stat-value">{jMachineStatus.events}</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">S-Block:</span>
+              <span class="stat-value">{jMachineStatus.height}</span>
+            </div>
+            {#if jWatcherStatus && jWatcherStatus.proposers.length > 0}
+              <div class="stat-item stat-full-width">
+                <span class="stat-label">Proposers:</span>
+                <span class="stat-value">
+                  {jWatcherStatus.proposers.map((p: any) => `${p.signerId}@${p.jBlock}`).join(', ')}
+                </span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Next Sync:</span>
+                <span class="stat-value">{nextSyncTimer.toFixed(1)}s</span>
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <!-- UI Preferences Section -->
+        <div class="setting-group">
+          <label for="portfolioScaleSlider">
+            <strong>Portfolio Bar Scale</strong>
+            <br><small>Adjust scale for better comparison ($1k - $10k)</small>
+          </label>
+          <div class="slider-container">
+            <input
+              type="range"
+              id="portfolioScaleSlider"
+              min="1000"
+              max="10000"
+              step="500"
+              value={$settings.portfolioScale}
+              on:input={(e) => settingsOperations.setPortfolioScale(Number((e.target as HTMLInputElement)?.value || 0))}
+            />
+            <div class="slider-value">
+              <span>${$settings.portfolioScale.toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -534,7 +561,40 @@
   .setting-group small {
     color: #9d9d9d;
   }
-  
+
+  /* Stats Grid */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 8px;
+  }
+
+  .stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .stat-full-width {
+    grid-column: 1 / -1;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: #9d9d9d;
+  }
+
+  .stat-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: #00ff88;
+    font-family: 'Courier New', monospace;
+  }
+
   /* Toggle Switch */
   .toggle-switch {
     position: relative;
