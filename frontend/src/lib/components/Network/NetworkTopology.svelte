@@ -3450,7 +3450,7 @@
       <div class="topology-controls">
         <!-- Token Filter -->
         <div class="control-group">
-          <label>🪙 Token:</label>
+          <label>Token:</label>
           <select
             bind:value={selectedTokenId}
             on:change={(e) => {
@@ -3468,7 +3468,7 @@
 
         <!-- Bars Mode -->
         <div class="control-group">
-          <label>📊 Bars:</label>
+          <label>Bars:</label>
           <button
             class="toggle-btn"
             class:active={barsMode === 'close'}
@@ -3487,7 +3487,7 @@
 
         <!-- 2D/3D Mode -->
         <div class="control-group">
-          <label>👁️ View:</label>
+          <label>View:</label>
           <button
             class="toggle-btn"
             class:active={viewMode === '2d'}
@@ -3506,7 +3506,7 @@
 
         <!-- Entity Display Mode -->
         <div class="control-group">
-          <label>👤 Entity:</label>
+          <label>Entity:</label>
           <button
             class="toggle-btn"
             class:active={entityMode === 'sphere'}
@@ -3525,7 +3525,7 @@
 
         <!-- Rotation Presets -->
         <div class="control-group">
-          <label>🔄 Rotation:</label>
+          <label>Rotation:</label>
           <div class="preset-buttons">
             <button
               class="preset-btn"
@@ -3565,7 +3565,7 @@
         <!-- Speed Control (if not stopped) -->
         {#if rotationX > 0 || rotationY > 0 || rotationZ > 0}
         <div class="control-group">
-          <label>⚡ Speed: {Math.round((rotationY || rotationX || rotationZ) / 100)}%</label>
+          <label>Speed: {Math.round((rotationY || rotationX || rotationZ) / 100)}%</label>
           <input
             type="range"
             min="1000"
@@ -3587,7 +3587,7 @@
 
         <!-- Label Size Slider -->
         <div class="control-group">
-          <label>🏷️ Label Size: {labelScale.toFixed(1)}x</label>
+          <label>Label Size: {labelScale.toFixed(1)}x</label>
           <input
             type="range"
             min="0.5"
@@ -3602,7 +3602,7 @@
 
         <!-- Lightning Speed Slider -->
         <div class="control-group">
-          <label>⚡ Lightning: {lightningSpeed}ms/hop</label>
+          <label>Lightning: {lightningSpeed}ms/hop</label>
           <input
             type="range"
             min="10"
