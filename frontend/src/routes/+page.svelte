@@ -20,12 +20,13 @@
   import { get } from 'svelte/store';
 
   let activeTab = 'formation';
-  let zenMode = false; // Zen mode: hide all UI chrome for pure graph immersion
+  let zenMode = false; // Zen mode: pure CSS hide/show, no state changes
 
-  // Zen mode toggle - hide all UI chrome for pure immersion
-  function toggleZenMode() {
-    zenMode = !zenMode;
-    console.log('🧘 Zen mode:', zenMode ? 'ON' : 'OFF');
+  // Keyboard shortcut for zen mode
+  function handleKeyboard(event: KeyboardEvent) {
+    if (event.key === 'z' || event.key === 'Z') {
+      zenMode = !zenMode;
+    }
   }
 
   // SEQUENTIAL LOADING: Wait for history to be populated
@@ -69,6 +70,9 @@
   onMount(async () => {
     console.log('🔄 ONMOUNT-DEBUG: +page.svelte onMount() called - this should only happen ONCE');
     console.log('🔍 ONMOUNT-DEBUG: Current timestamp:', new Date().toISOString());
+
+    // Add keyboard listener for zen mode
+    window.addEventListener('keydown', handleKeyboard);
 
     // Set up global error handlers FIRST
     window.addEventListener('error', (event) => {
@@ -220,10 +224,7 @@
       </div>
     {:else if $viewMode === 'graph3d' || $viewMode === 'graph2d'}
       <!-- Graph View Mode: Show Network Topology -->
-      <NetworkTopology
-        {zenMode}
-        onToggleZenMode={toggleZenMode}
-      />
+      <NetworkTopology />
     {:else if $viewMode === 'panels'}
       <!-- Panels Mode: Show Entity Panels -->
       <div class="main-content">
