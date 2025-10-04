@@ -4,7 +4,7 @@
   import Button from '../Common/Button.svelte';
 
   interface JurisdictionInfo {
-    port: number;
+    rpcUrl: string; // Full RPC URL (not just port)
     name: string;
     icon: string;
     chainId: string;
@@ -24,18 +24,29 @@
       // Use the centralized jurisdictionStore instead of fetching directly
       const config = await loadJurisdictions();
 
-      jurisdictions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => ({
-        port: parseInt(data.rpc.split(':').pop()),
-        name: data.name,
-        icon: key === 'ethereum' ? '🔷' : key === 'polygon' ? '🟣' : '🔵',
-        chainId: data.chainId.toString(),
-        blockNumber: 0,
-        contractAddress: data.contracts.entityProvider,
-        nextEntityNumber: 1,
-        status: 'checking' as const,
-        lastUpdate: '',
-        entities: []
-      }));
+      jurisdictions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => {
+        // Expand relative RPC URLs to full URLs based on current origin
+        let rpcUrl = data.rpc;
+        if (rpcUrl.startsWith(':')) {
+          // Relative port - use current origin
+          const protocol = window.location.protocol; // http: or https:
+          const hostname = window.location.hostname; // xln.finance or localhost
+          rpcUrl = `${protocol}//${hostname}${rpcUrl}`;
+        }
+
+        return {
+          rpcUrl,
+          name: data.name,
+          icon: key === 'ethereum' ? '🔷' : key === 'polygon' ? '🟣' : '🔵',
+          chainId: data.chainId.toString(),
+          blockNumber: 0,
+          contractAddress: data.contracts.entityProvider,
+          nextEntityNumber: 1,
+          status: 'checking' as const,
+          lastUpdate: '',
+          entities: []
+        };
+      });
 
       console.log(`✅ Loaded ${jurisdictions.length} jurisdictions from centralized store:`, jurisdictions.map(j => j.name));
     } catch (error) {
@@ -50,8 +61,8 @@
     jurisdiction.lastUpdate = 'Checking...';
 
     try {
-      // Test blockchain connection
-      const response = await fetch(`http://localhost:${jurisdiction.port}`, {
+      // Test blockchain connection using dynamic RPC URL
+      const response = await fetch(jurisdiction.rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -118,7 +129,7 @@
   
   <div class="jurisdiction-grid">
     {#each jurisdictions as jurisdiction}
-      <div class="jurisdiction-card" id="jurisdiction-{jurisdiction.port}">
+      <div class="jurisdiction-card" id="jurisdiction-{jurisdiction.name.toLowerCase()}">
         <div class="jurisdiction-header">
           <h4>{jurisdiction.icon} {jurisdiction.name}</h4>
           <span class="connection-status {jurisdiction.status}">
@@ -131,11 +142,11 @@
             {/if}
           </span>
         </div>
-        
+
         <div class="jurisdiction-details">
           <div class="detail-row">
-            <span>📡 RPC Port:</span>
-            <span>{jurisdiction.port}</span>
+            <span>📡 RPC URL:</span>
+            <span class="rpc-url">{jurisdiction.rpcUrl}</span>
           </div>
           <div class="detail-row">
             <span>🔗 Chain ID:</span>
