@@ -168,22 +168,14 @@ export const captureSnapshot = (
   envHistory.push(snapshot);
 
   // --- PERSISTENCE WITH BATCH OPERATIONS ---
-  // Skip saving if IndexedDB is unavailable (incognito mode, etc)
-  const { dbAvailable } = await import('./server');
-  if (!dbAvailable) {
-    // In-memory only mode - no persistence
-    return;
-  }
-
-  // Use batch operations for better performance
+  // Try to save, but gracefully handle IndexedDB unavailable (incognito mode, etc)
   try {
     const batch = db.batch();
     batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
     batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
     batch.write();
   } catch (error) {
-    console.warn(`⚠️ Snapshot persistence failed (continuing without save):`, (error as Error).message);
-    // Don't crash - continue execution even if persistence fails
+    // Silent fail - IndexedDB unavailable (incognito) or full - continue anyway
   }
 
   if (DEBUG) {

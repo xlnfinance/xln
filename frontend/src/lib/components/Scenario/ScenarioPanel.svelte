@@ -14,6 +14,12 @@
       description: 'Classic fractional reserve bank run scenario',
       file: 'diamond-dybvig.scenario.txt'
     },
+    {
+      id: 'phantom-grid',
+      name: 'Phantom Grid',
+      description: '27-entity 3×3×3 cube topology',
+      file: 'phantom-grid.scenario.txt'
+    },
   ];
 
   let selectedScenarioId: string = '';
@@ -24,6 +30,11 @@
   let isExecuting: boolean = false;
   let executionOutput: Array<{ timestamp: number; line: string; type: 'info' | 'success' | 'error' | 'step' }> = [];
   let executionOutputEl: HTMLDivElement;
+
+  // Auto-load scenario when selection changes
+  $: if (selectedScenarioId) {
+    loadScenario(selectedScenarioId);
+  }
 
   // Load scenario text from file
   async function loadScenario(scenarioId: string) {

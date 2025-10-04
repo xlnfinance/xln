@@ -105,36 +105,39 @@
     bottom: 100px; /* Above time machine */
     left: 50%;
     transform: translateX(-50%);
-    max-width: 800px;
-    padding: 20px 30px;
-    background: rgba(0, 0, 0, 0.85);
-    border: 2px solid #007acc;
-    border-radius: 12px;
-    backdrop-filter: blur(10px);
+    max-width: 600px;
+    padding: 12px 24px;
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    backdrop-filter: blur(8px);
     z-index: 100;
     pointer-events: none; /* Don't block interaction */
   }
 
   .narrative-title {
-    font-size: 24px;
-    font-weight: 700;
-    color: #00d9ff;
-    margin: 0 0 12px 0;
-    text-align: center;
-    text-shadow: 0 0 20px rgba(0, 217, 255, 0.5);
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    margin: 0 0 4px 0;
+    text-align: left;
+    letter-spacing: 1px;
+    text-transform: lowercase;
+    font-family: 'Monaco', 'Courier New', monospace;
   }
 
   .narrative-text {
-    font-size: 16px;
-    color: #e8e8e8;
+    font-size: 11px;
+    color: #666;
     margin: 0;
-    text-align: center;
-    line-height: 1.6;
+    text-align: left;
+    line-height: 1.4;
+    font-family: 'Monaco', 'Courier New', monospace;
   }
 
-  /* Typewriter cursor */
+  /* Typewriter cursor - minimal */
   .cursor {
-    color: #00d9ff;
+    color: #666;
     font-weight: normal;
     opacity: 0;
   }

@@ -1,6 +1,33 @@
 # xln Next Session - Final Polish
 
-## ✅ Completed (2025-10-04)
+## ✅ Completed (2025-10-04 - Session 3)
+
+### Production Deployment Fixes
+- ✅ **location.origin RPC URLs** - Smart detection: localhost→direct :8545, production→/rpc proxy
+- ✅ **/rpc Proxy** - Added to serve.ts + vite.config.ts with CORS headers (HTTPS-safe)
+- ✅ **IndexedDB Optional** - Graceful fallback to in-memory mode (Safari incognito, Oculus Browser)
+- ✅ **Clean DB Button** - Fully deletes all IndexedDB databases (works in all browsers)
+
+### Multi-Hop Payments
+- ✅ **Simple Multi-Hop Implementation** - No HTLC/onion, just forward with fees
+- ✅ **0.1% Fee Per Hop** - Minimum 1 token fee deducted at each intermediate node
+- ✅ **Capacity Validation** - Checks each hop has sufficient capacity before forwarding
+- ✅ **Auto-Routing** - Uses Dijkstra pathfinding through network graph
+- ✅ **Error Handling** - No route, insufficient capacity, missing accounts
+
+### Visual Improvements
+- ✅ **Reactive Theme Background** - Graph 3D now responds to theme changes instantly
+- ✅ **3D Grid Floor** - Subtle grid helper for Matrix/Arctic themes (depth effect)
+- ✅ **Bar Perspective Fixed** - Red bars now appear on entity extending credit (intuitive)
+
+### Scenarios
+- ✅ **Phantom Grid** - 27-entity 3×3×3 cube topology for Joachim Pastor album demo (Oct 10)
+
+### Developer Experience
+- ✅ **.gitignore Cleanup** - All generated files properly ignored (artifacts, cache, build outputs)
+- ✅ **Vite /rpc Proxy** - Dev server has same proxy as production (consistency)
+
+## ✅ Completed (2025-10-04 - Session 2)
 
 ### Bug Fixes (Session 2)
 - ✅ **Token 0 Bug** - Removed hack that forced non-existent token 0, now uses real tokens (1=ETH, 2=USDC)

@@ -122,40 +122,35 @@ export function processAccountTx(
         ? accountMachine.proofHeader.toEntity
         : accountMachine.proofHeader.fromEntity;
 
-      // Identify payer entity explicitly (fallback to heuristics for legacy frames)
-      let paymentFromEntity = accountTx.data.fromEntityId;
-      if (!paymentFromEntity) {
-        if (isOurFrame) {
-          paymentFromEntity = accountMachine.proofHeader.fromEntity;
-        } else {
-          paymentFromEntity = accountMachine.counterpartyEntityId;
-        }
-      }
-
-      let paymentToEntity = accountTx.data.toEntityId;
-      if (!paymentToEntity) {
-        paymentToEntity = paymentFromEntity === accountMachine.proofHeader.fromEntity
-          ? accountMachine.proofHeader.toEntity
-          : accountMachine.proofHeader.fromEntity;
-      }
+      // CRITICAL: Payment direction MUST be explicit - NO HEURISTICS (Channel.ts pattern)
+      const paymentFromEntity = accountTx.data.fromEntityId;
+      const paymentToEntity = accountTx.data.toEntityId;
 
       if (!paymentFromEntity || !paymentToEntity) {
+        console.error(`❌ CONSENSUS-FAILURE: Missing explicit payment direction`);
+        console.error(`  AccountTx:`, safeStringify(accountTx));
         return {
           success: false,
-          error: 'FINANCIAL-SAFETY: Unable to determine payment endpoints',
+          error: 'FATAL: Payment must have explicit fromEntityId/toEntityId',
           events,
         };
       }
 
-      // Canonical delta: always relative to left entity (like Channel.ts reference)
+      // Canonical delta: always relative to left entity (Channel.ts reference)
       let canonicalDelta: bigint;
       if (paymentFromEntity === leftEntity && paymentToEntity === rightEntity) {
         canonicalDelta = amount; // left paying right
       } else if (paymentFromEntity === rightEntity && paymentToEntity === leftEntity) {
         canonicalDelta = -amount; // right paying left
       } else {
-        // As a fallback, compare IDs for deterministic ordering
-        canonicalDelta = paymentFromEntity < paymentToEntity ? amount : -amount;
+        console.error(`❌ CONSENSUS-FAILURE: Payment entities don't match account`);
+        console.error(`  Account: ${leftEntity.slice(-4)} ↔ ${rightEntity.slice(-4)}`);
+        console.error(`  Payment: ${paymentFromEntity.slice(-4)} → ${paymentToEntity.slice(-4)}`);
+        return {
+          success: false,
+          error: 'FATAL: Payment entities must match account entities (no cross-account routing)',
+          events,
+        };
       }
 
       const isLeftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
@@ -398,6 +393,13 @@ export function handleAccountInput(
 
     const signature = input.prevSignatures[0];
     if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(expectedSigner, frameHash, signature)) {
+      // CRITICAL DEBUG: Log what we're committing
+      console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.frameId}`);
+      console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
+      console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
+      console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
+      console.log(`  StateHash: ${frameHash.slice(0,16)}...`);
+
       // Commit using cloned state
       if (accountMachine.clonedForValidation) {
         accountMachine.deltas = accountMachine.clonedForValidation.deltas;

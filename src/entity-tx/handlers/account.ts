@@ -204,12 +204,43 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           console.error(`❌ Cannot forward payment: No account with ${nextHop}`);
           newState.messages.push(`❌ Payment routing failed: No account with Entity ${nextHop?.slice(-4) || 'unknown'}`);
         } else {
+          // Calculate forwarding fee (0.1% with 1 token minimum)
+          const feeRate = 1000n; // 0.1% = 1/1000
+          const fee = paymentData.amount / feeRate > 1n ? paymentData.amount / feeRate : 1n;
+          const forwardAmount = paymentData.amount - fee;
+
+          console.log(`💰 Forwarding fee: ${fee}, forward amount: ${forwardAmount}`);
+
+          // Check next hop capacity
+          const nextAccount = newState.accounts.get(nextHop);
+          if (!nextAccount) {
+            console.error(`❌ Next hop account not found`);
+            newState.messages.push(`❌ Payment routing failed: No account with ${nextHop.slice(-4)}`);
+            return { newState, outputs };
+          }
+
+          const nextDelta = nextAccount.deltas.get(paymentData.tokenId);
+          if (!nextDelta) {
+            console.error(`❌ Next hop doesn't support token ${paymentData.tokenId}`);
+            newState.messages.push(`❌ Payment routing failed: Next hop doesn't support token`);
+            return { newState, outputs };
+          }
+
+          // Check capacity using deriveDelta
+          const isLeft = state.entityId < nextHop;
+          const derived = env.xlnFunctions?.deriveDelta(nextDelta, isLeft);
+          if (!derived || forwardAmount > derived.outCapacity) {
+            console.error(`❌ Next hop insufficient capacity: ${derived?.outCapacity || 0n} < ${forwardAmount}`);
+            newState.messages.push(`❌ Payment routing failed: Insufficient capacity at next hop`);
+            return { newState, outputs };
+          }
+
           // Create forwarded payment AccountTx
           const forwardedPayment = {
             type: 'direct_payment' as const,
             data: {
               tokenId: paymentData.tokenId,
-              amount: paymentData.amount,
+              amount: forwardAmount, // Reduced by fee
               route: remainingRoute,
               ...(paymentData.description ? { description: paymentData.description } : {}),
               fromEntityId: state.entityId,
