@@ -117,7 +117,7 @@ export async function initializeXLN() {
     const env = await Promise.race([
       xln.main(),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('CRITICAL: IndexedDB failed to load after 2 seconds - system failure')), 2000)
+        setTimeout(() => reject(new Error('CRITICAL: XLN initialization timeout after 10 seconds - check console for errors')), 10000)
       )
     ]);
 
