@@ -12,8 +12,8 @@ pkill -f "hardhat node" 2>/dev/null || true
 sleep 1
 
 # Start three hardhat nodes in background
-echo "📡 Starting Ethereum Network (internal port 18545, HTTPS via nginx on 8545)..."
-cd contracts && npx hardhat node --port 18545 --hostname 127.0.0.1 > ../logs/ethereum-18545.log 2>&1 &
+echo "📡 Starting Ethereum Network (port 8545)..."
+cd contracts && npx hardhat node --port 8545 --hostname 127.0.0.1 > ../logs/ethereum-8545.log 2>&1 &
 echo "$!" > ../pids/ethereum.pid
 
 # COMMENTED OUT: Focus on Ethereum only
@@ -39,17 +39,16 @@ check_network() {
 }
 
 echo "🔍 Checking network status..."
-if check_network 18545; then
-    echo "✅ Network on internal port 18545 is running"
+if check_network 8545; then
+    echo "✅ Network on port 8545 is running"
 else
-    echo "❌ Network on internal port 18545 failed to start"
+    echo "❌ Network on port 8545 failed to start"
     exit 1
 fi
 
 echo ""
 echo "🎯 Ethereum network started!"
-echo "   Internal: http://localhost:18545"
-echo "   Public (via nginx): https://xln.finance:8545"
+echo "   Ethereum: http://localhost:8545"
 echo ""
 echo "📝 Logs available in logs/ directory"
 echo "🛑 Use './stop-networks.sh' to stop all networks" 

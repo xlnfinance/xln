@@ -11,9 +11,9 @@ export default defineConfig({
 		// RPC Proxy - forward /rpc to Hardhat (HTTPS-safe for production)
 		proxy: {
 			'/rpc': {
-				target: 'http://localhost:18545',
+				target: 'http://localhost:8545',
 				changeOrigin: true,
-				rewrite: (_path) => '' // Forward to root of Hardhat RPC (internal port)
+				rewrite: (_path) => '' // Forward to root of Hardhat RPC
 			}
 		},
 		fs: {
