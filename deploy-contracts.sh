@@ -329,20 +329,21 @@ if [ $success_count -gt 0 ]; then
     echo ""
 
     # Create fresh jurisdictions.json with actual deployed addresses (NO placeholders!)
+    # CRITICAL: Use relative port :8545 to work from any origin (xln.finance, localhost, etc)
     cat > jurisdictions.json << EOF
 {
-  "version": "1.0.0", 
+  "version": "1.0.0",
   "lastUpdated": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "jurisdictions": {
     "ethereum": {
       "name": "Ethereum",
       "chainId": 1337,
-      "rpc": "http://localhost:8545",
+      "rpc": ":8545",
       "contracts": {
         "entityProvider": "$CONTRACT_8545_EP",
         "depository": "$CONTRACT_8545_DEP"
       },
-      "explorer": "http://localhost:8545", 
+      "explorer": ":8545",
       "currency": "ETH",
       "status": "active"
     }

@@ -118,7 +118,7 @@ WATCH_PID=$!
 echo "🌐 Starting Svelte development server..."
 
 # Step 3: Start Svelte dev server in background
-(cd frontend && bun run dev) &
+(cd frontend && bun --bun run dev) &
 SERVE_PID=$!
 
 # Wait for server to start
