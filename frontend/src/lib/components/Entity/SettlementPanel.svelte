@@ -5,7 +5,7 @@
 
   // Form state
   let counterpartyEntityId = '';
-  let tokenId = 2; // Default USDC
+  let tokenId = 1; // Default to first token (ETH)
   let mode: 'simple' | 'advanced' = 'simple';
 
   // Simple mode

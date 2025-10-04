@@ -241,6 +241,37 @@ async function testFreshPayment() {
   }
 
   if ((account1Final?.frameHistory?.length || 0) >= 2 && (account2Final?.frameHistory?.length || 0) >= 2) {
+    // CRITICAL: Verify both sides have IDENTICAL delta values (Channel.ts:195 pattern)
+    console.log('\n🔍 Verifying state consistency (both sides must match)...\n');
+
+    const delta1 = account1Final?.deltas.get(2); // Entity 1's view
+    const delta2 = account2Final?.deltas.get(2); // Entity 2's view
+
+    if (!delta1 || !delta2) {
+      console.log('❌ FATAL: Missing delta on one or both sides\n');
+      process.exit(1);
+    }
+
+    // Both sides MUST have same values (canonical storage)
+    const match =
+      delta1.offdelta === delta2.offdelta &&
+      delta1.ondelta === delta2.ondelta &&
+      delta1.collateral === delta2.collateral &&
+      delta1.leftCreditLimit === delta2.leftCreditLimit &&
+      delta1.rightCreditLimit === delta2.rightCreditLimit;
+
+    if (!match) {
+      console.log('❌ CONSENSUS-FAILURE: States diverged!\n');
+      console.log('Entity 1 delta:', delta1);
+      console.log('Entity 2 delta:', delta2);
+      process.exit(1);
+    }
+
+    console.log('✅ State Verification: IDENTICAL on both sides');
+    console.log(`   offdelta: ${delta1.offdelta}`);
+    console.log(`   ondelta: ${delta1.ondelta}`);
+    console.log(`   collateral: ${delta1.collateral}`);
+
     console.log('\n✅ SUCCESS: Both payments completed with bilateral consensus!');
     console.log('   Payments work like a swiss clock ⏰\n');
     process.exit(0);

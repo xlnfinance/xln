@@ -23,15 +23,15 @@ deploy_to_network() {
     local network_name=$2
     local network_config=""
 
-    # Map port to network config name
+    # Map port to network config name and internal RPC URL
+    # Public port 8545 → internal port 18545 (nginx proxy)
+    local rpc_url=""
     case $port in
-        8545) network_config="ethereum" ;;
-        8546) network_config="polygon" ;;
-        8547) network_config="arbitrum" ;;
+        8545) network_config="ethereum"; rpc_url="http://localhost:18545" ;;
+        8546) network_config="polygon"; rpc_url="http://localhost:18546" ;;
+        8547) network_config="arbitrum"; rpc_url="http://localhost:18547" ;;
         *) echo "   ❌ Unknown port: $port"; return 1 ;;
     esac
-
-    local rpc_url="http://localhost:$port"
 
     echo ""
     echo "🔄 Deploying to $network_name (port $port)..."

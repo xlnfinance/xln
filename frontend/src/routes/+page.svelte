@@ -16,7 +16,7 @@
   import DocsView from '../lib/components/Views/DocsView.svelte';
   import TerminalView from '../lib/components/Views/TerminalView.svelte';
   import InvariantTicker from '../lib/components/Home/InvariantTicker.svelte';
-  import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
+  import { initializeXLN, isLoading, error, replicas } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
   import { timeOperations } from '../lib/stores/timeStore';
@@ -120,6 +120,20 @@
       // SEQUENTIAL LOADING: Initialize XLN environment FIRST
       console.log('🔄 SEQUENTIAL-LOAD: Step 1 - Initializing XLN environment...');
       await initializeXLN();
+
+      // Auto-open first entity panel if none exist
+      const currentTabs = get(tabs);
+      const currentReplicas = get(replicas);
+      if (currentTabs.length === 0 && currentReplicas && currentReplicas.size > 0) {
+        const firstReplicaKey = Array.from(currentReplicas.keys())[0];
+        if (firstReplicaKey && typeof firstReplicaKey === 'string') {
+          const firstEntityId = firstReplicaKey.split(':')[0];
+          if (firstEntityId) {
+            console.log(`📋 Auto-opening panel for first entity: ${firstEntityId.slice(0,10)}...`);
+            tabOperations.addTab(firstEntityId);
+          }
+        }
+      }
 
       // SEQUENTIAL LOADING: Wait for history to be populated, then initialize time machine
       console.log('🔄 SEQUENTIAL-LOAD: Step 2 - Waiting for history to be populated...');
