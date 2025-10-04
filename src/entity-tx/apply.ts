@@ -340,6 +340,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Create AccountTx for the payment
+      // CRITICAL: ALWAYS include fromEntityId/toEntityId for deterministic consensus
       const accountTx: AccountTx = {
         type: 'direct_payment',
         data: {
@@ -347,6 +348,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           amount,
           route: route.slice(1), // Remove current entity from route
           description: description || `Payment to ${formatEntityId(targetEntityId)}`,
+          fromEntityId: entityState.entityId, // ✅ EXPLICIT direction
+          toEntityId: nextHop,                 // ✅ EXPLICIT direction
         },
       };
 

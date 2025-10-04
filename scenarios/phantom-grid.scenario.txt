@@ -1,0 +1,161 @@
+PHANTOM GRID
+27-node cubic lattice / multi-hop pathfinding demo
+
+===
+
+t=0
+title: initialization
+description: grid emergence
+
+import 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
+
+===
+
+t=1
+title: layer 1 | ground
+description: base connections form
+
+# Bottom layer (z=0): entities 1-9
+# Row connections (x-axis)
+openAccount 1 2
+openAccount 2 3
+openAccount 4 5
+openAccount 5 6
+openAccount 7 8
+openAccount 8 9
+
+# Column connections (y-axis)
+openAccount 1 4
+openAccount 2 5
+openAccount 3 6
+openAccount 4 7
+openAccount 5 8
+openAccount 6 9
+
+===
+
+t=2
+title: layer 2 | core
+description: central lattice activation
+
+# Middle layer (z=1): entities 10-18
+# Row connections
+openAccount 10 11
+openAccount 11 12
+openAccount 13 14
+openAccount 14 15
+openAccount 16 17
+openAccount 17 18
+
+# Column connections
+openAccount 10 13
+openAccount 11 14
+openAccount 12 15
+openAccount 13 16
+openAccount 14 17
+openAccount 15 18
+
+===
+
+t=3
+title: layer 3 | apex
+description: upper plane manifests
+
+# Top layer (z=2): entities 19-27
+# Row connections
+openAccount 19 20
+openAccount 20 21
+openAccount 22 23
+openAccount 23 24
+openAccount 25 26
+openAccount 26 27
+
+# Column connections
+openAccount 19 22
+openAccount 20 23
+openAccount 21 24
+openAccount 22 25
+openAccount 23 26
+openAccount 24 27
+
+===
+
+t=4
+title: vertical binding
+description: cube formation complete
+
+# Connect bottom to middle (z=0 to z=1)
+openAccount 1 10
+openAccount 2 11
+openAccount 3 12
+openAccount 4 13
+openAccount 5 14
+openAccount 6 15
+openAccount 7 16
+openAccount 8 17
+openAccount 9 18
+
+# Connect middle to top (z=1 to z=2)
+openAccount 10 19
+openAccount 11 20
+openAccount 12 21
+openAccount 13 22
+openAccount 14 23
+openAccount 15 24
+openAccount 16 25
+openAccount 17 26
+openAccount 18 27
+
+===
+
+t=6
+title: phantom flow
+description: corner-to-corner cascade
+
+pay 1 27 50000
+
+===
+
+t=8
+title: diagonal pulse
+description: interference patterns emerge
+
+pay 3 25 30000
+pay 7 21 30000
+pay 19 9 30000
+
+===
+
+t=10
+title: convergence
+description: corners collapse to center
+
+pay 1 14 10000
+pay 3 14 10000
+pay 7 14 10000
+pay 9 14 10000
+pay 19 14 10000
+pay 21 14 10000
+pay 25 14 10000
+pay 27 14 10000
+
+===
+
+t=12
+title: radiation
+description: center pulse outward
+
+pay 14 1 5000
+pay 14 3 5000
+pay 14 7 5000
+pay 14 9 5000
+pay 14 19 5000
+pay 14 21 5000
+pay 14 25 5000
+pay 14 27 5000
+
+===
+
+t=14
+title: grid stable
+description: harmonic equilibrium achieved

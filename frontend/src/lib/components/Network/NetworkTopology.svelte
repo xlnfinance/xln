@@ -258,6 +258,12 @@
     clearRouteHighlight();
   }
 
+  // Update 3D scene background when theme changes
+  $: if (scene && $settings.theme) {
+    const themeColors = getThemeColors($settings.theme);
+    scene.background = new THREE.Color(themeColors.background);
+  }
+
   // Active payment jobs
   interface PaymentJob {
     id: string;
@@ -404,7 +410,22 @@
 
     // Scene setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a0a);
+
+    // Set background from theme
+    const themeColors = getThemeColors($settings.theme);
+    scene.background = new THREE.Color(themeColors.background);
+
+    // Optional: Add 3D grid background for depth (Matrix/Arctic themes)
+    if ($settings.theme === 'matrix' || $settings.theme === 'arctic') {
+      const gridHelper = new THREE.GridHelper(200, 20,
+        new THREE.Color(themeColors.borderColor),
+        new THREE.Color(themeColors.borderColor)
+      );
+      gridHelper.material.opacity = 0.15;
+      gridHelper.material.transparent = true;
+      gridHelper.position.y = -50; // Below entities
+      scene.add(gridHelper);
+    }
 
     // Camera setup
     camera = new THREE.PerspectiveCamera(
@@ -1563,25 +1584,25 @@
 
     if (barsMode === 'spread') {
       // SPREAD MODE: bars extend FROM BOTH entities toward middle
-      // Left entity (our perspective): [outOwnCredit][inCollateral][outPeerCredit] →
-      // Right entity (their perspective): ← [inOwnCredit][outCollateral][inPeerCredit]
-      // Gap in middle (no delta separator in spread mode)
+      // SWAPPED: Show each entity's bars on THEIR side (intuitive - red on creditor, green on debtor)
+      // Left entity shows: [inOwnCredit][outCollateral][inPeerCredit] → (what we owe/have)
+      // Right entity shows: ← [outOwnCredit][inCollateral][outPeerCredit] (what they owe/have)
 
       // FIRST PRINCIPLE: Bars must NEVER pierce entity surface
       // Bar has radius, so start position must be: entitySurface + barRadius + gap
       const barRadius = barHeight * 2.5;
       const safeGap = 0.2; // Small visual gap between entity surface and bar
 
-      // Left-side bars (from left entity rightward) - START OUTSIDE ENTITY SPHERE
+      // Left-side bars (from left entity rightward) - SWAPPED to show right entity's state
       const leftStartPos = fromEntity.position.clone().add(
         direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap)
       );
 
       let leftOffset = 0;
       const leftBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'outOwnCredit', colorType: 'availableCredit' },
-        { key: 'inCollateral', colorType: 'secured' },
-        { key: 'outPeerCredit', colorType: 'unsecured' }
+        { key: 'inOwnCredit', colorType: 'unsecured' },
+        { key: 'outCollateral', colorType: 'secured' },
+        { key: 'inPeerCredit', colorType: 'availableCredit' }
       ];
 
       leftBars.forEach((barSpec) => {
@@ -1614,16 +1635,16 @@
         leftOffset += length;
       });
 
-      // Right-side bars (from right entity leftward) - START OUTSIDE ENTITY SPHERE
+      // Right-side bars (from right entity leftward) - SWAPPED to show left entity's state
       const rightStartPos = toEntity.position.clone().add(
         direction.clone().normalize().multiplyScalar(-(toEntitySize + barRadius + safeGap))
       );
 
       let rightOffset = 0;
       const rightBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'inOwnCredit', colorType: 'unsecured' },
-        { key: 'outCollateral', colorType: 'secured' },
-        { key: 'inPeerCredit', colorType: 'availableCredit' }
+        { key: 'outOwnCredit', colorType: 'availableCredit' },
+        { key: 'inCollateral', colorType: 'secured' },
+        { key: 'outPeerCredit', colorType: 'unsecured' }
       ];
 
       rightBars.forEach((barSpec) => {
