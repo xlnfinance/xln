@@ -199,9 +199,8 @@
     }
   }
 
-  // Zen mode props
+  // Zen mode prop (read-only, controlled by parent)
   export let zenMode: boolean = false;
-  export let onToggleZenMode: (() => void) | undefined = undefined;
 
   // Topology control state with persistence
   const savedSettings = loadBirdViewSettings();
@@ -3403,26 +3402,13 @@
   <button
     class="panel-toggle-btn"
     class:panel-open={showPanel}
-    on:click={() => {
-      showPanel = !showPanel;
-
-      // Sync zen mode with sidebar visibility
-      if (onToggleZenMode) {
-        // Sidebar hidden = zen mode on
-        // Sidebar visible = zen mode off
-        if (!showPanel && !zenMode) {
-          onToggleZenMode(); // Enter zen mode (hiding sidebar)
-        } else if (showPanel && zenMode) {
-          onToggleZenMode(); // Exit zen mode (showing sidebar)
-        }
-      }
-    }}
-    title="{showPanel ? 'Hide All UI (Zen Mode)' : 'Show Controls (Exit Zen)'}"
+    on:click={() => showPanel = !showPanel}
+    title="{showPanel ? 'Hide Controls' : 'Show Controls'}"
   >
     {#if showPanel}
       Hide ▶
     {:else}
-      ◀ {zenMode ? '🧘 Exit Zen' : 'Controls'}
+      ◀ Controls
     {/if}
   </button>
 
