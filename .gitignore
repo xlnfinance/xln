@@ -1,4 +1,43 @@
-# E2E artifacts
+# Dependencies
+node_modules
+
+# OS/editor noise
+.DS_Store
+*.log
+logs/*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Lock files
+bun.lockb
+contracts/bun.lock
+
+# Frontend generated files
+frontend/static/server.js
+frontend/static/jurisdictions.json
+frontend/build/
+frontend/src/lib/generated/version.ts
+.svelte-kit/
+
+# Backend generated files
+dist/
+jurisdictions.json
+db/
+
+# Contract artifacts
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
+contracts/ignition/deployments/chain-1337/
+
+# Process management
+pids/
+*.pid
+
+# E2E test artifacts
 e2e/test-results/
 e2e/**/test-results/
 e2e/playwright-report/
@@ -7,40 +46,13 @@ playwright-report/
 test-results/
 .playwright-mcp/
 
-# OS/editor noise
-.DS_Store
-*.log
+# Production/deployment scripts
+PRODUCTION-FIX-LOG.md
+auto-redeploy.sh
+deploy.sh
+ecosystem.config.cjs
+ecosystem.simple.cjs
+start-production.sh
 
-node_modules
-.DS_Store
-logs/*
-logs/*.txt
-
-# Generated files
-frontend/static/server.js
-frontend/static/jurisdictions.json
-frontend/build/
-frontend/src/lib/generated/version.ts
-dist/
-.svelte-kit/
-*.log
-.env
-.env.local
-.env.*.local
-bun.lockb
-
-# Contract compilation artifacts
-contracts/artifacts/
-contracts/cache/
-contracts/typechain-types/
-
-# Contract deployment artifacts (local only)
-contracts/ignition/deployments/chain-1337/
-jurisdictions.json
-
-# Process IDs
-pids/
-*.pid
-# Local database files
-db/
+# Legacy
 nul
