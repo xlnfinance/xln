@@ -1,4 +1,21 @@
-# XLN Next Development Session
+# xln Next Session - Final Polish
+
+## Immediate Tasks
+
+### 1. BrainVault Integration
+Port `frontend/bv.html` (wallet generator) to Svelte view mode
+- Create BrainVaultView.svelte
+- Add to viewMode type
+- Button after Home
+- No time machine
+
+### 2. Draggable Sidebar
+Resize handle on graph sidebar left edge (250-600px range)
+
+### 3. Remove Emoji Labels
+Still have Token:🪙, Bars:📊 in sidebar - replace with text
+
+## Previously Documented Tasks Below (Keep for Reference)
 
 ## 🚨 **IMMEDIATE PRIORITIES**
 
