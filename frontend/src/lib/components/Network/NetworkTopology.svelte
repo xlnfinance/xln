@@ -274,6 +274,9 @@
   let passthroughEnabled: boolean = false;
   let _vrControllers: any[] = []; // Stored for future controller visualization
 
+  // Visual effects toggles
+  let lightningEnabled: boolean = false; // Disabled by default (performance)
+
   // Ripple effects for balance changes
   interface Ripple {
     mesh: THREE.Mesh;
@@ -1691,7 +1694,7 @@
 
         // Lightning bolts from hub to connected entities
         const lightningGroup = entity.mesh.userData['lightningGroup'];
-        if (lightningGroup) {
+        if (lightningEnabled && lightningGroup) {
           // Clear old lightning every 150ms (faster refresh for more chaos)
           if (Math.floor(time * 6.67) !== Math.floor((time - 0.016) * 6.67)) {
             while (lightningGroup.children.length > 0) {
@@ -3757,6 +3760,15 @@
             <p class="vr-hint">Quest 3: Point + trigger to grab entities</p>
           {/if}
         </div>
+
+        <!-- Visual Effects -->
+        <div class="effects-section">
+          <h4>Visual Effects</h4>
+          <label class="effects-checkbox">
+            <input type="checkbox" bind:checked={lightningEnabled} />
+            <span>Hub Lightning (performance impact)</span>
+          </label>
+        </div>
       </div>
 
       <small>Scroll to zoom, drag to rotate</small>
@@ -4697,6 +4709,35 @@
   .vr-status {
     color: #7c3aed;
     font-weight: 600;
+  }
+
+  /* Visual Effects Section */
+  .effects-section {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(40, 40, 40, 0.6);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .effects-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .effects-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+  }
+
+  .effects-checkbox input {
+    cursor: pointer;
   }
 
   .send-btn:hover {
