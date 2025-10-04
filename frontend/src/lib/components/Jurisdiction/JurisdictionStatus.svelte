@@ -28,9 +28,8 @@
         // Expand relative RPC URLs using location.origin (works with any protocol/domain)
         let rpcUrl = data.rpc;
         if (rpcUrl.startsWith(':')) {
-          // Relative port - use location.protocol + location.hostname
-          const baseOrigin = `${window.location.protocol}//${window.location.hostname}`;
-          rpcUrl = `${baseOrigin}${rpcUrl}`;
+          // Use location.origin but strip any existing port (e.g., :8080 → empty, then add :8545)
+          rpcUrl = `${window.location.origin.replace(/:\d+$/, '')}${rpcUrl}`;
         }
 
         return {

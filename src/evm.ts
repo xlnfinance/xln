@@ -599,9 +599,8 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       // This allows jurisdictions.json to work from any domain (xln.finance, localhost, etc)
       let rpcUrl = jData['rpc'];
       if (isBrowser && rpcUrl.startsWith(':')) {
-        // Browser: location.protocol + location.hostname + port
-        const baseOrigin = `${window.location.protocol}//${window.location.hostname}`;
-        rpcUrl = `${baseOrigin}${rpcUrl}`;
+        // Browser: Use location.origin (includes protocol + hostname)
+        rpcUrl = `${window.location.origin.replace(/:\d+$/, '')}${rpcUrl}`;
         console.log(`🔧 Expanded RPC URL: ${jData['rpc']} → ${rpcUrl}`);
       } else if (!isBrowser && rpcUrl.startsWith(':')) {
         // Node.js: Default to localhost

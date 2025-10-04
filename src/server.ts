@@ -93,6 +93,15 @@ export const db: Level<Buffer, Buffer> = new Level('db', {
   keyEncoding: 'binary',
 });
 
+// CRITICAL: Explicitly open database (Level doesn't auto-open in browser)
+let dbOpenPromise: Promise<void> | null = null;
+async function ensureDbOpen() {
+  if (!dbOpenPromise) {
+    dbOpenPromise = db.open();
+  }
+  await dbOpenPromise;
+}
+
 declare const console: any;
 
 // === ETHEREUM INTEGRATION ===
@@ -532,6 +541,11 @@ const applyServerInput = async (
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
+  // CRITICAL: Open database BEFORE any db operations
+  console.log('🔓 Opening IndexedDB/LevelDB...');
+  await ensureDbOpen();
+  console.log('✅ Database opened successfully');
+
   // DEBUG: Log jurisdictions content on startup using centralized loader
   if (!isBrowser) {
     try {
@@ -575,7 +589,15 @@ const main = async (): Promise<Env> => {
     }
 
     console.log('🔍 BROWSER-DEBUG: Querying latest_height from database...');
-    const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
+
+    // CRITICAL: Wrap db.get in timeout - if IndexedDB hangs, just start fresh
+    const latestHeightBuffer = await Promise.race([
+      db.get(Buffer.from('latest_height')),
+      new Promise<Buffer>((_, reject) =>
+        setTimeout(() => reject(new Error('DB_TIMEOUT')), 1000)
+      )
+    ]);
+
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
     console.log(`📊 BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
 
@@ -672,10 +694,14 @@ const main = async (): Promise<Env> => {
       error.code === 'LEVEL_NOT_FOUND' ||
       error.message?.includes('LEVEL_NOT_FOUND') ||
       error.message?.includes('NotFoundError') ||
+      error.message?.includes('DB_TIMEOUT') ||
       error.name === 'NotFoundError';
 
     if (isNotFoundError) {
-      console.log('📦 No saved state found, using fresh environment');
+      const reason = error.message?.includes('DB_TIMEOUT')
+        ? 'IndexedDB timeout - starting fresh'
+        : 'No saved state found';
+      console.log(`📦 ${reason}, using fresh environment`);
       if (isBrowser) {
         console.log('💡 This is normal for first-time use. IndexedDB will be created automatically.');
       } else {
