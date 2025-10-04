@@ -18,7 +18,9 @@ logs/*.txt
 
 # Generated files
 frontend/static/server.js
+frontend/static/jurisdictions.json
 frontend/build/
+frontend/src/lib/generated/version.ts
 dist/
 .svelte-kit/
 *.log
@@ -27,9 +29,18 @@ dist/
 .env.*.local
 bun.lockb
 
+# Contract compilation artifacts
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
+
 # Contract deployment artifacts (local only)
 contracts/ignition/deployments/chain-1337/
 jurisdictions.json
+
+# Process IDs
+pids/
+*.pid
 # Local database files
 db/
 nul

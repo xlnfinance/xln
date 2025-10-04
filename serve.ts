@@ -40,6 +40,33 @@ const handler = async (request: Request): Promise<Response> => {
 
   console.log(`➡️  ${request.method} ${path}`);
 
+  // RPC Proxy - forward JSON-RPC requests to local Hardhat node
+  // CRITICAL: Enables HTTPS → HTTP RPC calls (Safari mixed content fix)
+  if (path === '/rpc' && request.method === 'POST') {
+    try {
+      const body = await request.json();
+      const rpcResponse = await fetch('http://localhost:8545', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await rpcResponse.json();
+      return new Response(JSON.stringify(data), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.error('❌ RPC proxy error:', error);
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32603, message: (error as Error).message },
+        id: null
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
   // Health check
   if (path === '/healthz') return new Response('ok');
 

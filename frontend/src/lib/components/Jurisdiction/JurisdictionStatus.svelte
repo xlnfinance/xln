@@ -25,13 +25,12 @@
       const config = await loadJurisdictions();
 
       jurisdictions = Object.entries(config.jurisdictions).map(([key, data]: [string, any]) => {
-        // Expand relative RPC URLs to full URLs based on current origin
+        // Expand relative RPC URLs using location.origin (works with any protocol/domain)
         let rpcUrl = data.rpc;
         if (rpcUrl.startsWith(':')) {
-          // Relative port - use current origin
-          const protocol = window.location.protocol; // http: or https:
-          const hostname = window.location.hostname; // xln.finance or localhost
-          rpcUrl = `${protocol}//${hostname}${rpcUrl}`;
+          // Relative port - use location.protocol + location.hostname
+          const baseOrigin = `${window.location.protocol}//${window.location.hostname}`;
+          rpcUrl = `${baseOrigin}${rpcUrl}`;
         }
 
         return {
