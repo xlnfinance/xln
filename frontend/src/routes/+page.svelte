@@ -11,6 +11,11 @@
   import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
   import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
   import ScenarioPanel from '../lib/components/Scenario/ScenarioPanel.svelte';
+  import BrainVaultView from '../lib/components/Views/BrainVaultView.svelte';
+  import SettingsView from '../lib/components/Views/SettingsView.svelte';
+  import DocsView from '../lib/components/Views/DocsView.svelte';
+  import TerminalView from '../lib/components/Views/TerminalView.svelte';
+  import InvariantTicker from '../lib/components/Home/InvariantTicker.svelte';
   import { initializeXLN, isLoading, error } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
@@ -20,13 +25,26 @@
   import { get } from 'svelte/store';
 
   let activeTab = 'formation';
-  let zenMode = false; // Zen mode: pure CSS hide/show, no state changes
+  let zenMode = false; // Zen mode: hide UI chrome
+  let hideButton = false; // Full zen: also hide the toggle button
 
   // Keyboard shortcut for zen mode
   function handleKeyboard(event: KeyboardEvent) {
     if (event.key === 'z' || event.key === 'Z') {
-      zenMode = !zenMode;
+      toggleFullZen();
     }
+  }
+
+  // Full zen mode (Z key) - hide everything including button
+  function toggleFullZen() {
+    zenMode = !zenMode;
+    hideButton = !hideButton;
+  }
+
+  // Button-triggered zen - hide UI but keep button visible for mobile
+  function toggleZenMode() {
+    zenMode = !zenMode;
+    hideButton = false; // Always keep button visible when using button
   }
 
   // SEQUENTIAL LOADING: Wait for history to be populated
@@ -159,9 +177,21 @@
           <p><strong>xln</strong> is the first <strong>RCPAN</strong> (Reserve-Credit Provable Account Network): credit where it scales, collateral where it secures. A principled hybrid.</p>
 
           <div class="invariant-box">
-            <p><strong>FCUAN:</strong> −leftCredit ≤ Δ ≤ rightCredit</p>
-            <p><strong>FRPAP:</strong> 0 ≤ Δ ≤ collateral</p>
-            <p><strong>RCPAN:</strong> −leftCredit ≤ Δ ≤ collateral + rightCredit</p>
+            <InvariantTicker
+              label="FCUAN"
+              description="−leftCredit ≤ Δ ≤ rightCredit"
+              pattern="[---.---]"
+            />
+            <InvariantTicker
+              label="FRPAP"
+              description="0 ≤ Δ ≤ collateral"
+              pattern="[.===]"
+            />
+            <InvariantTicker
+              label="RCPAN"
+              description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
+              pattern="[---.===---]"
+            />
           </div>
 
           <h2>Key Properties</h2>
@@ -222,9 +252,21 @@
           <p>Click "Graph 3D" to explore the network, or "Panels" to manage entities directly. Use the time machine to replay any state transition.</p>
         </div>
       </div>
+    {:else if $viewMode === 'settings'}
+      <!-- Settings View: Configuration -->
+      <SettingsView />
+    {:else if $viewMode === 'docs'}
+      <!-- Docs View: Documentation -->
+      <DocsView />
+    {:else if $viewMode === 'brainvault'}
+      <!-- BrainVault View: Wallet Generator -->
+      <BrainVaultView />
     {:else if $viewMode === 'graph3d' || $viewMode === 'graph2d'}
       <!-- Graph View Mode: Show Network Topology -->
-      <NetworkTopology />
+      <NetworkTopology {zenMode} {hideButton} {toggleZenMode} />
+    {:else if $viewMode === 'terminal'}
+      <!-- Terminal View: Command Interface -->
+      <TerminalView />
     {:else if $viewMode === 'panels'}
       <!-- Panels Mode: Show Entity Panels -->
       <div class="main-content">
@@ -295,8 +337,8 @@
       </div>
     {/if}
 
-    <!-- Time Machine (hidden in zen mode and home view) -->
-    {#if !zenMode && $viewMode !== 'home'}
+    <!-- Time Machine (hidden in zen mode, home view, settings, docs, terminal, and brainvault view) -->
+    {#if !zenMode && $viewMode !== 'home' && $viewMode !== 'settings' && $viewMode !== 'docs' && $viewMode !== 'terminal' && $viewMode !== 'brainvault'}
       <TimeMachine />
     {/if}
 
@@ -314,9 +356,9 @@
       'Segoe UI',
       Roboto,
       sans-serif;
-    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0f0f0f 100%);
+    background: var(--theme-bg-gradient, linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 50%, #0f0f0f 100%));
     min-height: 100vh;
-    color: #e8e8e8;
+    color: var(--theme-text-primary, #e8e8e8);
     overflow-x: hidden;
     margin: 0;
     padding: 0;
@@ -565,6 +607,15 @@
     /* Graph fills entire viewport in zen mode */
     width: 100vw !important;
     height: 100vh !important;
+    top: 0 !important;
+  }
+
+  .app.zen-mode :global(.admin-topbar),
+  .app.zen-mode :global(.time-machine),
+  .app.zen-mode :global(.topology-overlay),
+  .app.zen-mode :global(.panel-toggle-btn),
+  .app.zen-mode :global(.error-display) {
+    display: none !important;
   }
 
   /* Home Page */
@@ -637,11 +688,12 @@
     margin: 24px 0;
     font-family: 'Courier New', monospace;
     font-size: 14px;
-    line-height: 1.8;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
-  .invariant-box p {
-    margin: 8px 0;
+  .invariant-box :global(.header strong) {
     color: #00d9ff;
   }
 
@@ -680,3 +732,4 @@
     line-height: 1.5;
   }
 </style>
+  import InvariantTicker from '../lib/components/Home/InvariantTicker.svelte';

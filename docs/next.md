@@ -1,58 +1,33 @@
 # xln Next Session - Final Polish
 
-## Immediate Tasks
+## ✅ Completed (2025-10-04)
 
-### 1. BrainVault Integration
-Port `frontend/bv.html` (wallet generator) to Svelte view mode
-- Create BrainVaultView.svelte
-- Add to viewMode type
-- Button after Home
-- No time machine
+### Core Consensus Fixes
+- ✅ **Account Consensus Fixed** - Bilateral frame exchange now works reliably
+  - Fixed delta calculation inconsistency (`ondelta + offdelta` everywhere)
+  - Fixed state verification to compare actual deltas not reconstructed values
+  - Added error handling around batch.write() to prevent silent failures
+  - **Proper Rollback Logic** - Implemented Channel.ts deterministic rollback (LEFT always wins)
+  - Test: `bun run test-payment-fresh.ts` passes ✅
+  - Test: `bun run test-simultaneous-proposals.ts` passes ✅
 
-### 2. Draggable Sidebar
-Resize handle on graph sidebar left edge (250-600px range)
+## ✅ Completed (2025-10-04) - UI Features
 
-### 3. Remove Emoji Labels
-Still have Token:🪙, Bars:📊 in sidebar - replace with text
+- ✅ BrainVault Integration - Ported to Svelte view mode with liquid glass design
+- ✅ Draggable Sidebar - Resize handle with unlimited range (min 50px)
+- ✅ Remove Emoji Labels - Professional text-only labels
+- ✅ Settings as Full Page - Moved from modal to proper page view
+- ✅ 5-Theme Color Scheme System - Dark/Light/Gold Luxe/Matrix/Arctic with dropdown
+- ✅ Dual Hover Tooltips - Shows both entity perspectives on connection hover
+- ✅ Ripples on J-Events - Expanding rings on reserve/collateral blockchain events
+- ✅ H-Layout Position Persistence - Saves user positions, defaults to optimal layout
+- ✅ Force-Directed Graph Layout - Fruchterman-Reingold algorithm with capacity-weighted springs, Force/Radial toggle
+- ✅ Zen Mode Fix - Complete UI chrome hiding (press Z or button)
+- ✅ Scenario Execution Viewer - Auto-scrolling subtitle-style output with step-by-step progress
+- ✅ Terminal Interface - Hacker-style terminal with command history, fancy ASCII boxes, auto-loads network graph using docs/invariant ASCII style
+- ✅ Multi-Hop Path Preview - Radio button list in sidebar showing all routes (direct + multi-hop), visual route selection before sending
 
 ## Previously Documented Tasks Below (Keep for Reference)
-
-## 🚨 **IMMEDIATE PRIORITIES**
-
-### **🔥 Priority 1: Dual Hover Tooltips**
-On connection hover, show TWO tooltips (one for each side):
-
-```
-LEFT Entity View               RIGHT Entity View
-┌─────────────────────┐       ┌─────────────────────┐
-│ Their credit: 500k  │       │ Our credit: 300k    │
-│ Collateral: 100k    │       │ Collateral: 100k    │
-│ Our credit: 300k    │       │ Their credit: 500k  │
-│ Net: -200k (owe)    │       │ Net: +200k (owed)   │
-└─────────────────────┘       └─────────────────────┘
-```
-
-- Use `deriveDelta()` for proper perspective calculation
-- Show credit/collateral/net from each entity's viewpoint
-- Position tooltips on either side of the connection
-- Include token symbol and formatted amounts
-
-### **🔥 Priority 2: Ripples on J-Events**
-Visual feedback for jurisdictional events (reserve/collateral changes):
-
-- Detect j-events in server frames when rendering
-- Create radial ripple effect originating from entity
-- Broadcast-style animation (expanding ring)
-- Show when reserve state changes (deposits/withdrawals)
-
-### **🔥 Priority 3: H-Layout Position Persistence**
-Default to clean H-shaped layout on fresh start:
-
-- 2 columns (left/right bars of H)
-- Hubs at top of each column
-- Users spread vertically
-- Proper spacing to prevent bar overlap
-- Save positions after user adjustments
 
 ---
 

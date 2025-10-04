@@ -223,22 +223,24 @@ async function testFreshPayment() {
     console.log(`   Generated ${outputs.length} new outputs\n`);
   }
 
-  // Check final state after both payments
-  const e2Final = env.replicas.get(`${entity2Id}:s2`);
-  const account2 = e2Final?.state.accounts.get(entity1Id);
+  // Check final state after both payments (REFRESH BOTH ENTITIES)
+  const e1FinalRefresh = env.replicas.get(`${entity1Id}:s1`);
+  const e2FinalRefresh = env.replicas.get(`${entity2Id}:s2`);
+  const account1Final = e1FinalRefresh?.state.accounts.get(entity2Id);
+  const account2Final = e2FinalRefresh?.state.accounts.get(entity1Id);
 
   console.log('\n📊 Final State after both payments:\n');
-  console.log(`   Entity 1 account: ${account1?.frameHistory?.length || 0} frames`);
-  console.log(`   Entity 2 account: ${account2?.frameHistory?.length || 0} frames`);
-  console.log(`   Entity 1 pending: ${account1?.pendingFrame ? 'YES' : 'NO'}`);
-  console.log(`   Entity 2 pending: ${account2?.pendingFrame ? 'YES' : 'NO'}`);
+  console.log(`   Entity 1 account: ${account1Final?.frameHistory?.length || 0} frames`);
+  console.log(`   Entity 2 account: ${account2Final?.frameHistory?.length || 0} frames`);
+  console.log(`   Entity 1 pending: ${account1Final?.pendingFrame ? 'YES' : 'NO'}`);
+  console.log(`   Entity 2 pending: ${account2Final?.pendingFrame ? 'YES' : 'NO'}`);
 
-  if (account1?.pendingFrame || account2?.pendingFrame) {
+  if (account1Final?.pendingFrame || account2Final?.pendingFrame) {
     console.log('\n⚠️  Frame stuck after reverse payment\n');
     process.exit(1);
   }
 
-  if ((account1?.frameHistory?.length || 0) >= 2 && (account2?.frameHistory?.length || 0) >= 2) {
+  if ((account1Final?.frameHistory?.length || 0) >= 2 && (account2Final?.frameHistory?.length || 0) >= 2) {
     console.log('\n✅ SUCCESS: Both payments completed with bilateral consensus!');
     console.log('   Payments work like a swiss clock ⏰\n');
     process.exit(0);

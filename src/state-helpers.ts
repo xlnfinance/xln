@@ -169,11 +169,15 @@ export const captureSnapshot = (
 
   // --- PERSISTENCE WITH BATCH OPERATIONS ---
   // Use batch operations for better performance
-  const batch = db.batch();
-  batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
-  batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
-
-  batch.write();
+  try {
+    const batch = db.batch();
+    batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
+    batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
+    batch.write();
+  } catch (error) {
+    console.warn(`⚠️ Snapshot persistence failed (continuing without save):`, (error as Error).message);
+    // Don't crash - continue execution even if persistence fails
+  }
 
   if (DEBUG) {
     console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);

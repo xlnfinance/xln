@@ -9,6 +9,12 @@
   import { settings } from '../../stores/settingsStore';
   import { debug } from '../../utils/debug';
   import { TOKEN_REGISTRY } from '../../../../../src/account-utils';
+  import { getThemeColors } from '../../utils/themes';
+
+  // Props
+  export let zenMode: boolean = false;
+  export let hideButton: boolean = false;
+  export let toggleZenMode: () => void;
 
   // OrbitControls import (will be loaded dynamically)
   let OrbitControls: any;
@@ -199,9 +205,6 @@
     }
   }
 
-  // Zen mode prop (read-only, controlled by parent)
-  export let zenMode: boolean = false;
-
   // Topology control state with persistence
   const savedSettings = loadBirdViewSettings();
   let barsMode: 'close' | 'spread' = savedSettings.barsMode;
@@ -215,6 +218,9 @@
   let showPanel: boolean = true; // Mobile-friendly panel toggle - start visible
   let labelScale: number = 2.0; // Entity label size multiplier (1.0 = 32px font, 2.0 = 64px font)
   let lightningSpeed: number = 100; // Lightning animation speed in ms per hop (default 100ms)
+  let sidebarWidth: number = 400; // Sidebar width in pixels (250-600)
+  let isResizingSidebar: boolean = false;
+  let forceLayoutEnabled: boolean = true; // Toggle for force-directed layout rebalancing
 
   // Helper to get token symbol from TOKEN_REGISTRY
   function getTokenSymbol(tokenId: number): string {
@@ -235,6 +241,14 @@
       paymentFrom = firstEntity.id;
       paymentTo = secondEntity.id;
     }
+  }
+
+  // Calculate routes whenever from/to changes
+  $: if (paymentFrom && paymentTo && paymentFrom !== paymentTo) {
+    calculateAvailableRoutes(paymentFrom, paymentTo);
+  } else {
+    availableRoutes = [];
+    selectedRouteIndex = 0;
   }
 
   // Active payment jobs
@@ -286,14 +300,16 @@
   let activeRipples: Ripple[] = [];
 
   // Payment route selection state
-  let showRouteSelection = false;
   let availableRoutes: Array<{
     from: string;
     to: string;
     path: string[];
     type: 'direct' | 'multihop';
     description: string;
+    cost: number;
+    hops: number;
   }> = [];
+  let selectedRouteIndex: number = 0;
 
   // Real-time activity ticker
   let recentActivity: Array<{
@@ -344,6 +360,9 @@
     if (renderer) {
       renderer.dispose();
     }
+    // Remove sidebar resize listeners
+    window.removeEventListener('mousemove', handleResizeMove);
+    window.removeEventListener('mouseup', handleResizeEnd);
   });
 
   async function initThreeJS() {
@@ -430,6 +449,10 @@
 
     // Handle resize
     window.addEventListener('resize', onWindowResize);
+
+    // Sidebar resize handlers
+    window.addEventListener('mousemove', handleResizeMove);
+    window.addEventListener('mouseup', handleResizeEnd);
 
     // Setup VR controllers if VR supported
     if (isVRSupported && renderer) {
@@ -663,9 +686,26 @@
     // Clear and rebuild - simple and reliable
     clearNetwork();
 
-    // ALWAYS use H-shape layout for 6 entities (demo mode)
-    // Don't load saved positions - they break the H-shape
-    const forceLayoutPositions = applyForceDirectedLayout(entityData, connectionMap, capacityMap);
+    // Try to load saved positions first
+    let savedPositions: Map<string, THREE.Vector3> | null = null;
+    try {
+      const saved = localStorage.getItem('xln-entity-positions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        savedPositions = new Map();
+        Object.entries(parsed).forEach(([id, pos]: [string, any]) => {
+          savedPositions!.set(id, new THREE.Vector3(pos.x, pos.y, pos.z));
+        });
+      }
+    } catch (err) {
+      debug.warn('Failed to load saved positions:', err);
+    }
+
+    // Use saved positions if all entities have saved positions, otherwise use H-layout
+    const allEntitiesHaveSavedPositions = savedPositions && entityData.every(p => savedPositions!.has(p.entityId));
+    const forceLayoutPositions = allEntitiesHaveSavedPositions && savedPositions
+      ? savedPositions
+      : applyForceDirectedLayout(entityData, connectionMap, capacityMap);
 
     // Create entity nodes
     entityData.forEach((profile, index) => {
@@ -673,7 +713,10 @@
       createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
     });
 
-    // Don't save positions - we want fresh H-shape every time
+    // Save positions after creating entities (for persistence)
+    if (!allEntitiesHaveSavedPositions) {
+      saveEntityPositions();
+    }
 
     // Create connections between entities that have accounts
     createConnections();
@@ -713,79 +756,187 @@
     particles = [];
   }
 
-  // H-shape layout: Letter H for Homakov 😎
-  function applyForceDirectedLayout(profiles: any[], connectionMap: Map<string, Set<string>>, _capacityMap: Map<string, number>) {
+  /**
+   * State-of-the-art Force-Directed Graph Layout
+   * Uses Fruchterman-Reingold algorithm with capacity-weighted springs
+   *
+   * Physics model:
+   * - Repulsion: All nodes repel each other (prevents overlap)
+   * - Attraction: Connected nodes attract via springs (weighted by capacity)
+   * - Cooling: Temperature decreases over iterations for stability
+   */
+  function applyForceDirectedLayout(profiles: any[], connectionMap: Map<string, Set<string>>, capacityMap: Map<string, number>) {
     const positions = new Map<string, THREE.Vector3>();
 
-    // Detect hubs vs users by connection count
+    // If force layout disabled, use simple radial
+    if (!forceLayoutEnabled) {
+      return applySimpleRadialLayout(profiles, connectionMap);
+    }
+
+    // Detect hubs for initial positioning
     const connectionCounts = new Map<string, number>();
     profiles.forEach(profile => {
       const connections = connectionMap.get(profile.entityId);
       connectionCounts.set(profile.entityId, connections?.size || 0);
     });
 
-    // Sort: hubs first (most connections), then by entityId for deterministic ordering
+    // Initialize positions (random with bias for hubs toward center)
+    const nodePositions = new Map<string, {x: number, y: number}>();
+    profiles.forEach((profile, index) => {
+      const degree = connectionCounts.get(profile.entityId) || 0;
+      const isHub = degree > 2;
+
+      // Hubs near center, leaves spread out
+      const radius = isHub ? 10 : 30 + Math.random() * 20;
+      const angle = (index / profiles.length) * Math.PI * 2;
+      nodePositions.set(profile.entityId, {
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius
+      });
+    });
+
+    // Fruchterman-Reingold algorithm parameters
+    const width = 100;
+    const height = 100;
+    const area = width * height;
+    const k = Math.sqrt(area / profiles.length); // Optimal distance
+    const iterations = 100;
+    let temperature = width / 10; // Initial temperature (cooling schedule)
+    const coolingFactor = 0.95;
+
+    // Force calculations
+    const repulsionForce = (dist: number) => (k * k) / dist;
+    const attractionForce = (dist: number, capacity: number) => {
+      // Weight attraction by capacity (bigger capacity = stronger spring)
+      const weight = Math.max(0.1, Math.log10(capacity + 1));
+      return (dist * dist * weight) / k;
+    };
+
+    // Iterative force simulation
+    for (let iter = 0; iter < iterations; iter++) {
+      const displacement = new Map<string, {x: number, y: number}>();
+
+      // Initialize displacements
+      profiles.forEach(p => {
+        displacement.set(p.entityId, {x: 0, y: 0});
+      });
+
+      // Calculate repulsive forces (all pairs)
+      for (let i = 0; i < profiles.length; i++) {
+        for (let j = i + 1; j < profiles.length; j++) {
+          const v = profiles[i];
+          const u = profiles[j];
+          if (!v || !u) continue;
+
+          const vPos = nodePositions.get(v.entityId)!;
+          const uPos = nodePositions.get(u.entityId)!;
+
+          const dx = vPos.x - uPos.x;
+          const dy = vPos.y - uPos.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.01; // Avoid division by zero
+
+          const force = repulsionForce(dist);
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          const vDisp = displacement.get(v.entityId)!;
+          const uDisp = displacement.get(u.entityId)!;
+          vDisp.x += fx;
+          vDisp.y += fy;
+          uDisp.x -= fx;
+          uDisp.y -= fy;
+        }
+      }
+
+      // Calculate attractive forces (connected pairs)
+      for (const [entityId, neighbors] of connectionMap.entries()) {
+        const vPos = nodePositions.get(entityId);
+        if (!vPos) continue;
+
+        for (const neighborId of neighbors) {
+          const uPos = nodePositions.get(neighborId);
+          if (!uPos) continue;
+
+          const dx = vPos.x - uPos.x;
+          const dy = vPos.y - uPos.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+
+          // Get capacity for this connection
+          const capacityKey = [entityId, neighborId].sort().join('-');
+          const capacity = capacityMap.get(capacityKey) || 1;
+
+          const force = attractionForce(dist, Number(capacity));
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          const vDisp = displacement.get(entityId)!;
+          vDisp.x -= fx;
+          vDisp.y -= fy;
+        }
+      }
+
+      // Apply displacements with cooling
+      profiles.forEach(profile => {
+        const pos = nodePositions.get(profile.entityId)!;
+        const disp = displacement.get(profile.entityId)!;
+
+        const dispLength = Math.sqrt(disp.x * disp.x + disp.y * disp.y) || 0.01;
+        const cappedDisp = Math.min(dispLength, temperature);
+
+        pos.x += (disp.x / dispLength) * cappedDisp;
+        pos.y += (disp.y / dispLength) * cappedDisp;
+
+        // Keep within bounds
+        const halfWidth = width / 2;
+        const halfHeight = height / 2;
+        pos.x = Math.max(-halfWidth, Math.min(halfWidth, pos.x));
+        pos.y = Math.max(-halfHeight, Math.min(halfHeight, pos.y));
+      });
+
+      // Cool down
+      temperature *= coolingFactor;
+    }
+
+    // Convert to 3D positions
+    profiles.forEach(profile => {
+      const pos2d = nodePositions.get(profile.entityId)!;
+      positions.set(profile.entityId, new THREE.Vector3(pos2d.x, pos2d.y, 0));
+    });
+
+    return positions;
+  }
+
+  /**
+   * Simple radial layout (fallback when force layout disabled)
+   */
+  function applySimpleRadialLayout(profiles: any[], connectionMap: Map<string, Set<string>>) {
+    const positions = new Map<string, THREE.Vector3>();
+
+    const connectionCounts = new Map<string, number>();
+    profiles.forEach(profile => {
+      const connections = connectionMap.get(profile.entityId);
+      connectionCounts.set(profile.entityId, connections?.size || 0);
+    });
+
     const sorted = [...profiles].sort((a, b) => {
       const countA = connectionCounts.get(a.entityId) || 0;
       const countB = connectionCounts.get(b.entityId) || 0;
-      if (countB !== countA) {
-        return countB - countA; // Descending - hubs first
-      }
-      // Tiebreaker: sort by entityId for stable, deterministic layout
+      if (countB !== countA) return countB - countA;
       return a.entityId.localeCompare(b.entityId);
     });
 
-    // H-shape layout for exactly 6 nodes (vertical H for Homakov):
-    // First 2 sorted = hubs (most connections) → horizontal center line
-    // Next 4 sorted = leaves → vertical edges
-    //
-    //  leaf        leaf
-    //   |           |
-    //  hub1 ------ hub2
-    //   |           |
-    //  leaf        leaf
-    const spacing = 30;
-    const verticalSpacing = 40;
+    // Radial layout
+    const baseRadius = 5;
+    const maxRadius = 50;
+    const angleStep = (Math.PI * 2) / profiles.length;
 
     sorted.forEach((profile, index) => {
       const degree = connectionCounts.get(profile.entityId) || 0;
-
-      // Use H-shape positions if we have exactly 6 nodes
-      if (sorted.length === 6) {
-        let pos: { x: number; y: number; z: number };
-
-        if (index === 0) {
-          // Hub 1: left center
-          pos = { x: -spacing, y: 0, z: 0 };
-        } else if (index === 1) {
-          // Hub 2: right center
-          pos = { x: spacing, y: 0, z: 0 };
-        } else if (index === 2) {
-          // Leaf 1: top left
-          pos = { x: -spacing, y: verticalSpacing, z: 0 };
-        } else if (index === 3) {
-          // Leaf 2: top right
-          pos = { x: spacing, y: verticalSpacing, z: 0 };
-        } else if (index === 4) {
-          // Leaf 3: bottom left
-          pos = { x: -spacing, y: -verticalSpacing, z: 0 };
-        } else {
-          // Leaf 4: bottom right (index === 5)
-          pos = { x: spacing, y: -verticalSpacing, z: 0 };
-        }
-
-        positions.set(profile.entityId, new THREE.Vector3(pos.x, pos.y, pos.z));
-      } else {
-        // Fallback to radial for other counts
-        const baseRadius = 5;
-        const maxRadius = 50;
-        const angleStep = (Math.PI * 2) / profiles.length;
-        const radius = degree > 0 ? Math.max(baseRadius, maxRadius / (degree + 1)) : maxRadius;
-        const angle = index * angleStep;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
-        positions.set(profile.entityId, new THREE.Vector3(x, y, 0));
-      }
+      const radius = degree > 0 ? Math.max(baseRadius, maxRadius / (degree + 1)) : maxRadius;
+      const angle = index * angleStep;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      positions.set(profile.entityId, new THREE.Vector3(x, y, 0));
     });
 
     return positions;
@@ -816,10 +967,11 @@
     // Create entity geometry - size based on token reserves
     const geometry = new THREE.SphereGeometry(entitySize, 32, 32);
 
-    // Hub glow effect: Top-3 hubs get bright emissive glow
-    const baseColor = 0x00ff88; // Bright green
-    const emissiveColor = isHub ? 0x00ff88 : 0x002200; // Bright glow for hubs, subtle for others
-    const emissiveIntensity = isHub ? 1.5 : 0.1; // Much brighter for hubs (increased from 0.6 to 1.5)
+    // Get theme colors
+    const themeColors = getThemeColors($settings.theme);
+    const baseColor = parseInt(themeColors.entityColor.replace('#', '0x'));
+    const emissiveColor = parseInt(themeColors.entityEmissive.replace('#', '0x'));
+    const emissiveIntensity = isHub ? 1.5 : 0.1; // Much brighter for hubs
 
     const material = new THREE.MeshLambertMaterial({
       color: baseColor,
@@ -1156,9 +1308,12 @@
       toEntity.position
     ]);
 
-    // Create dotted line material - more spaced and lightweight (user requirement)
+    // Create dotted line material with theme color
+    const themeColors = getThemeColors($settings.theme);
+    const connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
+
     const material = new THREE.LineDashedMaterial({
-      color: 0x00ff44,
+      color: connectionColor,
       opacity: 0.3, // Much lighter (was 0.6)
       transparent: true,
       linewidth: 1,
@@ -2043,6 +2198,16 @@
                 // Add to activity ticker
                 addActivityToTicker(tx.data.fromEntityId, tx.data.toEntityId, tx.data.accountTx);
 
+                // Check for j-events (reserve/collateral changes from blockchain)
+                if (tx.data.accountTx) {
+                  const accountTxType = tx.data.accountTx.type;
+                  // J-event types: account_deposit, account_withdraw, account_settle
+                  if (accountTxType === 'account_deposit' || accountTxType === 'account_withdraw' || accountTxType === 'account_settle') {
+                    // Trigger ripple effect on entity that had reserve change
+                    createBroadcastRipple(tx.data.fromEntityId, accountTxType.replace('account_', ''));
+                  }
+                }
+
               } else if (tx.type === 'directPayment' && tx.data.route) {
                 // Lightning strike animation for direct payments
                 createLightningStrike(tx.data.route, tx.data.amount);
@@ -2465,6 +2630,23 @@
     }
   }
 
+  // Sidebar resize handlers
+  function handleResizeStart(event: MouseEvent) {
+    event.preventDefault();
+    isResizingSidebar = true;
+  }
+
+  function handleResizeMove(event: MouseEvent) {
+    if (!isResizingSidebar) return;
+
+    const newWidth = window.innerWidth - event.clientX;
+    sidebarWidth = Math.max(50, newWidth); // Allow dragging anywhere, minimum 50px
+  }
+
+  function handleResizeEnd() {
+    isResizingSidebar = false;
+  }
+
   // Touch event handlers for iPhone/mobile support
   function onTouchStart(event: TouchEvent) {
     event.preventDefault();
@@ -2674,6 +2856,74 @@
     return Math.max(0.3, Math.min(1.5, 0.5 + normalizedAmount * 0.001));
   }
 
+  function calculateAvailableRoutes(from: string, to: string) {
+    const env = $xlnEnvironment;
+    if (!env) {
+      availableRoutes = [];
+      return;
+    }
+
+    const routes: typeof availableRoutes = [];
+
+    // Check for direct account
+    const fromReplicaEntry = Array.from(env.replicas.entries() as [string, any][]).find(([k]) => k.startsWith(from + ':'));
+    const fromReplica = fromReplicaEntry?.[1];
+    if (fromReplica?.state?.accounts?.has(to)) {
+      routes.push({
+        from,
+        to,
+        path: [from, to],
+        type: 'direct',
+        description: `Direct: ${getEntityShortName(from)} → ${getEntityShortName(to)}`,
+        cost: 0,
+        hops: 1
+      });
+    }
+
+    // Find multi-hop routes (simple BFS for now)
+    const queue: Array<{current: string; path: string[]}> = [{current: from, path: [from]}];
+    const visited = new Set<string>([from]);
+    const maxHops = 3;
+
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (!item) break;
+
+      const {current, path} = item;
+      if (path.length > maxHops) continue;
+
+      const currentReplicaEntry = Array.from(env.replicas.entries() as [string, any][]).find(([k]) => k.startsWith(current + ':'));
+      const currentReplica = currentReplicaEntry?.[1];
+      if (!currentReplica?.state?.accounts) continue;
+
+      for (const [neighbor] of currentReplica.state.accounts.entries()) {
+        const neighborStr = String(neighbor);
+        if (neighborStr === to && path.length > 1) {
+          // Found a route!
+          const fullPath = [...path, to];
+          routes.push({
+            from,
+            to,
+            path: fullPath,
+            type: 'multihop',
+            description: fullPath.map(id => getEntityShortName(id)).join(' → '),
+            cost: fullPath.length - 1, // Simple cost = hop count
+            hops: fullPath.length - 1
+          });
+        } else if (!visited.has(neighborStr) && neighborStr !== to) {
+          visited.add(neighborStr);
+          queue.push({current: neighborStr, path: [...path, neighborStr]});
+        }
+      }
+    }
+
+    // Sort by hops (prefer fewer hops)
+    routes.sort((a, b) => a.hops - b.hops);
+
+    availableRoutes = routes;
+    selectedRouteIndex = 0;
+  }
+
   async function sendPayment() {
     try {
 
@@ -2685,6 +2935,13 @@
       if (paymentFrom === paymentTo) {
         debug.error('❌ Same entity selected');
         alert('Cannot send payment to same entity');
+        return;
+      }
+
+      // Use selected route if available
+      const selectedRoute = availableRoutes[selectedRouteIndex];
+      if (!selectedRoute) {
+        alert('No route available for this payment');
         return;
       }
 
@@ -2935,32 +3192,6 @@
     });
   }
 
-  async function executePaymentRoute(route: typeof availableRoutes[0]) {
-    try {
-      // Ensure we're in LIVE mode
-      if (!$isLive) {
-        timeOperations.goToLive();
-      }
-
-      await getXLN(); // Validate XLN available
-
-      // Calculate 10% of available capacity
-      // Trigger visual activity
-      triggerEntityActivity(route.from);
-      triggerEntityActivity(route.to);
-
-      // Close route selection
-      showRouteSelection = false;
-
-      // TODO: Call actual XLN payment function
-      // await xln.makePayment($xlnEnvironment, route.from, route.to, selectedTokenId, paymentAmount);
-
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      debug.error('❌ Payment execution failed:', error);
-      throw new Error(`FINTECH-SAFETY: Payment execution failed: ${errorMsg}`);
-    }
-  }
 
   async function executeScenario() {
     if (!selectedScenarioFile) {
@@ -3398,23 +3629,32 @@
 </script>
 
 <div bind:this={container} class="network-topology-container">
-  <!-- Toggle button - IDE-style vertical tab -->
+  <!-- Toggle button - always visible unless hideButton is true (Z key triggered) -->
+  {#if !hideButton}
   <button
     class="panel-toggle-btn"
-    class:panel-open={showPanel}
-    on:click={() => showPanel = !showPanel}
-    title="{showPanel ? 'Hide Controls' : 'Show Controls'}"
+    class:panel-open={!zenMode}
+    style="right: {!zenMode ? sidebarWidth : 0}px;"
+    on:click={toggleZenMode}
+    title="{!zenMode ? 'Hide UI (Zen Mode)' : 'Show UI'}"
   >
-    {#if showPanel}
+    {#if !zenMode}
       Hide ▶
     {:else}
-      ◀ Controls
+      ◀ Show
     {/if}
   </button>
+  {/if}
 
-  <!-- Sliding panel (mobile-friendly) -->
-  {#if showPanel}
-  <div class="topology-overlay" class:panel-open={showPanel}>
+  <!-- Sliding panel (mobile-friendly, hidden in zen mode) -->
+  {#if showPanel && !zenMode}
+  <div class="topology-overlay" class:panel-open={showPanel} style="width: {sidebarWidth}px;">
+    <!-- Resize handle -->
+    <div
+      class="resize-handle"
+      on:mousedown={handleResizeStart}
+      title="Drag to resize sidebar"
+    ></div>
     <div class="topology-info">
       <h3>Network Topology</h3>
 
@@ -3482,6 +3722,25 @@
             on:click={() => { barsMode = 'spread'; saveBirdViewSettings(); updateNetworkData(); }}
           >
             Spread
+          </button>
+        </div>
+
+        <!-- Force Layout Toggle -->
+        <div class="control-group">
+          <label>Layout:</label>
+          <button
+            class="toggle-btn"
+            class:active={forceLayoutEnabled}
+            on:click={() => { forceLayoutEnabled = true; updateNetworkData(); }}
+          >
+            Force
+          </button>
+          <button
+            class="toggle-btn"
+            class:active={!forceLayoutEnabled}
+            on:click={() => { forceLayoutEnabled = false; updateNetworkData(); }}
+          >
+            Radial
           </button>
         </div>
 
@@ -3657,7 +3916,27 @@
             <span class="rate-value">{paymentTPS.toFixed(1)}</span>
           </div>
 
-          <button class="send-btn" on:click={sendPayment}>
+          <!-- Route Preview Radio List -->
+          {#if availableRoutes.length > 0}
+            <div class="route-preview">
+              <label class="route-preview-label">Select Route:</label>
+              {#each availableRoutes as route, index}
+                <label class="route-radio-item">
+                  <input
+                    type="radio"
+                    name="payment-route"
+                    value={index}
+                    bind:group={selectedRouteIndex}
+                  />
+                  <span class="route-icon">{route.type === 'direct' ? '🎯' : '🔄'}</span>
+                  <span class="route-desc">{route.description}</span>
+                  <span class="route-info">{route.hops} hop{route.hops > 1 ? 's' : ''}</span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+
+          <button class="send-btn" on:click={sendPayment} disabled={availableRoutes.length === 0}>
             {paymentTPS === 0 ? '💸 Send Once' : '▶ Start Flow'}
           </button>
         </div>
@@ -3790,15 +4069,15 @@
   <!-- Active Payment Jobs (Flows) -->
   {#if activeJobs.length > 0}
     <div class="active-jobs">
-      <h4>🌊 Active Flows</h4>
+      <h4>Active Flows</h4>
       <div class="jobs-list">
         {#each activeJobs as job (job.id)}
           <div class="job-item">
             <div class="job-info">
               <span class="job-route">{getEntityShortName(job.from)} → {getEntityShortName(job.to)}</span>
-              <span class="job-amount">💰 {job.amount}</span>
-              <span class="job-rate">⚡ {job.tps} TPS</span>
-              <span class="job-count">📊 {job.sentCount} sent</span>
+              <span class="job-amount">Amount: {job.amount}</span>
+              <span class="job-rate">Rate: {job.tps} TPS</span>
+              <span class="job-count">Sent: {job.sentCount}</span>
             </div>
             <button class="job-cancel" on:click={() => cancelJob(job.id)} title="Cancel flow">
               ✕
@@ -3835,30 +4114,6 @@
     </div>
   {/if}
 
-  {#if showRouteSelection}
-    <div class="route-modal" on:click={() => showRouteSelection = false}>
-      <div class="route-content" on:click|stopPropagation>
-        <div class="route-header">
-        <h3>💸 Select Payment Route</h3>
-        <button class="route-close" on:click={() => showRouteSelection = false}>×</button>
-      </div>
-      <div class="route-list">
-        {#each availableRoutes as route}
-          <button
-            class="route-option"
-            on:click={() => executePaymentRoute(route)}
-          >
-            <div class="route-type">{route.type === 'direct' ? '🎯' : '🔄'}</div>
-            <div class="route-description">{route.description}</div>
-          </button>
-        {/each}
-        {#if availableRoutes.length === 0}
-          <div class="no-routes">No payment routes available</div>
-        {/if}
-        </div>
-      </div>
-    </div>
-  {/if}
 
   <!-- Narrative Subtitle Overlay -->
   <NarrativeSubtitle />
@@ -3875,11 +4130,29 @@
     background: #0a0a0a;
   }
 
+  /* Resize handle for sidebar */
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 8px;
+    height: 100%;
+    cursor: ew-resize;
+    background: linear-gradient(90deg, rgba(0, 122, 204, 0.2), rgba(0, 122, 204, 0.05));
+    border-right: 1px solid rgba(0, 122, 204, 0.3);
+    z-index: 100;
+    transition: background 0.2s ease;
+  }
+
+  .resize-handle:hover {
+    background: linear-gradient(90deg, rgba(0, 122, 204, 0.4), rgba(0, 122, 204, 0.1));
+    border-right-color: rgba(0, 122, 204, 0.6);
+  }
+
   /* Panel toggle button - IDE-style vertical tab on sidebar edge */
   .panel-toggle-btn {
     position: fixed;
     top: 50%;
-    right: 400px; /* Sidebar width */
     transform: translateY(-50%);
     z-index: 30;
     background: linear-gradient(135deg, rgba(0, 255, 136, 0.3), rgba(0, 255, 136, 0.2));
@@ -3938,7 +4211,6 @@
     top: 60px; /* Start below topbar */
     right: 0;
     bottom: 0;
-    width: 400px;
     /* Solid sidebar background - not floating glass */
     background: linear-gradient(
       135deg,
@@ -4769,6 +5041,70 @@
   .action-btn:hover {
     background: rgba(255, 175, 0, 0.4);
     color: #ffd700;
+  }
+
+  /* Route Preview Radio List */
+  .route-preview {
+    margin: 12px 0;
+    padding: 12px;
+    background: rgba(0, 20, 0, 0.3);
+    border: 1px solid rgba(0, 255, 136, 0.2);
+    border-radius: 6px;
+  }
+
+  .route-preview-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .route-radio-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    margin: 4px 0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 12px;
+  }
+
+  .route-radio-item:hover {
+    background: rgba(0, 122, 204, 0.2);
+    border-color: rgba(0, 122, 204, 0.5);
+  }
+
+  .route-radio-item input[type="radio"] {
+    cursor: pointer;
+  }
+
+  .route-radio-item:has(input:checked) {
+    background: rgba(0, 255, 136, 0.15);
+    border-color: rgba(0, 255, 136, 0.5);
+  }
+
+  .route-icon {
+    font-size: 14px;
+  }
+
+  .route-desc {
+    flex: 1;
+    color: rgba(255, 255, 255, 0.8);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+  }
+
+  .route-info {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: 'Courier New', monospace;
   }
 
   .route-modal {
