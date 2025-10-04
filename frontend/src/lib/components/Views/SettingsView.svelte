@@ -4,6 +4,7 @@
   import { tabOperations } from '../../stores/tabStore';
   import { THEME_DEFINITIONS } from '../../utils/themes';
   import type { ThemeName } from '../../types';
+  import { VERSION } from '../../generated/version';
 
   // J-machine status (derived from environment)
   $: jMachineStatus = (() => {
@@ -254,6 +255,27 @@
         />
       </div>
     </div>
+
+    <!-- Build Info Section -->
+    <div class="setting-group">
+      <h2>Build Info</h2>
+      <div class="build-info">
+        <div class="build-row">
+          <span class="build-label">Commit:</span>
+          <a href={VERSION.githubUrl} target="_blank" rel="noopener noreferrer" class="commit-link">
+            {VERSION.short} - {VERSION.message.split('\n')[0]}
+          </a>
+        </div>
+        <div class="build-row">
+          <span class="build-label">Built:</span>
+          <span class="build-value">{new Date(VERSION.buildTime).toLocaleString()}</span>
+        </div>
+        <div class="build-row">
+          <span class="build-label">Branch:</span>
+          <span class="build-value">{VERSION.branch}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -456,5 +478,45 @@
     outline: none;
     border-color: rgba(0, 122, 204, 0.7);
     box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
+  }
+
+  /* Build Info */
+  .build-info {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 16px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+  }
+
+  .build-row {
+    display: flex;
+    gap: 12px;
+    padding: 6px 0;
+    align-items: baseline;
+  }
+
+  .build-label {
+    color: rgba(255, 255, 255, 0.5);
+    min-width: 60px;
+  }
+
+  .build-value {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .commit-link {
+    color: #00d9ff;
+    text-decoration: none;
+    transition: color 0.2s;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .commit-link:hover {
+    color: #00ff88;
+    text-decoration: underline;
   }
 </style>

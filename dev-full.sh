@@ -4,6 +4,11 @@ echo "🚀 XLN Full Development Environment"
 echo "   This will reset networks, watch files, and serve the UI"
 echo ""
 
+# Inject git version info
+echo "📝 Injecting git version info..."
+bun run scripts/inject-version.ts
+echo ""
+
 # Function to cleanup on exit
 cleanup() {
     echo ""

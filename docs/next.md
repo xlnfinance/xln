@@ -14,7 +14,12 @@
 ### Network/VR Configuration
 - ✅ **Hardhat Network Access** - Configure `npx hardhat node --hostname 0.0.0.0` for Oculus/mobile access
 - ✅ **WebXR Detection** - Enhanced logging for Quest 3 debugging (requires HTTPS in production)
+- ✅ **ngrok Support** - Vite config `allowedHosts: ['all']` for tunnel access
 - ✅ **OCULUS-SETUP.md** - Complete guide for Quest 3 setup with troubleshooting
+
+### Developer Experience
+- ✅ **Build Info in Settings** - Shows commit hash, message, branch, build time with GitHub link
+- ✅ **Auto-Inject Version** - Runs on every `bun run dev` to keep version fresh
 
 ## ✅ Completed (2025-10-04) - UI Features
 

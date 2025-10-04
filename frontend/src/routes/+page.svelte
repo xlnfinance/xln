@@ -613,10 +613,11 @@
   .app.zen-mode :global(.admin-topbar),
   .app.zen-mode :global(.time-machine),
   .app.zen-mode :global(.topology-overlay),
-  .app.zen-mode :global(.panel-toggle-btn),
   .app.zen-mode :global(.error-display) {
     display: none !important;
   }
+
+  /* Button visibility controlled by hideButton prop, NOT zen-mode CSS */
 
   /* Home Page */
   .home-container {
@@ -732,4 +733,3 @@
     line-height: 1.5;
   }
 </style>
-  import InvariantTicker from '../lib/components/Home/InvariantTicker.svelte';
