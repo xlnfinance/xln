@@ -7,9 +7,14 @@
   - Fixed delta calculation inconsistency (`ondelta + offdelta` everywhere)
   - Fixed state verification to compare actual deltas not reconstructed values
   - Added error handling around batch.write() to prevent silent failures
-  - **Proper Rollback Logic** - Implemented Channel.ts deterministic rollback (LEFT always wins)
+  - **Proper Rollback Logic** - Implemented Channel.ts deterministic rollback (LEFT always wins, RIGHT rolls back)
   - Test: `bun run test-payment-fresh.ts` passes ✅
   - Test: `bun run test-simultaneous-proposals.ts` passes ✅
+
+### Network/VR Configuration
+- ✅ **Hardhat Network Access** - Configure `npx hardhat node --hostname 0.0.0.0` for Oculus/mobile access
+- ✅ **WebXR Detection** - Enhanced logging for Quest 3 debugging (requires HTTPS in production)
+- ✅ **OCULUS-SETUP.md** - Complete guide for Quest 3 setup with troubleshooting
 
 ## ✅ Completed (2025-10-04) - UI Features
 

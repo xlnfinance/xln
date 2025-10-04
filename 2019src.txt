@@ -1,0 +1,4085 @@
+File Tree:
+
+
+src
+├── internal_rpc
+├── ├── received_and_failed.js
+├── └── index.ts
+├── init_dashboard.ts
+├── xln.ts
+├── external_rpc
+├── ├── index.ts
+├── └── with_channel.js
+├── utils
+├── ├── derive.js
+├── ├── functions.js
+├── ├── ws.js
+├── └── monkey.js
+├── periodical
+├── ├── index.js
+├── ├── broadcast.js
+├── ├── sync_changes.js
+├── └── ensure_ack.js
+├── db
+├── └── offchain_db.js
+├── offchain
+├── ├── pay_channel.ts
+├── ├── flush_channel.ts
+├── ├── update_channel.ts
+├── ├── derive_entry.ts
+├── ├── rebalance_channels.ts
+├── └── build_channel.ts
+├── me.ts
+└── router
+└── └── index.js
+ 
+
+contracts
+
+ 
+
+--- internal_rpc/received_and_failed.js ---
+
+module.exports = async (ws) => {
+  // todo: return onchain ones too
+  let result = {}
+
+  let filters = [
+    {is_inward: true},
+    {is_inward: false, outcome_type: {[Op.ne]: 'outcomeSecret'}}
+  ]
+
+  // what we successfully received and must deposit in our app +
+  // what node failed to send so we must deposit it back to user's balance
+  result.receivedAndFailed = await Payment.findAll({
+    where: {
+      type: 'del',
+      status: 'ack',
+      processed: false,
+      [Op.or]: filters
+    }
+  })
+
+  // mark as processed
+  if (result.receivedAndFailed.length > 0) {
+    await Payment.update(
+      {processed: true},
+      {
+        where: {
+          type: 'del',
+          status: 'ack',
+          [Op.or]: filters
+        }
+      }
+    )
+  }
+
+  return result
+}
+
+
+--- internal_rpc/index.ts ---
+
+// Internal RPC serves requests made by the user's browser or by the merchant server app
+
+import *  as Router from '../router'
+import { utils, ethers } from 'ethers'
+
+module.exports = async function internal_rpc (ws, json) {
+  const result:any = {}
+
+  // auth_code prevents all kinds of CSRF and DNS rebinding
+  // strong coupling between the daemon and the browser client
+  if (json.auth_code != this.Config.auth_code && ws != 'admin') {
+    //if (!json.auth_code) {
+    //l('Not authorized')
+    ws[ws.end ? 'end' : 'send'](
+      JSON.stringify({alert: 'Invalid auth_code, restart node'})
+    )
+    return
+  }
+
+  if (ws.send && json.is_wallet && !this.browsers.includes(ws)) {
+    this.browsers.push(ws)
+    //setBrowser(ws)
+  }
+
+  if (!this.signer && !['load','login'].includes(json.method)){
+    return console.log("Authenticated method only")
+  }
+
+  // internal actions that require authorization
+
+  switch (json.method) {
+    case 'load':
+      // triggered by frontend to update
+
+      // public + private info
+      //this.react({})
+      //return
+
+      break
+    case 'login':
+      if (json.params.username.length == 66) {
+        this.Config.seed = json.params.username
+      } else {
+        this.Config.seed =
+          '0x' +
+          (
+            await require('../utils/derive')(
+              json.params.username,
+              json.params.password
+            )
+          ).toString('hex')
+      }
+      await this.start(this.Config.seed)
+      //this.react({})
+
+      break
+
+    case 'logout':
+      if (this.external_http_server) {
+        this.external_http_server.close()
+        this.external_wss.clients.forEach((c) => c.close())
+        // Object.keys(me.websockets).forEach( c=>me.websockets[c].end() )
+      }
+
+      this.Config = {}
+
+      this.fatal(1)
+
+      result.address = null
+      break
+
+    case 'payChannel':
+      await this.payChannel(json.params)
+      //this.react({})
+      break
+
+    case 'createOrder':{
+      this.send(this.coordinator, json.params)
+
+      break
+    }
+
+    case 'startDispute':{
+      const ch = this.Channels[json.params.partner]
+
+      this.sharedState.batch.disputeProof.push({
+        partner: ch.partner,
+        dispute_nonce: ch.dispute_nonce,
+        entries_hash: this.getCanonicalEntriesHash(ch),
+        entries: [], // empty for now
+        sig: ch.ackSig,
+      })
+      
+      result.confirm ='OK'
+
+      break
+    }
+
+    case 'openChannel':{
+      await this.flushChannel(json.params.address, true)
+
+      this.broadcastProfile()
+      break
+    }
+
+    case 'flushTransition':{
+      const ch = this.Channels[json.params.address]
+
+      ch.entries[json.params.assetId] = this.buildEntry(json.params.assetId)
+
+      await this.flushChannel(json.params.address)
+      //this.react({})
+
+      this.broadcastProfile()
+
+      break
+    }
+    
+
+    case 'setCreditLimit':{
+
+      
+
+      this.send(json.params.partner, json.params)
+      console.log("Set credit ", json.params)
+
+      this.Channels[json.params.partner].entries[json.params.assetId].credit_limit = json.params.credit_limit
+      
+      //this.react({})
+      this.broadcastProfile()
+
+      break
+    }
+
+    case 'requestCollateral':{
+
+      this.send(json.params.partner, json.params)
+      console.log("Request collateral ", json.params)
+      result.confirm ="Request sent, wait for rebalance"
+      break
+    }
+
+    case 'onchainFaucet':
+      json.params.pubkey = this.pubkey
+      json.params.method = 'onchainFaucet'
+
+      this.send(this.coordinator, json.params)
+
+      break
+
+    case 'reserveToChannel': {
+      this.sharedState.batch.reserveToChannel.push({
+        receiver: json.params.receiver ? json.params.receiver : this.signer.address,
+        partner: json.params.partner,
+        pairs: json.params.pairs, 
+      })
+      //this.react({})
+
+      break
+    }
+
+    case 'channelToReserve': {
+      const sig = await this.sendSync(json.params.partner, {method: 'getWithdrawalSig', pairs: json.params.pairs})
+
+      console.log("Got sig ", sig)
+
+      if (sig) {      
+        this.sharedState.batch.channelToReserve.push({
+          sig: sig,
+          partner: json.params.partner,
+          pairs: json.params.pairs,
+        })
+        //this.react({})
+      } else {
+        result.alert = "Partner is unresponsive"
+      }
+      
+      break
+    }
+
+    case 'cooperativeClose': {
+      const ch = this.Channels[json.params.partner]
+      const sig = await this.sendSync(json.params.partner, {method: 'cooperativeClose'})
+
+      if (!sig) {
+        result.alert= "Partner is unresponsive"
+      }
+
+      const signer = await this.hashAndVerify(this.getCooperativeProof(ch), sig)
+      if (signer != json.params.partner) {
+        result.alert= "Partner provided bad signature"
+      }
+    
+      this.sharedState.batch.cooperativeProof.push({
+        sig: sig,
+        partner: json.params.partner,
+        entries: this.getCanonicalEntries(ch),
+      })
+      
+      break
+    }
+  
+    case 'broadcastBatch': {
+
+      this.broadcastBatch()
+      return false
+      break
+    }
+
+    case 'getRoutes': {
+      //got direct channel
+      
+      if (this.Channels[json.params.address]) {
+        result.bestRoutes = [
+          [0, []]
+        ]
+        break
+      }
+
+      const profile = this.coordinator == this.signer.address ? this.Profiles[json.params.address] : await this.getProfile(json.params.address)
+
+      console.log("Received profile ", profile)
+
+      if (!profile) {
+        result.alert = "Invalid address "+json.params.address
+        break
+      }
+
+      //profile.hubs
+
+      const bestRoutes = [
+        [0, this.Channels[json.params.address] ? [] : [this.coordinator]]
+      ]
+
+
+      //await Router.bestRoutes(json.params.address, json.params)
+      //parsedAddress: await parseAddress(json.params.address),
+      result.bestRoutes = bestRoutes
+      result.hubsForAddress = profile.hubs
+      
+
+      break
+    }
+
+    case 'clearBatch':
+      this.sharedState.batch = this.getEmptyBatch()
+      result.confirm = 'Batch cleared'
+      break
+
+    case 'getinfo':
+      //this.react(require('./get_info')())
+      break
+
+    // to be called by merchant app on the same server
+    case 'receivedAndFailed':
+      //result = await require('./received_and_failed')(ws)
+      break
+
+    default:
+      this.react({alert: 'No method provided'})
+  }
+
+  // http or websocket?
+  if (ws.end) {
+    ws.end(JSON.stringify(result))
+  } else if (ws == 'admin') {
+    return result
+  } else {
+    //ws.send(JSON.stringify(result))
+    this.react(result)
+  }
+}
+
+
+--- init_dashboard.ts ---
+
+// serves default wallet and internal rpc on the same port
+const child_process = require('child_process')
+const querystring = require('querystring')
+const ws = require('ws')
+
+const opn = require('../lib/opn')
+module.exports = async (me) => {
+  const crashCallback = async (err) => {
+    if (me._crashedSafely) return false
+
+    console.log('crashCallback', err)
+    me._crashedSafely = true
+
+    me.fatal('Bye')
+  }
+
+  process.on('unhandledRejection', crashCallback)
+  process.on('uncaughtException', crashCallback)
+  process.on('exit', crashCallback)
+  process.on('beforeExit', () => {
+    console.log('before exit')
+  })
+
+  const finalhandler = require('finalhandler')
+  const serveStatic = require('serve-static')
+  const path = require('path')
+
+  let bundler
+
+  const cb = async function (req, res) {
+    // Clickjacking protection
+    res.setHeader('X-Frame-Options', 'DENY')
+
+    var [path, query] = req.url.split('?')
+    if (path == '/demoinstance') {
+      let startingPort = 8500
+      for (var i = startingPort; i < startingPort + 30; i++) {
+        if (!me.busyPorts[i]) {
+          var nextPort = i
+          me.busyPorts[nextPort] = new Date()
+          break
+        }
+      }
+
+      if (nextPort) {
+        console.log('Started demoinstance ' + nextPort)
+        console.log(
+          child_process
+            .execSync(
+              `pm2 delete f${nextPort} > /dev/null; 
+            rm -rf data${nextPort};
+            mkdir data${nextPort}; 
+            cp -r data/onchain data${nextPort}/onchain;
+            pm2 start --name f${nextPort} fair.js -- --wallet-dist --datadir=data${nextPort} -p${nextPort} -s > /dev/null;`
+            )
+            .toString()
+        )
+        //--wallet-dist --prod-server
+
+        await me.sleep(2500)
+
+        let instanceLog = child_process
+          .execSync(`cat data${nextPort}/config.json`)
+          .toString()
+
+          console.log('instance log', instanceLog)
+
+        if (!instanceLog) {
+          return
+        }
+
+        let auth_code = instanceLog.split('auth_code":"')[1].split('"')[0]
+        // we redirect the user to authenticated cloud instance
+        res.writeHead(302, {
+          Location: `http://fairlayer.com:${nextPort}/#auth_code=${auth_code}`,
+        })
+
+        /*
+        res.writeHead(302, {
+          Location: `http://demo-${
+            nextPort - startingPort
+          }.fairlayer.com/#auth_code=${auth_code}`,
+        })*/
+
+        setTimeout(() => {
+          console.log(`Destroying demo... ${nextPort}`)
+          //child_process.execSync(``)
+          // free up port
+          delete me.busyPorts[nextPort]
+        }, 300 * 60 * 1000)
+
+        res.end('redirect')
+      } else {
+        res.end(
+          'No available slot found for your cloud demo. Wait, or install locally.'
+        )
+      }
+    } else if (path == '/health') {
+      res.end(
+        JSON.stringify({
+          uptime: 3//new Date() - me.node_started_at,
+        })
+      )
+    } else if (path == '/rpc') {
+      res.setHeader('Content-Type', 'application/json')
+
+      var queryData = ''
+      req.on('data', function (data) {
+        queryData += data
+      })
+
+      req.on('end', function () {
+        // HTTP /rpc endpoint supports passing request in GET too
+        var json = Object.assign(querystring.parse(query), JSON.parse(queryData))
+
+        if (!json.params) json.params = {}
+        me.internal_rpc(res, json)
+      })
+    } else {
+      bundler(req, res, finalhandler(req, res))
+    }
+  }
+
+  if (me.argv['wallet-url']) {
+    const walletUrl = me.argv['wallet-url']
+    const http = require('http')
+    const proxy = require('http-proxy').createProxyServer({
+      target: walletUrl,
+    })
+    bundler = (req, res) => proxy.web(req, res, {}, finalhandler(req, res))
+    let retries = 0
+
+    while (true) {
+      const statusCode = await new Promise((resolve) => {
+        console.log('Reaching wallet ', walletUrl)
+        http
+          .get(walletUrl, (res) => {
+            const {statusCode} = res
+            resolve(statusCode)
+          })
+          .on('error', (e) => {
+            resolve(404)
+          })
+      })
+      if (statusCode !== 200) {
+        if (retries > 0) {
+          console.log(`Waiting for Parcel (HTTP ${statusCode})`)
+        }
+        if (retries > 5) {
+          throw new Error('No parcel on ' + walletUrl)
+        }
+        await me.sleep(1000 * Math.pow(1.5, retries))
+        retries++
+        continue
+      }
+      console.log('Parcel: OK')
+      break
+    }
+  } else if (me.argv['wallet-dist']) {
+    let dist = path.resolve(__dirname, '../dist')
+    console.log('Start parcel at dist ' + dist)
+    bundler = serveStatic(dist)
+  } else {
+    let Parcel = require('parcel-bundler')
+    let index = path.resolve(__dirname, '../wallet/index.html')
+    console.log('Start parcel at ' + index)
+    bundler = new Parcel(index, {
+      logLevel: 2,
+      // for more options https://parceljs.org/api.html
+    }).middleware()
+  }
+
+  // this serves dashboard HTML page
+  var server = require('http').createServer(cb)
+
+  server
+    .listen(me.on_server ? me.base_port : me.base_port)
+    .once('error', function (err) {
+      if (err.code === 'EADDRINUSE') {
+        console.log(
+          `Port ${
+            me.base_port
+          } is currently in use. Pass -p PORT to use another port.`
+        )
+        process.exit(0)
+      }
+    })
+
+  const url = `http://${
+    me.on_server ? 'fairlayer.com' : 'localhost'
+  }:${me.base_port}/#auth_code=${me.Config.auth_code}`
+  console.log(`Open ${url} in your browser`)
+
+  // --s for silent mode and no opn
+  if (!me.argv.s) {
+    opn(url)
+  }
+
+  me.internal_wss = new ws.Server({server: server, maxPayload: 64 * 1024 * 1024})
+
+  me.internal_wss.on('error', function (err) {
+    console.error(err)
+  })
+  me.internal_wss.on('connection', function (socket) {
+    socket.on('message', (msg) => {
+      me.internal_rpc(socket, JSON.parse(Buffer.from(msg).toString()))
+    })
+  })
+}
+
+
+--- xln.ts ---
+
+import { getAllJSDocTags } from "typescript"
+
+//import * as minimist from 'minimist'
+import minimist from 'minimist'
+
+import * as crypto from 'crypto'
+import * as fs from 'fs'
+import {Me} from './me' //= require('./me')
+
+
+
+
+
+
+
+async function main() {
+
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const me:any = new Me()
+
+  /*
+  const _originalConsoleLog = console.log;
+  console.log = function() {
+     // Invoke the original method with an additional parameter
+    _originalConsoleLog.apply(console, 
+                [(new Date().toString())].concat([].slice.call(arguments))
+              );
+
+
+    try {
+      const data = JSON.stringify({consoleLog: arguments})
+      me.browsers.map((ws) => {
+        if (ws.readyState == 1) {
+          ws.send(data)
+        }
+      })
+    } catch (e) {
+      //console.log(e)
+    }
+  }; 
+  */
+  
+  
+  //me.web3 = new Web3('http://127.0.0.1:8545')
+  //console.log(me.web3.givenProvider)
+
+  me.argv = minimist(process.argv.slice(2), {
+    string: ['username', 'password'],
+  })
+
+  me.base_port = me.argv.p ? parseInt(me.argv.p) : 8001
+  me.datadir = me.base_port == 8001 ? 'data' : 'data' + me.base_port
+  
+  me.on_server = !!me.argv['prod-server']
+  process.title = 'XLN ' + me.base_port
+
+
+
+
+
+  if (!fs.existsSync('./' + me.datadir)) {
+    console.log('Creating ' + me.datadir)
+    fs.mkdirSync('./' + me.datadir,'0777')
+  }
+
+  const file = './' + me.datadir + '/config.json'
+  console.log('Loading ' + file)
+
+  if (fs.existsSync(file)) {
+    console.log("Reading config")
+    me.Config = JSON.parse(fs.readFileSync(file).toString())
+  } else {
+    me.Config = {
+      auth_code: crypto.randomBytes(32).toString('hex'),
+      pendingBatchHex: null,
+    }
+    //fs.mkdirSync('./' + me.datadir+'/sdf')
+
+    console.log("Writing config")
+    fs.writeFileSync(file, JSON.stringify(me.Config))
+  }
+
+  console.log(me.Config)
+ 
+  if (me.argv.password) {
+    me.Config.seed = '0x'+(await require('./utils/derive')(me.argv.username, me.argv.password)).toString('hex')
+    console.log("Creating seed: ", me.Config.seed)
+  }
+  if (me.Config.seed) {
+    await me.start(me.Config.seed)
+  }
+
+  require('./init_dashboard')(me)
+
+  const repl = require('repl').start('')
+  repl.context.me = me
+  //repl.context.this = this
+}
+
+main().catch((e) => {
+  console.error(e)
+  process.exit(1)
+})
+
+--- external_rpc/index.ts ---
+
+// External RPC processes requests coming from outside world.
+
+//import * as WebSocketClient from '../utils/ws'
+const WebSocketClient = require('../utils/ws')
+
+import { utils, ethers } from 'ethers'
+
+module.exports = async function external_rpc(ws, msg) {
+  // uws gives ArrayBuffer, we create a view
+
+  // TODO: all messages must be signed
+
+  //if (data instanceof ArrayBuffer) {
+  //Buffer.from(arrayBuffer: This creates a view of the ArrayBuffer without copying the underlying memory
+  //Buffer.from(buffer): Copies the passed buffer data onto a new Buffer instance
+  const msgString:string = Buffer.from(Buffer.from(msg)).toString()
+
+  try {
+    const json = JSON.parse(msgString)
+
+    console.log("Received", json)
+
+    const addr = json.addr
+    if (json.method == 'auth') {
+      // todo: one socket per address or an array?
+      if (ws.instance) {
+        // is it already wrapped ws
+        this.websockets[json.addr] = ws
+      } else {
+        this.websockets[json.addr] = new WebSocketClient()
+        console.log("Assigning instance ws: ", ws)
+        this.websockets[json.addr].instance = ws
+      }
+      console.log("Authed ws ", this.websockets[json.addr])
+    } else if (json.method == 'callback') {
+      const key = addr+'_'+json.callback
+      const fn = this.websocketCallbacks[key]
+      console.log('callbacking', key, fn)
+      if (fn) {
+        delete this.websocketCallbacks[key]
+        fn(json.data)  
+      }
+    } else if (json.method == 'broadcastProfile') {
+      this.Profiles[json.addr] = json.data
+
+      console.log("Current profiles ", this.Profiles)
+    } else if (json.method == 'cooperativeClose') {
+
+      const ch = this.Channels[json.addr]
+      if (!ch) {
+        return console.log("no channel")
+      }
+
+      const proof = this.getCooperativeProof(ch)
+      console.log('coop proof', proof)
+      const sig = await this.hashAndSign(proof)
+
+      this.send(json.addr, {method: 'callback', callback: json.callback, data: sig})
+    } else if (json.method == 'createOrder') {
+
+      this.Orderbook.push(json.order)
+
+
+
+      Object.keys(this.websockets).forEach(addr=>{
+        this.send(addr, {
+          orderbook: this.Orderbook
+        })
+      })
+
+      
+
+
+
+    } else if (json.method == 'getWithdrawalSig') {
+
+      const ch = this.Channels[json.addr]
+      if (!ch) {
+        return console.log("no channel")
+      }
+
+      const delayed = []
+
+      // ensure pairs are valid
+      for (const [assetId, amountToWithdraw] of json.pairs) {
+
+        if (!ch.entries[assetId]) {
+          return console.log("Bad withdrawal request")
+        }
+
+        const derived = this.deriveEntry(ch, assetId)
+
+        if (amountToWithdraw <= derived.inbound_capacity && amountToWithdraw <= derived.they_secured) {
+          // only executed if everything is correct
+          delayed.push(()=>{
+            ch.entries[assetId].they_pending_withdraw = amountToWithdraw
+          })
+
+        } else {
+          return console.log("Not enough funds")
+        }
+      }
+
+      delayed.map(f=>f())
+
+      const sig = await this.hashAndSign(this.getWithdrawalProof(ch, json.pairs))
+
+      this.send(json.addr, {method: 'callback', callback: json.callback, data: sig})
+    } else if (json.method == 'getProfiles') {
+      const profiles = json.addresses.map(a=>this.Profiles[a])
+
+      this.send(json.addr, {method: 'callback', callback: json.callback, data: profiles})
+    } else if (json.method == 'updateChannel') {
+      
+      
+      
+      await this.section(json.addr, async () => {
+
+        await this.updateChannel(json.addr, json)
+
+
+      })
+
+
+    } else if (json.method == 'setCreditLimit') {
+      this.Channels[addr].entries[json.assetId].they_credit_limit = json.credit_limit
+
+    } else if (json.method == 'requestCollateral') {
+      const ch = this.Channels[addr]
+      const entry = ch.entries[json.assetId]
+      if (json.collateral > entry.collateral) {
+        console.log("Before/after", entry.collateral, json.collateral)
+        const diff = json.collateral - entry.collateral
+        const derived = this.deriveEntry(ch, json.assetId)
+        if (diff <= derived.they_unsecured) {
+          entry.they_requested_deposit = diff
+        } else {
+          console.log("They request too much")
+        }
+      } else if (json.collateral < entry.collateral) {
+        console.log("They requested withdrawal")
+      }
+
+    } else if (json.method == 'textMessage') {
+      this.react({confirm: json.msg})
+    }
+    
+    return
+  } catch (e) {
+    console.log('External RPC error', e)
+  }
+}
+
+
+--- external_rpc/with_channel.js ---
+
+module.exports = async (pubkey, json) => {
+  //todo: ensure no conflicts happen if two parties withdraw from each other at the same time
+
+  await section(['use', pubkey], async () => {
+    let ch = await me.getChannel(pubkey)
+
+    if (json.method == 'setLimits') {
+      let subch = ch.d.subchannels.by('asset', json.asset)
+
+      subch.they_credit = json.credit
+      subch.they_acceptable_rebalance = json.acceptable_rebalance
+      await subch.save()
+
+      me.textMessage(ch.d.they_pubkey, 'Updated credit limits')
+    } else if (json.method == 'requestInsurance') {
+      let subch = ch.d.subchannels.by('asset', json.asset)
+      subch.they_requested_insurance = true
+      await subch.save()
+
+      me.textMessage(ch.d.they_pubkey, 'Added to rebalance queue')
+    } else if (json.method == 'giveWithdrawal') {
+      let asset = parseInt(json.asset)
+      let amount = parseInt(json.amount)
+      let withdrawal_sig = fromHex(json.withdrawal_sig)
+
+      /*
+      if (!ch.ins) {
+        me.textMessage(
+          ch.d.they_pubkey,
+          'You must be registered'
+        )
+        return
+      }
+      */
+
+      let subch = ch.d.subchannels.by('asset', asset)
+
+      let they = await User.findOne({
+        where: {pubkey: ch.d.they_pubkey},
+        include: [Balance],
+      })
+      if (!they || !me.record) return l('no pair ', they, me.record)
+
+      let pair = [they.id, me.record.id]
+      if (ch.d.isLeft()) pair.reverse()
+
+      let withdrawal = [
+        methodMap('withdraw'),
+        pair[0],
+        pair[1],
+        ch.ins ? ch.ins.withdrawal_nonce : 0,
+        amount,
+        asset,
+      ]
+
+      if (!ec.verify(r(withdrawal), withdrawal_sig, pubkey)) {
+        l('Invalid withdrawal given', withdrawal, json)
+        return false
+      }
+
+      l('Got withdrawal for ' + amount)
+      subch.withdrawal_amount = amount
+      subch.withdrawal_sig = withdrawal_sig
+      await subch.save()
+
+      if (me.withdrawalRequests[subch.id]) {
+        // returning ch back to requesting function
+        me.withdrawalRequests[subch.id](ch)
+      }
+    } else if (json.method == 'requestWithdrawal') {
+      if (me.CHEAT_dontwithdraw) {
+        // if we dont give withdrawal or are offline for too long, the partner starts dispute
+        return l('CHEAT_dontwithdraw')
+      }
+
+      if (ch.d.status != 'main') {
+        return l('only return withdrawal to main status, now ' + ch.d.status)
+      }
+
+      if (!ch.ins) {
+        me.textMessage(ch.d.they_pubkey, 'You must be registered')
+        return
+      }
+
+      let subch = ch.d.subchannels.by('asset', json.asset)
+      let amount = parseInt(json.amount)
+      let asset = parseInt(json.asset)
+      // TODO: don't forget hold
+
+      // if we're bank, we let to withdraw from our onchain as well
+      if (me.my_bank) {
+        var available = ch.derived[asset].they_available
+      } else {
+        // otherwise we let bank to withdraw only from their insured side
+
+        // if we'd let banks to withdraw they_available,
+        // their compromise would lead to a disaster of failed credit
+        var available =
+          ch.derived[asset].they_insured - ch.derived[asset].inwards_hold
+      }
+
+      if (amount > available) {
+        me.textMessage(
+          ch.d.they_pubkey,
+          `Sorry, you can only withdraw up to ${available}`
+        )
+
+        return false
+      }
+
+      // technically withdrawable: our onchain + insurance size
+      let withdrawable =
+        ch.derived[asset].they_insured + userAsset(me.record, asset)
+      if (amount == 0 || amount > withdrawable) {
+        me.textMessage(
+          ch.d.they_pubkey,
+          `Sorry, you can only withdraw up to ${withdrawable}`
+        )
+        return false
+      }
+
+      if (amount > subch.they_withdrawal_amount) {
+        // only keep the highest amount we signed on
+        subch.they_withdrawal_amount = amount
+      }
+
+      let weSigned = [
+        methodMap('withdraw'),
+        ch.ins.leftId,
+        ch.ins.rightId,
+        ch.ins.withdrawal_nonce,
+        amount,
+        asset,
+      ]
+
+      await subch.save()
+
+      me.send(pubkey, {
+        method: 'giveWithdrawal',
+        withdrawal_sig: ec(r(weSigned), me.id.secretKey),
+        amount: amount,
+        asset: asset,
+        weSigned,
+      })
+    } else if (json.method == 'testnet') {
+      if (json.action == 'faucet') {
+
+        let pay = {
+          address: json.address,
+          amount: json.amount,
+          private_invoice: 'hi',
+          asset: json.asset,
+        }
+
+        await me.payChannel(pay)
+      }
+    }
+  })
+
+
+  
+    
+
+}
+
+
+--- utils/derive.js ---
+
+// derives private key from username and password using memory hard alg
+
+module.exports = async (username, password) => {
+  return new Promise((resolve, reject) => {
+    require('../../lib/scrypt')(
+      password,
+      username,
+      {
+        N: Math.pow(2, 12),
+        r: 8,
+        p: 1,
+        dkLen: 32,
+        encoding: 'binary'
+      },
+      (r) => {
+        r = Buffer.from(r)
+        resolve(r)
+      }
+    )
+
+    /* Native scrypt. TESTNET: we use pure JS scrypt
+    var seed = await scrypt.hash(pw, {
+      N: Math.pow(2, 16),
+      interruptStep: 1000,
+      p: 2,
+      r: 8,
+      dkLen: 32,
+      encoding: 'binary'
+    }, 32, username)
+
+    return seed; */
+  })
+}
+
+
+--- utils/functions.js ---
+
+const fs = require('fs')
+const path = require('path')
+
+const generateMonkeys = async () => {
+  const derive = require('./derive')
+  const addr = []
+
+  for (let i = 8001; i < 8060; i++) {
+    const username = i.toString()
+    const seed = await derive(username, 'password')
+    const me = new Me()
+    await me.start(seed)
+    // all monkeys use first bank by default
+
+    addr.push(me.getAddress())
+  }
+  // save new-line separated monkey addresses
+  await fs.writeFileSync('./tools/monkeys.txt', addr.join('\n'))
+}
+
+const loadMonkeys = (monkey_port) => {
+  const monkeys = fs
+    .readFileSync('./tools/monkeys.txt')
+    .toString()
+    .split('\n')
+    .slice(3, parseInt(monkey_port) - 8000)
+
+  l('Loaded monkeys: ' + monkeys.length)
+
+  return monkeys
+}
+module.exports = {
+  generateMonkeys: generateMonkeys,
+  loadMonkeys: loadMonkeys,
+}
+
+
+--- utils/ws.js ---
+
+// home baked ws client that auto reconnects
+
+var normalws = require('ws')
+
+function WebSocketClient() {
+  this.number = 0 // Message number
+  this.autoReconnectInterval = 10 * 1000 // ms
+}
+WebSocketClient.prototype.open = function(url) {
+  this.url = url
+  console.log("Creating ws: ", this.url)
+  this.instance = new normalws(this.url)
+
+  this.instance._req.on('socket', function(socket) {
+    socket.on('secureConnect', function() {
+      // TODO: cert pinning to prevent rogue CA
+      // C5:DA:46:F0:99:75:03:D5:D9:0C:30:56:91:58:85:09:16:0B:7A:73
+      // if (socket.getPeerCertificate().fingerprint !== validFingerprint) ws.close();
+    })
+  })
+
+  this.instance.on('open', () => {
+    this.onopen()
+  })
+  this.instance.on('message', (data, flags) => {
+    this.number++
+    this.onmessage(data, flags, this.number)
+  })
+  this.instance.on('close', (e) => {
+    switch (e) {
+      case 1000: // CLOSE_NORMAL
+        console.log('WebSocket: closed')
+        break
+      default:
+        // Abnormal closure
+        this.reconnect(e)
+        break
+    }
+    this.onclose(e)
+  })
+  this.instance.on('error', (e) => {
+    switch (e.code) {
+      case 'ECONNREFUSED':
+        this.reconnect(e)
+        break
+      default:
+        this.onerror(e)
+        break
+    }
+  })
+}
+WebSocketClient.prototype.send = function(data) {
+  if (this.instance && this.instance.readyState != 1) {
+    //console.log("Socket is not ready")
+    return false
+  }
+  //setTimeout(() => {
+    try {
+      //var port = this.url.split(':')[2]
+      //l('I SEND ' + data.length + ' TO ' + port)
+      console.log("our instance", this)
+      this.instance.send(data)
+      return true
+    } catch (e) {
+      console.log('Failed to send ws:', e)
+      return false
+      //this.instance.emit('error', e)
+    }
+  //}, 1)
+}
+WebSocketClient.prototype.reconnect = function(e) {
+  // console.log(`WebSocketClient: retry in ${this.autoReconnectInterval}ms`);
+  this.instance.removeAllListeners()
+  var that = this
+  setTimeout(function() {
+    that.open(that.url)
+  }, this.autoReconnectInterval)
+}
+WebSocketClient.prototype.onopen = function(e) {
+  console.log('WebSocketClient: open', arguments)
+}
+WebSocketClient.prototype.onmessage = function(data, flags, number) {
+  // console.log("WebSocketClient: message",arguments);
+}
+WebSocketClient.prototype.onerror = function(e) {
+  console.log('WS error  ', e)
+}
+WebSocketClient.prototype.onclose = function(e) {
+  // console.log('WebSocketClient: closed', arguments)
+}
+
+module.exports = WebSocketClient
+
+
+--- utils/monkey.js ---
+
+// runs e2e tests on itself,
+// different nodes acting like "monkeys" and doing different overlapping scenarios
+
+const payMonkey = async (on_server, counter = 1) => {
+  var parsedAddress = false
+  while (!parsedAddress) {
+    parsedAddress = await parseAddress(monkeys.randomElement())
+    if (me.is_me(parsedAddress.pubkey)) parsedAddress = false
+  }
+
+  // offchain payment
+
+  await me.payChannel({
+    address: parsedAddress.address,
+    amount: 50000 + Math.round(Math.random() * 50000),
+    asset: 1,
+  })
+
+  const reg = await getUserByIdOrKey(parsedAddress.pubkey)
+
+  // onchain payment (batched, not sent to validator yet)
+  /*
+  me.batchAdd('deposit', [
+    1,
+    [
+      Math.round(Math.random() * 1000),
+      reg.id ? reg.id : parsedAddress.pubkey,
+      0,
+    ],
+  ])
+  */
+
+  // run on server infinitely and with longer delays
+  // but for local tests limit requests and run faster
+  if (on_server) {
+    // replenish with testnet faucet once in a while
+    /*setTimeout(() => {
+      payMonkey(on_server, counter + 1)
+    }, Math.round(1000 + Math.random() * 5000))
+    */
+  } else if (counter < 6) {
+    setTimeout(() => {
+      payMonkey(on_server, counter + 1)
+    }, 1000)
+  }
+}
+
+let run = async () => {
+  if (base_port > 8000) {
+    // add first bank by default and open limit
+    //Config.usedBanks.push(1)
+
+    setTimeout(() => {}, 4000)
+  }
+
+  // only in monkey mode, not on end user node
+
+  if (base_port != 8008) {
+    Periodical.schedule('broadcast', Config.blocktime)
+  }
+
+  if (base_port > 8000 && base_port < 8500) {
+    monkeys.splice(monkeys.indexOf(me.getAddress()), 1) // *except our addr
+
+    setTimeout(async () => {
+      // ensure 1st bank node is up already
+      await sleep(2000)
+
+      await require('../internal_rpc/with_channel')({
+        method: 'setLimits',
+        they_pubkey: Config.banks[0].pubkey,
+        asset: 1,
+        acceptable_rebalance: Config.acceptable_rebalance,
+        credit: Config.credit,
+      })
+
+      await sleep(3000)
+
+      me.send(Config.banks[0].pubkey, {
+        method: 'testnet',
+        action: 'faucet',
+        asset: 1,
+        amount: 500000,
+        address: me.getAddress(),
+      })
+
+      l('Requesting faucet to ' + me.getAddress())
+
+      if (me.record && me.record.id == 2) {
+        // withdraw 12.34 from bank and deposit 9.12 to 3 @ 1
+        let ch = await me.getChannel(Config.banks[0].pubkey)
+
+        let withdrawn = await require('../internal_rpc/with_channel')({
+          method: 'withdraw',
+          they_pubkey: toHex(ch.d.they_pubkey),
+          asset: 1,
+          amount: 1234,
+        })
+
+        require('../internal_rpc/external_deposit')({
+          asset: 1,
+          userId: 3,
+          bank: 1,
+          amount: 1234,
+        })
+      }
+    }, Config.blocktime)
+
+    setTimeout(() => {
+      payMonkey(on_server)
+
+      // intended to fail
+
+      me.payChannel({
+        address:
+          'BummA99ygBEKX5pwxQdjgwLuBWUe1J3y83PgG4UUPRVeBLcq9z1MvbGwCVywazybHj3cazHohFMkhxhako7xmRU4t7cZSSSC#FAIL',
+        amount: 100,
+        asset: 1,
+      }).then(console.log)
+    }, 20000)
+  }
+
+  // below go pre-registred users
+  if (!me.record || me.record.id > 10) {
+    return
+  }
+
+  if (me.record.id == 1) {
+    l('Scheduling e2e checks')
+    // after a while the bank checks environment, db counts etc and test fails if anything is unexpected
+    setTimeout(async () => {
+      // no need to run test on server
+      if (on_server) return
+
+      await Periodical.syncChanges()
+
+      let monkey5 = await getUserByIdOrKey(5)
+      let monkey5ins = await getInsuranceSumForUser(5)
+
+      // must be >100 after expected rebalance
+
+      let failed = []
+
+      if (me.metrics.settle.total == 0) failed.push('metrics.settled')
+      if (me.metrics.fail.total == 0) failed.push('metrics.failed')
+      if ((await Payment.count()) == 0) failed.push('payments')
+
+      // was this entirely new user created since genesis?
+      if (!monkey5) failed.push('monkey5')
+
+      
+      let e2e = 'e2e: ' + (failed.length == 0 ? 'success' : failed.join(', '))
+      l(e2e)
+
+      Raven.captureMessage(e2e, {
+        level: 'info',
+      })
+
+      child_process.exec(`osascript -e 'display notification "${e2e}"'`)
+
+      if (failed.length != 0) {
+        //this.fatal(0)
+      }
+
+      //
+    }, 80000)
+
+    // adding onchain balances to monkeys
+    for (var dest of monkeys) {
+      let [pubkey, box_pubkey] = r(base58.decode(dest))
+      if (pubkey.length < 6) pubkey = readInt(pubkey)
+      me.batchAdd('deposit', [1, [1000000, pubkey, 0]])
+    }
+  }
+
+  if (me.record.id == 4) {
+    // trigger the dispute from bank
+
+    //me.CHEAT_dontack = true
+    //me.CHEAT_dontwithdraw = true
+
+    setTimeout(() => {
+      me.payChannel({
+        amount: 20000,
+        address: monkeys[0],
+        asset: 1,
+      })
+    }, 12000)
+  }
+}
+
+if (argv.monkey) {
+  run()
+}
+
+
+--- periodical/index.js ---
+
+const Periodical = {
+  syncChanges: require('./sync_changes'),
+
+  rebalance: require('./rebalance'),
+  ensureAck: require('./ensure_ack'),
+  broadcast: require('./broadcast'),
+  forceReact: () => {
+    react({})
+  },
+
+  leakData: async function () {
+    if (me.leak_channels_ws.length > 0) {
+      let result = {
+        channels: [],
+        users: cached_result.users,
+      }
+
+      let chans = await Channel.findAll()
+      for (let d of chans) {
+        let ch = await me.getChannel(d.they_pubkey)
+
+        result.channels.push({
+          insurance: ch.derived[1].insurance,
+          delta: ch.derived[1].delta,
+          credit: ch.derived[1].credit,
+          they_credit: ch.derived[1].they_credit,
+
+          is_left: ch.derived[1].is_left,
+          name: ch.d.they_pubkey,
+
+          status: ch.d.status,
+          nonce: ch.d.dispute_nonce,
+        })
+      }
+
+      //only first asset
+      me.leak_channels_ws.map((ws) => {
+        if (ws.readyState == 1) {
+          ws.send(JSON.stringify(result))
+        }
+      })
+    }
+  },
+
+  timeouts: {},
+}
+
+Periodical.schedule = function schedule(task, timeout) {
+  if (Periodical.timeouts[task]) {
+    // clear if there's existing timeout and re-schedule
+    clearTimeout(Periodical.timeouts[task])
+    delete Periodical.timeouts[task]
+  }
+
+  if (timeout == 0) return
+
+  var wrap = async function () {
+    //l('Start ', task)
+    await Periodical[task]()
+    Periodical.timeouts[task] = setTimeout(wrap, timeout)
+  }
+
+  wrap()
+}
+
+Periodical.startBank = () => {
+  me.startExternalRPC(me.my_bank.location)
+
+  Periodical.schedule('rebalance', Config.blocktime * 2)
+}
+
+module.exports = Periodical
+
+
+--- periodical/broadcast.js ---
+
+// signs and broadcasts
+module.exports = async function (opts) {
+  section('broadcast', async () => {
+    if (Config.pendingBatchHex) {
+      console.log('Have pendingBatchHex, only 1 tx is supported')
+
+      return
+    }
+    // TODO: make batch persistent on disk
+
+    let estimated = await me.batch_estimate(opts)
+
+    if (!estimated) return
+
+    if (trace) l('Broadcasting now with batch_nonce ', estimated.batch_nonce)
+    // saving locally to ensure it is added, and rebroadcast if needed
+    Config.pendingBatchHex = toHex(estimated.signed_batch)
+
+    rebroadcast(estimated.signed_batch)
+    me.pendingBatch = me.batch
+    me.batch = []
+  })
+}
+
+
+--- periodical/sync_changes.js ---
+
+// cache layer stores most commonly edited records:
+// channels, payments, users and insurances
+// also Config.json is stored
+module.exports = async (opts = {}) => {
+  me.metrics.syncChanges.current++
+
+  if (new Date() - me.last_sync_changes < 10000) {
+    return
+  }
+  me.last_sync_changes = new Date()
+
+  return await section('syncChanges', async () => {
+    var all = []
+
+    if (K) {
+      let K_dump = stringify(K)
+
+      // rewrite only if changed
+      if (K_dump != cache.last_K_dump) {
+        fs.writeFileSync(
+          require('path').resolve(
+            __dirname,
+            '../../' + datadir + '/onchain/k.json'
+          ),
+          K_dump,
+          function (err) {
+            if (err) return console.log(err)
+          }
+        )
+        cache.last_K_dump = K_dump
+      }
+    }
+
+    // saving all deltas and corresponding payment objects to db
+    // it only saves changed() records, so call save() on everything
+
+    /*
+
+    for (var key in cache.users) {
+      var u = cache.users[key]
+
+      if (u.id && u.changed()) {
+        all.push(u.save())
+      }
+    }
+
+    if (opts.flush == 'users') cache.users = {}
+
+    for (var key in cache.ins) {
+      var u = cache.ins[key]
+
+      if (u.id && u.changed()) {
+        all.push(u.save())
+      }
+    }
+
+    for (let key in cache.ch) {
+      //await section(['get', cache.ch[key].d.they_pubkey], async () => {
+      await section(['use', cache.ch[key].d.they_pubkey], async () => {
+        let ch = cache.ch[key]
+
+        // sync all Channel, Subchannel, Payments
+
+        //return false
+        let promises = []
+
+        //if (ch.d.changed()) {
+        promises.push(ch.d.save())
+        //}
+
+        //l('Saving subch: ', ch.d.subchannels.length)
+        for (let subch of ch.d.subchannels) {
+          //if (ch.d.subchannels[i].changed()) {
+          //subch.channelId = ch.d.id
+
+          //l('Saving subch... ', subch)
+          promises.push(subch.save())
+          //}
+        }
+        // Ensure: payments must be garbage collected!
+        //let left_payments = []
+        for (let i = 0; i < ch.payments.length; i++) {
+          let t = ch.payments[i]
+          //t.channelId = ch.d.id
+          //await t.save()
+
+          //if (t.changed()) {
+          promises.push(t.save())
+          l(`Saving ${t.type + t.status} ${trim(t.hash)}`)
+          //}
+
+          // delacked payments are of no interest anymore
+          if (t.type + t.status != 'delack') {
+            //left_payments.push(t)
+            //delete ch.payments[i]
+            //ch.payments.splice(i, 1)
+            //i -= 1
+          }
+        }
+        //ch.payments = left_payments
+
+        let evict = ch.last_used < new Date() - 2000
+        //Config.cache_timeout
+
+        await Promise.all(promises)
+
+        // the channel is only evicted after it is properly saved in db
+        // Our job is to ensure after eviction channel in db has same structure
+        if (evict) {
+          delete cache.ch[key]
+          //promise = promise.then(() => {
+          l('Evict idle ch: ' + trim(ch.d.they_pubkey))
+          //})
+        }
+
+        //all.push(promise)
+      })
+      //})
+    }
+    */
+
+    //if (all.length > 0) {
+    //l(`syncChanges done: ${all.length}`)
+    //}
+
+    return await Promise.all(all)
+  })
+}
+
+
+--- periodical/ensure_ack.js ---
+
+// This method ensures all settled hashlocks were ack on time. If we don't get ack on time,
+// the hashlock may expire and we lose the money,
+// that's why we must go to blockchain asap to reveal the secret to hashlock
+module.exports = async () => {
+  //l('Checking who has not ack')
+  if (Config.pendingBatchHex) return l('Pending batch')
+
+  var deltas = await Channel.findAll()
+
+  for (let d of deltas) {
+    await section(['use', d.they_pubkey], async () => {
+      let ch = await me.getChannel(d.they_pubkey)
+      if (!ch) {
+        return
+      }
+
+      let missed_ack = ch.d.ack_requested_at ? new Date() - ch.d.ack_requested_at : 0
+
+      if (
+        // already disputed
+        ch.d.status == 'disputed' ||
+        // they still have some time
+        missed_ack < Config.dispute_if_no_ack
+      ) {
+        return
+      }
+
+      var to_reveal = []
+
+      // TODO: Consider not disputing with people when no funds are at risk i.e. only dispute about unacked settles.
+      refresh(ch)
+
+      // not getting an ack on time is bad, but the worst is losing settled hashlock
+      for (var inward of ch.payments) {
+        // we have secret for inward payment but it's not acked
+        if (
+          inward.is_inward &&
+          inward.outcome_type == 'secret' &&
+          inward.status != 'ack'
+        ) {
+          // ensure they will still be revealed when resolve() happens. Extend lifetime if needed
+          var unlocked = await Hashlock.findOne({where: {hash: inward.hash}})
+          if (
+            !unlocked ||
+            unlocked.delete_at <
+              Config.usable_blocks +
+                Config.dispute_delay_for_users +
+                Config.hashlock_exp // when we expect resolution of our dispute
+          ) {
+            to_reveal.push(inward.outcome)
+          } else {
+            l('Already unlocked in ', ch.d)
+          }
+        }
+      }
+
+      if (to_reveal.length > 0) {
+        l(
+          `No ack dispute with ${trim(ch.d.they_pubkey)} secrets ${
+            to_reveal.length
+          } missed ${missed_ack} with ${ch.d.ack_requested_at}`
+        )
+
+        me.batchAdd('revealSecrets', to_reveal)
+        me.batchAdd('dispute', await startDispute(ch))
+      }
+    })
+  }
+}
+
+
+--- db/offchain_db.js ---
+
+// Offchain database - local and private stuff
+
+/*
+Helpful stats:
+show status like '%used_connections%';
+show variables like 'max_connections';
+show variables like 'open_files_limit';
+ulimit -n 10000
+
+Set new mysql pw:
+use mysql;
+update user set authentication_string=password(''), plugin='mysql_native_password' where user='root';
+ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '123123';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '123123';
+SELECT plugin FROM mysql.user WHERE User = 'root';
+
+Create databases before usage in simulation:
+
+str = 'create database data;'
+for(i=8001;i<8200;i++){
+  str+='create database data'+i+';'
+}
+*/
+
+const Sequelize = require('sequelize')
+
+/*
+  // each separate offdelta per asset
+  const Subchannel = sequelize.define(
+    'subchannel',
+    {
+      asset: {
+        type: Sequelize.INTEGER,
+        defaultValue: 1,
+      },
+
+      offdelta: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      },
+
+      rollback_offdelta: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      },
+
+      // by default all limits set to 0
+      acceptable_rebalance: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      },
+      credit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      }, // we trust up to
+
+      they_acceptable_rebalance: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      },
+      they_credit: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      }, // they trust us
+
+      requested_insurance: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: false,
+      },
+
+      they_requested_insurance: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: false,
+      },
+
+      withdrawal_amount: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      },
+
+      withdrawal_sig: Sequelize.BLOB, // we store a withdrawal sig to use in next rebalance
+
+      they_withdrawal_amount: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      },
+    },
+    {
+      indexes: [
+        {
+          fields: [
+            {
+              attribute: 'asset',
+            },
+          ],
+        },
+      ],
+    }
+  )
+
+
+  const Payment = sequelize.define(
+    'payment',
+    {
+      id: {
+        type: Sequelize.INTEGER,
+        autoIncrement: true,
+        primaryKey: true,
+      },
+
+      //todo: move to single field addnew, addsent ...
+      type: Sequelize.STRING, //ENUM('add', 'del', 'addrisk', 'delrisk', 'onchain'),
+      status: Sequelize.STRING, //ENUM('new', 'sent', 'ack'),
+      is_inward: Sequelize.BOOLEAN,
+
+      processed: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: false,
+      }, // did merchant app process this deposit already
+
+      // in outward it is inward amount - fee
+      amount: Sequelize.INTEGER,
+      // hash is same for inward and outward
+      hash: Sequelize.BLOB,
+      // best by block
+      exp: Sequelize.INTEGER,
+      // asset type
+      asset: {
+        type: Sequelize.INTEGER,
+        defaultValue: 0,
+      },
+
+      // secret or fail reason
+      outcome_type: Sequelize.STRING,
+      // payload of outcome
+      outcome: Sequelize.STRING,
+
+      // string to be decrypted by outward
+      unlocker: Sequelize.BLOB,
+
+      // user-specified or randomly generated private message
+      private_invoice: Sequelize.BLOB,
+
+      // stored on our node only. can help to identify the reason for payment
+      // eg when a withdrawal has failed we credit funds back
+      personal_tag: Sequelize.BLOB,
+
+      // who is recipient
+      destination_address: Sequelize.TEXT,
+
+      // sender may decide to provide refund address inside the private message
+      source_address: Sequelize.TEXT,
+
+      // who caused us to make this payment (if we're bank)?
+      inward_pubkey: Sequelize.BLOB,
+
+      // resulting balance
+      resulting_balance: Sequelize.INTEGER,
+    },
+    {
+      indexes: [
+        {
+          fields: ['type', 'status'],
+        },
+      ],
+    }
+  )
+
+  return {
+    // actual channel
+    Channel: Channel,
+  }
+}
+*/
+
+const productionDBConfig = (datadir, dbtoken, dbpool) => {
+  const logger = (str, time) => {
+    if (parseInt(time) > 900) {
+      loff(time + ' (on) ' + str)
+    }
+  }
+
+  const database = datadir
+  const [dialect, username, password] = dbtoken.split(':')
+  const config = {
+    dialect: dialect,
+    host: '127.0.0.1',
+    define: {timestamps: true}, // we don't mind timestamps in offchain db
+
+    logging: logger,
+    benchmark: true,
+    retry: {
+      max: 10,
+    },
+    pool: {
+      max: dbpool,
+      min: 0,
+      acquire: 20000,
+      idle: 20000,
+      evict: 30000,
+      handleDisconnects: true,
+    },
+  }
+
+  return [database, username, password, config]
+}
+
+const defaultDBConfig = (datadir) => {
+  const database = 'root'
+  const username = 'root'
+  const password = ''
+
+  var config = {
+    dialect: 'sqlite',
+    storage: datadir + '/offchain/db.sqlite',
+    define: {timestamps: true}, // we don't mind timestamps in offchain db
+
+    logging: false,
+    retry: {
+      max: 20,
+    },
+    pool: {
+      max: 10,
+      min: 0,
+      acquire: 10000,
+      idle: 10000,
+    },
+  }
+
+  return [database, username, password, config]
+}
+
+const getDBConfig = (datadir, dbtoken, dbpool) => {
+  if (dbtoken) {
+    return productionDBConfig(datadir, dbtoken, dbpool)
+  } else {
+    return defaultDBConfig(datadir)
+  }
+}
+
+class OffchainDB {
+  constructor(datadir, dbtoken, pool, force) {
+    this.datadir = datadir
+    this.dbtoken = dbtoken
+    this.pool = pool || 1
+    // set to true when updated the schema
+    this.force = force
+  }
+
+  init() {
+    l(
+      `Initializing offchain db, datadir ${this.datadir}, dbtoken ${this.dbtoken}, force ${this.force}`
+    )
+
+    const [database, username, password, config] = getDBConfig(
+      this.datadir,
+      this.dbtoken,
+      this.pool
+    )
+
+    this.db = new Sequelize(database, username, password, config)
+
+    
+
+    
+            
+
+        pending: Sequelize.BLOB,
+
+        ack_requested_at: {
+          type: Sequelize.DATE,
+          defaultValue: null,
+        },
+
+        last_online: Sequelize.DATE,
+        withdrawal_requested_at: Sequelize.DATE,
+
+        sig: Sequelize.BLOB,
+        signed_state: Sequelize.BLOB,
+
+        // All the safety Byzantine checks start with cheat_
+        CHEAT_profitable_state: Sequelize.BLOB,
+        CHEAT_profitable_sig: Sequelize.BLOB,
+      },
+      {
+        indexes: [
+          {
+            fields: [
+              {
+                attribute: 'they_pubkey',
+                length: 32,
+              },
+            ],
+          },
+        ],
+      }
+    )
+
+    Object.freeze(this)
+
+    return //this.db.sync({force: this.force})
+  }
+}
+
+module.exports = OffchainDB
+
+
+--- offchain/pay_channel.ts ---
+
+const Router = require('../router')
+// short helper to create a Payment on some delta and flush the channel right after it
+
+import crypto = require('crypto')
+
+
+const nacl = require('../../lib/nacl')
+
+// more highlevel wrappers that operate purely with JSON
+function encryptJSONBox(box_data, target_pubkey) {
+  // we don't care about authentication of box, but nacl requires that
+  const throwaway = nacl.box.keyPair()
+
+  const unlocker_nonce = crypto.randomBytes(24)
+
+  const box = nacl.box(
+    Buffer.from(JSON.stringify(box_data)),
+    unlocker_nonce,
+    target_pubkey,
+    throwaway.secretKey
+  )
+  return Buffer.concat([unlocker_nonce, throwaway.publicKey, box])
+}
+
+
+
+
+module.exports = async function (opts) {
+  
+  const secret = crypto.randomBytes(32)
+  const hash = this.ethers.utils.keccak256(secret)
+  const assetId = parseInt(opts.assetId)
+
+
+  const addr = opts.address
+  
+
+  const profile = await this.getProfile(addr)
+
+
+
+  opts.private_invoice = crypto.randomBytes(16).toString('hex')
+
+  const amount = parseInt(opts.amount)
+
+  // NaN
+  if (!Number.isInteger(amount)) return 'NaN'
+
+
+  
+
+  // 1. encrypt msg for destination that has final amount/asset etc and empty envelope
+  let onion = encryptJSONBox(
+    {
+      amount: amount, // final amount
+      assetId: assetId,
+
+      // buffers are in hex for JSON
+      secret: secret.toString('hex'),
+      private_invoice: opts.private_invoice,
+
+      timestamp: new Date(),
+      source_address: this.signer.address
+    },
+    Buffer.from(profile.boxPubkey,'hex')
+  ).toString('hex')
+
+  let nextHop = addr
+
+  // 2. encrypt msg for each hop in reverse order
+  
+  for (const hop of opts.chosenRoute.reverse()) {
+    //const hub = this.hubs.find(h=>h.addr == hop)
+    
+    //amount = beforeFee(amount, bank)
+    const profile = await this.getProfile(hop)
+
+    console.log("got profile", profile)
+    if (!profile) return this.react({alert: "Invalid address: "+hop})
+
+    onion = encryptJSONBox(
+      {
+        assetId: assetId,
+        amount: amount,
+        nextHop: nextHop,
+
+        unlocker: onion,
+      },
+      Buffer.from(profile.boxPubkey,'hex')
+    ).toString('hex')
+
+    nextHop = hop
+  }
+  
+
+  // 3. now nextHop is equal our first hop, and amount includes all fees
+  //await section(['use', nextHop], async () => {
+  const ch = this.Channels[nextHop]
+  if (!ch || !ch.entries[assetId]) {
+    return this.react({alert: `No channel to ${nextHop}`})
+  }
+
+  const derived = this.deriveEntry(ch, assetId)
+  
+  // 4. do we have enough available for this hop?
+  if (amount > derived.outbound_capacity) {
+    /*if (me.my_bank) {
+      // ask to increase credit
+      me.textMessage(
+        ch.d.they_pubkey,
+        `Cannot send ${commy(amount)} when available is ${commy(
+          available
+        )}, extend credit`
+      )
+    }*/
+    this.react({alert: `Not enough funds ${derived.outbound_capacity}`})
+
+    return 'Not enough available'
+  }
+
+  ch.locks.push({
+    type: 'AddLockNew',
+    assetId: assetId,
+    amount: amount,
+    hash: hash.toString('hex'),
+
+    secret: secret.toString('hex'),
+
+    exp: 777,
+
+
+    unlocker: onion,
+    destination_address: addr,
+    private_invoice: opts.private_invoice,
+
+    inbound: false,
+  })
+
+
+  
+
+  await this.flushChannel(nextHop)
+  
+  this.react({})
+  
+
+  return 'sent'
+
+}
+
+
+--- offchain/flush_channel.ts ---
+
+// Flush all new transitions to state channel. Types:
+/*
+Payment lifecycles:
+outbound: addNew > addSent > addAck > delAck
+inbound: addAck > delNew > delSent > delAck
+
+add - add outbound lock
+del - remove inbound lock by providing secret (applies amount to offdelta) or reason of failure (offdelta is unchanged)
+
+
+
+*/
+
+module.exports = async function(addr, forceAck) {
+
+  if (!this.ethers.utils.isAddress(addr)) return console.log("not an address")
+
+
+  console.log(`Requested Flush ${addr} forceAck ${forceAck}`)
+
+  const ch = this.Channels[addr] ? this.Channels[addr] : this.buildChannel(addr)
+
+  ch.last_used = new Date()
+
+  // an array of partners we need to ack or flush changes at the end of processing
+  const flushable: Array<string> = []
+
+  if (ch.status == 'disputed') {
+    /*
+    for (let t of ch.payments) {
+      if (t.type + t.status == 'addnew') {
+        t.type = 'del'
+        t.status = 'ack'
+        t.outcome_type = 'fail'
+        await t.save()
+
+        if (t.inward_pubkey) {
+          inward_ch = await me.getChannel(t.inward_pubkey)
+
+          let to_fail = inward_ch.payments.find((p) => p.hash.equals(t.hash))
+          to_fail.type = 'del'
+          to_fail.status = 'new'
+          to_fail.outcome_type = 'outcomeCapacity'
+          to_fail.outcome = 'outcomeCapacity'
+          await to_fail.save()
+
+          me.metrics.fail.current++
+        }
+      }
+    }
+    */
+  }
+
+  if (ch.status == 'sent') {
+    console.log(`End flush ${addr}, in sent`)
+
+    //me.send(addr, 'update', ch.d.pending)
+    return
+  }
+
+  const flushData = {
+    method: 'updateChannel',
+
+    dispute_nonce: ch.dispute_nonce,
+
+    ackEntries: this.getCanonicalEntries(ch),
+    ackState: this.getCanonicalDisputeProof(ch),
+    ackSig: await this.hashAndSign(this.getCanonicalDisputeProof(ch)),
+
+    transitions: [],
+ 
+    finalState: false,
+    finalSig: false,
+    finalEntries: false,
+    finalProof: false
+  }
+
+  //console.log(ch)
+
+
+  if (ch.status != 'ready') {
+    console.log("not ready: ", ch.status)
+    return false
+  }
+
+  for (const t of (<any>Object).values(ch.entries)) {
+
+    if (t.type == 'AddEntryNew') {
+      flushData.transitions.push({
+        type: t.type,
+        assetId: t.assetId
+      })
+      t.type = 'AddEntrySent'
+    }
+
+    if (t.type == 'DeleteEntryNew') {
+      flushData.transitions.push({
+        type: t.type,
+        assetId: t.assetId
+      })
+      t.type = 'DeleteEntrySent'
+    }
+
+
+    
+  }
+
+  // first we unlock locks to increase outbound capacity
+  for (const t of ch.locks) {
+    if (t.type != 'DeleteLockNew') continue
+  
+
+    // remove a hashlock and provide either secret or reason of failure
+
+    
+    flushData.transitions.push({
+      type: t.type, 
+      assetId: t.assetId,
+      hash: t.hash,
+      outcomeType: t.outcomeType,
+      outcome: t.outcome 
+    })
+
+    t.type = 'DeleteLockSent'
+  }
+
+  // then add locks
+  for (const t of ch.locks) {
+    if (t.type != 'AddLockNew') continue
+    const derived = this.deriveEntry(ch, t.assetId)
+
+    //derived.outbound.length >= 10
+    if (t.amount > derived.outbound_capacity) {
+
+      console.log(
+          `Cannot transit ${t.amount}/${derived.outbound_capacity}. Locks ${derived.outbound_locks.length}.`
+        )
+
+      // if we are hub, notify next hop to increase capacity
+
+      if (this.external_wss && t.amount > derived.outbound_capacity) {
+        this.textMessage(
+          addr,
+          `Not enough inbound capacity to receive ${t.amount}, extend credit by ${
+            t.amount - derived.outbound_capacity
+          }`
+        )
+      }
+
+      //this.metrics.fail.current++
+      t.type = 'DeleteLockAck'
+
+      if (t.inboundAddress) {
+        const inboundLock = this.Channels[t.inboundAddress].locks.find(l=>l.inbound && l.assetId==t.inboundAssetId && l.hash == t.hash)
+        inboundLock.type = 'DeleteLockNew'
+        t.outcomeType = 'NoCapacity'
+        if (!flushable.includes(t.inboundAddress)) flushable.push(t.inboundAddress)
+
+      }
+
+      continue
+
+
+
+    } 
+  
+    // set exp right before flushing to keep it fresh
+
+    //this.Config.usable_blocks + this.Config.hashlock_exp
+
+
+    flushData.transitions.push({
+      type: t.type, 
+      assetId: t.assetId, 
+      amount: t.amount, 
+      hash: t.hash, 
+      exp: t.exp, 
+      unlocker: t.unlocker
+    })
+    t.type = 'AddLockSent'
+
+  }
+
+
+  
+
+
+
+  if (flushData.transitions.length == 0) {
+    if (forceAck) {
+      // continue anyway without transitions just to send ack
+    } else {
+      console.log(`Nothing to flush ${addr}`)
+      return  
+    }
+  } else {
+    // there are transitions, need to give finalAck on top
+    ch.ackRequestedAt = new Date()
+    ch.status = 'sent'
+
+    // left increments nonce +2, see rollbacks
+    ch.dispute_nonce += ch.isLeft ? 2 : 1
+
+    flushData.finalEntries = this.getCanonicalEntries(ch)
+    flushData.finalState = this.getCanonicalDisputeProof(ch)
+      
+    // signing the final state
+    flushData.finalSig = await this.hashAndSign(this.getCanonicalDisputeProof(ch))
+    flushData.finalProof = this.getCanonicalDisputeProof(ch)
+  }
+  
+
+
+  console.log('flushData',flushData)
+
+
+  this.send(addr, flushData)
+
+  return //Promise.all(flushable.map((fl) => me.flushChannel(fl, true)))
+
+}
+
+
+--- offchain/update_channel.ts ---
+
+// This method receives set of transitions by another party and applies it
+// banks normally pass forward payments, end users normally decode payloads and unlock hashlocks
+
+
+
+const nacl = require('../../lib/nacl')
+
+import { utils, ethers } from 'ethers'
+
+
+function swapType(array, fromType, toType) {
+  array.forEach(element => {
+    if (element.type == fromType) {
+      element.type = toType
+    }
+  });
+}
+
+function ackChannel(ch){
+  swapType(Object.values(ch.entries), 'AddEntrySent', 'AddEntryAck')
+  swapType(Object.values(ch.entries), 'DeleteEntrySent', 'DeleteEntryAck')
+  swapType(Object.values(ch.locks), 'AddLockSent', 'AddLockAck')
+
+  //apply locks before deletion 
+  Object.keys(ch.locks).forEach(id=>{
+    const t = ch.locks[id]
+    if (t.type == 'DeleteLockSent') {
+      if (t.outcomeType == 'secret') {
+        // apply the locks before deleting
+        ch.entries[t.assetId].offdelta += (ch.isLeft ^ t.inbound) ? -t.amount : t.amount
+      }
+
+      t.type = 'DeleteLockAck'
+
+      //ch.locks.splice(id,1)
+
+    }       
+  })
+}
+
+
+module.exports = async function (
+  addr: string,
+  json: any
+) {
+
+  // an array of partners we need to ack or flush changes at the end of processing
+  const flushable = []
+
+  if (!this.Channels[json.addr]) {
+    // if we are hub
+    if (this.external_wss) {
+      this.buildChannel(json.addr)
+      console.log("created ", json.addr)  
+    } else {
+      // only hubs allow opening channel to them
+      return 
+    }
+    //this.flushChannel(json.addr, true)
+    //return
+  } 
+  
+
+  const ch = this.Channels[json.addr]
+
+  //await this.sleep(5000)
+
+  
+  ch.last_used = new Date()
+
+
+  if (ch.status == 'disputed') {
+    console.log('We are in a dispute')
+    return
+  }
+
+
+  console.log('received json', json)
+
+  /* 
+  Step 1. Verify current dispute_nonce and ackSig as an acknowledgement of current state
+  */
+
+  // verify ack
+  // our last known state has been ack.
+
+  if(json.dispute_nonce == ch.dispute_nonce) {
+    const signer = await this.hashAndVerify(this.getCanonicalDisputeProof(ch), json.ackSig)
+
+    if (addr == signer) {
+      // we must store latest dispute proof signature
+      ch.ackSig = json.ackSig
+      ch.ackRequestedAt = 0
+      
+      /*
+      swapType(Object.values(ch.entries), 'AddEntrySent', 'AddEntryAck')
+      swapType(Object.values(ch.entries), 'DeleteEntrySent', 'DeleteEntryAck')
+
+      swapType(Object.values(ch.locks), 'AddLockSent', 'AddLockAck')
+      swapType(Object.values(ch.locks), 'DeleteLockSent', 'DeleteLockAck')*/
+      
+      ackChannel(ch)
+    } else {
+      console.log("Invalid signer for ackSig", signer, this.getCanonicalDisputeProof(ch), 'vs ', json.ackState)
+    }
+  } else {
+    // they make transitions on top of different (older) dispute_nonce
+    // it happens when both users make update at the same time 
+    // REVERT if right, IGNORE, if left
+    if (ch.isLeft) {
+      // ignoring this request. there is no point in storing ackSig 
+      // right user will have higher dispute_nonce+1 anyway
+      console.log("rollback: ignore as left user")
+      return
+    } else if (json.dispute_nonce == ch.dispute_nonce - 1) {
+      // rollback to previous state, apply their transitions, 
+      // then flush and re-apply our transitions
+      console.log("Starting rollback as right user (we got higher nonce)")
+
+      swapType(Object.values(ch.entries), 'AddEntrySent', 'AddEntryNew')
+      swapType(Object.values(ch.entries), 'DeleteEntrySent', 'DeleteEntryNew')
+
+      swapType(Object.values(ch.locks), 'AddLockSent', 'AddLockNew')
+      swapType(Object.values(ch.locks), 'DeleteLockSent', 'DeleteLockNew')
+      const signer = await this.hashAndVerify(this.getCanonicalDisputeProof(ch), json.ackSig)
+
+      if (addr != signer) {
+
+        console.log("FATAL error: didn't manage to rollback")
+        return
+
+      } else {
+        console.log("rollback went fine")
+      }
+  
+
+    } else {
+      console.log("Invalid dispute_nonce in rollback")
+      return
+    }
+  }
+
+
+  ch.status = 'ready'
+
+  let stateChanged = false
+  const doIfValid = []
+
+  // can be used later in revert if finalSig is invalid
+  const originalLocksLength = ch.locks.length
+  const originalSwapsLength = ch.swaps.length
+
+  for (const t of json.transitions) {
+    console.log("Adding transition to state: ", t)
+    if (t.type == 'AddEntryNew' && !ch.entries[t.assetId]) {
+      ch.entries[t.assetId] = this.buildEntry(t.assetId)
+      ch.entries[t.assetId].type = 'AddEntrySent'
+      stateChanged = true
+    }
+
+    if (t.type == 'DeleteEntryNew' && ch.entries[t.assetId]) {
+      ch.entries[t.assetId].type = 'DeleteEntrySent'
+      stateChanged = true
+    }
+
+
+    if (t.type == 'AddLockNew' && ch.entries[t.assetId]) {
+
+      const inboundLock:any = {
+        type: 'AddLockSent',
+        assetId: t.assetId,
+        inbound: true,
+        amount: t.amount,
+        hash: t.hash,
+        exp: t.exp,
+      }
+      ch.locks.push(inboundLock)
+      stateChanged = true
+
+      doIfValid.push(()=>{
+          
+        // every 'add' transition must pass an encrypted envelope (onion routing)
+        const box = Buffer.from(t.unlocker, 'hex')
+        // 24 unlocker + 32 pubkey = 56
+        const binaryJSON = nacl.box.open(
+          box.slice(56),//box
+          box.slice(0,24),//nonce
+          box.slice(24,56),//pubkey
+          this.boxPair.secretKey
+        )
+
+        // create AddLockAck only when we are a hub mediating a payment
+        // in all other scenarios create DeleteLockNew
+        const boxData = binaryJSON ? JSON.parse(Buffer.from(binaryJSON).toString()) : {}
+        console.log('boxdata', boxData)
+
+        if (boxData.assetId == t.assetId && 
+          boxData.amount == t.amount && 
+          this.Channels[boxData.nextHop] && 
+          this.Channels[boxData.nextHop].entries[t.assetId] &&
+          boxData.unlocker) {
+
+
+          // try paying to nextHop, ignoring outbound_capacity
+
+          this.Channels[boxData.nextHop].locks.push({
+            type: 'AddLockNew',
+            assetId: t.assetId,
+            inbound: false,
+            amount: t.amount,
+            hash: t.hash,
+            exp: t.exp,
+            unlocker: boxData.unlocker,
+            inboundAddress: addr,
+            inboundAssetId: t.assetId
+          })
+
+          if (!flushable.includes(boxData.nextHop)) {
+            flushable.push(boxData.nextHop)
+          }
+        } else {
+          // delete the lock right away IF we got the secret OR the payment is invalid
+          inboundLock.type = 'DeleteLockNew'
+
+          if (boxData.secret && utils.keccak256(Buffer.from(boxData.secret,'hex')) == t.hash) {
+            console.log("good secret")
+
+            this.react({confirm:"Payment confirmed"})
+            inboundLock.outcome = boxData.secret
+            inboundLock.outcomeType = 'secret'
+          } else {
+            this.react({alert:"Payment failed"})
+            inboundLock.outcomeType = 'invalid'
+          }
+
+
+        }
+
+      })
+
+    }
+
+
+
+    if (t.type == 'DeleteLockNew' && ch.entries[t.assetId]) {
+
+      const outboundLock = ch.locks.find(l=>{
+        return !l.inbound && l.type == 'AddLockAck' && l.hash == t.hash && l.assetId == t.assetId
+      })
+
+      if (!outboundLock) {
+        console.log("No such lock found")
+        continue
+      } 
+
+      outboundLock.type = 'DeleteLockSent'
+      stateChanged = true
+
+      if (t.outcomeType == 'secret' && utils.keccak256(Buffer.from(t.outcome,'hex')) == outboundLock.hash) {
+        // received valid preimage, apply the lock to offdelta
+        outboundLock.outcomeType = t.outcomeType
+        outboundLock.outcome = t.outcome
+      } else {
+        outboundLock.outcomeType = 'fail'
+      }
+
+      doIfValid.push(()=>{
+        if (!outboundLock.inboundAddress) {
+          this.react(outboundLock.outcomeType == 'secret' ? {confirm:"Payment confirmed"} : {alert:"Payment failed"})
+        }
+
+        if (outboundLock.inboundAddress && this.Channels[outboundLock.inboundAddress]) {
+          const inboundLock = this.Channels[outboundLock.inboundAddress].locks.find(l=>{
+            return l.inbound && l.type == 'AddLockAck' && l.hash == t.hash && l.assetId == outboundLock.inboundAssetId
+          })
+
+          console.log('found ', inboundLock, this.Channels[outboundLock.inboundAddress].locks)
+
+          // delete lock down the route (either with secret or fail)
+          inboundLock.type = 'DeleteLockNew'
+          inboundLock.outcome = outboundLock.outcome
+          inboundLock.outcomeType = outboundLock.outcomeType
+
+          if (!flushable.includes(outboundLock.inboundAddress)) {
+            flushable.push(outboundLock.inboundAddress)
+          }
+
+
+        }
+      })
+
+    }
+
+    if (t.type == 'AddSwap') {
+      const swap:any = {}
+
+      swap.inTotalAmount = t.inTotalAmount
+
+
+      ch.swaps.push(swap)
+      // only hubs run matching engines and accept AddSwap
+    }
+
+
+
+
+
+
+
+
+  }
+
+  if (stateChanged) {
+    ch.dispute_nonce += ch.isLeft ? 1 : 2
+
+    // verify finalSig
+    const signer = await this.hashAndVerify(this.getCanonicalDisputeProof(ch), json.finalSig)
+    if (signer == addr) {
+
+      ackChannel(ch)
+      ch.ackSig = json.finalSig
+
+      // finalSig is valid, so perform the actions  
+      doIfValid.map(fn=>fn())
+
+      //swapType(Object.values(ch.locks), 'DeleteLockSent', 'DeleteLockAck')
+      
+    } else {
+      console.log('rollback everything - the finalSig is not valid', JSON.stringify([json.finalProof, this.getCanonicalDisputeProof(ch), json.finalEntries, this.getCanonicalEntries(ch)]))
+
+      // delete all newly created locks with splice
+      ch.locks.splice(originalLocksLength)
+      ch.swaps.splice(originalSwapsLength)
+
+      Object.keys(ch.entries).forEach(key=>{
+        if (ch.entries[key].type == 'AddEntrySent') {
+          // delete new entries
+          delete ch.entries[key]
+        } else if (ch.entries[key].type == 'DeleteEntrySent') {
+          // revert deleted entries 
+          ch.entries[key].type = 'AddEntryAck'
+        }
+      })
+
+      /*
+      swapType(Object.values(ch.entries), 'AddEntrySent', 'AddEntryAck')
+      swapType(Object.values(ch.entries), 'DeleteEntrySent', 'DeleteEntryAck')
+      swapType(Object.values(ch.locks), 'AddLockSent', 'AddLockAck')
+      swapType(Object.values(ch.locks), 'DeleteLockSent', 'DeleteLockAck')
+      */
+      
+    }
+
+
+    
+
+  }
+
+
+  
+  /*
+    
+
+
+  
+  
+  
+  
+  
+  
+      outward_hl.type = t[0]
+      outward_hl.status = 'ack'
+      // pass same outcome down the chain
+      outward_hl.outcome_type = outcome_type
+      outward_hl.outcome = outcome
+
+      ch.d.dispute_nonce++
+      if (!deltaVerify(ch.d, refresh(ch), ackSig)) {
+        let lastState = r(fromHex(t[3]))
+        prettyState(lastState)
+
+        mismatch('error: Invalid state sig at del', lastState)
+        break
+      }
+
+      me.metrics[valid ? 'settle' : 'fail'].current++
+
+      refresh(ch)
+      outward_hl.resulting_balance = ch.derived[asset].available
+
+      await outward_hl.save()
+
+      // if there's an inward channel for this, we are bank
+      if (outward_hl.inward_pubkey) {
+        //await section(['use', outward_hl.inward_pubkey], async () => {
+        var inward_ch = await me.getChannel(outward_hl.inward_pubkey)
+
+        if (inward_ch.d.status == 'disputed' && valid) {
+          loff(
+            'The inward channel is disputed (pointless to flush), which means we revealSecret - by the time of resultion hashlock will be unlocked'
+          )
+          me.batchAdd('revealSecrets', outcome)
+        } else {
+          // pulling the money after receiving secrets, down the chain of channels
+          var pull_hl = inward_ch.derived[asset].inwards.find((hl) =>
+            hl.hash.equals(hash)
+          )
+
+          if (!pull_hl) {
+            l(
+              `error: Not found pull`,
+              trim(pubkey),
+              toHex(hash),
+              valid,
+              inward_ch.d.rollback_nonce,
+              ascii_state(inward_ch.state)
+            )
+            return
+            //this.fatal('Not found pull hl')
+          }
+          // pass same outcome down the chain
+
+          pull_hl.outcome_type = outcome_type
+          pull_hl.outcome = outcome
+          pull_hl.type = 'del'
+          pull_hl.status = 'new'
+
+          // todo
+          refresh(inward_ch)
+          pull_hl.resulting_balance = inward_ch.derived[asset].available
+
+          await pull_hl.save()
+
+          if (trace)
+            l(
+              `Received a secret from ${trim(
+                pubkey
+              )}, acking and pulling inward payment`
+            )
+          uniqFlushable(outward_hl.inward_pubkey)
+
+          // how much fee we just made by mediating the transfer?
+          me.metrics.fees.current += pull_hl.amount - outward_hl.amount
+          // add to total volume
+          me.metrics.volume.current += pull_hl.amount
+        }
+        //})
+      } else {
+        if (valid) {
+          this.react(
+            {payment_outcome: 'success', confirm: 'Payment completed'},
+            false
+          )
+        } else {
+          // if not a bank, we are sender
+          this.react(
+            {
+              payment_outcome: 'fail',
+              alert:
+                'Payment failed, try another route: ' + outcome_type + outcome,
+            },
+            false
+          )
+        }
+      }
+
+      if (me.CHEAT_dontack) {
+        l('CHEAT: not acking the secret, but pulling from inward')
+        ch.d.status = 'CHEAT_dontack'
+        //await ch.d.save()
+        this.react({private: true}) // lazy react
+        return
+      }
+    }
+  }
+
+  // since we applied partner's diffs, all we need is to add the diff of our own transitions
+  if (ch.d.rollback_nonce > 0) {
+    // merging and leaving rollback mode
+    ch.d.dispute_nonce += ch.d.rollback_nonce
+    ch.d.rollback_nonce = 0
+
+
+    
+    ch.d.status = 'merge'
+  }
+  
+  */  
+
+  // if finalSig is valid, swap sent->ack, otherwise REVERT
+
+
+  this.react({})
+
+    /*
+  We MUST ack if there were any transitions, otherwise if it was ack w/o transitions
+  to us then do an opportunistic flush (flush if any). Forced ack here would lead to recursive ack pingpong!
+  Flushable are other channels that were impacted by this update
+  Sometimes sender is already included in flushable, so don't flush twice
+  */
+
+
+  await this.flushChannel(addr, json.transitions.length != 0)
+
+  flushable.map(f=>this.flushChannel(f))
+
+  
+  return flushable
+
+  // If no transitions received, do opportunistic flush, otherwise give forced ack
+}
+
+
+--- offchain/derive_entry.ts ---
+
+module.exports = function deriveEntry(ch, assetId) {
+
+
+  const entry = ch.entries[assetId]
+  const delta = entry.ondelta + entry.offdelta
+  const col = entry.collateral
+
+  // for left user
+// Defines how payment channels work, based on "insurance" and delta=(ondelta+offdelta)
+// There are 3 major scenarios of delta position
+// . is 0 point, | is delta, = is insured, - is uninsured
+// 4,6  .====--| (left user owns entire insurance, has 2 uninsured)
+// 4,2  .==|==   (left and right both have 2 insured)
+// 4,-2 |--.==== (right owns entire insurance, 2 in uninsured balance)
+// https://codepen.io/anon/pen/wjLGgR visual demo
+
+/*
+collateralized uncollateralized
+secured        unsecured
+insured        uninsured
+protected      unprotected
+covered        uncovered
+*/
+    
+
+
+
+  const o = {
+    they_unsecured: delta < 0 ? -delta : 0,
+    secured: delta > col ? col : delta > 0 ? delta : 0,
+    they_secured: delta > col ? 0 : delta > 0 ? col - delta : col,
+    unsecured: delta > col ? delta - col : 0,
+
+    inbound_locks: [],
+    outbound_locks: [],
+    inbound_hold: 0,
+    outbound_hold: 0,
+
+    inbound_capacity: 0,
+    outbound_capacity: 0,
+    total_capacity: col + entry.credit_limit + entry.they_credit_limit,
+
+    available_credit: 0,
+    they_available_credit: 0
+  }
+
+  if (!ch.isLeft) {
+    [o.secured, o.unsecured, o.they_secured, o.they_unsecured] = [o.they_secured, o.they_unsecured, o.secured, o.unsecured];
+  }
+
+  o.available_credit = entry.they_credit_limit - o.they_unsecured
+  o.they_available_credit = entry.credit_limit - o.unsecured
+
+
+  for (const t of ch.locks) {
+    //delsent in revert
+    if ([
+      'AddLockSent',
+      'AddLockAck',
+      'DeleteLockNew',
+    ].includes(t.type)) {
+      if (t.inbound) {
+        o.inbound_locks.push(t)
+        o.inbound_hold += t.amount
+      } else {
+        o.outbound_locks.push(t)
+        o.outbound_hold += t.amount
+      }
+    }
+  }
+
+  o.inbound_capacity = o.they_secured + o.they_unsecured + entry.credit_limit - o.unsecured - o.inbound_hold
+  o.outbound_capacity = o.secured + o.unsecured + entry.they_credit_limit - o.they_unsecured - o.outbound_hold
+    
+  return o
+}
+
+
+
+
+
+
+
+
+
+--- offchain/rebalance_channels.ts ---
+
+/*
+Once in a while the hub must submit a rebalance batch onchain.
+Net-receivers request more collateral, so the hub needs to withdraw from net-senders.
+
+
+The most important job of the bank is to rebalance assets once in a while.
+1. the bank finds who wants to insure their uninsured balances. They can learn automatically (given soft limit) or manually (Request Insurance in the wallet)
+2. now the bank tries to find the total amount of insurance needed from the net-spenders who are currently online
+3. it's up to the alg implementation to start disputes with net-spenders who are offline for too long
+4. if bank fails to find enough net-spenders right now, they may drop some low value or high value net-receivers to match the numbers on both sides
+5. packs withdrawals and deposits into one large rebalance batch and broadcasts onchain
+
+Current implementation is super simple and straightforward. There's huge room for improvement:
+* smart learning based on balances over time not on balance at the time of matching
+* use as little withdrawals/deposits to transfer as much as possible volume
+* have different schedule for different assets, e.g. rebalance FRD every 1 block but rare assets every 1k blocks
+* often bank needs to request insurance from another bank (cross-bank payments).
+
+General recommendations:
+1. assets stuck in a dispute is a waste. It's better to do everything by mutual agreement as much as possible, w/o suffering dispute delays and locked up liquidity
+2. the bank must store as little funds on their @onchain balances as possible. So once bank withdraw from net-spenders they should immediately deposit it to net-receiver.
+
+
+
+tier1 
+tier2 
+tier3 reserve-backed
+tier4 custodial
+*/
+
+
+module.exports = async function () {
+  //let current_rebalance_fee = Config.min_gasprice * 200
+
+  const addrs = Object.keys(this.Channels)
+
+  for (let assetId = 0; assetId <= this.sharedState.assets.length; assetId++) {
+    const minRisk = 500
+    const netSenders = []
+    const netReceivers = []
+    const pullable = []
+
+    for (const addr of addrs) {
+      //await section(['use', d.they_pubkey], async () => {
+      const ch = this.Channels[addr]
+      
+      if (!ch.entries[assetId]) continue
+
+      const derived = this.deriveEntry(ch, assetId)
+      const entry = ch.entries[assetId]
+
+      
+      // finding who has uninsured balances AND
+      // requests insurance OR gone beyond soft limit
+
+      if (entry.they_requested_deposit > 0) {
+        netReceivers.push([entry, addr])
+      }
+
+      if (derived.secured >= minRisk) {
+        if (this.websockets[ch.partner]) {
+          pullable.push([derived.secured, ch.partner])
+        }
+      }
+    }
+
+    // sort receivers, bigger ones are given priority
+    netReceivers.sort(
+      (a, b) =>
+        b[0].they_requested_deposit - a[0].they_requested_deposit
+    )
+
+    const totalToReceive = netReceivers.reduce(function(a, b) { return a + b[0].they_requested_deposit; }, 0);
+
+    // no need to pull
+    if (totalToReceive == 0) return
+
+    pullable.sort(
+      (a, b) =>
+        b[0] - a[0]
+    )
+
+
+    for (const [secured, addr] of pullable) {
+      const pairs = [[assetId, secured]]
+
+      const promise = this.sendSync(addr, {method: 'getWithdrawalSig', pairs: pairs}).then(async sig=>{
+        console.log("Response sig", sig)
+        if (sig) {      
+          this.sharedState.batch.channelToReserve.push({
+            sig: sig,
+            partner: addr,
+            pairs: pairs,
+          })
+          return pairs[0][1]
+        } else {
+          this.react({alert: "Partner is unresponsive"})
+          return 0
+        }
+      })
+
+      console.log("Adding netsender ", addr)
+      netSenders.push(promise)
+    }
+    
+    /*else if (subch.withdrawal_requested_at == null) {
+      l('Delayed pull')
+      subch.withdrawal_requested_at = new Date()
+    } else if (subch.withdrawal_requested_at + 600000 < new Date()) {
+      l('User is offline for too long, or tried to cheat')
+      me.batchAdd('dispute', await startDispute(ch))
+    }
+  }*/
+
+
+    //})
+
+    // checking on all withdrawals we expected to get, then rebalance
+    const withdrawn = (await Promise.all(netSenders)).reduce(function(a, b) { return a + b; }, 0);
+
+    // 1. how much we own of this asset
+    if (withdrawn > 0)
+    console.log('withdrawn', withdrawn, netReceivers)
+
+    let weOwn = this.sharedState.reserves[assetId] + withdrawn
+    
+    
+    // 3. debts will be enforced on us (if any), so let's deduct them beforehand
+    //let debts = await me.record.getDebts({where: {asset: asset}})
+    //for (let d of debts) {
+    //  weOwn -= d.amount_left
+    //}
+
+
+    // dont let our reserve go lower than that
+    const safety = 0
+
+    // 4. now do our best to cover net receivers
+    for (const [entry, addr] of netReceivers) {
+      weOwn -= entry.they_requested_deposit
+      
+      if (weOwn >= safety) {
+        this.sharedState.batch.reserveToChannel.push({
+          receiver: this.signer.address,
+          partner: addr,
+          pairs: [[assetId, entry.they_requested_deposit]], 
+        })
+
+        // nullify their request
+        entry.they_requested_deposit = 0
+      } else {
+        console.log(
+          `Run out of funds for asset ${assetId}, own ${weOwn} `
+        )
+        break
+      }
+    }
+
+  }
+
+
+  //this.broadcastBatch()
+}
+
+
+--- offchain/build_channel.ts ---
+
+module.exports = function buildChannel(addr: string) {
+  if (!this.signer || addr == this.signer.address) {
+    console.log('Channel to self?')
+    return false
+  }
+
+  if (this.Channels[addr]) {
+    return this.Channels[addr]
+  } 
+            
+
+  const buf_a1 = Buffer.from(this.signer.address.slice(2).toLowerCase(), "hex");
+  const buf_a2 = Buffer.from(addr.slice(2).toLowerCase(), "hex");
+
+  const ch:any = {
+    isLeft: Buffer.compare(buf_a1, buf_a2) == -1,
+    partner: addr,
+    status: 'ready',
+
+    channel_counter: 0,
+    cooperative_nonce: 0,
+    
+    dispute_nonce: 0,
+    dispute_until_block: 0,
+
+
+    entries: {},
+    locks: [], // conditional hashlocks 
+    swaps: [], // atomic swaps
+
+    last_used: new Date
+  }
+
+
+  console.log(`Creating new channel ${addr}`)
+  this.Channels[addr] = ch  
+
+  return ch
+
+}
+
+
+--- me.ts ---
+
+
+import * as http from "http"
+
+
+const WebSocketClient = require('./utils/ws')
+const stringify = require('../lib/stringify')
+
+// system
+const assert = require('assert')
+const fs = require('fs')
+
+const os = require('os')
+const ws = require('ws')
+const querystring = require('querystring')
+const crypto = require('crypto')
+
+import { ethers } from 'ethers'
+import { Depository__factory, TokenA__factory, Depository } from '../types/ethers-contracts'
+
+
+const RPC_HOST = 'http://127.0.0.1:7545'
+
+
+const abi:string = fs.readFileSync('./contracts/build/contracts/Depository.json').toString()
+const DepositoryAddress:string = JSON.parse(abi).networks[5777].address
+
+// scrypt = require('scrypt') // require('./scrypt_'+os.platform())
+const base58 = require('base-x')(
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+)
+ 
+const nacl = require('../lib/nacl')
+
+export class Me {
+  signer: any
+  partners: any
+
+  provider: any
+  Depository: Depository
+
+  MessageType = {
+    JSON: 0,
+    WithdrawProof: 1,
+    CooperativeProof: 2,
+    DisputeProof: 3,
+  }
+
+  sharedState: any = {}
+
+  channels: Array<any>
+  syncedChannels: Array<any>
+
+
+  
+  record: any
+  datadir: string
+  argv: any
+  external_http_server: http.Server
+  external_wss: any
+
+  coordinator: string
+
+  on_server: boolean
+
+  boxPair: any
+
+
+  ethers = ethers
+
+  Config = {}
+  Channels = {}
+  Orders = {}
+
+  
+
+  websockets = {}
+  websocketCallbacks = {}
+  Profiles = {}
+  Orderbook = []
+
+  
+  browsers = []
+  
+
+  busyPorts = [] // for cloud demos
+
+  section_queue = {}
+
+  leak_channels_ws = []
+
+  node_started_at = new Date()
+  last_react = new Date()
+  last_sync_changes = 0
+  last_sync_chain = 0
+
+    // generic metric boilerplate: contains array of averages over time
+  getMetric = () => {
+    return {
+      max: 0,
+      started: new Date(),
+      total: 0,
+      current: 0,
+      last_avg: 0,
+      avgs: [],
+    }
+  }
+
+  metrics = {
+    volume: this.getMetric(),
+    fail: this.getMetric(),
+    settle: this.getMetric(),
+    fees: this.getMetric(),
+    syncChanges: this.getMetric(),
+
+    //
+    bandwidth: this.getMetric(),
+    ecverify: this.getMetric(),
+  }
+
+  
+
+
+  async start(seed: string):Promise<void> {
+    this.provider = new this.ethers.JsonRpcProvider(RPC_HOST)
+    this.signer = new this.ethers.Wallet(seed, this.provider)
+    this.Depository = Depository__factory.connect(DepositoryAddress, this.signer)
+
+
+    this.sharedState.batch = this.getEmptyBatch()
+
+    const sk = Buffer.from(seed.substr(2), 'hex')
+
+    this.boxPair = nacl.box.keyPair.fromSecretKey(sk)
+
+    this.sharedState.address = this.signer.address
+    
+    await this.syncL1()
+
+    setInterval(()=>{this.syncL1()}, 2000)
+
+
+
+    
+
+    // are we a hub?
+    const myHub = this.sharedState.hubs.find(h=>h.addr==this.signer.address)
+    if (myHub) {
+      this.startExternalRPC(parseInt(myHub.uri.split(':')[2]))
+
+
+      this.admin('reserveToChannel', {receiver: '0xf17f52151EbEF6C7334FAD080c5704D77216b732', partner: this.coordinator, pairs: [[0, 10000]]})
+
+      //this.admin('reserveToChannel', {receiver: '0x8470C80C572512E3D472FB3A294a2B53f53F11DE', partner: this.coordinator, pairs: [[0, 10000]]})
+      this.admin('reserveToChannel', {receiver: '0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef', partner: this.coordinator, pairs: [[0, 10000]]})
+
+      setInterval(()=>{this.rebalanceChannels()}, 5000)
+    } else if (this.argv.p <= 8002) {
+      setTimeout(async ()=>{
+        this.admin('openChannel', {address: this.coordinator})
+        await this.sleep(200)
+        this.admin('flushTransition', {address: this.coordinator, assetId: 0})
+        await this.sleep(200)
+        this.admin('setCreditLimit', {method: 'setCreditLimit', partner: this.coordinator, assetId: 0, credit_limit: 10000})
+
+
+      },2000)
+    }
+
+    this.broadcastProfile()
+
+
+
+    await fs.writeFileSync(
+      this.datadir + '/config.json',
+      JSON.stringify(this.Config)
+    )
+  }
+
+  admin(method, params) {
+    this.internal_rpc('admin', {method: method, params: params})
+  }
+
+  getEmptyBatch() {
+    return {
+      channelToReserve: [],
+      reserveToChannel: [],
+
+      reserveToToken: [],
+      tokenToReserve: [],
+
+      reserveToReserve: [],
+
+      cooperativeProof: [],
+      disputeProof: [],
+      revealEntries: [],
+
+      revealSecret: [],
+      cleanSecret: [],
+
+      hub_id: 0,
+    }
+  }
+
+  async broadcastBatch(){
+    if (Object.values(this.sharedState.batch).join('') == '0') return
+
+    console.log("Broadcasting batch ",this.sharedState.batch)
+    try {
+      const tx = await this.Depository.processBatch(this.sharedState.batch,  {
+        gasLimit: 5000000
+      })
+          
+      console.log(this.sharedState.receipt = await tx.wait())
+      this.sharedState.logEvents = this.sharedState.receipt.events.map(e=>`${e.args[0]} ${e.args[1].toString()}`)
+      this.sharedState.batch = this.getEmptyBatch()
+    }catch(e){console.log("err ", e)}
+
+    this.react({confirm: "Batch broadcasted"})
+  }
+
+
+  async syncL1() {
+    const partners = Object.keys(this.Channels);
+    //['0xf17f52151EbEF6C7334FAD080c5704D77216b732','0x821aEa9a577a9b44299B9c15c88cf3087F3b5544'];
+    //Object.keys(Channels)
+
+    
+
+    [
+      this.sharedState.assets, 
+      this.sharedState.hubs, 
+      this.sharedState.EOA_balance,
+      this.sharedState.currentUser,
+      this.syncedChannels
+    ] = await Promise.all([
+      this.Depository.getAllAssets(),
+      this.Depository.getAllHubs(), 
+      this.provider.getBalance(this.signer.address),
+      this.Depository.getUser(this.signer.address), 
+
+      this.Depository.getChannels(this.signer.address, partners)
+    ])
+
+    this.sharedState.reserves = this.sharedState.currentUser.assets.map(r=>r.reserve.toString())
+
+    this.syncedChannels.map(gotCh=>{
+      
+      const ch = this.Channels[gotCh.partner]
+
+      ch.channel_counter = gotCh.channel.channel_counter.toNumber()
+      ch.cooperative_nonce = gotCh.channel.cooperative_nonce.toNumber()
+      ch.dispute_until_block = gotCh.channel.dispute_until_block.toNumber()
+
+      for (const assetId in gotCh.collaterals) {
+        if (ch.entries[assetId]) {
+          ch.entries[assetId].collateral = gotCh.collaterals[assetId].collateral.toNumber()
+          ch.entries[assetId].ondelta = gotCh.collaterals[assetId].ondelta.toNumber()
+        }
+      }
+
+    })
+
+    //console.log('current', this.sharedState.currentUser.assets)
+    //this.sharedState.currentUser[0]
+
+    this.sharedState.EOA_balance = utils.formatEther(this.sharedState.EOA_balance)
+
+    this.coordinator = this.sharedState.hubs[1].addr
+
+  }
+
+
+  async startExternalRPC(usePort: number) {
+
+    
+    
+    if (this.external_http_server) {
+      return console.log('Already have external server started')
+    }
+
+    this.external_http_server = http.createServer(
+      async (req, res) => {
+        var [path, query] = req.url.split('?')
+        // call /faucet?address=ME&amount=100&asset=1
+        if (path.startsWith('/faucet')) {
+          res.setHeader('Access-Control-Allow-Origin', '*')
+
+          const args = querystring.parse(query)
+          console.log('faucet ', args)
+
+          const status = await this.payChannel({
+            address: args.address,
+            amount: parseInt(args.amount),
+            asset: parseInt(args.asset),
+          })
+          res.end(status)
+        } else {
+          res.end('hello')
+        }
+      }
+    )
+
+    this.external_http_server.listen(usePort)
+
+    this.external_wss = new ws.Server({
+      //noServer: true,
+      clientTracking: false,
+      perMessageDeflate: false,
+      // attach to existing HTTP server
+      server: this.external_http_server,
+      maxPayload: 64 * 1024 * 1024,
+    })
+
+    this.external_wss.on('error', function (err) {
+      console.log(err)
+    })
+    this.external_wss.on('connection', (websocket) => {
+      //console.log(websocket)
+      
+      websocket.on('message', (msg) => {
+        this.external_rpc(websocket, msg)
+      })
+    })
+
+    console.log(`Started 
+     at: ${usePort}`)
+  }
+
+  textMessage(they_pubkey, msg) {
+    this.send(they_pubkey, {method: 'textMessage', msg: msg})
+  }
+
+  broadcastProfile() {
+    const peerHubs = []
+    for (const hub of this.sharedState.hubs) {
+      const ch = this.Channels[hub.addr]
+      if (ch) {
+
+        const entriesWithInboundCapacity = Object.keys(ch.entries).filter(e=>{
+          return true //this.deriveEntry(ch, e).inbound_capacity > 0
+        })
+
+        if (entriesWithInboundCapacity.length > 0) {
+          peerHubs.push([hub.addr, entriesWithInboundCapacity])
+        }
+      }
+    }
+    
+
+    this.send(this.coordinator, {
+      method: 'broadcastProfile',
+      addr: this.signer.address,
+      data: {
+        addr: this.signer.address,
+        boxPubkey: Buffer.from(this.boxPair.publicKey).toString('hex'),
+        hubs: peerHubs
+      }
+    })
+  }
+
+  async getProfile(addr) {
+    return (await this.sendSync(this.coordinator, {method:'getProfiles', addresses: [addr]}))[0]
+  }
+
+  async hashAndSign(str: string) {
+    const hash = utils.arrayify(utils.keccak256(str))
+    return this.signer.signMessage(hash)
+  }
+
+  async hashAndVerify(str: string, sig: string) {
+    const hash = utils.arrayify(utils.keccak256(str))
+    return utils.verifyMessage(hash, sig)
+  }
+
+  // a generic interface to send a websocket message
+  send(addr:string, msg:any, optional_cb?:unknown) {
+    if (this.signer){
+      msg.addr = this.signer.address
+    }
+
+    msg.timestamp = new Date()
+
+    msg = Buffer.from(JSON.stringify(msg))
+
+    if (this.websockets[addr]) {
+      // if there is live connection to this address
+      this.websockets[addr].send(msg)
+      return true
+    } else {
+      // try to connect using their advertised URI
+      const wsCandidate = new WebSocketClient()
+
+      wsCandidate.onmessage = (msg) => {
+        this.external_rpc(wsCandidate, msg)
+      }
+
+      wsCandidate.onerror = (e)=>{
+        console.log('Failed to open the socket to ', addr, e)
+        //delete this.websockets[addr]
+      }
+
+      wsCandidate.onopen = (e)=>{
+        this.websockets[addr] = wsCandidate
+
+        // first auth, then send actual message
+        if (this.signer.address) {
+          const authMsg = Buffer.from(JSON.stringify({
+            method: 'auth', 
+            addr: this.signer.address, 
+            data: new Date()
+          }))
+
+          this.websockets[addr].send(authMsg)
+        }
+
+        this.websockets[addr].send(msg)
+      }
+
+      const foundHub = this.sharedState.hubs.find(h=>h.addr == addr)
+      if (foundHub) {
+        wsCandidate.open(foundHub.uri)
+        return true
+      } else {
+        console.log("No such hub or socket exists for addr "+addr, this.sharedState.hubs)
+        return false
+      }
+    }
+  }
+
+  sendSync(addr:string, msg:any) {
+    return new Promise(async (resolve) => {
+      msg.callback = crypto.randomBytes(32).toString('hex')
+      const key = addr+'_'+msg.callback
+      this.websocketCallbacks[key] = resolve
+
+      setTimeout(()=>{
+        // fallback
+        const fn = this.websocketCallbacks[key]
+        if (fn) {
+          delete this.websocketCallbacks[key]  
+          fn(false)
+        }
+      }, 3000)
+
+      this.send(addr, msg)
+    })
+  }
+
+  async fatal(reason) {
+    console.log(reason)
+    this.react({reload: true}) //reloads UI window
+    //this.intervals.map(clearInterval)
+
+    //await Periodical.syncChanges()
+    //.then(async () => {
+    //await sequelize.close()
+    //await privSequelize.close()
+    await this.sleep(500)
+    process.exit()
+    //})
+  }
+
+  // for handicaps
+  async sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  /*var {performance} = require('perf_hooks')
+  withChannel = async (key, job) => {}
+  */
+
+  // https://en.wikipedia.org/wiki/Critical_section
+  async section(key, job) {
+    return new Promise(async (resolve) => {
+      key = JSON.stringify(key)
+
+      if (this.section_queue[key]) {
+        if (this.section_queue[key].length > 10) {
+          console.log('Queue overflow for: ' + key)
+        }
+
+        this.section_queue[key].push([job, resolve])
+      } else {
+        this.section_queue[key] = [[job, resolve]]
+
+        while (this.section_queue[key].length > 0) {
+          try {
+            const [got_job, got_resolve] = this.section_queue[key].shift()
+            //const started = performance.now()
+
+            //let deadlock = setTimeout(function() {
+            //  this.fatal('Deadlock in q ' + key)
+            //}, 20000)
+
+            got_resolve(await got_job())
+
+            //clearTimeout(deadlock)
+            //l('Section took: ' + (performance.now() - started))
+          } catch (e) {
+            console.log('Error in critical section: ', e)
+            setTimeout(() => {
+              this.fatal(e)
+            }, 100)
+          }
+        }
+        delete this.section_queue[key]
+      }
+    })
+  }
+
+  buildEntry(assetId: number){
+    return {
+      type: 'AddEntryNew',
+      assetId: assetId,
+      
+      collateral: 0,
+      ondelta: 0,
+  
+      offdelta: 0,
+
+      they_requested_deposit: 0,
+   
+  
+      pending_withdraw: 0,
+      they_pending_withdraw: 0,
+  
+      credit_limit: 0,
+      they_credit_limit: 0,
+  
+      interest_rate: 0,
+      they_interest_rate: 0
+  
+    }
+  }
+
+  /*
+  sha3 = (a) =>
+    crypto
+      .createHash('sha256')
+      .update(bin(a))
+      .digest()
+  js_sha3 = require('js-sha3')
+  sha3 = (a) => bin(js_sha3.sha3_256.digest(bin(a)))
+
+
+  hrtime() {
+    let hrTime = process.hrtime()
+    return hrTime[0] * 1000000 + Math.round(hrTime[1] / 1000)
+  }
+  perf(label) {
+    let started_at = hrtime()
+
+    // unlocker you run in the end
+    return () => {
+      if (!perf.entries[label]) perf.entries[label] = []
+
+      perf.entries[label].push(hrtime() - started_at)
+    }
+  } 
+  perf.entries = {}
+  perf.stats = (label) => {
+    if (label) {
+      var sum,
+        avg = 0
+
+      if (perf.entries[label].length) {
+        sum = perf.entries[label].reduce(function (a, b) {
+          return a + b
+        })
+        avg = sum / perf.entries[label].length
+      }
+      return [parseInt(sum), parseInt(avg)]
+    } else {
+      Object.keys(perf.entries).map((key) => {
+        let nums = perf.stats(key)
+        l(`${key}: sum ${commy(nums[0], false)} avg ${commy(nums[1], false)}`)
+      })
+    }
+  }
+  beforeFee(amount, bank) {
+    let new_amount:number = Math.round((amount / (10000 - bank.fee_bps)) * 10000)
+    if (new_amount == amount) new_amount = amount + this.Config.min_fee
+    if (new_amount > amount + this.Config.max_fee)
+      new_amount = amount + this.Config.max_fee
+    amount = new_amount
+
+    return new_amount
+  }
+
+  afterFees(amount, banks) {
+    if (!(banks instanceof Array)) banks = [banks]
+    for (var bank of banks) {
+      let taken_fee = Math.round((amount * bank.fee_bps) / 10000)
+      if (taken_fee == 0) taken_fee = this.Config.min_fee
+      if (taken_fee > this.Config.max_fee) taken_fee = this.Config.max_fee
+      amount = amount - taken_fee
+    }
+
+    return amount
+  }
+
+  commy(b, dot = true) {
+    let prefix = b < 0 ? '-' : ''
+
+    b = Math.abs(b).toString()
+    if (dot) {
+      if (b.length == 1) {
+        b = '0.0' + b
+      } else if (b.length == 2) {
+        b = '0.' + b
+      } else {
+        var insert_dot_at = b.length - 2
+        b = b.slice(0, insert_dot_at) + '.' + b.slice(insert_dot_at)
+      }
+    }
+    return prefix + b.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  }
+
+
+  */
+  async react(result) {
+    // Flush an object to browser websocket. Send force=false for lazy react (for high-tps nodes like banks)
+
+    
+
+    Object.assign(result, this.sharedState)
+    
+    //if (new Date() - this.last_react < 500) {
+      //l('reacting too often is bad for performance')
+      //return false
+    //}
+    this.last_react = new Date()
+
+    if (this.browsers.length == 0) {
+      //l('headless')
+      return
+    }
+
+    if (this.signer) {
+      // slice channels
+      result.channels = Object.values(this.Channels)
+
+      result.channels.forEach(element => {
+        element.derived = {}
+        Object.keys(element.entries).forEach(id=>{
+          element.derived[id] = this.deriveEntry(element, id)
+        })
+      });
+
+
+    }
+
+    try {
+      const data = JSON.stringify(result)
+      this.browsers.map((ws) => {
+        if (ws.readyState == 1) {
+          ws.send(data)
+        }
+      })
+    } catch (e) {
+      console.log(e)
+    }
+  }
+
+  channelKey(a1:string, a2:string): string {
+    const buf_a1 = Buffer.from(a1.slice(2).toLowerCase(), "hex");
+    const buf_a2 = Buffer.from(a2.slice(2).toLowerCase(), "hex");
+    const ordered_pair =
+      Buffer.compare(buf_a1, buf_a2) == 1 ? [buf_a2, buf_a1] : [buf_a1, buf_a2];
+    return "0x" + Buffer.concat(ordered_pair).toString("hex");
+
+  }
+
+  getCanonicalEntries(ch): Array<any>{
+
+    const stateEntries = []
+
+    for (const e of (<any>Object).values(ch.entries)) {
+      if (!['AddEntrySent','AddEntryAck','DeleteEntryNew'].includes(e.type)) continue
+
+      const left_locks = []
+      const right_locks = []
+      let offdelta = e.offdelta
+
+      for (const t of ch.locks) {
+
+
+        // lock is still in state
+        if ([
+          'AddLockSent',
+          'AddLockAck',
+          'DeleteLockNew'
+        ].includes(t.type)) {
+          if (ch.isLeft ^ t.inbound) {
+            left_locks.push([-t.amount, t.exp, t.hash])
+          } else {
+            right_locks.push([t.amount, t.exp, t.hash])
+          }
+        }
+
+
+        if (t.type == 'DeleteLockSent' && t.outcomeType == 'secret') {
+          offdelta += (ch.isLeft ^ t.inbound) ? -t.amount : t.amount
+        }
+      }
+
+      // asset_id, offdelta, left_locks, right_locks
+      stateEntries.push([e.assetId, offdelta, left_locks.concat(right_locks)])
+    }
+
+    return stateEntries
+
+  }
+
+  getCanonicalEntriesHash(ch): string{
+    // offdelta is int and can be negative
+    const encodedEntries = utils.defaultAbiCoder.encode(
+      ['(uint,int,(int,uint,bytes32)[])[]'], 
+      [this.getCanonicalEntries(ch)]
+      )
+
+    return utils.keccak256(encodedEntries)
+  }
+
+  getCanonicalDisputeProof(ch): string{
+    return utils.defaultAbiCoder.encode(["uint", "bytes", "uint", "uint", "bytes32"], [
+      this.MessageType.DisputeProof,
+      this.channelKey(this.signer.address, ch.partner),
+      ch.channel_counter,
+      ch.dispute_nonce,
+      this.getCanonicalEntriesHash(ch),
+    ])
+  }
+
+  getCooperativeProof(ch): string{
+    return utils.defaultAbiCoder.encode(["uint", "bytes", "uint", "uint", "(uint,int,(uint,uint,bytes32)[])[]"], [
+      this.MessageType.CooperativeProof,
+      this.channelKey(this.signer.address, ch.partner),
+      ch.channel_counter,
+      ch.cooperative_nonce,
+      this.getCanonicalEntries(ch),
+    ])
+  }
+
+  getWithdrawalProof(ch, pairs: Array<Array<number>>): string{
+    return utils.defaultAbiCoder.encode(["uint", "bytes", "uint", "uint", "(uint,uint)[]"], [
+      this.MessageType.WithdrawProof,
+      this.channelKey(this.signer.address, ch.partner),
+      ch.channel_counter,
+      ch.cooperative_nonce,
+      pairs,
+    ])
+  }
+
+  internal_rpc = require('./internal_rpc')
+  external_rpc = require('./external_rpc')
+ 
+  buildChannel = require('./offchain/build_channel')
+  deriveEntry = require('./offchain/derive_entry')
+  payChannel = require('./offchain/pay_channel')
+  flushChannel = require('./offchain/flush_channel')
+  updateChannel = require('./offchain/update_channel')
+  rebalanceChannels = require('./offchain/rebalance_channels')
+  
+}
+
+
+
+--- router/index.js ---
+
+const Router = {
+  max_hops: 10,
+  // don't offer routes that cost more than 10% in total
+  max_fee: 0.9,
+
+  getRouteIndex: function (from, to) {
+    // returns an index of a bidirectional route (from,to or to,from)
+    return Config.routes.findIndex((r) => {
+      return (r[0] == from && r[1] == to) || (r[0] == to && r[1] == from)
+    })
+  },
+
+  addRoute: function (from, to) {
+    // ensure only unique routes are saved
+    if (this.getRouteIndex(from, to) == -1) {
+      Config.routes.push([from, to])
+    }
+  },
+  removeRoute: function (from, to) {
+    // only existing routes can be removed
+    let index = this.getRouteIndex(from, to)
+    if (index != -1) {
+      Config.routes.splice(index, 1)
+    }
+  },
+  //https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
+  dijkstra: function (c) {
+    //l('Dijkstra', c)
+    // gets context on input
+    let last = c.used[c.used.length - 1]
+    if (c.targets.includes(last)) {
+      c.found.push(c.used)
+      //return found
+    }
+
+    // overflow of hops
+    if (c.used.length == this.max_hops) return false
+
+    for (let route of Config.routes) {
+      let context = Object.assign({}, c)
+      if (route[0] == last && !c.used.includes(route[1])) {
+        context.used = c.used.concat(route[1])
+        this.dijkstra(context)
+      } else if (route[1] == last && !c.used.includes(route[0])) {
+        context.used = c.used.concat(route[0])
+        this.dijkstra(context)
+      }
+    }
+    return c.found
+  },
+
+  // returns sorted and filtered routes to some nodes for specific asset/amount
+  bestRoutes: async function (address, args) {
+    let addr = await parseAddress(address)
+    if (!addr) return []
+
+    let toArray = addr.banks
+    let fromArray = []
+    var found = []
+
+    if (me.my_bank && addr.banks.includes(me.my_bank.id)) {
+      // for faucet: return direct route as only option
+      return [[1, []]]
+    }
+
+    // where do we have enough amount in available
+    for (let candidate of Config.usedBanks) {
+      let bank = Config.banks.find((h) => h.id == candidate)
+      let ch = await me.getChannel(bank.pubkey)
+
+      if (!ch || !ch.derived[args.asset]) continue
+
+      // account for potentially unpredictable fees?
+      // 0 >= 0? return potential routes even for no amount
+      if (
+        ch.d.status != 'disputed' &&
+        ch.derived[args.asset].available >= args.amount
+      ) {
+        fromArray.push(candidate)
+      } else {
+        //l('Not enough available: ', ch.derived[args.asset].available, args.amount)
+      }
+    }
+
+    if (!fromArray || !toArray || fromArray.length == 0 || toArray.length == 0)
+      return []
+
+    for (let from of fromArray) {
+      this.dijkstra({
+        targets: toArray,
+        used: [from],
+        found: found,
+      })
+    }
+
+    // ensure uniqness (a-b-c-d and a-c-b-d are pretty pointless)
+    let uniqSets = []
+
+    let filtered = []
+
+    for (let route of found) {
+      // sort by id and concatenate
+      /*
+      let serialized = route.slice().sort((a, b) => a - b).join(',')
+      if (!uniqSets.includes(serialized)) {
+        uniqSets.push(serialized)
+      } else {
+        // not uniq path
+        //continue
+      }
+      */
+
+      // calculate total fees of entire path
+      var afterfees = 1
+      for (let hop of route) {
+        let bank = Config.banks.find((h) => h.id == hop)
+        if (bank) {
+          afterfees *= 1 - bank.fee_bps / 10000
+        }
+      }
+
+      // if not too crazy, add to filtered
+      if (afterfees > this.max_fee) {
+        filtered.push([1 - afterfees, route])
+      }
+    }
+
+    // sort by fee
+    return filtered.sort((a, b) => a[0] - b[0])
+  },
+}
+
+module.exports = Router
+ 
+

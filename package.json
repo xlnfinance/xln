@@ -51,7 +51,7 @@
     "build:tsc": "tsc",
     "watch": "tsc --watch",
     "env:build": "cd ./contracts && npx hardhat compile",
-    "env:run": "cd ./contracts && npx hardhat node",
+    "env:run": "cd ./contracts && npx hardhat node --hostname 0.0.0.0",
     "env:deploy": "cd ./contracts && npx hardhat ignition deploy ignition/modules/Depository.ts  --network localhost",
     "format": "prettier --write ./src",
     "check:prettier": "prettier --check ./src",

@@ -321,15 +321,36 @@
 
   onMount(() => {
     const initAndSetup = async () => {
-      // Check VR support
-      if ('xr' in navigator) {
+      // Check VR support (WebXR API for Quest 3/Oculus)
+      // CRITICAL: Must check BOTH xr existence AND isSessionSupported
+      // WebXR requires HTTPS in production (works on localhost HTTP for dev)
+      if ('xr' in navigator && (navigator as any).xr) {
         try {
-          isVRSupported = await (navigator as any).xr?.isSessionSupported('immersive-vr') || false;
-          console.log('🥽 VR Support:', isVRSupported ? 'Available' : 'Not available');
+          // Oculus Quest browsers support 'immersive-vr'
+          const vrSupported = await (navigator as any).xr.isSessionSupported('immersive-vr');
+          isVRSupported = vrSupported === true;
+          console.log('🥽 WebXR Detection:', {
+            hasNavigatorXR: true,
+            isSessionSupported: isVRSupported,
+            isSecureContext: window.isSecureContext,
+            protocol: window.location.protocol,
+            userAgent: navigator.userAgent.slice(0, 100)
+          });
+
+          if (!isVRSupported && !window.isSecureContext) {
+            console.warn('⚠️ WebXR requires HTTPS in production. Use self-signed cert or ngrok for testing.');
+          }
         } catch (err) {
           console.log('🥽 VR Support check failed:', err);
           isVRSupported = false;
         }
+      } else {
+        console.log('🥽 WebXR not available:', {
+          hasNavigatorXR: 'xr' in navigator,
+          navigatorXRValue: (navigator as any).xr,
+          isSecureContext: window.isSecureContext
+        });
+        isVRSupported = false;
       }
 
       await initThreeJS();
