@@ -269,6 +269,12 @@
   let asciiScale: number = 100;
   let asciiScenario: string = '';
 
+  // VR state
+  let isVRSupported: boolean = false;
+  let isVRActive: boolean = false;
+  let passthroughEnabled: boolean = false;
+  let _vrControllers: any[] = []; // Stored for future controller visualization
+
   // Ripple effects for balance changes
   interface Ripple {
     mesh: THREE.Mesh;
@@ -298,6 +304,17 @@
 
   onMount(() => {
     const initAndSetup = async () => {
+      // Check VR support
+      if ('xr' in navigator) {
+        try {
+          isVRSupported = await (navigator as any).xr?.isSessionSupported('immersive-vr') || false;
+          console.log('🥽 VR Support:', isVRSupported ? 'Available' : 'Not available');
+        } catch (err) {
+          console.log('🥽 VR Support check failed:', err);
+          isVRSupported = false;
+        }
+      }
+
       await initThreeJS();
       updateNetworkData();
       animate();
@@ -350,10 +367,11 @@
     );
     camera.position.set(0, 0, 100); // Zoom out for better H visibility
 
-    // Renderer setup
+    // Renderer setup with VR support
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.xr.enabled = true; // Enable WebXR
     container.appendChild(renderer.domElement);
 
     // OrbitControls setup
@@ -411,6 +429,141 @@
 
     // Handle resize
     window.addEventListener('resize', onWindowResize);
+
+    // Setup VR controllers if VR supported
+    if (isVRSupported && renderer) {
+      setupVRControllers();
+    }
+  }
+
+  /**
+   * Setup VR controllers for Quest 3
+   */
+  function setupVRControllers() {
+    if (!renderer || !scene) return;
+
+    // Controller 1 (right hand)
+    const controller1 = renderer.xr.getController(0);
+    controller1.addEventListener('selectstart', onVRSelectStart);
+    controller1.addEventListener('selectend', onVRSelectEnd);
+    scene.add(controller1);
+
+    // Controller 2 (left hand)
+    const controller2 = renderer.xr.getController(1);
+    controller2.addEventListener('selectstart', onVRSelectStart);
+    controller2.addEventListener('selectend', onVRSelectEnd);
+    scene.add(controller2);
+
+    // Add visual ray for pointing
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, -5)
+    ]);
+    const material = new THREE.LineBasicMaterial({ color: 0x00ffff, opacity: 0.8, transparent: true });
+
+    const ray1 = new THREE.Line(geometry, material);
+    const ray2 = new THREE.Line(geometry, material.clone());
+
+    controller1.add(ray1);
+    controller2.add(ray2);
+
+    _vrControllers = [controller1, controller2];
+
+    console.log('🥽 VR Controllers initialized');
+  }
+
+  let vrGrabbedEntity: any = null;
+  let vrGrabController: any = null;
+
+  function onVRSelectStart(event: any) {
+    const controller = event.target;
+
+    // Raycast from controller
+    const tempMatrix = new THREE.Matrix4();
+    tempMatrix.identity().extractRotation(controller.matrixWorld);
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+    const intersects = raycaster.intersectObjects(entities.map(e => e.mesh));
+
+    if (intersects.length > 0) {
+      const intersected = intersects[0]?.object;
+      if (!intersected) return;
+      const entity = entities.find(e => e.mesh === intersected);
+
+      if (entity) {
+        vrGrabbedEntity = entity;
+        vrGrabController = controller;
+        entity.isPinned = true; // Pin while dragging
+        console.log('🥽 Grabbed entity:', entity.id);
+      }
+    }
+  }
+
+  function onVRSelectEnd() {
+    if (vrGrabbedEntity) {
+      console.log('🥽 Released entity:', vrGrabbedEntity.id);
+      vrGrabbedEntity = null;
+      vrGrabController = null;
+    }
+  }
+
+  /**
+   * Enter VR mode (Quest 3)
+   */
+  async function enterVR() {
+    if (!renderer || !isVRSupported) {
+      debug.error('VR not supported on this device');
+      return;
+    }
+
+    try {
+      const sessionInit: any = {
+        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+      };
+
+      // Add passthrough if enabled
+      if (passthroughEnabled) {
+        sessionInit.optionalFeatures.push('layers');
+      }
+
+      const session = await (navigator as any).xr.requestSession('immersive-vr', sessionInit);
+
+      await renderer.xr.setSession(session);
+      isVRActive = true;
+
+      // Switch to VR animation loop
+      renderer.setAnimationLoop(animate);
+
+      console.log('🥽 Entered VR mode');
+
+      // Listen for session end
+      session.addEventListener('end', () => {
+        isVRActive = false;
+        // Return to regular animation loop
+        renderer.setAnimationLoop(null);
+        animate();
+        console.log('🥽 Exited VR mode');
+      });
+
+    } catch (error) {
+      console.error('Failed to enter VR:', error);
+      debug.error('VR session failed: ' + (error as Error).message);
+    }
+  }
+
+  /**
+   * Exit VR mode
+   */
+  async function exitVR() {
+    if (renderer?.xr?.getSession) {
+      const session = await renderer.xr.getSession();
+      if (session) {
+        await session.end();
+      }
+    }
   }
 
   function updateNetworkData() {
@@ -1492,7 +1645,25 @@
   }
 
   function animate() {
-    animationId = requestAnimationFrame(animate);
+    // VR uses setAnimationLoop, don't double-call requestAnimationFrame
+    if (!renderer?.xr?.isPresenting) {
+      animationId = requestAnimationFrame(animate);
+    }
+
+    // Update VR grabbed entity position
+    if (vrGrabbedEntity && vrGrabController) {
+      const controllerPos = new THREE.Vector3();
+      controllerPos.setFromMatrixPosition(vrGrabController.matrixWorld);
+
+      vrGrabbedEntity.mesh.position.copy(controllerPos);
+      vrGrabbedEntity.position.copy(controllerPos);
+
+      // Update label position
+      if (vrGrabbedEntity.label) {
+        vrGrabbedEntity.label.position.copy(controllerPos);
+        vrGrabbedEntity.label.position.y += 3;
+      }
+    }
 
     // Pulse animation for hubs (24/7 always-on effect)
     const time = Date.now() * 0.001; // Convert to seconds
@@ -3576,6 +3747,30 @@
             </button>
           {/if}
         </div>
+
+        <!-- VR Mode -->
+        {#if isVRSupported}
+        <div class="vr-section">
+          <h4>VR Mode</h4>
+          {#if isVRActive}
+            <button class="vr-exit-btn" on:click={exitVR}>
+              Exit VR
+            </button>
+            <p class="vr-status">VR Active - Use controllers to interact</p>
+          {:else}
+            <div class="vr-options">
+              <label class="vr-checkbox">
+                <input type="checkbox" bind:checked={passthroughEnabled} />
+                <span>Passthrough (mixed reality)</span>
+              </label>
+            </div>
+            <button class="vr-enter-btn" on:click={enterVR}>
+              Enter VR
+            </button>
+            <p class="vr-hint">Quest 3: Point + trigger to grab entities</p>
+          {/if}
+        </div>
+        {/if}
       </div>
 
       <small>Scroll to zoom, drag to rotate</small>
@@ -4443,6 +4638,79 @@
 
   .ascii-execute-btn:hover {
     background: linear-gradient(135deg, #00ffaa 0%, #00dd77 100%);
+  }
+
+  /* VR Section */
+  .vr-section {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(40, 40, 40, 0.6);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .vr-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .vr-options {
+    margin-bottom: 8px;
+  }
+
+  .vr-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+  }
+
+  .vr-checkbox input {
+    cursor: pointer;
+  }
+
+  .vr-enter-btn,
+  .vr-exit-btn {
+    width: 100%;
+    padding: 8px 12px;
+    background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+    border: none;
+    border-radius: 4px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-bottom: 8px;
+  }
+
+  .vr-enter-btn:hover {
+    background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+  }
+
+  .vr-exit-btn {
+    background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  }
+
+  .vr-exit-btn:hover {
+    background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  }
+
+  .vr-status,
+  .vr-hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0;
+    text-align: center;
+  }
+
+  .vr-status {
+    color: #7c3aed;
+    font-weight: 600;
   }
 
   .send-btn:hover {
