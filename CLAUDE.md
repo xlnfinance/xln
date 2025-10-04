@@ -450,3 +450,4 @@ Bilateral relationships use canonical ordering:
 - Always use loadJurisdictions() functions instead of hardcoding contract addresses
 - Study old_src/app/Channel.ts for bilateral consensus patterns - it's the reference implementation
 - do NOT create ad-hoc /frontend methods when it belongs to /src code and must be exposed through server.ts - use it for all helpers. frontend is for UI/UX only
+- **CRITICAL: ALWAYS update docs/next.md when tasks are completed** - move to "Completed" section with date

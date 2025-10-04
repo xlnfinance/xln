@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 
-export type ViewMode = 'home' | 'panels' | 'graph3d' | 'graph2d' | 'terminal';
+export type ViewMode = 'home' | 'settings' | 'docs' | 'brainvault' | 'panels' | 'graph3d' | 'graph2d' | 'terminal';
 
 const STORAGE_KEY = 'xln-view-mode';
 
@@ -9,7 +9,7 @@ function createViewModeStore() {
 
   if (typeof window !== 'undefined') {
     const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved === 'home' || saved === 'panels' || saved === 'graph3d' || saved === 'graph2d' || saved === 'terminal') {
+    if (saved === 'home' || saved === 'settings' || saved === 'docs' || saved === 'brainvault' || saved === 'panels' || saved === 'graph3d' || saved === 'graph2d' || saved === 'terminal') {
       initial = saved;
     }
   }

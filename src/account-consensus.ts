@@ -17,9 +17,8 @@ import { cloneAccountMachine } from './state-helpers';
 import { deriveDelta, getDefaultCreditLimit, isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-tx/crypto';
 import { cryptoHash as hash, hash20 } from './utils';
-import { safeStringify, buffersEqual } from './serialization-utils';
+import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
-import { encode } from './snapshot-coder';
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
 
@@ -301,9 +300,9 @@ export async function proposeAccountFrame(
 
   for (const [tokenId, delta] of sortedTokens) {
     finalTokenIds.push(tokenId);
-    // Calculate net delta: offdelta - ondelta (+ collateral for reserves)
-    const netDelta = delta.offdelta - delta.ondelta;
-    finalDeltas.push(netDelta);
+    // Frame stores TOTAL delta: ondelta + offdelta (canonical across both sides)
+    const totalDelta = delta.ondelta + delta.offdelta;
+    finalDeltas.push(totalDelta);
   }
 
   console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
@@ -436,28 +435,42 @@ export function handleAccountInput(
       return { success: false, error: 'Invalid frame structure', events };
     }
 
-    // Handle simultaneous proposals - both sides can propose
-    // If we have a pending frame and receive one with same ID, we need to handle it
-    if (receivedFrame.frameId === accountMachine.currentFrameId + 1 && accountMachine.pendingFrame &&
-        accountMachine.pendingFrame.frameId === receivedFrame.frameId) {
-      console.log(`🔄 Simultaneous proposals detected for frame ${receivedFrame.frameId}`);
+    // CHANNEL.TS REFERENCE: Lines 138-165 - Proper rollback logic for simultaneous proposals
+    // Handle simultaneous proposals when both sides send same frameId
+    if (accountMachine.pendingFrame && receivedFrame.frameId === accountMachine.pendingFrame.frameId) {
+      console.log(`🔄 SIMULTANEOUS-PROPOSALS: Both proposed frame ${receivedFrame.frameId}`);
 
-      // Compare frame hashes to decide which to accept (deterministic tiebreaker)
-      const ourHash = accountMachine.pendingFrame.stateHash;
-      const theirHash = receivedFrame.stateHash;
+      // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
+      const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
-      if (ourHash < theirHash) {
-        console.log(`📤 Our frame wins (hash comparison), ignoring received frame`);
-        // Keep our pending frame, ignore theirs
-        return { success: false, error: 'Frame conflict - our frame has priority', events };
+      if (isLeftEntity) {
+        // We are LEFT - ignore their frame, keep ours
+        accountMachine.rollbackCount++;
+        console.log(`📤 LEFT-WINS: Ignoring right's frame (rollbacks: ${accountMachine.rollbackCount})`);
+        return { success: false, error: 'Simultaneous proposal - left side ignores right', events };
       } else {
-        console.log(`📥 Their frame wins (hash comparison), accepting and rolling back ours`);
-        // Accept their frame, rollback ours
-        delete accountMachine.pendingFrame;
-        accountMachine.sentTransitions = 0;
-        delete accountMachine.clonedForValidation;
-        // Continue to process their frame
+        // We are RIGHT - rollback our frame, accept theirs
+        if (accountMachine.rollbackCount === 0) {
+          // First rollback - discard our pending frame
+          accountMachine.sentTransitions = 0;
+          delete accountMachine.pendingFrame;
+          delete accountMachine.clonedForValidation;
+          accountMachine.rollbackCount++;
+          console.log(`📥 RIGHT-ROLLBACK: Discarding our frame, accepting left's (rollbacks: ${accountMachine.rollbackCount})`);
+          // Continue to process their frame below
+        } else {
+          // Should never rollback twice
+          console.error(`❌ FATAL: Right side rolled back ${accountMachine.rollbackCount} times - consensus broken`);
+          return { success: false, error: 'Multiple rollbacks detected - consensus failure', events };
+        }
       }
+    }
+
+    // CHANNEL.TS REFERENCE: Lines 161-164 - Decrement rollbacks on successful confirmation
+    if (accountMachine.pendingFrame && receivedFrame.frameId === accountMachine.currentFrameId + 1 && accountMachine.rollbackCount > 0) {
+      // They accepted our frame after we had rollbacks - decrement
+      accountMachine.rollbackCount--;
+      console.log(`✅ ROLLBACK-RESOLVED: They accepted our frame (rollbacks: ${accountMachine.rollbackCount})`);
     }
 
     // Verify frame sequence
@@ -491,30 +504,25 @@ export function handleAccountInput(
       processEvents.push(...result.events);
     }
 
-    // STATE VERIFICATION: Compare our computed state with their claimed state (like old_src Channel.ts)
-    const ourComputedState = encode(clonedMachine.deltas);
+    // STATE VERIFICATION: Compare deltas directly (both sides compute identically)
+    // Extract final state from clonedMachine after processing ALL transactions
+    const ourFinalTokenIds: number[] = [];
+    const ourFinalDeltas: bigint[] = [];
 
-    // Reconstruct their claimed state from the frame
-    const theirClaimedDeltas = new Map();
-    receivedFrame.tokenIds?.forEach((tokenId, i) => {
-      const existingDelta = accountMachine.deltas.get(tokenId);
-      if (existingDelta) {
-        // Frame contains total delta (ondelta + offdelta), we need to reconstruct the full delta
-        const totalClaimed = receivedFrame.deltas[i];
-        theirClaimedDeltas.set(tokenId, {
-          ...existingDelta,
-          // Assume ondelta stays same, frame delta represents new total
-          offdelta: totalClaimed! - existingDelta.ondelta
-        });
-      }
-    });
-    const theirClaimedState = encode(theirClaimedDeltas);
+    const sortedOurTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
+    for (const [tokenId, delta] of sortedOurTokens) {
+      ourFinalTokenIds.push(tokenId);
+      ourFinalDeltas.push(delta.ondelta + delta.offdelta);
+    }
+
+    const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
+    const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
 
     console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.frameId}:`);
-    console.log(`  Our computed:  ${ourComputedState.toString('hex').slice(0, 32)}...`);
-    console.log(`  Their claimed: ${theirClaimedState.toString('hex').slice(0, 32)}...`);
+    console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
+    console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
 
-    if (!buffersEqual(ourComputedState, theirClaimedState)) {
+    if (ourComputedState !== theirClaimedState) {
       console.error(`❌ CONSENSUS-FAILURE: Both sides computed different final states!`);
 
       // DUMP EVERYTHING - FULL DATA STRUCTURES
@@ -522,9 +530,10 @@ export function handleAccountInput(
       console.error(`❌ AccountMachine BEFORE:`, safeStringify(accountMachine));
       console.error(`❌ ClonedMachine AFTER:`, safeStringify(clonedMachine));
       console.error(`❌ ReceivedFrame COMPLETE:`, safeStringify(receivedFrame));
-      console.error(`❌ TheirClaimedDeltas COMPLETE:`, safeStringify(Object.fromEntries(theirClaimedDeltas)));
-      console.error(`❌ OurComputedState BUFFER:`, Array.from(ourComputedState).map(b => b.toString(16).padStart(2,'0')).join(''));
-      console.error(`❌ TheirClaimedState BUFFER:`, Array.from(theirClaimedState).map(b => b.toString(16).padStart(2,'0')).join(''));
+      console.error(`❌ OurComputedState:`, ourComputedState);
+      console.error(`❌ TheirClaimedState:`, theirClaimedState);
+      console.error(`❌ OurFinalDeltas:`, ourFinalDeltas.map(d => d.toString()));
+      console.error(`❌ TheirFrameDeltas:`, receivedFrame.deltas.map(d => d.toString()));
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
       console.error(`❌ isLeft=${isLeftEntity}, fromEntity=${accountMachine.proofHeader.fromEntity}, toEntity=${accountMachine.proofHeader.toEntity}`);
 

@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
-		host: '127.0.0.1',
+		host: '0.0.0.0',
 		port: 8080,
 		fs: {
 			// Allow serving files from the parent directory (to access ../dist/)

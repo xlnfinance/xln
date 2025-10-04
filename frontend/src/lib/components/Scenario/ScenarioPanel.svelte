@@ -21,6 +21,9 @@
   let isLoading: boolean = false;
   let commandInput: string = '';
   let parseErrors: string[] = [];
+  let isExecuting: boolean = false;
+  let executionOutput: Array<{ timestamp: number; line: string; type: 'info' | 'success' | 'error' | 'step' }> = [];
+  let executionOutputEl: HTMLDivElement;
 
   // Load scenario text from file
   async function loadScenario(scenarioId: string) {
@@ -51,7 +54,7 @@
     }
   }
 
-  // Execute scenario
+  // Execute scenario with live output
   async function executeScenario() {
     if (!scenarioText.trim()) {
       parseErrors = ['No scenario loaded'];
@@ -59,8 +62,25 @@
     }
 
     parseErrors = [];
+    executionOutput = [];
+    isExecuting = true;
+
+    const addOutput = (line: string, type: 'info' | 'success' | 'error' | 'step' = 'info') => {
+      executionOutput = [...executionOutput, { timestamp: Date.now(), line, type }];
+      // Auto-scroll to bottom
+      setTimeout(() => {
+        if (executionOutputEl) {
+          executionOutputEl.scrollTop = executionOutputEl.scrollHeight;
+        }
+      }, 50);
+    };
 
     try {
+      addOutput('═══════════════════════════════════════', 'info');
+      addOutput('  XLN SCENARIO EXECUTOR', 'info');
+      addOutput('═══════════════════════════════════════', 'info');
+      addOutput('', 'info');
+
       // Import XLN server module (contains scenario functions)
       const serverUrl = new URL('/server.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ serverUrl);
@@ -73,6 +93,8 @@
         throw new Error('Environment not initialized');
       }
 
+      addOutput('🔍 Parsing scenario...', 'step');
+
       // Parse scenario using XLN module
       const parsed = XLN.parseScenario(scenarioText);
 
@@ -80,23 +102,55 @@
         parseErrors = parsed.errors.map((e: any) =>
           `Line ${e.lineNumber}: ${e.message}${e.context ? ` (${e.context})` : ''}`
         );
+        addOutput(`❌ Parse failed: ${parsed.errors.length} errors`, 'error');
+        isExecuting = false;
         return;
       }
 
-      // Execute scenario
-      console.log('🎬 Executing scenario...');
+      addOutput(`✓ Parsed ${parsed.scenario.steps?.length || 0} steps`, 'success');
+      addOutput('', 'info');
+      addOutput('🎬 Executing scenario...', 'step');
+      addOutput('', 'info');
+
+      // Execute scenario with step-by-step output
+      const steps = parsed.scenario.steps || [];
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        await new Promise(resolve => setTimeout(resolve, 300)); // Delay for readability
+
+        addOutput(`[${i + 1}/${steps.length}] ${step.description || step.type}`, 'step');
+
+        // Show step details
+        if (step.from && step.to) {
+          addOutput(`    From: ${step.from.slice(0, 10)}...`, 'info');
+          addOutput(`    To:   ${step.to.slice(0, 10)}...`, 'info');
+        }
+        if (step.amount) {
+          addOutput(`    Amount: ${step.amount} ${step.token || 'USDC'}`, 'info');
+        }
+      }
+
       const result = await XLN.executeScenario(env, parsed.scenario);
 
+      addOutput('', 'info');
       if (result.success) {
-        console.log(`✅ Scenario executed successfully! Generated ${result.framesGenerated} frames`);
+        addOutput('═══════════════════════════════════════', 'success');
+        addOutput(`✅ Scenario complete!`, 'success');
+        addOutput(`   Generated ${result.framesGenerated} frames`, 'success');
+        addOutput('═══════════════════════════════════════', 'success');
       } else {
-        parseErrors = result.errors.map((e: any) =>
-          `t=${e.timestamp}s: ${e.error}`
-        );
+        addOutput('❌ Execution failed:', 'error');
+        result.errors.forEach((e: any) => {
+          addOutput(`   t=${e.timestamp}s: ${e.error}`, 'error');
+        });
+        parseErrors = result.errors.map((e: any) => `t=${e.timestamp}s: ${e.error}`);
       }
     } catch (error) {
       console.error('❌ Scenario execution failed:', error);
+      addOutput(`❌ Fatal error: ${(error as Error).message}`, 'error');
       parseErrors = [(error as Error).message];
+    } finally {
+      isExecuting = false;
     }
   }
 
@@ -144,8 +198,8 @@
     <div class="scenario-editor">
       <div class="editor-header">
         <span class="editor-title">Scenario Script</span>
-        <button on:click={executeScenario} class="execute-btn" disabled={isLoading}>
-          {isLoading ? '⏳ Loading...' : '▶️ Execute'}
+        <button on:click={executeScenario} class="execute-btn" disabled={isLoading || isExecuting}>
+          {isExecuting ? '⏳ Executing...' : isLoading ? '⏳ Loading...' : '▶️ Execute'}
         </button>
       </div>
 
@@ -167,6 +221,17 @@
         />
         <button on:click={addCommand} class="add-command-btn">+ Add</button>
       </div>
+
+      <!-- Execution Output Viewer -->
+      {#if executionOutput.length > 0}
+        <div class="execution-viewer" bind:this={executionOutputEl}>
+          {#each executionOutput as output}
+            <div class="output-line {output.type}">
+              {output.line}
+            </div>
+          {/each}
+        </div>
+      {/if}
 
       <!-- Parse Errors -->
       {#if parseErrors.length > 0}
@@ -384,5 +449,60 @@
   .scenario-textarea::-webkit-scrollbar-thumb:hover,
   .parse-errors::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.3);
+  }
+
+  /* Execution Viewer - Hacker Terminal Style */
+  .execution-viewer {
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.8);
+    border-top: 2px solid rgba(0, 255, 136, 0.3);
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #00ff88;
+  }
+
+  .output-line {
+    margin: 2px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .output-line.info {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .output-line.success {
+    color: #00ff88;
+    font-weight: 600;
+  }
+
+  .output-line.error {
+    color: #ff4444;
+    font-weight: 600;
+  }
+
+  .output-line.step {
+    color: #00d9ff;
+    font-weight: 500;
+  }
+
+  .execution-viewer::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .execution-viewer::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .execution-viewer::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 136, 0.3);
+    border-radius: 3px;
+  }
+
+  .execution-viewer::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 255, 136, 0.5);
   }
 </style>

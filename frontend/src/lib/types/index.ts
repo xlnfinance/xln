@@ -207,8 +207,28 @@ export interface ComponentState {
   [componentId: string]: boolean; // expanded/collapsed state
 }
 
+export type ThemeName = 'dark' | 'light' | 'gold-luxe' | 'matrix' | 'arctic';
+
+export interface ThemeColors {
+  name: string;
+  background: string;
+  backgroundGradient: string;
+  entityColor: string;
+  entityEmissive: string;
+  connectionColor: string;
+  creditColor: string;
+  debitColor: string;
+  collateralColor: string;
+  textPrimary: string;
+  textSecondary: string;
+  accentColor: string;
+  borderColor: string;
+  glassBackground: string;
+  glassBorder: string;
+}
+
 export interface Settings {
-  theme: 'dark' | 'light';
+  theme: ThemeName;
   dropdownMode: 'signer-first' | 'entity-first';
   serverDelay: number;
   portfolioScale: number; // Max value for portfolio comparison (e.g., $5000)

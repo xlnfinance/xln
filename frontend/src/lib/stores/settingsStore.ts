@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
-import type { Settings } from '../types';
+import type { Settings, ThemeName } from '../types';
+import { applyThemeToDocument } from '../utils/themes';
 
 // Default settings
 const defaultSettings: Settings = {
@@ -66,20 +67,10 @@ const settingsOperations = {
   },
 
   // Update theme
-  setTheme(theme: 'dark' | 'light') {
+  setTheme(theme: ThemeName) {
     settings.update(current => ({ ...current, theme }));
     this.saveToStorage();
-    
-    // Apply theme to document
-    if (typeof document !== 'undefined') {
-      document.documentElement.setAttribute('data-theme', theme);
-    }
-  },
-
-  // Toggle theme
-  toggleTheme() {
-    const current = get(settings);
-    this.setTheme(current.theme === 'dark' ? 'light' : 'dark');
+    applyThemeToDocument(theme);
   },
 
   // Update dropdown mode
@@ -150,12 +141,10 @@ const settingsOperations = {
   // Initialize settings
   initialize() {
     this.loadFromStorage();
-    
+
     // Apply initial theme
     const current = get(settings);
-    if (typeof document !== 'undefined') {
-      document.documentElement.setAttribute('data-theme', current.theme);
-    }
+    applyThemeToDocument(current.theme);
   }
 };
 
