@@ -251,6 +251,13 @@
     selectedRouteIndex = 0;
   }
 
+  // Highlight selected route path
+  $: if (availableRoutes.length > 0 && selectedRouteIndex >= 0) {
+    highlightRoutePath(availableRoutes[selectedRouteIndex]);
+  } else {
+    clearRouteHighlight();
+  }
+
   // Active payment jobs
   interface PaymentJob {
     id: string;
@@ -2762,6 +2769,44 @@
     }
   }
 
+  function highlightRoutePath(route: typeof availableRoutes[0] | undefined) {
+    if (!route) {
+      clearRouteHighlight();
+      return;
+    }
+
+    // Reset all connections to default opacity
+    clearRouteHighlight();
+
+    // Highlight connections in the route path
+    for (let i = 0; i < route.path.length - 1; i++) {
+      const from = route.path[i];
+      const to = route.path[i + 1];
+      if (!from || !to) continue;
+
+      const connection = connections.find(c =>
+        (c.from === from && c.to === to) || (c.from === to && c.to === from)
+      );
+
+      if (connection) {
+        const lineMaterial = connection.line.material as THREE.LineDashedMaterial;
+        lineMaterial.opacity = 0.8; // Bright highlight
+        lineMaterial.color.setHex(0x00ff88); // Green for selected route
+      }
+    }
+  }
+
+  function clearRouteHighlight() {
+    const themeColors = getThemeColors($settings.theme);
+    const connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
+
+    connections.forEach(connection => {
+      const lineMaterial = connection.line.material as THREE.LineDashedMaterial;
+      lineMaterial.opacity = 0.3; // Default opacity
+      lineMaterial.color.setHex(connectionColor); // Theme color
+    });
+  }
+
   function addActivityToTicker(fromId: string, toId: string, accountTx: any) {
     const fromShort = fromId.slice(0, 8);
     const toShort = toId.slice(0, 8);
@@ -2840,21 +2885,15 @@
     }
 
     availableTokens = Array.from(tokenSet).sort((a, b) => a - b);
+
+    // Default to token 2 (USDC) if nothing available
     if (availableTokens.length === 0) {
-      availableTokens = [0]; // Default fallback
-    }
-
-    // FORCE TOKEN 0 ALWAYS - Never switch tokens during playback
-    // This prevents the token 0 → token 1 jumping bug
-    if (selectedTokenId !== 0) {
-      selectedTokenId = 0;
-      saveBirdViewSettings(); // Persist the change
-    }
-
-    // ALWAYS include token 0 in availableTokens for UI stability
-    // This prevents dropdown from showing "empty" during playback
-    if (!availableTokens.includes(0)) {
-      availableTokens = [0, ...availableTokens].sort((a, b) => a - b);
+      availableTokens = [2];
+      selectedTokenId = 2;
+    } else if (!availableTokens.includes(selectedTokenId)) {
+      // If current selected token not available, switch to first available
+      selectedTokenId = availableTokens[0]!;
+      saveBirdViewSettings();
     }
   }
 
@@ -4068,23 +4107,23 @@
         </div>
       </div>
 
+      <!-- Real-time Activity Ticker (inside sidebar) -->
+      {#if recentActivity.length > 0}
+        <div class="activity-section">
+          <h4>⚡ Live Activity</h4>
+          <div class="activity-list">
+            {#each recentActivity as activity (activity.id)}
+              <div class="activity-item {activity.type}">
+                {activity.message}
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
       <small>Scroll to zoom, drag to rotate</small>
     </div>
   </div>
-  {/if}
-
-  <!-- Real-time Activity Ticker -->
-  {#if recentActivity.length > 0}
-    <div class="activity-ticker">
-      <h4>⚡ Live Activity</h4>
-      <div class="activity-list">
-        {#each recentActivity as activity (activity.id)}
-          <div class="activity-item {activity.type}">
-            {activity.message}
-          </div>
-        {/each}
-      </div>
-    </div>
   {/if}
 
   <!-- Active Payment Jobs (Flows) -->
@@ -5218,24 +5257,19 @@
     padding: 20px;
   }
 
-  .activity-ticker {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    background: rgba(45, 45, 45, 0.9);
-    border: 1px solid #007acc;
-    border-radius: 8px;
+  .activity-section {
+    margin-top: 16px;
     padding: 12px;
-    min-width: 300px;
-    max-width: 400px;
-    z-index: 20;
-    backdrop-filter: blur(10px);
+    background: rgba(0, 20, 0, 0.3);
+    border: 1px solid rgba(0, 255, 136, 0.2);
+    border-radius: 6px;
   }
 
-  .activity-ticker h4 {
+  .activity-section h4 {
     margin: 0 0 8px 0;
-    color: #007acc;
+    color: #00ff88;
     font-size: 12px;
+    font-weight: 600;
   }
 
   .activity-list {

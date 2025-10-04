@@ -2,6 +2,12 @@
 
 ## ✅ Completed (2025-10-04)
 
+### Bug Fixes (Session 2)
+- ✅ **Token 0 Bug** - Removed hack that forced non-existent token 0, now uses real tokens (1=ETH, 2=USDC)
+- ✅ **Route Highlighting** - Selected payment route glows green (0.8 opacity) showing full path
+- ✅ **Live Activity Moved** - Now inside sidebar instead of floating overlay
+- ✅ **Duplicate Import** - Removed stray InvariantTicker import at EOF
+
 ### Core Consensus Fixes
 - ✅ **Account Consensus Fixed** - Bilateral frame exchange now works reliably
   - Fixed delta calculation inconsistency (`ondelta + offdelta` everywhere)
