@@ -26,6 +26,8 @@ export type Profile = {
     // Fee configuration (PPM = parts per million)
     routingFeePPM?: number; // 0-10000 (0% - 1%)
     baseFee?: bigint; // Base fee in smallest unit (e.g., wei for ETH)
+    // 3D visualization position (for scenarios)
+    position?: { x: number; y: number; z: number };
     // Additional fields
     [key: string]: unknown;
   };

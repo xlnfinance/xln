@@ -61,7 +61,6 @@ echo ""
 echo "🎉 ALL TYPESCRIPT VALIDATION PASSED - Starting development servers..."
 
 # Step 2: Start file watching in background
-mkdir -p dist
 mkdir -p frontend/static
 
 echo "🔍 Starting continuous TypeScript checking for /src..."
@@ -72,10 +71,9 @@ echo "🔍 Starting continuous TypeScript checking for /frontend..."
 (cd frontend && bun run check:watch) &
 FRONTEND_TS_PID=$!
 
-# Build server once for frontend (use same command as build.sh)
+# Build server once for frontend (build directly to final location)
 echo "📦 Building server for frontend..."
-bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util
-cp dist/server.js frontend/static/server.js
+bun build src/server.ts --target=browser --outfile=frontend/static/server.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util
 
 # FINTECH PIPELINE: Test browser compatibility immediately
 echo "🧪 CRITICAL: Testing browser bundle compatibility..."
@@ -110,10 +108,10 @@ cp jurisdictions.json frontend/static/jurisdictions.json
 echo "📦 Starting server watch (ONLY src/server.ts)..."
 echo "   ⚠️  NOTE: This will ONLY rebuild server.js when src/server.ts changes"
 echo "   ⚠️  NOTE: jurisdictions.json is NEVER overwritten by this watcher"
-echo "   🔧 NOTE: Using same build command as build.sh for consistency"
-bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util --watch &
+echo "   🔧 NOTE: Building directly to frontend/static/server.js for instant updates"
+bun build src/server.ts --target=browser --outfile=frontend/static/server.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util --watch &
 WATCH_PID=$!
-# Note: Auto-copy handled by bun build --watch to dist, then manual copy
+# Auto-rebuild now writes directly to frontend/static/server.js
 
 echo "🌐 Starting Svelte development server..."
 

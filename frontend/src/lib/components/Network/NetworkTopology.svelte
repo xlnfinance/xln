@@ -8,7 +8,6 @@
   import { timeOperations } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
   import { debug } from '../../utils/debug';
-  import { TOKEN_REGISTRY } from '../../../../../src/account-utils';
   import { getThemeColors } from '../../utils/themes';
 
   // Props
@@ -32,6 +31,13 @@
     isPinned?: boolean;  // User has manually positioned this entity
     isHovered?: boolean; // Mouse is over this entity
     isDragging?: boolean; // Currently being dragged
+    activityRing?: THREE.Mesh; // Activity indicator ring
+  }
+
+  interface FrameActivity {
+    activeEntities: Set<string>;
+    incomingFlows: Map<string, string[]>; // entityId -> source entity IDs
+    outgoingFlows: Map<string, string[]>; // entityId -> destination entity IDs
   }
 
   interface ConnectionData {
@@ -86,7 +92,7 @@
   let entities: EntityData[] = [];
   let connections: ConnectionData[] = [];
 
-  // Transaction particles
+  // Transaction particles with directional metadata
   let particles: Array<{
     mesh: THREE.Mesh;
     connectionIndex: number;
@@ -94,7 +100,18 @@
     speed: number;
     type: string;
     amount?: bigint;
+    direction?: 'incoming' | 'outgoing';
   }> = [];
+
+  // Frame activity tracking
+  let currentFrameActivity: FrameActivity = {
+    activeEntities: new Set(),
+    incomingFlows: new Map(),
+    outgoingFlows: new Map()
+  };
+
+  // Connection index map for O(1) lookups
+  let connectionIndexMap: Map<string, number> = new Map();
 
   // Animation frame and hover state
   let animationId: number;
@@ -124,13 +141,13 @@
     try {
       const saved = localStorage.getItem('xln-bird-view-settings');
       const parsed = saved ? JSON.parse(saved) : {
-        barsMode: 'close',
+        barsMode: 'spread',
         selectedTokenId: 1, // Default to USDC
         viewMode: '3d',
         entityMode: 'sphere',
         wasLastOpened: false,
         rotationX: 0,
-        rotationY: 0, // No rotation by default
+        rotationY: 0,
         rotationZ: 0,
         camera: undefined
       };
@@ -155,13 +172,13 @@
       return parsed;
     } catch {
       return {
-        barsMode: 'close',
+        barsMode: 'spread',
         selectedTokenId: 1, // Default to USDC
         viewMode: '3d',
         entityMode: 'sphere',
         wasLastOpened: false,
         rotationX: 0,
-        rotationY: 0, // No rotation by default
+        rotationY: 0,
         rotationZ: 0,
         camera: undefined
       };
@@ -222,9 +239,10 @@
   let isResizingSidebar: boolean = false;
   let forceLayoutEnabled: boolean = true; // Toggle for force-directed layout rebalancing
 
-  // Helper to get token symbol from TOKEN_REGISTRY
+  // Helper to get token symbol using xlnFunctions
   function getTokenSymbol(tokenId: number): string {
-    return TOKEN_REGISTRY[tokenId]?.symbol || `TKN${tokenId}`;
+    const tokenInfo = $xlnFunctions?.getTokenInfo?.(tokenId);
+    return tokenInfo?.symbol || `TKN${tokenId}`;
   }
 
   // Quick payment form state
@@ -328,7 +346,13 @@
 
   // Live command builder state
   let commandAction: string = '';
-  let commandText: string = '';
+  let commandText: string = 'payRandom count=10 amount=100000 minHops=2 maxHops=4';
+
+  // Live activity log
+  let activityLog: string[] = [];
+  function logActivity(message: string) {
+    activityLog = [...activityLog.slice(-50), `[${new Date().toLocaleTimeString()}] ${message}`];
+  }
 
   // Slice & export state
   let sliceStart: number = 0;
@@ -815,9 +839,8 @@
     // Create connections between entities that have accounts
     createConnections();
 
-    // Create transaction flow particles and trigger activity pulses
+    // Create transaction flow particles (also tracks activity)
     createTransactionParticles();
-    updateEntityActivityFromCurrentFrame();
 
     // Don't enforce spacing constraints - they break the H-shape
     // enforceSpacingConstraints();
@@ -1037,17 +1060,33 @@
   }
 
   function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>, isHub: boolean) {
-    // Position entities using force-directed layout (always)
+    // Position entities: replica position > gossip position > force layout > radial fallback
     let x: number, y: number, z: number;
 
-    if (forceLayoutPositions.has(profile.entityId)) {
-      // Use computed force-directed position
+    // Priority 1: Check replica position (from importReplica serverTx)
+    const currentReplicas = $visibleReplicas;
+    const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(profile.entityId + ':'));
+    const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
+
+    if (replica?.position) {
+      x = replica.position.x;
+      y = replica.position.y;
+      z = replica.position.z;
+      console.log(`📍 Using replica position for ${profile.entityId.slice(0,10)}: (${x}, ${y}, ${z})`);
+    } else if (profile.metadata?.position) {
+      // Priority 2: Check gossip profile position
+      x = profile.metadata.position.x;
+      y = profile.metadata.position.y;
+      z = profile.metadata.position.z;
+      console.log(`📍 Using gossip position for ${profile.entityId.slice(0,10)}: (${x}, ${y}, ${z})`);
+    } else if (forceLayoutPositions.has(profile.entityId) && forceLayoutEnabled) {
+      // Priority 3: Use computed force-directed position (only if enabled)
       const pos = forceLayoutPositions.get(profile.entityId)!;
       x = pos.x;
       y = pos.y;
       z = pos.z;
     } else {
-      // Fallback: large circle if entity not in force layout
+      // Priority 4: Fallback to radial layout
       const radius = 30;
       const angle = (index / total) * Math.PI * 2;
       x = Math.cos(angle) * radius;
@@ -1077,6 +1116,7 @@
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
+    console.log(`📍 GRID-POS-E: Applied to mesh ${profile.entityId.slice(0,10)}: (${x}, ${y}, ${z})`);
 
     // Store material for animation (hubs will pulse)
     mesh.userData['isHub'] = isHub;
@@ -1146,105 +1186,157 @@
 
     // NO DEMO CONNECTIONS - only show real bilateral accounts
 
+    // Build connection index map for O(1) lookups
+    buildConnectionIndexMap();
+  }
+
+  function buildConnectionIndexMap() {
+    connectionIndexMap.clear();
+    connections.forEach((conn, index) => {
+      const key1 = `${conn.from}->${conn.to}`;
+      const key2 = `${conn.to}->${conn.from}`;
+      connectionIndexMap.set(key1, index);
+      connectionIndexMap.set(key2, index);
+    });
   }
 
   function createTransactionParticles() {
-    // Get current frame's server input for transaction data
+    // Reset activity tracking
+    currentFrameActivity = {
+      activeEntities: new Set(),
+      incomingFlows: new Map(),
+      outgoingFlows: new Map()
+    };
+
     const timeIndex = $currentTimeIndex;
 
     if (!$isLive && $xlnEnvironment?.history && timeIndex >= 0) {
       const currentFrame = $xlnEnvironment.history[timeIndex];
 
       if (currentFrame?.serverInput?.entityInputs) {
-
         currentFrame.serverInput.entityInputs.forEach((entityInput: any) => {
+          const processingEntityId = entityInput.entityId;
+          currentFrameActivity.activeEntities.add(processingEntityId);
+
           if (entityInput.entityTxs) {
             entityInput.entityTxs.forEach((tx: any) => {
-              if (tx.type === 'account_input') {
-                // Unicast: payment through network
-                createParticleForTransaction(tx.data, entityInput.entityId);
+              if (tx.type === 'accountInput' && tx.data) {
+                const fromEntityId = tx.data.fromEntityId;
+                const toEntityId = tx.data.toEntityId;
+
+                // Determine direction
+                if (processingEntityId === toEntityId) {
+                  // INCOMING
+                  if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
+                    currentFrameActivity.incomingFlows.set(toEntityId, []);
+                  }
+                  currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
+                  createDirectionalLightning(fromEntityId, toEntityId, 'incoming', tx.data.accountTx);
+                } else if (processingEntityId === fromEntityId) {
+                  // OUTGOING
+                  if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
+                    currentFrameActivity.outgoingFlows.set(fromEntityId, []);
+                  }
+                  currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
+                  createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+                }
+
+                triggerEntityActivity(fromEntityId);
+                triggerEntityActivity(toEntityId);
               } else if (['deposit_reserve', 'withdraw_reserve', 'credit_from_reserve', 'debit_to_reserve'].includes(tx.type)) {
-                // Broadcast: jurisdiction event (reserve operations)
-                createBroadcastRipple(entityInput.entityId, tx.type);
+                createBroadcastRipple(processingEntityId, tx.type);
               }
             });
           }
         });
       }
     } else if ($isLive && $xlnEnvironment?.serverInput?.entityInputs) {
-      // Live mode - use current server input
-
+      // Live mode - same logic
       $xlnEnvironment.serverInput.entityInputs.forEach((entityInput: any) => {
+        const processingEntityId = entityInput.entityId;
+        currentFrameActivity.activeEntities.add(processingEntityId);
+
         if (entityInput.entityTxs) {
           entityInput.entityTxs.forEach((tx: any) => {
-            if (tx.type === 'account_input') {
-              // Unicast: payment through network
-              createParticleForTransaction(tx.data, entityInput.entityId);
+            if (tx.type === 'accountInput' && tx.data) {
+              const fromEntityId = tx.data.fromEntityId;
+              const toEntityId = tx.data.toEntityId;
+
+              if (processingEntityId === toEntityId) {
+                if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
+                  currentFrameActivity.incomingFlows.set(toEntityId, []);
+                }
+                currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
+                createDirectionalLightning(fromEntityId, toEntityId, 'incoming', tx.data.accountTx);
+              } else if (processingEntityId === fromEntityId) {
+                if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
+                  currentFrameActivity.outgoingFlows.set(fromEntityId, []);
+                }
+                currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
+                createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+              }
+
+              triggerEntityActivity(fromEntityId);
+              triggerEntityActivity(toEntityId);
             } else if (['deposit_reserve', 'withdraw_reserve', 'credit_from_reserve', 'debit_to_reserve'].includes(tx.type)) {
-              // Broadcast: jurisdiction event (reserve operations)
-              createBroadcastRipple(entityInput.entityId, tx.type);
+              createBroadcastRipple(processingEntityId, tx.type);
             }
           });
         }
       });
     }
-
   }
 
-  function createParticleForTransaction(accountTxInput: any, _sourceEntityId: string) {
-    const fromId = accountTxInput.fromEntityId;
-    const toId = accountTxInput.toEntityId;
-    const accountTx = accountTxInput.accountTx;
-
-    // Find connection for this transaction
-    const connectionIndex = connections.findIndex(conn =>
-      (conn.from === fromId && conn.to === toId) ||
-      (conn.from === toId && conn.to === fromId)
-    );
+  function createDirectionalLightning(
+    fromEntityId: string,
+    toEntityId: string,
+    direction: 'incoming' | 'outgoing',
+    accountTx: any
+  ) {
+    // O(1) connection lookup
+    const key = `${fromEntityId}->${toEntityId}`;
+    const connectionIndex = connectionIndexMap.get(key) ??
+                            connectionIndexMap.get(`${toEntityId}->${fromEntityId}`) ??
+                            -1;
 
     if (connectionIndex === -1) return;
 
     // Particle color based on transaction type
-    let color = 0xffaa00; // Default gold
-    let size = 0.1;
+    let color = 0xffaa00;
+    let size = 0.15;
 
-    switch (accountTx.type) {
-      case 'payment':
-        color = 0xffaa00; // Gold for payments
-        size = Math.min(0.3, 0.1 + Number(accountTx.amount || 0n) / 10000);
-        break;
-      case 'credit_limit':
-        color = 0x0088ff; // Blue for credit
-        size = 0.15;
-        break;
-      case 'settlement':
-        color = 0xff4444; // Red for settlement
-        size = 0.2;
-        break;
+    if (accountTx) {
+      switch (accountTx.type) {
+        case 'direct-payment':
+          color = 0xffaa00;
+          size = Math.min(0.3, 0.1 + Number(accountTx.data?.amount || 0n) / 100000);
+          break;
+        case 'set-credit-limit':
+          color = 0x0088ff;
+          size = 0.15;
+          break;
+      }
     }
 
-    // Create particle mesh
     const geometry = new THREE.SphereGeometry(size, 8, 8);
-    const material = new THREE.MeshBasicMaterial({
+    const material = new THREE.MeshLambertMaterial({
       color,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.9,
+      emissive: color
     });
     const mesh = new THREE.Mesh(geometry, material);
-
     scene.add(mesh);
 
-    // Add to particles array
     particles.push({
       mesh,
       connectionIndex,
       progress: 0,
-      speed: 0.02 + Math.random() * 0.03, // Random speed
-      type: accountTx.type,
-      amount: accountTx.amount
+      speed: 0.03, // 50% in ~17 frames at 60fps (~0.3s)
+      type: accountTx?.type || 'unknown',
+      amount: accountTx?.data?.amount,
+      direction
     });
-
-    // Activity pulses are now handled by updateEntityActivityFromCurrentFrame()
   }
 
   function createBroadcastRipple(entityId: string, txType: string) {
@@ -2179,8 +2271,11 @@
       // Update progress
       particle.progress += particle.speed;
 
-      // Remove particle when it reaches the end
-      if (particle.progress >= 1) {
+      // Directional lightning: 0% → 50% (request sent, not received)
+      const maxProgress = 0.5;
+
+      // Remove particle when it reaches 50%
+      if (particle.progress >= maxProgress) {
         scene.remove(particle.mesh);
         particles.splice(index, 1);
         return;
@@ -2188,18 +2283,13 @@
 
       // Broadcast ripple animation (connectionIndex === -1)
       if (particle.connectionIndex === -1) {
-        // Expand ring and fade out
         const startRadius = 0.5;
         const maxRadius = 5.0;
-        const currentRadius = startRadius + (maxRadius - startRadius) * particle.progress;
-
-        // Update ring size (scale the torus)
+        const currentRadius = startRadius + (maxRadius - startRadius) * (particle.progress / maxProgress);
         particle.mesh.scale.setScalar(currentRadius / startRadius);
 
-        // Fade out as it expands
         const material = particle.mesh.material as THREE.MeshBasicMaterial;
-        material.opacity = 0.8 * (1 - particle.progress);
-
+        material.opacity = 0.8 * (1 - particle.progress / maxProgress);
         return;
       }
 
@@ -2212,13 +2302,20 @@
       const start = new THREE.Vector3().fromBufferAttribute(positions, 0);
       const end = new THREE.Vector3().fromBufferAttribute(positions, 1);
 
-      // Interpolate position along the line
+      // Interpolate position: 0% → 50% of line length
       const currentPos = start.lerp(end, particle.progress);
       particle.mesh.position.copy(currentPos);
 
-      // Add some slight pulsing animation
-      const pulse = 1 + 0.2 * Math.sin(Date.now() * 0.01 + index);
+      // Pulsing animation (different intensity for incoming vs outgoing)
+      const baseIntensity = particle.direction === 'outgoing' ? 1.3 : 1.0;
+      const pulse = baseIntensity + 0.3 * Math.sin(Date.now() * 0.015 + index);
       particle.mesh.scale.setScalar(pulse);
+
+      // Fade in quickly, fade out near 50%
+      const fadeIn = Math.min(1, particle.progress * 6);
+      const fadeOut = Math.max(0, 1 - (particle.progress - 0.35) * 6);
+      const material = particle.mesh.material as THREE.MeshBasicMaterial;
+      material.opacity = 0.9 * fadeIn * fadeOut;
     });
   }
 
@@ -2228,34 +2325,95 @@
     entities.forEach((entity) => {
       if (!entity.mesh) return;
 
-      // Only pulse if there was recent activity (no constant pulsing!)
+      const entityId = entity.id;
       const timeSinceActivity = currentTime - (entity.lastActivity || 0);
+      const isActive = timeSinceActivity < 2000;
 
-      if (timeSinceActivity < 2000) { // 2 second activity window
-        // Update pulse phase only when active
-        entity.pulsePhase = (entity.pulsePhase || 0) + 0.1;
+      const material = entity.mesh.material as THREE.MeshLambertMaterial;
+      if (!material?.emissive) {
+        throw new Error('FINTECH-SAFETY: Entity material missing emissive property');
+      }
 
-        // Single transaction pulse (not continuous)
+      if (isActive) {
+        // Check activity direction
+        const hasIncoming = currentFrameActivity.incomingFlows.has(entityId);
+        const hasOutgoing = currentFrameActivity.outgoingFlows.has(entityId);
+
+        entity.pulsePhase = (entity.pulsePhase || 0) + 0.12;
         const pulseIntensity = Math.max(0, 1 - timeSinceActivity / 2000);
-        const pulseFactor = 1 + pulseIntensity * 0.4 * Math.sin(entity.pulsePhase);
-
+        const pulseFactor = 1 + pulseIntensity * 0.5 * Math.sin(entity.pulsePhase);
         entity.mesh.scale.setScalar(pulseFactor);
 
-        // Activity glow with type safety
-        const material = entity.mesh.material as THREE.MeshLambertMaterial;
-        if (!material?.emissive) {
-          throw new Error('FINTECH-SAFETY: Entity material missing emissive property for glow');
+        // Color-coded glow based on direction
+        let glowR = 0, glowG = 0, glowB = 0;
+
+        if (hasIncoming && hasOutgoing) {
+          // BOTH: Cyan (processing hub)
+          glowR = 0;
+          glowG = 0.8;
+          glowB = 1;
+        } else if (hasIncoming) {
+          // INCOMING: Blue (receiving)
+          glowR = 0;
+          glowG = 0.4;
+          glowB = 1;
+        } else if (hasOutgoing) {
+          // OUTGOING: Orange (sending)
+          glowR = 1;
+          glowG = 0.6;
+          glowB = 0;
+        } else {
+          // Active but no flows (generic activity)
+          glowR = 0;
+          glowG = 1;
+          glowB = 0;
         }
-        const glowIntensity = pulseIntensity * 0.4;
-        material.emissive.setRGB(0, glowIntensity, 0);
+
+        const glowIntensity = pulseIntensity * 0.6;
+        material.emissive.setRGB(glowR * glowIntensity, glowG * glowIntensity, glowB * glowIntensity);
+
+        // Add activity ring if not present
+        if (!entity.activityRing) {
+          const ringGeometry = new THREE.TorusGeometry(0.4, 0.06, 16, 32);
+          const ringMaterial = new THREE.MeshLambertMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: 0.6,
+            emissive: 0x00ff00
+          });
+          entity.activityRing = new THREE.Mesh(ringGeometry, ringMaterial);
+          entity.activityRing.rotation.x = Math.PI / 2;
+          entity.mesh.add(entity.activityRing);
+        }
+
+        // Update ring color and animation
+        const ringMaterial = entity.activityRing.material as THREE.MeshLambertMaterial;
+        if (hasIncoming && hasOutgoing) {
+          ringMaterial.color.setHex(0x00ffff);
+          ringMaterial.emissive.setHex(0x00ffff);
+        } else if (hasIncoming) {
+          ringMaterial.color.setHex(0x0088ff);
+          ringMaterial.emissive.setHex(0x0088ff);
+        } else if (hasOutgoing) {
+          ringMaterial.color.setHex(0xff8800);
+          ringMaterial.emissive.setHex(0xff8800);
+        }
+
+        const ringPulse = 1 + 0.3 * Math.sin(entity.pulsePhase * 1.5);
+        entity.activityRing.scale.setScalar(ringPulse);
+        ringMaterial.opacity = 0.6 * pulseIntensity;
       } else {
-        // Reset to normal state when no activity
+        // Inactive: reset to normal
         entity.mesh.scale.setScalar(1);
-        const material = entity.mesh.material as THREE.MeshLambertMaterial;
-        if (!material?.emissive) {
-          throw new Error('FINTECH-SAFETY: Entity material missing emissive property for reset');
+        material.emissive.setRGB(0, 0.1, 0);
+
+        // Remove activity ring (use property deletion for optional type)
+        if (entity.activityRing) {
+          entity.mesh.remove(entity.activityRing);
+          entity.activityRing.geometry.dispose();
+          (entity.activityRing.material as THREE.Material).dispose();
+          entity.activityRing = undefined;
         }
-        material.emissive.setRGB(0, 0.1, 0); // Base glow
       }
     });
   }
@@ -2267,51 +2425,6 @@
     }
   }
 
-  function updateEntityActivityFromCurrentFrame() {
-    // Reset all activity first
-    entities.forEach(entity => {
-      entity.lastActivity = 0;
-    });
-
-    // Only pulse entities that have transactions in CURRENT frame
-    const timeIndex = $currentTimeIndex;
-
-    if (!$isLive && $xlnEnvironment?.history && timeIndex >= 0) {
-      const currentFrame = $xlnEnvironment.history[timeIndex];
-
-      if (currentFrame?.serverInput?.entityInputs) {
-
-        currentFrame.serverInput.entityInputs.forEach((entityInput: any) => {
-          if (entityInput.entityTxs) {
-            entityInput.entityTxs.forEach((tx: any) => {
-              if (tx.type === 'account_input') {
-                // Pulse entities involved in this transaction
-                triggerEntityActivity(tx.data.fromEntityId);
-                triggerEntityActivity(tx.data.toEntityId);
-
-                // Add to activity ticker
-                addActivityToTicker(tx.data.fromEntityId, tx.data.toEntityId, tx.data.accountTx);
-
-                // Check for j-events (reserve/collateral changes from blockchain)
-                if (tx.data.accountTx) {
-                  const accountTxType = tx.data.accountTx.type;
-                  // J-event types: account_deposit, account_withdraw, account_settle
-                  if (accountTxType === 'account_deposit' || accountTxType === 'account_withdraw' || accountTxType === 'account_settle') {
-                    // Trigger ripple effect on entity that had reserve change
-                    createBroadcastRipple(tx.data.fromEntityId, accountTxType.replace('account_', ''));
-                  }
-                }
-
-              } else if (tx.type === 'directPayment' && tx.data.route) {
-                // Lightning strike animation for direct payments
-                createLightningStrike(tx.data.route, tx.data.amount);
-              }
-            });
-          }
-        });
-      }
-    }
-  }
 
   function enforceSpacingConstraints() {
     // Check all entity pairs and push them apart if bars would pierce or entities intersect
@@ -3915,7 +4028,14 @@
             class:active={!forceLayoutEnabled}
             on:click={() => { forceLayoutEnabled = false; updateNetworkData(); }}
           >
-            Radial
+            Fixed
+          </button>
+          <button
+            class="action-btn"
+            on:click={() => updateNetworkData()}
+            title="Rebalance force-directed layout"
+          >
+            🔄 Rebalance
           </button>
         </div>
 
@@ -4114,6 +4234,52 @@
           <button class="send-btn" on:click={sendPayment} disabled={availableRoutes.length === 0}>
             {paymentTPS === 0 ? '💸 Send Once' : '▶ Start Flow'}
           </button>
+        </div>
+
+        <!-- Quick Demo Actions -->
+        <div class="quick-actions">
+          <h4>🎬 Quick Demo</h4>
+          <button class="demo-btn primary" on:click={async () => {
+            commandText = 'grid 2 2 2';
+            await executeLiveCommand();
+            setTimeout(async () => {
+              commandText = 'payRandom count=10 amount=100000 minHops=2 maxHops=4';
+              await executeLiveCommand();
+            }, 2000);
+          }}>
+            ⚡ Full Demo (Grid + Payments)
+          </button>
+
+          <button class="demo-btn" on:click={() => {
+            commandText = 'grid 2 2 2';
+            executeLiveCommand();
+          }}>
+            🎲 Grid 2×2×2
+          </button>
+
+          <button class="demo-btn" on:click={() => {
+            commandText = 'payRandom count=10 amount=100000 minHops=2 maxHops=4';
+            executeLiveCommand();
+          }}>
+            💸 PayRandom ×10
+          </button>
+        </div>
+
+        <!-- Live Activity Log -->
+        <div class="activity-log">
+          <div class="log-header">
+            <h4>📋 Live Activity Log</h4>
+            <button class="clear-log-btn" on:click={() => activityLog = []}>Clear</button>
+          </div>
+          <div class="log-content">
+            {#if activityLog.length === 0}
+              <div class="log-empty">No activity yet. Run grid or payRandom commands.</div>
+            {:else}
+              {#each activityLog as logLine}
+                <div class="log-line">{logLine}</div>
+              {/each}
+            {/if}
+          </div>
         </div>
 
         <!-- Live Command Builder -->
@@ -4949,6 +5115,131 @@
     box-shadow:
       0 4px 16px rgba(0, 255, 136, 0.25),
       inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  /* Quick Demo Actions */
+  .quick-actions {
+    background: linear-gradient(135deg, rgba(0, 122, 204, 0.15), rgba(0, 180, 255, 0.10));
+    border: 1px solid rgba(0, 122, 204, 0.4);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .quick-actions h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #00d9ff;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .demo-btn {
+    width: 100%;
+    padding: 12px;
+    margin: 6px 0;
+    background: linear-gradient(135deg, rgba(0, 122, 204, 0.4), rgba(0, 180, 255, 0.3));
+    border: 1px solid rgba(0, 122, 204, 0.5);
+    border-radius: 6px;
+    color: white;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .demo-btn:hover {
+    background: linear-gradient(135deg, rgba(0, 122, 204, 0.6), rgba(0, 180, 255, 0.5));
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 122, 204, 0.3);
+  }
+
+  .demo-btn.primary {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.5), rgba(0, 200, 255, 0.4));
+    border-color: rgba(0, 255, 136, 0.6);
+    font-size: 14px;
+    padding: 14px;
+  }
+
+  .demo-btn.primary:hover {
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.7), rgba(0, 200, 255, 0.6));
+    box-shadow: 0 4px 16px rgba(0, 255, 136, 0.4);
+  }
+
+  /* Live Activity Log */
+  .activity-log {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .log-header h4 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #00ff88;
+  }
+
+  .log-header .clear-log-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+    background: rgba(255, 76, 76, 0.3);
+    border: 1px solid rgba(255, 76, 76, 0.5);
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .log-header .clear-log-btn:hover {
+    background: rgba(255, 76, 76, 0.5);
+  }
+
+  .log-content {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #00ff88;
+    line-height: 1.4;
+  }
+
+  .log-empty {
+    color: #666;
+    font-style: italic;
+    padding: 8px;
+    text-align: center;
+  }
+
+  .log-line {
+    padding: 2px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .log-line:last-child {
+    border-bottom: none;
+  }
+
+  .activity-log::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .activity-log::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  .activity-log::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 136, 0.3);
+    border-radius: 3px;
   }
 
   /* Live Command Builder */

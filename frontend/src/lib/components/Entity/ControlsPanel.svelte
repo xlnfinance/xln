@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { EntityReplica, Tab } from '../../types';
-  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
-  
+  import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+
   export let replica: EntityReplica | null;
   export let tab: Tab;
 
@@ -34,6 +34,15 @@
         name: `Token #${id}`,
         amount: reserve
       }))
+    : [];
+
+  // Get all other entities for account opening
+  $: otherEntities = $xlnEnvironment?.replicas
+    ? Array.from(new Set(
+        Array.from($xlnEnvironment.replicas.keys() as IterableIterator<string>)
+          .map(key => key.split(':')[0]!)
+          .filter((entityId): entityId is string => !!entityId && entityId !== tab.entityId)
+      ))
     : [];
 
 
@@ -150,16 +159,13 @@
   }
 
   async function openAccount() {
-    if (!tab.entityId || !tab.signerId || !accountCounterparty.trim()) return;
-    
+    if (!tab.entityId || !tab.signerId || !accountCounterparty) return;
+
     try {
       const xln = await getXLN();
       const env = $xlnEnvironment;
       if (!env) throw new Error('XLN environment not ready');
 
-      // Resolve the counterparty entity ID
-      const counterpartyEntityId = resolveRecipient(accountCounterparty);
-      
       const accountInput = {
         entityId: tab.entityId,
         signerId: tab.signerId,
@@ -167,7 +173,7 @@
           type: 'accountInput',
           data: {
             fromEntityId: tab.entityId,
-            toEntityId: counterpartyEntityId,
+            toEntityId: accountCounterparty,
             accountTx: {
               type: 'initial_ack',
               data: { message: 'Account opening request' }
@@ -175,12 +181,11 @@
           }
         }]
       };
-      
-      console.log('💳 Opening account with entity:', counterpartyEntityId);
-      
-      // Direct processUntilEmpty for entityInputs (no serverTxs needed)
+
+      console.log('💳 Opening account with entity:', accountCounterparty);
+
       await xln.processUntilEmpty(env, [accountInput]);
-      
+
       console.log('✅ Account opened successfully');
       accountCounterparty = '';
     } catch (error) {
@@ -398,12 +403,23 @@
     {:else if selectedAction === 'account'}
       <div class="form-group">
         <label class="form-label">Counterparty Entity:</label>
-        <input class="form-input" type="text" bind:value={accountCounterparty} placeholder="Entity number (e.g., 2, 3) or full entity ID..." />
-        <div class="form-hint">
-          💡 Tip: Try entity number "2" to open account with Entity #2
-        </div>
+        <select class="form-input" bind:value={accountCounterparty}>
+          <option value="">Select entity...</option>
+          {#each otherEntities as entityId}
+            <option value={entityId}>
+              Entity #{$xlnFunctions?.getEntityNumber?.(entityId) || entityId.slice(0, 10)}
+            </option>
+          {/each}
+        </select>
+        {#if otherEntities.length === 0}
+          <div class="form-hint">
+            💡 No other entities available. Create more entities first.
+          </div>
+        {/if}
       </div>
-      <button class="form-button" on:click={openAccount}>Open Account</button>
+      <button class="form-button" on:click={openAccount} disabled={!accountCounterparty}>
+        Open Account
+      </button>
 
     {:else}
       <div class="form-group">

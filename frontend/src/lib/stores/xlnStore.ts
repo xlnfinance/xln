@@ -1,4 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
+import { errorLog } from './errorLogStore';
 
 // Direct import of XLN server module (no wrapper boilerplate needed)
 let XLN: any = null;
@@ -126,46 +127,7 @@ export async function initializeXLN() {
       }
     } else {
       console.log(`🔍 BROWSER-DEBUG: No replicas loaded - starting with fresh state`);
-
-      // AUTO-SCENARIO: If clean slate, run h-network scenario automatically
-      if (!env.history || env.history.length === 0) {
-        console.log('🚀 AUTO-SCENARIO: Clean slate detected - running h-network scenario...');
-        try {
-          // Load h-network scenario
-          const response = await fetch('/scenarios/h-network.scenario.txt');
-          if (!response.ok) {
-            throw new Error(`Failed to load h-network scenario: ${response.statusText}`);
-          }
-
-          const scenarioText = await response.text();
-          console.log('📜 Loaded h-network scenario');
-
-          // Parse and execute scenario
-          const parsed = xln.parseScenario(scenarioText);
-          if (parsed.errors.length > 0) {
-            console.error('❌ Scenario parse errors:', parsed.errors);
-            throw new Error('Failed to parse h-network scenario');
-          }
-
-          const result = await xln.executeScenario(env, parsed.scenario);
-
-          if (result.success) {
-            console.log('✅ AUTO-SCENARIO: H-network scenario completed successfully');
-            console.log(`🔍 AUTO-SCENARIO: Generated ${result.framesGenerated} frames`);
-          } else {
-            console.error('❌ AUTO-SCENARIO: Scenario execution errors:', result.errors);
-          }
-        } catch (err) {
-          console.error('❌ AUTO-SCENARIO: Failed to run scenario:', err);
-          // Fallback to old prepopulate
-          console.log('⚠️ Falling back to legacy prepopulate...');
-          try {
-            await xln.prepopulate(env, xln.processUntilEmpty);
-          } catch (fallbackErr) {
-            console.error('❌ Fallback prepopulate also failed:', fallbackErr);
-          }
-        }
-      }
+      console.log('💡 Use "grid 2 2 2" or quick action buttons to create network');
     }
 
     // History is now guaranteed to be included in env
@@ -191,8 +153,10 @@ export async function initializeXLN() {
   } catch (err) {
     console.error('🚨 CRITICAL: XLN initialization failed - this indicates a system failure:', err);
 
-    // No fallback, no empty state - fail hard and show the error
+    // Log to persistent error store
     const errorMessage = err instanceof Error ? err.message : 'Critical system failure during initialization';
+    errorLog.log(errorMessage, 'XLN Initialization', err);
+
     error.set(errorMessage);
     isLoading.set(false);
 

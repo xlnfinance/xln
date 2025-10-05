@@ -114,6 +114,7 @@ export const cloneEntityReplica = (replica: EntityReplica): EntityReplica => {
       }
     }),
     isProposer: replica.isProposer,
+    ...(replica.position && { position: { ...replica.position } }),
   };
 };
 

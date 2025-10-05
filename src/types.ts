@@ -33,6 +33,7 @@ export interface ServerTx {
   data: {
     config: ConsensusConfig;
     isProposer: boolean;
+    position?: { x: number; y: number; z: number };
   };
 }
 
@@ -342,6 +343,7 @@ export interface EntityReplica {
   proposal?: ProposedEntityFrame;
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   isProposer: boolean;
+  position?: { x: number; y: number; z: number }; // 3D visualization position (for grid scenarios)
 }
 
 export interface Env {

@@ -15,6 +15,7 @@ import { DEBUG, isBrowser } from './utils';
 // Load contract configuration directly in jurisdiction generation
 export const ENTITY_PROVIDER_ABI = [
   'function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber)',
+  'function registerNumberedEntitiesBatch(bytes32[] calldata boardHashes) external returns (uint256[] memory entityNumbers)',
   'function assignName(string memory name, uint256 entityNumber) external',
   'function transferName(string memory name, uint256 newEntityNumber) external',
   'function entities(bytes32 entityId) external view returns (tuple(uint256 boardHash, uint8 status, uint256 activationTime))',
@@ -428,6 +429,59 @@ export const registerNumberedEntityOnChain = async (
     return { txHash: tx.hash, entityNumber };
   } catch (error) {
     console.error('❌ Blockchain registration failed:', error);
+    throw error;
+  }
+};
+
+/**
+ * Batch register multiple numbered entities in ONE transaction
+ * Massive speedup for scenario imports (1000 entities in 1 tx vs 1000 txs)
+ */
+export const registerNumberedEntitiesBatchOnChain = async (
+  configs: ConsensusConfig[],
+  jurisdiction: JurisdictionConfig,
+): Promise<{ txHash: string; entityNumbers: number[] }> => {
+  try {
+    const { entityProvider } = await connectToEthereum(jurisdiction);
+
+    // Encode all board hashes
+    const boardHashes = configs.map(config => {
+      const encodedBoard = encodeBoard(config);
+      return hashBoard(encodedBoard);
+    });
+
+    console.log(`🏛️ Batch registering ${configs.length} entities in ONE transaction...`);
+
+    // Call batch registration function
+    const tx = await entityProvider['registerNumberedEntitiesBatch']!(boardHashes);
+    console.log(`📤 Batch tx sent: ${tx.hash}`);
+
+    // Wait for confirmation (ONE block for ALL entities!)
+    const receipt = await tx.wait();
+    console.log(`✅ Batch confirmed in block ${receipt.blockNumber}`);
+
+    if (receipt.status === 0) {
+      throw new Error(`Batch registration reverted! Hash: ${tx.hash}`);
+    }
+
+    // Extract all entity numbers from events
+    const entityNumbers: number[] = [];
+    receipt.logs.forEach((log: any) => {
+      try {
+        const parsed = entityProvider.interface.parseLog(log);
+        if (parsed?.name === 'EntityRegistered') {
+          entityNumbers.push(Number(parsed.args[1]));
+        }
+      } catch {
+        // Skip unparseable logs
+      }
+    });
+
+    console.log(`✅ Registered ${entityNumbers.length} entities: ${entityNumbers[0]}-${entityNumbers[entityNumbers.length - 1]}`);
+
+    return { txHash: tx.hash, entityNumbers };
+  } catch (error) {
+    console.error('❌ Batch registration failed:', error);
     throw error;
   }
 };

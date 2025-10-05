@@ -59,16 +59,8 @@
 
   // 💰 Financial calculation functions
 
-  // Token registry for consistent naming (matches contract prefunding)
-  const TOKEN_REGISTRY: Record<string, { symbol: string; name: string; decimals: number; price: number }> = {
-    '1': { symbol: 'ETH', name: 'Ethereum', decimals: 18, price: 2500 },
-    '2': { symbol: 'USDC', name: 'USD Coin', decimals: 18, price: 1 },
-  };
-
-  const getTokenInfo = (tokenId: string) => TOKEN_REGISTRY[tokenId] || { symbol: `TKN${tokenId}`, decimals: 18, price: 0 };
-
   function formatAssetDisplay(tokenId: string, amount: bigint): string {
-    const tokenInfo = getTokenInfo(tokenId);
+    const tokenInfo = $xlnFunctions.getTokenInfo(Number(tokenId));
     const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
 
     const wholePart = amount / divisor;
@@ -83,11 +75,13 @@
   }
 
   function getAssetValue(tokenId: string, amount: bigint): number {
-    const tokenInfo = getTokenInfo(tokenId);
+    const tokenInfo = $xlnFunctions.getTokenInfo(Number(tokenId));
     const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
 
     const numericAmount = Number(amount) / Number(divisor);
-    return numericAmount * tokenInfo.price;
+    // Simple price oracle for display (USDC=1, ETH=2500)
+    const price = Number(tokenId) === 1 ? 1 : 2500;
+    return numericAmount * price;
   }
 
   function calculateTotalNetworth(reserves: Map<string, bigint>): number {
@@ -253,7 +247,7 @@
           </div>
           <div class="reserves-grid">
             {#each Array.from(replica.state.reserves.entries()) as [tokenId, amount]}
-              {@const tokenInfo = getTokenInfo(tokenId)}
+              {@const tokenInfo = $xlnFunctions.getTokenInfo(Number(tokenId))}
               {@const assetValue = getAssetValue(tokenId, amount)}
               {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
               {@const globalPercentage = $settings.portfolioScale > 0 ? Math.min((assetValue / $settings.portfolioScale) * 100, 100) : 0}
