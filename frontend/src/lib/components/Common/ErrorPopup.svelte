@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import { errorLog } from '../../stores/errorLogStore';
+  import { safeStringify } from '../../utils/safeStringify';
 
   interface ErrorItem {
     id: number;
@@ -45,8 +46,9 @@
         originalError.apply(console, args);
 
         // Only show critical errors containing specific keywords
+        // FINTECH-SAFETY: Use safeStringify to handle BigInt values
         const errorMessage = args.map(arg =>
-          typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+          typeof arg === 'object' ? safeStringify(arg) : String(arg)
         ).join(' ');
 
         if (errorMessage.includes('createHash') ||

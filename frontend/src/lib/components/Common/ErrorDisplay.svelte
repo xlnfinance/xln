@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { safeStringify } from '../../utils/safeStringify';
 
   interface ErrorItem {
     id: string;
@@ -17,8 +18,9 @@
       originalError(...args);
 
       // Add to visual error display
+      // FINTECH-SAFETY: Use safeStringify to handle BigInt values
       const errorMsg = args.map(arg =>
-        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+        typeof arg === 'object' ? safeStringify(arg, 2) : String(arg)
       ).join(' ');
 
       errors = [...errors.slice(-4), { // Keep last 5 errors

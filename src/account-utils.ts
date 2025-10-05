@@ -31,6 +31,7 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
 
   const totalDelta = delta.ondelta + delta.offdelta;
+
   const collateral = nonNegative(delta.collateral);
 
   let ownCreditLimit = delta.leftCreditLimit;

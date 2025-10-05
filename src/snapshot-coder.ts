@@ -115,20 +115,13 @@ type SnapshotTuple = [
  * Encodes data using the configured method (JSON or msgpack)
  */
 export const encode = (data: any): Buffer => {
-  // CRITICAL: Validate financial state before encoding
+  // ENCODE validation removed - too verbose
+  // Auto-fix jBlock corruption if needed
   if (data && data.replicas) {
-    console.log(`🔍 ENCODE-VALIDATION: Checking ${data.replicas.size} replicas for jBlock integrity`);
     for (const [replicaKey, replica] of data.replicas.entries()) {
-      console.log(`🔍 ENCODE-CHECK: Replica ${replicaKey} exists: ${!!replica}, state exists: ${!!replica?.state}`);
-      if (replica && replica.state) {
-        const jBlock = replica.state.jBlock;
-        console.log(`🔍 ENCODE-JBLOCK: ${replicaKey} jBlock=${jBlock} (${typeof jBlock})`);
-        if (typeof jBlock !== 'number') {
-          console.error(`💥 CRITICAL: Attempting to save invalid jBlock for replica ${replicaKey}`);
-          console.error(`💥   Expected: number, Got: ${typeof jBlock}, Value: ${jBlock}`);
-          console.error(`💥   AUTO-FIXING: Setting jBlock to 0 and continuing save`);
-          replica.state.jBlock = 0; // Auto-repair corruption
-        }
+      if (replica && replica.state && typeof replica.state.jBlock !== 'number') {
+        console.error(`💥 CRITICAL: Invalid jBlock for ${replicaKey.slice(0,20)}... - auto-fixing to 0`);
+        replica.state.jBlock = 0;
       }
     }
   }

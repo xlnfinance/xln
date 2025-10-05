@@ -55,12 +55,7 @@ export const history = derived(
   xlnEnvironment,
   ($env) => {
     const historyData = $env?.history || [];
-    console.log('🔄 LOAD-ORDER-DEBUG: History derived store updated:', {
-      timestamp: new Date().toISOString(),
-      historyLength: historyData.length,
-      environmentExists: !!$env,
-      envHeight: $env?.height || 0
-    });
+    // LOAD-ORDER-DEBUG removed
     return historyData;
   }
 );
@@ -102,8 +97,7 @@ export async function initializeXLN() {
     // Register callback for automatic reactivity
     xln.registerEnvChangeCallback?.((env: any) => {
       xlnEnvironment.set(env);
-      console.log('🔄 BROWSER-DEBUG: Environment updated automatically');
-      console.log(`🔍 BROWSER-DEBUG: Updated env - Height: ${env.height}, Replicas: ${env.replicas?.size || 0}`);
+      // BROWSER-DEBUG removed
 
       // Update window for e2e testing
       if (typeof window !== 'undefined') {
@@ -112,32 +106,16 @@ export async function initializeXLN() {
     });
     
     // Load from IndexedDB - main() handles timeout internally
-    console.log('🚀 BROWSER-DEBUG: Starting XLN initialization...');
-    console.log('🔍 BROWSER-DEBUG: About to call xln.main() - this will load snapshots and start j-watcher');
+    // BROWSER-DEBUG removed
 
     const env = await xln.main();
-    console.log(`✅ BROWSER-DEBUG: XLN.main() completed! Loaded env with ${env.replicas?.size || 0} replicas`);
+    // BROWSER-DEBUG removed
 
-    // Debug loaded replicas and their jBlock values
-    if (env.replicas && env.replicas.size > 0) {
-      console.log(`🔍 BROWSER-DEBUG: Loaded replicas from IndexedDB:`);
-      for (const [replicaKey, replica] of env.replicas.entries()) {
-        const [entityId, signerId] = replicaKey.split(':');
-        console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, height=${replica.state.height}, isProposer=${replica.isProposer}`);
-      }
-    } else {
-      console.log(`🔍 BROWSER-DEBUG: No replicas loaded - starting with fresh state`);
-      console.log('💡 Use "grid 2 2 2" or quick action buttons to create network');
-    }
+    // Replica debugging removed
 
     // History is now guaranteed to be included in env
 
-    console.log('🔄 LOAD-ORDER-DEBUG: Setting xlnEnvironment with history:', {
-      timestamp: new Date().toISOString(),
-      historyLength: env?.history?.length || 0,
-      environmentHeight: env?.height || 0,
-      replicasCount: env?.replicas?.size || 0
-    });
+    // LOAD-ORDER-DEBUG removed
 
     xlnEnvironment.set(env);
     isLoading.set(false);

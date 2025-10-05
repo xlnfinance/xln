@@ -7,12 +7,19 @@
   // All utility functions now come from server.js via xlnFunctions
 
   // FINTECH-SAFE: Never return "N/A" - fail fast if data is corrupted
+  // Handles BigInt by converting to Number first
   function safeFixed(value: any, decimals: number = 4): string {
-    if (value == null || isNaN(value)) {
-      console.error('FINTECH-SAFETY: Attempted to format null/NaN value:', value);
+    if (value == null) {
+      console.error('FINTECH-SAFETY: Attempted to format null value:', value);
       throw new Error('FINTECH-SAFETY: Invalid numeric value - financial data corrupted');
     }
-    return Number(value).toFixed(decimals);
+    // Convert BigInt to Number first, then check for NaN
+    const numValue = Number(value);
+    if (isNaN(numValue)) {
+      console.error('FINTECH-SAFETY: Attempted to format NaN value:', value);
+      throw new Error('FINTECH-SAFETY: Invalid numeric value - financial data corrupted');
+    }
+    return numValue.toFixed(decimals);
   }
 
   // Simple timestamp formatting
@@ -131,9 +138,10 @@
     });
 
     // Calculate detailed segments
+    // FINTECH-SAFETY: Convert BigInt to Number BEFORE arithmetic operations
     const theirCreditLimit = delta.rightCreditLimit;
     const theirUsedCredit = theirCreditLimit > 0n ?
-      Math.max(0, Number(theirCreditLimit) - Number(derived.inCapacity - delta.collateral)) : 0;
+      Math.max(0, Number(theirCreditLimit) - (Number(derived.inCapacity) - Number(delta.collateral))) : 0;
     const theirUnusedCredit = Number(theirCreditLimit) - theirUsedCredit;
 
     const ourCreditLimit = delta.leftCreditLimit;
@@ -372,72 +380,59 @@
             </span>
           </div>
 
-          <div class="balance-visualization">
-            <div class="balance-row">
-              <span class="row-label">Our Side</span>
-              <div class="detailed-bar">
-                {#if td.ourUnusedCredit > 0}
-                  <div
-                    class="bar-segment unused-credit"
-                    style="flex: {td.ourUnusedCredit}"
-                    title="Unused credit we gave: {safeFixed(td.ourUnusedCredit, 4)}"
-                  >
-                    <span class="segment-label">{safeFixed(td.ourUnusedCredit, 2)}</span>
-                  </div>
-                {/if}
-                {#if td.ourCollateral > 0}
-                  <div
-                    class="bar-segment collateral"
-                    style="flex: {td.ourCollateral}"
-                    title="Our collateral: {safeFixed(td.ourCollateral, 4)}"
-                  >
-                    <span class="segment-label">{safeFixed(td.ourCollateral, 2)}</span>
-                  </div>
-                {/if}
-                {#if td.ourUsedCredit > 0}
-                  <div
-                    class="bar-segment used-credit"
-                    style="flex: {td.ourUsedCredit}"
-                    title="Used credit we gave: {safeFixed(td.ourUsedCredit, 4)}"
-                  >
-                    <span class="segment-label">{safeFixed(td.ourUsedCredit, 2)}</span>
-                  </div>
-                {/if}
-              </div>
+          <!-- Unified stacked bar (like 3D spread bars) -->
+          <div class="unified-capacity-bar">
+            <div class="bar-segments">
+              <!-- CORRECT ORDER (matching 2019vue.txt): our unused → our secured → our unsecured → gap → their unsecured → their secured → their unused -->
+              {#if td.ourUnusedCredit > 0}
+                <div class="bar-segment our-unused" style="flex: {td.ourUnusedCredit}" title="Our available credit: {safeFixed(td.ourUnusedCredit)}">
+                  {#if td.ourUnusedCredit > 50000}{safeFixed(td.ourUnusedCredit, 0)}{/if}
+                </div>
+              {/if}
+              {#if td.ourCollateral > 0}
+                <div class="bar-segment collateral" style="flex: {td.ourCollateral}" title="Our secured balance: {safeFixed(td.ourCollateral)}">
+                  {#if td.ourCollateral > 50000}{safeFixed(td.ourCollateral, 0)}{/if}
+                </div>
+              {/if}
+              {#if td.ourUsedCredit > 0}
+                <div class="bar-segment our-used" style="flex: {td.ourUsedCredit}" title="Our unsecured balance: {safeFixed(td.ourUsedCredit)}">
+                  {#if td.ourUsedCredit > 50000}{safeFixed(td.ourUsedCredit, 0)}{/if}
+                </div>
+              {/if}
+              <!-- GAP: Visual separator between our side and their side -->
+              {#if td.theirUsedCredit > 0}
+                <div class="bar-segment their-used" style="flex: {td.theirUsedCredit}" title="Their unsecured balance: {safeFixed(td.theirUsedCredit)}">
+                  {#if td.theirUsedCredit > 50000}{safeFixed(td.theirUsedCredit, 0)}{/if}
+                </div>
+              {/if}
+              {#if td.theirCollateral > 0}
+                <div class="bar-segment their-collateral" style="flex: {td.theirCollateral}" title="Their secured balance: {safeFixed(td.theirCollateral)}">
+                  {#if td.theirCollateral > 50000}{safeFixed(td.theirCollateral, 0)}{/if}
+                </div>
+              {/if}
+              {#if td.theirUnusedCredit > 0}
+                <div class="bar-segment their-unused" style="flex: {td.theirUnusedCredit}" title="Their available credit: {safeFixed(td.theirUnusedCredit)}">
+                  {#if td.theirUnusedCredit > 50000}{safeFixed(td.theirUnusedCredit, 0)}{/if}
+                </div>
+              {/if}
             </div>
-
-            <div class="balance-row">
-              <span class="row-label">Their Side</span>
-              <div class="detailed-bar">
-                {#if td.theirUnusedCredit > 0}
-                  <div
-                    class="bar-segment unused-credit"
-                    style="flex: {td.theirUnusedCredit}"
-                    title="Unused credit they gave: {safeFixed(td.theirUnusedCredit, 4)}"
-                  >
-                    <span class="segment-label">{safeFixed(td.theirUnusedCredit, 2)}</span>
-                  </div>
-                {/if}
-                {#if td.theirUsedCredit > 0}
-                  <div
-                    class="bar-segment used-credit"
-                    style="flex: {td.theirUsedCredit}"
-                    title="Used credit they gave: {safeFixed(td.theirUsedCredit, 4)}"
-                  >
-                    <span class="segment-label">{safeFixed(td.theirUsedCredit, 2)}</span>
-                  </div>
-                {/if}
-              </div>
+            <div class="bar-legend">
+              <span class="legend-item"><span class="legend-color our-unused-bg"></span> Our Available Credit</span>
+              <span class="legend-item"><span class="legend-color collateral-bg"></span> Our Secured</span>
+              <span class="legend-item"><span class="legend-color our-used-bg"></span> Our Unsecured</span>
+              <span class="legend-item"><span class="legend-color their-used-bg"></span> Their Unsecured</span>
+              <span class="legend-item"><span class="legend-color their-collateral-bg"></span> Their Secured</span>
+              <span class="legend-item"><span class="legend-color their-unused-bg"></span> Their Available Credit</span>
             </div>
           </div>
 
           <div class="capacity-summary">
             <div class="capacity-item">
-              <span class="capacity-label">Can Send:</span>
+              <span class="capacity-label">Available to Send:</span>
               <span class="capacity-value outbound">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}</span>
             </div>
             <div class="capacity-item">
-              <span class="capacity-label">Can Receive:</span>
+              <span class="capacity-label">Available to Receive:</span>
               <span class="capacity-value inbound">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}</span>
             </div>
             <div class="capacity-item">
@@ -448,12 +443,28 @@
 
           <div class="credit-details">
             <div class="credit-row">
-              <span>Our Credit Limit:</span>
+              <span>Our Credit Line:</span>
               <span>{safeFixed(td.ourCreditLimit)} {td.tokenInfo.symbol}</span>
             </div>
             <div class="credit-row">
-              <span>Their Credit Limit:</span>
+              <span>Our Credit Used:</span>
+              <span>{safeFixed(td.derived.inOwnCredit)} {td.tokenInfo.symbol}</span>
+            </div>
+            <div class="credit-row">
+              <span>Our Credit Available:</span>
+              <span>{safeFixed(td.derived.outOwnCredit)} {td.tokenInfo.symbol}</span>
+            </div>
+            <div class="credit-row">
+              <span>Their Credit Line:</span>
               <span>{safeFixed(td.theirCreditLimit)} {td.tokenInfo.symbol}</span>
+            </div>
+            <div class="credit-row">
+              <span>Their Credit Used:</span>
+              <span>{safeFixed(td.derived.outPeerCredit)} {td.tokenInfo.symbol}</span>
+            </div>
+            <div class="credit-row">
+              <span>Their Credit Available:</span>
+              <span>{safeFixed(td.derived.inPeerCredit)} {td.tokenInfo.symbol}</span>
             </div>
             <div class="credit-row">
               <span>Our Collateral:</span>
@@ -729,6 +740,19 @@
                     </span>
                   </div>
                 </div>
+
+                <!-- Show full transaction list -->
+                {#if frame.accountTxs && frame.accountTxs.length > 0}
+                  <div class="frame-txs-list">
+                    {#each frame.accountTxs as tx, idx}
+                      <div class="frame-tx-item">
+                        <span class="tx-index">{idx + 1}.</span>
+                        <span class="tx-type">{tx.type}</span>
+                        <span class="tx-data">{JSON.stringify(tx.data, (_k, v) => typeof v === 'bigint' ? v.toString() : v)}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {/each}
           </div>
@@ -944,6 +968,71 @@
     background: linear-gradient(135deg, #ff8c00, #ffa500);
   }
 
+  /* Unified capacity bar styles */
+  .unified-capacity-bar {
+    margin-bottom: 16px;
+  }
+
+  .bar-segments {
+    display: flex;
+    height: 40px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    margin-bottom: 8px;
+  }
+
+  .bar-legend {
+    display: flex;
+    gap: 12px;
+    font-size: 0.7em;
+    color: #888;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1px solid #444;
+  }
+
+  .their-unused-bg {
+    background: linear-gradient(135deg, rgba(255, 107, 157, 0.5), rgba(198, 66, 116, 0.7));
+  }
+
+  .their-used-bg {
+    background: linear-gradient(135deg, #ff6b9d, #c64274);
+  }
+
+  .collateral-bg {
+    background: linear-gradient(135deg, #4facfe, #00c8ff);
+  }
+
+  .their-collateral-bg {
+    background: linear-gradient(135deg, #4facfe, #00c8ff);
+  }
+
+  .bar-segment.their-collateral {
+    background: linear-gradient(135deg, #4facfe, #00c8ff);
+  }
+
+  .our-used-bg {
+    background: linear-gradient(135deg, #ff9a56, #cc6d2e);
+  }
+
+  .our-unused-bg {
+    background: linear-gradient(135deg, rgba(255, 154, 86, 0.5), rgba(204, 109, 46, 0.7));
+  }
+
   .capacity-summary {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -1137,6 +1226,46 @@
     margin-left: auto;
     color: #ce9178;
     font-family: monospace;
+  }
+
+  /* Historical frame transaction list styling */
+  .frame-txs-list {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #3e3e3e;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .frame-tx-item {
+    display: flex;
+    gap: 8px;
+    padding: 6px;
+    background: #1a1a1a;
+    border-radius: 3px;
+    font-size: 0.75em;
+    align-items: flex-start;
+  }
+
+  .frame-tx-item .tx-index {
+    color: #666;
+    min-width: 20px;
+  }
+
+  .frame-tx-item .tx-type {
+    color: #4ec9b0;
+    font-family: monospace;
+    font-weight: 600;
+    min-width: 120px;
+  }
+
+  .frame-tx-item .tx-data {
+    color: #888;
+    font-family: monospace;
+    font-size: 0.9em;
+    word-break: break-all;
+    flex: 1;
   }
 
   /* Account Frame History Styles */

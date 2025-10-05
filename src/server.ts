@@ -449,12 +449,7 @@ const applyServerInput = async (
     }
 
     // Notify Svelte about environment changes
-    console.log(`🔍 REPLICA-DEBUG: Before notifyEnvChange, total replicas: ${env.replicas.size}`);
-    console.log(`🔍 REPLICA-DEBUG: Replica keys:`, Array.from(env.replicas.keys()));
-    console.log(`🔍 GOSSIP-DEBUG: Environment keys before notify:`, Object.keys(env));
-    console.log(`🔍 GOSSIP-DEBUG: Gossip layer exists:`, !!env.gossip);
-    console.log(`🔍 GOSSIP-DEBUG: Gossip layer type:`, typeof env.gossip);
-    console.log(`🔍 GOSSIP-DEBUG: Gossip announce method:`, typeof env.gossip?.announce);
+    // REPLICA-DEBUG and GOSSIP-DEBUG removed
     
     // CRITICAL FIX: Initialize gossip layer if missing
     if (!env.gossip) {
@@ -516,18 +511,7 @@ const applyServerInput = async (
       console.log(`📤 No outputs generated`);
     }
 
-    if (DEBUG) {
-      console.log(`Replica states:`);
-      env.replicas.forEach((replica, key) => {
-        const [entityId, signerId] = key.split(':');
-        if (!entityId || !signerId) return; // Skip malformed keys (use return in forEach)
-        const entityDisplay = formatEntityDisplay(entityId);
-        const signerDisplay = formatSignerDisplay(signerId);
-        console.log(
-          `  Entity #${entityDisplay}:${signerDisplay}: mempool=${replica.mempool.length}, messages=${replica.state.messages.length}, proposal=${replica.proposal ? '✓' : '✗'}`,
-        );
-      });
-    }
+    // Replica states dump removed - too verbose
 
     // Always notify UI after processing a frame (this is the discrete simulation step)
     notifyEnvChange(env);
@@ -538,7 +522,7 @@ const applyServerInput = async (
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
     }
 
-    console.log(`🔍 APPLY-SERVER-INPUT-FINAL-RETURN: Returning ${entityOutbox.length} outputs, ${mergedInputs.length} mergedInputs`);
+    // APPLY-SERVER-INPUT-FINAL-RETURN removed
     return { entityOutbox, mergedInputs };
   } catch (error) {
     log.error(`❌ Error processing server input:`, error);
@@ -1051,39 +1035,19 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   let iterationCount = 0;
   const maxIterations = 10; // Safety limit
 
-  // Only log cascade details if there are outputs to process
-  if (outputs.length > 0) {
-    console.log('🔥 PROCESS-CASCADE: Starting with', outputs.length, 'initial outputs');
-
-    // Log FULL entityIds for debugging routing issues
-    outputs.forEach((o, idx) => {
-      console.log(`📤 CASCADE-INPUT[${idx}]: FULL entityId="${o.entityId}", signerId="${o.signerId}", replicaKey="${o.entityId}:${o.signerId}"`);
-    });
-
-    console.log(
-      '🔥 PROCESS-CASCADE: Initial outputs:',
-      outputs.map(o => {
-        // FINTECH-LEVEL TYPE SAFETY: Validate all financial routing inputs
-        try {
-          validateEntityInput(o);
-        } catch (error) {
-          console.error(`🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput detected!`, {
-            error: (error as Error).message,
-            input: o
-          });
-          throw error; // Re-throw to fail fast
-        }
-
-        return {
-          entityId: o.entityId.slice(0, 8) + '...',
-          signerId: o.signerId,
-          txs: o.entityTxs?.length || 0,
-          precommits: o.precommits?.size || 0,
-          hasFrame: !!o.proposedFrame,
-        };
-      }),
-    );
-  }
+  // Validate all outputs before processing
+  outputs.forEach(o => {
+    try {
+      validateEntityInput(o);
+    } catch (error) {
+      console.error(`🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput detected!`, {
+        error: (error as Error).message,
+        entityId: o.entityId.slice(0,10),
+        signerId: o.signerId,
+      });
+      throw error;
+    }
+  });
 
   // DEBUG: Log transaction details for vote transactions
   outputs.forEach((output, i) => {
@@ -1097,12 +1061,12 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
 
   while (outputs.length > 0 && iterationCount < maxIterations) {
     iterationCount++;
-    console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} - processing ${outputs.length} outputs`);
+    // CASCADE iteration logging removed
 
     const result = await applyServerInput(env, { serverTxs: [], entityInputs: outputs });
     outputs = result.entityOutbox;
 
-    console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} generated ${outputs.length} new outputs`);
+    // CASCADE iteration result removed
     if (outputs.length > 0) {
       console.log(
         '🔥 PROCESS-CASCADE: New outputs:',
@@ -1120,7 +1084,7 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
   if (iterationCount >= maxIterations) {
     console.warn('⚠️ processUntilEmpty reached maximum iterations');
   } else if (iterationCount > 0) {
-    console.log(`🔥 PROCESS-CASCADE: Completed after ${iterationCount} iterations`);
+    // CASCADE completion removed
   }
 
   return env;

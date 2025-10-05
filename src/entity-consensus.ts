@@ -650,16 +650,14 @@ export const applyEntityFrame = async (
         // 3. Received account transactions that need processing
         const isNewFrame = entityTx.data.newAccountFrame;
         const isAck = entityTx.data.frameId && entityTx.data.prevSignatures;
-        const hasAccountTx = entityTx.data.accountTx;
         const hasPendingTxs = accountMachine.mempool.length > 0;
 
         // Only propose if we have something to send:
         // - Need to ACK a new frame
         // - Have transactions in mempool
-        // - Received account transactions to process
-        if (isNewFrame || (hasPendingTxs && !accountMachine.pendingFrame) || hasAccountTx) {
+        if (isNewFrame || (hasPendingTxs && !accountMachine.pendingFrame)) {
           proposableAccounts.add(fromEntity);
-          console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - NewFrame:${isNewFrame}, AccTx:${hasAccountTx}, Pending:${hasPendingTxs}`);
+          console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - NewFrame:${isNewFrame}, Pending:${hasPendingTxs}`);
         } else if (isAck) {
           console.log(`✅ Received ACK from ${fromEntity.slice(0,10)}, no action needed (mempool empty)`);
         }

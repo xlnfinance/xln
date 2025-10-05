@@ -126,15 +126,7 @@ const timeOperations = {
 
     const maxIndex = Math.max(0, $history.length - 1);
 
-    console.log('🕰️ TIME-MACHINE-DEBUG updateMaxTimeIndex():', {
-      timestamp: new Date().toISOString(),
-      historyLength: $history.length,
-      calculatedMaxIndex: maxIndex,
-      currentMaxIndex: currentState.maxTimeIndex,
-      currentTimeIndex: currentState.currentTimeIndex,
-      isLive: currentState.isLive,
-      historyItemsPreview: $history.slice(-3).map((h, i) => `${i}: ${h?.height || 'no-height'}`)
-    });
+    // TIME-MACHINE-DEBUG removed
 
     // SAFETY: Only update if the new maxIndex is different and valid
     if (maxIndex !== currentState.maxTimeIndex && maxIndex >= 0) {
@@ -142,9 +134,7 @@ const timeOperations = {
         ...current,
         maxTimeIndex: maxIndex
       }));
-      console.log('✅ TIME-MACHINE: Updated maxTimeIndex to', maxIndex);
     } else {
-      console.log('🔄 TIME-MACHINE: No update needed, maxTimeIndex already correct');
     }
   },
 
@@ -295,19 +285,14 @@ const timeOperations = {
 
   // Initialize time machine - SEQUENTIAL LOADING
   initialize() {
-    console.log('🕰️ LOAD-ORDER-DEBUG: timeOperations.initialize() called');
+    // LOAD-ORDER-DEBUG removed
 
     // Subscribe to history changes for REACTIVE initialization
     // This ensures we wait for history to be loaded before setting maxTimeIndex
     let hasInitialized = false;
 
     history.subscribe(($history) => {
-      console.log('🕰️ LOAD-ORDER-DEBUG: History subscription triggered:', {
-        timestamp: new Date().toISOString(),
-        historyLength: $history.length,
-        hasInitialized,
-        currentTimeState: get(timeState)
-      });
+      // LOAD-ORDER-DEBUG removed
 
       // Wait for history to be properly loaded before initializing
       if (!hasInitialized && $history.length > 0) {
