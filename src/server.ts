@@ -187,8 +187,8 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
     // Set up a periodic check to process any queued events from j-watcher
     setInterval(async () => {
       if (env.serverInput.entityInputs.length > 0) {
-        const eventCount = env.serverInput.entityInputs.length;
-        console.log(`🔭 J-WATCHER: Processing ${eventCount} J-machine events`);
+        // const eventCount = env.serverInput.entityInputs.length;
+        // J-WATCHER routine log removed
         
         // Process the queued entity inputs from j-watcher
         await applyServerInput(env, { 
@@ -268,30 +268,7 @@ const applyServerInput = async (
 
     const entityOutbox: EntityInput[] = [];
 
-    if (DEBUG) {
-      console.log(`\n=== TICK ${env.height} ===`);
-      console.log(
-        `Server inputs: ${serverInput.serverTxs.length} new serverTxs, ${serverInput.entityInputs.length} new entityInputs`,
-      );
-      console.log(
-        `Total in env: ${env.serverInput.serverTxs.length} serverTxs, ${env.serverInput.entityInputs.length} entityInputs (merged to ${mergedInputs.length})`,
-      );
-      if (mergedInputs.length > 0) {
-        console.log(`🔄 Processing merged inputs:`);
-        mergedInputs.forEach((input, i) => {
-          const parts = [];
-          if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`); // Debug logging - keep defensive
-          if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
-          if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
-          console.log(`  ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
-        });
-      }
-    }
-
-    // Process server transactions (replica imports) from env.serverInput
-    console.log(
-      `🔍 REPLICA-DEBUG: Processing ${env.serverInput.serverTxs.length} serverTxs, current replicas: ${env.replicas.size}`,
-    );
+    // TICK and REPLICA-DEBUG logging removed - too verbose
     env.serverInput.serverTxs.forEach(serverTx => {
       if (serverTx.type === 'importReplica') {
         if (DEBUG)
@@ -325,14 +302,14 @@ const applyServerInput = async (
         // Only add position if it exists (exactOptionalPropertyTypes compliance)
         if (serverTx.data.position) {
           replica.position = serverTx.data.position;
-          console.log(`📍 GRID-POS-C: Stored replica ${serverTx.entityId.slice(0,10)} position:`, replica.position);
+          // GRID-POS-C removed - frontend has GRID-POS-D/E
         }
 
         env.replicas.set(replicaKey, replica);
         // Validate jBlock immediately after creation
         const createdReplica = env.replicas.get(replicaKey);
         const actualJBlock = createdReplica?.state.jBlock;
-        console.log(`🔍 REPLICA-DEBUG: Added replica ${replicaKey}, jBlock should be 0, actually is: ${actualJBlock} (type: ${typeof actualJBlock})`);
+        // REPLICA-DEBUG removed
 
         // Broadcast initial profile to gossip layer
         if (env.gossip && createdReplica) {
@@ -348,7 +325,7 @@ const applyServerInput = async (
             accounts: [], // No accounts yet
           };
           env.gossip.announce(profile);
-          console.log(`📡 Broadcast initial profile for Entity #${formatEntityDisplay(serverTx.entityId)}`);
+          // Broadcast log removed
         }
 
         if (typeof actualJBlock !== 'number') {
@@ -362,21 +339,10 @@ const applyServerInput = async (
         }
       }
     });
-    console.log(`🔍 REPLICA-DEBUG: After processing serverTxs, total replicas: ${env.replicas.size}`);
-
-    // Simple watcher automatically syncs all proposer replicas from their last jBlock
-
-    // Process entity inputs - check for j-events
-    console.log(`🔍 SERVER-PROCESSING: About to process ${mergedInputs.length} merged entity inputs`);
+    // REPLICA-DEBUG and SERVER-PROCESSING logs removed
     for (const entityInput of mergedInputs) {
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
-      const jEventCount = entityInput.entityTxs!.filter(tx => tx.type === 'j_event').length;
-      if (jEventCount > 0) {
-        console.log(`🚨 FOUND-J-EVENTS: Entity ${entityInput.entityId.slice(0,10)}... has ${jEventCount} j-events from ${entityInput.signerId}`);
-        entityInput.entityTxs!.filter(tx => tx.type === 'j_event').forEach((jEvent, i) => {
-          console.log(`🚨   J-EVENT-${i}: type=${jEvent.data.event.type}, block=${jEvent.data.blockNumber}, observedAt=${new Date(jEvent.data.observedAt).toLocaleTimeString()}`);
-        });
-      }
+      // J-EVENT logging removed - too verbose
 
       // Handle empty signerId for AccountInputs - auto-route to proposer
       let actualSignerId = entityInput.signerId;
@@ -395,7 +361,7 @@ const applyServerInput = async (
             const firstReplica = env.replicas.get(firstReplicaKey);
             if (firstReplica?.state.config.validators[0]) {
               actualSignerId = firstReplica.state.config.validators[0];
-              console.log(`🔄 AUTO-ROUTE: Routing AccountInput to proposer ${actualSignerId} for entity ${entityInput.entityId.slice(0,10)}...`);
+              // AUTO-ROUTE log removed
             }
           }
         }

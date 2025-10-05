@@ -294,9 +294,17 @@ export async function proposeAccountFrame(
   const sortedTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
 
   for (const [tokenId, delta] of sortedTokens) {
-    finalTokenIds.push(tokenId);
-    // Frame stores TOTAL delta: ondelta + offdelta (canonical across both sides)
+    // CONSENSUS FIX: Only include tokens that were actually used in transactions
+    // This prevents mismatch when one side creates empty delta entries
     const totalDelta = delta.ondelta + delta.offdelta;
+
+    // Skip tokens with zero delta AND zero limits (never used)
+    if (totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n) {
+      console.log(`⏭️  Skipping unused token ${tokenId} from frame (zero delta, zero limits)`);
+      continue;
+    }
+
+    finalTokenIds.push(tokenId);
     finalDeltas.push(totalDelta);
   }
 
