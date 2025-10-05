@@ -521,9 +521,20 @@ export function handleAccountInput(
 
     const sortedOurTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
     for (const [tokenId, delta] of sortedOurTokens) {
+      const totalDelta = delta.ondelta + delta.offdelta;
+
+      // CONSENSUS FIX: Apply SAME filtering as proposer
+      // Skip tokens with zero delta AND zero limits (never used)
+      if (totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n) {
+        console.log(`⏭️  RECEIVER: Skipping unused token ${tokenId} from validation (zero delta, zero limits)`);
+        continue;
+      }
+
       ourFinalTokenIds.push(tokenId);
-      ourFinalDeltas.push(delta.ondelta + delta.offdelta);
+      ourFinalDeltas.push(totalDelta);
     }
+
+    console.log(`🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`);
 
     const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
     const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
