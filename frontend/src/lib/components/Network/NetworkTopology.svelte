@@ -31,7 +31,8 @@
     isPinned?: boolean;  // User has manually positioned this entity
     isHovered?: boolean; // Mouse is over this entity
     isDragging?: boolean; // Currently being dragged
-    activityRing?: THREE.Mesh; // Activity indicator ring
+    activityRing?: THREE.Mesh | null; // Activity indicator ring
+    hubConnectedIds?: Set<string>; // PERF: Cache of connected entity IDs for hubs
   }
 
   interface FrameActivity {
@@ -350,9 +351,29 @@
 
   // Live activity log
   let activityLog: string[] = [];
+
   function logActivity(message: string) {
-    activityLog = [...activityLog.slice(-50), `[${new Date().toLocaleTimeString()}] ${message}`];
+    const timestamp = new Date().toLocaleTimeString();
+    activityLog = [...activityLog.slice(-100), `[${timestamp}] ${message}`];
   }
+
+  // Performance metrics
+  let perfMetrics = {
+    fps: 0,
+    renderTime: 0,
+    entityCount: 0,
+    connectionCount: 0,
+    lastFrameTime: 0,
+    avgFrameTime: 0,
+  };
+  let frameTimeSamples: number[] = [];
+  let lastPerfUpdate = 0;
+
+  // Track logged entities to only log ONCE on first draw
+  let loggedGridPositions = new Set<string>();
+
+  // PERF: Cache entity sizes to avoid O(n²) reactive store lookups
+  let entitySizeCache = new Map<string, number>();
 
   // Slice & export state
   let sliceStart: number = 0;
@@ -1072,13 +1093,21 @@
       x = replica.position.x;
       y = replica.position.y;
       z = replica.position.z;
-      console.log(`📍 Using replica position for ${profile.entityId.slice(0,10)}: (${x}, ${y}, ${z})`);
+      // Only log ONCE on first draw
+      if (!loggedGridPositions.has(profile.entityId)) {
+        loggedGridPositions.add(profile.entityId);
+        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)})`);
+      }
     } else if (profile.metadata?.position) {
       // Priority 2: Check gossip profile position
       x = profile.metadata.position.x;
       y = profile.metadata.position.y;
       z = profile.metadata.position.z;
-      console.log(`📍 Using gossip position for ${profile.entityId.slice(0,10)}: (${x}, ${y}, ${z})`);
+      // Only log ONCE on first draw
+      if (!loggedGridPositions.has(profile.entityId)) {
+        loggedGridPositions.add(profile.entityId);
+        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)})`);
+      }
     } else if (forceLayoutPositions.has(profile.entityId) && forceLayoutEnabled) {
       // Priority 3: Use computed force-directed position (only if enabled)
       const pos = forceLayoutPositions.get(profile.entityId)!;
@@ -1116,7 +1145,8 @@
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
-    console.log(`📍 GRID-POS-E: Applied to mesh ${profile.entityId.slice(0,10)}: (${x}, ${y}, ${z})`);
+
+    // GRID-POS-E removed - already logged in GRID-POS-D above
 
     // Store material for animation (hubs will pulse)
     mesh.userData['isHub'] = isHub;
@@ -1188,6 +1218,17 @@
 
     // Build connection index map for O(1) lookups
     buildConnectionIndexMap();
+
+    // PERF: Cache hub connections to avoid O(n × c) nested iteration
+    entities.forEach(entity => {
+      if (entity.isHub) {
+        entity.hubConnectedIds = new Set(
+          connections
+            .filter(c => c.from === entity.id || c.to === entity.id)
+            .map(c => c.from === entity.id ? c.to : c.from)
+        );
+      }
+    });
   }
 
   function buildConnectionIndexMap() {
@@ -1397,95 +1438,44 @@
 
   }
 
-  /**
-   * Create lightning strike animation that propagates hop-by-hop through the route
-   * @param route - Array of entity IDs representing the payment path
-   * @param amount - Payment amount (for visual sizing)
-   */
-  async function createLightningStrike(route: string[], amount: bigint) {
-    if (!route || route.length < 2) return;
-
-    debug.network('⚡ Lightning strike:', { route, amount: amount.toString() });
-
-    // Animate each hop sequentially
-    for (let i = 0; i < route.length - 1; i++) {
-      const fromId = route[i];
-      const toId = route[i + 1];
-
-      if (!fromId || !toId) {
-        debug.warn(`⚡ Lightning hop ${i}: missing route entity ID`);
-        continue;
-      }
-
-      // Find entities
-      const fromEntity = entities.find(e => e.id === fromId);
-      const toEntity = entities.find(e => e.id === toId);
-
-      if (!fromEntity || !toEntity) {
-        debug.warn(`⚡ Lightning hop ${i}: entity not found`, { fromId, toId });
-        continue;
-      }
-
-      // Create lightning bolt geometry
-      const lightningBolt = createLightningBolt(fromEntity.position, toEntity.position, amount);
-      scene.add(lightningBolt);
-
-      // Pulse both entities
-      triggerEntityActivity(fromId);
-      triggerEntityActivity(toId);
-
-      // Wait for lightningSpeed ms before next hop
-      await new Promise(resolve => setTimeout(resolve, lightningSpeed));
-
-      // Remove lightning bolt after brief display
-      setTimeout(() => {
-        scene.remove(lightningBolt);
-      }, lightningSpeed * 0.5); // Display for half the hop duration
-    }
-  }
 
   /**
-   * Create a single lightning bolt mesh between two points
+   * PERF: Update only connections touching a specific entity (during drag)
+   * Avoids full rebuild - just updates BufferGeometry positions
    */
-  function createLightningBolt(start: THREE.Vector3, end: THREE.Vector3, amount: bigint): THREE.Group {
-    const group = new THREE.Group();
+  function updateConnectionsForEntity(entityId: string) {
+    connections.forEach(conn => {
+      if (conn.from === entityId || conn.to === entityId) {
+        const fromEntity = entities.find(e => e.id === conn.from);
+        const toEntity = entities.find(e => e.id === conn.to);
+        if (fromEntity && toEntity) {
+          // Update line geometry positions (no recreate)
+          const posAttr = conn.line.geometry.getAttribute('position');
+          if (posAttr && posAttr.array) {
+            const positions = posAttr.array as Float32Array;
+            positions[0] = fromEntity.position.x;
+            positions[1] = fromEntity.position.y;
+            positions[2] = fromEntity.position.z;
+            positions[3] = toEntity.position.x;
+            positions[4] = toEntity.position.y;
+            positions[5] = toEntity.position.z;
+            posAttr.needsUpdate = true;
+            conn.line.computeLineDistances();
+          }
 
-    // Main bolt line (bright electric blue)
-    const boltGeometry = new THREE.BufferGeometry().setFromPoints([start, end]);
-    const boltMaterial = new THREE.LineBasicMaterial({
-      color: 0x00d9ff, // Electric blue
-      linewidth: 3,
-      opacity: 1.0,
-      transparent: false
+          // Update progress bars position/rotation
+          if (conn.progressBars) {
+            const midpoint = new THREE.Vector3(
+              (fromEntity.position.x + toEntity.position.x) / 2,
+              (fromEntity.position.y + toEntity.position.y) / 2,
+              (fromEntity.position.z + toEntity.position.z) / 2
+            );
+            conn.progressBars.position.copy(midpoint);
+            conn.progressBars.lookAt(toEntity.position);
+          }
+        }
+      }
     });
-    const bolt = new THREE.Line(boltGeometry, boltMaterial);
-    group.add(bolt);
-
-    // Glow effect (wider, semi-transparent)
-    const glowMaterial = new THREE.LineBasicMaterial({
-      color: 0x00d9ff,
-      linewidth: 8,
-      opacity: 0.3,
-      transparent: true
-    });
-    const glow = new THREE.Line(boltGeometry.clone(), glowMaterial);
-    group.add(glow);
-
-    // Add sparks at midpoint
-    const midpoint = new THREE.Vector3().lerpVectors(start, end, 0.5);
-    const sparkSize = Math.min(0.3, 0.1 + Number(amount) / 1000000);
-
-    const sparkGeometry = new THREE.SphereGeometry(sparkSize, 8, 8);
-    const sparkMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.9
-    });
-    const spark = new THREE.Mesh(sparkGeometry, sparkMaterial);
-    spark.position.copy(midpoint);
-    group.add(spark);
-
-    return group;
   }
 
   function createConnectionLine(fromEntity: any, toEntity: any, fromId: string, toId: string, replica: any) {
@@ -1964,9 +1954,8 @@
         entity.label = createEntityLabel(entity.id);
       }
 
-      // Verify label is in scene (defensive check)
-      if (!scene.children.includes(entity.label)) {
-        debug.warn(`⚠️ Label for ${entity.id.slice(-4)} not in scene - re-adding`);
+      // PERF: Use .parent check instead of scene.children.includes() (O(1) vs O(400+))
+      if (!entity.label.parent) {
         scene.add(entity.label);
       }
 
@@ -2042,15 +2031,10 @@
               lightningGroup.remove(child);
             }
 
-            // Find all entities connected to this hub
-            const connectedEntities = entities.filter(e => {
-              if (e.id === entity.id) return false;
-              // Check if there's a connection between hub and this entity
-              return connections.some(c =>
-                (c.from === entity.id && c.to === e.id) ||
-                (c.to === entity.id && c.from === e.id)
-              );
-            });
+            // PERF: Use cached hub connections instead of nested filter+some
+            const connectedEntities = entity.hubConnectedIds
+              ? entities.filter(e => entity.hubConnectedIds!.has(e.id))
+              : [];
 
             // Fire lightning to 1-3 random connected entities
             const targetCount = Math.min(3, connectedEntities.length);
@@ -2184,7 +2168,26 @@
     }
 
     if (renderer && camera) {
+      const renderStartTime = performance.now();
       renderer.render(scene, camera);
+      const renderEndTime = performance.now();
+
+      // Performance metrics update (every 500ms)
+      const frameTime = renderEndTime - renderStartTime;
+      frameTimeSamples.push(frameTime);
+      if (frameTimeSamples.length > 60) frameTimeSamples.shift();
+
+      if (renderEndTime - lastPerfUpdate > 500) {
+        perfMetrics = {
+          fps: Math.round(1000 / (frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length)),
+          renderTime: Math.round(frameTime * 100) / 100,
+          entityCount: entities.length,
+          connectionCount: connections.length,
+          lastFrameTime: Math.round(frameTime * 100) / 100,
+          avgFrameTime: Math.round((frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length) * 100) / 100,
+        };
+        lastPerfUpdate = renderEndTime;
+      }
     }
   }
 
@@ -2193,6 +2196,9 @@
   let needsConnectionRebuild = false;
 
   function applyCollisionRepulsion() {
+    // PERF: Skip expensive O(n²) collision checks during drag
+    if (isDragging) return;
+
     // First principle: entities must never overlap in 3D space
     // Check all pairs and push apart if they're too close (sphere intersection)
 
@@ -2412,7 +2418,7 @@
           entity.mesh.remove(entity.activityRing);
           entity.activityRing.geometry.dispose();
           (entity.activityRing.material as THREE.Material).dispose();
-          entity.activityRing = undefined;
+          entity.activityRing = null;
         }
       }
     });
@@ -2639,15 +2645,8 @@
       draggedEntity.position.copy(intersection.add(dragOffset));
       draggedEntity.mesh.position.copy(draggedEntity.position);
 
-      // Rebuild connections in real-time during drag (bars follow entities)
-      connections.forEach(connection => {
-        scene.remove(connection.line);
-        if (connection.progressBars) {
-          scene.remove(connection.progressBars);
-        }
-      });
-      connections = [];
-      createConnections();
+      // PERF: Only update affected connections (not full rebuild)
+      updateConnectionsForEntity(draggedEntity.id);
 
       return; // Skip hover logic while dragging
     }
@@ -2986,51 +2985,6 @@
     });
   }
 
-  function addActivityToTicker(fromId: string, toId: string, accountTx: any) {
-    const fromShort = getEntityShortName(fromId);
-    const toShort = getEntityShortName(toId);
-
-    let message = '';
-    let type: 'payment' | 'credit' | 'settlement' | 'j-event' | 'commit' = 'payment';
-
-    switch (accountTx.type) {
-      case 'direct_payment':
-        const amt = accountTx.data?.amount ? Number(accountTx.data.amount) : 0;
-        const hops = accountTx.data?.route?.length || 0;
-        message = hops > 0
-          ? `💸 ${fromShort} → ${toShort}: ${amt} (${hops} hops)`
-          : `💸 ${fromShort} → ${toShort}: ${amt}`;
-        type = 'payment';
-        break;
-      case 'account_settle':
-        message = `⚖️ ${fromShort} ⟷ ${toShort}: settlement`;
-        type = 'settlement';
-        break;
-      case 'account_deposit':
-        message = `🏦 ${fromShort} deposit (j-event)`;
-        type = 'j-event';
-        break;
-      case 'account_withdraw':
-        message = `🏦 ${fromShort} withdraw (j-event)`;
-        type = 'j-event';
-        break;
-      default:
-        message = `${fromShort} ↔ ${toShort}: ${accountTx.type}`;
-    }
-
-    // Add to beginning of array (newest first)
-    recentActivity.unshift({
-      id: `${Date.now()}-${Math.random()}`,
-      message,
-      timestamp: Date.now(),
-      type
-    });
-
-    // Keep only last 30 activities (verbose mode)
-    if (recentActivity.length > 30) {
-      recentActivity = recentActivity.slice(0, 30);
-    }
-  }
 
   // Helper to log frame commits (currently unused, will be called from frame processing)
   // function logFrameCommit(entity1: string, entity2: string, frameId: number) {
@@ -3106,22 +3060,42 @@
   }
 
   function getEntitySizeForToken(entityId: string, tokenId: number): number {
-    const currentReplicas = $visibleReplicas;
-    const replica = Array.from(currentReplicas.entries() as [string, any][])
-      .find(([key]) => key.startsWith(entityId + ':'));
-
-    if (!replica?.[1]?.state?.reserves) {
-      return 0.5; // Default size
+    // PERF: Check cache first (eliminates O(n²) reactive store lookups)
+    const cacheKey = `${entityId}:${tokenId}`;
+    if (entitySizeCache.has(cacheKey)) {
+      return entitySizeCache.get(cacheKey)!;
     }
 
-    const reserves = replica[1].state.reserves;
-    // FINTECH-SAFETY: reserves Map uses string keys, not number
-    const tokenAmount = reserves.get(String(tokenId)) || 0n;
+    const currentReplicas = $visibleReplicas;
+    let replica: any = null;
 
-    // Normalize size between 0.3 and 1.5 based on token amount
-    // FINTECH-SAFETY: Divide BigInt before casting to preserve precision
+    // PERF: Direct iteration instead of Array.from + find
+    for (const [key, value] of currentReplicas) {
+      if (key.startsWith(entityId + ':')) {
+        replica = value;
+        break;
+      }
+    }
+
+    if (!replica?.state?.reserves) {
+      const defaultSize = 0.5;
+      entitySizeCache.set(cacheKey, defaultSize);
+      return defaultSize;
+    }
+
+    const reserves = replica.state.reserves;
+    const tokenAmount = reserves.get(String(tokenId)) || 0n;
     const normalizedAmount = Number(tokenAmount / 10000n);
-    return Math.max(0.3, Math.min(1.5, 0.5 + normalizedAmount * 0.001));
+    const size = Math.max(0.3, Math.min(1.5, 0.5 + normalizedAmount * 0.001));
+
+    // Cache the result
+    entitySizeCache.set(cacheKey, size);
+    return size;
+  }
+
+  // PERF: Clear cache when replicas change
+  $: if ($visibleReplicas) {
+    entitySizeCache.clear();
   }
 
   function calculateAvailableRoutes(from: string, to: string) {
@@ -3527,6 +3501,11 @@
       }
 
       console.log(`🎬 Executing live command: ${commandText}`);
+
+      // Clear logged positions if this is a grid command (for fresh logs)
+      if (commandText.trim().startsWith('grid')) {
+        loggedGridPositions.clear();
+      }
 
       // Parse as single-line scenario
       const scenarioText = `SEED live-${Date.now()}\n\n0: Live Command\n${commandText}`;
@@ -4263,6 +4242,33 @@
           }}>
             💸 PayRandom ×10
           </button>
+        </div>
+
+        <!-- Performance Metrics -->
+        <div class="perf-metrics">
+          <h4>⚡ Performance</h4>
+          <div class="perf-grid">
+            <div class="perf-item">
+              <span class="perf-label">FPS:</span>
+              <span class="perf-value" class:perf-good={perfMetrics.fps >= 50} class:perf-warning={perfMetrics.fps < 50 && perfMetrics.fps >= 30} class:perf-bad={perfMetrics.fps < 30}>{perfMetrics.fps}</span>
+            </div>
+            <div class="perf-item">
+              <span class="perf-label">Render:</span>
+              <span class="perf-value">{perfMetrics.renderTime}ms</span>
+            </div>
+            <div class="perf-item">
+              <span class="perf-label">Entities:</span>
+              <span class="perf-value">{perfMetrics.entityCount}</span>
+            </div>
+            <div class="perf-item">
+              <span class="perf-label">Connections:</span>
+              <span class="perf-value">{perfMetrics.connectionCount}</span>
+            </div>
+            <div class="perf-item">
+              <span class="perf-label">Avg Frame:</span>
+              <span class="perf-value">{perfMetrics.avgFrameTime}ms</span>
+            </div>
+          </div>
         </div>
 
         <!-- Live Activity Log -->
@@ -5165,6 +5171,61 @@
   .demo-btn.primary:hover {
     background: linear-gradient(135deg, rgba(0, 255, 136, 0.7), rgba(0, 200, 255, 0.6));
     box-shadow: 0 4px 16px rgba(0, 255, 136, 0.4);
+  }
+
+  /* Performance Metrics */
+  .perf-metrics {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(0, 200, 255, 0.4);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 16px;
+  }
+
+  .perf-metrics h4 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #00c8ff;
+  }
+
+  .perf-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .perf-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .perf-label {
+    color: #999;
+    font-weight: 500;
+  }
+
+  .perf-value {
+    color: #00ff88;
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+  }
+
+  .perf-good {
+    color: #00ff88;
+  }
+
+  .perf-warning {
+    color: #ffc107;
+  }
+
+  .perf-bad {
+    color: #ff4c4c;
   }
 
   /* Live Activity Log */

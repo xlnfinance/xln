@@ -256,13 +256,13 @@ export const applyEntityInput = async (
       console.log(`    ⚠️  CORNER CASE: Large batch of ${entityInput.entityTxs.length} transactions`);
     }
   } else if (entityInput.entityTxs && entityInput.entityTxs.length === 0) {
-    if (DEBUG) console.log(`    ⚠️  CORNER CASE: Empty transaction array received - no mempool changes`);
+    // DEBUG removed: ⚠️  CORNER CASE: Empty transaction array received - no mempool changes`);
   }
 
   // CRITICAL: Forward transactions to proposer BEFORE processing commits
   // This prevents race condition where commits clear mempool before forwarding
   if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
-    if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
+    // DEBUG removed: → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
     if (!proposerId) {
@@ -290,7 +290,7 @@ export const applyEntityInput = async (
 
     if (totalPower >= entityReplica.state.config.threshold) {
       // This is a commit notification from proposer, apply the frame
-      if (DEBUG) console.log(`    → Received commit notification with ${entityInput.precommits.size} signatures`);
+      // DEBUG removed: → Received commit notification with ${entityInput.precommits.size} signatures`);
 
       // Apply the committed frame with incremented height
       entityReplica.state = {
@@ -319,7 +319,7 @@ export const applyEntityInput = async (
 
     // Lock to this frame (CometBFT style)
     entityReplica.lockedFrame = entityInput.proposedFrame;
-    if (DEBUG) console.log(`    → Validator locked to frame ${entityInput.proposedFrame.hash.slice(0, 10)}...`);
+    // DEBUG removed: → Validator locked to frame ${entityInput.proposedFrame.hash.slice(0, 10)}...`);
 
     if (config.mode === 'gossip-based') {
       // Send precommit to all validators
@@ -333,7 +333,7 @@ export const applyEntityInput = async (
           precommits: new Map([[entityReplica.signerId, frameSignature]]),
         });
       });
-      if (DEBUG) console.log(`    → Signed proposal, gossiping precommit to ${config.validators.length} validators`);
+      // DEBUG removed: → Signed proposal, gossiping precommit to ${config.validators.length} validators`);
     } else {
       // Send precommit to proposer only
       const proposerId = config.validators[0];
@@ -352,7 +352,7 @@ export const applyEntityInput = async (
         signerId: proposerId,
         precommits: new Map([[entityReplica.signerId, frameSignature]]),
       });
-      if (DEBUG) console.log(`    → Signed proposal, sending precommit to ${proposerId}`);
+      // DEBUG removed: → Signed proposal, sending precommit to ${proposerId}`);
     }
   }
 
@@ -398,7 +398,7 @@ export const applyEntityInput = async (
         ...entityReplica.proposal.newState,
         height: entityReplica.state.height + 1,
       };
-      if (DEBUG) console.log(`    → Threshold reached! Committing frame, height: ${entityReplica.state.height}`);
+      // DEBUG removed: → Threshold reached! Committing frame, height: ${entityReplica.state.height}`);
 
       // Save proposal data before clearing
       const sortedSignatures = sortSignatures(entityReplica.proposal.signatures, entityReplica.state.config);
@@ -432,8 +432,8 @@ export const applyEntityInput = async (
             });
           }
         });
-        const notifiedCount = entityReplica.state.config.validators.length - 1; // excluding self
-        if (DEBUG) console.log(`    → Sending commit notifications to ${notifiedCount} validators (excluding self)`);
+        // const notifiedCount = entityReplica.state.config.validators.length - 1; // excluding self
+        // DEBUG removed: → Sending commit notifications to ${notifiedCount} validators (excluding self)`);
       } else {
         console.log(
           `🔍 GOSSIP-COMMIT: [${timestamp}] ${entityReplica.signerId} NOT sending commit notifications (gossip mode) for entity ${entityInput.entityId.slice(0, 10)}...`,
@@ -548,9 +548,9 @@ export const applyEntityInput = async (
       }
     });
   } else if (entityReplica.isProposer && entityReplica.mempool.length === 0 && !entityReplica.proposal) {
-    if (DEBUG) console.log(`    ⚠️  CORNER CASE: Proposer with empty mempool - no auto-propose`);
+    // DEBUG removed: ⚠️  CORNER CASE: Proposer with empty mempool - no auto-propose`);
   } else if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
-    if (DEBUG) console.log(`    → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
+    // DEBUG removed: → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
     if (!proposerId) {
@@ -570,7 +570,7 @@ export const applyEntityInput = async (
     // Clear mempool after sending
     entityReplica.mempool.length = 0;
   } else if (entityReplica.isProposer && entityReplica.proposal) {
-    if (DEBUG) console.log(`    ⚠️  CORNER CASE: Proposer already has pending proposal - no new auto-propose`);
+    // DEBUG removed: ⚠️  CORNER CASE: Proposer already has pending proposal - no new auto-propose`);
   }
 
   // Debug: Log outputs being generated with detailed analysis
@@ -747,8 +747,6 @@ export const applyEntityFrame = async (
               data: proposal.accountInput
             }]
           };
-          console.log(`📤 ROUTING-DEBUG: Creating EntityInput output - FULL entityId="${outputEntityInput.entityId}", signerId="${outputEntityInput.signerId}"`);
-          console.log(`📤 ROUTING-DEBUG: Expected replica key should be: "${outputEntityInput.entityId}:${outputEntityInput.signerId}"`);
           allOutputs.push(outputEntityInput);
 
           // Add events to entity messages

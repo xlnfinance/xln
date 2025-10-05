@@ -336,7 +336,7 @@ async function handleImport(
 
 /**
  * Create 3D grid of entities with automatic connections
- * Syntax: grid X Y Z spacing=40 token=1
+ * Syntax: grid N (creates N×N×N cube) OR grid X Y Z spacing=40
  */
 async function handleGrid(
   params: any[],
@@ -346,10 +346,15 @@ async function handleGrid(
   const positional = getPositionalParams(params);
   const named = namedParamsToObject(params);
 
-  const X = parseInt(String(positional[0] || '2'));
-  const Y = parseInt(String(positional[1] || '2'));
-  const Z = parseInt(String(positional[2] || '2'));
-  const spacing = parseFloat(String(named['spacing'] || '400'));
+  // Default grid spacing constant
+  const DEFAULT_GRID_SPACING = 40;
+
+  // If only one number provided, expand to cube (N N N)
+  const firstArg = positional[0] !== undefined ? parseInt(String(positional[0])) : 2;
+  const X = firstArg;
+  const Y = positional[1] !== undefined ? parseInt(String(positional[1])) : firstArg;
+  const Z = positional[2] !== undefined ? parseInt(String(positional[2])) : firstArg;
+  const spacing = parseFloat(String(named['spacing'] || DEFAULT_GRID_SPACING));
 
   const total = X * Y * Z;
   if (total > 1000) {
@@ -530,7 +535,7 @@ async function handleGrid(
  */
 async function handlePayRandom(
   params: any[],
-  context: ScenarioExecutionContext,
+  _context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {
   const named = namedParamsToObject(params);
@@ -544,49 +549,61 @@ async function handlePayRandom(
 
   console.log(`  🎲 Executing ${count} random payments (${minHops}-${maxHops} hops, ${minAmount}-${maxAmount} amount)`);
 
-  const entities = Array.from(context.entityMapping.values());
-  if (entities.length < 2) {
-    console.warn('  ⚠️  Need at least 2 entities for random payments');
+  // Get all entities from server state (not just scenario context)
+  const allEntityIds = Array.from(env.replicas.keys())
+    .map(key => key.split(':')[0])
+    .filter((id, idx, arr) => arr.indexOf(id) === idx); // unique
+
+  if (allEntityIds.length < 2) {
+    console.warn(`  ⚠️  Need at least 2 entities for random payments (found ${allEntityIds.length})`);
     return;
   }
 
-  const { processUntilEmpty } = await import('../server.js');
-  const paymentInputs: any[] = [];
+  console.log(`  💸 Found ${allEntityIds.length} entities in network`);
 
+  const { processUntilEmpty } = await import('../server.js');
+
+  // Send payments one at a time with 1 second delay
   for (let i = 0; i < count; i++) {
     // Random source and destination
-    const sourceIdx = Math.floor(Math.random() * entities.length);
-    let destIdx = Math.floor(Math.random() * entities.length);
+    const sourceIdx = Math.floor(Math.random() * allEntityIds.length);
+    let destIdx = Math.floor(Math.random() * allEntityIds.length);
 
     // Ensure source !== dest
-    while (destIdx === sourceIdx && entities.length > 1) {
-      destIdx = Math.floor(Math.random() * entities.length);
+    while (destIdx === sourceIdx && allEntityIds.length > 1) {
+      destIdx = Math.floor(Math.random() * allEntityIds.length);
     }
 
-    const sourceEntityId = entities[sourceIdx];
-    const destEntityId = entities[destIdx];
+    const sourceEntityId = allEntityIds[sourceIdx];
+    const destEntityId = allEntityIds[destIdx];
     if (!sourceEntityId || !destEntityId) continue;
+
+    // Get signer from replica
+    const replicaKey = Array.from(env.replicas.keys()).find(k => k.startsWith(sourceEntityId + ':'));
+    const replica = replicaKey ? env.replicas.get(replicaKey) : null;
+    if (!replica) {
+      console.warn(`  ⚠️  No replica found for ${sourceEntityId.slice(0, 10)}`);
+      continue;
+    }
+    const signerId = replica.signerId;
 
     // Random amount
     const amountRange = maxAmount - minAmount;
     const randomOffset = BigInt(Math.floor(Math.random() * Number(amountRange)));
     const amount = minAmount + randomOffset;
 
-    // Find scenario ID for signer
-    const sourceScenarioId = Array.from(context.entityMapping.entries())
-      .find(([, addr]) => addr === sourceEntityId)?.[0];
-    if (!sourceScenarioId) continue;
+    console.log(`  💸 Payment ${i + 1}/${count}: ${sourceEntityId.slice(0,8)} → ${destEntityId.slice(0,8)} (${amount} tokens)`);
 
-    paymentInputs.push({
+    await processUntilEmpty(env, [{
       entityId: sourceEntityId,
-      signerId: `g${sourceScenarioId}`,
+      signerId: signerId,
       entityTxs: [{
         type: 'accountInput',
         data: {
           fromEntityId: sourceEntityId,
           toEntityId: destEntityId,
           accountTx: {
-            type: 'direct-payment',
+            type: 'direct_payment',
             data: {
               tokenId: token,
               amount: amount,
@@ -595,12 +612,15 @@ async function handlePayRandom(
           }
         }
       }]
-    });
+    }]);
+
+    // Wait 1 second before next payment
+    if (i < count - 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
   }
 
-  console.log(`  💸 Sending ${paymentInputs.length} random payments...`);
-  await processUntilEmpty(env, paymentInputs);
-  console.log(`  ✅ Random payments complete`);
+  console.log(`  ✅ ${count} random payments complete`);
 }
 
 /**
