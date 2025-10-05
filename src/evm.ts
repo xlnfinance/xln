@@ -595,12 +595,14 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       }
       const jData = data as Record<string, any>;
 
-      // CRITICAL: Expand RPC URLs - nginx handles HTTPS proxy on :8545
+      // CRITICAL: Expand RPC URLs - production uses port + 10000 (nginx proxy)
       let rpcUrl = jData['rpc'];
       if (isBrowser && rpcUrl.startsWith(':')) {
-        // Use location.origin + port (nginx proxies HTTPS on xln.finance:8545)
-        rpcUrl = `${window.location.origin.replace(/:\d+$/, '')}${rpcUrl}`;
-        console.log(`🔧 RPC URL: ${jData['rpc']} → ${rpcUrl}`);
+        const port = parseInt(rpcUrl.slice(1));
+        const isLocalhost = window.location.hostname.match(/localhost|127\.0\.0\.1/);
+        const actualPort = isLocalhost ? port : port + 10000;
+        rpcUrl = `${window.location.protocol}//${window.location.hostname}:${actualPort}`;
+        console.log(`🔧 RPC URL: ${jData['rpc']} → ${rpcUrl} (${isLocalhost ? 'local' : 'production'})`);
       } else if (!isBrowser && rpcUrl.startsWith(':')) {
         // Node.js: Default to localhost
         rpcUrl = `http://localhost${rpcUrl}`;
