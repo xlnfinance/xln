@@ -1,10 +1,47 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, isLoading, error } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
   import { THEME_DEFINITIONS } from '../../utils/themes';
   import type { ThemeName } from '../../types';
   import { VERSION } from '../../generated/version';
+  import { errorLog, formatErrorLog } from '../../stores/errorLogStore';
+
+  // Browser capabilities check
+  $: browserCapabilities = {
+    indexedDB: typeof indexedDB !== 'undefined',
+    webGL: (() => {
+      try {
+        const canvas = document.createElement('canvas');
+        return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+      } catch { return false; }
+    })(),
+    webXR: 'xr' in navigator,
+    secureContext: typeof window !== 'undefined' && window.isSecureContext,
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown'
+  };
+
+  // Database health check
+  let dbHealth = { available: false, size: 0, location: 'Unknown' };
+  async function checkDbHealth() {
+    try {
+      if (typeof indexedDB !== 'undefined' && 'estimate' in navigator.storage) {
+        const estimate = await navigator.storage.estimate();
+        dbHealth = {
+          available: true,
+          size: Math.round((estimate.usage || 0) / 1024),
+          location: 'IndexedDB (browser)'
+        };
+      } else {
+        dbHealth = { available: false, size: 0, location: 'Unavailable' };
+      }
+    } catch {
+      dbHealth = { available: false, size: 0, location: 'Error checking' };
+    }
+  }
+
+  // Format error log for textarea
+  $: errorLogText = formatErrorLog($errorLog);
 
   // J-machine status (derived from environment)
   $: jMachineStatus = (() => {
@@ -46,6 +83,74 @@
   setInterval(() => {
     nextSyncTimer = Math.floor((1000 - (Date.now() % 1000)) / 100) / 10;
   }, 100);
+
+  // Jurisdiction connection status
+  let jurisdictionStatus: any = null;
+  let statusCheckInterval: any = null;
+
+  async function checkJurisdictionStatus() {
+    try {
+      const xln = await getXLN();
+      const jurisdictions = await xln.getAvailableJurisdictions();
+
+      const status = await Promise.all(jurisdictions.map(async (j: any) => {
+        try {
+          const { ethers } = await import('ethers');
+          const provider = new ethers.JsonRpcProvider(j.address);
+          const blockNumber = await Promise.race([
+            provider.getBlockNumber(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), 2000))
+          ]);
+
+          return {
+            name: j.name,
+            rpcUrl: j.address,
+            connected: true,
+            lastBlock: blockNumber,
+            error: null
+          };
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Connection failed';
+          // Log to persistent error store
+          errorLog.log(`${j.name} RPC connection failed: ${errorMsg}`, 'Jurisdiction', { rpcUrl: j.address });
+
+          return {
+            name: j.name,
+            rpcUrl: j.address,
+            connected: false,
+            lastBlock: null,
+            error: errorMsg
+          };
+        }
+      }));
+
+      jurisdictionStatus = status;
+    } catch (error) {
+      console.error('Failed to check jurisdiction status:', error);
+      jurisdictionStatus = [{
+        name: 'Error',
+        rpcUrl: 'N/A',
+        connected: false,
+        lastBlock: null,
+        error: error instanceof Error ? error.message : 'Failed to load jurisdictions'
+      }];
+    }
+  }
+
+  // Check status on mount and every 5 seconds
+  import { onMount, onDestroy } from 'svelte';
+  onMount(() => {
+    checkJurisdictionStatus();
+    checkDbHealth();
+    statusCheckInterval = setInterval(() => {
+      checkJurisdictionStatus();
+      checkDbHealth();
+    }, 5000);
+  });
+
+  onDestroy(() => {
+    if (statusCheckInterval) clearInterval(statusCheckInterval);
+  });
 
   function handleThemeChange(event: Event) {
     const target = event.target as HTMLSelectElement;
@@ -134,6 +239,21 @@
 <div class="settings-container">
   <h1>Settings & Configuration</h1>
 
+  <!-- XLN Initialization Status -->
+  {#if $isLoading}
+    <div class="init-status loading">
+      🔄 XLN Environment loading...
+    </div>
+  {:else if $error}
+    <div class="init-status error">
+      ❌ XLN failed to initialize: {$error}
+    </div>
+  {:else if $xlnEnvironment}
+    <div class="init-status success">
+      ✅ XLN Environment active (Height: {$xlnEnvironment.height}, Replicas: {$xlnEnvironment.replicas?.size || 0})
+    </div>
+  {/if}
+
   <div class="settings-content">
     <!-- Admin Actions Section -->
     <div class="setting-group">
@@ -183,6 +303,111 @@
           </div>
         {/if}
       </div>
+    </div>
+
+    <!-- Jurisdiction Connection Status Section -->
+    <div class="setting-group">
+      <h2>🌐 Jurisdiction Connection Status</h2>
+      {#if jurisdictionStatus === null}
+        <div class="connection-status-loading">
+          <span>⏳ Checking connections...</span>
+        </div>
+      {:else}
+        <div class="jurisdiction-status-grid">
+          {#each jurisdictionStatus as jStatus}
+            <div class="jurisdiction-card" class:connected={jStatus.connected} class:disconnected={!jStatus.connected}>
+              <div class="jurisdiction-header">
+                <span class="jurisdiction-name">{jStatus.name}</span>
+                <span class="connection-indicator" class:connected={jStatus.connected}>
+                  {jStatus.connected ? '✅ Connected' : '❌ Disconnected'}
+                </span>
+              </div>
+              <div class="jurisdiction-details">
+                <div class="detail-row">
+                  <span class="detail-label">RPC URL:</span>
+                  <span class="detail-value">{jStatus.rpcUrl}</span>
+                </div>
+                {#if jStatus.connected && jStatus.lastBlock !== null}
+                  <div class="detail-row">
+                    <span class="detail-label">Latest Block:</span>
+                    <span class="detail-value">#{jStatus.lastBlock}</span>
+                  </div>
+                {:else if jStatus.error}
+                  <div class="detail-row error-row">
+                    <span class="detail-label">Error:</span>
+                    <span class="detail-value">{jStatus.error}</span>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
+    <!-- Browser Capabilities Section -->
+    <div class="setting-group">
+      <h2>🖥️ Browser Capabilities</h2>
+      <div class="capabilities-grid">
+        <div class="capability-item" class:available={browserCapabilities.indexedDB}>
+          <span class="capability-name">IndexedDB:</span>
+          <span class="capability-status">{browserCapabilities.indexedDB ? '✅ Available' : '❌ Blocked'}</span>
+        </div>
+        <div class="capability-item" class:available={browserCapabilities.webGL}>
+          <span class="capability-name">WebGL:</span>
+          <span class="capability-status">{browserCapabilities.webGL ? '✅ Available' : '❌ Not Available'}</span>
+        </div>
+        <div class="capability-item" class:available={browserCapabilities.webXR}>
+          <span class="capability-name">WebXR:</span>
+          <span class="capability-status">{browserCapabilities.webXR ? '✅ Available' : '❌ Not Available'}</span>
+        </div>
+        <div class="capability-item" class:available={browserCapabilities.secureContext}>
+          <span class="capability-name">HTTPS:</span>
+          <span class="capability-status">{browserCapabilities.secureContext ? '✅ Secure' : '❌ Insecure'}</span>
+        </div>
+        <div class="capability-item full-width">
+          <span class="capability-name">User Agent:</span>
+          <span class="capability-value">{browserCapabilities.userAgent}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Database Health Section -->
+    <div class="setting-group">
+      <h2>💾 Database Health</h2>
+      <div class="db-health-grid">
+        <div class="health-item">
+          <span class="health-label">Status:</span>
+          <span class="health-value" class:healthy={dbHealth.available} class:unhealthy={!dbHealth.available}>
+            {dbHealth.available ? '✅ Available' : '❌ Unavailable'}
+          </span>
+        </div>
+        <div class="health-item">
+          <span class="health-label">Location:</span>
+          <span class="health-value">{dbHealth.location}</span>
+        </div>
+        <div class="health-item">
+          <span class="health-label">Size:</span>
+          <span class="health-value">{dbHealth.size} KB</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Persistent Error Log Section -->
+    <div class="setting-group">
+      <h2>🚨 Error Log</h2>
+      <div class="error-log-controls">
+        <button class="clear-log-btn" on:click={() => errorLog.clear()}>
+          Clear Log
+        </button>
+        <span class="error-count">{$errorLog.length} errors logged</span>
+      </div>
+      <textarea
+        class="error-log-textarea"
+        readonly
+        value={errorLogText || 'No errors logged yet'}
+        placeholder="Error log will appear here..."
+      />
     </div>
 
     <!-- UI Preferences Section -->
@@ -294,8 +519,36 @@
     font-size: 32px;
     font-weight: 700;
     color: #00d9ff;
-    margin: 0 0 40px 0;
+    margin: 0 0 20px 0;
     text-align: center;
+  }
+
+  /* Initialization Status */
+  .init-status {
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .init-status.loading {
+    background: rgba(255, 193, 7, 0.2);
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    color: #ffc107;
+  }
+
+  .init-status.error {
+    background: rgba(255, 76, 76, 0.2);
+    border: 1px solid rgba(255, 76, 76, 0.4);
+    color: #ff4c4c;
+  }
+
+  .init-status.success {
+    background: rgba(0, 255, 136, 0.2);
+    border: 1px solid rgba(0, 255, 136, 0.4);
+    color: #00ff88;
   }
 
   h2 {
@@ -374,6 +627,227 @@
     font-weight: 600;
     color: #00ff88;
     font-family: 'Courier New', monospace;
+  }
+
+  /* Jurisdiction Status */
+  .connection-status-loading {
+    text-align: center;
+    padding: 20px;
+    color: #9d9d9d;
+  }
+
+  .jurisdiction-status-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .jurisdiction-card {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    padding: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .jurisdiction-card.connected {
+    border-color: rgba(0, 255, 136, 0.3);
+  }
+
+  .jurisdiction-card.disconnected {
+    border-color: rgba(255, 76, 76, 0.3);
+  }
+
+  .jurisdiction-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .jurisdiction-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #00d9ff;
+  }
+
+  .connection-indicator {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: rgba(255, 76, 76, 0.2);
+    color: #ff4c4c;
+  }
+
+  .connection-indicator.connected {
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+  }
+
+  .jurisdiction-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+  }
+
+  .detail-label {
+    color: #9d9d9d;
+  }
+
+  .detail-value {
+    color: #d4d4d4;
+    font-family: 'Courier New', monospace;
+    word-break: break-all;
+  }
+
+  .detail-row.error-row .detail-value {
+    color: #ff4c4c;
+  }
+
+  /* Browser Capabilities */
+  .capabilities-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .capability-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .capability-item.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .capability-name {
+    font-size: 13px;
+    color: #9d9d9d;
+    font-weight: 500;
+  }
+
+  .capability-status {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .capability-item.available .capability-status {
+    color: #00ff88;
+  }
+
+  .capability-item:not(.available) .capability-status {
+    color: #ff4c4c;
+  }
+
+  .capability-value {
+    font-size: 11px;
+    color: #999;
+    font-family: 'Courier New', monospace;
+    word-break: break-all;
+  }
+
+  /* Database Health */
+  .db-health-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+
+  .health-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+  }
+
+  .health-label {
+    font-size: 12px;
+    color: #9d9d9d;
+  }
+
+  .health-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: #d4d4d4;
+  }
+
+  .health-value.healthy {
+    color: #00ff88;
+  }
+
+  .health-value.unhealthy {
+    color: #ff4c4c;
+  }
+
+  /* Error Log */
+  .error-log-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .clear-log-btn {
+    padding: 6px 12px;
+    background: #555;
+    border: 1px solid #666;
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .clear-log-btn:hover {
+    background: #666;
+  }
+
+  .error-count {
+    font-size: 13px;
+    color: #9d9d9d;
+  }
+
+  .error-log-textarea {
+    width: 100%;
+    min-height: 200px;
+    max-height: 400px;
+    padding: 12px;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ff4c4c;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    resize: vertical;
+    white-space: pre-wrap;
+    overflow-y: auto;
+  }
+
+  .error-log-textarea::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .error-log-textarea::-webkit-scrollbar-track {
+    background: #1a1a1a;
+  }
+
+  .error-log-textarea::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
   }
 
   /* Preference Items */

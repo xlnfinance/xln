@@ -233,7 +233,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         accountTx: {
           type: 'account_payment',
           data: {
-            tokenId: 2, // USDT - initial account opening transaction
+            tokenId: 1, // USDC - initial account opening transaction
             amount: 0n
           }
         }

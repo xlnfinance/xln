@@ -104,8 +104,8 @@ const runDemo = async (env: Env): Promise<Env> => {
 
   console.log(`\n💰 Prefunding entity ${formatEntityDisplay(e1_id)}...`);
   const initialPortfolio = [
-    { asset: 'ETH', amount: '100000000000000000000', decimals: 18, tokenId: 1 },
-    { asset: 'USDC', amount: '5000000000', decimals: 6, tokenId: 2 },
+    { asset: 'USDC', amount: '100000000000000000000', decimals: 18, tokenId: 1 },
+    { asset: 'ETH', amount: '100000000000000000000', decimals: 18, tokenId: 2 },
   ];
 
   const depositInputs = initialPortfolio.map(asset => createDepositEvent(e1_id, s1, asset));

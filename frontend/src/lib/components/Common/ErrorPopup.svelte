@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
+  import { errorLog } from '../../stores/errorLogStore';
 
   interface ErrorItem {
     id: number;
@@ -20,7 +21,10 @@
 
     errors.update(items => [...items, error]);
 
-    // Auto-remove after 10 seconds
+    // Log to persistent error store
+    errorLog.log(message, 'Console Error');
+
+    // Auto-remove popup after 10 seconds (log persists)
     setTimeout(() => {
       removeError(error.id);
     }, 10000);

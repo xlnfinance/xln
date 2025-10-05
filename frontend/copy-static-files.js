@@ -3,8 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, cpSync } from 'fs';
 import { join, resolve } from 'path';
 
 // Copy necessary files to static folder before build
+// Note: server.js is built directly to static/ now (no copy needed)
 const files = [
-  { src: '../dist/server.js', dest: 'static/server.js' },
   { src: '../jurisdictions.json', dest: 'static/jurisdictions.json' }
 ];
 
@@ -18,6 +18,14 @@ for (const file of files) {
   } else {
     console.log(`⚠️ Source file not found: ${file.src}`);
   }
+}
+
+// Verify server.js exists (it should already be built there)
+const serverJsPath = resolve('static/server.js');
+if (existsSync(serverJsPath)) {
+  console.log(`✅ static/server.js exists (built directly)`);
+} else {
+  console.log(`⚠️ static/server.js missing - run 'bun run build' first`);
 }
 
 // Copy scenarios directory (skip if already symlinked)

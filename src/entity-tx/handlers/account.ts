@@ -22,9 +22,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // Get or create account machine for this counterparty (fromEntityId is who we're creating an account WITH)
   let accountMachine = newState.accounts.get(input.fromEntityId);
   if (!accountMachine) {
-    // Initialize with default USDC delta showing credit limits (no collateral initially)
+    // Initialize with default USDC (token 1) delta showing credit limits (no collateral initially)
     const initialDeltas = new Map();
-    initialDeltas.set(2, createDemoDelta(2, 0n, 0n));
+    initialDeltas.set(1, createDemoDelta(1, 0n, 0n));
 
     accountMachine = {
       counterpartyEntityId: input.fromEntityId,

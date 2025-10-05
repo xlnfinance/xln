@@ -135,15 +135,15 @@ contract EntityProvider is ERC1155 {
   function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber) {
     entityNumber = nextNumber++;
     bytes32 entityId = bytes32(entityNumber);
-    
+
     // Create entity with default governance articles
     EntityArticles memory defaultArticles = EntityArticles({
       controlDelay: 1000,     // Default 1000 blocks for control
-      dividendDelay: 3000,    // Default 3000 blocks for dividend  
+      dividendDelay: 3000,    // Default 3000 blocks for dividend
       foundationDelay: 10000, // Default 10000 blocks for foundation
       controlThreshold: 51    // Default 51% threshold
     });
-    
+
     entities[entityId] = Entity({
       currentBoardHash: boardHash,
       proposedBoardHash: bytes32(0),
@@ -152,21 +152,70 @@ contract EntityProvider is ERC1155 {
       proposerType: ProposerType.BOARD,
       articlesHash: keccak256(abi.encode(defaultArticles))
     });
-    
+
     // Automatically setup governance with fixed supply
     (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
     address entityAddress = address(uint160(uint256(entityId)));
-    
+
     _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
     _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
-    
+
     totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
     totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
-    
+
     emit EntityRegistered(entityId, entityNumber, boardHash);
     emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
-    
+
     return entityNumber;
+  }
+
+  /**
+   * @notice Batch register multiple numbered entities in one transaction
+   * @param boardHashes Array of board hashes for entities
+   * @return entityNumbers Array of assigned entity numbers
+   */
+  function registerNumberedEntitiesBatch(bytes32[] calldata boardHashes) external returns (uint256[] memory entityNumbers) {
+    entityNumbers = new uint256[](boardHashes.length);
+
+    // Default governance articles (reused for all)
+    EntityArticles memory defaultArticles = EntityArticles({
+      controlDelay: 1000,
+      dividendDelay: 3000,
+      foundationDelay: 10000,
+      controlThreshold: 51
+    });
+    bytes32 articlesHash = keccak256(abi.encode(defaultArticles));
+
+    for (uint256 i = 0; i < boardHashes.length; i++) {
+      uint256 entityNumber = nextNumber++;
+      bytes32 entityId = bytes32(entityNumber);
+
+      entities[entityId] = Entity({
+        currentBoardHash: boardHashes[i],
+        proposedBoardHash: bytes32(0),
+        activateAtBlock: 0,
+        registrationBlock: block.number,
+        proposerType: ProposerType.BOARD,
+        articlesHash: articlesHash
+      });
+
+      // Setup governance
+      (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+      address entityAddress = address(uint160(uint256(entityId)));
+
+      _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+      _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+
+      totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
+      totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+
+      emit EntityRegistered(entityId, entityNumber, boardHashes[i]);
+      emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
+
+      entityNumbers[i] = entityNumber;
+    }
+
+    return entityNumbers;
   }
 
   /**

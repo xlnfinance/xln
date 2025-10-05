@@ -8,6 +8,7 @@ import {
   Scenario,
   ScenarioEvent,
   ScenarioAction,
+  ActionParam,
   RepeatBlock,
   ParserContext,
   ParsedScenario,
@@ -249,7 +250,7 @@ function parseActionLine(
   }
 
   // Special actions without entity ID (keywords)
-  const KEYWORDS = ['VIEW', 'import', 'PAUSE', 'ASSERT'];
+  const KEYWORDS = ['VIEW', 'import', 'PAUSE', 'ASSERT', 'grid', 'payRandom'];
 
   // Check if this looks like an action:
   // 1. Starts with keyword (VIEW, import, etc.)
@@ -329,13 +330,77 @@ function parseActionLine(
     }
 
     const range = parseRange(rangeOrId);
+    const entityIds = range ? expandRange(range).map(String) : [rangeOrId];
 
-    const params = range ? expandRange(range).map(String) : [rangeOrId];
+    // Parse position parameters (x=, y=, z=)
+    const additionalParams = tokens.slice(2);
+    const position: Record<string, string> = {};
+
+    for (const param of additionalParams) {
+      const parsed = parseNamedParam(param);
+      if (parsed) {
+        position[parsed.key] = parsed.value;
+      }
+    }
+
+    // Build params array with entity IDs and optional position
+    const params: ActionParam[] = [...entityIds];
+    if (Object.keys(position).length > 0) {
+      params.push(position);
+    }
 
     return {
       isAction: true,
       action: {
         type: 'import',
+        params,
+        sourceLineNumber: lineNumber,
+      },
+    };
+  }
+
+  // GRID command (no entity prefix)
+  if (firstToken === 'grid') {
+    const allParams = tokens.slice(1);
+    const params: ActionParam[] = [];
+
+    for (const param of allParams) {
+      const parsed = parseNamedParam(param);
+      if (parsed) {
+        params.push({ [parsed.key]: parsed.value });
+      } else {
+        params.push(param);
+      }
+    }
+
+    return {
+      isAction: true,
+      action: {
+        type: 'grid',
+        params,
+        sourceLineNumber: lineNumber,
+      },
+    };
+  }
+
+  // PAYRANDOM command (no entity prefix)
+  if (firstToken === 'payRandom') {
+    const allParams = tokens.slice(1);
+    const params: ActionParam[] = [];
+
+    for (const param of allParams) {
+      const parsed = parseNamedParam(param);
+      if (parsed) {
+        params.push({ [parsed.key]: parsed.value });
+      } else {
+        params.push(param);
+      }
+    }
+
+    return {
+      isAction: true,
+      action: {
+        type: 'payRandom',
         params,
         sourceLineNumber: lineNumber,
       },

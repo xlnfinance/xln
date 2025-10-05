@@ -2,7 +2,6 @@
   import type { AccountMachine } from '../../types';
   import { createEventDispatcher } from 'svelte';
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
-  import BigIntUtils from '../../utils/bigint-ui';
   import BigIntInput from '../Common/BigIntInput.svelte';
 
   // All utility functions now come from server.js via xlnFunctions
@@ -102,10 +101,10 @@
     }
 
     const derived = $xlnFunctions.deriveDelta(delta, isLeftEntity);
-    const tokenInfo = {
-      symbol: tokenId === 1 ? 'ETH' : tokenId === 2 ? 'USDC' : `TKN${tokenId}`,
-      color: tokenId === 1 ? '#627eea' : tokenId === 2 ? '#2775ca' : '#999',
-      name: tokenId === 1 ? 'Ethereum' : tokenId === 2 ? 'USD Coin' : `Token ${tokenId}`,
+    const tokenInfo = $xlnFunctions?.getTokenInfo?.(tokenId) || {
+      symbol: `TKN${tokenId}`,
+      color: '#999',
+      name: `Token ${tokenId}`,
       decimals: 18
     };
 
@@ -186,7 +185,7 @@
       };
 
       await xln.processUntilEmpty(env, [paymentInput]);
-      console.log(`✅ Payment sent: ${BigIntUtils.formatToken(paymentAmountBigInt, selectedTokenId)}`);
+      console.log(`✅ Payment sent: ${$xlnFunctions.formatTokenAmount(selectedTokenId, paymentAmountBigInt)}`);
 
       // Reset form
       paymentAmountBigInt = 0n;

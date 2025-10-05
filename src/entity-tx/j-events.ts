@@ -1,19 +1,14 @@
 import { EntityState } from '../types';
 import { DEBUG } from '../utils';
 import { cloneEntityState } from '../state-helpers';
-
-// Token registry for consistent naming (matches contract prefunding)
-const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number }> = {
-  1: { symbol: 'ETH', name: 'Ethereum', decimals: 18 },
-  2: { symbol: 'USDC', name: 'USD Coin', decimals: 18 },
-};
+import { getTokenInfo } from '../account-utils';
 
 const getTokenSymbol = (tokenId: number): string => {
-  return TOKEN_REGISTRY[tokenId]?.symbol || `TKN${tokenId}`;
+  return getTokenInfo(tokenId).symbol;
 };
 
 const getTokenDecimals = (tokenId: number): number => {
-  return TOKEN_REGISTRY[tokenId]?.decimals || 18;
+  return getTokenInfo(tokenId).decimals;
 };
 
 export const handleJEvent = (entityState: EntityState, entityTxData: any): EntityState => {

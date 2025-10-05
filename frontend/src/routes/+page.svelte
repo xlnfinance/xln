@@ -162,18 +162,24 @@
   {/if}
   <ErrorDisplay />
 
-  {#if $isLoading}
+  {#if $isLoading && $viewMode !== 'settings'}
     <div class="loading-container">
       <div class="loading-spinner">🔄</div>
       <div class="loading-text">Loading XLN Environment...</div>
     </div>
-  {:else if $error}
+  {:else if $error && $viewMode !== 'settings'}
     <div class="error-container">
       <div class="error-icon">❌</div>
       <div class="error-text">Failed to load XLN Environment</div>
       <div class="error-details">{$error}</div>
       <button class="retry-btn" on:click={() => initializeXLN()}> Retry </button>
+      <button class="settings-btn" on:click={() => viewMode.set('settings')}>
+        ⚙️ Open Settings
+      </button>
     </div>
+  {:else if $viewMode === 'settings'}
+    <!-- Settings always accessible, even during errors -->
+    <SettingsView />
   {:else}
     {#if $viewMode === 'home'}
       <!-- Home View: Whitepaper & Introduction -->
@@ -266,9 +272,6 @@
           <p>Click "Graph 3D" to explore the network, or "Panels" to manage entities directly. Use the time machine to replay any state transition.</p>
         </div>
       </div>
-    {:else if $viewMode === 'settings'}
-      <!-- Settings View: Configuration -->
-      <SettingsView />
     {:else if $viewMode === 'docs'}
       <!-- Docs View: Documentation -->
       <DocsView />
@@ -351,8 +354,8 @@
       </div>
     {/if}
 
-    <!-- Time Machine (hidden in zen mode, home view, settings, docs, terminal, and brainvault view) -->
-    {#if !zenMode && $viewMode !== 'home' && $viewMode !== 'settings' && $viewMode !== 'docs' && $viewMode !== 'terminal' && $viewMode !== 'brainvault'}
+    <!-- Time Machine (hidden in zen mode, home view, docs, terminal, and brainvault view) -->
+    {#if !zenMode && $viewMode !== 'home' && $viewMode !== 'docs' && $viewMode !== 'terminal' && $viewMode !== 'brainvault'}
       <TimeMachine />
     {/if}
 
@@ -449,7 +452,8 @@
     word-break: break-word;
   }
 
-  .retry-btn {
+  .retry-btn,
+  .settings-btn {
     background: #007acc;
     color: white;
     border: none;
@@ -460,10 +464,20 @@
     font-weight: 500;
     transition: background-color 0.2s ease;
     margin-top: 16px;
+    margin-right: 12px;
   }
 
-  .retry-btn:hover {
+  .retry-btn:hover,
+  .settings-btn:hover {
     background: #0086e6;
+  }
+
+  .settings-btn {
+    background: #555;
+  }
+
+  .settings-btn:hover {
+    background: #666;
   }
 
   .main-content {

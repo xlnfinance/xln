@@ -50,7 +50,6 @@ while (( "$#" )); do
 done
 
 # Create necessary directories
-mkdir -p dist
 mkdir -p frontend/static
 mkdir -p logs
 mkdir -p pids
@@ -111,11 +110,10 @@ if [ $DEPLOY_RC -ne 0 ]; then
 fi
 
 echo "🔨 Building TypeScript..."
-bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util || {
+bun build src/server.ts --target=browser --outfile=frontend/static/server.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util || {
     echo "❌ TypeScript build failed"
     exit 1
 }
-cp dist/server.js frontend/static/server.js
 
 echo "🌐 Starting frontend server..."
 cd frontend

@@ -1,11 +1,11 @@
 <script lang="ts">
   import { timeOperations, timeState } from '../../stores/timeStore';
   import { history, currentHeight } from '../../stores/xlnStore';
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { SkipBack, ChevronLeft, ChevronRight, Play, Pause, Zap, RotateCcw } from 'lucide-svelte';
 
   // Player state
-  let isPlaying = true; // Start in play mode by default
+  let isPlaying = false; // Paused by default for investor demos
   let playbackSpeed = 1; // 0.25x, 0.5x, 1x, 2x, 4x
   let loopEnabled = true; // Loop by default
   let playbackInterval: number | null = null;
@@ -147,16 +147,6 @@
   function toggleLoop() {
     loopEnabled = !loopEnabled;
   }
-
-  // Auto-start playback on mount
-  onMount(() => {
-    // Start playback automatically after component mounts and history loads
-    setTimeout(() => {
-      if ($history.length > 0 && isPlaying) {
-        startPlayback();
-      }
-    }, 500); // Small delay to ensure history is loaded
-  });
 
   // Cleanup on component destroy
   onDestroy(() => {

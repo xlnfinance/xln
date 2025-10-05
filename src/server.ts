@@ -21,6 +21,7 @@ import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import {
   createLazyEntity,
   createNumberedEntity,
+  createNumberedEntitiesBatch,
   detectEntityType,
   encodeBoard,
   generateLazyEntityId,
@@ -299,7 +300,7 @@ const applyServerInput = async (
           );
 
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
-        env.replicas.set(replicaKey, {
+        const replica: any = {
           entityId: serverTx.entityId,
           signerId: serverTx.signerId,
           state: {
@@ -319,7 +320,15 @@ const applyServerInput = async (
           },
           mempool: [],
           isProposer: serverTx.data.isProposer,
-        });
+        };
+
+        // Only add position if it exists (exactOptionalPropertyTypes compliance)
+        if (serverTx.data.position) {
+          replica.position = serverTx.data.position;
+          console.log(`📍 GRID-POS-C: Stored replica ${serverTx.entityId.slice(0,10)} position:`, replica.position);
+        }
+
+        env.replicas.set(replicaKey, replica);
         // Validate jBlock immediately after creation
         const createdReplica = env.replicas.get(replicaKey);
         const actualJBlock = createdReplica?.state.jBlock;
@@ -573,6 +582,8 @@ const applyServerInput = async (
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
+  console.log('🚀 SERVER.JS VERSION: 2025-10-05-16:45 - GRID POSITIONS + ACTIVITY HIGHLIGHTS');
+
   // Open database before any operations
   const dbReady = await tryOpenDb();
 
@@ -845,6 +856,7 @@ export {
   // Entity creation functions
   createLazyEntity,
   createNumberedEntity,
+  createNumberedEntitiesBatch,
   createProfileUpdateTx,
   demoCompleteHanko,
   detectEntityType,

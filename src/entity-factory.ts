@@ -251,6 +251,45 @@ export const createNumberedEntity = async (
   }
 };
 
+/**
+ * Batch create multiple numbered entities in ONE transaction
+ * Optimized for scenarios importing many entities (e.g., PhantomGrid 1000 nodes)
+ */
+export const createNumberedEntitiesBatch = async (
+  entities: Array<{ name: string; validators: string[]; threshold: bigint }>,
+  jurisdiction: JurisdictionConfig,
+): Promise<Array<{ config: ConsensusConfig; entityNumber: number; entityId: string }>> => {
+  if (!jurisdiction) {
+    throw new Error('Jurisdiction required for numbered entity registration');
+  }
+
+  console.log(`🔢 Batch creating ${entities.length} numbered entities in ONE transaction`);
+
+  // Build configs for all entities
+  const configs: ConsensusConfig[] = entities.map(e => ({
+    mode: 'proposer-based' as const,
+    threshold: e.threshold,
+    validators: e.validators,
+    shares: e.validators.reduce((acc, v) => ({ ...acc, [v]: 1n }), {}),
+    jurisdiction,
+  }));
+
+  // Call batch registration on-chain
+  const { registerNumberedEntitiesBatchOnChain } = await import('./evm');
+  const { entityNumbers } = await registerNumberedEntitiesBatchOnChain(configs, jurisdiction);
+
+  // Build results
+  return entityNumbers.map((entityNumber, i) => {
+    const entityId = generateNumberedEntityId(entityNumber);
+    const config = configs[i];
+    if (!config) throw new Error(`Missing config for entity ${i}`);
+
+    console.log(`  ✅ Entity ${i + 1}/${entities.length}: #${entityNumber} (${entityId.slice(0, 10)}...)`);
+
+    return { config, entityNumber, entityId };
+  });
+};
+
 // 3. NAMED ENTITIES (Premium - admin assignment required)
 export const requestNamedEntity = async (
   name: string,
