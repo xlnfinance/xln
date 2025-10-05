@@ -14,12 +14,7 @@ import { formatEntityDisplay, generateEntityAvatar } from './utils';
  * Store entity profile in gossip layer
  */
 export const storeProfile = async (db: any, profile: EntityProfile): Promise<void> => {
-  // Check if IndexedDB is available (skip in incognito/private mode)
-  const { dbAvailable } = await import('./server');
-  if (!db || !dbAvailable) {
-    // Silent skip - in-memory mode
-    return;
-  }
+  if (!db) return;
 
   try {
     // Store profile
@@ -29,8 +24,8 @@ export const storeProfile = async (db: any, profile: EntityProfile): Promise<voi
     await updateNameIndex(db, profile.name, profile.entityId);
 
     console.log(`📝 Stored profile for ${profile.name} (${formatEntityDisplay(profile.entityId)})`);
-  } catch (error) {
-    console.error('Error storing profile:', error);
+  } catch {
+    // Silent skip - DB unavailable or in-memory mode
   }
 };
 

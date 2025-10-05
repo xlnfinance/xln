@@ -125,7 +125,7 @@
       const saved = localStorage.getItem('xln-bird-view-settings');
       const parsed = saved ? JSON.parse(saved) : {
         barsMode: 'close',
-        selectedTokenId: 0,
+        selectedTokenId: 1, // Default to USDC
         viewMode: '3d',
         entityMode: 'sphere',
         wasLastOpened: false,
@@ -156,7 +156,7 @@
     } catch {
       return {
         barsMode: 'close',
-        selectedTokenId: 0,
+        selectedTokenId: 1, // Default to USDC
         viewMode: '3d',
         entityMode: 'sphere',
         wasLastOpened: false,
@@ -2974,13 +2974,20 @@
 
     availableTokens = Array.from(tokenSet).sort((a, b) => a - b);
 
-    // Default to token 2 (USDC) if nothing available
+    // USDC (token 1) is always available
+    if (!availableTokens.includes(1)) {
+      availableTokens.push(1);
+      availableTokens.sort((a, b) => a - b);
+    }
+
+    // Default to token 1 (USDC) if nothing selected
     if (availableTokens.length === 0) {
-      availableTokens = [2];
-      selectedTokenId = 2;
-    } else if (!availableTokens.includes(selectedTokenId)) {
-      // If current selected token not available, switch to first available
-      selectedTokenId = availableTokens[0]!;
+      availableTokens = [1];
+      selectedTokenId = 1;
+    } else if (!availableTokens.includes(selectedTokenId) && $isLive) {
+      // Only auto-switch in LIVE mode - during playback, keep user's selection
+      // Always prefer USDC (token 1)
+      selectedTokenId = availableTokens.includes(1) ? 1 : availableTokens[0]!;
       saveBirdViewSettings();
     }
   }

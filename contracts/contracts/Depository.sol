@@ -314,15 +314,15 @@ contract Depository is Console {
 
   // DEBUG: Bulk fund top 1000 entities with test reserves
   function debugBulkFundEntities() public {
-    console.log("debugBulkFundEntities: funding entities 1-1000 with 100 ETH each");
+    console.log("debugBulkFundEntities: funding entities 1-200 with USDC and ETH");
 
-    uint256 fundAmount = 100000000000000000000; // 100 ETH (100e18)
+    uint256 fundAmount = 100000000000000000000; // 100 units (100e18)
 
     for (uint256 entityNum = 1; entityNum <= 200; entityNum++) {
       bytes32 entity = bytes32(entityNum); // Entity ID is just the number padded
 
-      // Fund with tokens 1, 2, 3
-      for (uint256 tokenId = 1; tokenId <= 3; tokenId++) {
+      // Fund with tokens 1 (USDC), 2 (ETH) only
+      for (uint256 tokenId = 1; tokenId <= 2; tokenId++) {
         _reserves[entity][tokenId] += fundAmount;
         emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
       }
