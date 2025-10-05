@@ -139,10 +139,11 @@ export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, del
 
 /**
  * Get token information for display
+ * USDC is primary token (1), ETH is secondary (2)
  */
 export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> = {
-  1: { symbol: 'ETH', name: 'Ethereum', decimals: 18, color: '#627eea' },
-  2: { symbol: 'USDC', name: 'USD Coin', decimals: 18, color: '#2775ca' },
+  1: { symbol: 'USDC', name: 'USD Coin', decimals: 18, color: '#2775ca' },
+  2: { symbol: 'ETH', name: 'Ethereum', decimals: 18, color: '#627eea' },
 };
 
 export function getTokenInfo(tokenId: number) {

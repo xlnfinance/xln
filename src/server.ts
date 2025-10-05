@@ -93,32 +93,45 @@ export const db: Level<Buffer, Buffer> = new Level('db', {
   keyEncoding: 'binary',
 });
 
-// CRITICAL: Detect if IndexedDB is available (Safari incognito/Oculus browser may block it)
-export let dbAvailable = true;
-let dbOpenPromise: Promise<void> | null = null;
+// Helper: Race promise with timeout
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT')), ms)
+    )
+  ]);
+}
 
-async function ensureDbOpen() {
-  if (!dbAvailable) return; // Skip if DB is unavailable
+// Database availability check
+let dbOpenPromise: Promise<boolean> | null = null;
 
+async function tryOpenDb(): Promise<boolean> {
   if (!dbOpenPromise) {
     dbOpenPromise = (async () => {
       try {
-        // Add timeout to db.open() - don't hang forever on corrupted/locked DB
-        await Promise.race([
-          db.open(),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('DB_TIMEOUT: IndexedDB open timeout after 500ms')), 500)
-          )
-        ]);
-        console.log('✅ Database available and opened');
+        await db.open();
+        console.log('✅ Database opened');
+        return true;
       } catch (error) {
-        dbAvailable = false;
-        const isTimeout = error instanceof Error && error.message.includes('DB_TIMEOUT');
-        console.log(`⚠️ IndexedDB ${isTimeout ? 'timeout' : 'unavailable'} - running in-memory only`);
+        // Check if IndexedDB is completely blocked (Safari incognito)
+        const isBlocked = error instanceof Error &&
+          (error.message?.includes('blocked') ||
+           error.name === 'SecurityError' ||
+           error.name === 'InvalidStateError');
+
+        if (isBlocked) {
+          console.log('⚠️ IndexedDB blocked (incognito/private mode) - running in-memory');
+          return false;
+        }
+
+        // Other errors - log but assume DB is available
+        console.warn('⚠️ DB open warning:', error instanceof Error ? error.message : error);
+        return true;
       }
     })();
   }
-  await dbOpenPromise;
+  return dbOpenPromise;
 }
 
 declare const console: any;
@@ -560,10 +573,8 @@ const applyServerInput = async (
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
-  // CRITICAL: Open database BEFORE any db operations
-  console.log('🔓 Opening IndexedDB/LevelDB...');
-  await ensureDbOpen();
-  console.log('✅ Database opened successfully');
+  // Open database before any operations
+  const dbReady = await tryOpenDb();
 
   // DEBUG: Log jurisdictions content on startup using centralized loader
   if (!isBrowser) {
@@ -599,29 +610,15 @@ const main = async (): Promise<Env> => {
     gossip: gossipLayer,
   };
 
-  // Then try to load saved state if available (skip if IndexedDB unavailable)
-  if (!dbAvailable) {
-    console.log('💾 Database unavailable - skipping snapshot loading, running in-memory only');
-  }
-
+  // Try to load saved state from database
   try {
-    if (!dbAvailable) throw new Error('DB_UNAVAILABLE');
-
-    if (isBrowser) {
-      console.log('🌐 BROWSER-DEBUG: Starting IndexedDB snapshot loading process...');
-    } else {
-      console.log('🖥️ Node.js environment: Attempting to load snapshots from filesystem...');
+    if (!dbReady) {
+      console.log('💾 Database unavailable - starting fresh');
+      throw new Error('DB_UNAVAILABLE');
     }
 
-    console.log('🔍 BROWSER-DEBUG: Querying latest_height from database...');
-
-    // CRITICAL: Wrap db.get in timeout - if IndexedDB hangs, just start fresh
-    const latestHeightBuffer = await Promise.race([
-      db.get(Buffer.from('latest_height')),
-      new Promise<Buffer>((_, reject) =>
-        setTimeout(() => reject(new Error('DB_TIMEOUT')), 1000)
-      )
-    ]);
+    console.log('📥 Loading state from database...');
+    const latestHeightBuffer = await withTimeout(db.get(Buffer.from('latest_height')), 2000);
 
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
     console.log(`📊 BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
@@ -713,45 +710,18 @@ const main = async (): Promise<Env> => {
         serverInputs: env.serverInput.entityInputs.length,
       });
     }
-  } catch (error: any) {
-    // Handle various "not found" error conditions gracefully
-    const isNotFoundError =
-      error.code === 'LEVEL_NOT_FOUND' ||
-      error.message?.includes('LEVEL_NOT_FOUND') ||
-      error.message?.includes('NotFoundError') ||
-      error.message?.includes('DB_TIMEOUT') ||
-      error.message?.includes('DB_UNAVAILABLE') ||
-      error.name === 'NotFoundError';
+  } catch (error) {
+    const isTimeout = error instanceof Error && error.message === 'TIMEOUT';
+    const isNotFound = error instanceof Error &&
+      (error.name === 'NotFoundError' || error.message?.includes('NotFoundError'));
 
-    if (isNotFoundError) {
-      const reason = error.message?.includes('DB_TIMEOUT')
-        ? 'IndexedDB timeout'
-        : error.message?.includes('DB_UNAVAILABLE')
-        ? 'IndexedDB unavailable (incognito/private mode)'
-        : 'No saved state found';
-      console.log(`📦 ${reason} - starting fresh, running in-memory only`);
-      if (isBrowser) {
-        console.log('💡 This is normal for first-time use. IndexedDB will be created automatically.');
-      } else {
-        console.log('💡 Node.js: No existing snapshots in db directory.');
-      }
+    if (isTimeout || isNotFound) {
+      console.log('📦 No saved state found - starting fresh');
+    } else if (error instanceof Error && error.message === 'DB_UNAVAILABLE') {
+      // Already logged above
     } else {
-      // Log the error but don't crash - fall back to fresh environment
-      console.warn('⚠️ Error loading state from LevelDB (falling back to fresh environment):', error.message);
-      console.log('🔍 Error type:', error.code || error.name || 'Unknown');
-
-      if (DEBUG) {
-        console.error('🔍 Full error details:', {
-          code: error.code,
-          name: error.name,
-          message: error.message,
-          isBrowser,
-          dbLocation: isBrowser ? 'IndexedDB: db' : 'db',
-        });
-      }
-
-      // Don't throw - just use fresh environment
-      console.log('✅ Using fresh environment to continue startup');
+      console.warn('⚠️ Error loading state:', error instanceof Error ? error.message : error);
+      console.log('📦 Starting fresh');
     }
   }
 
