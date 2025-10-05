@@ -6,7 +6,7 @@ import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, AccountInput, E
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile } from '../gossip-helper';
-import { createDemoDelta, getDefaultCreditLimit } from '../account-utils';
+import { getDefaultCreditLimit } from '../account-utils';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import { handleAccountInput } from './handlers/account';
 import { handleJEvent } from './j-events';
@@ -189,9 +189,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       if (!newState.accounts.has(entityTx.data.targetEntityId)) {
         console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
-        // Initialize with default USDT delta showing credit limits
+        // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
+        // This ensures both sides have identical delta Maps (matches Channel.ts pattern)
         const initialDeltas = new Map<number, Delta>();
-        initialDeltas.set(2, createDemoDelta(2, 0n, 0n)); // USDT token
 
         newState.accounts.set(entityTx.data.targetEntityId, {
           counterpartyEntityId: entityTx.data.targetEntityId,
