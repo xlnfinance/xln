@@ -103,11 +103,18 @@ async function ensureDbOpen() {
   if (!dbOpenPromise) {
     dbOpenPromise = (async () => {
       try {
-        await db.open();
+        // Add timeout to db.open() - don't hang forever on corrupted/locked DB
+        await Promise.race([
+          db.open(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('DB_TIMEOUT: IndexedDB open timeout after 500ms')), 500)
+          )
+        ]);
         console.log('✅ Database available and opened');
       } catch (error) {
         dbAvailable = false;
-        console.log('⚠️ IndexedDB unavailable (incognito/private mode?) - running in-memory only');
+        const isTimeout = error instanceof Error && error.message.includes('DB_TIMEOUT');
+        console.log(`⚠️ IndexedDB ${isTimeout ? 'timeout' : 'unavailable'} - running in-memory only`);
       }
     })();
   }

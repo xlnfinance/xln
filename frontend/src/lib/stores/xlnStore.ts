@@ -110,17 +110,11 @@ export async function initializeXLN() {
       }
     });
     
-    // Load from IndexedDB with critical failure detection
+    // Load from IndexedDB - main() handles timeout internally
     console.log('🚀 BROWSER-DEBUG: Starting XLN initialization...');
     console.log('🔍 BROWSER-DEBUG: About to call xln.main() - this will load snapshots and start j-watcher');
 
-    const env = await Promise.race([
-      xln.main(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('CRITICAL: XLN initialization timeout after 10 seconds - check console for errors')), 10000)
-      )
-    ]);
-
+    const env = await xln.main();
     console.log(`✅ BROWSER-DEBUG: XLN.main() completed! Loaded env with ${env.replicas?.size || 0} replicas`);
 
     // Debug loaded replicas and their jBlock values
