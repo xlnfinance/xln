@@ -18,9 +18,7 @@ export const cloneArray = <T>(arr: T[]) => [...arr];
  * This prevents the jBlock corruption bugs that occur with manual state spreading
  */
 export function cloneEntityState(entityState: EntityState): EntityState {
-  // CRITICAL: Log jBlock before and after cloning
-  const originalJBlock = entityState.jBlock;
-  console.log(`🔍 CLONE-TRACE: About to clone entity state, jBlock=${originalJBlock} (${typeof originalJBlock})`);
+  // jBlock validation (no logging)
 
   // Use structuredClone for deep cloning with fallback
   try {
@@ -34,7 +32,7 @@ export function cloneEntityState(entityState: EntityState): EntityState {
       cloned.jBlock = entityState.jBlock ?? 0; // Force fix
     }
 
-    console.log(`✅ CLONE-SUCCESS: Cloned state, jBlock=${cloned.jBlock} (${typeof cloned.jBlock})`);
+    // CLONE-SUCCESS removed
 
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
     return validateEntityState(cloned, 'cloneEntityState.structuredClone');

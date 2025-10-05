@@ -19,6 +19,8 @@ module.exports = {
     hardhat: {
       chainId: 1337,
       allowUnlimitedContractSize: true,
+      // Increase gas limit 10x for large grid deployments (grid 6 = 216 entities)
+      blockGasLimit: 300000000, // 300M gas (default is 30M)
       // Bind to 0.0.0.0 to allow network access (Oculus, mobile devices)
       mining: {
         auto: true,

@@ -14,17 +14,19 @@
 
 import { AccountMachine, AccountFrame, AccountTx, AccountInput } from './types';
 import { cloneAccountMachine } from './state-helpers';
-import { deriveDelta, getDefaultCreditLimit, isLeft } from './account-utils';
-import { signAccountFrame, verifyAccountSignature } from './account-tx/crypto';
+import { isLeft } from './account-utils';
+import { signAccountFrame, verifyAccountSignature } from './account-crypto';
 import { cryptoHash as hash, hash20 } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
+import { processAccountTx } from './account-tx/apply';
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
 const MAX_MESSAGE_COUNTER = 1000000;
+const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
 
 // === VALIDATION ===
 
@@ -80,163 +82,8 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
 
 // === TRANSACTION PROCESSING ===
 
-
-/**
- * Process AccountTx with proper direction handling (like old_src Channel)
- */
-export function processAccountTx(
-  accountMachine: AccountMachine,
-  accountTx: AccountTx,
-  isOurFrame: boolean = true
-): { success: boolean; events: string[]; error?: string } {
-  console.log(`🔄 Processing ${accountTx.type} for ${accountMachine.counterpartyEntityId.slice(-4)} (ourFrame: ${isOurFrame})`);
-
-  const events: string[] = [];
-
-  switch (accountTx.type) {
-    case 'direct_payment': {
-      const { tokenId, amount, route, description } = accountTx.data;
-
-      // Get or create delta
-      let delta = accountMachine.deltas.get(tokenId);
-      if (!delta) {
-        const defaultCreditLimit = getDefaultCreditLimit(tokenId);
-        delta = {
-          tokenId,
-          collateral: 0n,
-          ondelta: 0n,
-          offdelta: 0n,
-          leftCreditLimit: defaultCreditLimit,
-          rightCreditLimit: defaultCreditLimit,
-          leftAllowence: 0n,
-          rightAllowence: 0n,
-        };
-        accountMachine.deltas.set(tokenId, delta);
-      }
-
-      // Determine canonical direction relative to left/right entities
-      const leftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity
-        ? accountMachine.proofHeader.fromEntity
-        : accountMachine.proofHeader.toEntity;
-      const rightEntity = leftEntity === accountMachine.proofHeader.fromEntity
-        ? accountMachine.proofHeader.toEntity
-        : accountMachine.proofHeader.fromEntity;
-
-      // CRITICAL: Payment direction MUST be explicit - NO HEURISTICS (Channel.ts pattern)
-      const paymentFromEntity = accountTx.data.fromEntityId;
-      const paymentToEntity = accountTx.data.toEntityId;
-
-      if (!paymentFromEntity || !paymentToEntity) {
-        console.error(`❌ CONSENSUS-FAILURE: Missing explicit payment direction`);
-        console.error(`  AccountTx:`, safeStringify(accountTx));
-        return {
-          success: false,
-          error: 'FATAL: Payment must have explicit fromEntityId/toEntityId',
-          events,
-        };
-      }
-
-      // Canonical delta: always relative to left entity (Channel.ts reference)
-      let canonicalDelta: bigint;
-      if (paymentFromEntity === leftEntity && paymentToEntity === rightEntity) {
-        canonicalDelta = amount; // left paying right
-      } else if (paymentFromEntity === rightEntity && paymentToEntity === leftEntity) {
-        canonicalDelta = -amount; // right paying left
-      } else {
-        console.error(`❌ CONSENSUS-FAILURE: Payment entities don't match account`);
-        console.error(`  Account: ${leftEntity.slice(-4)} ↔ ${rightEntity.slice(-4)}`);
-        console.error(`  Payment: ${paymentFromEntity.slice(-4)} → ${paymentToEntity.slice(-4)}`);
-        return {
-          success: false,
-          error: 'FATAL: Payment entities must match account entities (no cross-account routing)',
-          events,
-        };
-      }
-
-      const isLeftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
-
-      // Check capacity using deriveDelta (perspective-aware)
-      const derived = deriveDelta(delta, isLeftEntity);
-      if (isOurFrame && amount > derived.outCapacity) {
-        return {
-          success: false,
-          error: `Insufficient capacity: need ${amount.toString()}, available ${derived.outCapacity.toString()}`,
-          events,
-        };
-      }
-
-      // Check global credit limits for the USD-denominated token (token 2)
-      const newDelta = delta.ondelta + delta.offdelta + canonicalDelta;
-      if (isOurFrame && tokenId === 2 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
-        return {
-          success: false,
-          error: `Exceeds global credit limit: ${newDelta.toString()} > ${accountMachine.globalCreditLimits.peerLimit.toString()}`,
-          events,
-        };
-      }
-
-      // Apply canonical delta (identical on both sides)
-      delta.offdelta += canonicalDelta;
-
-      // Events differ by perspective but state is identical
-      if (isOurFrame) {
-        events.push(`💸 Sent ${amount.toString()} token ${tokenId} to Entity ${accountMachine.counterpartyEntityId.slice(-4)} ${description ? '(' + description + ')' : ''}`);
-      } else {
-        events.push(`💰 Received ${amount.toString()} token ${tokenId} from Entity ${paymentFromEntity.slice(-4)} ${description ? '(' + description + ')' : ''}`);
-      }
-
-      // Update current frame
-      const tokenIndex = accountMachine.currentFrame.tokenIds.indexOf(tokenId);
-      const totalDelta = delta.ondelta + delta.offdelta;
-
-      if (tokenIndex >= 0) {
-        accountMachine.currentFrame.deltas[tokenIndex] = totalDelta;
-      } else {
-        accountMachine.currentFrame.tokenIds.push(tokenId);
-        accountMachine.currentFrame.deltas.push(totalDelta);
-      }
-
-      // Check if we need to forward the payment (multi-hop routing)
-      const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
-      if (route && route.length > 1 && !isOutgoing) {
-        // We received the payment, but it's not for us - forward to next hop
-        const nextHop = route[0]; // Current entity should be route[0]
-        const finalTarget = route[route.length - 1];
-        if (!finalTarget) {
-          console.error(`❌ Empty route in payment - invalid payment routing`);
-          return { success: false, error: 'Invalid payment route', events };
-        }
-
-        if (accountMachine.counterpartyEntityId === nextHop) {
-          // This is wrong - we received from the entity we should forward to
-          console.error(`❌ Routing error: received from ${nextHop} but should forward to them`);
-        } else {
-          // Add forwarding event
-          events.push(
-            `↪️ Forwarding payment to ${finalTarget.slice(-4)} via ${route.length} more hops`
-          );
-
-          // Note: The actual forwarding happens through entity-consensus
-          // which will create a new AccountTx for the next hop
-          // Store the route info in the account machine for entity-consensus to process
-          accountMachine.pendingForward = {
-            tokenId,
-            amount,
-            route: route.slice(1), // Remove current hop
-            ...(description ? { description } : {}),
-          };
-        }
-      }
-
-      return { success: true, events };
-    }
-
-    default:
-      // Type-safe error handling for unknown AccountTx types
-      const unknownType = 'type' in accountTx ? accountTx.type : 'MISSING_TYPE';
-      return { success: false, error: `Unknown accountTx type: ${unknownType}`, events };
-  }
-}
+// Transaction processing now delegated to account-tx/apply.ts (modular handlers)
+// See: src/account-tx/handlers/* for individual transaction handlers
 
 // === FRAME CONSENSUS ===
 
@@ -335,9 +182,30 @@ export async function proposeAccountFrame(
   frameData.stateHash = await createFrameHash(frameData as any);
 
   // VALIDATE AT SOURCE: Guaranteed type safety from this point forward
-  const newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
+  let newFrame: AccountFrame;
+  try {
+    newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
+  } catch (error) {
+    console.error(`❌ Frame validation failed:`, error);
+    console.error(`❌ Frame data:`, safeStringify(frameData, 2));
+    return {
+      success: false,
+      error: `Frame validation failed: ${(error as Error).message}`,
+      events,
+    };
+  }
 
-  // No more defensive checks needed - frame is guaranteed valid!
+  // Validate frame size (Bitcoin 1MB block limit)
+  const frameSize = safeStringify(newFrame).length;
+  if (frameSize > MAX_FRAME_SIZE_BYTES) {
+    console.error(`❌ Frame too large: ${frameSize} bytes > ${MAX_FRAME_SIZE_BYTES} bytes (1MB)`);
+    return {
+      success: false,
+      error: `Frame exceeds 1MB limit: ${frameSize} bytes`,
+      events,
+    };
+  }
+  console.log(`✅ Frame size: ${frameSize} bytes (${(frameSize / MAX_FRAME_SIZE_BYTES * 100).toFixed(2)}% of 1MB limit)`);
 
   // Generate signature
   const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, newFrame.stateHash);
@@ -367,10 +235,10 @@ export async function proposeAccountFrame(
 /**
  * Handle received AccountInput (bilateral consensus)
  */
-export function handleAccountInput(
+export async function handleAccountInput(
   accountMachine: AccountMachine,
   input: AccountInput
-): { success: boolean; response?: AccountInput; events: string[]; error?: string } {
+): Promise<{ success: boolean; response?: AccountInput; events: string[]; error?: string }> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}`);
 
   const events: string[] = [];
@@ -431,7 +299,14 @@ export function handleAccountInput(
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
 
       events.push(`✅ Frame ${input.frameId} confirmed and committed`);
-      return { success: true, events };
+
+      // CRITICAL: Don't return yet! Check if they also sent a new frame in same message
+      // Channel.ts pattern: ACK + new frame can be batched (line 576-612)
+      if (!input.newAccountFrame) {
+        return { success: true, events }; // Only ACK, no new frame
+      }
+      // Fall through to process newAccountFrame below
+      console.log(`📦 BATCHED-MESSAGE: ACK processed, now processing bundled new frame...`);
     } else {
       return { success: false, error: 'Invalid confirmation signature', events };
     }
@@ -580,15 +455,37 @@ export function handleAccountInput(
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.frameId} from Entity ${input.fromEntityId.slice(-4)}`);
 
-    // Send confirmation
+    // Send confirmation (ACK)
     const confirmationSig = signAccountFrame(accountMachine.proofHeader.fromEntity, receivedFrame.stateHash);
     const response: AccountInput = {
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       frameId: receivedFrame.frameId,
       prevSignatures: [confirmationSig],
-      counter: ++accountMachine.proofHeader.cooperativeNonce, // CHANNEL.TS REFERENCE: Line 536 - use cooperativeNonce as counter
+      counter: ++accountMachine.proofHeader.cooperativeNonce, // CHANNEL.TS REFERENCE: Line 620
     };
+
+    // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
+    // If we have mempool items, propose next frame immediately
+    if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+      console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
+
+      const proposeResult = await proposeAccountFrame(accountMachine);
+
+      if (proposeResult.success && proposeResult.accountInput) {
+        // Merge ACK and new proposal into same AccountInput
+        if (proposeResult.accountInput.newAccountFrame) {
+          response.newAccountFrame = proposeResult.accountInput.newAccountFrame;
+        }
+        if (proposeResult.accountInput.newSignatures) {
+          response.newSignatures = proposeResult.accountInput.newSignatures;
+        }
+
+        const newFrameId = proposeResult.accountInput.newAccountFrame?.frameId || 0;
+        console.log(`✅ Batched ACK for frame ${receivedFrame.frameId} + proposal for frame ${newFrameId}`);
+        events.push(`📤 Batched ACK + frame ${newFrameId}`);
+      }
+    }
 
     return { success: true, response, events };
   }

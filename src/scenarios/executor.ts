@@ -349,19 +349,25 @@ async function handleGrid(
   // Default grid spacing constant
   const DEFAULT_GRID_SPACING = 40;
 
-  // If only one number provided, expand to cube (N N N)
+  // Parse grid parameters
   const firstArg = positional[0] !== undefined ? parseInt(String(positional[0])) : 2;
   const X = firstArg;
   const Y = positional[1] !== undefined ? parseInt(String(positional[1])) : firstArg;
   const Z = positional[2] !== undefined ? parseInt(String(positional[2])) : firstArg;
   const spacing = parseFloat(String(named['spacing'] || DEFAULT_GRID_SPACING));
+  const isLazy = String(named['type'] || '').toLowerCase() === 'lazy';
 
   const total = X * Y * Z;
   if (total > 1000) {
     throw new Error(`Grid too large: ${X}x${Y}x${Z} = ${total} entities (max 1000)`);
   }
 
-  console.log(`  🎲 Creating ${X}x${Y}x${Z} grid (${total} entities, ${spacing}px spacing)`);
+  console.log(`  🎲 Creating ${X}x${Y}x${Z} ${isLazy ? 'LAZY' : ''} grid (${total} entities, ${spacing}px spacing)`);
+
+  if (isLazy) {
+    // LAZY MODE: In-browser only, no blockchain registration
+    return handleLazyGrid(X, Y, Z, spacing, context, env);
+  }
 
   const jurisdictions = await getAvailableJurisdictions();
   const ethereum = jurisdictions.find(j => j.name.toLowerCase() === 'ethereum');
@@ -530,6 +536,167 @@ async function handleGrid(
 }
 
 /**
+ * LAZY GRID: In-browser only grid (no blockchain registration)
+ * 10x faster, uses hash-based entity IDs
+ */
+async function handleLazyGrid(
+  X: number,
+  Y: number,
+  Z: number,
+  spacing: number,
+  context: ScenarioExecutionContext,
+  env: Env
+): Promise<void> {
+  const { cryptoHash } = await import('../utils.js');
+
+  const total = X * Y * Z;
+  console.log(`  ⚡ LAZY MODE: Creating ${total} in-browser entities (no blockchain)`);
+
+  const serverTxs: any[] = [];
+
+  for (let z = 0; z < Z; z++) {
+    for (let y = 0; y < Y; y++) {
+      for (let x = 0; x < X; x++) {
+        const gridCoord = `${x}_${y}_${z}`;
+
+        // Generate hash-based entity ID (like real entities but deterministic)
+        const entityId = await cryptoHash(`lazy-grid-${gridCoord}-${Date.now()}`);
+        const signerId = `lazy_${gridCoord}`;
+
+        context.entityMapping.set(gridCoord, entityId);
+
+        const pos = { x: x * spacing, y: y * spacing, z: z * spacing };
+
+        // Announce to gossip for visualization (no blockchain)
+        env.gossip?.announce({
+          entityId,
+          capabilities: [],
+          hubs: [],
+          metadata: {
+            name: gridCoord.slice(0, 4), // First 4 chars for lazy entities
+            avatar: '',
+            position: pos,
+          }
+        });
+
+        // Create in-memory replica (no blockchain registration)
+        serverTxs.push({
+          type: 'importReplica' as const,
+          entityId,
+          signerId,
+          data: {
+            config: {
+              validators: [signerId],
+              threshold: 1n,
+              mode: 'proposer-based' as const,
+            },
+            isProposer: true,
+            position: pos,
+          },
+        });
+      }
+    }
+  }
+
+  // Import all lazy entities into server state
+  const { applyServerInput } = await import('../server.js');
+  await applyServerInput(env, { serverTxs, entityInputs: [] });
+
+  console.log(`  ⚡ LAZY: Created ${total} in-browser entities`);
+
+  // Create connections (same as normal grid)
+  const { processUntilEmpty } = await import('../server.js');
+  const connectionInputs: any[] = [];
+
+  const gridId = (x: number, y: number, z: number) => `${x}_${y}_${z}`;
+
+  // X-axis connections - BIDIRECTIONAL (both sides create accounts)
+  for (let z = 0; z < Z; z++) {
+    for (let y = 0; y < Y; y++) {
+      for (let x = 0; x < X - 1; x++) {
+        const id1 = gridId(x, y, z);
+        const id2 = gridId(x + 1, y, z);
+        const entityId1 = context.entityMapping.get(id1);
+        const entityId2 = context.entityMapping.get(id2);
+
+        if (entityId1 && entityId2) {
+          // Entity1 → Entity2 connection
+          connectionInputs.push({
+            entityId: entityId1,
+            signerId: `lazy_${id1}`,
+            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId2 } }]
+          });
+          // Entity2 → Entity1 connection (reciprocal)
+          connectionInputs.push({
+            entityId: entityId2,
+            signerId: `lazy_${id2}`,
+            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId1 } }]
+          });
+        }
+      }
+    }
+  }
+
+  // Y-axis connections - BIDIRECTIONAL
+  for (let z = 0; z < Z; z++) {
+    for (let y = 0; y < Y - 1; y++) {
+      for (let x = 0; x < X; x++) {
+        const id1 = gridId(x, y, z);
+        const id2 = gridId(x, y + 1, z);
+        const entityId1 = context.entityMapping.get(id1);
+        const entityId2 = context.entityMapping.get(id2);
+
+        if (entityId1 && entityId2) {
+          // Entity1 → Entity2 connection
+          connectionInputs.push({
+            entityId: entityId1,
+            signerId: `lazy_${id1}`,
+            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId2 } }]
+          });
+          // Entity2 → Entity1 connection (reciprocal)
+          connectionInputs.push({
+            entityId: entityId2,
+            signerId: `lazy_${id2}`,
+            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId1 } }]
+          });
+        }
+      }
+    }
+  }
+
+  // Z-axis connections - BIDIRECTIONAL
+  for (let z = 0; z < Z - 1; z++) {
+    for (let y = 0; y < Y; y++) {
+      for (let x = 0; x < X; x++) {
+        const id1 = gridId(x, y, z);
+        const id2 = gridId(x, y, z + 1);
+        const entityId1 = context.entityMapping.get(id1);
+        const entityId2 = context.entityMapping.get(id2);
+
+        if (entityId1 && entityId2) {
+          // Entity1 → Entity2 connection
+          connectionInputs.push({
+            entityId: entityId1,
+            signerId: `lazy_${id1}`,
+            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId2 } }]
+          });
+          // Entity2 → Entity1 connection (reciprocal)
+          connectionInputs.push({
+            entityId: entityId2,
+            signerId: `lazy_${id2}`,
+            entityTxs: [{ type: 'openAccount', data: { targetEntityId: entityId1 } }]
+          });
+        }
+      }
+    }
+  }
+
+  console.log(`  🔗 Creating ${connectionInputs.length} lazy connections...`);
+  await processUntilEmpty(env, connectionInputs);
+  console.log(`  ✅ LAZY grid complete: ${total} entities, ${connectionInputs.length} connections`);
+}
+
+/**
  * Execute random payments across the network
  * Syntax: payRandom count=10 minHops=0 maxHops=5 minAmount=1000 maxAmount=100000 token=1
  */
@@ -598,18 +765,13 @@ async function handlePayRandom(
       entityId: sourceEntityId,
       signerId: signerId,
       entityTxs: [{
-        type: 'accountInput',
+        type: 'directPayment',
         data: {
-          fromEntityId: sourceEntityId,
-          toEntityId: destEntityId,
-          accountTx: {
-            type: 'direct_payment',
-            data: {
-              tokenId: token,
-              amount: amount,
-              description: `Random payment #${i + 1}`
-            }
-          }
+          targetEntityId: destEntityId,
+          tokenId: token,
+          amount: amount,
+          route: [], // Will be auto-calculated
+          description: `Random payment #${i + 1}`
         }
       }]
     }]);

@@ -1,22 +1,9 @@
 /**
- * Account Transaction System
- * Simple transaction types and processing only
- * Use account-consensus.ts from src root for frame consensus
+ * Account Transaction Module Exports
+ * Modular organization matching entity-tx pattern
  */
 
-// Core DirectPayment functionality
-export {
-  applyDirectPayment,
-  createDirectPaymentTx
-} from './direct-payment';
-
-export type { DirectPaymentData } from './direct-payment';
-
-// Transaction processing (legacy - use account-consensus.ts instead)
-export {
-  processAccountTransaction,
-  processAccountMempool
-} from './processor';
-
-// Re-export types
-export type { AccountMachine, AccountTx, Delta } from '../types';
+export { processAccountTx } from './apply';
+export { handleAddDelta } from './handlers/add-delta';
+export { handleSetCreditLimit } from './handlers/set-credit-limit';
+export { handleDirectPayment } from './handlers/direct-payment';

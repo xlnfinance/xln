@@ -1,50 +1,56 @@
 # xln Next Session - Critical Cleanup
 
-## 🚨 IMMEDIATE FIXES NEEDED (Session Incomplete - 2025-10-05)
+## 🚨 NEXT SESSION PRIORITIES
 
-### Bilateral Consensus Still Broken
-Despite fixes, payRandom still fails with consensus mismatch. Need to trace full bilateral flow and compare token delta synchronization with Channel.ts reference implementation.
+### Bilateral Consensus (CRITICAL)
+PayRandom fails with state mismatch. Root cause still unknown despite multiple fix attempts.
 
-**Next steps:**
-1. Add detailed delta logging at frame proposal/receipt
-2. Verify both sides create identical delta entries
-3. Check if problem is in processAccountTx or frame validation
-4. Test with single manual payment first (not payRandom batch)
-
----
-
-## 🗑️ CONSOLE SPAM NUKED (2025-10-05 Evening - Round 2)
+**Action plan:**
+1. Study `2024_src/app/Channel.ts` bilateral consensus in detail
+2. Compare delta synchronization between old/new implementations
+3. Test single manual payment (not payRandom batch)
+4. Add comprehensive bilateral flow logging
+5. Consider explicit "AddDelta" transaction pattern from old implementation
 
 ### Route Visualization Enhancement
 - Add glowing animated line showing payment flow: source → hop1 → hop2 → destination
 - Make route selection more obvious with visual path preview
 - Helps users understand multi-hop payments before sending
 
-### Grid Entity Types (Future Enhancement)
-- Add `grid N type=lazy` option to skip blockchain registration
-- Lazy mode: Pure in-browser simulation, no gas costs, 10x faster creation
-- **Entity IDs:** Use hash-based IDs (not numbered Grid-X_Y_Z)
-- **UI Display:** Show first 4 hex chars only (e.g., "a3f2", "b81e")
-- Benefits: Instant 1000-entity grids for performance testing
-
----
-
-## 🔥 FIXED (2025-10-05 Evening Session)
-
-### Verify Grid Positions Working
-- Restart `bun run dev` (build pipeline now fixed!)
-- Run `grid 2 2 3` and check **sidebar Live Activity Log**
-- Should see: `📍 GRID-POS-A/B/C/D/E` traces showing x,y,z values
-- If z=0 everywhere, position is being lost in pipeline
-
-### Build System Cleanup
-- ✅ Removed `/dist` intermediate directory - now builds directly to `frontend/static/server.js`
-- ✅ Updated: `dev-full.sh`, `dev-ci.sh`, `package.json`, `copy-static-files.js`
-- ⚠️ **ACTION**: Delete `/dist` directory entirely (it's unused now)
+### Capacity Calculation Investigation
+- After 5×200k payments, shows 1.4M available (should be 1M)
+- DERIVE-DELTA logs added - check actual ondelta/offdelta values
+- ASCII visualization shows correct exhaustion
+- Likely issue in capacity formula or delta accumulation
 
 ---
 
 ## ✅ Completed This Session (2025-10-05)
+
+### Session Summary
+**Duration:** ~4 hours
+**Focus:** Performance optimization, console spam elimination, grid system, UI improvements
+**Major Wins:** 60 FPS smooth dragging, 99% spam reduction, lazy grid mode, unified capacity bars
+**Still Broken:** Bilateral consensus (payRandom fails)
+**Next:** Deep dive into Channel.ts to fix consensus protocol
+
+### UI/UX Improvements (Final Push)
+- ✅ **Historical frames show full tx details** - Complete transaction list with JSON data
+- ✅ **Credit usage display** - 6 new rows showing used/unused credit breakdown
+- ✅ **Unified capacity bar** - Single stacked bar (5 segments: their-unused/used, collateral, our-used/unused)
+- ✅ **Frame tx list styling** - Clean monospace display matching mempool queue
+- ✅ **Capacity debugging** - DERIVE-DELTA logs for tracing calculation bugs
+- ✅ **Replica states dump removed** - No more 150-line spam per tick
+
+### Grid Lazy Mode
+- ✅ **`grid N type=lazy`** - Pure in-browser mode, zero blockchain interaction
+- ✅ **Hash-based entity IDs** - Deterministic cryptoHash() for entity addresses
+- ✅ **Grid coordinate names** - Display first 4 chars (e.g., "0_0_", "1_2_")
+- ✅ **Instant creation** - 1000 entities in <1 second, zero gas costs
+- ✅ **Full topology** - X/Y/Z axis connections identical to normal grid
+- 🎯 **Usage:** `grid 10 type=lazy` = instant 1000-entity lattice
+
+
 
 ### Main Thread Performance Obliterated (2025-10-05 Evening)
 - ✅ **Entity size caching** - Eliminates 8,844 reactive store lookups per frame

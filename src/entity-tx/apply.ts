@@ -2,7 +2,7 @@ import { calculateQuorumPower } from '../entity-consensus';
 import { formatEntityId } from '../entity-helpers';
 import { processProfileUpdate } from '../name-resolution';
 import { db } from '../server';
-import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, AccountInput, EntityInput } from '../types';
+import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput } from '../types';
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile } from '../gossip-helper';
@@ -21,9 +21,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     return { newState: entityState, outputs: [] };
   }
 
-  console.log(`🚨🚨 APPLY-ENTITY-TX: type="${entityTx?.type}" (typeof: ${typeof entityTx?.type})`);
-  console.log(`🚨🚨 APPLY-ENTITY-TX: data=`, safeStringify(entityTx?.data, 2));
-  console.log(`🚨🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, openAccount, directPayment`);
+  //console.log(`🚨🚨 APPLY-ENTITY-TX: type="${entityTx?.type}" (typeof: ${typeof entityTx?.type})`);
+  //console.log(`🚨🚨 APPLY-ENTITY-TX: data=`, safeStringify(entityTx?.data, 2));
+  //console.log(`🚨🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, openAccount, directPayment`);
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
@@ -223,47 +223,38 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         });
       }
 
-      // STEP 2: Send initial AccountInput to target entity to establish bilateral account
-      console.log(`💳 Sending initial AccountInput to ${formatEntityId(entityTx.data.targetEntityId)} to establish account`);
+      // STEP 2: Add transactions to LOCAL mempool only (Channel.ts pattern)
+      // Frame proposal happens automatically on next tick via AUTO-PROPOSE
+      console.log(`💳 Adding account setup transactions to local mempool for ${formatEntityId(entityTx.data.targetEntityId)}`);
 
-      // Create AccountInput with initial account opening handshake
-      const accountInput: AccountInput = {
-        fromEntityId: entityState.entityId,
-        toEntityId: entityTx.data.targetEntityId,
-        accountTx: {
-          type: 'account_payment',
-          data: {
-            tokenId: 1, // USDC - initial account opening transaction
-            amount: 0n
-          }
-        }
-      };
-
-      // Get the proposer of the target entity (default to 'alice' if not found)
-      let targetProposerId = 'alice';
-      const targetReplicaKeys = Array.from(env.replicas.keys()).filter(key => key.startsWith(entityTx.data.targetEntityId + ':'));
-      if (targetReplicaKeys.length > 0) {
-        const firstKey = targetReplicaKeys[0];
-        if (firstKey) {
-          const firstTargetReplica = env.replicas.get(firstKey);
-          const firstValidator = firstTargetReplica?.state.config.validators[0];
-          if (firstValidator) {
-            targetProposerId = firstValidator;
-          }
-        }
+      // Get the account machine we just created
+      const localAccount = newState.accounts.get(entityTx.data.targetEntityId);
+      if (!localAccount) {
+        throw new Error(`CRITICAL: Account machine not found after creation`);
       }
-      console.log(`💳 Target entity ${entityTx.data.targetEntityId.slice(0,10)} has proposer: ${targetProposerId}`);
 
-      // Queue AccountInput to be sent to target entity
-      outputs.push({
-        entityId: entityTx.data.targetEntityId,
-        signerId: targetProposerId,
-        entityTxs: [{
-          type: 'accountInput',
-          data: accountInput
-        }]
+      // Token 1 = USDC
+      const usdcTokenId = 1;
+      const defaultCreditLimit = getDefaultCreditLimit(3); // 1M USDC
+
+      // Determine canonical side (left/right) - DETERMINISTIC
+      const isLeftEntity = entityState.entityId < entityTx.data.targetEntityId;
+      const ourSide: 'left' | 'right' = isLeftEntity ? 'left' : 'right';
+
+      // Add transactions to mempool - will be batched into frame #1 on next tick
+      localAccount.mempool.push({
+        type: 'add_delta',
+        data: { tokenId: usdcTokenId }
       });
-      console.log(`📤 Queued AccountInput for Entity ${formatEntityId(entityTx.data.targetEntityId)}`);
+
+      localAccount.mempool.push({
+        type: 'set_credit_limit',
+        data: { tokenId: usdcTokenId, amount: defaultCreditLimit, side: ourSide }
+      });
+
+      console.log(`📝 Queued 2 transactions to mempool (total: ${localAccount.mempool.length})`);
+      console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
+      console.log(`   Transactions: [add_delta, set_credit_limit(side=${ourSide}, amount=1M)]`);
 
       // Add success message to chat
       newState.messages.push(`✅ Account opening request sent to Entity ${formatEntityId(entityTx.data.targetEntityId)}`);

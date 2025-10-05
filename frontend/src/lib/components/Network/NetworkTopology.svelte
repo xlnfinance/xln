@@ -1711,25 +1711,25 @@
 
     if (barsMode === 'spread') {
       // SPREAD MODE: bars extend FROM BOTH entities toward middle
-      // SWAPPED: Show each entity's bars on THEIR side (intuitive - red on creditor, green on debtor)
-      // Left entity shows: [inOwnCredit][outCollateral][inPeerCredit] → (what we owe/have)
-      // Right entity shows: ← [outOwnCredit][inCollateral][outPeerCredit] (what they owe/have)
+      // 2019VUE.TXT PATTERN: Each entity shows THEIR OWN state on their side
+      // Left entity (fromEntity): [available_credit][secured][unsecured] → (our unused, our collateral, our used)
+      // Right entity (toEntity): ← [they_unsecured][they_secured][they_available_credit] (their used, their collateral, their unused)
 
       // FIRST PRINCIPLE: Bars must NEVER pierce entity surface
       // Bar has radius, so start position must be: entitySurface + barRadius + gap
       const barRadius = barHeight * 2.5;
       const safeGap = 0.2; // Small visual gap between entity surface and bar
 
-      // Left-side bars (from left entity rightward) - SWAPPED to show right entity's state
+      // Left-side bars (from left entity rightward) - 2019vue: available_credit, secured, unsecured
       const leftStartPos = fromEntity.position.clone().add(
         direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap)
       );
 
       let leftOffset = 0;
       const leftBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'inOwnCredit', colorType: 'unsecured' },
-        { key: 'outCollateral', colorType: 'secured' },
-        { key: 'inPeerCredit', colorType: 'availableCredit' }
+        { key: 'outOwnCredit', colorType: 'availableCredit' },  // Our unused credit (pink/light)
+        { key: 'inCollateral', colorType: 'secured' },          // Our collateral (green)
+        { key: 'outPeerCredit', colorType: 'unsecured' }        // Their used credit FROM US (red)
       ];
 
       leftBars.forEach((barSpec) => {
@@ -1762,16 +1762,16 @@
         leftOffset += length;
       });
 
-      // Right-side bars (from right entity leftward) - SWAPPED to show left entity's state
+      // Right-side bars (from right entity leftward) - 2019vue: they_unsecured, they_secured, they_available_credit
       const rightStartPos = toEntity.position.clone().add(
         direction.clone().normalize().multiplyScalar(-(toEntitySize + barRadius + safeGap))
       );
 
       let rightOffset = 0;
       const rightBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'outOwnCredit', colorType: 'availableCredit' },
-        { key: 'inCollateral', colorType: 'secured' },
-        { key: 'outPeerCredit', colorType: 'unsecured' }
+        { key: 'inOwnCredit', colorType: 'unsecured' },        // Our used credit TO THEM (red)
+        { key: 'outCollateral', colorType: 'secured' },        // Their collateral (green)
+        { key: 'inPeerCredit', colorType: 'availableCredit' }  // Their unused credit (pink/light)
       ];
 
       rightBars.forEach((barSpec) => {
