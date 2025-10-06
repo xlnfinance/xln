@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
+  import { routePreview } from '../../stores/routePreviewStore';
   // Functions now accessed through $xlnEnvironment.xln from server.ts
 
   export let entityId: string;
@@ -31,6 +32,13 @@
   // Auto-calculate routes when target and amount change
   $: if (targetEntityId && amount && !findingRoutes) {
     findRoutes();
+  }
+
+  // Show route preview when route selected
+  $: if (selectedRouteIndex >= 0 && routes[selectedRouteIndex]) {
+    routePreview.showRoute(routes[selectedRouteIndex].path);
+  } else {
+    routePreview.clear();
   }
 
   // Get all entities for dropdown - guaranteed non-null entity IDs

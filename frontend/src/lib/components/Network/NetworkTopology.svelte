@@ -19,8 +19,8 @@
 
   // Network3D managers
   import { EntityManager } from '../../network3d/EntityManager';
-  import { AccountManager } from '../../network3d/AccountManager';
   import { AccountActivityVisualizer } from '../../network3d/AccountActivityVisualizer';
+  import { createAccountBars } from '../../network3d/AccountBarRenderer';
 
   // Props
   export let zenMode: boolean = false;
@@ -103,7 +103,6 @@
 
   // Network3D managers
   let entityManager: EntityManager;
-  let accountManager: AccountManager;
   let activityVisualizer: AccountActivityVisualizer;
 
   // Visual effects system
@@ -160,6 +159,127 @@
   let dragOffset: THREE.Vector3 = new THREE.Vector3();
   let isDragging: boolean = false;
   let justDragged: boolean = false; // Flag to prevent click after drag
+
+  /**
+   * ============================================================
+   * FUNCTION INDEX - NetworkTopology.svelte (5842 lines)
+   * ============================================================
+   *
+   * Use this index for efficient editing with offset reads:
+   * 1. Find function in index → note line range
+   * 2. Read file offset=START limit=LENGTH
+   * 3. Edit only that section
+   *
+   * Saves ~55k tokens per edit (read 100 lines instead of 5842)
+   *
+   * SETTINGS & PERSISTENCE (164-270)
+   *   loadBirdViewSettings       164-210
+   *   saveBirdViewSettings       212-229
+   *   saveEntityPositions        231-247
+   *   getTokenSymbol             267-270
+   *
+   * UTILITY FUNCTIONS (396-399, 2926-2995, 3602-3667)
+   *   logActivity                396-399
+   *   updateAvailableTokens      2926-2961
+   *   getEntitySizeForToken      2963-2995
+   *   getEntityBalanceInfo       3602-3630
+   *   formatFinancialAmount      3636-3654
+   *   getEntityShortName         3659-3667
+   *   getDualConnectionAccountInfo 3673-3766
+   *
+   * VR CONTROLLERS (681-748, 840-865)
+   *   setupVRControllers         681-710
+   *   onVRSelectStart            715-740
+   *   onVRSelectEnd              742-748
+   *   handleJEventRipple         840-865
+   *
+   * NETWORK DATA & LAYOUT (867-1218)
+   *   updateNetworkData          867-1005   (138 lines - COMPLEX)
+   *   clearNetwork               1007-1032
+   *   applyForceDirectedLayout   1043-1182  (139 lines - COMPLEX)
+   *   applySimpleRadialLayout    1187-1218
+   *
+   * ENTITY & CONNECTION RENDERING (1220-1616)
+   *   createEntityNode           1220-1314  (94 lines)
+   *   createConnections          1316-1369
+   *   buildConnectionIndexMap    1371-1379
+   *   createTransactionParticles 1381-1466  (85 lines)
+   *   createDirectionalLightning 1468-1518
+   *   createBroadcastRipple      1520-1576
+   *   updateConnectionsForEntity 1583-1616
+   *
+   * ACCOUNT BARS - RCPAN VISUALIZATION (1618-1861)
+   *   createConnectionLine       1618-1650
+   *   createAccountBarsForConnection 1652-1733  (81 lines)
+   *   getAccountTokenDelta       1739-1745
+   *   deriveEntry                1747-1781
+   *   createEntityLabel          1790-1830
+   *   updateEntityLabels         1832-1861
+   *
+   * ANIMATION LOOP & EFFECTS (1863-2333)
+   *   animate                    1863-2093  (230 lines - CORE LOOP)
+   *   applyCollisionRepulsion    2099-2174  (75 lines)
+   *   animateParticles           2176-2227
+   *   animateEntityPulses        2229-2326  (97 lines)
+   *   triggerEntityActivity      2328-2333
+   *
+   * COLLISION & PHYSICS (2336-2444)
+   *   enforceSpacingConstraints  2336-2444  (108 lines)
+   *
+   * MOUSE INTERACTION (2446-2755)
+   *   onMouseDown                2446-2495
+   *   onMouseUp                  2497-2529
+   *   onMouseMove                2531-2651  (120 lines)
+   *   onMouseOut                 2653-2666
+   *   onMouseClick               2668-2705
+   *   onMouseDoubleClick         2707-2738
+   *   handleResizeStart          2741-2744
+   *   handleResizeMove           2746-2751
+   *   handleResizeEnd            2753-2755
+   *
+   * TOUCH INTERACTION (2758-2849)
+   *   onTouchStart               2758-2801
+   *   onTouchMove                2803-2821
+   *   onTouchEnd                 2823-2849
+   *
+   * ROUTE MANAGEMENT (2851-3068)
+   *   highlightRoutePath         2851-2876
+   *   clearRouteHighlight        2878-2887
+   *   update3DMode               2905-2924
+   *   calculateAvailableRoutes   3002-3068
+   *
+   * PAYMENT JOBS & EFFECTS (3250-3335)
+   *   cancelJob                  3250-3256
+   *   createRipple               3258-3288
+   *   updateRipples              3290-3313
+   *   detectJurisdictionalEvents 3315-3335
+   *
+   * ASCII SCENARIO GENERATION (3439-3566)
+   *   generateSliceURL           3439-3481
+   *   generateASCIIScenario      3483-3566  (83 lines)
+   *
+   * WINDOW EVENTS (3768-3774)
+   *   onWindowResize             3768-3774
+   *
+   * TEMPLATE SECTION (3777-4380) - 604 lines HTML
+   * STYLE SECTION (4381-5842) - 1461 lines CSS
+   * ============================================================
+   * EDITING WORKFLOW:
+   * ============================================================
+   * Example: Edit applyForceDirectedLayout function
+   *
+   * Step 1: Find function in index above
+   *   → Lines 1043-1182 (140 lines)
+   *
+   * Step 2: Read only that section
+   *   Read file offset=1043 limit=140
+   *
+   * Step 3: Edit with exact old_string match
+   *   Edit old_string="function applyForceDirectedLayout(...entire function...)"
+   *
+   * Saves: Read 140 lines instead of 5842 (97% reduction)
+   * ============================================================
+   */
 
   // Load saved bird view settings (including camera state)
   function loadBirdViewSettings(): BirdViewSettings {
@@ -541,9 +661,6 @@
     if (entityManager) {
       entityManager.clear();
     }
-    if (accountManager) {
-      accountManager.clear();
-    }
     if (activityVisualizer) {
       activityVisualizer.clearAll();
     }
@@ -664,7 +781,6 @@
 
     // ===== INITIALIZE MANAGERS =====
     entityManager = new EntityManager(scene);
-    accountManager = new AccountManager(scene);
     activityVisualizer = new AccountActivityVisualizer(scene);
     spatialHash = new SpatialHash(100);
     gestureManager = new GestureManager();
@@ -1407,26 +1523,23 @@
                 const fromEntityId = tx.data.fromEntityId;
                 const toEntityId = tx.data.toEntityId;
 
-                // Determine direction
-                if (processingEntityId === toEntityId) {
-                  // INCOMING
-                  if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
-                    currentFrameActivity.incomingFlows.set(toEntityId, []);
-                  }
-                  currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
-                  createDirectionalLightning(fromEntityId, toEntityId, 'incoming', tx.data.accountTx);
-                } else if (processingEntityId === fromEntityId) {
-                  // OUTGOING
-                  if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
-                    currentFrameActivity.outgoingFlows.set(fromEntityId, []);
-                  }
-                  currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
-                  createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+                // Create BOTH incoming and outgoing particles for bilateral visibility
+                // Outgoing: from sender's perspective
+                if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
+                  currentFrameActivity.outgoingFlows.set(fromEntityId, []);
                 }
+                currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
+                createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+
+                // Incoming: from receiver's perspective (same particle, different tracking)
+                if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
+                  currentFrameActivity.incomingFlows.set(toEntityId, []);
+                }
+                currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
 
                 triggerEntityActivity(fromEntityId);
                 triggerEntityActivity(toEntityId);
-              } else if (['deposit_reserve', 'withdraw_reserve', 'credit_from_reserve', 'debit_to_reserve'].includes(tx.type)) {
+              } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
                 createBroadcastRipple(processingEntityId, tx.type);
               }
             });
@@ -1445,23 +1558,23 @@
               const fromEntityId = tx.data.fromEntityId;
               const toEntityId = tx.data.toEntityId;
 
-              if (processingEntityId === toEntityId) {
-                if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
-                  currentFrameActivity.incomingFlows.set(toEntityId, []);
-                }
-                currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
-                createDirectionalLightning(fromEntityId, toEntityId, 'incoming', tx.data.accountTx);
-              } else if (processingEntityId === fromEntityId) {
-                if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
-                  currentFrameActivity.outgoingFlows.set(fromEntityId, []);
-                }
-                currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
-                createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+              // Create BOTH incoming and outgoing particles for bilateral visibility
+              // Outgoing: from sender's perspective
+              if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
+                currentFrameActivity.outgoingFlows.set(fromEntityId, []);
               }
+              currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
+              createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+
+              // Incoming: from receiver's perspective (same particle, different tracking)
+              if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
+                currentFrameActivity.incomingFlows.set(toEntityId, []);
+              }
+              currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
 
               triggerEntityActivity(fromEntityId);
               triggerEntityActivity(toEntityId);
-            } else if (['deposit_reserve', 'withdraw_reserve', 'credit_from_reserve', 'debit_to_reserve'].includes(tx.type)) {
+            } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
               createBroadcastRipple(processingEntityId, tx.type);
             }
           });
@@ -1484,29 +1597,33 @@
 
     if (connectionIndex === -1) return;
 
-    // Particle color based on transaction type
-    let color = 0xffaa00;
-    let size = 0.15;
+    // BLUE LIGHTNING with transaction-specific intensity
+    let color = 0x00aaff; // Electric blue (cooler visual)
+    let size = 0.2;
 
     if (accountTx) {
       switch (accountTx.type) {
-        case 'direct-payment':
-          color = 0xffaa00;
-          size = Math.min(0.3, 0.1 + Number(accountTx.data?.amount || 0n) / 100000);
+        case 'direct_payment':
+          color = 0x00ccff; // Bright cyan for payments
+          size = Math.min(0.4, 0.15 + Number(accountTx.data?.amount || 0n) / 100000);
           break;
-        case 'set-credit-limit':
-          color = 0x0088ff;
-          size = 0.15;
+        case 'set_credit_limit':
+          color = 0x0088ff; // Deep blue for credit
+          size = 0.18;
           break;
+        default:
+          color = 0x00aaff;
+          size = 0.2;
       }
     }
 
-    const geometry = new THREE.SphereGeometry(size, 8, 8);
+    const geometry = new THREE.SphereGeometry(size, 12, 12); // More segments for smoother sphere
     const material = new THREE.MeshLambertMaterial({
       color,
       transparent: true,
-      opacity: 0.9,
-      emissive: color
+      opacity: 0.95,
+      emissive: color,
+      emissiveIntensity: 1.5
     });
     const mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);
@@ -1515,7 +1632,7 @@
       mesh,
       connectionIndex,
       progress: 0,
-      speed: 0.03, // 50% in ~17 frames at 60fps (~0.3s)
+      speed: 0.02, // Slower for more dramatic effect (full cycle in ~2.5s)
       type: accountTx?.type || 'unknown',
       amount: accountTx?.data?.amount,
       direction
@@ -1536,6 +1653,10 @@
     // Ring color based on tx type
     let color = 0x00ffff; // Cyan default
     switch (txType) {
+      case 'deposit_collateral':
+      case 'reserve_to_collateral':
+        color = 0x00ff88; // Bright green - entity growing (reserve → collateral)
+        break;
       case 'deposit_reserve':
         color = 0x00ff00; // Green - money coming in
         break;
@@ -1643,20 +1764,18 @@
     line.computeLineDistances(); // Required for dashed lines
     scene.add(line);
 
-    // Create progress bars for credit/collateral
-    const progressBars = createProgressBars(fromEntity, toEntity, fromId, toId, replica);
+    // Create account capacity bars
+    const accountBars = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
 
     connections.push({
       from: fromId,
       to: toId,
       line,
-      progressBars
+      progressBars: accountBars
     });
   }
 
-  function createProgressBars(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
-    const group = new THREE.Group();
-
+  function createAccountBarsForConnection(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
     // Get current replicas to find the account
     const currentReplicas = $visibleReplicas;
 
@@ -1686,12 +1805,14 @@
 
     // NO BARS if no real account data
     if (!accountData) {
+      const group = new THREE.Group();
       scene.add(group);
       return group;
     }
 
     // FINTECH-SAFETY: Get available tokens for THIS specific connection
     if (!accountData.deltas) {
+      const group = new THREE.Group();
       scene.add(group);
       return group;
     }
@@ -1699,6 +1820,7 @@
     const availableTokens = Array.from(accountData.deltas.keys() as IterableIterator<number>).sort((a, b) => a - b);
 
     if (availableTokens.length === 0) {
+      const group = new THREE.Group();
       scene.add(group);
       return group;
     }
@@ -1715,28 +1837,25 @@
 
     if (!tokenDelta) {
       // This should never happen after fallback, but fail-fast
-      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found in progress bars despite being in availableTokens: ${availableTokens}`);
+      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens: ${availableTokens}`);
     }
 
-
-    // Derive channel data using 2019vue logic with REAL token delta
+    // Derive account data using REAL token delta
     const derived = deriveEntry(tokenDelta, fromId < toId); // left entity is lexicographically smaller
 
-    // Calculate line geometry
-    const direction = new THREE.Vector3().subVectors(toEntity.position, fromEntity.position);
-    const lineLength = direction.length();
-    const normalizedDirection = direction.clone().normalize();
-
-    // Calculate bar dimensions and positions
-    const barHeight = 0.08;
-
-    // Create bars according to 2019vue structure:
-    // [our_available_credit][our_secured][our_unsecured] |DELTA| [their_unsecured][their_secured][their_available_credit]
-
-    createChannelBars(group, fromEntity, toEntity, fromId, toId, derived, barHeight, lineLength, normalizedDirection);
-
-    scene.add(group);
-    return group;
+    // Delegate rendering to AccountBarRenderer
+    return createAccountBars(
+      scene,
+      fromEntity,
+      toEntity,
+      derived,
+      {
+        barsMode,
+        portfolioScale: $settings.portfolioScale || 5000,
+        selectedTokenId: displayTokenId
+      },
+      getEntitySizeForToken
+    );
   }
 
   /**
@@ -1787,258 +1906,7 @@
     return result;
   }
 
-  function createChannelBars(
-    group: THREE.Group,
-    fromEntity: EntityData,
-    toEntity: EntityData,
-    fromId: string,
-    toId: string,
-    derived: DerivedAccountData,
-    barHeight: number,
-    lineLength: number,
-    direction: THREE.Vector3
-  ): void {
-    // INVARIANT: 1px = $1 - bars length directly proportional to value
-    // Values come with 18 decimals (1e18 = 1 token), scale to visual units
-    const globalScale = $settings.portfolioScale || 5000;
-    const decimals = 18;
-    const tokensToVisualUnits = 0.00001; // 1M tokens → 10 visual units
-    const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
-
-    // 2019vue.txt 7-region colors
-    const colors = {
-      availableCredit: 0xff9c9c,  // light red - unused credit
-      secured: 0x5cb85c,          // green - collateral
-      unsecured: 0xdc3545         // red - used credit
-    };
-
-    // 7-region stack (left to right):
-    // 1. outOwnCredit (our unused credit)
-    // 2. inCollateral (our collateral)
-    // 3. outPeerCredit (their used credit)
-    // 4. DELTA SEPARATOR
-    // 5. inOwnCredit (our used credit)
-    // 6. outCollateral (their collateral)
-    // 7. inPeerCredit (their unused credit)
-    const segments = {
-      outOwnCredit: derived.outOwnCredit * barScale,
-      inCollateral: derived.inCollateral * barScale,
-      outPeerCredit: derived.outPeerCredit * barScale,
-      inOwnCredit: derived.inOwnCredit * barScale,
-      outCollateral: derived.outCollateral * barScale,
-      inPeerCredit: derived.inPeerCredit * barScale
-    };
-
-    // Calculate entity radii to avoid collision
-    const fromEntitySize = getEntitySizeForToken(fromId, selectedTokenId);
-    const toEntitySize = getEntitySizeForToken(toId, selectedTokenId);
-
-    // ENFORCED MINIMUM GAPS (user requirement):
-    // - Spread mode: 2 visual units gap in middle (no delta separator)
-    // - Close mode: 1 visual unit gap on each side + delta separator in front
-    // Note: These are visual/world units, not screen pixels. At current scale ~40 units = full H-width
-    const minGapSpread = 2; // Small gap in middle (spread mode)
-    const minGapClose = 1; // Small gap on each side (close mode)
-
-    const availableSpace = lineLength - fromEntitySize - toEntitySize;
-
-    // Calculate total bars length - NO SCALING (maintain invariant: 1px = 1 value unit)
-    const totalBarsLength = Object.values(segments).reduce((sum, length) => sum + length, 0);
-
-    // Check if bars overflow (for debugging) - but DON'T scale them down
-    const requiredSpace = barsMode === 'spread' ? totalBarsLength + minGapSpread : totalBarsLength + (2 * minGapClose);
-    if (requiredSpace > availableSpace) {
-    }
-
-
-    if (barsMode === 'spread') {
-      // SPREAD MODE: bars extend FROM BOTH entities toward middle
-      // 2019VUE.TXT PATTERN: Each entity shows THEIR OWN state on their side
-      // Left entity (fromEntity): [available_credit][secured][unsecured] → (our unused, our collateral, our used)
-      // Right entity (toEntity): ← [they_unsecured][they_secured][they_available_credit] (their used, their collateral, their unused)
-
-      // FIRST PRINCIPLE: Bars must NEVER pierce entity surface
-      // Bar has radius, so start position must be: entitySurface + barRadius + gap
-      const barRadius = barHeight * 2.5;
-      const safeGap = 0.2; // Small visual gap between entity surface and bar
-
-      // Left-side bars (from left entity rightward) - 2019vue: available_credit, secured, unsecured
-      const leftStartPos = fromEntity.position.clone().add(
-        direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap)
-      );
-
-      let leftOffset = 0;
-      const leftBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'outOwnCredit', colorType: 'availableCredit' },  // Our unused (pink) - closest to entity
-        { key: 'inCollateral', colorType: 'secured' },          // Our collateral (green) - middle
-        { key: 'outPeerCredit', colorType: 'unsecured' }        // Their used (red) - closest to gap
-      ];
-
-      leftBars.forEach((barSpec) => {
-        const length = segments[barSpec.key];
-        if (length > 0.01) {
-          const radius = barHeight * 2.5;
-          const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-          const barColor = colors[barSpec.colorType];
-
-          // Credit bars: airy/transparent (unloaded trust), Collateral: solid (actual value)
-          const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
-          const material = new THREE.MeshLambertMaterial({
-            color: barColor,
-            transparent: true,
-            opacity: isCredit ? 0.3 : 0.9, // Credit: very airy (30%), Collateral: solid (90%)
-            emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
-            wireframe: isCredit // Credit shows as wireframe (unloaded trust)
-          });
-          const bar = new THREE.Mesh(geometry, material);
-
-          const barCenter = leftStartPos.clone().add(direction.clone().normalize().multiplyScalar(leftOffset + length/2));
-          bar.position.copy(barCenter);
-
-          const axis = new THREE.Vector3(0, 1, 0);
-          const targetAxis = direction.clone().normalize();
-          bar.quaternion.setFromUnitVectors(axis, targetAxis);
-
-          group.add(bar);
-        }
-        leftOffset += length;
-      });
-
-      // Right-side bars (extending rightward from gap, same visual order as left)
-      // Calculate where gap starts (after left bars)
-      const leftBarsLength = segments.outOwnCredit + segments.inCollateral + segments.outPeerCredit;
-      const gapStart = fromEntity.position.clone().add(
-        direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap + leftBarsLength + minGapSpread)
-      );
-
-      let rightOffset = 0;
-      const rightBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'inPeerCredit', colorType: 'availableCredit' },  // Their unused (pink) - closest to entity
-        { key: 'outCollateral', colorType: 'secured' },         // Their collateral (green) - middle
-        { key: 'inOwnCredit', colorType: 'unsecured' }          // Our used (red) - closest to gap
-      ];
-
-      rightBars.forEach((barSpec) => {
-        const length = segments[barSpec.key];
-        if (length > 0.01) {
-          const radius = barHeight * 2.5;
-          const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-          const barColor = colors[barSpec.colorType];
-
-          // Credit bars: airy/transparent wireframe (unloaded trust)
-          const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
-          const material = new THREE.MeshLambertMaterial({
-            color: barColor,
-            transparent: true,
-            opacity: isCredit ? 0.3 : 0.9,
-            emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
-            wireframe: isCredit
-          });
-          const bar = new THREE.Mesh(geometry, material);
-
-          // Extend RIGHTWARD from gap (same direction as left bars)
-          const barCenter = gapStart.clone().add(direction.clone().normalize().multiplyScalar(rightOffset + length/2));
-          bar.position.copy(barCenter);
-
-          const axis = new THREE.Vector3(0, 1, 0);
-          const targetAxis = direction.clone().normalize();
-          bar.quaternion.setFromUnitVectors(axis, targetAxis);
-
-          group.add(bar);
-        }
-        rightOffset += length;
-      });
-
-
-    } else {
-      // CLOSE MODE: 7-region stack with delta separator
-      // Total length before delta: outOwnCredit + inCollateral + outPeerCredit
-      // Total length after delta: inOwnCredit + outCollateral + inPeerCredit
-      const totalBarsLength = segments.outOwnCredit + segments.inCollateral + segments.outPeerCredit +
-                               segments.inOwnCredit + segments.outCollateral + segments.inPeerCredit;
-
-      const centerPoint = fromEntity.position.clone().lerp(toEntity.position, 0.5);
-      const halfBarsLength = totalBarsLength / 2;
-      const startPos = centerPoint.clone().sub(direction.clone().normalize().multiplyScalar(halfBarsLength));
-      const barDirection = direction.clone().normalize();
-
-      let currentOffset = 0;
-      // 7-region order from 2019vue.txt
-      const barOrder: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'outOwnCredit', colorType: 'availableCredit' },  // our unused credit - light red
-        { key: 'inCollateral', colorType: 'secured' },          // our collateral - green
-        { key: 'outPeerCredit', colorType: 'unsecured' },       // their used credit - red
-        // DELTA SEPARATOR HERE
-        { key: 'inOwnCredit', colorType: 'unsecured' },         // our used credit - red
-        { key: 'outCollateral', colorType: 'secured' },         // their collateral - green
-        { key: 'inPeerCredit', colorType: 'availableCredit' }   // their unused credit - light red
-      ];
-
-      barOrder.forEach((barSpec, index) => {
-        const length = segments[barSpec.key];
-
-        if (length > 0.01) {
-          const radius = barHeight * 2.5;
-          const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-          const barColor = colors[barSpec.colorType];
-
-          // Credit: wireframe/transparent, Collateral: solid
-          const isCredit = barSpec.colorType === 'availableCredit';
-          const material = new THREE.MeshLambertMaterial({
-            color: barColor,
-            transparent: true,
-            opacity: isCredit ? 0.3 : (barSpec.colorType === 'secured' ? 0.9 : 0.6),
-            emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
-            wireframe: isCredit
-          });
-          const bar = new THREE.Mesh(geometry, material);
-
-          const barCenter = startPos.clone().add(barDirection.clone().multiplyScalar(currentOffset + length/2));
-          bar.position.copy(barCenter);
-
-          const axis = new THREE.Vector3(0, 1, 0);
-          bar.quaternion.setFromUnitVectors(axis, barDirection);
-
-          group.add(bar);
-        }
-
-        currentOffset += length;
-
-        // Add delta separator after outPeerCredit (index 2)
-        if (index === 2) {
-          const separatorPos = startPos.clone().add(barDirection.clone().multiplyScalar(currentOffset));
-          createDeltaSeparator(group, separatorPos, barDirection, barHeight);
-        }
-      });
-    }
-  }
-
-  function createDeltaSeparator(group: THREE.Group, position: THREE.Vector3, direction: THREE.Vector3, barHeight: number) {
-    // SHARP DISK separator marking delta (zero point) - sleek knife-like ==|== design
-    const diskRadius = barHeight * 12; // 3x bigger for visibility from far
-    const diskThickness = barHeight * 0.3; // Very thin for sharp knife appearance
-
-    // Create thin disk (very flat cylinder)
-    const geometry = new THREE.CylinderGeometry(diskRadius, diskRadius, diskThickness, 32);
-    const material = new THREE.MeshLambertMaterial({
-      color: 0xffff00, // YELLOW separator for visibility
-      transparent: true,
-      opacity: 0.95,
-      emissive: 0xffff00,
-      emissiveIntensity: 0.5
-    });
-    const separator = new THREE.Mesh(geometry, material);
-
-    separator.position.copy(position);
-
-    // Align cylinder axis (Y) with line direction so disk face is perpendicular (splits bars)
-    // Cylinder default axis is Y, we want Y to point along the line direction
-    const axis = new THREE.Vector3(0, 1, 0); // Cylinder's default axis
-    const targetAxis = direction.clone().normalize();
-    separator.quaternion.setFromUnitVectors(axis, targetAxis);
-
-    group.add(separator);
-  }
+  // Deleted: createChannelBars and createDeltaSeparator moved to AccountBarRenderer.ts
 
   // Bar labels removed per user request - shown only on hover tooltips
   // function createBarLabel(group: THREE.Group, position: THREE.Vector3, value: number, _barType: string) {
@@ -2436,10 +2304,10 @@
       // Update progress
       particle.progress += particle.speed;
 
-      // Directional lightning: 0% → 50% (request sent, not received)
-      const maxProgress = 0.5;
+      // 3-PHASE LIGHTNING: incoming (0%-45%) → entity flash (45%-55%) → outgoing (55%-100%)
+      const maxProgress = 1.0;
 
-      // Remove particle when it reaches 50%
+      // Remove particle when complete
       if (particle.progress >= maxProgress) {
         scene.remove(particle.mesh);
         particles.splice(index, 1);
@@ -2450,37 +2318,61 @@
       if (particle.connectionIndex === -1) {
         const startRadius = 0.5;
         const maxRadius = 5.0;
-        const currentRadius = startRadius + (maxRadius - startRadius) * (particle.progress / maxProgress);
+        const currentRadius = startRadius + (maxRadius - startRadius) * particle.progress;
         particle.mesh.scale.setScalar(currentRadius / startRadius);
 
-        const material = particle.mesh.material as THREE.MeshBasicMaterial;
-        material.opacity = 0.8 * (1 - particle.progress / maxProgress);
+        const material = particle.mesh.material as THREE.MeshLambertMaterial;
+        material.opacity = 0.8 * (1 - particle.progress);
         return;
       }
 
-      // Unicast particle animation (along connection line)
+      // 3-PHASE unicast lightning animation
       const connection = connections[particle.connectionIndex];
       if (!connection) return;
 
-      // Get start and end points
       const positions = connection.line.geometry.getAttribute('position');
       const start = new THREE.Vector3().fromBufferAttribute(positions, 0);
       const end = new THREE.Vector3().fromBufferAttribute(positions, 1);
+      const material = particle.mesh.material as THREE.MeshLambertMaterial;
 
-      // Interpolate position: 0% → 50% of line length
-      const currentPos = start.lerp(end, particle.progress);
-      particle.mesh.position.copy(currentPos);
+      // PHASE 1: Incoming (0% → 45%) - particle travels from source toward entity
+      if (particle.progress < 0.45) {
+        const phase1Progress = particle.progress / 0.45; // 0 to 1
+        const currentPos = start.lerp(end, phase1Progress * 0.5); // Travel to midpoint
+        particle.mesh.position.copy(currentPos);
 
-      // Pulsing animation (different intensity for incoming vs outgoing)
-      const baseIntensity = particle.direction === 'outgoing' ? 1.3 : 1.0;
-      const pulse = baseIntensity + 0.3 * Math.sin(Date.now() * 0.015 + index);
-      particle.mesh.scale.setScalar(pulse);
+        // Fade in, bright pulse
+        const fadeIn = Math.min(1, phase1Progress * 3);
+        const pulse = 1.2 + 0.3 * Math.sin(Date.now() * 0.02 + index);
+        particle.mesh.scale.setScalar(pulse);
+        material.opacity = 0.95 * fadeIn;
+        material.emissiveIntensity = 1.5;
+      }
+      // PHASE 2: Entity Flash (45% → 55%) - particle explodes at entity
+      else if (particle.progress < 0.55) {
+        const phase2Progress = (particle.progress - 0.45) / 0.1; // 0 to 1
+        const midpoint = start.lerp(end, 0.5);
+        particle.mesh.position.copy(midpoint);
 
-      // Fade in quickly, fade out near 50%
-      const fadeIn = Math.min(1, particle.progress * 6);
-      const fadeOut = Math.max(0, 1 - (particle.progress - 0.35) * 6);
-      const material = particle.mesh.material as THREE.MeshBasicMaterial;
-      material.opacity = 0.9 * fadeIn * fadeOut;
+        // Explosive flash at entity
+        const flashScale = 1.5 + 2.0 * Math.sin(phase2Progress * Math.PI); // Peak at 50%
+        particle.mesh.scale.setScalar(flashScale);
+        material.opacity = 1.0;
+        material.emissiveIntensity = 3.0 * Math.sin(phase2Progress * Math.PI); // Intense flash
+      }
+      // PHASE 3: Outgoing (55% → 100%) - particle continues to destination
+      else {
+        const phase3Progress = (particle.progress - 0.55) / 0.45; // 0 to 1
+        const currentPos = start.lerp(end, 0.5 + phase3Progress * 0.5); // Midpoint to end
+        particle.mesh.position.copy(currentPos);
+
+        // Fade out toward destination
+        const pulse = 1.0 + 0.2 * Math.sin(Date.now() * 0.02 + index);
+        const fadeOut = Math.max(0, 1 - phase3Progress);
+        particle.mesh.scale.setScalar(pulse);
+        material.opacity = 0.9 * fadeOut;
+        material.emissiveIntensity = 1.2 * fadeOut;
+      }
     });
   }
 
@@ -4305,6 +4197,28 @@
           />
         </div>
 
+        <!-- Active Flows -->
+        {#if activeJobs.length > 0}
+          <div class="active-flows">
+            <h4>⚡ Active Flows</h4>
+            <div class="jobs-list">
+              {#each activeJobs as job (job.id)}
+                <div class="job-item">
+                  <div class="job-info">
+                    <span class="job-route">{getEntityShortName(job.from)} → {getEntityShortName(job.to)}</span>
+                    <span class="job-amount">{job.amount}</span>
+                    <span class="job-rate">{job.tps} TPS</span>
+                    <span class="job-count">Sent: {job.sentCount}</span>
+                  </div>
+                  <button class="job-cancel" on:click={() => cancelJob(job.id)} title="Cancel flow">
+                    ✕
+                  </button>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
         <!-- Quick Payment Form -->
         <div class="payment-form">
           <div class="form-row">
@@ -4339,11 +4253,11 @@
             <input
               type="range"
               min="0"
-              max="100"
+              max="5"
               step="0.1"
               bind:value={paymentTPS}
               class="repeat-slider"
-              title="TPS: 0=once, 0.1=every 10s, 100=max"
+              title="TPS: 0=once, 0.1=every 10s, 5=max"
             />
             <span class="rate-value">{paymentTPS.toFixed(1)}</span>
           </div>
@@ -4429,14 +4343,16 @@
           </div>
         </div>
 
-        <!-- Visual Effects Demo Panel -->
-        <div class="visual-effects-section">
-          <VisualDemoPanel
-            {scene}
-            entityMeshes={entityMeshMap}
-            {spatialHash}
-          />
-        </div>
+        <!-- Visual Effects Demo Panel (ENABLED) -->
+        {#if scene && entityMeshMap.size > 0 && spatialHash}
+          <div class="visual-effects-section">
+            <VisualDemoPanel
+              {scene}
+              entityMeshes={entityMeshMap}
+              {spatialHash}
+            />
+          </div>
+        {/if}
 
         <!-- Admin Panel -->
         <AdminPanel />
@@ -4583,27 +4499,6 @@
   </div>
   {/if}
 
-  <!-- Active Payment Jobs (Flows) -->
-  {#if activeJobs.length > 0}
-    <div class="active-jobs">
-      <h4>Active Flows</h4>
-      <div class="jobs-list">
-        {#each activeJobs as job (job.id)}
-          <div class="job-item">
-            <div class="job-info">
-              <span class="job-route">{getEntityShortName(job.from)} → {getEntityShortName(job.to)}</span>
-              <span class="job-amount">Amount: {job.amount}</span>
-              <span class="job-rate">Rate: {job.tps} TPS</span>
-              <span class="job-count">Sent: {job.sentCount}</span>
-            </div>
-            <button class="job-cancel" on:click={() => cancelJob(job.id)} title="Cancel flow">
-              ✕
-            </button>
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
 
   {#if tooltip.visible}
     <div
@@ -5990,22 +5885,16 @@
     color: #ff4444;
   }
 
-  .active-jobs {
-    position: absolute;
-    bottom: 20px;
-    right: 20px;
+  .active-flows {
     background: rgba(0, 255, 136, 0.05);
     border: 2px solid rgba(0, 255, 136, 0.4);
     border-radius: 8px;
     padding: 12px;
-    min-width: 400px;
-    max-width: 600px;
-    z-index: 20;
+    margin-bottom: 16px;
     backdrop-filter: blur(10px);
-    box-shadow: 0 4px 16px rgba(0, 255, 136, 0.2);
   }
 
-  .active-jobs h4 {
+  .active-flows h4 {
     margin: 0 0 12px 0;
     color: #00ff88;
     font-size: 13px;

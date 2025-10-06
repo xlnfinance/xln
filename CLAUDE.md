@@ -59,6 +59,28 @@ bun run check 2>&1 | grep -E "(found.*error|✓ built)" | head -10
 # (User can see the code changes, doesn't need explanation)
 ```
 
+### **FUNCTION INDEX FOR LARGE FILES (NEW WORKFLOW)**
+
+**Files with function indexes (USE THIS WORKFLOW):**
+- `frontend/src/lib/components/Network/NetworkTopology.svelte` (5842 lines - index at lines 163-282)
+  - **ALWAYS use index + offset reads**
+  - **NEVER read full file unless adding imports**
+  - See `docs/editing-large-files.md` for complete workflow
+
+**Workflow example:**
+```typescript
+// 1. Check function index in file (lines 163-282)
+//    → applyForceDirectedLayout: 1043-1182 (140 lines)
+
+// 2. Read ONLY that function
+Read offset=1043 limit=140
+
+// 3. Edit just that section
+Edit old_string="function applyForceDirectedLayout(...)"
+
+// Saves: 1k tokens instead of 60k (98% reduction)
+```
+
 ### **REFERENCE FILES - GREP ONLY, NEVER READ FULL**
 These files are >500 lines and should ONLY be accessed via grep:
 - `2024_src/app/Channel.ts` (800 lines - reference only)
@@ -73,7 +95,7 @@ grep -r "from.*account-tx/processor" /Users/egor/xln/src
 # No results? DELETE immediately, don't analyze
 ```
 
-**GOLDEN RULE:** If you're about to Read a file >300 lines, ask yourself: "Can I grep for the specific function/pattern first?"
+**GOLDEN RULE:** If you're about to Read a file >300 lines, ask yourself: "Can I grep for the specific function/pattern first? Does it have a function index?"
 
 ## 🚨 CRITICAL: BROWSER-ONLY BUILD (NEVER FORGET!)
 
