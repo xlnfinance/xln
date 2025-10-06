@@ -48,11 +48,13 @@ export const DEPOSITORY_ABI = [
 ];
 
 export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
+  // Declare outside try block for error logging
+  let rpcUrl = jurisdiction.address;
+  const entityProviderAddress = jurisdiction.entityProviderAddress;
+  const depositoryAddress = jurisdiction.depositoryAddress;
+
   try {
     // FINTECH-SAFETY: Validate jurisdiction structure before using
-    const rpcUrl = jurisdiction.address;
-    const entityProviderAddress = jurisdiction.entityProviderAddress;
-    const depositoryAddress = jurisdiction.depositoryAddress;
 
     // Support legacy format with explicit validation
     if (!rpcUrl && 'rpc' in jurisdiction) {
