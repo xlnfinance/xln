@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, replicas } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, replicas, processWithDelay } from '../../stores/xlnStore';
 
   export let entityId: string;
 
@@ -103,7 +103,7 @@
   async function sendSettlement() {
     sending = true;
     try {
-      const xln = await getXLN();
+      await getXLN(); // Ensure initialized
       const env = $xlnEnvironment;
       if (!env) throw new Error('Environment not ready');
 
@@ -176,7 +176,7 @@
         entityTxs: [entityTx],
       };
 
-      await xln.processUntilEmpty(env, [settlementInput]);
+      await processWithDelay(env, [settlementInput]);
       console.log(`✅ Settlement sent`);
 
       // Reset simple mode
