@@ -84,6 +84,58 @@
     nextSyncTimer = Math.floor((1000 - (Date.now() % 1000)) / 100) / 10;
   }, 100);
 
+  // RPC endpoint override (for Oculus Quest compatibility)
+  const RPC_PRESETS = [
+    { label: 'Auto (default)', value: '' },
+    { label: 'Path Proxy: /rpc', value: '/rpc' },
+    { label: 'Direct Port: :8545', value: ':8545' },
+    { label: 'Production Port: :18545', value: ':18545' },
+  ];
+
+  let rpcOverride = '';
+  let customRpcInput = '';
+  let showCustomRpc = false;
+
+  // Load RPC override from localStorage
+  onMount(() => {
+    const saved = localStorage.getItem('xln_rpc_override');
+    if (saved) {
+      rpcOverride = saved;
+      if (!RPC_PRESETS.find(p => p.value === saved)) {
+        customRpcInput = saved;
+        showCustomRpc = true;
+        rpcOverride = 'custom';
+      }
+    }
+  });
+
+  function handleRpcChange(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    const value = target.value;
+
+    if (value === 'custom') {
+      showCustomRpc = true;
+      rpcOverride = 'custom';
+    } else {
+      showCustomRpc = false;
+      rpcOverride = value;
+      saveAndReconnectRpc(value);
+    }
+  }
+
+  function handleCustomRpcSubmit() {
+    if (customRpcInput) {
+      saveAndReconnectRpc(customRpcInput);
+    }
+  }
+
+  function saveAndReconnectRpc(value: string) {
+    localStorage.setItem('xln_rpc_override', value);
+    console.log(`🔧 RPC override saved: ${value}`);
+    console.log(`🔄 Reloading to apply new RPC configuration...`);
+    setTimeout(() => window.location.reload(), 500);
+  }
+
   // Jurisdiction connection status
   let jurisdictionStatus: any = null;
   let statusCheckInterval: any = null;
@@ -303,6 +355,44 @@
           </div>
         {/if}
       </div>
+    </div>
+
+    <!-- RPC Endpoint Override (Oculus Quest Support) -->
+    <div class="setting-group">
+      <h2>🔌 RPC Endpoint Override</h2>
+      <p class="setting-description">
+        For Oculus Quest: Use path proxy (/rpc) to avoid HTTPS port issues. Changes auto-reload the page.
+      </p>
+      <div class="rpc-selector">
+        <label for="rpc-preset">RPC Endpoint:</label>
+        <select id="rpc-preset" value={rpcOverride} on:change={handleRpcChange}>
+          {#each RPC_PRESETS as preset}
+            <option value={preset.value}>{preset.label}</option>
+          {/each}
+          <option value="custom">Custom...</option>
+        </select>
+      </div>
+
+      {#if showCustomRpc}
+        <div class="custom-rpc-input">
+          <label for="custom-rpc">Custom RPC:</label>
+          <input
+            id="custom-rpc"
+            type="text"
+            bind:value={customRpcInput}
+            placeholder="e.g., /rpc/ethereum or :8545"
+          />
+          <button class="action-btn" on:click={handleCustomRpcSubmit}>
+            Apply & Reload
+          </button>
+        </div>
+      {/if}
+
+      {#if rpcOverride}
+        <div class="current-override">
+          ℹ️ Current override: <code>{rpcOverride === 'custom' ? customRpcInput : rpcOverride}</code>
+        </div>
+      {/if}
     </div>
 
     <!-- Jurisdiction Connection Status Section -->
@@ -992,5 +1082,92 @@
   .commit-link:hover {
     color: #00ff88;
     text-decoration: underline;
+  }
+
+  /* RPC Selector Styles */
+  .setting-description {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 16px;
+    line-height: 1.5;
+  }
+
+  .rpc-selector {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .rpc-selector label {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+    min-width: 120px;
+  }
+
+  .rpc-selector select {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .rpc-selector select:hover {
+    border-color: rgba(0, 217, 255, 0.4);
+  }
+
+  .custom-rpc-input {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+  }
+
+  .custom-rpc-input label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    min-width: 90px;
+  }
+
+  .custom-rpc-input input {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #fff;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+  }
+
+  .custom-rpc-input input:focus {
+    outline: none;
+    border-color: rgba(0, 217, 255, 0.6);
+  }
+
+  .current-override {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(0, 217, 255, 0.1);
+    border: 1px solid rgba(0, 217, 255, 0.3);
+    border-radius: 4px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .current-override code {
+    background: rgba(0, 0, 0, 0.6);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    color: #00d9ff;
   }
 </style>

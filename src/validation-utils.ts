@@ -298,10 +298,10 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
   const obj = validateObject(value, context);
 
   const validated: AccountFrame = {
-    frameId: validateNumber(obj['frameId'], `${context}.frameId`),
+    height: validateNumber(obj['height'], `${context}.height`),
     timestamp: validateNumber(obj['timestamp'], `${context}.timestamp`),
     accountTxs: validateArray(obj['accountTxs'], `${context}.accountTxs`),
-    previousStateHash: validateString(obj['previousStateHash'], `${context}.previousStateHash`),
+    prevFrameHash: validateString(obj['prevFrameHash'], `${context}.prevFrameHash`),
     stateHash: validateString(obj['stateHash'], `${context}.stateHash`),
     tokenIds: validateArray<number>(obj['tokenIds'] || [], `${context}.tokenIds`),
     deltas: validateArray<bigint>(obj['deltas'] || [], `${context}.deltas`)

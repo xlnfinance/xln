@@ -48,6 +48,20 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState: newEntityState, outputs: [] };
     }
 
+    if (entityTx.type === 'chatMessage') {
+      // System-generated messages (e.g., from crontab dispute suggestions)
+      const { message } = entityTx.data;
+      const newEntityState = cloneEntityState(entityState);
+
+      newEntityState.messages.push(message);
+
+      if (newEntityState.messages.length > 10) {
+        newEntityState.messages.shift();
+      }
+
+      return { newState: newEntityState, outputs: [] };
+    }
+
     if (entityTx.type === 'propose') {
       const { action, proposer } = entityTx.data;
       const proposalId = generateProposalId(action, proposer, entityState);
@@ -196,7 +210,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         newState.accounts.set(entityTx.data.targetEntityId, {
           counterpartyEntityId: entityTx.data.targetEntityId,
           mempool: [],
-          currentFrame: { frameId: 0, timestamp: Date.now(), tokenIds: [], deltas: [] },
+          currentFrame: { height: 0, timestamp: env.timestamp, tokenIds: [], deltas: [] },
           sentTransitions: 0,
           ackedTransitions: 0,
           deltas: initialDeltas,
@@ -205,7 +219,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             peerLimit: getDefaultCreditLimit(1), // Counterparty extends same USDC credit to us
           },
           // Frame-based consensus fields
-          currentFrameId: 0,
+          currentHeight: 0,
           pendingSignatures: [],
           rollbackCount: 0,
           // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)

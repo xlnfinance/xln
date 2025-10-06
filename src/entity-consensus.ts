@@ -222,6 +222,20 @@ export const applyEntityInput = async (
 
   const entityOutbox: EntityInput[] = [];
 
+  // ⏰ Execute crontab tasks (periodic checks like account timeouts)
+  const { executeCrontab, initCrontab } = await import('./entity-crontab');
+
+  // Initialize crontab on first use
+  if (!entityReplica.state.crontabState) {
+    entityReplica.state.crontabState = initCrontab();
+  }
+
+  const crontabOutputs = await executeCrontab(entityReplica, entityReplica.state.crontabState);
+  if (crontabOutputs.length > 0) {
+    console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
+    entityOutbox.push(...crontabOutputs);
+  }
+
   // Add transactions to mempool (mutable for performance)
   if (entityInput.entityTxs?.length) {
     // DEBUG: Track vote transactions specifically
@@ -545,11 +559,11 @@ export const applyEntityInput = async (
     // Add any outputs generated during proposal to the outbox
     entityOutbox.push(...proposalOutputs);
 
-    // Proposer creates new timestamp for this frame (always use current time for new proposals)
-    const newTimestamp = Date.now();
+    // Proposer creates new timestamp for this frame (DETERMINISTIC: use server timestamp)
+    const newTimestamp = env.timestamp;
 
     // SECURITY: Validate timestamp
-    if (!validateTimestamp(newTimestamp, Date.now())) {
+    if (!validateTimestamp(newTimestamp, env.timestamp)) {
       log.error(`❌ Invalid proposal timestamp: ${newTimestamp}`);
       return { newState: entityReplica.state, outputs: entityOutbox };
     }
@@ -687,7 +701,7 @@ export const applyEntityFrame = async (
         // 2. Received an ACK (frameId with prevSignatures) AND we have mempool items
         // 3. Received account transactions that need processing
         const isNewFrame = entityTx.data.newAccountFrame;
-        const isAck = entityTx.data.frameId && entityTx.data.prevSignatures;
+        const isAck = entityTx.data.height && entityTx.data.prevSignatures;
         const hasPendingTxs = accountMachine.mempool.length > 0;
 
         // Only propose if we have something to send:
@@ -746,8 +760,8 @@ export const applyEntityFrame = async (
   console.log(`🚀 Additional accounts from getAccountsToProposeFrames: ${additionalAccounts.join(', ') || 'none'}`);
   additionalAccounts.forEach(accountId => proposableAccounts.add(accountId));
 
-  // Convert Set to Array for processing
-  const accountsToProposeFrames = Array.from(proposableAccounts);
+  // CRITICAL: Deterministic ordering - sort by counterpartyEntityId (lexicographic)
+  const accountsToProposeFrames = Array.from(proposableAccounts).sort();
 
   if (accountsToProposeFrames.length > 0) {
     console.log(`🔄 AUTO-PROPOSE: ${accountsToProposeFrames.length} accounts need frame proposals`);
@@ -759,7 +773,7 @@ export const applyEntityFrame = async (
       const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
       if (accountMachine) {
         console.log(`🔄 AUTO-PROPOSE: Account details - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}`);
-        const proposal = await proposeAccountFrame(accountMachine);
+        const proposal = await proposeAccountFrame(env, accountMachine);
         console.log(`🔄 AUTO-PROPOSE: Proposal result - success=${proposal.success}, hasInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
 
         if (proposal.success && proposal.accountInput) {
@@ -827,25 +841,6 @@ export const sortSignatures = (signatures: Map<string, string>, config: Consensu
 export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
   const merged = new Map<string, EntityInput>();
   let duplicateCount = 0;
-  const timestamp = Date.now();
-
-  // Always log input count for debugging with detailed breakdown
-  console.log(`🔍 MERGE-START: [${timestamp}] Processing ${inputs.length} entity inputs for merging`);
-
-  // Log FULL entityIds for routing debugging
-  inputs.forEach((input, idx) => {
-    console.log(`🔍 MERGE-INPUT[${idx}]: FULL entityId="${input.entityId}", signerId="${input.signerId}", replicaKey="${input.entityId}:${input.signerId}"`);
-  });
-
-  // Pre-analysis: Show all inputs before merging to identify potential Carol duplicates
-  const inputAnalysis = inputs.map((input, i) => {
-    const entityShort = input.entityId.slice(0, 10);
-    const frameHash = input.proposedFrame?.hash?.slice(0, 10) || 'none';
-    const precommitCount = input.precommits?.size || 0;
-    const precommitSigners = input.precommits ? Array.from(input.precommits.keys()).join(',') : 'none';
-    return `${i + 1}:${entityShort}:${input.signerId}(txs=${input.entityTxs?.length || 0},pc=${precommitCount}[${precommitSigners}],f=${frameHash})`;
-  });
-  console.log(`🔍 MERGE-INPUTS: ${inputAnalysis.join(' | ')}`);
 
   // Look for potential Carol duplicates specifically
   const carolInputs = inputs.filter(input => input.signerId.includes('carol'));
