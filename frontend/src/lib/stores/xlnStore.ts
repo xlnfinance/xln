@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
+import { settings } from './settingsStore';
 
 // Direct import of XLN server module (no wrapper boilerplate needed)
 let XLN: any = null;
@@ -155,6 +156,13 @@ export { getXLN };
 // Helper to get current environment
 export function getEnv() {
   return get(xlnEnvironment);
+}
+
+// Wrapper for processUntilEmpty that auto-injects serverDelay from settings
+export async function processWithDelay(env: any, inputs?: any[]) {
+  const xln = await getXLN();
+  const delay = get(settings).serverDelay;
+  return await xln.processUntilEmpty(env, inputs, delay);
 }
 
 // === FRONTEND UTILITY FUNCTIONS ===

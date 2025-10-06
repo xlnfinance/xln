@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, replicas, xlnFunctions } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
   // Functions now accessed through $xlnEnvironment.xln from server.ts
 
   export let entityId: string;
@@ -188,7 +188,7 @@
 
     sendingPayment = true;
     try {
-      const xln = await getXLN();
+      await getXLN(); // Ensure initialized
       const env = $xlnEnvironment;
       if (!env) throw new Error('Environment not ready');
 
@@ -219,7 +219,7 @@
         }],
       };
 
-      await xln.processUntilEmpty(env, [paymentInput]);
+      await processWithDelay(env, [paymentInput]);
       console.log(`✅ Payment sent via route: ${route.path.join(' → ')}`);
 
       // Don't reset form - allow easy repeat payments

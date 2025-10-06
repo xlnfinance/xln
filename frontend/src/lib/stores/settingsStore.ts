@@ -6,7 +6,7 @@ import { applyThemeToDocument } from '../utils/themes';
 const defaultSettings: Settings = {
   theme: 'dark',
   dropdownMode: 'signer-first',
-  serverDelay: 0,
+  serverDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {}
 };

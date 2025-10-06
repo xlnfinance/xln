@@ -1011,10 +1011,23 @@ export const createEmptyEnv = (): Env => {
 };
 
 // === CONSENSUS PROCESSING UTILITIES ===
-export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
+// Global cascade lock to prevent tick interleaving
+let cascading = false;
+
+export const processUntilEmpty = async (env: Env, inputs?: EntityInput[], serverDelay = 0) => {
+  // Cascade lock: prevent interleaving when delay > tick interval
+  if (cascading) {
+    console.warn('⏸️ SKIP-CASCADE: Previous cascade still running');
+    return env;
+  }
+
+  cascading = true;
   let outputs = inputs || [];
   let iterationCount = 0;
   const maxIterations = 10; // Safety limit
+
+  // Helper to sleep (browser-compatible)
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   // Validate all outputs before processing
   outputs.forEach(o => {
@@ -1040,26 +1053,32 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
     }
   });
 
-  while (outputs.length > 0 && iterationCount < maxIterations) {
-    iterationCount++;
-    // CASCADE iteration logging removed
+  try {
+    while (outputs.length > 0 && iterationCount < maxIterations) {
+      iterationCount++;
 
-    const result = await applyServerInput(env, { serverTxs: [], entityInputs: outputs });
-    outputs = result.entityOutbox;
+      const result = await applyServerInput(env, { serverTxs: [], entityInputs: outputs });
+      outputs = result.entityOutbox;
 
-    // CASCADE iteration result removed
-    if (outputs.length > 0) {
-      console.log(`🔥 PROCESS-CASCADE: ${outputs.length} outputs`);
+      if (outputs.length > 0) {
+        console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount}, ${outputs.length} outputs`);
+      }
+
+      // Visual delay between cascade iterations (AFTER processing, before next iteration)
+      if (outputs.length > 0 && serverDelay > 0) {
+        console.log(`⏱️ CASCADE-DELAY: Waiting ${serverDelay}ms before next iteration...`);
+        await sleep(serverDelay);
+      }
     }
-  }
 
-  if (iterationCount >= maxIterations) {
-    console.warn('⚠️ processUntilEmpty reached maximum iterations');
-  } else if (iterationCount > 0) {
-    // CASCADE completion removed
-  }
+    if (iterationCount >= maxIterations) {
+      console.warn('⚠️ processUntilEmpty reached maximum iterations');
+    }
 
-  return env;
+    return env;
+  } finally {
+    cascading = false;
+  }
 };
 
 // === PREPOPULATE FUNCTION ===
