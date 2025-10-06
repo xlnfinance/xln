@@ -337,6 +337,7 @@ export interface EntityReplica {
   proposal?: ProposedEntityFrame;
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   isProposer: boolean;
+  sentTransitions?: number; // Number of txs sent to proposer but not yet committed (Channel.ts pattern)
   position?: { x: number; y: number; z: number }; // 3D visualization position (for grid scenarios)
 }
 

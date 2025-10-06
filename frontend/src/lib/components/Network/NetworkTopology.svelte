@@ -4230,10 +4230,10 @@
           </button>
 
           <button class="demo-btn" on:click={() => {
-            commandText = 'grid 2 2 2';
+            commandText = 'grid 2 2 2 type=lazy';
             executeLiveCommand();
           }}>
-            🎲 Grid 2×2×2
+            🎲 Grid 2×2×2 (Lazy)
           </button>
 
           <button class="demo-btn" on:click={() => {

@@ -262,14 +262,15 @@ export const applyEntityInput = async (
   // CRITICAL: Forward transactions to proposer BEFORE processing commits
   // This prevents race condition where commits clear mempool before forwarding
   if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
-    // DEBUG removed: → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
     if (!proposerId) {
       console.error(`❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
       return { newState: entityReplica.state, outputs: entityOutbox };
     }
-    console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
+
+    const txCount = entityReplica.mempool.length;
+    console.log(`🔥 BOB-TO-ALICE: Bob sending ${txCount} txs to proposer ${proposerId}`);
     console.log(
       `🔥 BOB-TO-ALICE: Transaction types:`,
       entityReplica.mempool.map(tx => tx.type),
@@ -279,8 +280,11 @@ export const applyEntityInput = async (
       signerId: proposerId,
       entityTxs: [...entityReplica.mempool],
     });
-    // Clear mempool after sending
-    entityReplica.mempool.length = 0;
+
+    // CHANNEL.TS PATTERN: Track sent txs, DON'T clear mempool yet
+    // Only clear after receiving commit confirmation (like Channel.ts line 217)
+    entityReplica.sentTransitions = txCount;
+    console.log(`📊 Tracked ${txCount} sent transitions (will clear on commit)`);
   }
 
   // Handle commit notifications AFTER forwarding (when receiving finalized frame from proposer)
@@ -290,14 +294,48 @@ export const applyEntityInput = async (
 
     if (totalPower >= entityReplica.state.config.threshold) {
       // This is a commit notification from proposer, apply the frame
-      // DEBUG removed: → Received commit notification with ${entityInput.precommits.size} signatures`);
+
+      // SECURITY: Validate commit matches our locked frame (if we have one)
+      if (entityReplica.lockedFrame) {
+        if (entityReplica.lockedFrame.hash !== entityInput.proposedFrame.hash) {
+          console.error(`❌ BYZANTINE: Commit frame doesn't match locked frame!`);
+          console.error(`   Locked: ${entityReplica.lockedFrame.hash}`);
+          console.error(`   Commit: ${entityInput.proposedFrame.hash}`);
+          return { newState: entityReplica.state, outputs: entityOutbox };
+        }
+        console.log(`✅ Commit validation: matches locked frame ${entityReplica.lockedFrame.hash.slice(0,10)}`);
+      }
+
+      // SECURITY: Verify signatures are for the correct frame hash
+      for (const [signerId, signature] of entityInput.precommits) {
+        const expectedSig = `sig_${signerId}_${entityInput.proposedFrame.hash}`;
+        if (signature !== expectedSig) {
+          console.error(`❌ BYZANTINE: Invalid signature format from ${signerId}`);
+          console.error(`   Expected: ${expectedSig.slice(0,30)}...`);
+          console.error(`   Received: ${signature.slice(0,30)}...`);
+          return { newState: entityReplica.state, outputs: entityOutbox };
+        }
+      }
+      console.log(`✅ All ${entityInput.precommits.size} signatures validated for frame ${entityInput.proposedFrame.hash.slice(0,10)}`);
 
       // Apply the committed frame with incremented height
       entityReplica.state = {
         ...entityInput.proposedFrame.newState,
         height: entityReplica.state.height + 1,
       };
-      entityReplica.mempool.length = 0;
+
+      // CHANNEL.TS PATTERN: Only clear sent transactions that were committed
+      // Like Channel.ts line 217: mempool.splice(0, this.data.sentTransitions)
+      if (entityReplica.sentTransitions && entityReplica.sentTransitions > 0) {
+        console.log(`📊 Clearing ${entityReplica.sentTransitions} committed txs from mempool (${entityReplica.mempool.length} total)`);
+        entityReplica.mempool.splice(0, entityReplica.sentTransitions);
+        entityReplica.sentTransitions = 0;
+        console.log(`📊 Mempool after commit: ${entityReplica.mempool.length} txs remaining`);
+      } else {
+        // Fallback: clear entire mempool (old behavior)
+        entityReplica.mempool.length = 0;
+      }
+
       delete entityReplica.lockedFrame; // Release lock after commit
       if (DEBUG)
         console.log(
