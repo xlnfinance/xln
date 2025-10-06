@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { Tab } from '../types';
+import type { Tab } from '$lib/types/ui';
 
 // Tab System State
 export const tabs = writable<Tab[]>([]);

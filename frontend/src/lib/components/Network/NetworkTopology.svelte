@@ -10,6 +10,16 @@
   import { debug } from '../../utils/debug';
   import { getThemeColors } from '../../utils/themes';
 
+  // Visual effects system
+  import { effectOperations } from '../../stores/visualEffects';
+  import { SpatialHash, RippleEffect } from '../../vr/EffectsManager';
+  import { GestureManager } from '../../vr/GestureDetector';
+  import VisualDemoPanel from '../Views/VisualDemoPanel.svelte';
+
+  // Network3D managers
+  import { EntityManager } from '../../network3d/EntityManager';
+  import { AccountManager } from '../../network3d/AccountManager';
+
   // Props
   export let zenMode: boolean = false;
   export let hideButton: boolean = false;
@@ -89,7 +99,17 @@
   let raycaster: THREE.Raycaster;
   let mouse: THREE.Vector2;
 
-  // Network data with proper typing
+  // Network3D managers
+  let entityManager: EntityManager;
+  let accountManager: AccountManager;
+
+  // Visual effects system
+  let spatialHash: SpatialHash;
+  let gestureManager: GestureManager;
+  let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
+  let lastJEventId: string | null = null;
+
+  // Network data with proper typing (legacy - will migrate to managers)
   let entities: EntityData[] = [];
   let connections: ConnectionData[] = [];
 
@@ -116,6 +136,7 @@
 
   // Animation frame and hover state
   let animationId: number;
+  let clock = new THREE.Clock();
   let hoveredObject: any = null;
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
 
@@ -306,6 +327,19 @@
     loadScenarioSteps(selectedScenarioFile);
   }
 
+  // ===== WATCH FOR J-EVENTS (auto-ripple on settlements) =====
+  $: if ($xlnEnvironment?.lastJEvent) {
+    handleJEventRipple($xlnEnvironment.lastJEvent);
+  }
+
+  // ===== UPDATE SPATIAL HASH (when entities move) =====
+  $: if (spatialHash && entities.length > 0) {
+    entities.forEach(entity => {
+      spatialHash.update(entity.id, entity.position);
+      entityMeshMap.set(entity.id, entity.mesh);
+    });
+  }
+
   async function loadScenarioSteps(filename: string) {
     try {
       const response = await fetch(`/scenarios/${filename}`);
@@ -484,6 +518,25 @@
     if (renderer) {
       renderer.dispose();
     }
+
+    // Clean up visual effects
+    if (gestureManager) {
+      gestureManager.clear();
+    }
+    if (spatialHash) {
+      spatialHash.clear();
+    }
+    effectOperations.clear();
+    entityMeshMap.clear();
+
+    // Clean up managers
+    if (entityManager) {
+      entityManager.clear();
+    }
+    if (accountManager) {
+      accountManager.clear();
+    }
+
     // Remove sidebar resize listeners
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', handleResizeEnd);
@@ -597,6 +650,22 @@
     if (isVRSupported && renderer) {
       setupVRControllers();
     }
+
+    // ===== INITIALIZE MANAGERS =====
+    entityManager = new EntityManager(scene);
+    accountManager = new AccountManager(scene);
+    spatialHash = new SpatialHash(100);
+    gestureManager = new GestureManager();
+
+    // Register shake-to-rebalance callback
+    gestureManager.on((event) => {
+      if (event.type === 'shake-rebalance') {
+        console.log('🤝 SHAKE REBALANCE TRIGGERED:', event.entityId);
+        handleRebalanceGesture(event.entityId);
+      }
+    });
+
+    console.log('✅ Network3D managers initialized');
   }
 
   /**
@@ -725,6 +794,67 @@
         await session.end();
       }
     }
+  }
+
+  // ===== VISUAL EFFECTS HANDLERS =====
+
+  /**
+   * Handle shake-to-rebalance gesture
+   */
+  async function handleRebalanceGesture(entityId: string) {
+    try {
+      console.log(`🔄 Initiating automatic rebalance for entity: ${entityId}`);
+
+      // TODO: Implement hub rebalance coordination (Phase 3 of docs/next.md)
+      console.log('⚠️ Rebalance coordination not yet implemented');
+
+      // Visual feedback ripple
+      if (spatialHash) {
+        const entity = entities.find(e => e.id === entityId);
+        if (entity) {
+          const ripple = new RippleEffect(
+            `rebalance-${Date.now()}`,
+            entity.position.clone(),
+            500n,
+            entityId,
+            spatialHash
+          );
+          effectOperations.enqueue(ripple);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Rebalance gesture failed:', error);
+    }
+  }
+
+  /**
+   * Handle j-event ripple effects (gas-weighted)
+   */
+  function handleJEventRipple(jEvent: any) {
+    if (!spatialHash || !jEvent) return;
+
+    // Deduplicate events
+    const eventId = `${jEvent.type}-${jEvent.blockNumber}-${jEvent.transactionHash}`;
+    if (lastJEventId === eventId) return;
+    lastJEventId = eventId;
+
+    const entity = entities.find(e => e.id === jEvent.entityId || jEvent.from === e.id);
+    if (!entity) return;
+
+    // Gas-weighted intensity
+    let gasUsed = 100n;
+    if (jEvent.type === 'TransferReserveToCollateral') gasUsed = 500n;
+    if (jEvent.type === 'ProcessBatch') gasUsed = BigInt(Math.min((jEvent.data?.batchSize || 1) * 100, 1000));
+    if (jEvent.type === 'Dispute') gasUsed = 200n;
+    if (jEvent.type === 'Settlement') gasUsed = 300n;
+
+    effectOperations.enqueue(new RippleEffect(
+      `jevent-${eventId}`,
+      entity.position.clone(),
+      gasUsed,
+      entity.id,
+      spatialHash
+    ));
   }
 
   function updateNetworkData() {
@@ -1727,9 +1857,9 @@
 
       let leftOffset = 0;
       const leftBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'outOwnCredit', colorType: 'availableCredit' },  // Our unused credit (pink/light)
-        { key: 'inCollateral', colorType: 'secured' },          // Our collateral (green)
-        { key: 'outPeerCredit', colorType: 'unsecured' }        // Their used credit FROM US (red)
+        { key: 'outOwnCredit', colorType: 'availableCredit' },  // Our unused (pink) - closest to entity
+        { key: 'inCollateral', colorType: 'secured' },          // Our collateral (green) - middle
+        { key: 'outPeerCredit', colorType: 'unsecured' }        // Their used (red) - closest to gap
       ];
 
       leftBars.forEach((barSpec) => {
@@ -1762,16 +1892,18 @@
         leftOffset += length;
       });
 
-      // Right-side bars (from right entity leftward) - 2019vue: they_unsecured, they_secured, they_available_credit
-      const rightStartPos = toEntity.position.clone().add(
-        direction.clone().normalize().multiplyScalar(-(toEntitySize + barRadius + safeGap))
+      // Right-side bars (extending rightward from gap, same visual order as left)
+      // Calculate where gap starts (after left bars)
+      const leftBarsLength = segments.outOwnCredit + segments.inCollateral + segments.outPeerCredit;
+      const gapStart = fromEntity.position.clone().add(
+        direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap + leftBarsLength + minGapSpread)
       );
 
       let rightOffset = 0;
       const rightBars: Array<{key: keyof typeof segments, colorType: 'availableCredit' | 'secured' | 'unsecured'}> = [
-        { key: 'inOwnCredit', colorType: 'unsecured' },        // Our used credit TO THEM (red)
-        { key: 'outCollateral', colorType: 'secured' },        // Their collateral (green)
-        { key: 'inPeerCredit', colorType: 'availableCredit' }  // Their unused credit (pink/light)
+        { key: 'inPeerCredit', colorType: 'availableCredit' },  // Their unused (pink) - closest to entity
+        { key: 'outCollateral', colorType: 'secured' },         // Their collateral (green) - middle
+        { key: 'inOwnCredit', colorType: 'unsecured' }          // Our used (red) - closest to gap
       ];
 
       rightBars.forEach((barSpec) => {
@@ -1792,7 +1924,8 @@
           });
           const bar = new THREE.Mesh(geometry, material);
 
-          const barCenter = rightStartPos.clone().add(direction.clone().normalize().multiplyScalar(-(rightOffset + length/2)));
+          // Extend RIGHTWARD from gap (same direction as left bars)
+          const barCenter = gapStart.clone().add(direction.clone().normalize().multiplyScalar(rightOffset + length/2));
           bar.position.copy(barCenter);
 
           const axis = new THREE.Vector3(0, 1, 0);
@@ -1870,17 +2003,17 @@
 
   function createDeltaSeparator(group: THREE.Group, position: THREE.Vector3, direction: THREE.Vector3, barHeight: number) {
     // SHARP DISK separator marking delta (zero point) - sleek knife-like ==|== design
-    const diskRadius = barHeight * 4; // Wide disk for visibility
+    const diskRadius = barHeight * 12; // 3x bigger for visibility from far
     const diskThickness = barHeight * 0.3; // Very thin for sharp knife appearance
 
     // Create thin disk (very flat cylinder)
     const geometry = new THREE.CylinderGeometry(diskRadius, diskRadius, diskThickness, 32);
     const material = new THREE.MeshLambertMaterial({
-      color: 0xff3333, // Bright red for delta marker
+      color: 0xffff00, // YELLOW separator for visibility
       transparent: true,
       opacity: 0.95,
-      emissive: 0xff0000,
-      emissiveIntensity: 0.3
+      emissive: 0xffff00,
+      emissiveIntensity: 0.5
     });
     const separator = new THREE.Mesh(geometry, material);
 
@@ -1979,6 +2112,12 @@
       animationId = requestAnimationFrame(animate);
     }
 
+    // ===== PROCESS VISUAL EFFECTS QUEUE =====
+    if (scene && spatialHash && entityMeshMap) {
+      const deltaTime = clock.getDelta() * 1000; // to milliseconds
+      effectOperations.process(scene, entityMeshMap, deltaTime, 10);
+    }
+
     // Update VR grabbed entity position
     if (vrGrabbedEntity && vrGrabController) {
       const controllerPos = new THREE.Vector3();
@@ -1986,6 +2125,11 @@
 
       vrGrabbedEntity.mesh.position.copy(controllerPos);
       vrGrabbedEntity.position.copy(controllerPos);
+
+      // ===== UPDATE GESTURE DETECTOR =====
+      if (gestureManager) {
+        gestureManager.updateEntity(vrGrabbedEntity.id, vrGrabbedEntity.position, Date.now());
+      }
 
       // Update label position
       if (vrGrabbedEntity.label) {
@@ -3125,7 +3269,7 @@
     // Find multi-hop routes (simple BFS for now)
     const queue: Array<{current: string; path: string[]}> = [{current: from, path: [from]}];
     const visited = new Set<string>([from]);
-    const maxHops = 3;
+    const maxHops = 10;
 
     while (queue.length > 0) {
       const item = queue.shift();
@@ -3272,21 +3416,20 @@
       const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(paddedDecimal || 0);
 
 
-      // Build route object (MUST match PaymentPanel structure)
-      const routePath = [job.from, job.to];
+      // Build route object from selected route (multi-hop support)
+      const selectedRoute = availableRoutes[selectedRouteIndex];
+      if (!selectedRoute) {
+        throw new Error('No route selected');
+      }
+
+      const routePath = selectedRoute.path;
 
       // VALIDATE route construction
-      if (!routePath || routePath.length !== 2) {
-        throw new Error(`Invalid route: expected 2 entities, got ${routePath?.length || 0}`);
+      if (!routePath || routePath.length < 2) {
+        throw new Error(`Invalid route: expected at least 2 entities, got ${routePath?.length || 0}`);
       }
-      if (!job.from || !job.to) {
-        throw new Error(`Invalid route: from=${job.from}, to=${job.to}`);
-      }
-      if (job.from === job.to) {
-        throw new Error(`Invalid route: cannot send to same entity`);
-      }
-      if (routePath[0] !== job.from || routePath[1] !== job.to) {
-        throw new Error(`Route mismatch: expected [${job.from}, ${job.to}], got [${routePath[0]}, ${routePath[1]}]`);
+      if (routePath[0] !== job.from || routePath[routePath.length - 1] !== job.to) {
+        throw new Error(`Route mismatch: expected ${job.from} → ${job.to}, got ${routePath[0]} → ${routePath[routePath.length - 1]}`);
       }
 
       // Step 2: Find signerId (copy from PaymentPanel)
@@ -4269,6 +4412,15 @@
               <span class="perf-value">{perfMetrics.avgFrameTime}ms</span>
             </div>
           </div>
+        </div>
+
+        <!-- Visual Effects Demo Panel -->
+        <div class="visual-effects-section">
+          <VisualDemoPanel
+            {scene}
+            entityMeshes={entityMeshMap}
+            {spatialHash}
+          />
         </div>
 
         <!-- Live Activity Log -->

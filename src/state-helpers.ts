@@ -37,9 +37,9 @@ export function cloneEntityState(entityState: EntityState): EntityState {
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
     return validateEntityState(cloned, 'cloneEntityState.structuredClone');
   } catch (error) {
-    console.warn(`⚠️ structuredClone failed, using manual clone: ${(error as Error).message}`);
+    // structuredClone warning removed - browser limitation, not actionable
     const manual = manualCloneEntityState(entityState);
-    console.log(`✅ MANUAL-CLONE: Manual clone completed, jBlock=${manual.jBlock} (${typeof manual.jBlock})`);
+    // MANUAL-CLONE success removed - too noisy
 
     // VALIDATE AT SOURCE: Guarantee type safety from manual clone path too
     return validateEntityState(manual, 'cloneEntityState.manual');
@@ -210,7 +210,7 @@ export function cloneAccountMachine(account: AccountMachine): AccountMachine {
   try {
     return structuredClone(account);
   } catch (error) {
-    console.warn(`⚠️ structuredClone failed for AccountMachine, using manual clone`);
+    // structuredClone warning removed - browser limitation
     return manualCloneAccountMachine(account);
   }
 }
@@ -243,6 +243,8 @@ function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
       tokenIds: [...account.proofBody.tokenIds],
       deltas: [...account.proofBody.deltas],
     },
+    pendingWithdrawals: new Map(account.pendingWithdrawals), // Phase 2: Clone withdrawal tracking
+    requestedRebalance: new Map(account.requestedRebalance), // Phase 3: Clone rebalance hints
   };
 
   // Add optional properties if they exist

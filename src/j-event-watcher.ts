@@ -49,6 +49,7 @@ export class JEventWatcher {
     'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
     'event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)',
     'event SettlementProcessed(bytes32 indexed leftEntity, bytes32 indexed rightEntity, uint256 indexed tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)',
+    'event TransferReserveToCollateral(bytes32 indexed receivingEntity, bytes32 indexed counterentity, uint256 collateral, int256 ondelta, uint256 indexed tokenId)',
   ];
 
   constructor(config: WatcherConfig) {
@@ -247,15 +248,16 @@ export class JEventWatcher {
       console.log(`🔭🔍 EVENT-QUERY: Fetching events for entity ${entityId.slice(0,10)}... blocks ${fromBlock}-${toBlock}`);
     }
 
-    // Get both ReserveUpdated and SettlementProcessed events for this entity
+    // Get all relevant events for this entity
     const reserveFilter = this.depositoryContract.filters['ReserveUpdated'];
     const settlementFilter = this.depositoryContract.filters['SettlementProcessed'];
+    const r2cFilter = this.depositoryContract.filters['TransferReserveToCollateral'];
 
-    if (!reserveFilter || !settlementFilter) {
+    if (!reserveFilter || !settlementFilter || !r2cFilter) {
       throw new Error('Contract filters not available');
     }
 
-    const [reserveEvents, settlementEventsLeft, settlementEventsRight] = await Promise.all([
+    const [reserveEvents, settlementEventsLeft, settlementEventsRight, r2cEventsReceiving, r2cEventsCounterparty] = await Promise.all([
       this.depositoryContract.queryFilter(
         reserveFilter(entityId),
         fromBlock,
@@ -270,18 +272,30 @@ export class JEventWatcher {
         settlementFilter(null, entityId, null),
         fromBlock,
         toBlock
+      ),
+      this.depositoryContract.queryFilter(
+        r2cFilter(entityId, null, null), // receivingEntity
+        fromBlock,
+        toBlock
+      ),
+      this.depositoryContract.queryFilter(
+        r2cFilter(null, entityId, null), // counterentity
+        fromBlock,
+        toBlock
       )
     ]);
 
     if (HEAVY_LOGS) {
-      console.log(`🔭🔍 EVENT-QUERY: Entity ${entityId.slice(0,10)}... - Reserve: ${reserveEvents.length}, SettlementLeft: ${settlementEventsLeft.length}, SettlementRight: ${settlementEventsRight.length}`);
+      console.log(`🔭🔍 EVENT-QUERY: Entity ${entityId.slice(0,10)}... - Reserve: ${reserveEvents.length}, SettlementLeft: ${settlementEventsLeft.length}, SettlementRight: ${settlementEventsRight.length}, R2C: ${r2cEventsReceiving.length + r2cEventsCounterparty.length}`);
     }
 
     // Combine and sort chronologically
     const allEvents = [
       ...reserveEvents.map(e => ({ ...e, eventType: 'ReserveUpdated' })),
       ...settlementEventsLeft.map(e => ({ ...e, eventType: 'SettlementProcessed', side: 'left' })),
-      ...settlementEventsRight.map(e => ({ ...e, eventType: 'SettlementProcessed', side: 'right' }))
+      ...settlementEventsRight.map(e => ({ ...e, eventType: 'SettlementProcessed', side: 'right' })),
+      ...r2cEventsReceiving.map(e => ({ ...e, eventType: 'TransferReserveToCollateral', side: 'receiving' })),
+      ...r2cEventsCounterparty.map(e => ({ ...e, eventType: 'TransferReserveToCollateral', side: 'counterparty' }))
     ].sort((a, b) => {
       if (a.blockNumber !== b.blockNumber) {
         return a.blockNumber - b.blockNumber;
@@ -363,6 +377,31 @@ export class JEventWatcher {
 
       if (DEBUG) {
         console.log(`🔭💱 SETTLE-EVENT: Entity ${entityId.slice(0,10)}... vs ${counterpartyId.slice(0,10)}... (${event.side} side, block ${event.blockNumber})`);
+      }
+    } else if (event.eventType === 'TransferReserveToCollateral') {
+      entityTx = {
+        type: 'j_event' as const,
+        data: {
+          from: signerId,
+          event: {
+            type: 'TransferReserveToCollateral',
+            data: {
+              receivingEntity: event.args.receivingEntity.toString(),
+              counterentity: event.args.counterentity.toString(),
+              collateral: event.args.collateral.toString(),
+              ondelta: event.args.ondelta.toString(),
+              tokenId: Number(event.args.tokenId),
+              side: event.side, // 'receiving' or 'counterparty'
+            },
+          },
+          observedAt: Date.now(),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash,
+        },
+      };
+
+      if (DEBUG) {
+        console.log(`🔭💰 R2C-EVENT: Entity ${entityId.slice(0,10)}... (${event.side} side) collateral=${event.args.collateral.toString()}, block ${event.blockNumber}`);
       }
     }
 

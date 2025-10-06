@@ -3,7 +3,7 @@
   import { replicas, xlnFunctions } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
-  import type { Tab } from '../../types';
+  import type { Tab } from '$lib/types/ui';
 
   export let tab: Tab;
 

@@ -55,12 +55,16 @@ export function handleDirectPayment(
     };
   }
 
-  // Canonical delta: always relative to left entity (Channel.ts reference)
+  // Canonical delta: always relative to left entity
+  // CRITICAL: "Payment" = pulling value, increases receiver's allocation (they lend to you)
+  // When A pays B: B's red area (lending to A) increases
   let canonicalDelta: bigint;
   if (paymentFromEntity === leftEntity && paymentToEntity === rightEntity) {
-    canonicalDelta = amount; // left paying right
+    // Left requests value from right - right lends to left - delta DECREASES
+    canonicalDelta = -amount;
   } else if (paymentFromEntity === rightEntity && paymentToEntity === leftEntity) {
-    canonicalDelta = -amount; // right paying left
+    // Right requests value from left - left lends to right - delta INCREASES
+    canonicalDelta = amount;
   } else {
     console.error(`❌ CONSENSUS-FAILURE: Payment entities don't match account`);
     console.error(`  Account: ${leftEntity.slice(-4)} ↔ ${rightEntity.slice(-4)}`);
@@ -120,31 +124,48 @@ export function handleDirectPayment(
 
   // Check if we need to forward the payment (multi-hop routing)
   const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
-  if (route && route.length > 1 && !isOutgoing) {
-    // We received the payment, but it's not for us - forward to next hop
-    const nextHop = route[0];
+  console.log(`🔍 FORWARD-CHECK: route=${route ? `[${route.map(r => r.slice(-4)).join(',')}]` : 'null'}`);
+  console.log(`🔍 FORWARD-CHECK: isOutgoing=${isOutgoing}, paymentFrom=${paymentFromEntity.slice(-4)}, proofHeader.from=${accountMachine.proofHeader.fromEntity.slice(-4)}`);
+
+  if (route && route.length > 0 && !isOutgoing) {
+    console.log(`🔍 FORWARD-CHECK: Passed first check (route.length=${route.length}, isOutgoing=${isOutgoing})`);
+    // Check if we're intermediate hop: route[0] should be current entity
+    const currentEntityInRoute = route[0];
     const finalTarget = route[route.length - 1];
-    if (!finalTarget) {
+
+    if (!currentEntityInRoute || !finalTarget) {
       console.error(`❌ Empty route in payment - invalid payment routing`);
       return { success: false, error: 'Invalid payment route', events };
     }
 
-    if (accountMachine.counterpartyEntityId === nextHop) {
-      // This is wrong - we received from the entity we should forward to
-      console.error(`❌ Routing error: received from ${nextHop} but should forward to them`);
-    } else {
-      // Add forwarding event
-      events.push(
-        `↪️ Forwarding payment to ${finalTarget.slice(-4)} via ${route.length} more hops`
-      );
+    console.log(`🔍 FORWARD-CHECK: currentInRoute=${currentEntityInRoute.slice(-4)}, proofHeader.from=${accountMachine.proofHeader.fromEntity.slice(-4)}, final=${finalTarget.slice(-4)}`);
+    console.log(`🔍 FORWARD-CHECK: Check result: ${currentEntityInRoute === accountMachine.proofHeader.fromEntity && currentEntityInRoute !== finalTarget}`);
 
-      // Store forwarding info for entity-consensus to create next hop transaction
-      accountMachine.pendingForward = {
-        tokenId,
-        amount,
-        route: route.slice(1), // Remove current hop
-        ...(description ? { description } : {}),
-      };
+    // If we're in the route but not the final destination, forward
+    if (currentEntityInRoute === accountMachine.proofHeader.fromEntity && currentEntityInRoute !== finalTarget) {
+      const nextHop = route[1]; // Next entity after us
+
+      if (!nextHop) {
+        console.error(`❌ No next hop in route for forwarding`);
+        return { success: false, error: 'Invalid route: no next hop', events };
+      }
+
+      if (accountMachine.counterpartyEntityId === nextHop) {
+        console.error(`❌ Routing error: received from ${nextHop} but should forward to them`);
+      } else {
+        // Add forwarding event
+        events.push(
+          `↪️ Forwarding payment to ${finalTarget.slice(-4)} via ${route.length - 1} more hops`
+        );
+
+        // Store forwarding info for entity-consensus to create next hop transaction
+        accountMachine.pendingForward = {
+          tokenId,
+          amount,
+          route: route.slice(1), // Remove current entity, keep rest of route
+          ...(description ? { description } : {}),
+        };
+      }
     }
   }
 

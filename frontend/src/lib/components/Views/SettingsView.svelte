@@ -3,7 +3,7 @@
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { tabOperations } from '../../stores/tabStore';
   import { THEME_DEFINITIONS } from '../../utils/themes';
-  import type { ThemeName } from '../../types';
+  import type { ThemeName } from '$lib/types/ui';
   import { VERSION } from '../../generated/version';
   import { errorLog, formatErrorLog } from '../../stores/errorLogStore';
 
@@ -163,8 +163,36 @@
           };
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Connection failed';
-          // Log to persistent error store
-          errorLog.log(`${j.name} RPC connection failed: ${errorMsg}`, 'Jurisdiction', { rpcUrl: j.address });
+
+          // DETAILED ERROR LOGGING FOR OCULUS DEBUGGING
+          const debugInfo: any = {
+            rpcUrl: j.address,
+            jurisdictionName: j.name,
+            errorMessage: errorMsg,
+            errorType: error?.constructor?.name || typeof error,
+            userAgent: navigator.userAgent,
+            protocol: window.location.protocol,
+            hostname: window.location.hostname,
+          };
+
+          // Extract ethers.js specific error details
+          if (error && typeof error === 'object') {
+            const e = error as any;
+            if (e.code) debugInfo.errorCode = e.code;
+            if (e.reason) debugInfo.errorReason = e.reason;
+            if (e.action) debugInfo.errorAction = e.action;
+            if (e.error) debugInfo.nestedError = e.error?.message || String(e.error);
+            if (e.stack) debugInfo.stackTrace = e.stack.split('\n').slice(0, 5).join('\n');
+          }
+
+          // Log to persistent error store with full details
+          errorLog.log(
+            `${j.name} RPC connection failed: ${errorMsg}`,
+            'Jurisdiction',
+            debugInfo
+          );
+
+          console.error('🚨 DETAILED RPC ERROR:', debugInfo);
 
           return {
             name: j.name,

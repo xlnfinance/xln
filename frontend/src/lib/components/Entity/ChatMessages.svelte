@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, afterUpdate } from 'svelte';
-  import type { EntityReplica, Tab } from '../../types';
+  import type { EntityReplica, Tab } from '$lib/types/ui';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { EntityReplica } from '../../types';
+  import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { getXLN, replicas, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';

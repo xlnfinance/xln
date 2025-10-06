@@ -152,6 +152,42 @@ export const handleJEvent = (entityState: EntityState, entityTxData: any): Entit
     newEntityState.accountInputQueue.push(accountInput);
     
     if (DEBUG) console.log(`✅ SettlementProcessed: Created accountInput for token ${tokenId} with counterparty ${counterpartyEntityId.slice(0,10)}...`);
+  } else if (event.type === 'TransferReserveToCollateral') {
+    const { receivingEntity, counterentity, collateral, ondelta, tokenId, side } = event.data;
+
+    // Determine counterparty from our perspective
+    const counterpartyEntityId = side === 'receiving' ? counterentity : receivingEntity;
+
+    // Note: Reserve updates happen via separate ReserveUpdated event, so we don't update reserves here
+
+    // Create accountInput to update bilateral account state
+    const accountInput = {
+      fromEntityId: entityState.entityId,
+      toEntityId: counterpartyEntityId,
+      accountTx: {
+        type: 'reserve_to_collateral' as const,
+        data: {
+          tokenId: Number(tokenId),
+          collateral: collateral, // Absolute collateral value from contract
+          ondelta: ondelta,       // Absolute ondelta value from contract
+          side: side,             // 'receiving' or 'counterparty'
+          blockNumber: blockNumber,
+          transactionHash: transactionHash
+        }
+      },
+      metadata: {
+        purpose: 'r2c_consensus',
+        description: `R→C event from j-machine for token ${tokenId}`
+      }
+    };
+
+    // Add to entity's account inputs queue
+    if (!newEntityState.accountInputQueue) {
+      newEntityState.accountInputQueue = [];
+    }
+    newEntityState.accountInputQueue.push(accountInput);
+
+    if (DEBUG) console.log(`✅ TransferReserveToCollateral: Created accountInput for token ${tokenId} with counterparty ${counterpartyEntityId.slice(0,10)}...`);
   } else {
     newEntityState.messages.push(`⚠️ Unhandled j-event type: ${event.type}`);
   }

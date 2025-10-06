@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
-  import type { EntityReplica } from '../../types';
+  import type { EntityReplica, AccountMachine } from '$lib/types/ui';
 
   export let replica: EntityReplica;
   export let selectedAccountId: string | null = null;
@@ -9,8 +9,8 @@
   const dispatch = createEventDispatcher();
 
   // Get available accounts from entity state
-  $: availableAccounts = Array.from(replica?.state?.accounts?.entries() || [])
-    .map(([counterpartyId, account]) => ({
+  $: availableAccounts = Array.from(replica?.state?.accounts?.entries() || [] as [string, AccountMachine][])
+    .map(([counterpartyId, account]: [string, AccountMachine]) => ({
       id: counterpartyId,
       account,
       entityNumber: $xlnFunctions.getEntityNumber(counterpartyId),

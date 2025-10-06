@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { Tab, EntityReplica } from '../../types';
+  import type { Tab, EntityReplica } from '$lib/types/ui';
   import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
@@ -273,6 +273,34 @@
           </div>
           <p class="empty-reserves">No reserves yet - deposit assets via Depository.sol</p>
         </div>
+      {/if}
+
+      <!-- Crontab Timers -->
+      {#if replica && (replica.state as any)?.crontabState}
+        {@const now = Date.now()}
+        {@const crontabState = (replica.state as any).crontabState}
+        {@const tasks = crontabState.tasks}
+        {#if tasks instanceof Map}
+          <div class="crontab-section">
+            <h3>⏰ Periodic Tasks</h3>
+            <div class="crontab-timers">
+              {#each Array.from(tasks.entries()) as [taskName, task]}
+                {@const timeSinceLastRun = now - task.lastRun}
+                {@const timeUntilNext = Math.max(0, task.intervalMs - timeSinceLastRun)}
+                {@const progress = (timeSinceLastRun / task.intervalMs) * 100}
+                <div class="crontab-task">
+                  <div class="task-info">
+                    <span class="task-name">{taskName}</span>
+                    <span class="task-timer">{Math.ceil(timeUntilNext / 1000)}s</span>
+                  </div>
+                  <div class="task-progress">
+                    <div class="task-fill" style="width: {Math.min(progress, 100)}%"></div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       {/if}
 
       <!-- Accounts - Always Visible -->

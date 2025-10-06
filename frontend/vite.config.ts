@@ -36,7 +36,8 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			// BROWSER TARGET: Node.js modules not available in browser - remove aliases
+			// Direct import from source types - single source of truth
+			'$types': '../src/types.ts'
 		}
 	}
 });

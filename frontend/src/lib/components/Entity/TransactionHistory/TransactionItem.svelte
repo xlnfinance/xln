@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { BankingTransaction } from '../../../types';
+  import type { BankingTransaction } from '$lib/types/ui';
 
   export let transaction: BankingTransaction;
 </script>

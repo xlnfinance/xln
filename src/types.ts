@@ -109,6 +109,9 @@ export type EntityTx =
           counterpartyId?: string;
           height?: number;
           frameAge?: number;
+          tokenId?: number;
+          rebalanceAmount?: string;
+          [key: string]: any; // Allow additional rebalance metadata
         };
       };
     }
@@ -159,6 +162,14 @@ export type EntityTx =
         }>;
         description?: string; // e.g., "Fund collateral from reserve"
       };
+    }
+  | {
+      type: 'deposit_collateral';
+      data: {
+        counterpartyId: string; // Which account to add collateral to
+        tokenId: number;
+        amount: bigint;
+      };
     };
 
 export interface AssetBalance {
@@ -184,7 +195,7 @@ export interface AccountSnapshot {
 export interface AccountMachine {
   counterpartyEntityId: string;
   mempool: AccountTx[]; // Unprocessed account transactions
-  currentFrame: AccountSnapshot; // Current agreed state
+  currentFrame: AccountFrame; // Current agreed state (includes full transaction history for replay/audit)
   sentTransitions: number; // Number of transitions sent but not yet confirmed
   ackedTransitions: number; // Number of transitions acknowledged by counterparty
 
@@ -235,6 +246,20 @@ export interface AccountMachine {
     route: string[];
     description?: string;
   };
+
+  // Withdrawal tracking (Phase 2: C→R)
+  pendingWithdrawals: Map<string, {
+    requestId: string;
+    tokenId: number;
+    amount: bigint;
+    requestedAt: number; // Timestamp
+    direction: 'outgoing' | 'incoming'; // Did we request, or did they?
+    status: 'pending' | 'approved' | 'rejected' | 'timed_out';
+    signature?: string; // If approved
+  }>;
+
+  // Rebalancing hints (Phase 3: Hub coordination)
+  requestedRebalance: Map<number, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
 }
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
@@ -314,6 +339,42 @@ export type AccountTx =
         blockNumber: number;
         transactionHash: string;
       };
+    }
+  | {
+      type: 'reserve_to_collateral';
+      data: {
+        tokenId: number;
+        collateral: string; // Absolute collateral value from contract
+        ondelta: string;    // Absolute ondelta value from contract
+        side: 'receiving' | 'counterparty';
+        blockNumber: number;
+        transactionHash: string;
+      };
+    }
+  | {
+      type: 'request_withdrawal';
+      data: {
+        tokenId: number;
+        amount: bigint;
+        requestId: string; // Unique ID for matching ACK/NACK
+      };
+    }
+  | {
+      type: 'approve_withdrawal';
+      data: {
+        tokenId: number;
+        amount: bigint;
+        requestId: string; // Matches request_withdrawal.requestId
+        approved: boolean; // true = ACK, false = NACK
+        signature?: string; // If approved: signature for on-chain submission
+      };
+    }
+  | {
+      type: 'request_rebalance';
+      data: {
+        tokenId: number;
+        amount: bigint; // How much collateral requested for insurance
+      };
     };
 
 export interface EntityState {
@@ -334,8 +395,11 @@ export interface EntityState {
   // 🔗 Account machine integration
   accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine
 
-  // ⏰ Crontab system - periodic task execution
-  crontabState?: any; // CrontabState from entity-crontab.ts (avoid circular import)
+  // ⏰ Crontab system - periodic task execution (typed in entity-crontab.ts)
+  crontabState?: any; // CrontabState - avoid circular import
+
+  // 📦 J-Batch system - accumulates operations for on-chain submission (typed in j-batch.ts)
+  jBatchState?: any; // JBatchState - avoid circular import
 }
 
 export interface ProposedEntityFrame {

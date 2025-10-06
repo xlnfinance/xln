@@ -318,7 +318,7 @@ contract Depository is Console {
 
     uint256 fundAmount = 100000000000000000000; // 100 units (100e18)
 
-    for (uint256 entityNum = 1; entityNum <= 200; entityNum++) {
+    for (uint256 entityNum = 1; entityNum <= 500; entityNum++) {
       bytes32 entity = bytes32(entityNum); // Entity ID is just the number padded
 
       // Fund with tokens 1 (USDC), 2 (ETH) only

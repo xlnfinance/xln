@@ -297,6 +297,9 @@ const applyServerInput = async (
 
             // ⏰ Crontab system - will be initialized on first use
             crontabState: undefined,
+
+            // 📦 J-Batch system - will be initialized on first use
+            jBatchState: undefined,
           },
           mempool: [],
           isProposer: serverTx.data.isProposer,
@@ -379,18 +382,7 @@ const applyServerInput = async (
       const replicaKey = `${entityInput.entityId}:${actualSignerId}`;
       const entityReplica = env.replicas.get(replicaKey);
 
-      console.log(`🔍 REPLICA-LOOKUP: Key="${replicaKey}"`);
-      console.log(`🔍 REPLICA-LOOKUP: Found replica: ${!!entityReplica}`);
-      console.log(`🔍 REPLICA-LOOKUP: Input txs: ${entityInput.entityTxs!.length}`);
-      if (entityInput.entityTxs && entityInput.entityTxs.length > 0) {
-        console.log(
-          `🔍 REPLICA-LOOKUP: Tx types:`,
-          entityInput.entityTxs.map(tx => tx.type),
-        );
-      }
-      if (!entityReplica) {
-        console.log(`🔍 REPLICA-LOOKUP: Available replica keys:`, Array.from(env.replicas.keys()));
-      }
+      // REPLICA-LOOKUP logs removed - not consensus-critical
 
       if (entityReplica) {
         if (DEBUG) {
@@ -401,7 +393,7 @@ const applyServerInput = async (
         }
 
         const { newState, outputs } = await applyEntityInput(env, entityReplica, entityInput);
-        console.log(`🔍 APPLY-ENTITY-INPUT-RESULT: Got ${outputs.length} outputs from ${replicaKey}`);
+        // APPLY-ENTITY-INPUT-RESULT removed - too noisy
 
         // CRITICAL FIX: Update the replica in the environment with the new state
         env.replicas.set(replicaKey, { ...entityReplica, state: newState });
@@ -420,7 +412,7 @@ const applyServerInput = async (
         });
 
         entityOutbox.push(...outputs);
-        console.log(`🔍 ENTITY-OUTBOX-AFTER-PUSH: entityOutbox now has ${entityOutbox.length} outputs`);
+        // ENTITY-OUTBOX log removed - too noisy
       }
     }
 
@@ -474,8 +466,7 @@ const applyServerInput = async (
         !key.startsWith('0x57e360b00f393ea6d898d6119f71db49241be80aec0fbdecf6358b0103d43a31:'),
     );
 
-    console.log(`🔍 OLD-ENTITY-DEBUG: ${oldEntityKeys.length} old entities:`, oldEntityKeys.slice(0, 2));
-    console.log(`🔍 NEW-ENTITY-DEBUG: ${newEntityKeys.length} new entities:`, newEntityKeys.slice(0, 2));
+    // OLD/NEW-ENTITY-DEBUG removed - too noisy
 
     if (oldEntityKeys.length > 0 && newEntityKeys.length > 0) {
       const oldReplicaKey = oldEntityKeys[0];
@@ -484,20 +475,7 @@ const applyServerInput = async (
         console.error(`❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
         // Continue with empty outbox instead of crashing
       } else {
-      const oldReplica = env.replicas.get(oldReplicaKey);
-      const newReplica = env.replicas.get(newReplicaKey);
-      console.log(`🔍 OLD-REPLICA-STRUCTURE:`, {
-        hasState: !!oldReplica?.state,
-        hasConfig: !!oldReplica?.state?.config,
-        hasJurisdiction: !!oldReplica?.state?.config?.jurisdiction,
-        jurisdictionName: oldReplica?.state?.config?.jurisdiction?.name,
-      });
-      console.log(`🔍 NEW-REPLICA-STRUCTURE:`, {
-        hasState: !!newReplica?.state,
-        hasConfig: !!newReplica?.state?.config,
-        hasJurisdiction: !!newReplica?.state?.config?.jurisdiction,
-        jurisdictionName: newReplica?.state?.config?.jurisdiction?.name,
-      });
+      // REPLICA-STRUCTURE logs removed - not consensus-critical
       }
     }
 
@@ -1071,16 +1049,7 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[]) => {
 
     // CASCADE iteration result removed
     if (outputs.length > 0) {
-      console.log(
-        '🔥 PROCESS-CASCADE: New outputs:',
-        outputs.map(o => ({
-          entityId: o.entityId.slice(0, 8) + '...',
-          signerId: o.signerId,
-          txs: o.entityTxs?.length || 0,
-          precommits: o.precommits?.size || 0,
-          hasFrame: !!o.proposedFrame,
-        })),
-      );
+      console.log(`🔥 PROCESS-CASCADE: ${outputs.length} outputs`);
     }
   }
 

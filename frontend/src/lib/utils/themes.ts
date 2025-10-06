@@ -1,4 +1,4 @@
-import type { ThemeColors, ThemeName } from '../types';
+import type { ThemeColors, ThemeName } from '$lib/types/ui';
 
 export const THEME_DEFINITIONS: Record<ThemeName, ThemeColors> = {
   'dark': {

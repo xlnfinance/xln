@@ -5,7 +5,7 @@
 
   // Form state
   let counterpartyEntityId = '';
-  let tokenId = 1; // Default to first token (ETH)
+  let tokenId = 1; // Default to token 1 (USDC)
   let mode: 'simple' | 'advanced' = 'simple';
 
   // Simple mode
@@ -34,6 +34,22 @@
     .map(key => key.split(':')[0]!)
     .filter((id, index, self) => self.indexOf(id) === index && id !== entityId)
     .sort() : [];
+
+  // Get jBatch state for this entity
+  $: jBatchState = (() => {
+    if (!$replicas || !entityId) return null;
+    const keys = Array.from($replicas.keys()) as string[];
+    const replicaKey = keys.find((k) => k.startsWith(entityId + ':'));
+    if (!replicaKey) return null;
+    const replica = $replicas.get(replicaKey);
+    return (replica?.state as any)?.jBatchState || null;
+  })();
+
+  $: batchSize = jBatchState ? (
+    (jBatchState.batch.reserveToCollateral?.length || 0) +
+    (jBatchState.batch.settlements?.length || 0) +
+    (jBatchState.batch.reserveToReserve?.length || 0)
+  ) : 0;
 
   // Update diffs when simple mode changes
   $: if (mode === 'simple' && counterpartyEntityId && simpleAmount) {
@@ -85,13 +101,6 @@
   }
 
   async function sendSettlement() {
-    if (!invariantValid) {
-      const error = 'Invariant violation: leftDiff + rightDiff + collateralDiff must equal 0';
-      console.error('❌ Settlement validation failed:', error);
-      alert(error);
-      return;
-    }
-
     sending = true;
     try {
       const xln = await getXLN();
@@ -107,10 +116,40 @@
         }
       }
 
-      const settlementInput = {
-        entityId,
-        signerId,
-        entityTxs: [{
+      let entityTx: any;
+
+      // SIMPLE MODE: Use new deposit_collateral or request_withdrawal
+      if (mode === 'simple') {
+        if (simpleAction === 'fund') {
+          // R→C: Unilateral deposit (adds to jBatch, broadcasts via crontab)
+          entityTx = {
+            type: 'deposit_collateral' as const,
+            data: {
+              counterpartyId: counterpartyEntityId,
+              tokenId,
+              amount: BigInt(simpleAmount),
+            },
+          };
+          console.log('📤 Sending R→C deposit_collateral');
+        } else {
+          // C→R: Withdrawal request (requires counterparty approval)
+          // TODO: Implement withdrawal request flow via bilateral account consensus
+          // For now, user can use Advanced mode with manual settleDiffs
+          alert('Withdrawal requires bilateral approval flow - not yet wired to UI.\n\nUse Advanced mode with manual settleDiffs for now, or wait for bilateral withdrawal UI.');
+          sending = false;
+          return;
+        }
+      } else {
+        // ADVANCED MODE: Manual settleDiffs (requires invariant)
+        if (!invariantValid) {
+          const error = 'Invariant violation: leftDiff + rightDiff + collateralDiff must equal 0';
+          console.error('❌ Settlement validation failed:', error);
+          alert(error);
+          sending = false;
+          return;
+        }
+
+        entityTx = {
           type: 'settleDiffs' as const,
           data: {
             counterpartyEntityId,
@@ -123,7 +162,14 @@
             }],
             description: description || undefined,
           },
-        }],
+        };
+        console.log('📤 Sending manual settleDiffs');
+      }
+
+      const settlementInput = {
+        entityId,
+        signerId,
+        entityTxs: [entityTx],
       };
 
       await xln.processUntilEmpty(env, [settlementInput]);
@@ -143,7 +189,60 @@
 </script>
 
 <div class="settlement-panel">
-  <h3>Settlement (Reserve ⇄ Collateral)</h3>
+  <h3>Settlement (Reserve ⇄ Collateral + Batch Rebalancing)</h3>
+  <p class="panel-description">
+    <strong>Fund (R→C):</strong> Deposits to jBatch, broadcasts every 5s via crontab<br>
+    <strong>Withdraw (C→R):</strong> Requires bilateral approval (use Advanced mode for now)<br>
+    <strong>Advanced:</strong> Manual settleDiffs with full control over all 4 diffs
+  </p>
+
+  <!-- jBatch Status -->
+  {#if jBatchState}
+    <div class="jbatch-status">
+      <h4>📦 Pending Batch ({batchSize} operations)</h4>
+      {#if batchSize > 0}
+        <div class="batch-contents">
+          {#if jBatchState.batch.reserveToCollateral?.length > 0}
+            <div class="batch-section">
+              <strong>R→C Deposits ({jBatchState.batch.reserveToCollateral.length}):</strong>
+              {#each jBatchState.batch.reserveToCollateral as r2c}
+                {#each r2c.pairs as pair}
+                  <div class="batch-item">
+                    • Entity {r2c.receivingEntity.slice(-4)} → {pair.entity.slice(-4)}: {Number(pair.amount) / 1e18} token {r2c.tokenId}
+                  </div>
+                {/each}
+              {/each}
+            </div>
+          {/if}
+          {#if jBatchState.batch.settlements?.length > 0}
+            <div class="batch-section">
+              <strong>Settlements ({jBatchState.batch.settlements.length}):</strong>
+              {#each jBatchState.batch.settlements as settle}
+                <div class="batch-item">
+                  • {settle.leftEntity.slice(-4)}↔{settle.rightEntity.slice(-4)}: {settle.diffs.length} tokens
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {#if jBatchState.batch.reserveToReserve?.length > 0}
+            <div class="batch-section">
+              <strong>R→R Transfers ({jBatchState.batch.reserveToReserve.length}):</strong>
+              {#each jBatchState.batch.reserveToReserve as r2r}
+                <div class="batch-item">
+                  • → {r2r.receivingEntity.slice(-4)}: {Number(r2r.amount) / 1e18} token {r2r.tokenId}
+                </div>
+              {/each}
+            </div>
+          {/if}
+          <div class="batch-broadcast-info">
+            Next broadcast in ~{Math.ceil((5000 - (Date.now() - (jBatchState.lastBroadcast || 0))) / 1000)}s
+          </div>
+        </div>
+      {:else}
+        <p class="batch-empty">No pending operations</p>
+      {/if}
+    </div>
+  {/if}
 
   <div class="form-group">
     <label>Counterparty</label>
@@ -158,8 +257,8 @@
   <div class="form-group">
     <label>Token</label>
     <select bind:value={tokenId} disabled={sending}>
-      <option value={1}>ETH</option>
-      <option value={2}>USDC</option>
+      <option value={1}>USDC</option>
+      <option value={2}>ETH</option>
     </select>
   </div>
 
@@ -542,5 +641,58 @@
   .btn-send:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  /* jBatch Status */
+  .jbatch-status {
+    margin: 16px 0;
+    padding: 12px;
+    background: rgba(0, 217, 255, 0.05);
+    border: 1px solid rgba(0, 217, 255, 0.2);
+    border-radius: 6px;
+  }
+
+  .jbatch-status h4 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    color: #00d9ff;
+  }
+
+  .batch-contents {
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+  }
+
+  .batch-section {
+    margin: 8px 0;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .batch-section strong {
+    display: block;
+    margin-bottom: 4px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .batch-item {
+    margin-left: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.6;
+  }
+
+  .batch-broadcast-info {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    font-style: italic;
+  }
+
+  .batch-empty {
+    margin: 8px 0 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
   }
 </style>

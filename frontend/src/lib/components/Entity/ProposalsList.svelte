@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { EntityReplica, Tab } from '../../types';
+  import type { EntityReplica, Tab } from '$lib/types/ui';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;

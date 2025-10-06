@@ -263,7 +263,7 @@ export async function handleAccountInput(
   env: Env,
   accountMachine: AccountMachine,
   input: AccountInput
-): Promise<{ success: boolean; response?: AccountInput; events: string[]; error?: string }> {
+): Promise<{ success: boolean; response?: AccountInput; events: string[]; error?: string; approvalNeeded?: AccountTx }> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}`);
 
   const events: string[] = [];
@@ -306,9 +306,11 @@ export async function handleAccountInput(
         accountMachine.currentFrame = {
           height: accountMachine.pendingFrame.height,
           timestamp: accountMachine.pendingFrame.timestamp,
+          accountTxs: accountMachine.pendingFrame.accountTxs,
+          prevFrameHash: accountMachine.pendingFrame.prevFrameHash,
           tokenIds: accountMachine.pendingFrame.tokenIds,
           deltas: accountMachine.pendingFrame.deltas,
-          stateHash: accountMachine.pendingFrame.stateHash, // Store for prevFrameHash verification
+          stateHash: accountMachine.pendingFrame.stateHash,
         };
         accountMachine.currentHeight = accountMachine.pendingFrame.height;
 
@@ -373,10 +375,10 @@ export async function handleAccountInput(
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
       if (isLeftEntity) {
-        // We are LEFT - ignore their frame, keep ours
-        accountMachine.rollbackCount++;
-        console.log(`📤 LEFT-WINS: Ignoring right's frame (rollbacks: ${accountMachine.rollbackCount})`);
-        return { success: false, error: 'Simultaneous proposal - left side ignores right', events };
+        // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
+        console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, waiting for them to accept ours`);
+        // This is NOT an error - it's correct consensus behavior (no response needed)
+        return { success: true, events };
       } else {
         // We are RIGHT - rollback our frame, accept theirs
         if (accountMachine.rollbackCount === 0) {
@@ -491,12 +493,21 @@ export async function handleAccountInput(
 
     // Commit frame
     accountMachine.deltas = clonedMachine.deltas;
+
+    // CRITICAL: Copy pendingForward for multi-hop routing
+    if (clonedMachine.pendingForward) {
+      accountMachine.pendingForward = clonedMachine.pendingForward;
+      console.log(`🔀 Copied pendingForward for multi-hop: route=[${clonedMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}]`);
+    }
+
     accountMachine.currentFrame = {
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
+      accountTxs: receivedFrame.accountTxs,
+      prevFrameHash: receivedFrame.prevFrameHash,
       tokenIds: receivedFrame.tokenIds,
       deltas: receivedFrame.deltas,
-      stateHash: receivedFrame.stateHash, // Store for prevFrameHash verification
+      stateHash: receivedFrame.stateHash,
     };
     accountMachine.currentHeight = receivedFrame.height;
 
