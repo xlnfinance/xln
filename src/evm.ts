@@ -10,6 +10,27 @@ import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } f
 import { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 
+// Global logger for UI-accessible error logging (set by frontend)
+declare global {
+  interface Window {
+    xlnErrorLog?: (message: string, source: string, details?: any) => void;
+  }
+}
+
+const uiLog = (message: string, details?: any) => {
+  console.log(message, details);
+  if (isBrowser && window.xlnErrorLog) {
+    window.xlnErrorLog(message, 'EVM', details);
+  }
+};
+
+const uiError = (message: string, details?: any) => {
+  console.error(message, details);
+  if (isBrowser && window.xlnErrorLog) {
+    window.xlnErrorLog(message, 'EVM-ERROR', details);
+  }
+};
+
 // === ETHEREUM INTEGRATION ===
 
 // Load contract configuration directly in jurisdiction generation
@@ -71,52 +92,58 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       throw new Error('Jurisdiction missing contract addresses (entityProvider and depository)');
     }
 
-    console.log(`🔌 CONNECTING: jurisdiction=${jurisdiction.name}, rpcUrl=${rpcUrl}`);
+    uiLog(`🔌 CONNECTING: jurisdiction=${jurisdiction.name}, rpcUrl=${rpcUrl}`);
     if (isBrowser) {
-      console.log(`   Page Origin: ${window.location.origin}`);
-      console.log(`   Page Protocol: ${window.location.protocol}`);
-      console.log(`   Page Host: ${window.location.hostname}:${window.location.port}`);
-      console.log(`   RPC Origin: ${new URL(rpcUrl).origin}`);
-      console.log(`   CORS issue? ${window.location.origin !== new URL(rpcUrl).origin ? 'YES - Different origins!' : 'No'}`);
-      console.log(`   User Agent: ${navigator.userAgent}`);
+      uiLog(`   Page Origin: ${window.location.origin}`);
+      uiLog(`   Page Protocol: ${window.location.protocol}`);
+      uiLog(`   Page Host: ${window.location.hostname}:${window.location.port}`);
+      uiLog(`   RPC Origin: ${new URL(rpcUrl).origin}`);
+      const corsIssue = window.location.origin !== new URL(rpcUrl).origin;
+      uiLog(`   CORS issue? ${corsIssue ? 'YES - Different origins!' : 'No'}`, { corsIssue });
+      uiLog(`   User Agent: ${navigator.userAgent}`);
     }
-    console.log(`   Contracts: EP=${entityProviderAddress.slice(0,10)}, DEP=${depositoryAddress.slice(0,10)}`);
+    uiLog(`   Contracts: EP=${entityProviderAddress.slice(0,10)}, DEP=${depositoryAddress.slice(0,10)}`);
 
     // Connect to specified RPC node
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    console.log(`✅ Provider created`);
+    uiLog(`✅ Provider created`);
 
     // Use Hardhat account #0 private key (browser-compatible, no getSigner)
     // This is the publicly known Hardhat test key, safe for demo
     const privateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
     const signer = new ethers.Wallet(privateKey, provider);
-    console.log(`✅ Signer created: ${await signer.getAddress()}`);
+    const signerAddress = await signer.getAddress();
+    uiLog(`✅ Signer created: ${signerAddress}`);
 
     // Test connection
     try {
       const network = await provider.getNetwork();
-      console.log(`✅ Network connected: chainId=${network.chainId}`);
+      uiLog(`✅ Network connected: chainId=${network.chainId}`);
     } catch (netError) {
-      console.error(`❌ NETWORK-CONNECT-FAILED:`, netError);
-      console.error(`   RPC URL: ${rpcUrl}`);
-      console.error(`   Error code: ${(netError as any)?.code}`);
-      console.error(`   Error message: ${(netError as any)?.message}`);
+      uiError(`❌ NETWORK-CONNECT-FAILED`, {
+        rpcUrl,
+        errorCode: (netError as any)?.code,
+        errorMessage: (netError as any)?.message,
+        errorStack: (netError as any)?.stack
+      });
       throw netError;
     }
 
     // Create contract instances
     const entityProvider = new ethers.Contract(entityProviderAddress, ENTITY_PROVIDER_ABI, signer);
     const depository = new ethers.Contract(depositoryAddress, DEPOSITORY_ABI, signer);
-    console.log(`✅ Contracts created for ${jurisdiction.name}`);
+    uiLog(`✅ Contracts created for ${jurisdiction.name}`);
 
     return { provider, signer, entityProvider, depository };
   } catch (error) {
-    console.error(`❌ CONNECT-FAILED: ${jurisdiction.name}:`, error);
-    console.error(`   RPC URL: ${rpcUrl}`);
-    console.error(`   Error type: ${(error as any)?.constructor?.name}`);
-    console.error(`   Error code: ${(error as any)?.code}`);
-    console.error(`   Error reason: ${(error as any)?.reason}`);
-    console.error(`   Error stack:`, (error as any)?.stack);
+    uiError(`❌ CONNECT-FAILED: ${jurisdiction.name}`, {
+      rpcUrl,
+      errorType: (error as any)?.constructor?.name,
+      errorCode: (error as any)?.code,
+      errorReason: (error as any)?.reason,
+      errorMessage: (error as any)?.message,
+      errorStack: (error as any)?.stack
+    });
     throw error;
   }
 };
@@ -692,13 +719,17 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
 
       const rpcOverride = isBrowser ? localStorage.getItem('xln_rpc_override') : null;
 
-      console.log(`🔍 RPC-TRANSFORM-START: key=${key}, rpc=${rpcUrl}, isOculus=${isOculusBrowser}, override=${rpcOverride}`);
+      uiLog(`🔍 RPC-TRANSFORM-START: key=${key}, rpc=${rpcUrl}`, {
+        isOculusBrowser,
+        override: rpcOverride,
+        userAgent: isBrowser ? navigator.userAgent : 'N/A'
+      });
 
       // Oculus Browser fix: Force direct port without +10000 offset
       if (isOculusBrowser && !rpcOverride && rpcUrl.startsWith(':')) {
         const port = parseInt(rpcUrl.slice(1));
         rpcUrl = `${window.location.protocol}//${window.location.hostname}:${port}`;
-        console.log(`🎮 OCULUS FIX: Using direct port ${port} → ${rpcUrl}`);
+        uiLog(`🎮 OCULUS FIX: Using direct port ${port} → ${rpcUrl}`);
       }
 
       if (rpcOverride && rpcOverride !== '') {
@@ -711,15 +742,15 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
             ? rpcOverride  // Single jurisdiction: use /rpc directly
             : (rpcOverride.endsWith('/') ? rpcOverride + jData['name'].toLowerCase() : `${rpcOverride}/${jData['name'].toLowerCase()}`);
           rpcUrl = `${window.location.origin}${path}`;
-          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (path proxy, ${jurisdictionCount} jurisdictions)`);
+          uiLog(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (path proxy, ${jurisdictionCount} jurisdictions)`);
         } else if (rpcOverride.startsWith(':')) {
           // Port-based (e.g., :8545 or :18545)
           rpcUrl = `${window.location.protocol}//${window.location.hostname}${rpcOverride}`;
-          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (custom port)`);
+          uiLog(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (custom port)`);
         } else {
           // Full URL override
           rpcUrl = rpcOverride;
-          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (full URL)`);
+          uiLog(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (full URL)`);
         }
       } else if (isBrowser && rpcUrl.startsWith(':')) {
         // Default behavior: production uses port + 10000 (nginx proxy)
@@ -727,16 +758,22 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         const isLocalhost = window.location.hostname.match(/localhost|127\.0\.0\.1/);
         const actualPort = isLocalhost ? port : port + 10000;
         rpcUrl = `${window.location.protocol}//${window.location.hostname}:${actualPort}`;
-        console.log(`🔧 RPC-TRANSFORM-DEFAULT: ${jData['rpc']} → ${rpcUrl}`);
-        console.log(`   Hostname: ${window.location.hostname} (isLocalhost=${!!isLocalhost})`);
-        console.log(`   Port: ${port} → ${actualPort} (${isLocalhost ? 'direct' : '+10000'})`);
+        uiLog(`🔧 RPC-TRANSFORM-DEFAULT: ${jData['rpc']} → ${rpcUrl}`, {
+          hostname: window.location.hostname,
+          isLocalhost: !!isLocalhost,
+          port,
+          actualPort,
+          portOffset: isLocalhost ? 0 : 10000
+        });
       } else if (!isBrowser && rpcUrl.startsWith(':')) {
         // Node.js: Default to localhost
         rpcUrl = `http://localhost${rpcUrl}`;
       }
 
-      console.log(`📍 FINAL-RPC-URL: ${key} → ${rpcUrl}`);
-      console.log(`   Contracts: EP=${jData['contracts']['entityProvider']}, DEP=${jData['contracts']['depository']}`);
+      uiLog(`📍 FINAL-RPC-URL: ${key} → ${rpcUrl}`, {
+        entityProvider: jData['contracts']['entityProvider'],
+        depository: jData['contracts']['depository']
+      });
 
       jurisdictions.set(key, {
         address: rpcUrl,

@@ -28,6 +28,11 @@
     }
   }
 
+  // Auto-calculate routes when target and amount change
+  $: if (targetEntityId && amount && !findingRoutes) {
+    findRoutes();
+  }
+
   // Get all entities for dropdown - guaranteed non-null entity IDs
   $: allEntities = $replicas ? Array.from($replicas.keys() as IterableIterator<string>)
     .map((key: string) => {
@@ -245,16 +250,32 @@
 
   <div class="form-group">
     <label for="target">Target Entity</label>
-    <select
-      id="target"
-      bind:value={targetEntityId}
-      disabled={findingRoutes || sendingPayment}
-    >
-      <option value="">Select entity...</option>
-      {#each allEntities as id}
-        <option value={id}>Entity #{$xlnFunctions!.getEntityNumber(id)}</option>
-      {/each}
-    </select>
+    <div class="entity-select-row">
+      <select
+        id="target"
+        bind:value={targetEntityId}
+        disabled={findingRoutes || sendingPayment}
+      >
+        <option value="">Select entity...</option>
+        {#each allEntities as id}
+          <option value={id}>Entity #{$xlnFunctions!.getEntityNumber(id)}</option>
+        {/each}
+      </select>
+      <button
+        class="btn-reverse"
+        on:click={() => {
+          // Show target entity info (for reverse payment, user clicks target entity in graph)
+          if (targetEntityId && $xlnFunctions) {
+            const targetNum = $xlnFunctions.getEntityNumber(targetEntityId);
+            alert(`To send reverse payment: Click Entity #${targetNum} in the graph`);
+          }
+        }}
+        disabled={!targetEntityId || findingRoutes || sendingPayment}
+        title="Reverse payment direction"
+      >
+        ⇄
+      </button>
+    </div>
   </div>
 
   <div class="form-row">
@@ -423,6 +444,38 @@
 
   .btn-primary:disabled, .btn-send:disabled {
     opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .entity-select-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .entity-select-row select {
+    flex: 1;
+  }
+
+  .btn-reverse {
+    padding: 8px 12px;
+    background: rgba(100, 100, 110, 0.3);
+    border: 1px solid rgba(150, 150, 160, 0.4);
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 40px;
+  }
+
+  .btn-reverse:hover:not(:disabled) {
+    background: rgba(150, 150, 160, 0.5);
+    transform: scale(1.1);
+  }
+
+  .btn-reverse:disabled {
+    opacity: 0.3;
     cursor: not-allowed;
   }
 

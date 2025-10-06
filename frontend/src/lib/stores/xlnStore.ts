@@ -27,9 +27,15 @@ function exposeGlobalDebugObjects() {
     // @ts-ignore - Expose environment directly (avoid naming conflicts)
     window.xlnEnv = xlnEnvironment;
 
+    // @ts-ignore - Expose error logger for server-side logging
+    window.xlnErrorLog = (message: string, source: string, details?: any) => {
+      errorLog.log(message, source, details);
+    };
+
     console.log('🌍 GLOBAL DEBUG: XLN objects exposed');
     console.log('  window.XLN - All server functions (deriveDelta, isLeft, etc.)');
     console.log('  window.xlnEnv - Reactive environment store');
+    console.log('  window.xlnErrorLog - Logs to Settings error panel');
     console.log('  Usage: window.XLN.deriveDelta(delta, true).ascii');
     console.log('  Usage: Get current env value with xlnEnv subscribe pattern');
   }
