@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AccountMachine } from '../../types';
+  import type { AccountMachine } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import BigIntInput from '../Common/BigIntInput.svelte';
@@ -29,9 +29,6 @@
 
 
   export let account: AccountMachine;
-
-  // Cast account to any to handle missing properties safely
-  $: accountAny = account as any;
   export let counterpartyId: string;
   export let entityId: string;
 
@@ -295,15 +292,15 @@
         Entity #{$xlnFunctions!.getEntityNumber(entityId)} ⟷ Entity #{$xlnFunctions!.getEntityNumber(counterpartyId)}
       </span>
       <div class="consensus-status">
-        <span class="frame-badge">Frame #{account.currentFrame.frameId}</span>
-        {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
+        <span class="frame-badge">Frame #{account.currentFrame.height}</span>
+        {#if account.mempool.length > 0 || account.pendingFrame || account.sentTransitions > 0}
           <span class="status-badge pending">
-            {#if (account as any).pendingFrame}
+            {#if account.pendingFrame}
               Awaiting Consensus
             {:else if account.mempool.length > 0}
               {account.mempool.length} pending
             {:else}
-              {(account as any).sentTransitions} in flight
+              {account.sentTransitions} in flight
             {/if}
           </span>
         {:else}
@@ -311,7 +308,7 @@
         {/if}
 
         <!-- Quick Trust Indicator -->
-        {#if (account.currentFrame as any).stateHash}
+        {#if account.currentFrame.stateHash}
           <span class="trust-indicator verified" title="Cryptographically verified account state">🔒 Secured</span>
         {:else}
           <span class="trust-indicator pending" title="Awaiting cryptographic verification">⏳ Unverified</span>
@@ -477,25 +474,25 @@
             <div class="signature-header">
               <span class="proof-icon">🔐</span>
               <span class="proof-title">Cryptographic Proof</span>
-              <span class="frame-info">Frame #{account.currentFrame.frameId}</span>
+              <span class="frame-info">Frame #{account.currentFrame.height}</span>
             </div>
 
             <div class="signature-details">
-              {#if (account.currentFrame as any).stateHash}
+              {#if account.currentFrame.stateHash}
                 <div class="signature-row">
                   <span class="sig-label">State Hash:</span>
-                  <code class="sig-value" title="{(account.currentFrame as any).stateHash}">
-                    {(account.currentFrame as any).stateHash.slice(0, 16)}...
+                  <code class="sig-value" title="{account.currentFrame.stateHash}">
+                    {account.currentFrame.stateHash.slice(0, 16)}...
                   </code>
                   <span class="sig-status verified">✓</span>
                 </div>
               {/if}
 
-              {#if (account as any).hankoSignature}
+              {#if account.hankoSignature}
                 <div class="signature-row">
                   <span class="sig-label">Their Hanko:</span>
-                  <code class="sig-value" title="{(account as any).hankoSignature}">
-                    hanko_{(account as any).hankoSignature.slice(0, 12)}...
+                  <code class="sig-value" title="{account.hankoSignature}">
+                    hanko_{account.hankoSignature.slice(0, 12)}...
                   </code>
                   <span class="sig-status verified">✓</span>
                 </div>
@@ -594,7 +591,7 @@
             <div class="mempool-item">
               <span class="tx-index">#{i + 1}</span>
               <span class="tx-type">{tx.type}</span>
-              {#if tx.data.amount}
+              {#if 'amount' in tx.data && tx.data.amount}
                 <span class="tx-amount">{safeFixed((Number(tx.data.amount) / 1e18), 4)}</span>
               {/if}
             </div>
@@ -605,34 +602,34 @@
 
     <!-- Account Frame History Section -->
     <div class="section">
-      <h3>💾 Account Frame History ({(account as any).frameHistory?.length || 0} confirmed frames)</h3>
+      <h3>💾 Account Frame History ({account.frameHistory?.length || 0} confirmed frames)</h3>
       <div class="frame-history">
 
         <!-- Pending Frame (TOP PRIORITY) -->
-        {#if accountAny.pendingFrame}
+        {#if account.pendingFrame}
           <div class="frame-item pending">
             <div class="frame-header">
-              <span class="frame-id">⏳ Pending Frame #{accountAny.pendingFrame.frameId}</span>
+              <span class="frame-id">⏳ Pending Frame #{account.pendingFrame.height}</span>
               <span class="frame-status pending">Awaiting Consensus</span>
               <span class="frame-timestamp">
-                {formatTimestamp(accountAny.pendingFrame.timestamp)}
+                {formatTimestamp(account.pendingFrame.timestamp)}
               </span>
             </div>
             <div class="frame-details">
               <div class="frame-detail">
                 <span class="detail-label">Transactions:</span>
-                <span class="detail-value">{accountAny.pendingFrame.accountTxs.length}</span>
+                <span class="detail-value">{account.pendingFrame.accountTxs.length}</span>
               </div>
               <div class="frame-detail">
                 <span class="detail-label">Signatures:</span>
-                <span class="detail-value">{accountAny.pendingSignatures?.length || 0}/2</span>
+                <span class="detail-value">{account.pendingSignatures?.length || 0}/2</span>
               </div>
               <div class="pending-transactions">
-                {#each accountAny.pendingFrame.accountTxs as tx, i}
+                {#each account.pendingFrame.accountTxs as tx, i}
                   <div class="pending-tx">
                     <span class="tx-index">{i+1}.</span>
                     <span class="tx-type">{tx.type}</span>
-                    {#if tx.type === 'direct-payment'}
+                    {#if tx.type === 'direct_payment'}
                       <span class="tx-amount">{$xlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
                       <span class="tx-desc">{tx.data.description || ''}</span>
                     {/if}
@@ -656,13 +653,13 @@
                   <div class="mempool-tx">
                     <span class="tx-index">{i+1}.</span>
                     <span class="tx-type">{tx.type}</span>
-                    {#if tx.type === 'direct-payment'}
+                    {#if tx.type === 'direct_payment'}
                       <span class="tx-amount">{$xlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
                       <span class="tx-desc">"{tx.data.description || 'no description'}"</span>
                       <span class="tx-token">Token #{tx.data.tokenId}</span>
-                    {:else if tx.type === 'set-credit-limit'}
+                    {:else if tx.type === 'set_credit_limit'}
                       <span class="tx-amount">{$xlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
-                      <span class="tx-desc">{tx.data.isForSelf ? 'Self limit' : 'Peer limit'}</span>
+                      <span class="tx-desc">{tx.data.side === 'left' ? 'Left limit' : 'Right limit'}</span>
                     {:else}
                       <span class="tx-desc">{$xlnFunctions?.safeStringify(tx.data)}</span>
                     {/if}
@@ -677,7 +674,7 @@
         {#if account.currentFrame}
           <div class="frame-item current">
             <div class="frame-header">
-              <span class="frame-id">✅ Current Frame #{account.currentFrame.frameId || accountAny.currentFrameId}</span>
+              <span class="frame-id">✅ Current Frame #{account.currentFrame.height || account.currentHeight}</span>
               <span class="frame-status current">Active</span>
               <span class="frame-timestamp">
                 {formatTimestamp(account.currentFrame.timestamp || Date.now())}
@@ -686,14 +683,14 @@
             <div class="frame-details">
               <div class="frame-detail">
                 <span class="detail-label">Transactions:</span>
-                <span class="detail-value">{(account.currentFrame as any)?.accountTxs?.length || 0}</span>
+                <span class="detail-value">{account.currentFrame?.accountTxs?.length || 0}</span>
               </div>
               <div class="frame-detail">
                 <span class="detail-label">State Hash:</span>
                 <span class="detail-value hash">
                   <!-- AccountSnapshot doesn't have stateHash - generate one from frame data -->
                   {#if account.currentFrame}
-                    frame#{account.currentFrame.frameId}_{account.currentFrame.timestamp.toString().slice(-6)}
+                    frame#{account.currentFrame.height}_{account.currentFrame.timestamp.toString().slice(-6)}
                   {:else}
                     <span style="color: #ff4444; font-weight: bold;">NO FRAME</span>
                   {/if}
@@ -704,13 +701,13 @@
         {/if}
 
         <!-- Historical Frames (from frameHistory array) -->
-        {#if (account as any).frameHistory && (account as any).frameHistory.length > 0}
+        {#if account.frameHistory && account.frameHistory.length > 0}
           <div class="historical-frames">
-            <h4>📚 Historical Frames (last {Math.min(10, (account as any).frameHistory.length)}):</h4>
-            {#each (account as any).frameHistory.slice(-10).reverse() as frame}
+            <h4>📚 Historical Frames (last {Math.min(10, account.frameHistory.length)}):</h4>
+            {#each account.frameHistory.slice(-10).reverse() as frame}
               <div class="frame-item historical">
                 <div class="frame-header">
-                  <span class="frame-id">📜 Frame #{frame.frameId}</span>
+                  <span class="frame-id">📜 Frame #{frame.height}</span>
                   <span class="frame-status historical">Confirmed</span>
                   <span class="frame-timestamp">
                     {formatTimestamp(frame.timestamp)}
@@ -723,7 +720,7 @@
                   </div>
                   <div class="frame-detail">
                     <span class="detail-label">Proposer:</span>
-                    <span class="detail-value">{frame.isProposer ? 'Us' : 'Them'}</span>
+                    <span class="detail-value">Bilateral</span>
                   </div>
                   <div class="frame-detail">
                     <span class="detail-label">Tokens:</span>
@@ -758,7 +755,7 @@
           </div>
         {/if}
 
-        {#if !account.currentFrame && !(account as any).pendingFrame && account.mempool.length === 0 && (!(account as any).frameHistory || (account as any).frameHistory.length === 0)}
+        {#if !account.currentFrame && !account.pendingFrame && account.mempool.length === 0 && (!account.frameHistory || account.frameHistory.length === 0)}
           <div class="no-frames">
             No account activity yet. Send a payment to start bilateral consensus.
           </div>

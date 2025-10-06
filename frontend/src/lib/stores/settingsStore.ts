@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ThemeName } from '../types';
+import type { Settings, ThemeName } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
 
 // Default settings

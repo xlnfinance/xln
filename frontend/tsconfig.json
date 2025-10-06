@@ -31,6 +31,14 @@
 
 		// SAFETY
 		"allowUnreachableCode": false,
-		"allowUnusedLabels": false
+		"allowUnusedLabels": false,
+
+		// Path mappings (merged with .svelte-kit/tsconfig.json)
+		"paths": {
+			"$lib": ["./src/lib"],
+			"$lib/*": ["./src/lib/*"],
+			"$types": ["../src/types.ts"],
+			"$app/types": ["./.svelte-kit/types/index.d.ts"]
+		}
 	}
 }

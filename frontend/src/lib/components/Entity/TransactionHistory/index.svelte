@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { EntityReplica, Tab, Snapshot } from '../../../types';
+  import type { EntityReplica, Tab, Snapshot } from '$lib/types/ui';
   import { getServerFrames } from '../../../utils/serverFrameProcessor';
   import FrameItem from './FrameItem.svelte';
 

@@ -1,4 +1,4 @@
-import type { Snapshot, EntityReplica, ServerFrame } from '../types';
+import type { Snapshot, EntityReplica, ServerFrame, ServerTx, EntityInput } from '$lib/types/ui';
 
 export function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp);
@@ -48,26 +48,29 @@ export function getServerFrames(history: Snapshot[], replica: EntityReplica | nu
 
     // Filter inputs TO this specific replica
     const replicaInputs = entityInputs.filter(
-      (input) => input.entityId === replica.entityId && input.signerId === replica.signerId,
+      (input: EntityInput) =>
+        input.entityId === replica.entityId && input.signerId === replica.signerId,
     );
 
     // Filter outputs FROM this specific replica
     const replicaOutputs = serverOutputs.filter(
-      (output) => output.entityId === replica.entityId && output.signerId === replica.signerId,
+      (output: EntityInput) =>
+        output.entityId === replica.entityId && output.signerId === replica.signerId,
     );
 
     // Filter serverTx imports related to this replica
     const serverTxs = snapshot.serverInput?.serverTxs || [];
-    const replicaImports = serverTxs.filter((serverTx) => {
+    const replicaImports = serverTxs.filter((serverTx: ServerTx) => {
       if (serverTx.type === 'importReplica') {
-        return serverTx.entityId === replica.entityId && serverTx.data?.signerId === replica.signerId;
+        return serverTx.entityId === replica.entityId && serverTx.signerId === replica.signerId;
       }
       return false;
     });
 
     // Also check relevant serverTxs
     const relevantServerTxs = serverTxs.filter(
-      (tx) => tx.entityId === replica.entityId || tx.data?.from === replica.signerId,
+      (tx: ServerTx) =>
+        tx.entityId === replica.entityId || tx.signerId === replica.signerId,
     );
 
     const hasActivity = replicaInputs.length > 0 || replicaOutputs.length > 0 || replicaImports.length > 0;

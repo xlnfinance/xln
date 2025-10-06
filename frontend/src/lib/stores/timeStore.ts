@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { TimeState } from '../types';
+import type { TimeState } from '$lib/types/ui';
 import { xlnEnvironment, history } from './xlnStore';
 
 // Load initial state from localStorage

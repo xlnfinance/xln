@@ -210,7 +210,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         newState.accounts.set(entityTx.data.targetEntityId, {
           counterpartyEntityId: entityTx.data.targetEntityId,
           mempool: [],
-          currentFrame: { height: 0, timestamp: env.timestamp, tokenIds: [], deltas: [] },
+          currentFrame: {
+            height: 0,
+            timestamp: env.timestamp,
+            accountTxs: [],
+            prevFrameHash: '',
+            tokenIds: [],
+            deltas: [],
+            stateHash: ''
+          },
           sentTransitions: 0,
           ackedTransitions: 0,
           deltas: initialDeltas,
@@ -233,7 +241,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             disputeNonce: 0,
           },
           proofBody: { tokenIds: [], deltas: [] },
-          frameHistory: [] // Initialize empty frame history
+          frameHistory: [],
+          pendingWithdrawals: new Map(),
+          requestedRebalance: new Map(),
         });
       }
 
@@ -351,7 +361,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: {
           tokenId,
           amount,
-          route: route.slice(1), // Remove current entity from route
+          route: route.slice(1), // Remove sender from route (next hop needs to see themselves in route[0])
           description: description || `Payment to ${formatEntityId(targetEntityId)}`,
           fromEntityId: entityState.entityId, // ✅ EXPLICIT direction
           toEntityId: nextHop,                 // ✅ EXPLICIT direction
@@ -395,6 +405,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       return { newState, outputs };
+    }
+
+    if (entityTx.type === 'deposit_collateral') {
+      const { handleDepositCollateral } = await import('./handlers/deposit-collateral');
+      return await handleDepositCollateral(entityState, entityTx);
     }
 
     if (entityTx.type === 'settleDiffs') {

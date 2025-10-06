@@ -26,9 +26,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       mempool: [],
       currentFrame: {
         height: 0,
-        timestamp: env.timestamp, // DETERMINISTIC: Copy from server machine
+        timestamp: env.timestamp,
+        accountTxs: [],
+        prevFrameHash: '',
         tokenIds: [],
         deltas: [],
+        stateHash: ''
       },
       sentTransitions: 0,
       ackedTransitions: 0,
@@ -52,7 +55,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         tokenIds: [],
         deltas: [],
       },
-      frameHistory: []
+      frameHistory: [],
+      pendingWithdrawals: new Map(),
+          requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
     };
 
     newState.accounts.set(input.fromEntityId, accountMachine);
@@ -99,6 +104,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       newState.messages.push(...result.events);
 
       // CRITICAL: Process multi-hop forwarding (consume pendingForward)
+      console.log(`🔍 PENDING-FORWARD-CHECK: Has pendingForward=${!!accountMachine.pendingForward}`);
+      if (accountMachine.pendingForward) {
+        console.log(`🔍 PENDING-FORWARD: route=[${accountMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}], amount=${accountMachine.pendingForward.amount}`);
+      }
+
       if (accountMachine.pendingForward) {
         const forward = accountMachine.pendingForward;
         console.log(`🔀 MULTI-HOP: Payment needs forwarding to ${forward.route[forward.route.length - 1]?.slice(-4)}`);
@@ -122,7 +132,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               data: {
                 tokenId: forward.tokenId,
                 amount: forwardAmount,
-                route: forward.route.slice(1), // Remove current hop from route
+                route: forward.route, // Already sliced in direct-payment.ts - don't slice again
                 ...(forward.description ? { description: forward.description } : {}),
                 fromEntityId: state.entityId,
                 toEntityId: nextHop,

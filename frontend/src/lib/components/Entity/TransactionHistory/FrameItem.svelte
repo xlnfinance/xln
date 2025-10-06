@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ServerFrame } from '../../../types';
+  import type { ServerFrame } from '$lib/types/ui';
   import { formatTimestamp } from '../../../utils/serverFrameProcessor';
   // Simplified without complex rendering - no more TransactionItem needed
 

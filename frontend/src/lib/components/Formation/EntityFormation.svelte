@@ -3,7 +3,7 @@
   import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
   import { loadJurisdictions } from '../../stores/jurisdictionStore';
   import { tabOperations } from '../../stores/tabStore';
-  import type { EntityFormData } from '../../types';
+  import type { EntityFormData } from '$lib/types/ui';
   import { xlnFunctions } from '../../stores/xlnStore';
 
   let formData: EntityFormData = {

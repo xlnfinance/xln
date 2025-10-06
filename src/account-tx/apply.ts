@@ -7,6 +7,10 @@ import { AccountMachine, AccountTx } from '../types';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
 import { handleDirectPayment } from './handlers/direct-payment';
+import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
+import { handleRequestWithdrawal } from './handlers/request-withdrawal';
+import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
+import { handleRequestRebalance } from './handlers/request-rebalance';
 
 /**
  * Process single AccountTx through bilateral consensus
@@ -42,6 +46,18 @@ export function processAccountTx(
       // Blockchain settlement - handled separately in entity-tx/handlers/account.ts
       console.log(`💰 account_settle processed externally`);
       return { success: true, events: [`⚖️ Settlement processed`] };
+
+    case 'reserve_to_collateral':
+      return handleReserveToCollateral(accountMachine, accountTx as Extract<AccountTx, { type: 'reserve_to_collateral' }>);
+
+    case 'request_withdrawal':
+      return handleRequestWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'request_withdrawal' }>, isOurFrame);
+
+    case 'approve_withdrawal':
+      return handleApproveWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'approve_withdrawal' }>);
+
+    case 'request_rebalance':
+      return handleRequestRebalance(accountMachine, accountTx as Extract<AccountTx, { type: 'request_rebalance' }>);
 
     case 'account_frame':
       // This should never be called - frames are handled by frame-level consensus

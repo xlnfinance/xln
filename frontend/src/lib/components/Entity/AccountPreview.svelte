@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AccountMachine } from '../../types';
+  import type { AccountMachine, Delta } from '$lib/types/ui';
   // Functions now accessed through $xlnEnvironment.xln from server.ts
   // Entity functions now accessed through xlnFunctions from server.js
   import { createEventDispatcher } from 'svelte';
@@ -45,7 +45,7 @@
   }
 
   // Get all token deltas for rendering
-  $: tokenDeltas = Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
+  $: tokenDeltas = Array.from(account.deltas?.entries() || [] as [number, Delta][]).map(([tokenId, delta]: [number, Delta]) => {
     if (!$xlnFunctions) return { tokenId, delta, derived: null, tokenInfo: null };
 
     const isLeftEntity = entityId < counterpartyId;

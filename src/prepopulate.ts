@@ -95,9 +95,12 @@ function upsertAccount(
     mempool: [],
     currentFrame: {
       height: 0,
-      timestamp: 0, // Will be set from env.timestamp when account is used
+      timestamp: 0,
+      accountTxs: [],
+      prevFrameHash: '',
       tokenIds: [USDC_TOKEN_ID],
       deltas: [deltaValue],
+      stateHash: ''
     },
     sentTransitions: 0,
     ackedTransitions: 0,
@@ -127,6 +130,8 @@ function upsertAccount(
       deltas: [deltaValue],
     },
     frameHistory: [],
+    pendingWithdrawals: new Map(),
+          requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
   };
 
   replica.state.accounts.set(counterpartyId, accountMachine);

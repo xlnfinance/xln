@@ -42,6 +42,20 @@ export function initCrontab(): CrontabState {
     handler: checkAccountTimeoutsHandler,
   });
 
+  tasks.set('broadcastBatch', {
+    name: 'broadcastBatch',
+    intervalMs: 5000, // Broadcast every 5 seconds (2019src.txt pattern)
+    lastRun: 0,
+    handler: broadcastBatchHandler,
+  });
+
+  tasks.set('hubRebalance', {
+    name: 'hubRebalance',
+    intervalMs: 30000, // Check rebalance opportunities every 30 seconds
+    lastRun: 0,
+    handler: hubRebalanceHandler,
+  });
+
   return { tasks };
 }
 
@@ -61,7 +75,7 @@ export async function executeCrontab(
     const timeSinceLastRun = now - task.lastRun;
 
     if (timeSinceLastRun >= task.intervalMs) {
-      console.log(`⏰ CRONTAB: Running task "${task.name}" (${timeSinceLastRun}ms since last run)`);
+      // Removed verbose crontab logging (only log task completion)
 
       try {
         const outputs = await task.handler(replica);
@@ -69,7 +83,10 @@ export async function executeCrontab(
 
         // Update last run time
         task.lastRun = now;
-        console.log(`✅ CRONTAB: Task "${task.name}" completed, generated ${outputs.length} outputs`);
+        // Only log if outputs generated
+        if (outputs.length > 0) {
+          console.log(`✅ CRONTAB: Task "${task.name}" generated ${outputs.length} outputs`);
+        }
       } catch (error) {
         console.error(`❌ CRONTAB: Task "${task.name}" failed:`, error);
       }
@@ -197,4 +214,152 @@ export function getAccountTimeoutStats(replica: EntityReplica): {
     timedOutFrames,
     oldestPendingFrameAge,
   };
+}
+
+/**
+ * Broadcast jBatch to Depository contract
+ * Reference: 2019src.txt lines 3384-3399
+ */
+async function broadcastBatchHandler(replica: EntityReplica): Promise<EntityInput[]> {
+  const outputs: EntityInput[] = [];
+
+  // Initialize jBatch on first use
+  if (!replica.state.jBatchState) {
+    const { initJBatch } = await import('./j-batch');
+    replica.state.jBatchState = initJBatch();
+  }
+
+  const { shouldBroadcastBatch, isBatchEmpty } = await import('./j-batch');
+
+  // Check if we should broadcast
+  if (!shouldBroadcastBatch(replica.state.jBatchState, replica.state.timestamp)) {
+    return outputs; // Nothing to broadcast yet
+  }
+
+  if (isBatchEmpty(replica.state.jBatchState.batch)) {
+    return outputs;
+  }
+
+  console.log(`📤 CRONTAB: jBatch ready for broadcast (entity ${replica.entityId.slice(-4)})`);
+
+  // Get jurisdiction from entity config
+  const jurisdiction = replica.state.config.jurisdiction;
+  if (!jurisdiction) {
+    console.warn(`⚠️ No jurisdiction configured for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`);
+    return outputs;
+  }
+
+  // Broadcast batch to Depository contract
+  const { broadcastBatch } = await import('./j-batch');
+  const result = await broadcastBatch(replica.entityId, replica.state.jBatchState, jurisdiction);
+
+  if (result.success) {
+    console.log(`✅ jBatch broadcasted successfully: ${result.txHash}`);
+
+    // Generate success message
+    outputs.push({
+      entityId: replica.entityId,
+      signerId: 'system',
+      entityTxs: [{
+        type: 'chatMessage',
+        data: {
+          message: `📤 Batch broadcasted: ${result.txHash?.slice(0, 16)}...`,
+          timestamp: replica.state.timestamp,
+          metadata: {
+            type: 'BATCH_BROADCAST',
+            txHash: result.txHash,
+          },
+        },
+      }],
+    });
+  } else {
+    console.error(`❌ jBatch broadcast failed: ${result.error}`);
+  }
+
+  return outputs;
+}
+
+/**
+ * Hub Rebalance Handler
+ * Scans all accounts, matches net-spenders with net-receivers
+ * Reference: 2019src.txt lines 2973-3114
+ */
+async function hubRebalanceHandler(replica: EntityReplica): Promise<EntityInput[]> {
+  const outputs: EntityInput[] = [];
+  // Removed verbose scan start log
+
+  const { deriveDelta } = await import('./account-utils');
+
+  const tokenAccountMap = new Map<number, {
+    netSpenders: Array<{ entityId: string; debt: bigint; collateral: bigint }>;
+    netReceivers: Array<{ entityId: string; requested: bigint }>;
+  }>();
+
+  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
+    for (const [tokenId, delta] of accountMachine.deltas.entries()) {
+      const weAreLeft = replica.entityId < counterpartyId;
+      const derived = deriveDelta(delta, weAreLeft);
+
+      if (derived.delta < 0n) {
+        const debtAmount = -derived.delta;
+        if (debtAmount > 0n) {
+          if (!tokenAccountMap.has(tokenId)) {
+            tokenAccountMap.set(tokenId, { netSpenders: [], netReceivers: [] });
+          }
+          tokenAccountMap.get(tokenId)!.netSpenders.push({
+            entityId: counterpartyId,
+            debt: debtAmount,
+            collateral: delta.collateral,
+          });
+        }
+      }
+
+      const requestedRebalance = accountMachine.requestedRebalance.get(tokenId);
+      if (requestedRebalance && requestedRebalance > 0n) {
+        if (!tokenAccountMap.has(tokenId)) {
+          tokenAccountMap.set(tokenId, { netSpenders: [], netReceivers: [] });
+        }
+        tokenAccountMap.get(tokenId)!.netReceivers.push({
+          entityId: counterpartyId,
+          requested: requestedRebalance,
+        });
+      }
+    }
+  }
+
+  for (const [tokenId, { netSpenders, netReceivers }] of tokenAccountMap.entries()) {
+    if (netSpenders.length === 0 || netReceivers.length === 0) continue;
+
+    const totalDebt = netSpenders.reduce((sum, s) => sum + s.debt, 0n);
+    const totalRequested = netReceivers.reduce((sum, r) => sum + r.requested, 0n);
+    const rebalanceAmount = totalDebt < totalRequested ? totalDebt : totalRequested;
+
+    if (rebalanceAmount === 0n) continue;
+
+    console.log(`🔄 REBALANCE OPPORTUNITY token ${tokenId}: ${rebalanceAmount}`);
+
+    const message = `🔄 REBALANCE OPPORTUNITY (Token ${tokenId}):
+Spenders: ${netSpenders.length} (debt: ${totalDebt})
+Receivers: ${netReceivers.length} (requested: ${totalRequested})
+Match: ${rebalanceAmount} (${Number(rebalanceAmount * 100n) / Number(totalDebt || 1n)}%)`;
+
+    outputs.push({
+      entityId: replica.entityId,
+      signerId: 'system',
+      entityTxs: [{
+        type: 'chatMessage',
+        data: {
+          message,
+          timestamp: replica.state.timestamp,
+          metadata: {
+            type: 'REBALANCE_OPPORTUNITY',
+            tokenId,
+            rebalanceAmount: rebalanceAmount.toString(),
+          },
+        },
+      }],
+    });
+  }
+
+  return outputs;
 }
