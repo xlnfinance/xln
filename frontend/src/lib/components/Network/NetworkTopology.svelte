@@ -15,10 +15,12 @@
   import { SpatialHash, RippleEffect } from '../../vr/EffectsManager';
   import { GestureManager } from '../../vr/GestureDetector';
   import VisualDemoPanel from '../Views/VisualDemoPanel.svelte';
+  import AdminPanel from '../Admin/AdminPanel.svelte';
 
   // Network3D managers
   import { EntityManager } from '../../network3d/EntityManager';
   import { AccountManager } from '../../network3d/AccountManager';
+  import { AccountActivityVisualizer } from '../../network3d/AccountActivityVisualizer';
 
   // Props
   export let zenMode: boolean = false;
@@ -102,6 +104,7 @@
   // Network3D managers
   let entityManager: EntityManager;
   let accountManager: AccountManager;
+  let activityVisualizer: AccountActivityVisualizer;
 
   // Visual effects system
   let spatialHash: SpatialHash;
@@ -332,6 +335,11 @@
     handleJEventRipple($xlnEnvironment.lastJEvent);
   }
 
+  // ===== PROCESS ACCOUNT ACTIVITY LIGHTNING (on new frame) =====
+  $: if (activityVisualizer && $xlnEnvironment?.serverInput && entityMeshMap) {
+    activityVisualizer.processFrame($xlnEnvironment.serverInput, entityMeshMap);
+  }
+
   // ===== UPDATE SPATIAL HASH (when entities move) =====
   $: if (spatialHash && entities.length > 0) {
     entities.forEach(entity => {
@@ -536,6 +544,9 @@
     if (accountManager) {
       accountManager.clear();
     }
+    if (activityVisualizer) {
+      activityVisualizer.clearAll();
+    }
 
     // Remove sidebar resize listeners
     window.removeEventListener('mousemove', handleResizeMove);
@@ -654,6 +665,7 @@
     // ===== INITIALIZE MANAGERS =====
     entityManager = new EntityManager(scene);
     accountManager = new AccountManager(scene);
+    activityVisualizer = new AccountActivityVisualizer(scene);
     spatialHash = new SpatialHash(100);
     gestureManager = new GestureManager();
 
@@ -2116,6 +2128,9 @@
     if (scene && spatialHash && entityMeshMap) {
       const deltaTime = clock.getDelta() * 1000; // to milliseconds
       effectOperations.process(scene, entityMeshMap, deltaTime, 10);
+
+      // ===== UPDATE ACCOUNT ACTIVITY LIGHTNING =====
+      activityVisualizer?.update(deltaTime);
     }
 
     // Update VR grabbed entity position
@@ -4422,6 +4437,9 @@
             {spatialHash}
           />
         </div>
+
+        <!-- Admin Panel -->
+        <AdminPanel />
 
         <!-- Live Activity Log -->
         <div class="activity-log">

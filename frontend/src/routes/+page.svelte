@@ -11,6 +11,7 @@
   import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
   import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
   import ScenarioPanel from '../lib/components/Scenario/ScenarioPanel.svelte';
+  import AdminPanel from '../lib/components/Admin/AdminPanel.svelte';
   import BrainVaultView from '../lib/components/Views/BrainVaultView.svelte';
   import SettingsView from '../lib/components/Views/SettingsView.svelte';
   import DocsView from '../lib/components/Views/DocsView.svelte';
@@ -333,6 +334,14 @@
           >
             🎬 Scenarios
           </button>
+          <button
+            class="tab-button"
+            class:active={activeTab === 'admin'}
+            on:click={() => switchTab('admin')}
+            id="adminTab"
+          >
+            🔧 Admin
+          </button>
         </div>
 
         <div id="formationTabContent" class="tab-content" class:active={activeTab === 'formation'}>
@@ -349,6 +358,10 @@
 
         <div id="scenariosTabContent" class="tab-content" class:active={activeTab === 'scenarios'}>
           <ScenarioPanel />
+        </div>
+
+        <div id="adminTabContent" class="tab-content" class:active={activeTab === 'admin'}>
+          <AdminPanel />
         </div>
         </div>
       </div>

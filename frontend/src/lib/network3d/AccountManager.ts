@@ -11,11 +11,13 @@
 
 import * as THREE from 'three';
 import type { AccountConnectionData, DerivedAccountData, EntityData } from './types';
+import { BarAnimator } from './BarAnimator';
 
 export class AccountManager {
   private scene: THREE.Scene;
   private accounts = new Map<string, AccountConnectionData>();
   private accountIndexMap = new Map<string, number>();
+  private barAnimator = new BarAnimator();
 
   // Settings
   private barsMode: 'close' | 'spread' = 'close';
@@ -158,12 +160,13 @@ export class AccountManager {
     if (this.barsMode === 'close') {
       // Close mode: bars stack on centerline
       this.createStackedBars(group, midpoint, perpendicular, derived, scale);
+      group.position.copy(midpoint);
     } else {
-      // Spread mode: bars extend left and right
-      this.createSpreadBars(group, midpoint, perpendicular, direction, derived, scale);
+      // Spread mode: bars extend left and right (world space, no group offset)
+      this.createSpreadBars(group, fromEntity, toEntity, direction, derived, scale);
+      // Don't set group.position - bars are in world space
     }
 
-    group.position.copy(midpoint);
     this.scene.add(group);
 
     return group;
@@ -192,24 +195,31 @@ export class AccountManager {
       { value: derived.inPeerCredit, color: 0x00ff88, name: 'their unused credit' }
     ];
 
-    layers.forEach(layer => {
+    layers.forEach((layer, index) => {
       const height = (Number(layer.value) / 1e18) * scale;
-      if (height > 0.01) {
-        const geometry = new THREE.BoxGeometry(barWidth, height, barWidth);
-        const material = new THREE.MeshBasicMaterial({
-          color: layer.color,
-          opacity: 0.8,
-          transparent: true
-        });
 
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.copy(perpendicular.clone().multiplyScalar(0));
-        mesh.position.y = yOffset + height / 2;
-        mesh.userData['layerName'] = layer.name;
+      // Always create bar geometry (even if height is 0) for smooth transitions
+      const geometry = new THREE.BoxGeometry(barWidth, 1, barWidth); // height=1, scale with mesh.scale.y
+      const material = new THREE.MeshBasicMaterial({
+        color: layer.color,
+        opacity: 0.8,
+        transparent: true
+      });
 
-        group.add(mesh);
-        yOffset += height;
-      }
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.copy(perpendicular.clone().multiplyScalar(0));
+      mesh.position.y = yOffset + height / 2;
+      mesh.userData['layerName'] = layer.name;
+      mesh.userData['layerIndex'] = index;
+      mesh.userData['originalY'] = mesh.position.y;
+      mesh.userData['baseHeight'] = 1; // Geometry height
+
+      // Register with animator for smooth transitions
+      const barKey = `${group.uuid}_layer${index}`;
+      this.barAnimator.registerBar(barKey, mesh, height);
+
+      group.add(mesh);
+      yOffset += height;
     });
   }
 
@@ -219,22 +229,18 @@ export class AccountManager {
    */
   private createSpreadBars(
     group: THREE.Group,
-    _midpoint: THREE.Vector3,
-    _perpendicular: THREE.Vector3,
+    fromEntity: EntityData,
+    _toEntity: EntityData,
     direction: THREE.Vector3,
     derived: DerivedAccountData,
-    scale: number
+    _scale: number
   ) {
-    // NOTE: This is simplified - full implementation needs entity sizes and proper geometry
-    // For now, use the original NetworkTopology implementation (lines 1842-1940)
-    // TODO: Extract full cylinder-based spread bars with rotation
-
-    const barHeight = 0.4;
+    const barHeight = 0.08;
     const barRadius = barHeight * 2.5;
     const safeGap = 0.2;
     const minGapSpread = 2;
 
-    // Assume entity size = 2 (will get from EntityManager later)
+    // Assume entity size = 2 (from original code)
     const fromEntitySize = 2;
 
     // Colors from 2019vue.txt pattern
@@ -244,18 +250,25 @@ export class AccountManager {
       unsecured: 0xdc3545         // red - used credit
     };
 
-    const barScale = scale / 20; // Normalize scale
+    // Scale based on token decimals (from original implementation)
+    const globalScale = 5000; // Match NetworkTopology default
+    const decimals = 18;
+    const tokensToVisualUnits = 0.00001;
+    const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
+
     const segments = {
-      outOwnCredit: Number(derived.outOwnCredit) / 1e18 * barScale,
-      inCollateral: Number(derived.inCollateral) / 1e18 * barScale,
-      outPeerCredit: Number(derived.outPeerCredit) / 1e18 * barScale,
-      inOwnCredit: Number(derived.inOwnCredit) / 1e18 * barScale,
-      outCollateral: Number(derived.outCollateral) / 1e18 * barScale,
-      inPeerCredit: Number(derived.inPeerCredit) / 1e18 * barScale
+      outOwnCredit: Number(derived.outOwnCredit) * barScale,
+      inCollateral: Number(derived.inCollateral) * barScale,
+      outPeerCredit: Number(derived.outPeerCredit) * barScale,
+      inOwnCredit: Number(derived.inOwnCredit) * barScale,
+      outCollateral: Number(derived.outCollateral) * barScale,
+      inPeerCredit: Number(derived.inPeerCredit) * barScale
     };
 
-    // Left-side bars extend FROM left entity
-    const leftStartPos = direction.clone().normalize().multiplyScalar(-(fromEntitySize + barRadius + safeGap));
+    // Left-side bars extend FROM left entity (WORLD SPACE)
+    const leftStartPos = fromEntity.position.clone().add(
+      direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap)
+    );
 
     let leftOffset = 0;
     const leftBars = [
@@ -264,38 +277,47 @@ export class AccountManager {
       { key: 'outPeerCredit' as const, colorType: 'unsecured' as const }        // Their used (red) - closest to gap
     ];
 
-    leftBars.forEach((barSpec) => {
+    leftBars.forEach((barSpec, index) => {
       const length = segments[barSpec.key];
-      if (length > 0.01) {
-        const geometry = new THREE.CylinderGeometry(barRadius, barRadius, length, 16);
-        const barColor = colors[barSpec.colorType];
-        const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
 
-        const material = new THREE.MeshLambertMaterial({
-          color: barColor,
-          transparent: true,
-          opacity: isCredit ? 0.3 : 0.9,
-          emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
-          wireframe: isCredit
-        });
+      // Always create bar (even if length is 0) for smooth transitions
+      const geometry = new THREE.CylinderGeometry(barRadius, barRadius, 1, 16); // height=1, scale with mesh.scale.y
+      const barColor = colors[barSpec.colorType];
+      const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
 
-        const bar = new THREE.Mesh(geometry, material);
-        const barCenter = leftStartPos.clone().add(direction.clone().normalize().multiplyScalar(leftOffset + length / 2));
-        bar.position.copy(barCenter);
+      const material = new THREE.MeshLambertMaterial({
+        color: barColor,
+        transparent: true,
+        opacity: isCredit ? 0.3 : 0.9,
+        emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
+        wireframe: isCredit
+      });
 
-        // Rotate cylinder to align with direction
-        const axis = new THREE.Vector3(0, 1, 0);
-        bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+      const bar = new THREE.Mesh(geometry, material);
+      const barCenter = leftStartPos.clone().add(direction.clone().normalize().multiplyScalar(leftOffset + length / 2));
+      bar.position.copy(barCenter);
+      bar.userData['originalY'] = bar.position.y;
+      bar.userData['baseHeight'] = 1;
+      bar.userData['barKey'] = barSpec.key;
 
-        group.add(bar);
-        leftOffset += length;
-      }
+      // Rotate cylinder to align with direction
+      const axis = new THREE.Vector3(0, 1, 0);
+      bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+
+      // Register with animator for smooth transitions
+      const barKey = `${group.uuid}_left${index}`;
+      this.barAnimator.registerBar(barKey, bar, length);
+
+      group.add(bar);
+      leftOffset += length;
     });
 
-    // Right-side bars extend FROM right entity
+    // Right-side bars extend FROM left entity after gap (WORLD SPACE)
     const leftBarsLength = segments.outOwnCredit + segments.inCollateral + segments.outPeerCredit;
-    const gapStart = direction.clone().normalize().multiplyScalar(
-      -(fromEntitySize + barRadius + safeGap + leftBarsLength + minGapSpread)
+    const gapStart = fromEntity.position.clone().add(
+      direction.clone().normalize().multiplyScalar(
+        fromEntitySize + barRadius + safeGap + leftBarsLength + minGapSpread
+      )
     );
 
     let rightOffset = 0;
@@ -305,32 +327,39 @@ export class AccountManager {
       { key: 'inOwnCredit' as const, colorType: 'unsecured' as const }           // Our used (red) - closest to gap
     ];
 
-    rightBars.forEach((barSpec) => {
+    rightBars.forEach((barSpec, index) => {
       const length = segments[barSpec.key];
-      if (length > 0.01) {
-        const geometry = new THREE.CylinderGeometry(barRadius, barRadius, length, 16);
-        const barColor = colors[barSpec.colorType];
-        const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
 
-        const material = new THREE.MeshLambertMaterial({
-          color: barColor,
-          transparent: true,
-          opacity: isCredit ? 0.3 : 0.9,
-          emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
-          wireframe: isCredit
-        });
+      // Always create bar (even if length is 0) for smooth transitions
+      const geometry = new THREE.CylinderGeometry(barRadius, barRadius, 1, 16); // height=1, scale with mesh.scale.y
+      const barColor = colors[barSpec.colorType];
+      const isCredit = barSpec.colorType === 'availableCredit' || barSpec.colorType === 'unsecured';
 
-        const bar = new THREE.Mesh(geometry, material);
-        const barCenter = gapStart.clone().add(direction.clone().normalize().multiplyScalar(-(rightOffset + length / 2)));
-        bar.position.copy(barCenter);
+      const material = new THREE.MeshLambertMaterial({
+        color: barColor,
+        transparent: true,
+        opacity: isCredit ? 0.3 : 0.9,
+        emissive: new THREE.Color(barColor).multiplyScalar(isCredit ? 0.05 : 0.1),
+        wireframe: isCredit
+      });
 
-        // Rotate cylinder
-        const axis = new THREE.Vector3(0, 1, 0);
-        bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+      const bar = new THREE.Mesh(geometry, material);
+      const barCenter = gapStart.clone().add(direction.clone().normalize().multiplyScalar(rightOffset + length / 2));
+      bar.position.copy(barCenter);
+      bar.userData['originalY'] = bar.position.y;
+      bar.userData['baseHeight'] = 1;
+      bar.userData['barKey'] = barSpec.key;
 
-        group.add(bar);
-        rightOffset += length;
-      }
+      // Rotate cylinder
+      const axis = new THREE.Vector3(0, 1, 0);
+      bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+
+      // Register with animator for smooth transitions
+      const barKey = `${group.uuid}_right${index}`;
+      this.barAnimator.registerBar(barKey, bar, length);
+
+      group.add(bar);
+      rightOffset += length;
     });
   }
 
@@ -387,6 +416,13 @@ export class AccountManager {
       array[5] = toEntity.position.z;
       positions.needsUpdate = true;
     }
+  }
+
+  /**
+   * Update bar animations (call this in animation loop)
+   */
+  update(deltaTime: number) {
+    this.barAnimator.update(deltaTime);
   }
 
   /**
@@ -495,6 +531,7 @@ export class AccountManager {
 
     this.accounts.clear();
     this.accountIndexMap.clear();
+    this.barAnimator.clear();
   }
 
   /**

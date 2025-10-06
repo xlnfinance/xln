@@ -132,12 +132,16 @@
           };
           console.log('📤 Sending R→C deposit_collateral');
         } else {
-          // C→R: Withdrawal request (requires counterparty approval)
-          // TODO: Implement withdrawal request flow via bilateral account consensus
-          // For now, user can use Advanced mode with manual settleDiffs
-          alert('Withdrawal requires bilateral approval flow - not yet wired to UI.\n\nUse Advanced mode with manual settleDiffs for now, or wait for bilateral withdrawal UI.');
-          sending = false;
-          return;
+          // C→R: Withdrawal request (bilateral via account consensus)
+          entityTx = {
+            type: 'requestWithdrawal' as const,
+            data: {
+              counterpartyEntityId,
+              tokenId,
+              amount: BigInt(simpleAmount),
+            },
+          };
+          console.log('📤 Sending C→R withdrawal request');
         }
       } else {
         // ADVANCED MODE: Manual settleDiffs (requires invariant)

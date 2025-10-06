@@ -69,19 +69,52 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       throw new Error('Jurisdiction missing contract addresses (entityProvider and depository)');
     }
 
+    console.log(`🔌 CONNECTING: jurisdiction=${jurisdiction.name}, rpcUrl=${rpcUrl}`);
+    if (isBrowser) {
+      console.log(`   Page Origin: ${window.location.origin}`);
+      console.log(`   Page Protocol: ${window.location.protocol}`);
+      console.log(`   Page Host: ${window.location.hostname}:${window.location.port}`);
+      console.log(`   RPC Origin: ${new URL(rpcUrl).origin}`);
+      console.log(`   CORS issue? ${window.location.origin !== new URL(rpcUrl).origin ? 'YES - Different origins!' : 'No'}`);
+      console.log(`   User Agent: ${navigator.userAgent}`);
+    }
+    console.log(`   Contracts: EP=${entityProviderAddress.slice(0,10)}, DEP=${depositoryAddress.slice(0,10)}`);
+
     // Connect to specified RPC node
     const provider = new ethers.JsonRpcProvider(rpcUrl);
+    console.log(`✅ Provider created`);
 
-    // Use first account for testing (Hardhat account #0)
-    const signer = await provider.getSigner(0);
+    // Use Hardhat account #0 private key (browser-compatible, no getSigner)
+    // This is the publicly known Hardhat test key, safe for demo
+    const privateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+    const signer = new ethers.Wallet(privateKey, provider);
+    console.log(`✅ Signer created: ${await signer.getAddress()}`);
+
+    // Test connection
+    try {
+      const network = await provider.getNetwork();
+      console.log(`✅ Network connected: chainId=${network.chainId}`);
+    } catch (netError) {
+      console.error(`❌ NETWORK-CONNECT-FAILED:`, netError);
+      console.error(`   RPC URL: ${rpcUrl}`);
+      console.error(`   Error code: ${(netError as any)?.code}`);
+      console.error(`   Error message: ${(netError as any)?.message}`);
+      throw netError;
+    }
 
     // Create contract instances
     const entityProvider = new ethers.Contract(entityProviderAddress, ENTITY_PROVIDER_ABI, signer);
     const depository = new ethers.Contract(depositoryAddress, DEPOSITORY_ABI, signer);
+    console.log(`✅ Contracts created for ${jurisdiction.name}`);
 
     return { provider, signer, entityProvider, depository };
   } catch (error) {
-    console.error(`Failed to connect to ${jurisdiction.name}:`, error);
+    console.error(`❌ CONNECT-FAILED: ${jurisdiction.name}:`, error);
+    console.error(`   RPC URL: ${rpcUrl}`);
+    console.error(`   Error type: ${(error as any)?.constructor?.name}`);
+    console.error(`   Error code: ${(error as any)?.code}`);
+    console.error(`   Error reason: ${(error as any)?.reason}`);
+    console.error(`   Error stack:`, (error as any)?.stack);
     throw error;
   }
 };
@@ -651,16 +684,32 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
 
       // CRITICAL: Check for RPC override (for Oculus Quest compatibility)
       let rpcUrl = jData['rpc'];
+
+      // Detect Oculus Browser (blocks custom ports on HTTPS - security restriction)
+      const isOculusBrowser = isBrowser && /OculusBrowser|Quest/i.test(navigator.userAgent);
+
       const rpcOverride = isBrowser ? localStorage.getItem('xln_rpc_override') : null;
+
+      console.log(`🔍 RPC-TRANSFORM-START: key=${key}, rpc=${rpcUrl}, isOculus=${isOculusBrowser}, override=${rpcOverride}`);
+
+      // Oculus Browser fix: Force direct port without +10000 offset
+      if (isOculusBrowser && !rpcOverride && rpcUrl.startsWith(':')) {
+        const port = parseInt(rpcUrl.slice(1));
+        rpcUrl = `${window.location.protocol}//${window.location.hostname}:${port}`;
+        console.log(`🎮 OCULUS FIX: Using direct port ${port} → ${rpcUrl}`);
+      }
 
       if (rpcOverride && rpcOverride !== '') {
         // User-specified RPC override
         if (rpcOverride.startsWith('/')) {
           // Path-based proxy (e.g., /rpc or /rpc/ethereum)
-          const jurisdictionName = jData['name'].toLowerCase();
-          const path = rpcOverride.endsWith('/') ? rpcOverride + jurisdictionName : `${rpcOverride}/${jurisdictionName}`;
+          // If single jurisdiction, use path directly. If multiple, append jurisdiction name.
+          const jurisdictionCount = Object.keys(config.jurisdictions).length;
+          const path = jurisdictionCount === 1
+            ? rpcOverride  // Single jurisdiction: use /rpc directly
+            : (rpcOverride.endsWith('/') ? rpcOverride + jData['name'].toLowerCase() : `${rpcOverride}/${jData['name'].toLowerCase()}`);
           rpcUrl = `${window.location.origin}${path}`;
-          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (path proxy)`);
+          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (path proxy, ${jurisdictionCount} jurisdictions)`);
         } else if (rpcOverride.startsWith(':')) {
           // Port-based (e.g., :8545 or :18545)
           rpcUrl = `${window.location.protocol}//${window.location.hostname}${rpcOverride}`;
@@ -676,11 +725,16 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         const isLocalhost = window.location.hostname.match(/localhost|127\.0\.0\.1/);
         const actualPort = isLocalhost ? port : port + 10000;
         rpcUrl = `${window.location.protocol}//${window.location.hostname}:${actualPort}`;
-        console.log(`🔧 RPC URL: ${jData['rpc']} → ${rpcUrl} (${isLocalhost ? 'local' : 'production'})`);
+        console.log(`🔧 RPC-TRANSFORM-DEFAULT: ${jData['rpc']} → ${rpcUrl}`);
+        console.log(`   Hostname: ${window.location.hostname} (isLocalhost=${!!isLocalhost})`);
+        console.log(`   Port: ${port} → ${actualPort} (${isLocalhost ? 'direct' : '+10000'})`);
       } else if (!isBrowser && rpcUrl.startsWith(':')) {
         // Node.js: Default to localhost
         rpcUrl = `http://localhost${rpcUrl}`;
       }
+
+      console.log(`📍 FINAL-RPC-URL: ${key} → ${rpcUrl}`);
+      console.log(`   Contracts: EP=${jData['contracts']['entityProvider']}, DEP=${jData['contracts']['depository']}`);
 
       jurisdictions.set(key, {
         address: rpcUrl,
