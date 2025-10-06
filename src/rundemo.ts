@@ -259,7 +259,7 @@ const runDemo = async (env: Env): Promise<Env> => {
         accountTx: {
           type: 'direct_payment' as const,
           data: {
-            tokenId: 2, // USD token for reference pricing
+            tokenId: 1, // USDC token for reference pricing (token 1 = USDC)
             amount: 50000n, // $500 USD payment
             description: 'Demo direct payment from e1 to e2'
           }
@@ -287,9 +287,9 @@ const runDemo = async (env: Env): Promise<Env> => {
     const e1_account = e1_final_replica.state.accounts.get(e2_id)!;
     const e2_account = e2_final_replica.state.accounts.get(e1_id)!;
 
-    // Check token 2 (USD) balances
-    const e1_delta = e1_account.deltas.get(2);
-    const e2_delta = e2_account.deltas.get(2);
+    // Check token 1 (USDC) balances
+    const e1_delta = e1_account.deltas.get(1);
+    const e2_delta = e2_account.deltas.get(1);
 
     if (e1_delta && e2_delta) {
       const e1_total = e1_delta.ondelta + e1_delta.offdelta;

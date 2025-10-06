@@ -71,7 +71,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
     if (hasAddDelta) {
       const usdcTokenId = 1;
-      const defaultCreditLimit = getDefaultCreditLimit(3); // 1M USDC
+      const defaultCreditLimit = getDefaultCreditLimit(1); // 1M USDC (token 1)
 
       console.log(`💳 NEW-ACCOUNT: Received opening frame, queueing our credit limit`);
 

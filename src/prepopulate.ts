@@ -13,7 +13,7 @@ import { buildEntityProfile } from './gossip-helper';
 import { cloneEntityReplica } from './state-helpers';
 import type { Profile } from './gossip';
 
-const USDC_TOKEN_ID = 2;
+const USDC_TOKEN_ID = 1; // Token 1 = USDC (fixed from incorrect token 2)
 const DECIMALS = 18n;
 const ONE_TOKEN = 10n ** DECIMALS;
 

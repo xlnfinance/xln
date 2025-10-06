@@ -10,6 +10,70 @@ Do not create mocks/stubs unless asked to. Use real integration. Don't repeat sa
 
 ALWAYS run `bun run check` after applying changes to ensure type safety.
 
+## 🎯 TOKEN EFFICIENCY (CRITICAL - Learned from 2025-10-06 session)
+
+**This session wasted ~250k tokens (50% of total). Don't repeat these mistakes:**
+
+### **GREP-FIRST, READ-SECOND (saves ~100k tokens)**
+```bash
+# ❌ NEVER do this:
+Read /Users/egor/xln/2024_src/app/Channel.ts  # Reads entire 800-line file
+
+# ✅ ALWAYS do this:
+grep -n "AddDelta\|SetCreditLimit" 2024_src/app/Channel.ts
+# Then read ONLY the relevant lines:
+Read /Users/egor/xln/2024_src/app/Channel.ts offset=287 limit=80
+```
+
+### **FILTER ALL COMMAND OUTPUT (saves ~80k tokens)**
+```bash
+# ❌ NEVER dump full output:
+bun test 2>&1  # Returns 500+ lines
+
+# ✅ ALWAYS filter to what matters:
+bun test 2>&1 | grep -E "(✅|❌|PASSED|FAILED|error TS)"
+bun run check 2>&1 | grep -E "(found.*error|✓ built)" | head -10
+```
+
+### **AGENTS FOR DESIGN, NOT VERIFICATION (saves ~50k tokens)**
+```bash
+# ✅ Use agents for:
+- Architecture decisions ("how should multi-hop routing work?")
+- Complex analysis requiring multiple file reads
+- Final security review of completed work
+
+# ❌ DON'T use agents for:
+- Verifying your own fixes (just run tests)
+- Simple file comparisons (use grep + diff)
+- Checking if code matches reference (read both files yourself)
+```
+
+### **TERSE CONFIRMATIONS (saves ~30k tokens)**
+```bash
+# ❌ After fixing something:
+"I've successfully fixed the issue by changing X to Y. This ensures that Z happens correctly. The fix follows the Channel.ts pattern where..."
+
+# ✅ After fixing something:
+"Fixed. Tests pass."
+# (User can see the code changes, doesn't need explanation)
+```
+
+### **REFERENCE FILES - GREP ONLY, NEVER READ FULL**
+These files are >500 lines and should ONLY be accessed via grep:
+- `2024_src/app/Channel.ts` (800 lines - reference only)
+- `2019vue.txt` (13k+ lines - UI reference only)
+- Any file in `node_modules/`
+- Any test file you're not actively editing
+
+### **CHECK IMPORTS BEFORE READING CODE**
+```bash
+# Before reading potentially dead code:
+grep -r "from.*account-tx/processor" /Users/egor/xln/src
+# No results? DELETE immediately, don't analyze
+```
+
+**GOLDEN RULE:** If you're about to Read a file >300 lines, ask yourself: "Can I grep for the specific function/pattern first?"
+
 ## 🚨 CRITICAL: BROWSER-ONLY BUILD (NEVER FORGET!)
 
 **ALWAYS use `--target=browser` with ALL external flags when building server.ts:**

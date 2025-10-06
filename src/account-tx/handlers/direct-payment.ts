@@ -84,9 +84,9 @@ export function handleDirectPayment(
     };
   }
 
-  // Check global credit limits for the USD-denominated token (token 2)
+  // Check global credit limits for the USD-denominated token (token 1 = USDC)
   const newDelta = delta.ondelta + delta.offdelta + canonicalDelta;
-  if (isOurFrame && tokenId === 2 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
+  if (isOurFrame && tokenId === 1 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
     return {
       success: false,
       error: `Exceeds global credit limit: ${newDelta.toString()} > ${accountMachine.globalCreditLimits.peerLimit.toString()}`,

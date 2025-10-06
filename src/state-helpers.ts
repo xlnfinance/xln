@@ -112,6 +112,7 @@ export const cloneEntityReplica = (replica: EntityReplica): EntityReplica => {
       }
     }),
     isProposer: replica.isProposer,
+    ...(replica.sentTransitions !== undefined && { sentTransitions: replica.sentTransitions }),
     ...(replica.position && { position: { ...replica.position } }),
   };
 };

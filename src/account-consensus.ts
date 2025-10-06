@@ -91,7 +91,8 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
  * Propose account frame (like old_src Channel consensus)
  */
 export async function proposeAccountFrame(
-  accountMachine: AccountMachine
+  accountMachine: AccountMachine,
+  skipCounterIncrement: boolean = false
 ): Promise<{ success: boolean; accountInput?: AccountInput; events: string[]; error?: string }> {
   console.log(`🚀 E-MACHINE: Proposing account frame for ${accountMachine.counterpartyEntityId.slice(-4)}`);
   console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentFrameId=${accountMachine.currentFrameId}`);
@@ -226,7 +227,7 @@ export async function proposeAccountFrame(
     frameId: newFrame.frameId,
     newAccountFrame: newFrame,
     newSignatures: [signature],
-    counter: ++accountMachine.proofHeader.cooperativeNonce, // CHANNEL.TS REFERENCE: Line 536 - use cooperativeNonce as counter
+    counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
   return { success: true, accountInput, events };
@@ -336,12 +337,19 @@ export async function handleAccountInput(
       } else {
         // We are RIGHT - rollback our frame, accept theirs
         if (accountMachine.rollbackCount === 0) {
-          // First rollback - discard our pending frame
+          // First rollback - restore transactions to mempool before discarding frame
+          if (accountMachine.pendingFrame) {
+            console.log(`📥 RIGHT-ROLLBACK: Restoring ${accountMachine.pendingFrame.accountTxs.length} txs to mempool`);
+            // CRITICAL: Re-add transactions to mempool (Channel.ts pattern)
+            accountMachine.mempool.unshift(...accountMachine.pendingFrame.accountTxs);
+            console.log(`📥 Mempool now has ${accountMachine.mempool.length} txs after rollback restore`);
+          }
+
           accountMachine.sentTransitions = 0;
           delete accountMachine.pendingFrame;
           delete accountMachine.clonedForValidation;
           accountMachine.rollbackCount++;
-          console.log(`📥 RIGHT-ROLLBACK: Discarding our frame, accepting left's (rollbacks: ${accountMachine.rollbackCount})`);
+          console.log(`📥 RIGHT-ROLLBACK: Accepting left's frame (rollbacks: ${accountMachine.rollbackCount})`);
           // Continue to process their frame below
         } else {
           // Should never rollback twice
@@ -457,22 +465,27 @@ export async function handleAccountInput(
 
     // Send confirmation (ACK)
     const confirmationSig = signAccountFrame(accountMachine.proofHeader.fromEntity, receivedFrame.stateHash);
+
+    // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
+    // Check if we should batch BEFORE incrementing counter
+    let batchedWithNewFrame = false;
     const response: AccountInput = {
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       frameId: receivedFrame.frameId,
       prevSignatures: [confirmationSig],
-      counter: ++accountMachine.proofHeader.cooperativeNonce, // CHANNEL.TS REFERENCE: Line 620
+      counter: 0, // Will be set below after batching decision
     };
 
-    // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
-    // If we have mempool items, propose next frame immediately
+    // If we have mempool items, propose next frame immediately and batch with ACK
     if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
       console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
 
-      const proposeResult = await proposeAccountFrame(accountMachine);
+      // Pass skipCounterIncrement=true since we'll increment for the whole batch below
+      const proposeResult = await proposeAccountFrame(accountMachine, true);
 
       if (proposeResult.success && proposeResult.accountInput) {
+        batchedWithNewFrame = true;
         // Merge ACK and new proposal into same AccountInput
         if (proposeResult.accountInput.newAccountFrame) {
           response.newAccountFrame = proposeResult.accountInput.newAccountFrame;
@@ -486,6 +499,10 @@ export async function handleAccountInput(
         events.push(`📤 Batched ACK + frame ${newFrameId}`);
       }
     }
+
+    // Increment counter ONCE per message (whether batched or not)
+    response.counter = ++accountMachine.proofHeader.cooperativeNonce;
+    console.log(`🔢 Message counter: ${response.counter} (batched=${batchedWithNewFrame})`);
 
     return { success: true, response, events };
   }

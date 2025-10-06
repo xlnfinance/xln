@@ -201,8 +201,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           ackedTransitions: 0,
           deltas: initialDeltas,
           globalCreditLimits: {
-            ownLimit: getDefaultCreditLimit(3), // We extend 1M USD credit (USDC) to counterparty
-            peerLimit: getDefaultCreditLimit(3), // Counterparty extends same credit to us
+            ownLimit: getDefaultCreditLimit(1), // We extend 1M USDC credit to counterparty (token 1 = USDC)
+            peerLimit: getDefaultCreditLimit(1), // Counterparty extends same USDC credit to us
           },
           // Frame-based consensus fields
           currentFrameId: 0,
@@ -235,7 +235,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Token 1 = USDC
       const usdcTokenId = 1;
-      const defaultCreditLimit = getDefaultCreditLimit(3); // 1M USDC
+      const defaultCreditLimit = getDefaultCreditLimit(1); // 1M USDC (token 1)
 
       // Determine canonical side (left/right) - DETERMINISTIC
       const isLeftEntity = entityState.entityId < entityTx.data.targetEntityId;
