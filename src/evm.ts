@@ -649,9 +649,29 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       }
       const jData = data as Record<string, any>;
 
-      // CRITICAL: Expand RPC URLs - production uses port + 10000 (nginx proxy)
+      // CRITICAL: Check for RPC override (for Oculus Quest compatibility)
       let rpcUrl = jData['rpc'];
-      if (isBrowser && rpcUrl.startsWith(':')) {
+      const rpcOverride = isBrowser ? localStorage.getItem('xln_rpc_override') : null;
+
+      if (rpcOverride && rpcOverride !== '') {
+        // User-specified RPC override
+        if (rpcOverride.startsWith('/')) {
+          // Path-based proxy (e.g., /rpc or /rpc/ethereum)
+          const jurisdictionName = jData['name'].toLowerCase();
+          const path = rpcOverride.endsWith('/') ? rpcOverride + jurisdictionName : `${rpcOverride}/${jurisdictionName}`;
+          rpcUrl = `${window.location.origin}${path}`;
+          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (path proxy)`);
+        } else if (rpcOverride.startsWith(':')) {
+          // Port-based (e.g., :8545 or :18545)
+          rpcUrl = `${window.location.protocol}//${window.location.hostname}${rpcOverride}`;
+          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (custom port)`);
+        } else {
+          // Full URL override
+          rpcUrl = rpcOverride;
+          console.log(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (full URL)`);
+        }
+      } else if (isBrowser && rpcUrl.startsWith(':')) {
+        // Default behavior: production uses port + 10000 (nginx proxy)
         const port = parseInt(rpcUrl.slice(1));
         const isLocalhost = window.location.hostname.match(/localhost|127\.0\.0\.1/);
         const actualPort = isLocalhost ? port : port + 10000;

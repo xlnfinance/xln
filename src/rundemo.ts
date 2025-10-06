@@ -326,7 +326,7 @@ const runDemo = async (env: Env): Promise<Env> => {
     const e1_account = e1_replica_final.state.accounts.get(e2_id)!;
     console.log(`💳 ${formatEntityDisplay(e1_id)} account with ${formatEntityDisplay(e2_id)}:`);
     console.log(`   Credit limits: own=${e1_account.globalCreditLimits.ownLimit.toString()} USD, peer=${e1_account.globalCreditLimits.peerLimit.toString()} USD`);
-    console.log(`   Frame ${e1_account.currentFrame.frameId}: tokens=[${e1_account.currentFrame.tokenIds.join(',')}], deltas=[${e1_account.currentFrame.deltas.map(d => d.toString()).join(',')}]`);
+    console.log(`   Frame ${e1_account.currentFrame.height}: tokens=[${e1_account.currentFrame.tokenIds.join(',')}], deltas=[${e1_account.currentFrame.deltas.map(d => d.toString()).join(',')}]`);
     console.log(`   Sent transitions: ${e1_account.sentTransitions}, mempool: ${e1_account.mempool.length}`);
   }
 
@@ -334,7 +334,7 @@ const runDemo = async (env: Env): Promise<Env> => {
     const e2_account = e2_replica_final.state.accounts.get(e1_id)!;
     console.log(`💳 ${formatEntityDisplay(e2_id)} account with ${formatEntityDisplay(e1_id)}:`);
     console.log(`   Credit limits: own=${e2_account.globalCreditLimits.ownLimit.toString()} USD, peer=${e2_account.globalCreditLimits.peerLimit.toString()} USD`);
-    console.log(`   Frame ${e2_account.currentFrame.frameId}: tokens=[${e2_account.currentFrame.tokenIds.join(',')}], deltas=[${e2_account.currentFrame.deltas.map(d => d.toString()).join(',')}]`);
+    console.log(`   Frame ${e2_account.currentFrame.height}: tokens=[${e2_account.currentFrame.tokenIds.join(',')}], deltas=[${e2_account.currentFrame.deltas.map(d => d.toString()).join(',')}]`);
     console.log(`   Sent transitions: ${e2_account.sentTransitions}, mempool: ${e2_account.mempool.length}`);
   }
 

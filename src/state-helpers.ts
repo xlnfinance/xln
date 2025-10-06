@@ -231,7 +231,7 @@ function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
     ackedTransitions: account.ackedTransitions,
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
     globalCreditLimits: { ...account.globalCreditLimits },
-    currentFrameId: account.currentFrameId,
+    currentHeight: account.currentHeight,
     pendingSignatures: [...account.pendingSignatures],
     rollbackCount: account.rollbackCount,
     sendCounter: account.sendCounter,

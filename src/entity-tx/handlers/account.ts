@@ -25,8 +25,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       counterpartyEntityId: input.fromEntityId,
       mempool: [],
       currentFrame: {
-        frameId: 0,
-        timestamp: Date.now(),
+        height: 0,
+        timestamp: env.timestamp, // DETERMINISTIC: Copy from server machine
         tokenIds: [],
         deltas: [],
       },
@@ -34,10 +34,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       ackedTransitions: 0,
       deltas: initialDeltas,
       globalCreditLimits: {
-        ownLimit: getDefaultCreditLimit(2),
-        peerLimit: getDefaultCreditLimit(2),
+        ownLimit: getDefaultCreditLimit(1), // Token 1 = USDC (was incorrectly token 2)
+        peerLimit: getDefaultCreditLimit(1),
       },
-      currentFrameId: 0,
+      currentHeight: 0,
       pendingSignatures: [],
       rollbackCount: 0,
       sendCounter: 0,    // Channel.ts message counter
@@ -90,10 +90,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   }
 
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
-  if (input.frameId || input.newAccountFrame) {
+  if (input.height || input.newAccountFrame) {
     console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}`);
 
-    const result = await processAccountInput(accountMachine, input);
+    const result = await processAccountInput(env, accountMachine, input);
 
     if (result.success) {
       newState.messages.push(...result.events);

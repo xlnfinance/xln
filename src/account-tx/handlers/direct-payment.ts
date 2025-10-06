@@ -72,21 +72,24 @@ export function handleDirectPayment(
     };
   }
 
-  const isLeftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+  // CRITICAL: ALWAYS check capacity from SENDER's perspective (both on creation and verification)
+  // Determine if sender is left entity
+  const senderIsLeft = paymentFromEntity === leftEntity;
 
-  // Check capacity using deriveDelta (perspective-aware)
-  const derived = deriveDelta(delta, isLeftEntity);
-  if (isOurFrame && amount > derived.outCapacity) {
+  // Derive capacity from sender's perspective
+  const senderDerived = deriveDelta(delta, senderIsLeft);
+
+  if (amount > senderDerived.outCapacity) {
     return {
       success: false,
-      error: `Insufficient capacity: need ${amount.toString()}, available ${derived.outCapacity.toString()}`,
+      error: `Insufficient capacity for sender ${paymentFromEntity.slice(-4)}: need ${amount.toString()}, available ${senderDerived.outCapacity.toString()}`,
       events,
     };
   }
 
-  // Check global credit limits for the USD-denominated token (token 1 = USDC)
+  // CRITICAL: ALWAYS check global credit limits (not just for our frames)
   const newDelta = delta.ondelta + delta.offdelta + canonicalDelta;
-  if (isOurFrame && tokenId === 1 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
+  if (tokenId === 1 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
     return {
       success: false,
       error: `Exceeds global credit limit: ${newDelta.toString()} > ${accountMachine.globalCreditLimits.peerLimit.toString()}`,

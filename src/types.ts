@@ -100,6 +100,19 @@ export type EntityTx =
       data: { from: string; message: string };
     }
   | {
+      type: 'chatMessage';
+      data: {
+        message: string;
+        timestamp: number;
+        metadata?: {
+          type: string;
+          counterpartyId?: string;
+          height?: number;
+          frameAge?: number;
+        };
+      };
+    }
+  | {
       type: 'propose';
       data: { action: ProposalAction; proposer: string };
     }
@@ -161,7 +174,7 @@ export interface AccountDelta {
 
 // Simple account state snapshot (for currentFrame)
 export interface AccountSnapshot {
-  frameId: number;
+  height: number; // Renamed from frameId for S/E/A consistency
   timestamp: number;
   tokenIds: number[]; // Array of token IDs in this account
   deltas: bigint[]; // Array of deltas corresponding to tokenIds
@@ -185,7 +198,7 @@ export interface AccountMachine {
   };
 
   // Frame-based consensus (like old_src Channel, consistent with entity frames)
-  currentFrameId: number;
+  currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
   pendingSignatures: string[];
 
@@ -226,14 +239,15 @@ export interface AccountMachine {
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
 export interface AccountFrame {
-  frameId: number;
+  height: number; // Renamed from frameId for S/E/A consistency
   timestamp: number;
   accountTxs: AccountTx[]; // Renamed from transitions
-  previousStateHash: string;
+  prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
   stateHash: string;
   // Removed isProposer - both sides can propose bilaterally
   tokenIds: number[]; // Array of token IDs in this frame
-  deltas: bigint[]; // Array of deltas corresponding to tokenIds
+  deltas: bigint[]; // Array of deltas corresponding to tokenIds (ondelta+offdelta for quick access)
+  fullDeltaStates?: Delta[]; // OPTIONAL: Full delta objects (includes credit limits, allowances, collateral)
 }
 
 // AccountInput - Maps 1:1 to Channel.ts FlushMessage (frame-level consensus ONLY)
@@ -242,7 +256,7 @@ export interface AccountInput {
   toEntityId: string;
 
   // Frame-level consensus (matches Channel.ts FlushMessage structure)
-  frameId?: number;                  // Which frame we're ACKing or referencing
+  height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
   prevSignatures?: string[];         // ACK for their frame (like pendingSignatures in Channel.ts)
   newAccountFrame?: AccountFrame;    // Our new proposed frame (like block in Channel.ts)
   newSignatures?: string[];          // Signatures on new frame (like newSignatures in Channel.ts)
@@ -319,6 +333,9 @@ export interface EntityState {
 
   // 🔗 Account machine integration
   accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine
+
+  // ⏰ Crontab system - periodic task execution
+  crontabState?: any; // CrontabState from entity-crontab.ts (avoid circular import)
 }
 
 export interface ProposedEntityFrame {

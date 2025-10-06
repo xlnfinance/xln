@@ -12,11 +12,11 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env } from './types';
+import { AccountMachine, AccountFrame, AccountTx, AccountInput } from './types';
 import { cloneAccountMachine } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
-import { cryptoHash as hash } from './utils';
+import { cryptoHash as hash, hash20 } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
@@ -26,7 +26,6 @@ import { processAccountTx } from './account-tx/apply';
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
 const MAX_MESSAGE_COUNTER = 1000000;
-const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
 
 // === VALIDATION ===
@@ -34,15 +33,13 @@ const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block siz
 /**
  * Validate account frame (frame-level validation)
  */
-export function validateAccountFrame(frame: AccountFrame, currentTimestamp?: number): boolean {
-  if (frame.height < 0) return false;
+export function validateAccountFrame(frame: AccountFrame): boolean {
+  if (frame.frameId < 0) return false;
   if (frame.accountTxs.length > 100) return false;
   if (frame.tokenIds.length !== frame.deltas.length) return false;
 
-  // Optional timestamp drift check (only if currentTimestamp provided)
-  if (currentTimestamp !== undefined) {
-    if (Math.abs(frame.timestamp - currentTimestamp) > MAX_FRAME_TIMESTAMP_DRIFT_MS) return false;
-  }
+  const now = Date.now();
+  if (Math.abs(frame.timestamp - now) > 300000) return false; // 5 min drift
 
   return true;
 }
@@ -70,37 +67,15 @@ export function validateMessageCounter(accountMachine: AccountMachine, counter: 
 // === FRAME HASH COMPUTATION ===
 
 async function createFrameHash(frame: AccountFrame): Promise<string> {
-  // CRITICAL: Use keccak256 for EVM compatibility (Channel.ts:585, 744)
-  // Include prevFrameHash to chain frames together (prevents signature replay)
-  const { ethers } = await import('ethers');
+  // Use browser-compatible crypto for proper deterministic hashing
+  const txsContent = frame.accountTxs.map(tx =>
+    `${tx.type}:${safeStringify(tx.data)}`
+  ).join('|');
 
-  // Encode FULL frame structure including all delta fields (2024 pattern)
-  const frameData = {
-    height: frame.height,
-    timestamp: frame.timestamp,
-    prevFrameHash: frame.prevFrameHash, // Chain linkage
-    accountTxs: frame.accountTxs.map(tx => ({
-      type: tx.type,
-      data: tx.data
-    })),
-    tokenIds: frame.tokenIds,
-    deltas: frame.deltas.map(d => d.toString()), // Quick access sums
-    // AUDIT FIX: Include FULL delta state (credit limits, allowances, collateral)
-    fullDeltaStates: frame.fullDeltaStates?.map(delta => ({
-      tokenId: delta.tokenId,
-      collateral: delta.collateral.toString(),
-      ondelta: delta.ondelta.toString(),
-      offdelta: delta.offdelta.toString(),
-      leftCreditLimit: delta.leftCreditLimit.toString(),
-      rightCreditLimit: delta.rightCreditLimit.toString(),
-      leftAllowence: delta.leftAllowence.toString(),
-      rightAllowence: delta.rightAllowence.toString(),
-    }))
-  };
+  const content = `${frame.frameId}-${frame.timestamp}-${txsContent}-${frame.tokenIds.join(',')}-${frame.deltas.map(d => d.toString()).join(',')}`;
 
-  // Use keccak256 like 2024 Channel.ts (not truncated hash20)
-  const encoded = safeStringify(frameData); // Deterministic JSON encoding
-  return ethers.keccak256(ethers.toUtf8Bytes(encoded));
+  // Use hash20 to get first 20 bytes like old_src
+  return await hash20(content);
 }
 
 // === TRANSACTION PROCESSING ===
@@ -114,12 +89,11 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
  * Propose account frame (like old_src Channel consensus)
  */
 export async function proposeAccountFrame(
-  env: Env,
   accountMachine: AccountMachine,
   skipCounterIncrement: boolean = false
 ): Promise<{ success: boolean; accountInput?: AccountInput; events: string[]; error?: string }> {
   console.log(`🚀 E-MACHINE: Proposing account frame for ${accountMachine.counterpartyEntityId.slice(-4)}`);
-  console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`);
+  console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentFrameId=${accountMachine.currentFrameId}`);
 
   const events: string[] = [];
 
@@ -136,7 +110,7 @@ export async function proposeAccountFrame(
 
   // Check if we have a pending frame waiting for ACK
   if (accountMachine.pendingFrame) {
-    console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.height}`);
+    console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.frameId}`);
     return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
 
@@ -158,10 +132,9 @@ export async function proposeAccountFrame(
   }
 
   // CRITICAL FIX: Extract FULL delta state from clonedMachine.deltas (after processing)
-  // Include ALL fields (credit limits, allowances, collateral) for dispute proofs
+  // This was the consensus bug - we were using old currentFrame instead of new deltas
   const finalTokenIds: number[] = [];
   const finalDeltas: bigint[] = [];
-  const fullDeltaStates: import('./types').Delta[] = [];
 
   // Sort by tokenId for deterministic ordering
   const sortedTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
@@ -179,8 +152,6 @@ export async function proposeAccountFrame(
 
     finalTokenIds.push(tokenId);
     finalDeltas.push(totalDelta);
-    // AUDIT FIX: Store FULL delta state (collateral, credit limits, allowances)
-    fullDeltaStates.push({ ...delta });
   }
 
   console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
@@ -189,21 +160,20 @@ export async function proposeAccountFrame(
 
   // Create account frame matching the real AccountFrame interface
   const frameData = {
-    height: accountMachine.currentHeight + 1,
-    timestamp: env.timestamp, // DETERMINISTIC: Copy from server machine
+    frameId: accountMachine.currentFrameId + 1,
+    timestamp: Date.now(), // Keep as number
     accountTxs: [...accountMachine.mempool],
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
-    prevFrameHash: accountMachine.currentHeight === 0
+    prevFrameHash: accountMachine.currentFrameId === 0
       ? 'genesis'
       : accountMachine.currentFrame.stateHash || '',
     stateHash: '', // Will be filled after hash calculation
     tokenIds: finalTokenIds, // Use computed state from clonedMachine.deltas
-    deltas: finalDeltas,      // Quick access: ondelta+offdelta sums
-    fullDeltaStates          // AUDIT FIX: Full Delta objects for dispute proofs
+    deltas: finalDeltas       // Use computed state from clonedMachine.deltas
   };
 
-  // Calculate state hash (frameData is properly typed AccountFrame)
-  frameData.stateHash = await createFrameHash(frameData as AccountFrame);
+  // Calculate state hash
+  frameData.stateHash = await createFrameHash(frameData as any);
 
   // VALIDATE AT SOURCE: Guaranteed type safety from this point forward
   let newFrame: AccountFrame;
@@ -242,12 +212,12 @@ export async function proposeAccountFrame(
   // Clear mempool
   accountMachine.mempool = [];
 
-  events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
+  events.push(`🚀 Proposed frame ${newFrame.frameId} with ${newFrame.accountTxs.length} transactions`);
 
   const accountInput: AccountInput = {
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
-    height: newFrame.height,
+    frameId: newFrame.frameId,
     newAccountFrame: newFrame,
     newSignatures: [signature],
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
@@ -260,7 +230,6 @@ export async function proposeAccountFrame(
  * Handle received AccountInput (bilateral consensus)
  */
 export async function handleAccountInput(
-  env: Env,
   accountMachine: AccountMachine,
   input: AccountInput
 ): Promise<{ success: boolean; response?: AccountInput; events: string[]; error?: string }> {
@@ -271,7 +240,7 @@ export async function handleAccountInput(
   // CRITICAL: Counter validation (replay protection) - ALWAYS enforce, no frame 0 exemption
   if (input.counter !== undefined) {
     const counterValid = validateMessageCounter(accountMachine, input.counter);
-    console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, frameId=${accountMachine.currentHeight}, valid=${counterValid}`);
+    console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, frameId=${accountMachine.currentFrameId}, valid=${counterValid}`);
 
     if (!counterValid) {
       return { success: false, error: `Replay attack detected: counter ${input.counter} invalid (expected ${accountMachine.ackedTransitions + 1})`, events };
@@ -285,8 +254,8 @@ export async function handleAccountInput(
   }
 
   // Handle pending frame confirmation
-  if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevSignatures) {
-    console.log(`✅ Received confirmation for pending frame ${input.height}`);
+  if (accountMachine.pendingFrame && input.frameId === accountMachine.pendingFrame.frameId && input.prevSignatures) {
+    console.log(`✅ Received confirmation for pending frame ${input.frameId}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
     const expectedSigner = accountMachine.proofHeader.toEntity;
@@ -294,7 +263,7 @@ export async function handleAccountInput(
     const signature = input.prevSignatures[0];
     if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(expectedSigner, frameHash, signature)) {
       // CRITICAL DEBUG: Log what we're committing
-      console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
+      console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.frameId}`);
       console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
       console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
       console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
@@ -304,17 +273,17 @@ export async function handleAccountInput(
       if (accountMachine.clonedForValidation) {
         accountMachine.deltas = accountMachine.clonedForValidation.deltas;
         accountMachine.currentFrame = {
-          height: accountMachine.pendingFrame.height,
+          frameId: accountMachine.pendingFrame.frameId,
           timestamp: accountMachine.pendingFrame.timestamp,
           tokenIds: accountMachine.pendingFrame.tokenIds,
           deltas: accountMachine.pendingFrame.deltas,
           stateHash: accountMachine.pendingFrame.stateHash, // Store for prevFrameHash verification
         };
-        accountMachine.currentHeight = accountMachine.pendingFrame.height;
+        accountMachine.currentFrameId = accountMachine.pendingFrame.frameId;
 
         // Add confirmed frame to history
         accountMachine.frameHistory.push({...accountMachine.pendingFrame});
-        console.log(`📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`);
+        console.log(`📚 Frame ${accountMachine.pendingFrame.frameId} added to history (total: ${accountMachine.frameHistory.length})`);
       }
 
       // Clear pending state
@@ -323,7 +292,7 @@ export async function handleAccountInput(
       delete accountMachine.clonedForValidation;
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
 
-      events.push(`✅ Frame ${input.height} confirmed and committed`);
+      events.push(`✅ Frame ${input.frameId} confirmed and committed`);
 
       // CRITICAL: Don't return yet! Check if they also sent a new frame in same message
       // Channel.ts pattern: ACK + new frame can be batched (line 576-612)
@@ -346,7 +315,7 @@ export async function handleAccountInput(
     }
 
     // CRITICAL: Verify prevFrameHash links to our current frame (prevent state fork)
-    const expectedPrevFrameHash = accountMachine.currentHeight === 0
+    const expectedPrevFrameHash = accountMachine.currentFrameId === 0
       ? 'genesis'
       : accountMachine.currentFrame.stateHash || '';
 
@@ -354,7 +323,7 @@ export async function handleAccountInput(
       console.error(`❌ FRAME-CHAIN-BROKEN: prevFrameHash mismatch`);
       console.error(`  Expected: ${expectedPrevFrameHash.slice(0, 16)}...`);
       console.error(`  Received: ${receivedFrame.prevFrameHash.slice(0, 16)}...`);
-      console.error(`  Current height: ${accountMachine.currentHeight}`);
+      console.error(`  Current frameId: ${accountMachine.currentFrameId}`);
       return {
         success: false,
         error: `Frame chain broken: prevFrameHash mismatch (expected ${expectedPrevFrameHash.slice(0, 16)}...)`,
@@ -362,12 +331,12 @@ export async function handleAccountInput(
       };
     }
 
-    console.log(`✅ Frame chain verified: prevFrameHash matches frame ${accountMachine.currentHeight}`);
+    console.log(`✅ Frame chain verified: prevFrameHash matches frame ${accountMachine.currentFrameId}`);
 
     // CHANNEL.TS REFERENCE: Lines 138-165 - Proper rollback logic for simultaneous proposals
     // Handle simultaneous proposals when both sides send same frameId
-    if (accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height) {
-      console.log(`🔄 SIMULTANEOUS-PROPOSALS: Both proposed frame ${receivedFrame.height}`);
+    if (accountMachine.pendingFrame && receivedFrame.frameId === accountMachine.pendingFrame.frameId) {
+      console.log(`🔄 SIMULTANEOUS-PROPOSALS: Both proposed frame ${receivedFrame.frameId}`);
 
       // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
@@ -403,16 +372,16 @@ export async function handleAccountInput(
     }
 
     // CHANNEL.TS REFERENCE: Lines 161-164 - Decrement rollbacks on successful confirmation
-    if (accountMachine.pendingFrame && receivedFrame.height === accountMachine.currentHeight + 1 && accountMachine.rollbackCount > 0) {
+    if (accountMachine.pendingFrame && receivedFrame.frameId === accountMachine.currentFrameId + 1 && accountMachine.rollbackCount > 0) {
       // They accepted our frame after we had rollbacks - decrement
       accountMachine.rollbackCount--;
       console.log(`✅ ROLLBACK-RESOLVED: They accepted our frame (rollbacks: ${accountMachine.rollbackCount})`);
     }
 
     // Verify frame sequence
-    if (receivedFrame.height !== accountMachine.currentHeight + 1) {
-      console.log(`❌ Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`);
-      return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`, events };
+    if (receivedFrame.frameId !== accountMachine.currentFrameId + 1) {
+      console.log(`❌ Frame sequence mismatch: expected ${accountMachine.currentFrameId + 1}, got ${receivedFrame.frameId}`);
+      return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentFrameId + 1}, got ${receivedFrame.frameId}`, events };
     }
 
     // Verify signatures
@@ -465,7 +434,7 @@ export async function handleAccountInput(
     const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
     const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
 
-    console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
+    console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.frameId}:`);
     console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
 
@@ -487,25 +456,25 @@ export async function handleAccountInput(
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
-    console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.height}`);
+    console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.frameId}`);
 
     // Commit frame
     accountMachine.deltas = clonedMachine.deltas;
     accountMachine.currentFrame = {
-      height: receivedFrame.height,
+      frameId: receivedFrame.frameId,
       timestamp: receivedFrame.timestamp,
       tokenIds: receivedFrame.tokenIds,
       deltas: receivedFrame.deltas,
       stateHash: receivedFrame.stateHash, // Store for prevFrameHash verification
     };
-    accountMachine.currentHeight = receivedFrame.height;
+    accountMachine.currentFrameId = receivedFrame.frameId;
 
     // Add accepted frame to history
     accountMachine.frameHistory.push({...receivedFrame});
-    console.log(`📚 Frame ${receivedFrame.height} accepted and added to history (total: ${accountMachine.frameHistory.length})`);
+    console.log(`📚 Frame ${receivedFrame.frameId} accepted and added to history (total: ${accountMachine.frameHistory.length})`);
 
     events.push(...processEvents);
-    events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
+    events.push(`🤝 Accepted frame ${receivedFrame.frameId} from Entity ${input.fromEntityId.slice(-4)}`);
 
     // Send confirmation (ACK)
     const confirmationSig = signAccountFrame(accountMachine.proofHeader.fromEntity, receivedFrame.stateHash);
@@ -516,7 +485,7 @@ export async function handleAccountInput(
     const response: AccountInput = {
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
-      height: receivedFrame.height,
+      frameId: receivedFrame.frameId,
       prevSignatures: [confirmationSig],
       counter: 0, // Will be set below after batching decision
     };
@@ -526,7 +495,7 @@ export async function handleAccountInput(
       console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
 
       // Pass skipCounterIncrement=true since we'll increment for the whole batch below
-      const proposeResult = await proposeAccountFrame(env, accountMachine, true);
+      const proposeResult = await proposeAccountFrame(accountMachine, true);
 
       if (proposeResult.success && proposeResult.accountInput) {
         batchedWithNewFrame = true;
@@ -538,8 +507,8 @@ export async function handleAccountInput(
           response.newSignatures = proposeResult.accountInput.newSignatures;
         }
 
-        const newFrameId = proposeResult.accountInput.newAccountFrame?.height || 0;
-        console.log(`✅ Batched ACK for frame ${receivedFrame.height} + proposal for frame ${newFrameId}`);
+        const newFrameId = proposeResult.accountInput.newAccountFrame?.frameId || 0;
+        console.log(`✅ Batched ACK for frame ${receivedFrame.frameId} + proposal for frame ${newFrameId}`);
         events.push(`📤 Batched ACK + frame ${newFrameId}`);
       }
     }

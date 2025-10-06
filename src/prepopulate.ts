@@ -94,8 +94,8 @@ function upsertAccount(
     counterpartyEntityId: counterpartyId,
     mempool: [],
     currentFrame: {
-      frameId: 0,
-      timestamp: Date.now(),
+      height: 0,
+      timestamp: 0, // Will be set from env.timestamp when account is used
       tokenIds: [USDC_TOKEN_ID],
       deltas: [deltaValue],
     },
@@ -111,7 +111,7 @@ function upsertAccount(
       ownLimit: ownCreditLimit,
       peerLimit: peerCreditLimit,
     },
-    currentFrameId: 0,
+    currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
     sendCounter: 0,

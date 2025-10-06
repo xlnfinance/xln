@@ -294,6 +294,9 @@ const applyServerInput = async (
 
             // 🔭 J-machine tracking
             jBlock: 0, // Must start from 0 to resync all reserves
+
+            // ⏰ Crontab system - will be initialized on first use
+            crontabState: undefined,
           },
           mempool: [],
           isProposer: serverTx.data.isProposer,
