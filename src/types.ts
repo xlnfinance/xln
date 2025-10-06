@@ -150,6 +150,14 @@ export type EntityTx =
       };
     }
   | {
+      type: 'requestWithdrawal';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
+    }
+  | {
       type: 'settleDiffs';
       data: {
         counterpartyEntityId: string;

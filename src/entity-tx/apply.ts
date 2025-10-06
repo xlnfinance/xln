@@ -412,6 +412,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return await handleDepositCollateral(entityState, entityTx);
     }
 
+    if (entityTx.type === 'requestWithdrawal') {
+      const { handleRequestWithdrawal } = await import('./handlers/request-withdrawal');
+      return { newState: handleRequestWithdrawal(entityState, entityTx), outputs: [] };
+    }
+
     if (entityTx.type === 'settleDiffs') {
       console.log(`🏦 SETTLE-DIFFS: Processing settlement with ${entityTx.data.counterpartyEntityId}`);
 
