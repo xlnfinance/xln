@@ -457,7 +457,7 @@
     </div>
     <div
       class="component-content"
-      style="max-height: 600px;"
+      style="max-height: none; overflow-y: auto;"
     >
       <PaymentPanel entityId={replica?.entityId || tab.entityId} />
     </div>
@@ -480,7 +480,7 @@
     </div>
     <div
       class="component-content"
-      style="max-height: 600px;"
+      style="max-height: none; overflow-y: auto;"
     >
       <SettlementPanel entityId={replica?.entityId || tab.entityId} />
     </div>

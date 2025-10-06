@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, replicas, processWithDelay } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, replicas, processWithDelay, xlnFunctions } from '../../stores/xlnStore';
 
   export let entityId: string;
 
@@ -253,7 +253,7 @@
     <select bind:value={counterpartyEntityId} disabled={sending}>
       <option value="">Select entity...</option>
       {#each allEntities as id}
-        <option value={id}>Entity #{id.slice(0, 10)}...</option>
+        <option value={id}>Entity #{$xlnFunctions!.getEntityNumber(id)}</option>
       {/each}
     </select>
   </div>
