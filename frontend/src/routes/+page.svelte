@@ -165,7 +165,7 @@
 
   {#if $isLoading && $viewMode !== 'settings'}
     <div class="loading-container">
-      <div class="loading-spinner">🔄</div>
+      <img src="/img/finis.png" alt="Loading" class="loading-spinner-img" />
       <div class="loading-text">Loading XLN Environment...</div>
     </div>
   {:else if $error && $viewMode !== 'settings'}
@@ -423,8 +423,9 @@
     gap: 16px;
   }
 
-  .loading-spinner {
-    font-size: 48px;
+  .loading-spinner-img {
+    width: 64px;
+    height: 64px;
     animation: spin 2s linear infinite;
   }
 
