@@ -316,6 +316,10 @@ export async function handleAccountInput(
 
         // Add confirmed frame to history
         accountMachine.frameHistory.push({...accountMachine.pendingFrame});
+        // Cap history at 100 frames to prevent snapshot bloat (500KB → 100KB)
+        if (accountMachine.frameHistory.length > 100) {
+          accountMachine.frameHistory.shift();
+        }
         console.log(`📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`);
       }
 
@@ -513,6 +517,10 @@ export async function handleAccountInput(
 
     // Add accepted frame to history
     accountMachine.frameHistory.push({...receivedFrame});
+    // Cap history at 100 frames to prevent snapshot bloat (500KB → 100KB)
+    if (accountMachine.frameHistory.length > 100) {
+      accountMachine.frameHistory.shift();
+    }
     console.log(`📚 Frame ${receivedFrame.height} accepted and added to history (total: ${accountMachine.frameHistory.length})`);
 
     events.push(...processEvents);
