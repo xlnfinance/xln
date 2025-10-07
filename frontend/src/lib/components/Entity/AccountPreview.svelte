@@ -96,7 +96,7 @@
 >
   <div class="account-header">
     <div class="entity-info">
-      <span class="entity-name">Entity #{$xlnFunctions!.getEntityNumber(counterpartyId)}</span>
+      <span class="entity-name">Entity #{$xlnFunctions!.getEntityShortId(counterpartyId)}</span>
     </div>
     <div class="account-status">
       {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}

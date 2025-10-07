@@ -89,7 +89,7 @@
                 {#each serverInput.entityInputs as input, index}
                   <div class="input-item">
                     <div class="summary-line">
-                      <strong>Entity #{$xlnFunctions!.getEntityNumber(input.entityId)}:{input.signerId}</strong>
+                      <strong>Entity {$xlnFunctions!.formatEntityId(input.entityId)}:{input.signerId}</strong>
                       {#if input.entityTxs && input.entityTxs.length > 0}
                         <br>📝 <strong>{input.entityTxs.length} transactions:</strong>
                         {#each input.entityTxs as tx, i}
@@ -134,7 +134,7 @@
                 {#each serverOutputs as output, index}
                   <div class="input-item">
                     <div class="summary-line">
-                      <strong>📤 {index + 1}. → Entity #{$xlnFunctions!.getEntityNumber(output.entityId)}:{output.signerId}</strong>
+                      <strong>📤 {index + 1}. → Entity {$xlnFunctions!.formatEntityId(output.entityId)}:{output.signerId}</strong>
                       {#if output.entityTxs && output.entityTxs.length > 0}
                         <br>📝 <strong>{output.entityTxs.length} transactions:</strong>
                         {#each output.entityTxs as tx, i}

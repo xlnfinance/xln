@@ -3864,13 +3864,12 @@
   }
 
   /**
-   * Get entity short name (just number, clean - no prefix)
+   * Get entity short name (just ID, clean - no prefix)
    */
   function getEntityShortName(entityId: string): string {
-    if (!$xlnFunctions?.getEntityNumber) return entityId.slice(-4);
+    if (!$xlnFunctions?.getEntityShortId) return entityId.slice(-4);
     try {
-      const entityNum = $xlnFunctions.getEntityNumber(entityId);
-      return `${entityNum}`; // Just number, clean - no "#" or "Entity" prefix
+      return $xlnFunctions.getEntityShortId(entityId); // Just ID, clean - no "#" or "Entity" prefix
     } catch {
       return entityId.slice(-4);
     }
