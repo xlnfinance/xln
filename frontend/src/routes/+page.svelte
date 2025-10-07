@@ -652,8 +652,7 @@
   }
 
   .app.zen-mode :global(.admin-topbar),
-  .app.zen-mode :global(.time-machine),
-  .app.zen-mode :global(.topology-overlay),
+  /* Zen mode: Keep time-machine and sidebar visible in VR for controls */
   .app.zen-mode :global(.error-display) {
     display: none !important;
   }
