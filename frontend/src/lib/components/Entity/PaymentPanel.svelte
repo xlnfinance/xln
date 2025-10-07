@@ -245,7 +245,7 @@
   }
 
   function formatRoute(route: any): string {
-    return route.path.map((id: string) => `E${$xlnFunctions!.getEntityNumber(id)}`).join(' → ');
+    return route.path.map((id: string) => `E${$xlnFunctions!.getEntityShortId(id)}`).join(' → ');
   }
 
   function formatFee(feePPM: number): string {
@@ -266,7 +266,7 @@
       >
         <option value="">Select entity...</option>
         {#each allEntities as id}
-          <option value={id}>Entity #{$xlnFunctions!.getEntityNumber(id)}</option>
+          <option value={id}>Entity {$xlnFunctions!.formatEntityId(id)}</option>
         {/each}
       </select>
       <button
@@ -274,8 +274,8 @@
         on:click={() => {
           // Show target entity info (for reverse payment, user clicks target entity in graph)
           if (targetEntityId && $xlnFunctions) {
-            const targetNum = $xlnFunctions.getEntityNumber(targetEntityId);
-            alert(`To send reverse payment: Click Entity #${targetNum} in the graph`);
+            const targetDisplay = $xlnFunctions.formatEntityId(targetEntityId);
+            alert(`To send reverse payment: Click Entity ${targetDisplay} in the graph`);
           }
         }}
         disabled={!targetEntityId || findingRoutes || sendingPayment}

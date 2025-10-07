@@ -20,7 +20,7 @@
       </div>
       <div class="profile-info">
         <div class="profile-name">
-          Entity #{$xlnFunctions.getEntityNumber(replica.entityId)}
+          Entity #{$xlnFunctions.getEntityShortId(replica.entityId)}
         </div>
         <div class="profile-details">
           <img

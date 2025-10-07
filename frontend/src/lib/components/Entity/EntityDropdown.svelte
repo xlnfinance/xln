@@ -18,7 +18,7 @@
   function getDropdownText(tab: Tab): string {
     // SIMPLE: Just show the selected entity (like I fixed in CombinedNavigationDropdown)
     if (tab.entityId) {
-      const entityNum = $xlnFunctions.getEntityNumber(tab.entityId);
+      const entityNum = $xlnFunctions.getEntityShortId(tab.entityId);
       return `Entity #${entityNum}`;
     }
     return 'Select Entity';
@@ -127,7 +127,7 @@
         signerEntities?.forEach((replica, eIndex) => {
           const isLastEntity = eIndex === (signerEntities?.length || 0) - 1;
           if (!$xlnFunctions) return; // Safety guard
-          const entityNum = $xlnFunctions.getEntityNumber(replica.entityId);
+          const entityNum = $xlnFunctions.getEntityShortId(replica.entityId);
           const entityDisplay = `Entity #${entityNum}`;
 
           const entityItem = createDropdownTreeItem(
@@ -155,7 +155,7 @@
       console.log(`🔍 EntityDropdown: ${jurisdiction.name} has ${replicasArray.length} replicas`);
       replicasArray.forEach((replica: any) => {
         if (!$xlnFunctions) return; // Safety guard
-        console.log(`  📋 Entity: #${$xlnFunctions.getEntityNumber(replica.entityId)} (${replica.signerId})`);
+        console.log(`  📋 Entity: #${$xlnFunctions.getEntityShortId(replica.entityId)} (${replica.signerId})`);
       });
 
       if (replicasArray.length === 0) return;
@@ -178,7 +178,7 @@
         const entitySigners = entityGroups[entityId];
         const isLastEntity = eIndex === entityKeys.length - 1;
         if (!$xlnFunctions) return; // Safety guard
-        const entityNum = $xlnFunctions.getEntityNumber(entityId);
+        const entityNum = $xlnFunctions.getEntityShortId(entityId);
         const entityDisplay = `Entity #${entityNum}`;
 
         // Add entity

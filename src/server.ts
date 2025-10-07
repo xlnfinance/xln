@@ -70,7 +70,7 @@ import {
   FINANCIAL_CONSTANTS
 } from './financial-utils';
 import { captureSnapshot, cloneEntityReplica } from './state-helpers';
-import { getEntityNumber } from './entity-helpers';
+import { getEntityShortId, getEntityNumber, formatEntityId } from './entity-helpers';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
 import { EntityInput, EntityReplica, Env, ServerInput } from './types';
@@ -712,15 +712,23 @@ const main = async (): Promise<Env> => {
   }
 
   // Start j-watcher after snapshots are fully loaded (prevent multiple instances)
+  // CRITICAL: Non-blocking with timeout - don't hang page load if blockchain unavailable
   if (!jWatcherStarted) {
-    try {
-      console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher...');
-      await startJEventWatcher(env);
-      jWatcherStarted = true;
-      console.log('🔭 JWATCHER-READY: J-watcher started successfully');
-    } catch (error) {
-      console.error('❌ Failed to start J-Event Watcher:', error);
-    }
+    console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher (non-blocking)...');
+
+    // Start j-watcher in background with 3s timeout
+    Promise.race([
+      startJEventWatcher(env),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
+    ])
+      .then(() => {
+        jWatcherStarted = true;
+        console.log('🔭 JWATCHER-READY: J-watcher started successfully');
+      })
+      .catch((error) => {
+        console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
+        console.warn('    UI will load anyway. Blockchain sync will retry in background.');
+      });
   } else {
     console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
   }
@@ -838,7 +846,9 @@ export {
   getDefaultCreditLimit,
 
   // Entity utilities (from entity-helpers and serialization-utils)
-  getEntityNumber,
+  getEntityShortId,
+  getEntityNumber, // deprecated, use getEntityShortId
+  formatEntityId,
   safeStringify,
 
   // Financial utilities (ethers.js-based, precision-safe)

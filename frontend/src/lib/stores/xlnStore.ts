@@ -173,8 +173,39 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
   // If xlnInstance is missing, return empty functions that throw clear errors
   if (!$xlnInstance) {
     console.error('❌ CRITICAL: xlnInstance is null - XLN not initialized');
+    const notReady = () => { throw new Error('XLN not initialized'); };
     return {
-      getEntityNumber: () => { throw new Error('XLN not initialized'); },
+      // Account utilities
+      deriveDelta: notReady as any,
+      formatTokenAmount: notReady as any,
+      getTokenInfo: notReady as any,
+      isLeft: notReady as any,
+      createDemoDelta: notReady as any,
+      getDefaultCreditLimit: notReady as any,
+      safeStringify: notReady as any,
+
+      // Financial utilities
+      formatTokenAmountEthers: notReady as any,
+      parseTokenAmount: notReady as any,
+      convertTokenPrecision: notReady as any,
+      calculatePercentageEthers: notReady as any,
+      formatAssetAmountEthers: notReady as any,
+      BigIntMath: notReady as any,
+      FINANCIAL_CONSTANTS: {} as any,
+
+      // Entity utilities
+      getEntity: notReady as any,
+      getEntityShortId: notReady as any,
+      formatEntityId: notReady as any,
+      getEntityNumber: notReady as any,
+      formatEntityDisplay: notReady as any,
+      formatShortEntityId: notReady as any,
+
+      // Avatar generation
+      generateEntityAvatar: notReady as any,
+      generateSignerAvatar: notReady as any,
+      getEntityDisplayInfo: notReady as any,
+
       isReady: false
     };
   }
@@ -201,14 +232,15 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
     // Entity utilities - UNIFIED ENTITY ACCESS
     getEntity: (entityId: string) => {
       try {
-        const number = $xlnInstance.getEntityNumber(entityId);
-        if (typeof number !== 'number' || isNaN(number)) {
-          throw new Error(`FINTECH-SAFETY: getEntityNumber returned invalid: ${number}`);
+        const shortId = $xlnInstance.getEntityShortId(entityId);
+        if (!shortId) {
+          throw new Error(`FINTECH-SAFETY: getEntityShortId returned empty: ${shortId}`);
         }
+        const display = $xlnInstance.formatEntityId(entityId);
         return {
           id: entityId,
-          number,
-          display: `Entity #${number}`,
+          shortId,
+          display,
           avatar: $xlnInstance.generateEntityAvatar?.(entityId) || '',
           info: $xlnInstance.getEntityDisplayInfo?.(entityId) || { name: entityId, avatar: '', type: 'numbered' }
         };
@@ -218,18 +250,25 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
       }
     },
 
-    // Legacy functions (use getEntity() instead)
-    getEntityNumber: (entityId: string): number => {
+    // Entity helper functions
+    getEntityShortId: (entityId: string): string => {
       try {
-        const result = $xlnInstance.getEntityNumber(entityId);
-        if (typeof result !== 'number' || isNaN(result)) {
-          throw new Error(`FINTECH-SAFETY: getEntityNumber returned invalid: ${result}`);
+        const result = $xlnInstance.getEntityShortId(entityId);
+        if (!result) {
+          throw new Error(`FINTECH-SAFETY: getEntityShortId returned empty: ${result}`);
         }
         return result;
       } catch (error) {
-        console.error('FINTECH-SAFETY: Entity number extraction failed:', error);
+        console.error('FINTECH-SAFETY: Entity ID extraction failed:', error);
         throw error; // Fail fast - don't hide errors
       }
+    },
+
+    formatEntityId: $xlnInstance.formatEntityId,
+
+    // Legacy function (use getEntityShortId instead)
+    getEntityNumber: (entityId: string): string => {
+      return $xlnInstance.getEntityShortId(entityId);
     },
     formatEntityDisplay: $xlnInstance.formatEntityDisplay,
     formatShortEntityId: $xlnInstance.formatShortEntityId,

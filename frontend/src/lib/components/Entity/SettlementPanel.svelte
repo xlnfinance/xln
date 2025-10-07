@@ -253,7 +253,7 @@
     <select bind:value={counterpartyEntityId} disabled={sending}>
       <option value="">Select entity...</option>
       {#each allEntities as id}
-        <option value={id}>Entity #{$xlnFunctions!.getEntityNumber(id)}</option>
+        <option value={id}>Entity #{$xlnFunctions!.getEntityShortId(id)}</option>
       {/each}
     </select>
   </div>

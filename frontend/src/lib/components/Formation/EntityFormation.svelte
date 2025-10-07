@@ -131,12 +131,12 @@
         const isDuplicate = existingReplicas.some((key: string) => key.startsWith(entityId + ':'));
         
         if (isDuplicate) {
-          throw new Error(`⚠️ This validator configuration already exists! Entity #${$xlnFunctions!.getEntityNumber(entityId)} is already in use. Try different validators or weights to create a unique entity.`);
+          throw new Error(`⚠️ This validator configuration already exists! Entity #${$xlnFunctions!.getEntityShortId(entityId)} is already in use. Try different validators or weights to create a unique entity.`);
         }
         
         config = xln.createLazyEntity(formData.entityName, validatorNames, threshold, formattedJurisdiction);
         console.log('✅ Lazy entity config created:', config);
-        console.log('✅ Entity ID: #', $xlnFunctions!.getEntityNumber(entityId));
+        console.log('✅ Entity ID: #', $xlnFunctions!.getEntityShortId(entityId));
       } else {
         const creation = await xln.createNumberedEntity(formData.entityName, validatorNames, threshold, formattedJurisdiction);
         config = creation.config;
@@ -168,7 +168,7 @@
       await xln.processUntilEmpty(env, result.entityOutbox);
       console.log('✅ Entity creation complete!');
 
-      console.log(`💰 Entity #${$xlnFunctions!.getEntityNumber(entityId)} automatically prefunded by Depository.sol contract during deployment`);
+      console.log(`💰 Entity #${$xlnFunctions!.getEntityShortId(entityId)} automatically prefunded by Depository.sol contract during deployment`);
       console.log(`🔄 J-Watcher will sync historical ReserveUpdated events to populate reserves`);
 
       // Auto-create panels with entity and signers pre-selected
@@ -179,7 +179,7 @@
       
       for (let i = 0; i < validatorNames.length; i++) {
         const signer = validatorNames[i];
-        console.log(`📋 Creating panel ${i + 1} for Entity #${$xlnFunctions!.getEntityNumber(entityId as string)} with signerId: ${signer} on ${jurisdictionName}`);
+        console.log(`📋 Creating panel ${i + 1} for Entity #${$xlnFunctions!.getEntityShortId(entityId as string)} with signerId: ${signer} on ${jurisdictionName}`);
         tabOperations.addTab(entityId as string, signer, jurisdictionName);
       }
       

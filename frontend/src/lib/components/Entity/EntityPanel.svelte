@@ -197,9 +197,9 @@
     <!-- Focused Account View -->
     <div class="focused-account-view">
       <div class="account-breadcrumb">
-        <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{$xlnFunctions!.getEntityNumber(tab.entityId)}</button>
+        <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{$xlnFunctions!.getEntityShortId(tab.entityId)}</button>
         <span class="breadcrumb-separator">→</span>
-        <span class="breadcrumb-current">Account with Entity #{$xlnFunctions!.getEntityNumber(selectedAccountId!)}</span>
+        <span class="breadcrumb-current">Account with Entity #{$xlnFunctions!.getEntityShortId(selectedAccountId!)}</span>
       </div>
       <AccountPanel
         account={selectedAccount}

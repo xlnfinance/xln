@@ -43,22 +43,33 @@
 
     return Array.from(entitySet).map(entityId => {
       // Try to get a human-readable name for the entity
-      const entityNumber = $xlnFunctions!.getEntityNumber(entityId);
+      const shortId = $xlnFunctions!.getEntityShortId(entityId);
       const hasAccount = existingAccountIds.has(entityId);
       return {
         entityId,
-        displayName: `Entity #${entityNumber}`,
-        shortId: $xlnFunctions!.formatEntityDisplay(entityId) || 'Unknown',
+        displayName: $xlnFunctions!.formatEntityId(entityId),
+        shortId,
         hasAccount
       };
-    }).sort((a, b) => $xlnFunctions!.getEntityNumber(a.entityId) - $xlnFunctions!.getEntityNumber(b.entityId)); // Sort by entity number
+    }).sort((a, b) => {
+      const aId = $xlnFunctions!.getEntityShortId(a.entityId);
+      const bId = $xlnFunctions!.getEntityShortId(b.entityId);
+      // Try numeric sort first
+      const aNum = parseInt(aId, 10);
+      const bNum = parseInt(bId, 10);
+      if (!isNaN(aNum) && !isNaN(bNum) && aId === aNum.toString() && bId === bNum.toString()) {
+        return aNum - bNum;
+      }
+      // Fall back to string sort for hash-based IDs
+      return aId.localeCompare(bId);
+    }); // Sort by entity ID
   }
 
   async function openAccountWith(targetEntityId: string) {
     if (!replica) return;
 
     try {
-      console.log(`💳 NEW-FLOW: Opening account with Entity #${$xlnFunctions!.getEntityNumber(targetEntityId)} via entity transaction`);
+      console.log(`💳 NEW-FLOW: Opening account with Entity ${$xlnFunctions!.formatEntityId(targetEntityId)} via entity transaction`);
 
       const xln = await getXLN();
       const env = $xlnEnvironment;
@@ -77,7 +88,7 @@
       };
 
       await xln.processUntilEmpty(env, [accountRequestInput]);
-      console.log(`✅ Account request sent to local e-machine for Entity #${$xlnFunctions!.getEntityNumber(targetEntityId)}`);
+      console.log(`✅ Account request sent to local e-machine for Entity ${$xlnFunctions!.formatEntityId(targetEntityId)}`);
     } catch (error) {
       console.error('Failed to send account request:', error);
       alert(`Failed to send account request: ${(error as Error)?.message || 'Unknown error'}`);

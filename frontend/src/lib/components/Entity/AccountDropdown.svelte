@@ -13,7 +13,7 @@
     .map(([counterpartyId, account]: [string, AccountMachine]) => ({
       id: counterpartyId,
       account,
-      entityNumber: $xlnFunctions.getEntityNumber(counterpartyId),
+      entityShortId: $xlnFunctions.getEntityShortId(counterpartyId),
       hasPending: account.mempool.length > 0,
       status: account.mempool.length > 0 ? 'pending' : 'synced'
     }));
@@ -42,7 +42,7 @@
     <option value="">Select Account...</option>
     {#each availableAccounts as acc (acc.id)}
       <option value={acc.id}>
-        Entity #{acc.entityNumber}
+        Entity #{acc.entityShortId}
         {acc.hasPending ? `(${acc.account.mempool.length} pending)` : '(Synced)'}
       </option>
     {/each}
