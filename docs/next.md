@@ -2,6 +2,18 @@
 
 ## 🚨 NEXT SESSION PRIORITIES
 
+### 🔴 CRITICAL: Fix frameHash Derivation from State
+**Status:** Byzantine vulnerability - frames not cryptographically bound to state
+
+**Current:** `frameHash = frame_${height}_${timestamp}` (just string interpolation)
+**Should:** `frameHash = keccak256(RLP(prevFrameHash, height, timestamp, deltas, transactions))`
+
+**Why critical:** Without state-derived hashes, frames can be replayed onto wrong state ancestry. More fundamental than mock signatures for consensus correctness.
+
+**Estimated time:** 2-3 hours
+
+---
+
 ### 🔴 CRITICAL: Replace Mock Signatures with Real ECDSA
 **Status:** Production blocker - mock signatures can be forged
 
@@ -15,18 +27,6 @@
 2. Derive keys deterministically: `keccak256(signerId + entityId + salt)`
 3. Replace `signAccountFrame()` with real `wallet.signMessage()`
 4. Replace `verifyAccountSignature()` with `ethers.verifyMessage()`
-
-**Estimated time:** 2-3 hours
-
----
-
-### 🔴 CRITICAL: Fix frameHash Derivation from State
-**Status:** Byzantine vulnerability - frames not cryptographically bound to state
-
-**Current:** `frameHash = frame_${height}_${timestamp}` (just string interpolation)
-**Should:** `frameHash = keccak256(RLP(prevFrameHash, height, timestamp, deltas, transactions))`
-
-**Why critical:** Without state-derived hashes, frames can be replayed onto wrong state ancestry. More fundamental than mock signatures for consensus correctness.
 
 **Estimated time:** 2-3 hours
 
@@ -68,79 +68,165 @@
 
 ---
 
-## ✅ COMPLETED THIS SESSION (2025-10-06 - Part 3: Token Efficiency & Visual Polish)
+## 💡 TOOL IDEAS (From Session 2025-10-07)
 
-### Token Efficiency System (~1 hour)
-**Major win:** Function index system prevents 600k token waste in future sessions
+### Tier 1: Production Value
+**1. Consensus Divergence Detector** 🔍 (1h)
+- Compare state hashes between entity pairs in real-time
+- Highlight accounts with mismatched deltas in red
+- Click to see diff (left vs right perspective)
+- **Why:** Catches bilateral consensus bugs instantly
 
-**Created:**
-1. ✅ **Function Index** in NetworkTopology.svelte (lines 163-282)
-   - 59 functions organized into 14 logical sections
-   - Exact line ranges for every function
-   - Embedded workflow instructions
+**2. Payment Flow Tracer** 🎯 (45min)
+- Click entity → highlights all payment paths
+- Incoming (blue), outgoing (orange), forwarding (purple)
+- Tooltip: "5 payments flowing, $2.3M total volume"
+- **Why:** Makes demos dramatically better
 
-2. ✅ **Documentation:** `docs/editing-large-files.md`
-   - Complete workflow guide
-   - Token savings calculations (97% reduction per edit)
-   - Index regeneration commands
-   - Example editing session
+### Tier 2: VR Experience
+**3. Network Healer** 🩹 (45min)
+- Green crystal wand on left controller
+- Restore disputed accounts (opposite of hammer)
+- Creates drama cycle: fragment→repair→fragment
 
-3. ✅ **Updated CLAUDE.md**
-   - Added "FUNCTION INDEX FOR LARGE FILES" section
-   - Workflow example for future sessions
-   - Updated golden rule
+**4. Entity Spawner** ✨ (1h)
+- Point in 3D space, place entity
+- Ghost preview while aiming
+- Auto-connects to nearest 3 entities
+- VR-native network building
 
-**Workflow:**
-```typescript
-// 1. Check function index (lines 163-282)
-→ animate: 1863-2093 (230 lines)
+**5. Payment Cannon** 💸 (45min)
+- Trigger button fires payment from controller
+- Amount dial on wrist
+- Rapid-fire stress testing
 
-// 2. Read ONLY that function
-Read offset=1863 limit=230
+**6. Credit Adjuster** 💳 (30min)
+- Slider tool appears when holding controller near bars
+- Drag to adjust credit limits in real-time
+- Visual parameter tuning
 
-// 3. Edit
-Edit old_string="..."
-
-// Saves: 58k tokens per edit (97% reduction)
-```
+### Tier 3: Visual Polish
+**7. Tool Skins (Sunder from Morrowind)** (30min)
+- Different hammer meshes (cosmetic only)
+- Defer until 3+ tools exist with different behaviors
 
 ---
 
-### Visual Polish & Bug Fixes (~2 hours)
+## ✅ COMPLETED THIS SESSION (2025-10-07: Lightning + VR + Polish)
 
-**Lightning System - 3-Phase Animation:**
-- ✅ Phase 1 (0%-45%): Travel source → entity
-- ✅ Phase 2 (45%-55%): **Explosive flash** at entity (emissive 3x, scale 3.5x)
-- ✅ Phase 3 (55%-100%): Continue entity → destination
-- ✅ Changed color: Orange → **Electric blue** (0x00ccff)
-- ✅ Both live mode and replay mode working
-- ✅ Bilateral visibility (tracks incoming + outgoing)
-- Lines: 1600-1640, 2297-2372
+### Fat Lightning Bolts (~30min)
+**Status:** ✅ Complete - Value-scaled payment visualization
 
-**Account Bar Opacity:**
-- ✅ **Unused credit (pink):** 20% opacity + wireframe (mental clarity)
-- ✅ **Used credit (red):** 100% opacity + solid + bright
-- ✅ **Collateral (green):** 100% opacity + solid + bright
-- File: `AccountBarRenderer.ts:242-255`
+**Implementation:**
+- Replaced sphere particles with fat cylinder bolts
+- **Logarithmic scaling:** `radius = log10(amountUSD) * 0.08`
+  - $1k payment = 0.24 units (thin)
+  - $1M payment = 0.48 units (medium)
+  - $1B payment = 0.72 units (MASSIVE)
+- 3-phase animation:
+  - Phase 1 (0-45%): Bolt grows from source
+  - Phase 2 (45-55%): Explosive white-blue flash at entity
+  - Phase 3 (55-100%): Fade to dim blue
+- Gradient: Bright cyan (source) → dim blue (dest)
+- Per-hop bolts (matches bilateral consensus reality)
 
-**UI Improvements:**
-- ✅ Active Flows moved to sidebar (from floating overlay)
-- ✅ TPS slider: 0-100 → 0.1-5 (reasonable demo range)
-- ✅ Entity dropdowns show short IDs everywhere (not 0x0000...)
-- ✅ SettlementPanel max-height removed (was 600px, now full height)
-- ✅ Visual Demo Panel enabled (applies effects to random entities)
+**Agent Feedback:**
+- ✅ Per-hop visualization (not end-to-end) matches bilateral model
+- ✅ Post-COMMIT timing prevents visual lies about consensus
+- ✅ Logarithmic scaling maintains perceptual accuracy
+- ✅ Fee visualization: Entity gold glow (not bolt thinning)
 
-**Broadcast Ripples:**
-- ✅ Trigger on `deposit_collateral` and `reserve_to_collateral`
-- ✅ Bright green expanding torus when entity grows
-- ✅ Lines: 1542, 1577, 1656-1658
+**Files:**
+- NetworkTopology.svelte:1614-1683 (createDirectionalLightning)
+- NetworkTopology.svelte:2377-2432 (animateParticles 3-phase)
 
-**Code Organization:**
-- ✅ Deleted broken `AccountManager.ts` (543 lines)
-- ✅ Deleted unused `BarAnimator.ts` (82 lines)
-- ✅ Created `AccountBarRenderer.ts` (clean 283-line extraction)
-- ✅ Fixed `getEntityNumber` bug (entity #9 parsing)
-- ✅ Net deletion: 693 lines removed, 283 added = **410 lines cleaned**
+---
+
+### Incremental Grid Growth (~30min)
+**Status:** ✅ Complete - Organic network expansion
+
+**UI:**
+- Grid 2, 3, 4, 5 cascade buttons in sidebar
+- Click 2 → creates 2×2×2 (8 entities)
+- Click 3 → adds outer shell to make 3×3×3 (19 new, 27 total)
+- Click 4 → adds outer shell to make 4×4×4 (37 new, 64 total)
+- Click 5 → adds outer shell to make 5×5×5 (61 new, 125 total)
+
+**Logic:**
+- Detects existing grid size from entityMapping
+- Only creates entities in outer shell (x,y,z ≥ existingSize)
+- Skips existing connections (hasAccount check)
+- Visual: Network grows organically shell-by-shell
+
+**Files:**
+- src/scenarios/executor.ts:377-434 (incremental entity creation)
+- src/scenarios/executor.ts:497-580 (incremental connections)
+- NetworkTopology.svelte:4361-4370 (UI buttons)
+
+---
+
+### VR Settlement Court System (~1h)
+**Status:** ✅ Complete - Interactive dispute visualization
+
+**VRHammer:**
+- 3D gavel mesh (gold head + brown handle)
+- Attached to right controller
+- Raycast hit detection on connection lines
+- Punch accounts to dispute
+- Visual: Connection turns red, bars removed (network fragments)
+- Haptic pulse feedback on hit
+
+**VRScenarioBuilder:**
+- Shows ONLY in VR mode (not zen mode)
+- 3 tools selectable:
+  - ⚖️ Dispute Hammer (fragment network)
+  - 💚 Network Healer (restore - TODO)
+  - ✨ Entity Spawner (place entities - TODO)
+- Quick actions: Spawn Grid, Payment Wave (TODO)
+- Active tool indicator
+
+**Visibility Logic:**
+- Zen mode: Sidebar hidden
+- VR mode: Sidebar + time machine visible
+- `isVRActive` flag tracks `renderer.xr.isPresenting`
+
+**Files:**
+- frontend/src/lib/vr/VRHammer.ts (191 lines)
+- frontend/src/lib/components/VR/VRScenarioBuilder.svelte (207 lines)
+- NetworkTopology.svelte:809-837 (hammer integration)
+
+---
+
+### Visual Polish (~30min)
+**Status:** ✅ Complete - Better contrast and depth
+
+**URL Routing:**
+- Created `/graph` route (frontend/src/routes/graph/+page.svelte)
+- Direct link to Graph 3D view
+- No more 404 on /graph
+
+**3D Grid Floor:**
+- Matrix-style grid helper (200 units, 40 divisions)
+- Always visible (not theme-dependent)
+- XLN green center line + dark teal grid
+- Positioned y=-50 (below entities)
+- 20% opacity (subtle depth cue)
+
+**Theme Toggle:**
+- Added to sidebar (before Bars control)
+- Updates scene.background immediately
+- Options: Default, Matrix, Arctic, Sunset
+
+**Label Contrast:**
+- Added black stroke outline (4px width)
+- Bright green text on top
+- Visible on any background
+
+**Connection Lines:**
+- Opacity: 0.3 → 0.5 (67% brighter)
+- Width: 1 → 2 (thicker)
+- Dash: 0.2 → 0.3 (longer dashes)
+- Gap: 0.5 → 0.3 (more continuous)
 
 ---
 
@@ -173,11 +259,6 @@ See `docs/2019spec` for full reference architecture.
 
 ## 🔮 DEFERRED TASKS
 
-### AccountManager Unification (OBSOLETE - AccountBarRenderer extracted instead)
-- ~~Delete 440 lines from NetworkTopology.svelte~~
-- **Status:** Replaced with cleaner extraction approach
-- **Result:** 410 lines deleted net
-
 ### Smooth Bar Transitions (~1 hour)
 - Add per-account state tracking for previous/current values
 - Lerp bar heights in animation loop
@@ -186,16 +267,25 @@ See `docs/2019spec` for full reference architecture.
 
 ---
 
-## 📝 SESSION NOTES (2025-10-06 Part 3)
+## 📝 SESSION NOTES (2025-10-07)
+
+**Duration:** ~3 hours
+**Focus:** Value-scaled lightning visualization, VR tools, visual polish
 
 **Major Achievements:**
-1. Function Index system prevents future token waste (97% savings)
-2. Account bars properly modularized (AccountBarRenderer.ts)
-3. Visual effects significantly improved (3-phase lightning, bright bars)
-4. 410 net lines deleted (code cleanup)
+1. Fat lightning bolts with logarithmic scaling (1px=$1 visual rule)
+2. Incremental grid growth (organic network expansion)
+3. VR Settlement Court (dispute hammer + scenario builder)
+4. Function Index system (97% token savings on future edits)
+5. Account bar extraction (AccountBarRenderer.ts)
+6. Visual polish (grid floor, theme toggle, better contrast)
 
-**Token Usage:** ~227k tokens (~23% of budget)
-**Files Modified:** 8 files
-**Net Code Change:** +333 insertions, -1026 deletions
+**Token Usage:** ~328k/1M (33% of budget)
+**Commits:** 4 total
+- a658398: Function index + visual polish
+- f0bc306: VR Settlement Court
+- 13847b7: Lightning bolts + incremental grid
+- [pending]: Visual polish + routing
 
+**Net Code Change:** +1810 insertions, -1776 deletions
 **Build Status:** ✅ Passes with 0 errors

@@ -689,17 +689,15 @@
     const themeColors = getThemeColors($settings.theme);
     scene.background = new THREE.Color(themeColors.background);
 
-    // Optional: Add 3D grid background for depth (Matrix/Arctic themes)
-    if ($settings.theme === 'matrix' || $settings.theme === 'arctic') {
-      const gridHelper = new THREE.GridHelper(200, 20,
-        new THREE.Color(themeColors.borderColor),
-        new THREE.Color(themeColors.borderColor)
-      );
-      gridHelper.material.opacity = 0.15;
-      gridHelper.material.transparent = true;
-      gridHelper.position.y = -50; // Below entities
-      scene.add(gridHelper);
-    }
+    // Matrix-style 3D grid floor (always visible, subtle depth)
+    const gridHelper = new THREE.GridHelper(200, 40,
+      0x00ff88, // Center line (XLN green)
+      0x002222  // Grid lines (very dark for subtlety)
+    );
+    gridHelper.material.opacity = 0.2; // Subtle but visible
+    gridHelper.material.transparent = true;
+    gridHelper.position.y = -50; // Below entities
+    scene.add(gridHelper);
 
     // Camera setup
     camera = new THREE.PerspectiveCamera(
@@ -1796,11 +1794,11 @@
 
     const material = new THREE.LineDashedMaterial({
       color: connectionColor,
-      opacity: 0.3, // Much lighter (was 0.6)
+      opacity: 0.5, // More visible (was 0.3)
       transparent: true,
-      linewidth: 1,
-      dashSize: 0.2, // Shorter dashes (was 0.3)
-      gapSize: 0.5   // Much larger gaps (was 0.1)
+      linewidth: 2, // Thicker lines
+      dashSize: 0.3, // Longer dashes (more visible)
+      gapSize: 0.3   // Smaller gaps (more continuous)
     });
 
     const line = new THREE.Line(geometry, material);
@@ -1970,13 +1968,18 @@
     // NO background - transparent (user requirement: black background is ugly)
     context.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Text styling - minimalist monospace, bright green, dynamic font size based on labelScale
-    context.fillStyle = '#00ff88';
+    // Text styling - bright green with dark outline for contrast
     context.font = `bold ${32 * labelScale}px sans-serif`; // Dynamic: 32px * labelScale
     context.textAlign = 'center';
     context.textBaseline = 'middle';
 
-    // Draw text centered in square canvas
+    // Draw dark outline for contrast (visible on any background)
+    context.strokeStyle = '#000000';
+    context.lineWidth = 4;
+    context.strokeText(entityName, 64, 64);
+
+    // Draw bright green text on top
+    context.fillStyle = '#00ff88';
     context.fillText(entityName, 64, 64);
 
     // Create sprite with texture
@@ -4077,6 +4080,28 @@
             {#each availableTokens as tokenId}
               <option value={tokenId}>{getTokenSymbol(tokenId)}</option>
             {/each}
+          </select>
+        </div>
+
+        <!-- Theme Selector -->
+        <div class="control-group">
+          <label>Theme:</label>
+          <select
+            value={$settings.theme}
+            on:change={(e) => {
+              const theme = e.currentTarget.value as any;
+              settings.update(s => ({...s, theme}));
+              if (scene) {
+                const themeColors = getThemeColors(theme);
+                scene.background = new THREE.Color(themeColors.background);
+              }
+            }}
+            class="theme-select"
+          >
+            <option value="default">Default</option>
+            <option value="matrix">Matrix</option>
+            <option value="arctic">Arctic</option>
+            <option value="sunset">Sunset</option>
           </select>
         </div>
 
