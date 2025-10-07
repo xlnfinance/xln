@@ -16,6 +16,8 @@
   import { GestureManager } from '../../vr/GestureDetector';
   import VisualDemoPanel from '../Views/VisualDemoPanel.svelte';
   import AdminPanel from '../Admin/AdminPanel.svelte';
+  import VRScenarioBuilder from '../VR/VRScenarioBuilder.svelte';
+  import { VRHammer } from '../../vr/VRHammer';
 
   // Network3D managers
   import { EntityManager } from '../../network3d/EntityManager';
@@ -108,6 +110,7 @@
   // Visual effects system
   let spatialHash: SpatialHash;
   let gestureManager: GestureManager;
+  let vrHammer: VRHammer | null = null;
   let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
   let lastJEventId: string | null = null;
 
@@ -784,6 +787,7 @@
     activityVisualizer = new AccountActivityVisualizer(scene);
     spatialHash = new SpatialHash(100);
     gestureManager = new GestureManager();
+    vrHammer = new VRHammer();
 
     // Register shake-to-rebalance callback
     gestureManager.on((event) => {
@@ -802,11 +806,35 @@
   function setupVRControllers() {
     if (!renderer || !scene) return;
 
-    // Controller 1 (right hand)
+    // Controller 1 (right hand) - HAMMER attached here
     const controller1 = renderer.xr.getController(0);
     controller1.addEventListener('selectstart', onVRSelectStart);
     controller1.addEventListener('selectend', onVRSelectEnd);
     scene.add(controller1);
+
+    // Attach hammer to right controller
+    if (vrHammer) {
+      vrHammer.attachToController(controller1);
+      vrHammer.onAccountHit((event) => {
+        console.log(`⚖️ DISPUTE: ${event.fromEntityId} ↔ ${event.toEntityId}`);
+        // Find and break the connection visually
+        const conn = connections.find(c =>
+          (c.from === event.fromEntityId && c.to === event.toEntityId) ||
+          (c.from === event.toEntityId && c.to === event.fromEntityId)
+        );
+        if (conn) {
+          // Make connection red and break visual
+          const material = conn.line.material as THREE.LineDashedMaterial;
+          material.color.setHex(0xff0000);
+          material.opacity = 0.8;
+          // Remove bars to show "broken" state
+          if (conn.progressBars) {
+            scene.remove(conn.progressBars);
+            (conn as any).progressBars = undefined;
+          }
+        }
+      });
+    }
 
     // Controller 2 (left hand)
     const controller2 = renderer.xr.getController(1);
@@ -2019,6 +2047,11 @@
         vrGrabbedEntity.label.position.copy(controllerPos);
         vrGrabbedEntity.label.position.y += 3;
       }
+    }
+
+    // ===== UPDATE VR HAMMER (hit detection) =====
+    if (isVRActive && vrHammer) {
+      vrHammer.update(connections);
     }
 
     // Pulse animation for hubs (24/7 always-on effect)
@@ -3943,8 +3976,8 @@
   </button>
   {/if}
 
-  <!-- Sliding panel (mobile-friendly, hidden in zen mode) -->
-  {#if showPanel && !zenMode}
+  <!-- Sliding panel (visible in VR, hidden in zen mode) -->
+  {#if showPanel && (!zenMode || isVRActive)}
   <div class="topology-overlay" class:panel-open={showPanel} style="width: {sidebarWidth}px;">
     <!-- Resize handle -->
     <div
@@ -4343,6 +4376,11 @@
           </div>
         </div>
 
+        <!-- VR Scenario Builder (VR only) -->
+        {#if isVRActive}
+          <VRScenarioBuilder {isVRActive} />
+        {/if}
+
         <!-- Visual Effects Demo Panel (ENABLED) -->
         {#if scene && entityMeshMap.size > 0 && spatialHash}
           <div class="visual-effects-section">
@@ -4641,6 +4679,8 @@
     /* Slide-in animation */
     transform: translateX(0);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* VR: Keep visible and accessible */
+    pointer-events: auto;
   }
 
   /* Mobile: narrower sidebar and push from top */
