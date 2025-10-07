@@ -1625,42 +1625,57 @@
 
     if (connectionIndex === -1) return;
 
-    // BLUE LIGHTNING with transaction-specific intensity
-    let color = 0x00aaff; // Electric blue (cooler visual)
-    let size = 0.2;
+    const connection = connections[connectionIndex];
+    if (!connection) return;
 
-    if (accountTx) {
-      switch (accountTx.type) {
-        case 'direct_payment':
-          color = 0x00ccff; // Bright cyan for payments
-          size = Math.min(0.4, 0.15 + Number(accountTx.data?.amount || 0n) / 100000);
-          break;
-        case 'set_credit_limit':
-          color = 0x0088ff; // Deep blue for credit
-          size = 0.18;
-          break;
-        default:
-          color = 0x00aaff;
-          size = 0.2;
-      }
+    // Get connection geometry
+    const positions = connection.line.geometry.getAttribute('position');
+    const start = new THREE.Vector3().fromBufferAttribute(positions, 0);
+    const end = new THREE.Vector3().fromBufferAttribute(positions, 1);
+    const boltLength = start.distanceTo(end);
+    const boltDirection = new THREE.Vector3().subVectors(end, start).normalize();
+
+    // LOGARITHMIC SCALING: 1px = $1 visual rule (same as bars)
+    // Extract amount from payment
+    const paymentAmount = accountTx?.data?.amount ? Number(accountTx.data.amount) : 0;
+    const amountUSD = paymentAmount / 1e18; // Convert from wei to tokens
+
+    // Log scaling for perceptual accuracy
+    let radius = 0.08; // Default for non-payments
+    if (amountUSD > 0) {
+      radius = Math.log10(amountUSD) * 0.08; // $1k=0.24, $1M=0.48, $1B=0.72
+      radius = Math.max(0.05, Math.min(radius, 0.8)); // Clamp 0.05-0.8
     }
 
-    const geometry = new THREE.SphereGeometry(size, 12, 12); // More segments for smoother sphere
+    // FAT CYLINDER BOLT (not sphere)
+    const geometry = new THREE.CylinderGeometry(radius, radius, boltLength, 16);
+
+    // GRADIENT MATERIAL: bright cyan (source) → dim blue (dest)
     const material = new THREE.MeshLambertMaterial({
-      color,
+      color: 0x00ccff, // Bright cyan
       transparent: true,
       opacity: 0.95,
-      emissive: color,
-      emissiveIntensity: 1.5
+      emissive: 0x00ccff,
+      emissiveIntensity: 2.0 // Very bright for electric feel
     });
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
+
+    const bolt = new THREE.Mesh(geometry, material);
+
+    // Position at connection start
+    const midpoint = start.clone().lerp(end, 0.5);
+    bolt.position.copy(midpoint);
+
+    // Orient cylinder along connection direction
+    const axis = new THREE.Vector3(0, 1, 0); // Cylinder default axis
+    bolt.quaternion.setFromUnitVectors(axis, boltDirection);
+
+    scene.add(bolt);
 
     particles.push({
-      mesh,
+      mesh: bolt,
       connectionIndex,
       progress: 0,
-      speed: 0.02, // Slower for more dramatic effect (full cycle in ~2.5s)
+      speed: 0.02, // Full 3-phase cycle in ~2.5s
       type: accountTx?.type || 'unknown',
       amount: accountTx?.data?.amount,
       direction
@@ -2359,52 +2374,61 @@
         return;
       }
 
-      // 3-PHASE unicast lightning animation
+      // 3-PHASE LIGHTNING BOLT animation
       const connection = connections[particle.connectionIndex];
       if (!connection) return;
 
-      const positions = connection.line.geometry.getAttribute('position');
-      const start = new THREE.Vector3().fromBufferAttribute(positions, 0);
-      const end = new THREE.Vector3().fromBufferAttribute(positions, 1);
       const material = particle.mesh.material as THREE.MeshLambertMaterial;
 
-      // PHASE 1: Incoming (0% → 45%) - particle travels from source toward entity
+      // PHASE 1: Strike Formation (0% → 45%) - bolt grows from source
       if (particle.progress < 0.45) {
         const phase1Progress = particle.progress / 0.45; // 0 to 1
-        const currentPos = start.lerp(end, phase1Progress * 0.5); // Travel to midpoint
-        particle.mesh.position.copy(currentPos);
 
-        // Fade in, bright pulse
+        // Bolt grows from 0 to full length
+        particle.mesh.scale.y = phase1Progress;
+
+        // Fade in with bright emissive
         const fadeIn = Math.min(1, phase1Progress * 3);
-        const pulse = 1.2 + 0.3 * Math.sin(Date.now() * 0.02 + index);
-        particle.mesh.scale.setScalar(pulse);
         material.opacity = 0.95 * fadeIn;
-        material.emissiveIntensity = 1.5;
+        material.emissiveIntensity = 2.5 * fadeIn;
+
+        // Gradient: bright cyan at source
+        material.color.setHex(0x00ffff);
       }
-      // PHASE 2: Entity Flash (45% → 55%) - particle explodes at entity
+      // PHASE 2: Entity Flash (45% → 55%) - maximum intensity at entity
       else if (particle.progress < 0.55) {
         const phase2Progress = (particle.progress - 0.45) / 0.1; // 0 to 1
-        const midpoint = start.lerp(end, 0.5);
-        particle.mesh.position.copy(midpoint);
 
-        // Explosive flash at entity
-        const flashScale = 1.5 + 2.0 * Math.sin(phase2Progress * Math.PI); // Peak at 50%
-        particle.mesh.scale.setScalar(flashScale);
+        // Full bolt visible
+        particle.mesh.scale.y = 1.0;
+
+        // EXPLOSIVE FLASH
         material.opacity = 1.0;
-        material.emissiveIntensity = 3.0 * Math.sin(phase2Progress * Math.PI); // Intense flash
+        material.emissiveIntensity = 4.0 * Math.sin(phase2Progress * Math.PI); // Peak at midpoint
+
+        // Ultra bright white-blue during flash
+        const flashBrightness = Math.sin(phase2Progress * Math.PI);
+        material.color.setRGB(
+          flashBrightness * 0.5,
+          flashBrightness,
+          1.0
+        );
       }
-      // PHASE 3: Outgoing (55% → 100%) - particle continues to destination
+      // PHASE 3: Dissipation (55% → 100%) - bolt fades to destination color
       else {
         const phase3Progress = (particle.progress - 0.55) / 0.45; // 0 to 1
-        const currentPos = start.lerp(end, 0.5 + phase3Progress * 0.5); // Midpoint to end
-        particle.mesh.position.copy(currentPos);
 
-        // Fade out toward destination
-        const pulse = 1.0 + 0.2 * Math.sin(Date.now() * 0.02 + index);
+        // Bolt stays full length
+        particle.mesh.scale.y = 1.0;
+
+        // Fade out
         const fadeOut = Math.max(0, 1 - phase3Progress);
-        particle.mesh.scale.setScalar(pulse);
         material.opacity = 0.9 * fadeOut;
-        material.emissiveIntensity = 1.2 * fadeOut;
+        material.emissiveIntensity = 2.0 * fadeOut;
+
+        // Gradient: dim blue at destination
+        const dimFactor = 1 - phase3Progress * 0.5;
+        material.color.setRGB(0, 0.6 * dimFactor, 1.0 * dimFactor);
       }
     });
   }
@@ -4334,12 +4358,16 @@
             ⚡ Full Demo (Grid + Payments)
           </button>
 
-          <button class="demo-btn" on:click={() => {
-            commandText = 'grid 2 2 2 type=lazy';
-            executeLiveCommand();
-          }}>
-            🎲 Grid 2×2×2 (Lazy)
-          </button>
+          <!-- Grid Cascade: Incremental Growth -->
+          <div class="grid-cascade">
+            <h5>🔲 Grid Growth:</h5>
+            <div class="grid-btns">
+              <button class="grid-size-btn" on:click={() => { commandText = 'grid 2'; executeLiveCommand(); }}>2</button>
+              <button class="grid-size-btn" on:click={() => { commandText = 'grid 3'; executeLiveCommand(); }}>3</button>
+              <button class="grid-size-btn" on:click={() => { commandText = 'grid 4'; executeLiveCommand(); }}>4</button>
+              <button class="grid-size-btn" on:click={() => { commandText = 'grid 5'; executeLiveCommand(); }}>5</button>
+            </div>
+          </div>
 
           <button class="demo-btn" on:click={() => {
             commandText = 'payRandom count=10 amount=100000 minHops=2 maxHops=4';
@@ -5276,6 +5304,44 @@
   .demo-btn.primary:hover {
     background: linear-gradient(135deg, rgba(0, 255, 136, 0.7), rgba(0, 200, 255, 0.6));
     box-shadow: 0 4px 16px rgba(0, 255, 136, 0.4);
+  }
+
+  /* Grid Cascade Buttons */
+  .grid-cascade {
+    margin: 12px 0;
+  }
+
+  .grid-cascade h5 {
+    margin: 0 0 8px 0;
+    font-size: 11px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .grid-btns {
+    display: flex;
+    gap: 6px;
+  }
+
+  .grid-size-btn {
+    flex: 1;
+    background: rgba(0, 122, 204, 0.15);
+    border: 1px solid rgba(0, 122, 204, 0.4);
+    border-radius: 4px;
+    padding: 10px;
+    color: #00aaff;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .grid-size-btn:hover {
+    background: rgba(0, 122, 204, 0.3);
+    border-color: rgba(0, 122, 204, 0.8);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 122, 204, 0.3);
   }
 
   /* Performance Metrics */

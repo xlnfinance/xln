@@ -362,8 +362,6 @@ async function handleGrid(
     throw new Error(`Grid too large: ${X}x${Y}x${Z} = ${total} entities (max 1000)`);
   }
 
-  console.log(`  🎲 Creating ${X}x${Y}x${Z} ${isLazy ? 'LAZY' : ''} grid (${total} entities, ${spacing}px spacing)`);
-
   if (isLazy) {
     // LAZY MODE: In-browser only, no blockchain registration
     return handleLazyGrid(X, Y, Z, spacing, context, env);
@@ -376,7 +374,28 @@ async function handleGrid(
   // Helper to compute entity ID from grid coordinates
   const gridId = (x: number, y: number, z: number) => `${x}_${y}_${z}`;
 
-  // Phase 1: Create all entities with positions
+  // INCREMENTAL GRID: Detect existing grid size from entityMapping
+  let existingSize = 0;
+  for (const coord of context.entityMapping.keys()) {
+    if (!coord.includes('_')) continue; // Skip non-grid entities
+    const parts = coord.split('_');
+    if (parts.length === 3) {
+      const maxCoord = Math.max(
+        parseInt(parts[0] || '0'),
+        parseInt(parts[1] || '0'),
+        parseInt(parts[2] || '0')
+      );
+      existingSize = Math.max(existingSize, maxCoord + 1);
+    }
+  }
+
+  if (existingSize > 0) {
+    console.log(`  📦 Existing grid: ${existingSize}x${existingSize}x${existingSize}, growing to ${X}x${X}x${X}`);
+  } else {
+    console.log(`  🎲 Creating ${X}x${Y}x${Z} grid (${total} entities, ${spacing}px spacing)`);
+  }
+
+  // Phase 1: Create only NEW entities (outer shell)
   const entities: Array<{ name: string; validators: string[]; threshold: bigint }> = [];
   const positions = new Map<string, {x: number, y: number, z: number}>();
 
@@ -384,6 +403,12 @@ async function handleGrid(
     for (let y = 0; y < Y; y++) {
       for (let x = 0; x < X; x++) {
         const id = gridId(x, y, z);
+
+        // INCREMENTAL: Skip if entity already exists (interior)
+        if (x < existingSize && y < existingSize && z < existingSize) {
+          continue; // Already created in previous grid
+        }
+
         entities.push({
           name: `Grid-${id}`,
           validators: [`g${id}`],
@@ -400,6 +425,14 @@ async function handleGrid(
       }
     }
   }
+
+  if (entities.length === 0) {
+    console.log(`  ✅ Grid ${X}x${X}x${X} already complete, no new entities needed`);
+    return;
+  }
+
+  console.log(`  ➕ Creating ${entities.length} new entities (shell growth)`);
+
 
   // Batch create all entities
   const { createNumberedEntitiesBatch } = await import('../entity-factory.js');
@@ -457,9 +490,19 @@ async function handleGrid(
 
   console.log(`  ✅ Created ${results.length} entities in grid formation`);
 
-  // Phase 2: Create connections along each axis
+  // Phase 2: Create connections along each axis (INCREMENTAL - skip existing)
   const { processUntilEmpty } = await import('../server.js');
   const connectionInputs: any[] = [];
+
+  // Helper to check if account already exists
+  const hasAccount = (from: string, to: string): boolean => {
+    for (const replica of env.replicas.values()) {
+      if (replica.entityId === from && replica.state?.accounts?.has(to)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   // X-axis connections (horizontal)
   for (let z = 0; z < Z; z++) {
@@ -470,7 +513,7 @@ async function handleGrid(
         const entityId1 = context.entityMapping.get(id1);
         const entityId2 = context.entityMapping.get(id2);
 
-        if (entityId1 && entityId2) {
+        if (entityId1 && entityId2 && !hasAccount(entityId1, entityId2)) {
           connectionInputs.push({
             entityId: entityId1,
             signerId: `g${id1}`,
@@ -493,7 +536,7 @@ async function handleGrid(
         const entityId1 = context.entityMapping.get(id1);
         const entityId2 = context.entityMapping.get(id2);
 
-        if (entityId1 && entityId2) {
+        if (entityId1 && entityId2 && !hasAccount(entityId1, entityId2)) {
           connectionInputs.push({
             entityId: entityId1,
             signerId: `g${id1}`,
@@ -516,7 +559,7 @@ async function handleGrid(
         const entityId1 = context.entityMapping.get(id1);
         const entityId2 = context.entityMapping.get(id2);
 
-        if (entityId1 && entityId2) {
+        if (entityId1 && entityId2 && !hasAccount(entityId1, entityId2)) {
           connectionInputs.push({
             entityId: entityId1,
             signerId: `g${id1}`,
@@ -530,9 +573,11 @@ async function handleGrid(
     }
   }
 
-  console.log(`  🔗 Creating ${connectionInputs.length} grid connections...`);
-  await processUntilEmpty(env, connectionInputs);
-  console.log(`  ✅ Grid complete: ${total} entities, ${connectionInputs.length} connections`);
+  console.log(`  🔗 Creating ${connectionInputs.length} new grid connections...`);
+  if (connectionInputs.length > 0) {
+    await processUntilEmpty(env, connectionInputs);
+  }
+  console.log(`  ✅ Grid complete: ${total} total entities, ${connectionInputs.length} new connections`);
 }
 
 /**
