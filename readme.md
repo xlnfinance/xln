@@ -1,3 +1,5 @@
+![XLN Network Visualization](frontend/static/img/preview.png)
+
 xln is unified layer2 for EVM jurisdictions. Works as a reserve-credit network of accounts. Our accounts a hybrid of full-credit banking accounts and full-reserve "payment channel" style accounts (as in Lightning/Raiden/Hydra). This superset allows great synergy and solves inbound capacity and Diamond-Dybvig problem with hub runs in TradFi.
 
 /src is core implementation of server->entity->account state machine hierarchy. 
