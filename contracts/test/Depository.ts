@@ -203,9 +203,6 @@ describe("Depository", function () {
 
 
 
-
-
-
     it("should finalizeChannel()", async function () {
       const proofBody = {
         offdeltas: [25, -5, -10],
