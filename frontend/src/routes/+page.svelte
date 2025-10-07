@@ -166,7 +166,6 @@
   {#if $isLoading && $viewMode !== 'settings'}
     <div class="loading-container">
       <img src="/img/finis.png" alt="Loading" class="loading-spinner-img" />
-      <div class="loading-text">Loading XLN Environment...</div>
     </div>
   {:else if $error && $viewMode !== 'settings'}
     <div class="error-container">
@@ -424,8 +423,8 @@
   }
 
   .loading-spinner-img {
-    width: 64px;
-    height: 64px;
+    width: 320px;
+    height: 320px;
     animation: spin 2s linear infinite;
   }
 
