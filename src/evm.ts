@@ -7,8 +7,10 @@ import { ethers } from 'ethers';
 import { loadJurisdictions } from './jurisdiction-loader';
 
 import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
+import { safeStringify } from './serialization-utils';
 import { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
+import { logError } from './logger';
 
 // Global logger for UI-accessible error logging (set by frontend)
 declare global {
@@ -25,7 +27,7 @@ const uiLog = (message: string, details?: any) => {
 };
 
 const uiError = (message: string, details?: any) => {
-  console.error(message, details);
+  logError("BLOCKCHAIN", message, details);
   if (isBrowser && window.xlnErrorLog) {
     window.xlnErrorLog(message, 'EVM-ERROR', details);
   }
@@ -168,7 +170,7 @@ export const debugFundReserves = async (jurisdiction: JurisdictionConfig, entity
     
     return { transaction: tx, receipt, newBalance };
   } catch (error) {
-    console.error(`❌ Failed to fund reserves:`, error);
+    logError("BLOCKCHAIN", `❌ Failed to fund reserves:`, error);
     throw error;
   }
 };
@@ -227,7 +229,7 @@ export const submitPrefundAccount = async (jurisdiction: JurisdictionConfig, ent
     };
     
   } catch (error) {
-    console.error(`❌ Failed to prefund account:`, error);
+    logError("BLOCKCHAIN", `❌ Failed to prefund account:`, error);
     throw error;
   }
 };
@@ -235,7 +237,7 @@ export const submitPrefundAccount = async (jurisdiction: JurisdictionConfig, ent
 export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entityId: string, batch: any) => {
   try {
     console.log(`💸 Submitting processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
-    console.log(`🔍 BATCH DEBUG:`, JSON.stringify(batch, null, 2));
+    console.log(`🔍 BATCH DEBUG:`, safeStringify(batch));
     console.log(`🔍 ENTITY DEBUG: ${entityId}`);
     console.log(`🔍 JURISDICTION DEBUG:`, jurisdiction);
     console.log(`🔍 JURISDICTION SOURCE: Reading from jurisdictions.json file`);
@@ -254,8 +256,8 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
         }
       }
     }
-    console.log(`🔍 FIXED BATCH:`, JSON.stringify(batch, null, 2));
-    
+    console.log(`🔍 FIXED BATCH:`, safeStringify(batch));
+
     const { depository, provider } = await connectToEthereum(jurisdiction);
     console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
     
@@ -323,7 +325,7 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
     console.log(`🔍 Bytecode length: ${bytecode.length} chars`);
     
     // Check ABI hash vs expected
-    const abiHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(depository.interface.fragments.map(f => {
+    const abiHash = ethers.keccak256(ethers.toUtf8Bytes(safeStringify(depository.interface.fragments.map(f => {
       // Proper typing: Fragment has format method
       return 'format' in f && typeof f.format === 'function' ? f.format() : f.toString();
     }))));
@@ -369,7 +371,7 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
       const result = await depository['processBatch']?.staticCall(entityId, batch);
       console.log(`✅ Static call successful: ${result}`);
     } catch (staticError) {
-      console.error(`❌ Static call failed:`, staticError);
+      logError("BLOCKCHAIN", `❌ Static call failed:`, staticError);
 
       // Type-safe error handling for ethers.js errors
       const errorDetails: Record<string, unknown> = {};
@@ -392,7 +394,7 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
       const gasEstimate = await depository['processBatch']?.estimateGas(entityId, batch);
       console.log(`🔍 Gas estimate: ${gasEstimate?.toString() || 'N/A'}`);
     } catch (gasError) {
-      console.error(`❌ Gas estimation failed:`, gasError);
+      logError("BLOCKCHAIN", `❌ Gas estimation failed:`, gasError);
       throw gasError;
     }
     
@@ -406,7 +408,7 @@ export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entit
     
     return { transaction: tx, receipt };
   } catch (error) {
-    console.error(`❌ Failed to submit processBatch to ${jurisdiction.name}:`, error);
+    logError("BLOCKCHAIN", `❌ Failed to submit processBatch to ${jurisdiction.name}:`, error);
     throw error;
   }
 };
@@ -459,7 +461,7 @@ export const registerNumberedEntityOnChain = async (
       receipt.logs.forEach((log: any, i: number) => {
         try {
           const parsed = entityProvider.interface.parseLog(log);
-          console.log(`   📝 Log ${i}: ${parsed?.name} - ${JSON.stringify(parsed?.args)}`);
+          console.log(`   📝 Log ${i}: ${parsed?.name} - ${safeStringify(parsed?.args)}`);
         } catch {
           console.log(`   📝 Log ${i}: Unable to parse log - ${log.topics?.[0]}`);
         }
@@ -490,7 +492,7 @@ export const registerNumberedEntityOnChain = async (
 
     return { txHash: tx.hash, entityNumber };
   } catch (error) {
-    console.error('❌ Blockchain registration failed:', error);
+    logError("BLOCKCHAIN", '❌ Blockchain registration failed:', error);
     throw error;
   }
 };
@@ -543,7 +545,7 @@ export const registerNumberedEntitiesBatchOnChain = async (
 
     return { txHash: tx.hash, entityNumbers };
   } catch (error) {
-    console.error('❌ Batch registration failed:', error);
+    logError("BLOCKCHAIN", '❌ Batch registration failed:', error);
     throw error;
   }
 };
@@ -576,7 +578,7 @@ export const assignNameOnChain = async (
 
     return { txHash: tx.hash };
   } catch (error) {
-    console.error('❌ Name assignment failed:', error);
+    logError("BLOCKCHAIN", '❌ Name assignment failed:', error);
     throw error;
   }
 };
@@ -619,7 +621,7 @@ export const getEntityInfoFromChain = async (
       ...(name !== undefined ? { name } : {})
     };
   } catch (error) {
-    console.error('❌ Failed to get entity info from chain:', error);
+    logError("BLOCKCHAIN", '❌ Failed to get entity info from chain:', error);
     return { exists: false };
   }
 };
@@ -656,7 +658,7 @@ export const getNextEntityNumber = async (jurisdiction: JurisdictionConfig): Pro
     if (DEBUG) console.log(`🔢 Next entity number: ${result}`);
     return result;
   } catch (error) {
-    console.error('❌ Failed to get next entity number:', error);
+    logError("BLOCKCHAIN", '❌ Failed to get next entity number:', error);
     throw error;
   }
 };
@@ -784,7 +786,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       });
     }
   } catch (error) {
-    console.error('❌ Failed to load jurisdictions:', error);
+    logError("BLOCKCHAIN", '❌ Failed to load jurisdictions:', error);
   }
 
   return jurisdictions;
@@ -850,7 +852,7 @@ export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity:
     return { txHash: tx.hash, blockNumber: receipt.blockNumber };
 
   } catch (error) {
-    console.error('❌ Settlement failed:', error);
+    logError("BLOCKCHAIN", '❌ Settlement failed:', error);
     throw error;
   }
 };
@@ -885,7 +887,7 @@ export const submitReserveToReserve = async (jurisdiction: JurisdictionConfig, f
     return { txHash: tx.hash, blockNumber: receipt.blockNumber };
 
   } catch (error) {
-    console.error('❌ Direct R2R failed:', error);
+    logError("BLOCKCHAIN", '❌ Direct R2R failed:', error);
     throw error;
   }
 };

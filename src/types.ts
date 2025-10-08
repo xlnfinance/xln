@@ -304,8 +304,8 @@ export interface Delta {
   offdelta: bigint; // Off-chain delta
   leftCreditLimit: bigint;
   rightCreditLimit: bigint;
-  leftAllowence: bigint;
-  rightAllowence: bigint;
+  leftAllowance: bigint;
+  rightAllowance: bigint;
 }
 
 // Derived account balance information per token

@@ -1,9 +1,10 @@
 // import { calculateQuorumPower } from '../entity-consensus'; // TODO: Remove if not needed
 import { EntityState, Proposal, ProposalAction } from '../types';
 import { createHash, DEBUG } from '../utils';
+import { safeStringify } from '../serialization-utils';
 
 export const generateProposalId = (action: ProposalAction, proposer: string, entityState: EntityState): string => {
-  const proposalData = JSON.stringify({
+  const proposalData = safeStringify({
     type: action.type,
     data: action.data,
     proposer,

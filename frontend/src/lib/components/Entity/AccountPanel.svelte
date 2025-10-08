@@ -906,34 +906,9 @@
     color: #f48771;
   }
 
-  .balance-visualization {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
 
-  .balance-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
 
-  .row-label {
-    min-width: 80px;
-    font-size: 0.85em;
-    color: #888;
-  }
 
-  .detailed-bar {
-    flex: 1;
-    height: 32px;
-    background: #1a1a1a;
-    border-radius: 4px;
-    overflow: hidden;
-    display: flex;
-    border: 1px solid #333;
-  }
 
   .bar-segment {
     display: flex;
@@ -943,17 +918,8 @@
     min-width: 0;
   }
 
-  .segment-label {
-    font-size: 0.7em;
-    color: white;
-    font-weight: 600;
-    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-  }
 
   /* Pink - Unused credit */
-  .bar-segment.unused-credit {
-    background: linear-gradient(135deg, #ff69b4, #ff86c8);
-  }
 
   /* Green - Collateral */
   .bar-segment.collateral {
@@ -961,9 +927,6 @@
   }
 
   /* Orange - Used credit */
-  .bar-segment.used-credit {
-    background: linear-gradient(135deg, #ff8c00, #ffa500);
-  }
 
   /* Unified capacity bar styles */
   .unified-capacity-bar {

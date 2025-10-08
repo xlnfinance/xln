@@ -37,11 +37,46 @@ export function shouldLog(category: keyof LogConfig): boolean {
   return LOG_CONFIG[category] ?? false;
 }
 
-// Conditional logger
-export function log(category: keyof LogConfig, ...args: any[]): void {
+// Log levels for structured logging
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+// Conditional logger with levels
+export function log(category: keyof LogConfig, level: LogLevel, ...args: unknown[]): void {
   if (shouldLog(category)) {
-    console.log(...args);
+    const prefix = `[${category}]`;
+    switch (level) {
+      case 'error':
+        console.error(prefix, ...args);
+        break;
+      case 'warn':
+        console.warn(prefix, ...args);
+        break;
+      case 'info':
+        console.info(prefix, ...args);
+        break;
+      case 'debug':
+      default:
+        console.log(prefix, ...args);
+        break;
+    }
   }
+}
+
+// Convenience methods for common patterns
+export function logDebug(category: keyof LogConfig, ...args: unknown[]): void {
+  log(category, 'debug', ...args);
+}
+
+export function logInfo(category: keyof LogConfig, ...args: unknown[]): void {
+  log(category, 'info', ...args);
+}
+
+export function logWarn(category: keyof LogConfig, ...args: unknown[]): void {
+  log(category, 'warn', ...args);
+}
+
+export function logError(category: keyof LogConfig, ...args: unknown[]): void {
+  log(category, 'error', ...args);
 }
 
 // Debug helper to show current config

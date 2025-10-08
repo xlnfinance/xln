@@ -58,19 +58,9 @@ export const replicas = derived(
   ($env) => $env?.replicas || new Map()
 );
 
-export const history = derived(
-  xlnEnvironment,
-  ($env) => {
-    const historyData = $env?.history || [];
-    // LOAD-ORDER-DEBUG removed
-    return historyData;
-  }
-);
-
-export const currentHeight = derived(
-  xlnEnvironment,
-  ($env) => $env?.height || 0
-);
+// Direct stores for immediate updates (no derived timing races)
+export const history = writable<any[]>([]);
+export const currentHeight = writable<number>(0);
 
 // Track if XLN is already initialized to prevent data loss
 let isInitialized = false;
@@ -86,45 +76,41 @@ export async function initializeXLN() {
     }
   }
 
+  // FAILSAFE: Auto-disable loading after 10s to prevent stuck UI
+  const loadingTimeout = setTimeout(() => {
+    console.error('⚠️ Loading timeout (10s) - forcing isLoading=false to prevent stuck UI');
+    isLoading.set(false);
+    error.set('Loading timed out. UI may be incomplete. Check Settings for details.');
+  }, 10000);
+
   try {
     isLoading.set(true);
     error.set(null);
-    
+
     const xln = await getXLN();
 
     // Store XLN instance separately for function access
     xlnInstance.set(xln);
-    console.log('✅ XLN instance stored with functions:', Object.keys(xln).filter(k => typeof xln[k] === 'function'));
-    console.log('🔍 Looking for deriveDelta:', {
-      hasDeriveDelta: 'deriveDelta' in xln,
-      deriveDeltaType: typeof xln.deriveDelta,
-      allAccountFunctions: Object.keys(xln).filter(k => k.includes('account') || k.includes('Delta') || k.includes('token'))
-    });
 
-    // Register callback for automatic reactivity
+    // Register callback for automatic reactivity (fires on every processUntilEmpty)
     xln.registerEnvChangeCallback?.((env: any) => {
       xlnEnvironment.set(env);
-      // BROWSER-DEBUG removed
+      history.set(env?.history || []);
+      currentHeight.set(env?.height || 0);
 
       // Update window for e2e testing
       if (typeof window !== 'undefined') {
         (window as any).xlnEnv = env;
       }
     });
-    
-    // Load from IndexedDB - main() handles timeout internally
-    // BROWSER-DEBUG removed
 
+    // Load from IndexedDB - main() handles DB timeout internally
     const env = await xln.main();
-    // BROWSER-DEBUG removed
 
-    // Replica debugging removed
-
-    // History is now guaranteed to be included in env
-
-    // LOAD-ORDER-DEBUG removed
-
+    // Set all stores immediately (no derived timing races)
     xlnEnvironment.set(env);
+    history.set(env?.history || []);
+    currentHeight.set(env?.height || 0);
     isLoading.set(false);
 
     // Expose to window for e2e testing
@@ -132,11 +118,14 @@ export async function initializeXLN() {
       (window as any).xlnEnv = env;
     }
 
-    console.log('✅ XLN Environment initialized with auto-reactivity');
+    console.log('✅ XLN Environment initialized');
     isInitialized = true;
+
+    clearTimeout(loadingTimeout);
     return env;
   } catch (err) {
-    console.error('🚨 CRITICAL: XLN initialization failed - this indicates a system failure:', err);
+    clearTimeout(loadingTimeout);
+    console.error('🚨 XLN initialization failed:', err);
 
     // Log to persistent error store
     const errorMessage = err instanceof Error ? err.message : 'Critical system failure during initialization';

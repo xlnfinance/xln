@@ -26,6 +26,19 @@
     "simple-import-sort/exports": "error",
     "@typescript-eslint/no-explicit-any": "warn",
     "@typescript-eslint/no-unused-vars": "warn",
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "JSON",
+        "property": "stringify",
+        "message": "🚨 FINTECH-SAFETY: Use safeStringify() from serialization-utils (for logs) or encode() from snapshot-coder (for storage). BigInt values will crash JSON.stringify()!"
+      },
+      {
+        "object": "JSON",
+        "property": "parse",
+        "message": "⚠️ FINTECH-SAFETY: Consider using safeParse() or decode() for BigInt-safe deserialization."
+      }
+    ],
   },
   "settings": {
     "import/resolver": {

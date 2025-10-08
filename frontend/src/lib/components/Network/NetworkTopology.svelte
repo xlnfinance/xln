@@ -4008,6 +4008,12 @@
     <!-- Resize handle -->
     <div
       class="resize-handle"
+      role="slider"
+      aria-label="Resize sidebar"
+      aria-valuenow={sidebarWidth}
+      aria-valuemin={250}
+      aria-valuemax={800}
+      tabindex="0"
       on:mousedown={handleResizeStart}
       title="Drag to resize sidebar"
     ></div>
@@ -4066,8 +4072,9 @@
       <div class="topology-controls">
         <!-- Token Filter -->
         <div class="control-group">
-          <label>Token:</label>
+          <label for="token-filter-select">Token:</label>
           <select
+            id="token-filter-select"
             bind:value={selectedTokenId}
             on:change={(e) => {
               // FINTECH-SAFETY: Coerce string→number from select binding
@@ -4084,8 +4091,9 @@
 
         <!-- Theme Selector -->
         <div class="control-group">
-          <label>Theme:</label>
+          <label for="theme-select">Theme:</label>
           <select
+            id="theme-select"
             value={$settings.theme}
             on:change={(e) => {
               const theme = e.currentTarget.value as any;
@@ -4106,7 +4114,8 @@
 
         <!-- Bars Mode -->
         <div class="control-group">
-          <label>Bars:</label>
+          <span class="control-label">Bars:</span>
+          <div role="group" aria-label="Bars mode selection">
           <button
             class="toggle-btn"
             class:active={barsMode === 'close'}
@@ -4121,11 +4130,13 @@
           >
             Spread
           </button>
+          </div>
         </div>
 
         <!-- Force Layout Toggle -->
         <div class="control-group">
-          <label>Layout:</label>
+          <span class="control-label">Layout:</span>
+          <div role="group" aria-label="Layout mode selection">
           <button
             class="toggle-btn"
             class:active={forceLayoutEnabled}
@@ -4147,11 +4158,13 @@
           >
             🔄 Rebalance
           </button>
+          </div>
         </div>
 
         <!-- 2D/3D Mode -->
         <div class="control-group">
-          <label>View:</label>
+          <span class="control-label">View:</span>
+          <div role="group" aria-label="View mode selection">
           <button
             class="toggle-btn"
             class:active={viewMode === '2d'}
@@ -4166,11 +4179,13 @@
           >
             3D
           </button>
+          </div>
         </div>
 
         <!-- Entity Display Mode -->
         <div class="control-group">
-          <label>Entity:</label>
+          <span class="control-label">Entity:</span>
+          <div role="group" aria-label="Entity display mode">
           <button
             class="toggle-btn"
             class:active={entityMode === 'sphere'}
@@ -4185,11 +4200,13 @@
           >
             Avatar
           </button>
+          </div>
         </div>
 
         <!-- Rotation Presets -->
         <div class="control-group">
-          <label>Rotation:</label>
+          <span class="control-label">Rotation:</span>
+          <div role="group" aria-label="Rotation presets">
           <div class="preset-buttons">
             <button
               class="preset-btn"
@@ -4224,13 +4241,15 @@
               🎡 Fast
             </button>
           </div>
+          </div>
         </div>
 
         <!-- Speed Control (if not stopped) -->
         {#if rotationX > 0 || rotationY > 0 || rotationZ > 0}
         <div class="control-group">
-          <label>Speed: {Math.round((rotationY || rotationX || rotationZ) / 100)}%</label>
+          <label for="rotation-speed-slider">Speed: {Math.round((rotationY || rotationX || rotationZ) / 100)}%</label>
           <input
+            id="rotation-speed-slider"
             type="range"
             min="1000"
             max="10000"
@@ -4251,8 +4270,9 @@
 
         <!-- Label Size Slider -->
         <div class="control-group">
-          <label>Label Size: {labelScale.toFixed(1)}x</label>
+          <label for="label-scale-slider">Label Size: {labelScale.toFixed(1)}x</label>
           <input
+            id="label-scale-slider"
             type="range"
             min="0.5"
             max="5.0"
@@ -4266,8 +4286,9 @@
 
         <!-- Lightning Speed Slider -->
         <div class="control-group">
-          <label>Lightning: {lightningSpeed}ms/hop</label>
+          <label for="lightning-speed-slider">Lightning: {lightningSpeed}ms/hop</label>
           <input
+            id="lightning-speed-slider"
             type="range"
             min="10"
             max="500"
@@ -4303,8 +4324,8 @@
         <!-- Quick Payment Form -->
         <div class="payment-form">
           <div class="form-row">
-            <label>💸 From:</label>
-            <select bind:value={paymentFrom} class="form-select">
+            <label for="payment-from">💸 From:</label>
+            <select id="payment-from" bind:value={paymentFrom} class="form-select">
               <option value="">Select...</option>
               {#each entities as entity}
                 <option value={entity.id}>{getEntityShortName(entity.id)}</option>
@@ -4313,8 +4334,8 @@
           </div>
 
           <div class="form-row">
-            <label>→ To:</label>
-            <select bind:value={paymentTo} class="form-select">
+            <label for="payment-to">→ To:</label>
+            <select id="payment-to" bind:value={paymentTo} class="form-select">
               <option value="">Select...</option>
               {#each entities as entity}
                 {#if entity.id !== paymentFrom}
@@ -4325,13 +4346,14 @@
           </div>
 
           <div class="form-row">
-            <label>💰 Amount:</label>
-            <input type="text" bind:value={paymentAmount} class="form-input" placeholder="200000" />
+            <label for="payment-amount">💰 Amount:</label>
+            <input id="payment-amount" type="text" bind:value={paymentAmount} class="form-input" placeholder="200000" />
           </div>
 
           <div class="form-row">
-            <label>⚡ TPS:</label>
+            <label for="payment-tps-slider">⚡ TPS:</label>
             <input
+              id="payment-tps-slider"
               type="range"
               min="0"
               max="5"
@@ -4345,8 +4367,8 @@
 
           <!-- Route Preview Radio List -->
           {#if availableRoutes.length > 0}
-            <div class="route-preview">
-              <label class="route-preview-label">Select Route:</label>
+            <div class="route-preview" role="group" aria-label="Route selection">
+              <span class="route-preview-label">Select Route:</span>
               {#each availableRoutes as route, index}
                 <label class="route-radio-item">
                   <input
@@ -4516,8 +4538,8 @@
             rows="4"
           ></textarea>
           <div class="ascii-controls">
-            <label>Scale:</label>
-            <input type="number" class="ascii-scale-input" bind:value={asciiScale} min="10" max="500" />
+            <label for="ascii-scale-input">Scale:</label>
+            <input id="ascii-scale-input" type="number" class="ascii-scale-input" bind:value={asciiScale} min="10" max="500" />
             <span>px</span>
           </div>
           <button class="ascii-generate-btn" on:click={generateASCIIScenario}>

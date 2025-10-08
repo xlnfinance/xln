@@ -336,26 +336,26 @@
     <div class="controls-form">
     {#if selectedAction === 'chat'}
       <div class="form-group">
-        <label class="form-label">Message:</label>
-        <textarea class="form-textarea" bind:value={message} placeholder="Enter your message..."></textarea>
+        <label class="form-label" for="chat-message">Message:</label>
+        <textarea id="chat-message" class="form-textarea" bind:value={message} placeholder="Enter your message..."></textarea>
       </div>
       <button class="form-button" on:click={submitChatMessage}>Send Message</button>
     
     {:else if selectedAction === 'proposal'}
       <div class="form-group">
-        <label class="form-label">Proposal Title:</label>
-        <input class="form-input" type="text" bind:value={proposalTitle} placeholder="Enter proposal title..." />
+        <label class="form-label" for="proposal-title">Proposal Title:</label>
+        <input id="proposal-title" class="form-input" type="text" bind:value={proposalTitle} placeholder="Enter proposal title..." />
       </div>
       <div class="form-group">
-        <label class="form-label">Description:</label>
-        <textarea class="form-textarea" bind:value={proposalDescription} placeholder="Enter proposal description..."></textarea>
+        <label class="form-label" for="proposal-desc">Description:</label>
+        <textarea id="proposal-desc" class="form-textarea" bind:value={proposalDescription} placeholder="Enter proposal description..."></textarea>
       </div>
       <button class="form-button" on:click={submitProposal}>Create Proposal</button>
     
     {:else if selectedAction === 'vote'}
       <div class="form-group">
-        <label class="form-label">Select Proposal:</label>
-        <select class="form-input" bind:value={selectedProposalId}>
+        <label class="form-label" for="vote-proposal">Select Proposal:</label>
+        <select id="vote-proposal" class="form-input" bind:value={selectedProposalId}>
           <option value="">Select a proposal...</option>
           {#each proposals as proposal}
             <option value={proposal.id}>{proposal.action?.data?.message || 'Proposal ' + proposal.id}</option>
@@ -363,8 +363,8 @@
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Vote:</label>
-        <select class="form-input" bind:value={voteChoice}>
+        <label class="form-label" for="vote-choice">Vote:</label>
+        <select id="vote-choice" class="form-input" bind:value={voteChoice}>
           <option value="">Select your vote...</option>
           <option value="yes">✅ Yes</option>
           <option value="no">❌ No</option>
@@ -372,22 +372,22 @@
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Comment (optional):</label>
-        <textarea class="form-textarea" bind:value={voteComment} placeholder="Add a comment to your vote..."></textarea>
+        <label class="form-label" for="vote-comment">Comment (optional):</label>
+        <textarea id="vote-comment" class="form-textarea" bind:value={voteComment} placeholder="Add a comment to your vote..."></textarea>
       </div>
       <button class="form-button" on:click={submitVote}>Submit Vote</button>
     
     {:else if selectedAction === 'jtx'}
       <div class="form-group">
-        <label class="form-label">Recipient Entity:</label>
-        <input class="form-input" type="text" bind:value={jtxRecipient} placeholder="Entity number (e.g., 2, 3) or full entity ID..." />
+        <label class="form-label" for="jtx-recipient">Recipient Entity:</label>
+        <input id="jtx-recipient" class="form-input" type="text" bind:value={jtxRecipient} placeholder="Entity number (e.g., 2, 3) or full entity ID..." />
         <div class="form-hint">
           💡 Tip: Try entity number "2" to transfer to Entity #2
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Token:</label>
-        <select class="form-input" bind:value={jtxTokenId}>
+        <label class="form-label" for="jtx-token">Token:</label>
+        <select id="jtx-token" class="form-input" bind:value={jtxTokenId}>
           <option value="">Select a token...</option>
           {#each availableTokens as token}
             <option value={token.id}>{token.name} (Balance: {token.amount})</option>
@@ -395,15 +395,15 @@
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Amount:</label>
-        <input class="form-input" type="number" bind:value={jtxAmount} placeholder="0.0" />
+        <label class="form-label" for="jtx-amount">Amount:</label>
+        <input id="jtx-amount" class="form-input" type="number" bind:value={jtxAmount} placeholder="0.0" />
       </div>
       <button class="form-button" on:click={submitJtx}>Send Transfer</button>
 
     {:else if selectedAction === 'account'}
       <div class="form-group">
-        <label class="form-label">Counterparty Entity:</label>
-        <select class="form-input" bind:value={accountCounterparty}>
+        <label class="form-label" for="account-counterparty">Counterparty Entity:</label>
+        <select id="account-counterparty" class="form-input" bind:value={accountCounterparty}>
           <option value="">Select entity...</option>
           {#each otherEntities as entityId}
             <option value={entityId}>
@@ -423,7 +423,7 @@
 
     {:else}
       <div class="form-group">
-        <label class="form-label">Action:</label>
+        <span class="form-label">Action: {selectedAction}</span>
         <div class="form-input" style="padding: 12px; background: #1e1e1e; border-radius: 4px; color: #666;">
           {selectedAction} controls will be implemented here
         </div>

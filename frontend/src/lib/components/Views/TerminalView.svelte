@@ -305,7 +305,6 @@ SYSTEM:
       bind:value={currentCommand}
       on:keydown={handleKeydown}
       placeholder="enter command..."
-      autofocus
     />
   </div>
 </div>

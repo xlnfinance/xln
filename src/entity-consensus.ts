@@ -7,6 +7,7 @@ import { applyEntityTx } from './entity-tx';
 import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env } from './types';
 import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
+import { logError } from './logger';
 
 // === SECURITY VALIDATION ===
 
@@ -279,7 +280,7 @@ export const applyEntityInput = async (
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
     if (!proposerId) {
-      console.error(`❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
+      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
       return { newState: entityReplica.state, outputs: entityOutbox };
     }
 
@@ -312,9 +313,9 @@ export const applyEntityInput = async (
       // SECURITY: Validate commit matches our locked frame (if we have one)
       if (entityReplica.lockedFrame) {
         if (entityReplica.lockedFrame.hash !== entityInput.proposedFrame.hash) {
-          console.error(`❌ BYZANTINE: Commit frame doesn't match locked frame!`);
-          console.error(`   Locked: ${entityReplica.lockedFrame.hash}`);
-          console.error(`   Commit: ${entityInput.proposedFrame.hash}`);
+          logError("FRAME_CONSENSUS", `❌ BYZANTINE: Commit frame doesn't match locked frame!`);
+          logError("FRAME_CONSENSUS", `   Locked: ${entityReplica.lockedFrame.hash}`);
+          logError("FRAME_CONSENSUS", `   Commit: ${entityInput.proposedFrame.hash}`);
           return { newState: entityReplica.state, outputs: entityOutbox };
         }
         console.log(`✅ Commit validation: matches locked frame ${entityReplica.lockedFrame.hash.slice(0,10)}`);
@@ -324,9 +325,9 @@ export const applyEntityInput = async (
       for (const [signerId, signature] of entityInput.precommits) {
         const expectedSig = `sig_${signerId}_${entityInput.proposedFrame.hash}`;
         if (signature !== expectedSig) {
-          console.error(`❌ BYZANTINE: Invalid signature format from ${signerId}`);
-          console.error(`   Expected: ${expectedSig.slice(0,30)}...`);
-          console.error(`   Received: ${signature.slice(0,30)}...`);
+          logError("FRAME_CONSENSUS", `❌ BYZANTINE: Invalid signature format from ${signerId}`);
+          logError("FRAME_CONSENSUS", `   Expected: ${expectedSig.slice(0,30)}...`);
+          logError("FRAME_CONSENSUS", `   Received: ${signature.slice(0,30)}...`);
           return { newState: entityReplica.state, outputs: entityOutbox };
         }
       }
@@ -390,7 +391,7 @@ export const applyEntityInput = async (
       // Send precommit to proposer only
       const proposerId = config.validators[0];
       if (!proposerId) {
-        console.error(`❌ No proposer found in validators: ${config.validators}`);
+        logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${config.validators}`);
         return { newState: entityReplica.state, outputs: entityOutbox };
       }
       console.log(
@@ -606,7 +607,7 @@ export const applyEntityInput = async (
     // Send mempool to proposer
     const proposerId = entityReplica.state.config.validators[0];
     if (!proposerId) {
-      console.error(`❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
+      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
       return { newState: entityReplica.state, outputs: entityOutbox };
     }
     console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);

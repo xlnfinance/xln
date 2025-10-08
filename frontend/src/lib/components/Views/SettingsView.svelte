@@ -520,7 +520,7 @@
         </button>
         <span class="error-count">{$errorLog.length} errors logged</span>
       </div>
-      <textarea
+      <textarea></textarea>
         class="error-log-textarea"
         readonly
         value={errorLogText || 'No errors logged yet'}
@@ -1034,20 +1034,7 @@
     margin-top: 8px;
   }
 
-  .theme-toggle-btn {
-    padding: 8px 16px;
-    background: rgba(40, 40, 40, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
-    color: rgba(255, 255, 255, 0.8);
-    cursor: pointer;
-    font-size: 13px;
-  }
 
-  .theme-toggle-btn:hover {
-    background: rgba(50, 50, 50, 0.8);
-    border-color: rgba(0, 122, 204, 0.5);
-  }
 
   .theme-select {
     padding: 8px 12px;

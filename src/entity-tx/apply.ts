@@ -14,10 +14,11 @@ import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState } from '../state-helpers';
 import { submitSettle } from '../evm';
+import { logError } from '../logger';
 
 export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
   if (!entityTx) {
-    console.error(`❌ EntityTx is undefined!`);
+    logError("ENTITY_TX", `❌ EntityTx is undefined!`);
     return { newState: entityState, outputs: [] };
   }
 
@@ -170,7 +171,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         try {
           await processProfileUpdate(db, profileData.entityId, profileData, profileData.hankoSignature || '', env);
         } catch (error) {
-          console.error(`❌ Failed to process profile update for ${profileData.entityId}:`, error);
+          logError("ENTITY_TX", `❌ Failed to process profile update for ${profileData.entityId}:`, error);
         }
       } else {
         console.warn(`⚠️ Invalid profile-update transaction data:`, entityTx.data);
@@ -322,12 +323,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
               route = paths[0].path;
               console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
             } else {
-              console.error(`❌ No route found to ${formatEntityId(targetEntityId)}`);
+              logError("ENTITY_TX", `❌ No route found to ${formatEntityId(targetEntityId)}`);
               newState.messages.push(`❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
               return { newState, outputs: [] };
             }
           } else {
-            console.error(`❌ Cannot find route: Gossip layer not available`);
+            logError("ENTITY_TX", `❌ Cannot find route: Gossip layer not available`);
             newState.messages.push(`❌ Payment failed: Network routing unavailable`);
             return { newState, outputs: [] };
           }
@@ -336,20 +337,20 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Validate route starts with current entity
       if (route.length < 2 || route[0] !== entityState.entityId) {
-        console.error(`❌ Invalid route: doesn't start with current entity`);
+        logError("ENTITY_TX", `❌ Invalid route: doesn't start with current entity`);
         return { newState: entityState, outputs: [] };
       }
 
       // Determine next hop
       const nextHop = route[1];
       if (!nextHop) {
-        console.error(`❌ Invalid route: no next hop specified in route`);
+        logError("ENTITY_TX", `❌ Invalid route: no next hop specified in route`);
         return { newState: entityState, outputs: [] };
       }
 
       // Check if we have an account with next hop
       if (!newState.accounts.has(nextHop)) {
-        console.error(`❌ No account with next hop: ${nextHop}`);
+        logError("ENTITY_TX", `❌ No account with next hop: ${nextHop}`);
         newState.messages.push(`❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
         return { newState, outputs: [] };
       }
@@ -427,14 +428,14 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       for (const diff of diffs) {
         const sum = diff.leftDiff + diff.rightDiff + diff.collateralDiff;
         if (sum !== 0n) {
-          console.error(`❌ INVARIANT-VIOLATION: leftDiff + rightDiff + collateralDiff = ${sum} (must be 0)`);
+          logError("ENTITY_TX", `❌ INVARIANT-VIOLATION: leftDiff + rightDiff + collateralDiff = ${sum} (must be 0)`);
           throw new Error(`Settlement invariant violation: ${sum} !== 0`);
         }
       }
 
       // Step 2: Validate account exists
       if (!newState.accounts.has(counterpartyEntityId)) {
-        console.error(`❌ No account exists with ${formatEntityId(counterpartyEntityId)}`);
+        logError("ENTITY_TX", `❌ No account exists with ${formatEntityId(counterpartyEntityId)}`);
         throw new Error(`No account with ${counterpartyEntityId}`);
       }
 
@@ -473,7 +474,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           `🏦 ${description || 'Settlement'} tx: ${result.txHash.slice(0, 10)}... (block ${result.blockNumber})`
         );
       } catch (error) {
-        console.error(`❌ Settlement transaction failed:`, error);
+        logError("ENTITY_TX", `❌ Settlement transaction failed:`, error);
         newState.messages.push(`❌ Settlement failed: ${(error as Error).message}`);
         throw error; // Re-throw to trigger outer catch
       }

@@ -49,8 +49,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
   let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
 
-  let inAllowence = delta.rightAllowence;
-  let outAllowence = delta.leftAllowence;
+  let inAllowence = delta.rightAllowance;
+  let outAllowence = delta.leftAllowance;
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
@@ -130,8 +130,8 @@ export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, del
     offdelta: 0n,
     leftCreditLimit: creditLimit,
     rightCreditLimit: creditLimit,
-    leftAllowence: 0n,
-    rightAllowence: 0n,
+    leftAllowance: 0n,
+    rightAllowance: 0n,
   };
 
   // VALIDATE AT SOURCE: Guarantee type safety from this point forward

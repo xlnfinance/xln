@@ -17,6 +17,7 @@ import { mergeAndSortEvents } from './parser.js';
 import { namedParamsToObject, getPositionalParams } from './types.js';
 import { createNumberedEntity } from '../entity-factory.js';
 import { getAvailableJurisdictions } from '../evm.js';
+import { safeStringify } from '../serialization-utils.js';
 
 /**
  * Execute a scenario and generate server frames
@@ -984,7 +985,7 @@ function applyViewState(
 
       latestSnapshot.viewState = mappedViewState;
 
-      console.log(`  🎥 VIEW: ${JSON.stringify(mappedViewState)}`);
+      console.log(`  🎥 VIEW: ${safeStringify(mappedViewState)}`);
     }
   }
 }

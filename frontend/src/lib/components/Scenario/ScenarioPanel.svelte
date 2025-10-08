@@ -214,7 +214,7 @@
         </button>
       </div>
 
-      <textarea
+      <textarea></textarea>
         bind:value={scenarioText}
         class="scenario-textarea"
         placeholder="Scenario script..."
