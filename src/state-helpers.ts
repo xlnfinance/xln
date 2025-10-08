@@ -8,6 +8,7 @@ import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, ServerI
 import type { Profile } from './gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
+import { safeStringify, safeParse } from './serialization-utils';
 
 // === CLONING UTILITIES ===
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
@@ -132,7 +133,7 @@ export const captureSnapshot = (
           return structuredClone(profile);
         } catch (error) {
           try {
-            return JSON.parse(JSON.stringify(profile));
+            return safeParse(safeStringify(profile));
           } catch {
             return profile;
           }

@@ -8,6 +8,7 @@
  * - Zero tolerance for undefined/null in financial flows
  */
 
+import { safeStringify } from './serialization-utils';
 import type {
   Delta,
   EntityInput,
@@ -18,31 +19,37 @@ import type {
 
 /**
  * Strict validation for Delta objects - financial data must be complete
+ * @param delta - Unvalidated input that claims to be a Delta
+ * @param source - Source context for error messages
  */
-export function validateDelta(delta: any, source: string = 'unknown'): Delta {
+export function validateDelta(delta: unknown, source: string = 'unknown'): Delta {
   if (!delta || typeof delta !== 'object') {
     throw new Error(`Invalid Delta object from ${source}: ${delta}`);
   }
 
+  // Type narrowing: after checking it's an object, we validate fields immediately
+  // Using 'as any' here is safe because we validate every field before returning
+  const obj = delta as any;
+
   // Ensure all required properties exist and are proper types
   const errors: string[] = [];
 
-  if (typeof delta.tokenId !== 'number' || !Number.isInteger(delta.tokenId) || delta.tokenId < 0) {
-    errors.push(`tokenId must be non-negative integer, got: ${delta.tokenId}`);
+  if (typeof obj.tokenId !== 'number' || !Number.isInteger(obj.tokenId) || obj.tokenId < 0) {
+    errors.push(`tokenId must be non-negative integer, got: ${obj.tokenId}`);
   }
 
   // Validate all BigInt fields
-  const bigintFields = ['collateral', 'ondelta', 'offdelta', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowence', 'rightAllowence'];
+  const bigintFields = ['collateral', 'ondelta', 'offdelta', 'leftCreditLimit', 'rightCreditLimit', 'leftAllowance', 'rightAllowance'] as const;
 
   for (const field of bigintFields) {
-    const value = delta[field];
+    const value = obj[field];
     if (value === null || value === undefined) {
       errors.push(`${field} cannot be null/undefined, got: ${value}`);
     } else if (typeof value !== 'bigint') {
       // Try to convert if it's a string representation
       if (typeof value === 'string' && /^-?\d+n?$/.test(value)) {
         try {
-          delta[field] = BigInt(value.replace(/n$/, ''));
+          obj[field] = BigInt(value.replace(/n$/, ''));
         } catch (e) {
           errors.push(`${field} invalid BigInt string: ${value}`);
         }
@@ -56,23 +63,25 @@ export function validateDelta(delta: any, source: string = 'unknown'): Delta {
     throw new Error(`Delta validation failed from ${source}:\n${errors.join('\n')}`);
   }
 
-  // Ensure we return a properly typed Delta
+  // After validation, safe to cast to Delta
   return {
-    tokenId: delta.tokenId,
-    collateral: delta.collateral,
-    ondelta: delta.ondelta,
-    offdelta: delta.offdelta,
-    leftCreditLimit: delta.leftCreditLimit,
-    rightCreditLimit: delta.rightCreditLimit,
-    leftAllowence: delta.leftAllowence,
-    rightAllowence: delta.rightAllowence,
+    tokenId: obj.tokenId as number,
+    collateral: obj.collateral as bigint,
+    ondelta: obj.ondelta as bigint,
+    offdelta: obj.offdelta as bigint,
+    leftCreditLimit: obj.leftCreditLimit as bigint,
+    rightCreditLimit: obj.rightCreditLimit as bigint,
+    leftAllowance: obj.leftAllowance as bigint,
+    rightAllowance: obj.rightAllowance as bigint,
   };
 }
 
 /**
  * Validate and fix account deltas Map
+ * @param deltas - Unvalidated Map or object that may contain deltas
+ * @param source - Source context for error messages
  */
-export function validateAccountDeltas(deltas: any, source: string = 'unknown'): Map<number, Delta> {
+export function validateAccountDeltas(deltas: unknown, source: string = 'unknown'): Map<number, Delta> {
   if (!deltas) {
     console.warn(`No deltas provided from ${source}, returning empty Map`);
     return new Map();
@@ -126,15 +135,16 @@ export function createDefaultDelta(tokenId: number): Delta {
     offdelta: 0n,
     leftCreditLimit: 1000000000000000000000000n, // 1M with 18 decimals
     rightCreditLimit: 1000000000000000000000000n,
-    leftAllowence: 0n,
-    rightAllowence: 0n,
+    leftAllowance: 0n,
+    rightAllowance: 0n,
   };
 }
 
 /**
  * Type guard for Delta objects
+ * @param obj - Value to check if it's a valid Delta
  */
-export function isDelta(obj: any): obj is Delta {
+export function isDelta(obj: unknown): obj is Delta {
   try {
     validateDelta(obj, 'type-guard');
     return true;
@@ -150,52 +160,61 @@ export function isDelta(obj: any): obj is Delta {
 /**
  * CRITICAL: Validate EntityInput has required routing identifiers
  * Never allow undefined entityId/signerId in financial flows
+ * @param input - Unvalidated input claiming to be EntityInput
  */
-export function validateEntityInput(input: any): EntityInput {
-  if (!input) {
-    throw new Error(`FINANCIAL-SAFETY: EntityInput is null/undefined`);
+export function validateEntityInput(input: unknown): EntityInput {
+  if (!input || typeof input !== 'object') {
+    throw new Error(`FINANCIAL-SAFETY: EntityInput is null/undefined or not an object`);
   }
 
-  if (!input.entityId || typeof input.entityId !== 'string') {
+  // Safe to use 'as any' since we validate all required fields immediately
+  const obj = input as any;
+
+  if (!obj.entityId || typeof obj.entityId !== 'string') {
     throw new Error(`FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected`);
   }
 
-  if (!input.signerId || typeof input.signerId !== 'string') {
+  if (!obj.signerId || typeof obj.signerId !== 'string') {
     throw new Error(`FINANCIAL-SAFETY: signerId is missing or invalid - payment routing will fail`);
   }
 
-  if (!input.entityTxs || !Array.isArray(input.entityTxs)) {
+  if (!obj.entityTxs || !Array.isArray(obj.entityTxs)) {
     throw new Error(`FINANCIAL-SAFETY: entityTxs is missing or invalid`);
   }
 
-  return input as EntityInput;
+  return obj as EntityInput;
 }
 
 /**
  * CRITICAL: Validate EntityOutput (same as EntityInput) has required routing identifiers
  * Ensure all outputs have proper routing data for financial flows
+ * @param output - Unvalidated output claiming to be EntityOutput
  */
-export function validateEntityOutput(output: any): EntityInput {
-  if (!output) {
-    throw new Error(`FINANCIAL-SAFETY: EntityOutput is null/undefined`);
+export function validateEntityOutput(output: unknown): EntityInput {
+  if (!output || typeof output !== 'object') {
+    throw new Error(`FINANCIAL-SAFETY: EntityOutput is null/undefined or not an object`);
   }
 
-  if (!output.entityId || typeof output.entityId !== 'string') {
+  // Safe to use 'as any' since we validate all required fields immediately
+  const obj = output as any;
+
+  if (!obj.entityId || typeof obj.entityId !== 'string') {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption`);
   }
 
-  if (!output.signerId || typeof output.signerId !== 'string') {
+  if (!obj.signerId || typeof obj.signerId !== 'string') {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput signerId is missing - routing corruption`);
   }
 
-  return output as EntityInput;
+  return obj as EntityInput;
 }
 
 /**
  * CRITICAL: Validate payment route integrity
  * Ensure payment routing paths are complete and valid
+ * @param route - Unvalidated array claiming to be a payment route
  */
-export function validatePaymentRoute(route: any): string[] {
+export function validatePaymentRoute(route: unknown): string[] {
   if (!route || !Array.isArray(route)) {
     throw new Error(`FINANCIAL-SAFETY: Payment route must be a valid array`);
   }
@@ -235,7 +254,7 @@ export class FinancialDataCorruptionError extends Error {
     super(`🚨 FINANCIAL-SAFETY VIOLATION: ${message}`);
     this.name = 'FinancialDataCorruptionError';
     if (context) {
-      this.message += `\nContext: ${JSON.stringify(context, (_k, v) => typeof v === 'bigint' ? v.toString() : v)}`;
+      this.message += `\nContext: ${safeStringify(context)}`;
     }
   }
 }

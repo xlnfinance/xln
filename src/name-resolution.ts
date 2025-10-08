@@ -5,6 +5,7 @@
  * Includes autocomplete functionality and hanko-signed profile updates.
  */
 
+import { decode, encode } from './snapshot-coder';
 import { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
 import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
@@ -17,8 +18,8 @@ export const storeProfile = async (db: any, profile: EntityProfile): Promise<voi
   if (!db) return;
 
   try {
-    // Store profile
-    await db.put(`profile:${profile.entityId}`, JSON.stringify(profile));
+    // Store profile (using encode for BigInt safety)
+    await db.put(`profile:${profile.entityId}`, encode(profile));
 
     // Update name index for autocomplete
     await updateNameIndex(db, profile.name, profile.entityId);
@@ -37,7 +38,7 @@ export const getProfile = async (db: any, entityId: string): Promise<EntityProfi
 
   try {
     const data = await db.get(`profile:${entityId}`);
-    return JSON.parse(data) as EntityProfile;
+    return decode(data) as EntityProfile;
   } catch (error) {
     // Profile doesn't exist - return null
     return null;
@@ -53,7 +54,7 @@ const updateNameIndex = async (db: any, name: string, entityId: string): Promise
     let nameIndex: NameIndex = {};
     try {
       const data = await db.get('name-index');
-      nameIndex = JSON.parse(data);
+      nameIndex = decode(data);
     } catch {
       // Index doesn't exist yet
     }
@@ -61,8 +62,8 @@ const updateNameIndex = async (db: any, name: string, entityId: string): Promise
     // Update index
     nameIndex[name.toLowerCase()] = entityId;
 
-    // Store updated index
-    await db.put('name-index', JSON.stringify(nameIndex));
+    // Store updated index (using encode for BigInt safety)
+    await db.put('name-index', encode(nameIndex));
   } catch (error) {
     console.error('Error updating name index:', error);
   }
@@ -79,7 +80,7 @@ export const searchEntityNames = async (db: any, query: string, limit: number = 
   try {
     // Get name index
     const data = await db.get('name-index');
-    const nameIndex: NameIndex = JSON.parse(data);
+    const nameIndex: NameIndex = decode(data);
 
     const queryLower = query.toLowerCase();
     const results: NameSearchResult[] = [];

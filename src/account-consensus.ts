@@ -12,11 +12,12 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env } from './types';
+import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState } from './types';
 import { cloneAccountMachine } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
 import { cryptoHash as hash } from './utils';
+import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
@@ -93,8 +94,8 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       offdelta: delta.offdelta.toString(),
       leftCreditLimit: delta.leftCreditLimit.toString(),
       rightCreditLimit: delta.rightCreditLimit.toString(),
-      leftAllowence: delta.leftAllowence.toString(),
-      rightAllowence: delta.rightAllowence.toString(),
+      leftAllowance: delta.leftAllowance.toString(),
+      rightAllowance: delta.rightAllowance.toString(),
     }))
   };
 
@@ -210,8 +211,8 @@ export async function proposeAccountFrame(
   try {
     newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
   } catch (error) {
-    console.error(`❌ Frame validation failed:`, error);
-    console.error(`❌ Frame data:`, safeStringify(frameData, 2));
+    logError("FRAME_CONSENSUS", `❌ Frame validation failed:`, error);
+    logError("FRAME_CONSENSUS", `❌ Frame data:`, safeStringify(frameData, 2));
     return {
       success: false,
       error: `Frame validation failed: ${(error as Error).message}`,
@@ -222,7 +223,7 @@ export async function proposeAccountFrame(
   // Validate frame size (Bitcoin 1MB block limit)
   const frameSize = safeStringify(newFrame).length;
   if (frameSize > MAX_FRAME_SIZE_BYTES) {
-    console.error(`❌ Frame too large: ${frameSize} bytes > ${MAX_FRAME_SIZE_BYTES} bytes (1MB)`);
+    logError("FRAME_CONSENSUS", `❌ Frame too large: ${frameSize} bytes > ${MAX_FRAME_SIZE_BYTES} bytes (1MB)`);
     return {
       success: false,
       error: `Frame exceeds 1MB limit: ${frameSize} bytes`,
@@ -357,10 +358,10 @@ export async function handleAccountInput(
       : accountMachine.currentFrame.stateHash || '';
 
     if (receivedFrame.prevFrameHash !== expectedPrevFrameHash) {
-      console.error(`❌ FRAME-CHAIN-BROKEN: prevFrameHash mismatch`);
-      console.error(`  Expected: ${expectedPrevFrameHash.slice(0, 16)}...`);
-      console.error(`  Received: ${receivedFrame.prevFrameHash.slice(0, 16)}...`);
-      console.error(`  Current height: ${accountMachine.currentHeight}`);
+      logError("FRAME_CONSENSUS", `❌ FRAME-CHAIN-BROKEN: prevFrameHash mismatch`);
+      logError("FRAME_CONSENSUS", `  Expected: ${expectedPrevFrameHash.slice(0, 16)}...`);
+      logError("FRAME_CONSENSUS", `  Received: ${receivedFrame.prevFrameHash.slice(0, 16)}...`);
+      logError("FRAME_CONSENSUS", `  Current height: ${accountMachine.currentHeight}`);
       return {
         success: false,
         error: `Frame chain broken: prevFrameHash mismatch (expected ${expectedPrevFrameHash.slice(0, 16)}...)`,
@@ -402,7 +403,7 @@ export async function handleAccountInput(
           // Continue to process their frame below
         } else {
           // Should never rollback twice
-          console.error(`❌ FATAL: Right side rolled back ${accountMachine.rollbackCount} times - consensus broken`);
+          logError("FRAME_CONSENSUS", `❌ FATAL: Right side rolled back ${accountMachine.rollbackCount} times - consensus broken`);
           return { success: false, error: 'Multiple rollbacks detected - consensus failure', events };
         }
       }
@@ -476,19 +477,19 @@ export async function handleAccountInput(
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
 
     if (ourComputedState !== theirClaimedState) {
-      console.error(`❌ CONSENSUS-FAILURE: Both sides computed different final states!`);
+      logError("FRAME_CONSENSUS", `❌ CONSENSUS-FAILURE: Both sides computed different final states!`);
 
       // DUMP EVERYTHING - FULL DATA STRUCTURES
-      console.error(`❌ FULL CONSENSUS FAILURE DUMP:`);
-      console.error(`❌ AccountMachine BEFORE:`, safeStringify(accountMachine));
-      console.error(`❌ ClonedMachine AFTER:`, safeStringify(clonedMachine));
-      console.error(`❌ ReceivedFrame COMPLETE:`, safeStringify(receivedFrame));
-      console.error(`❌ OurComputedState:`, ourComputedState);
-      console.error(`❌ TheirClaimedState:`, theirClaimedState);
-      console.error(`❌ OurFinalDeltas:`, ourFinalDeltas.map(d => d.toString()));
-      console.error(`❌ TheirFrameDeltas:`, receivedFrame.deltas.map(d => d.toString()));
+      logError("FRAME_CONSENSUS", `❌ FULL CONSENSUS FAILURE DUMP:`);
+      logError("FRAME_CONSENSUS", `❌ AccountMachine BEFORE:`, safeStringify(accountMachine));
+      logError("FRAME_CONSENSUS", `❌ ClonedMachine AFTER:`, safeStringify(clonedMachine));
+      logError("FRAME_CONSENSUS", `❌ ReceivedFrame COMPLETE:`, safeStringify(receivedFrame));
+      logError("FRAME_CONSENSUS", `❌ OurComputedState:`, ourComputedState);
+      logError("FRAME_CONSENSUS", `❌ TheirClaimedState:`, theirClaimedState);
+      logError("FRAME_CONSENSUS", `❌ OurFinalDeltas:`, ourFinalDeltas.map(d => d.toString()));
+      logError("FRAME_CONSENSUS", `❌ TheirFrameDeltas:`, receivedFrame.deltas.map(d => d.toString()));
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-      console.error(`❌ isLeft=${isLeftEntity}, fromEntity=${accountMachine.proofHeader.fromEntity}, toEntity=${accountMachine.proofHeader.toEntity}`);
+      logError("FRAME_CONSENSUS", `❌ isLeft=${isLeftEntity}, fromEntity=${accountMachine.proofHeader.fromEntity}, toEntity=${accountMachine.proofHeader.toEntity}`);
 
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
@@ -602,8 +603,9 @@ export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
 
 /**
  * Get accounts that should propose frames (for E-Machine auto-propose)
+ * @param entityState - Entity state containing accounts to check
  */
-export function getAccountsToProposeFrames(entityState: any): string[] {
+export function getAccountsToProposeFrames(entityState: EntityState): string[] {
   const accountsToProposeFrames: string[] = [];
 
   // Check if accounts exists and is iterable
@@ -636,7 +638,7 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
       .map(tokenId => {
         const delta = accountMachine.deltas.get(tokenId);
         if (!delta) {
-          console.error(`❌ Missing delta for tokenId ${tokenId} in account ${accountMachine.counterpartyEntityId}`);
+          logError("FRAME_CONSENSUS", `❌ Missing delta for tokenId ${tokenId} in account ${accountMachine.counterpartyEntityId}`);
           throw new Error(`Critical financial data missing: delta for token ${tokenId}`);
         }
         return delta.ondelta + delta.offdelta; // Total delta for each token

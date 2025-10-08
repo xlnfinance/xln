@@ -21,7 +21,6 @@
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
   import { timeOperations } from '../lib/stores/timeStore';
-  import { history } from '../lib/stores/xlnStore';
   import { viewMode } from '../lib/stores/viewModeStore';
   import { get } from 'svelte/store';
 
@@ -48,37 +47,6 @@
     hideButton = false; // Always keep button visible when using button
   }
 
-  // SEQUENTIAL LOADING: Wait for history to be populated
-  async function waitForHistoryToLoad(): Promise<void> {
-    return new Promise((resolve) => {
-      console.log('🔄 SEQUENTIAL-LOAD: Waiting for history to load...');
-
-      // Check immediately first
-      const currentHistory = get(history);
-      if (currentHistory.length > 0) {
-        console.log('🔄 SEQUENTIAL-LOAD: History already loaded!', currentHistory.length);
-        resolve();
-        return;
-      }
-
-      // Wait for history subscription to fire with data
-      const unsubscribe = history.subscribe(($history) => {
-        console.log('🔄 SEQUENTIAL-LOAD: History subscription fired:', $history.length);
-        if ($history.length > 0) {
-          console.log('✅ SEQUENTIAL-LOAD: History loaded successfully with', $history.length, 'snapshots');
-          unsubscribe();
-          resolve();
-        }
-      });
-
-      // Timeout after 10 seconds to prevent infinite wait
-      setTimeout(() => {
-        console.warn('⚠️ SEQUENTIAL-LOAD: History load timeout - proceeding anyway');
-        unsubscribe();
-        resolve();
-      }, 10000);
-    });
-  }
 
   // Tab switching function
   function switchTab(tabName: string) {
@@ -118,9 +86,11 @@
       // Initialize default tabs if none exist
       tabOperations.initializeDefaultTabs();
 
-      // SEQUENTIAL LOADING: Initialize XLN environment FIRST
-      console.log('🔄 SEQUENTIAL-LOAD: Step 1 - Initializing XLN environment...');
+      // Initialize XLN environment (includes history loading)
       await initializeXLN();
+
+      // Initialize time machine (now that history is guaranteed ready)
+      timeOperations.initialize();
 
       // Auto-open first entity panel if none exist
       const currentTabs = get(tabs);
@@ -136,14 +106,7 @@
         }
       }
 
-      // SEQUENTIAL LOADING: Wait for history to be populated, then initialize time machine
-      console.log('🔄 SEQUENTIAL-LOAD: Step 2 - Waiting for history to be populated...');
-      await waitForHistoryToLoad();
-
-      console.log('🔄 SEQUENTIAL-LOAD: Step 3 - Initializing time machine...');
-      timeOperations.initialize();
-
-      console.log('✅ XLN Svelte application initialized successfully');
+      console.log('✅ XLN application initialized');
     } catch (err) {
       console.error('❌ Failed to initialize XLN application:', err);
       const errorMsg = (err as Error)?.message || 'Failed to initialize application';
@@ -428,10 +391,6 @@
     animation: spin 2s linear infinite;
   }
 
-  .loading-text {
-    font-size: 18px;
-    color: #9d9d9d;
-  }
 
   .error-container {
     background: rgba(220, 53, 69, 0.1);

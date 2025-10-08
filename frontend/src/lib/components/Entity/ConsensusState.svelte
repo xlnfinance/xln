@@ -62,9 +62,6 @@
     font-weight: 500;
   }
 
-  .consensus-status-locked {
-    color: #f14c4c;
-  }
 
   .consensus-status-unlocked {
     color: #4ade80;

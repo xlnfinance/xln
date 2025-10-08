@@ -86,6 +86,7 @@ import {
   isBrowser,
   log,
 } from './utils';
+import { logError } from './logger';
 
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
@@ -202,7 +203,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
     }, 100); // Check every 100ms to process j-watcher events quickly
     
   } catch (error) {
-    console.error('❌ Failed to start J-Event Watcher:', error);
+    logError("SERVER_TICK", '❌ Failed to start J-Event Watcher:', error);
   }
 };
 
@@ -258,7 +259,7 @@ const applyServerInput = async (
       try {
         validateEntityInput(input);
       } catch (error) {
-        console.error(`🚨 CRITICAL FINANCIAL ERROR: Invalid merged EntityInput[${i}]!`, {
+        logError("SERVER_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid merged EntityInput[${i}]!`, {
           error: (error as Error).message,
           input
         });
@@ -335,8 +336,8 @@ const applyServerInput = async (
         }
 
         if (typeof actualJBlock !== 'number') {
-          console.error(`💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
-          console.error(`💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
+          logError("SERVER_TICK", `💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
+          logError("SERVER_TICK", `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
           // Force fix immediately
           if (createdReplica) {
             createdReplica.state.jBlock = 0;
@@ -361,7 +362,7 @@ const applyServerInput = async (
           if (entityReplicaKeys.length > 0) {
             const firstReplicaKey = entityReplicaKeys[0];
             if (!firstReplicaKey) {
-              console.error(`❌ Invalid replica key for entity ${entityInput.entityId}`);
+              logError("SERVER_TICK", `❌ Invalid replica key for entity ${entityInput.entityId}`);
               continue;
             }
             const firstReplica = env.replicas.get(firstReplicaKey);
@@ -403,7 +404,7 @@ const applyServerInput = async (
           try {
             validateEntityOutput(output);
           } catch (error) {
-            console.error(`🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
+            logError("SERVER_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
               error: (error as Error).message,
               output
             });
@@ -472,7 +473,7 @@ const applyServerInput = async (
       const oldReplicaKey = oldEntityKeys[0];
       const newReplicaKey = newEntityKeys[0];
       if (!oldReplicaKey || !newReplicaKey) {
-        console.error(`❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
+        logError("SERVER_TICK", `❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
         // Continue with empty outbox instead of crashing
       } else {
       // REPLICA-STRUCTURE logs removed - not consensus-critical
@@ -527,7 +528,7 @@ const main = async (): Promise<Env> => {
       console.log('📍 Ethereum Depository:', jurisdictions.jurisdictions['ethereum']?.contracts?.depository);
       console.log('📍 Ethereum EntityProvider:', jurisdictions.jurisdictions['ethereum']?.contracts?.entityProvider);
       console.log('📍 Last updated:', jurisdictions.lastUpdated);
-      console.log('📍 Full Ethereum config:', JSON.stringify(jurisdictions.jurisdictions['ethereum'], null, 2));
+      console.log('📍 Full Ethereum config:', safeStringify(jurisdictions.jurisdictions['ethereum']));
     } catch (error) {
       console.log('⚠️ Failed to load jurisdictions:', (error as Error).message);
     }
@@ -579,7 +580,7 @@ const main = async (): Promise<Env> => {
         snapshots.push(snapshot);
         console.log(`📦 Snapshot ${i}: loaded ${buffer.length} bytes`);
       } catch (error) {
-        console.error(`❌ Failed to load snapshot ${i}:`, error);
+        logError("SERVER_TICK", `❌ Failed to load snapshot ${i}:`, error);
         console.warn(`⚠️ Snapshot ${i} missing, continuing with available data...`);
       }
     }
@@ -623,7 +624,7 @@ const main = async (): Promise<Env> => {
           throw new Error('LEVEL_NOT_FOUND');
         }
       } catch (conversionError) {
-        console.error('❌ Failed to convert replicas to Map:', conversionError);
+        logError("SERVER_TICK", '❌ Failed to convert replicas to Map:', conversionError);
         console.warn('⚠️ Falling back to fresh environment');
         throw new Error('LEVEL_NOT_FOUND');
       }
@@ -655,7 +656,9 @@ const main = async (): Promise<Env> => {
   } catch (error) {
     const isTimeout = error instanceof Error && error.message === 'TIMEOUT';
     const isNotFound = error instanceof Error &&
-      (error.name === 'NotFoundError' || error.message?.includes('NotFoundError'));
+      (error.name === 'NotFoundError' ||
+       error.message?.includes('NotFoundError') ||
+       error.message?.includes('Entry not found'));
 
     if (isTimeout || isNotFound) {
       console.log('📦 No saved state found - starting fresh');
@@ -913,7 +916,7 @@ if (!isBrowser) {
       }
     })
     .catch(error => {
-      console.error('❌ An error occurred during Node.js auto-execution:', error);
+      logError("SERVER_TICK", '❌ An error occurred during Node.js auto-execution:', error);
     });
 }
 
@@ -955,7 +958,7 @@ const verifyJurisdictionRegistrations = async () => {
 
       console.log('');
     } catch (error) {
-      console.error(`   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
+      logError("SERVER_TICK", `   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
       console.log('');
     }
   }
@@ -982,7 +985,7 @@ const demoCompleteHanko = async (): Promise<void> => {
     // await runCompleteHankoTests();
     console.log('✅ Complete Hanko tests skipped!');
   } catch (error) {
-    console.error('❌ Complete Hanko tests failed:', error);
+    logError("SERVER_TICK", '❌ Complete Hanko tests failed:', error);
     throw error;
   }
 };
@@ -1003,7 +1006,7 @@ const runDemoWrapper = async (env: any): Promise<any> => {
 
     return result;
   } catch (error) {
-    console.error('❌ XLN Demo failed:', error);
+    logError("SERVER_TICK", '❌ XLN Demo failed:', error);
     throw error;
   }
 };
@@ -1044,7 +1047,7 @@ export const processUntilEmpty = async (env: Env, inputs?: EntityInput[], server
     try {
       validateEntityInput(o);
     } catch (error) {
-      console.error(`🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput detected!`, {
+      logError("SERVER_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput detected!`, {
         error: (error as Error).message,
         entityId: o.entityId.slice(0,10),
         signerId: o.signerId,

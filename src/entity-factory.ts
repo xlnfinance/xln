@@ -5,6 +5,7 @@
 
 import { ethers } from 'ethers';
 
+import { safeStringify } from './serialization-utils';
 import { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
 import { DEBUG } from './utils';
 
@@ -27,7 +28,7 @@ export const encodeBoard = (config: ConsensusConfig): string => {
   };
 
   // Return JSON representation that can be hashed consistently
-  return JSON.stringify(board, Object.keys(board).sort());
+  return safeStringify(board);
 };
 
 export const hashBoard = (encodedBoard: string): string => {
@@ -57,7 +58,7 @@ export const generateLazyEntityId = (
     threshold: threshold.toString(),
   };
 
-  const serialized = JSON.stringify(quorumData);
+  const serialized = safeStringify(quorumData);
   return hashBoard(serialized);
 };
 

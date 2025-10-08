@@ -41,8 +41,8 @@ export function handleReserveToCollateral(
       offdelta: 0n,
       leftCreditLimit: defaultCreditLimit,
       rightCreditLimit: defaultCreditLimit,
-      leftAllowence: 0n,
-      rightAllowence: 0n,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
     };
     accountMachine.deltas.set(tokenId, delta);
   }

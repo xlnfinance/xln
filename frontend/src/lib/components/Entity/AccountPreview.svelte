@@ -206,14 +206,7 @@
     transition: all 0.15s ease;
   }
 
-  .account-preview.loading {
-    opacity: 0.6;
-    background: #1a1a1a;
-  }
 
-  .status-badge.loading {
-    color: #888;
-  }
 
   .account-preview:hover {
     background: #222;

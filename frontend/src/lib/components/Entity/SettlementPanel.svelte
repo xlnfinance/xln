@@ -249,8 +249,8 @@
   {/if}
 
   <div class="form-group">
-    <label>Counterparty</label>
-    <select bind:value={counterpartyEntityId} disabled={sending}>
+    <label for="settlement-counterparty">Counterparty</label>
+    <select id="settlement-counterparty" bind:value={counterpartyEntityId} disabled={sending}>
       <option value="">Select entity...</option>
       {#each allEntities as id}
         <option value={id}>Entity #{$xlnFunctions!.getEntityShortId(id)}</option>
@@ -259,8 +259,8 @@
   </div>
 
   <div class="form-group">
-    <label>Token</label>
-    <select bind:value={tokenId} disabled={sending}>
+    <label for="settlement-token">Token</label>
+    <select id="settlement-token" bind:value={tokenId} disabled={sending}>
       <option value={1}>USDC</option>
       <option value={2}>ETH</option>
     </select>
@@ -311,10 +311,10 @@
       </div>
 
       <div class="form-group">
-        <label>Amount</label>
+        <label for="settlement-amount">Amount</label>
         <input
           type="text"
-          bind:value={simpleAmount}
+          id="settlement-amount" bind:value={simpleAmount}
           on:input={updateSimpleDiffs}
           placeholder="1000000"
           disabled={sending}
@@ -339,23 +339,23 @@
     <div class="advanced-mode">
       <div class="diffs-section">
         <div class="form-group">
-          <label>Left Diff</label>
-          <input type="text" bind:value={leftDiff} disabled={sending} />
+          <label for="settlement-left-diff">Left Diff</label>
+          <input type="text" id="settlement-left-diff" bind:value={leftDiff} disabled={sending} />
         </div>
 
         <div class="form-group">
-          <label>Right Diff</label>
-          <input type="text" bind:value={rightDiff} disabled={sending} />
+          <label for="settlement-right-diff">Right Diff</label>
+          <input type="text" id="settlement-right-diff" bind:value={rightDiff} disabled={sending} />
         </div>
 
         <div class="form-group">
-          <label>Collateral Diff</label>
-          <input type="text" bind:value={collateralDiff} disabled={sending} />
+          <label for="settlement-collateral-diff">Collateral Diff</label>
+          <input type="text" id="settlement-collateral-diff" bind:value={collateralDiff} disabled={sending} />
         </div>
 
         <div class="form-group">
-          <label>Ondelta Diff</label>
-          <input type="text" bind:value={ondeltaDiff} disabled={sending} />
+          <label for="settlement-ondelta-diff">Ondelta Diff</label>
+          <input type="text" id="settlement-ondelta-diff" bind:value={ondeltaDiff} disabled={sending} />
         </div>
       </div>
     </div>
@@ -399,8 +399,8 @@
   </div>
 
   <div class="form-group">
-    <label>Description (optional)</label>
-    <input type="text" bind:value={description} placeholder="Settlement note..." disabled={sending} />
+    <label for="settlement-description">Description (optional)</label>
+    <input id="settlement-description" type="text" bind:value={description} placeholder="Settlement note..." disabled={sending} />
   </div>
 
   <button
