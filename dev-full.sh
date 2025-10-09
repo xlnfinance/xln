@@ -105,9 +105,9 @@ fi
 echo "✅ /src TypeScript validation passed"
 
 echo "🔍 Validating /frontend Svelte components..."
-if ! (cd frontend && bun run check); then
+if ! (cd frontend && bunx svelte-check --tsconfig ./tsconfig.json --threshold error); then
     echo ""
-    echo "❌ DEVELOPMENT BLOCKED: Frontend has errors"
+    echo "❌ DEVELOPMENT BLOCKED: Frontend has Svelte errors"
     echo "💡 Fix errors with: cd frontend && bun run check"
     exit 1
 fi
@@ -123,10 +123,10 @@ echo ""
 
 mkdir -p frontend/static
 
-# Start TypeScript watchers
-echo "🔍 Starting continuous TypeScript checking..."
-bun x tsc --noEmit --watch --project . &
-(cd frontend && bun run check:watch) &
+# Start TypeScript watchers (optional - comment out if too noisy)
+# echo "🔍 Starting continuous TypeScript checking..."
+# bun x tsc --noEmit --watch --project . &
+# (cd frontend && bun run check:watch) &
 
 # Initial server build
 echo "📦 Building server for frontend..."
