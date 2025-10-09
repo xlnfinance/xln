@@ -20,22 +20,46 @@ check_bun() {
 check_foundry() {
     if ! command -v anvil &> /dev/null; then
         echo ""
-        echo "❌ Foundry (anvil) not found - required for local blockchain"
+        echo "❌ Foundry (anvil) not found - installing automatically..."
         echo ""
-        echo "📥 Quick install (takes ~2 minutes):"
+        echo "📥 Installing Foundry (takes ~2 minutes)..."
+
+        # Auto-install Foundry
+        if ! curl -L https://foundry.paradigm.xyz | bash; then
+            echo "❌ Foundry installation failed"
+            echo "💡 Try manual install: https://book.getfoundry.sh/getting-started/installation"
+            exit 1
+        fi
+
+        # Add to PATH for current session
+        export PATH="$HOME/.foundry/bin:$PATH"
+
+        # Run foundryup to install actual binaries
+        if [ -f "$HOME/.foundry/bin/foundryup" ]; then
+            echo "🔧 Running foundryup to install anvil..."
+            "$HOME/.foundry/bin/foundryup"
+        else
+            echo "⚠️  foundryup not found, trying from PATH..."
+            foundryup || {
+                echo "❌ foundryup failed - restart terminal and run: foundryup"
+                exit 1
+            }
+        fi
+
+        # Verify installation
+        if ! command -v anvil &> /dev/null; then
+            echo ""
+            echo "✅ Foundry installed, but not in PATH yet"
+            echo "💡 Run: source ~/.bashrc (or ~/.zshrc)"
+            echo "💡 Then: bun run dev"
+            exit 1
+        fi
+
+        echo "✅ Foundry installed successfully!"
         echo ""
-        echo "   curl -L https://foundry.paradigm.xyz | bash"
-        echo "   source ~/.bashrc  # or ~/.zshrc"
-        echo "   foundryup"
-        echo ""
-        echo "Then run: bun run dev"
-        echo ""
-        echo "💡 Alternative: Run frontend-only (no blockchain):"
-        echo "   cd frontend && bun run dev"
-        echo ""
-        exit 1
+    else
+        echo "✅ anvil (Foundry) installed"
     fi
-    echo "✅ anvil (Foundry) installed"
 }
 
 check_dependencies() {
