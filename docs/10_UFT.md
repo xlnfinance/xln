@@ -1,20 +1,20 @@
-# 1.0 Unified Financial Theory
+# 1.0 Unified Financial Theory DRAFT
 
 RCPAN ⊇ FCUAN+FRPAP `−Lₗ ≤ Δ ≤ C + Lᵣ`
 
 ### Egor Homakov / h@xln.finance
 
-### Preface
+# Preface
 
 ### whoami
 
 Before we jump to Abstract, lets briefly elaborate my **intrinsic motivation and passion** to creating UFT/Xln. I started my career in JavaScript/Ruby on Rails software engineering circa 2007.
 
-In 2012, I've stumbled upon a fundamental insecure-by-default pattern in Rails called mass assignment and inappropriately hacked Github to make my point. Ever since I was addicted to finding not just one-off bugs, but systemic issues in protocols and improving software layers as a whole: further hardening Ruby-ecosystem, client side security, OAuth2 etc.
+In 2012, I've stumbled upon a fundamental insecure-by-default pattern in Rails called mass assignment and inappropriately hacked Github to make my point. Ever since I was obsessed with finding not just one-off bugs, but systemic issues in protocols and improving software layers as a whole: further hardening Ruby-ecosystem, client side security, OAuth2.
 
-I founded [Sakurity](https://sakurity.com), conducted boutique security audits for some of the big names in the startup industry. Things went good. Around 2017 I've decided to retire from audits and focus on **the most critical yet most vulnerable and misdesigned architecture on the planet** – our financial system, including TradFi + DeFi (according to JEA soon you will see they are two parts of the whole).
+I founded [Sakurity](https://sakurity.com), conducted boutique security audits for some of the big names in the startup industry. Things went good. Around 2017 I've decided to retire from audits and focus on **the most critical yet most vulnerable and misdesigned architecture on the planet** – our financial system, including TradFi + DeFi (according to JEA soon you will see why they are two parts of the whole).
 
-It all started with reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius wheel (proofs + collateral + delta transformer primitives) but tried to make an obviously delusional "unicycle" out of this wheel (full-reserve account network, has no working incentive model, can't scale). By 2026 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel networks are dead due to inbound capacity problem.
+The catalyst was reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius wheel primitives (proofs + collateral + delta transformer) but tried to apply it in an obviously delusional "unicycle" (full-reserve account network, has no working incentive model, can't scale). By 2026 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel networks are dead due to inbound capacity problem.
 
 The solution to inbound capacity was painfully obvious: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon. This is why UTF/Xln exists.
 
@@ -94,18 +94,7 @@ Additional whitepapers that further complement UFT are published separately:
 
 finis ⟁ coronat ⟁ opus
 
-
-[/asdf]
-
-## 1.1 J-Machine
-
-We unify the terminology and design space of both traditional finance (TradFi) and decentralized finance (DeFi) under a single umbrella of hierarchical state machines tri-layer: 
-
-Let's apply Occam's Razor and Duck Typing principle to both DeFi and TradFi, reducing both to an elegant mechanism of replicated state machine talking to each other and progressing in a replayable deterministic mechanical dance.
-
-Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
-
-The same Occam's Razor princple 
+[1.1 Jurisdiction Machine](/11_Jurisdiction_Machine.md)
 
 
 
