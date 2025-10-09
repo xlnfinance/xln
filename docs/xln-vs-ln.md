@@ -52,3 +52,4 @@
 - Lightning/Raiden remain special cases (collateral-only) within the XLN invariant envelope.
 - Adoption strategy: introduce XLN channels that start in FRPAP mode, then progressively enable credit as counterparties prove reliability.
 
+

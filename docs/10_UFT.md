@@ -1,20 +1,30 @@
-# Unified Financial Theory
+# 1.0 Unified Financial Theory
 
-`−Lₗ ≤ Δ ≤ C + Lᵣ`
+RCPAN ⊇ FCUAN+FRPAP `−Lₗ ≤ Δ ≤ C + Lᵣ`
 
 ### Egor Homakov / h@xln.finance
 
-## Preface
+### Preface
 
-Lets briefly elaborate my intrinsic motivation to creating UFT/Xln. I started my path in JS/PHP/Ruby on Rails software engineering circa 2007.
+### whoami
 
-In 2012, I've stumbled upon a fundamental insecure-by-default pattern in Rails called mass assignment and inappropriately hacked Github to make my point. Ever since I was addicted to finding not just one-off bugs, but systemic issues in protocols and improving software architecture as a whole.
+Before we jump to Abstract, lets briefly elaborate my **intrinsic motivation and passion** to creating UFT/Xln. I started my career in JavaScript/Ruby on Rails software engineering circa 2007.
 
-Then I founded Sakurity, organised boutique audits for some of the big names in the startup industry. Things went good. Around 2017 I've decided to retire from audits and focus on the most important yet most vulnerable and misdesign-ridden protocol on the planet – our financial system, both TradFi and DeFi (I view them as two parts of the whole). 
+In 2012, I've stumbled upon a fundamental insecure-by-default pattern in Rails called mass assignment and inappropriately hacked Github to make my point. Ever since I was addicted to finding not just one-off bugs, but systemic issues in protocols and improving software layers as a whole: further hardening Ruby-ecosystem, client side security, OAuth2 etc.
 
-It all started with reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius wheel (proofs + collateral + delta transformer primitives) but tried to make an obviously delusional "unicycle" out of this wheel (full-reserve account network, has no working incentive model, can't scale). 
+I founded [Sakurity](https://sakurity.com), conducted boutique security audits for some of the big names in the startup industry. Things went good. Around 2017 I've decided to retire from audits and focus on **the most critical yet most vulnerable and misdesigned architecture on the planet** – our financial system, including TradFi + DeFi (according to JEA soon you will see they are two parts of the whole).
 
-This is when the core of Xln was formed: molding together the most scalable & used Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017.
+It all started with reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius wheel (proofs + collateral + delta transformer primitives) but tried to make an obviously delusional "unicycle" out of this wheel (full-reserve account network, has no working incentive model, can't scale). By 2026 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel networks are dead due to inbound capacity problem.
+
+The solution to inbound capacity was painfully obvious: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon. This is why UTF/Xln exists.
+
+### Show, don't tell!
+
+Sure! You can build & play with your personal home-grown credit-collateral subnet xlnomy at xln.finance in 2D/Graph 3D/VR/Panel/Terminal interface. **It's real fun with Oculus Quest!** Create personal/multisig entities, companies and institutions with instant IPO of C/D shares with any hub. Stream dividends and buybacks per-second, do merge&acquisitions, new board election, and of course borrow/lend/payments/swaps and other DeFi primitives of any complexity. 
+
+![XLN Network Visualization](../frontend/static/img/preview.png)
+
+Private testnet with cross-subnet networking ETA: Q1 2026.
 
 ### Should I read it?
 
@@ -68,24 +78,24 @@ In the first chapter we focus exclusively on reducing the overengineered and inc
 
 In second chapter we generalize all world's financial Unicast systems into two major categories: full-credit unprovable account networks (FCUAN: all banking, brokers and CEX) and full-reserve provable account networks (FRPAN: Lightning/Raiden/Hydra/other channel networks).
 
-In third chapter, we introduce our main innovation superset invariant reserve-credit provable account network RCPAN={FCUAN, FRPAN} 
+In third chapter, we introduce our main innovation, the superset invariant **reserve-credit provable account network RCPAN ⊇ FCUAN+FRPAP**
 
 `−Lₗ ≤ Δ ≤ C + Lᵣ`
 
-Additional whitepapers that further elaborate and complement UFT are published separately:
+Additional whitepapers that further complement UFT are published separately:
 
-* **Cascade Security Model**: we extend the credit+collateral RCPAN invariant with "on-jurisdiction reserves" and opt-in Deposit Insurance Schemes forming a waterfall-like security cascade for all fungible value any entity in Xln holds: reserve->collateral->credit->insurance->reinsurance. 
+* **2.0 Cascade Security Model**: we extend the credit+collateral RCPAN invariant with "on-jurisdiction reserves" and opt-in Deposit Insurance Schemes forming a waterfall-like security cascade for all fungible value any entity in Xln holds: reserve->collateral->credit->insurance->reinsurance. 
 
-* **Delta Transformers**: generalized way to Bilateral Unicast DeFi: programmable cascade of hooks `int[] deltas -> Transformer.apply(data, leftArguments, rightArguments) -> int[] deltas` that entities simulate off-J but can routinely enforce with Depository.sol during on-J dispute. Transformers allow Lego-DeFi logic of any complexity but in bilateral 2-party fashion (same as how TradFi worked for centuries).
+* **3.0 Delta Transformers**: generalized way to Bilateral Unicast DeFi: programmable cascade of hooks `int[] deltas -> Transformer.apply(data, leftArguments, rightArguments) -> int[] deltas` that entities simulate off-J but can routinely enforce with Depository.sol during on-J dispute. Transformers allow Lego-DeFi logic of any complexity but in bilateral 2-party fashion (same as how TradFi worked for centuries).
 
-* **Cascade Control Model**: a deeper dive into Board/Control/Dividend cascade, a novel hierarchical aggregated Hanko-signature for Entity-machines and Merge&Acquisition, index funds and institutional mechanics of Xln. 
+* **4.0 Cascade Control Model**: a deeper dive into Board/Control/Dividend cascade, a novel hierarchical aggregated Hanko-signature for Entity-machines and Merge&Acquisition, index funds and institutional mechanics of Xln. 
 
-* **BrainVault**: argon2id(username, password, complexityFactor ~5sec...5hours) - in addition to cumbersome randomly generated 16-word seeds users may prefer the longer but easier to handle option. Just like RCPAN accounts are "payment channels done right" we propose a secure evolution of BrainWallet/WarpWallet idea.
+* **5.0 BrainVault**: argon2id(username, password, complexityFactor ~5sec...5hours) - in addition to cumbersome randomly generated 16-word seeds users may prefer the longer but easier to handle option. Just like RCPAN accounts are "payment channels done right" we propose a secure evolution of BrainWallet/WarpWallet idea.
+
+finis ⟁ coronat ⟁ opus
 
 
-
-
-
+[/asdf]
 
 ## 1.1 J-Machine
 
