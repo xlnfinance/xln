@@ -16,7 +16,7 @@ I founded [Sakurity](https://sakurity.com), conducted boutique security audits f
 
 The catalyst was reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius primitives, **"the wheel"** (proofs + collateral + delta transformer) but then tried to apply it in an obviously delusional way, **"the unicycle"** (full-reserve account network, has no working incentive model, can't scale). By 2026 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel networks are dead due to inbound capacity problem.
 
-![XLN Network Visualization](../frontend/static/img/RCPAN.png)
+<img src="../frontend/static/img/RCPAN.png" width="400px">
 
 The solution to inbound capacity was painfully obvious: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon.
 
@@ -37,7 +37,7 @@ Xln achieves that by creating two lousely coupled layers:
 
 You are absolutely right! You can build & play with your personal home-grown credit-collateral subnet xlnomy at xln.finance in 2D/Graph 3D/VR/Panel/Terminal interface. **It's real fun with Oculus Quest!** Create personal entities, N/M multifactor entities, hierarchical companies and institutions with instant IPO of C/D shares with any hub. Stream dividends and buybacks per-second, do merge&acquisitions, new board election, and of course borrow/lend/payments/swaps and other DeFi primitives of any complexity. 
 
-![XLN Network Visualization](../frontend/static/img/preview.png)
+<img src="../frontend/static/img/preview.png" width="400px">
 
 Private testnet with cross-subnet networking ETA: Q1 2026.
 
