@@ -53,3 +53,4 @@
 - Adoption strategy: introduce XLN channels that start in FRPAP mode, then progressively enable credit as counterparties prove reliability.
 
 
+
