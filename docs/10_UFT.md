@@ -4,7 +4,7 @@ RCPAN ⊇ FCUAN+FRPAP `−Lₗ ≤ Δ ≤ C + Lᵣ`
 
 ### Egor Homakov / h@xln.finance
 
-# Preface
+# Questions & Answers
 
 ### whoami
 
@@ -18,19 +18,32 @@ The catalyst was reading the Lightning Network whitepaper and realizing: the aut
 
 ![XLN Network Visualization](../frontend/static/img/RCPAN.jpg)
 
-The solution to inbound capacity was painfully obvious: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon. This is why UTF/Xln exists.
+The solution to inbound capacity was painfully obvious: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon.
+
+The UFT (theory) and Xln (practical reference implementation) is my magnum opus and quintessence of 9 years of research into TradFi/RTGS/DeFi/DAO/AA/institutional governance/state channels. I believe it's 100x more important than all of my infosec research combined. Call me delusional, but I just happen to be right, eventually.
+
+### Another Bitcoin/Ethereum Killer?
+
+**No, quite the opposite! Xln is not a blockchain, it's a unified Layer2 for all Jurisdiction machines.**
+
+We believe and double down on the original vision of Bitcoin and Ethereum where every laptop and phone can run fully verifying node. 
+
+Xln achieves that by creating two lousely coupled layers: 
+
+* <30-100 tps global settlement Layer1 (Bitcoin and Ethereum are J-machines). Xln is jurisdiction-agnostic and can support any L1, but the lower global tps - the easier it is to run a full node on consumer device. Xln is the first architecture that works just fine with Original Ethereum, even if gaslimit is reduced 10-100x. Unlike rollups, Xln does not require blobspace or data availability committees of any form - the account proofs are sovereign and exits are guaranteed at all times.
+* unbounded scalability Unicast Layer2. Xln is a netting overlay attaching to any EVM/CBDC J-machines, creating financial Internet of unified liquidity.
 
 ### Show, don't tell!
 
-Sure! You can build & play with your personal home-grown credit-collateral subnet xlnomy at xln.finance in 2D/Graph 3D/VR/Panel/Terminal interface. **It's real fun with Oculus Quest!** Create personal/multisig entities, companies and institutions with instant IPO of C/D shares with any hub. Stream dividends and buybacks per-second, do merge&acquisitions, new board election, and of course borrow/lend/payments/swaps and other DeFi primitives of any complexity. 
+You are absolutely right! You can build & play with your personal home-grown credit-collateral subnet xlnomy at xln.finance in 2D/Graph 3D/VR/Panel/Terminal interface. **It's real fun with Oculus Quest!** Create personal entities, N/M multifactor entities, hierarchical companies and institutions with instant IPO of C/D shares with any hub. Stream dividends and buybacks per-second, do merge&acquisitions, new board election, and of course borrow/lend/payments/swaps and other DeFi primitives of any complexity. 
 
 ![XLN Network Visualization](../frontend/static/img/preview.png)
 
 Private testnet with cross-subnet networking ETA: Q1 2026.
 
-### Should I read it?
+### Should I read it? What's target audience?
 
-If you're willing to bend your mental models around the status quo, embrace our contrarian yet factually correct rhetoric, ready to research into unknown and question the dogmas from first principles - yes.
+Anyone, really. Especially if you're into fintech/crypto/complex systems. If you're willing to bend your mental models around the status quo, embrace our contrarian yet factually correct rhetoric, ready to research into unknown and question the dogmas from first principles - yes.
 
 If you don't have time for 30-60 min deep reading - **spend 5 minutes on understanding core RCPAN invariant** and save the rest of the document for the future. 
 
@@ -38,13 +51,13 @@ If you don't have time for 30-60 min deep reading - **spend 5 minutes on underst
 
 The documents are a little heavy on technical & financial terminology. This is intentional - instead of making it a tedious long read "for the general crowd", it seemed like a better idea to make it concentrated and to the point, letting readers ask an LLM of their choice to expand on any idea / statement, with targeted prompts like "ELI5?", "I'm a banker, what is it?", "I'm a protocols engineer, what's under the hood?".
 
-There will be more approachable and elaborated versions of it soon. Feel free to create your own adaptaion, though!
+There will be more approachable and elaborated versions of it soon. You're welcome to create your own adaptaion, though!
 
-**Start with "should I read it and why?" with any frontier language model.** GPT-5/Claude/Grok/Gemini/Qwen/GLM – all have phenomenal understanding of UFT/Xln once you attach the whitepapers as context. 
+**Start with "context: https://xln.finance/c.txt should I learn it and why?" with any frontier language model.** GPT-5/Claude/Grok/Gemini/Qwen/GLM – all have phenomenal grasp on UFT/Xln once you attach the whitepapers/contracts/src as the context.
 
 Feel free to reach out directly if after 3-5 prompts the answers still seem cryptic to you. 
 
-#  Abstract
+# Abstract
 
 In this flagship whitepaper we propose a series of incremental upgrades and simplifications to the status-quo mental model of how financial & organizational double-layered networks work and reasoned about. 
 
