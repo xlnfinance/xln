@@ -4,50 +4,43 @@
 
 **Unified Layer-2 for EVM jurisdictions.** Reserve-credit network combining full-credit banking with payment channel architectures.
 
-## 🚀 Quick Start (One Command!)
+---
+
+## 🚀 **One-Liner Install** (Recommended)
 
 ```bash
+bunx github:xlnfinance/xln
+```
+
+**Or traditional:**
+```bash
+git clone https://github.com/xlnfinance/xln
+cd xln
 bun run dev
 ```
 
-**That's literally it!** The command automatically:
-- ✅ Checks prerequisites (bun, anvil)
-- ✅ Installs all dependencies (root, frontend, contracts)
-- ✅ Deploys smart contracts to local blockchain
-- ✅ Validates TypeScript (fail-fast on errors)
-- ✅ Starts dev server → http://localhost:8080
+Both auto-install everything (bun, Foundry, dependencies, contracts).
 
-**First time:** ~2 minutes (downloads deps)  
-**Subsequent runs:** ~10 seconds
+**First run:** ~2-3 minutes (downloads Foundry)  
+**After:** ~10 seconds
+
+**Opens:** http://localhost:8080
 
 ---
 
-## Prerequisites (Auto-Checked)
+## What It Does
 
-**Required:**
-- [bun](https://bun.sh) - JavaScript runtime
-- [Foundry/anvil](https://getfoundry.sh) - Local blockchain
-
-**Install (2 minutes):**
-```bash
-# 1. Install bun
-curl -fsSL https://bun.sh/install | bash
-
-# 2. Install Foundry (for local blockchain)
-curl -L https://foundry.paradigm.xyz | bash
-source ~/.bashrc  # or ~/.zshrc if you use zsh
-foundryup
-
-# 3. Verify
-bun --version
-anvil --version
+```
+✅ Checks if bun installed (installs if needed)
+✅ Checks if Foundry/anvil installed (auto-installs)
+✅ Installs all dependencies (root, frontend, contracts)
+✅ Starts local blockchain (anvil)
+✅ Deploys smart contracts
+✅ Validates TypeScript (fail-fast on errors)
+✅ Starts dev server with hot reload
 ```
 
-**Alternative (UI-only, no blockchain):**
-```bash
-cd frontend && bun run dev
-# Just frontend at localhost:8080, no smart contracts
-```
+**Zero manual steps. Just works.**
 
 ---
 
@@ -74,9 +67,13 @@ cd frontend && bun run dev
   diamond-dybvig.scenario      # Bank run simulation
   phantom-grid-*.scenario      # Stress tests (100-1000 entities)
 
-/scripts                # Organized utility scripts
-  /debug                # Debug helpers
-  /dev                  # Development scripts
+/reference              # Original implementations (2019)
+  2019src.txt           # Production-tested patterns
+  2019vue.txt           # Original UI reference
+
+/scripts                # Organized utilities
+  /dev                  # Development helpers
+  /debug                # Debug scripts
   /deployment           # Server deployment
 ```
 
@@ -86,20 +83,20 @@ cd frontend && bun run dev
 
 ```bash
 # Development
-bun run dev              # Full dev (with blockchain)
-bun run check            # Type check + build verification
+bun run dev              # Full dev (auto-installs everything)
+bun run check            # Type check + build
 
-# Testing
+# Testing  
 bun test                 # Unit tests
-bun run test:e2e         # E2E tests (Playwright)
-bun run tutorial         # Interactive tutorial
+bun run test:e2e         # E2E tests
+bun run tutorial         # Interactive demo
 
 # Blockchain
-./reset-networks.sh      # Reset local chain + redeploy
-./deploy-contracts.sh    # Redeploy contracts only
+./reset-networks.sh      # Reset chain + redeploy
+./deploy-contracts.sh    # Redeploy contracts
 
 # Production
-bun run build            # Build static bundle → frontend/build/
+bun run build            # Build static bundle
 ```
 
 ---
@@ -108,72 +105,60 @@ bun run build            # Build static bundle → frontend/build/
 
 **Three-layer state machine hierarchy:**
 
-- **J-machine (Jurisdiction):** Public registry of entities, reserves, dispute outcomes. Anchors final state on-chain (Ethereum, etc.)
-- **E-machine (Entity):** BFT consensus for organizations. Quorum signs proposals to commit actions.
-- **A-machine (Account):** Bilateral channels between entities. Frame-based consensus for off-chain settlement.
+- **J-machine (Jurisdiction):** Public registry. Anchors state on-chain (Ethereum, etc.)
+- **E-machine (Entity):** BFT consensus for organizations. Quorum-based governance.
+- **A-machine (Account):** Bilateral channels. Frame-based off-chain settlement.
 
 **Flow:** Server → Entity → Account (S→E→A)  
-**Paradigm:** Pure functional state machines `(prevState, input) → {nextState, outputs}`
+**Paradigm:** Pure functional `(prevState, input) → {nextState, outputs}`
 
 ---
 
 ## Key Features
 
-✅ **Browser-native:** Core logic runs in browser (no server needed)  
-✅ **Time machine:** Navigate consensus history frame-by-frame  
-✅ **Multi-hop routing:** Lightning-style payment routing  
-✅ **BFT consensus:** Byzantine fault tolerant entity governance  
+✅ **Browser-native:** Core logic runs client-side (no server)  
+✅ **Time machine:** Replay consensus frame-by-frame  
+✅ **Multi-hop routing:** Lightning-style payment paths  
+✅ **BFT consensus:** Byzantine fault tolerant governance  
 ✅ **EVM integration:** Deploy to any EVM chain  
-✅ **VR support:** Oculus Quest compatible (see OCULUS-SETUP.md)  
+✅ **VR support:** Oculus Quest compatible  
 
 ---
 
 ## Documentation
 
-- 📖 **Architecture:** `/docs/JEA.md` - Jurisdiction/Entity/Account model
-- 💸 **Payments:** `/docs/payment-spec.md` - Payment flow specification
-- 🎓 **Philosophy:** `/docs/philosophy/` - Design principles
-- 🔐 **HTTPS Setup:** `frontend/HTTPS.md` - Local HTTPS development
-- 🥽 **VR Setup:** `OCULUS-SETUP.md` - Oculus Quest setup
+- 📖 **Architecture:** `/docs/JEA.md`
+- 💸 **Payments:** `/docs/payment-spec.md`
+- 🎓 **Philosophy:** `/docs/philosophy/`
+- 🔐 **HTTPS:** `frontend/HTTPS.md`
+- 🥽 **VR:** `OCULUS-SETUP.md`
 
 ---
 
 ## Troubleshooting
 
-### "anvil: command not found"
+**Foundry install hangs?**
 ```bash
+# Install manually
 curl -L https://foundry.paradigm.xyz | bash
+source ~/.bashrc
 foundryup
+bun run dev
 ```
 
-### "Port 8545 already in use"
+**Port 8545 in use?**
 ```bash
 ./scripts/dev/stop-networks.sh
 bun run dev
 ```
 
-### TypeScript errors block startup
+**TypeScript errors?**
 ```bash
-# Fix errors first
-bun run check
-
-# Then restart
-bun run dev
+bun run check  # Shows errors
+# Fix, then: bun run dev
 ```
 
 ---
 
-## Contributing
-
-**Development flow:**
-1. `bun run dev` - Start environment
-2. Make changes (auto-rebuilds)
-3. `bun run check` - Verify before commit
-4. Commit with descriptive message
-
-**Code style:** Functional, immutable, type-safe TypeScript. See `CLAUDE.md` for full guidelines.
-
----
-
 **License:** MIT  
-**Status:** Active development (Q4 2025)
+**Status:** Active development (2025)
