@@ -8,6 +8,7 @@ import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env
 import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
+import { addMessages } from './state-helpers';
 
 // === SECURITY VALIDATION ===
 
@@ -800,8 +801,8 @@ export const applyEntityFrame = async (
           };
           allOutputs.push(outputEntityInput);
 
-          // Add events to entity messages
-          currentEntityState.messages.push(...proposal.events);
+          // Add events to entity messages with size limiting
+          addMessages(currentEntityState, proposal.events);
         }
       }
     }

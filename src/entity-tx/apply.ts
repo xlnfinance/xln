@@ -12,7 +12,7 @@ import { handleAccountInput } from './handlers/account';
 import { handleJEvent } from './j-events';
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState, addMessage } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
 
@@ -40,11 +40,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const newEntityState = cloneEntityState(entityState);
 
       newEntityState.nonces.set(from, expectedNonce);
-      newEntityState.messages.push(`${from}: ${message}`);
-
-      if (newEntityState.messages.length > 10) {
-        newEntityState.messages.shift();
-      }
+      addMessage(newEntityState, `${from}: ${message}`);
 
       return { newState: newEntityState, outputs: [] };
     }
@@ -54,11 +50,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const { message } = entityTx.data;
       const newEntityState = cloneEntityState(entityState);
 
-      newEntityState.messages.push(message);
-
-      if (newEntityState.messages.length > 10) {
-        newEntityState.messages.shift();
-      }
+      addMessage(newEntityState, message);
 
       return { newState: newEntityState, outputs: [] };
     }
@@ -198,7 +190,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const outputs: EntityInput[] = [];
 
       // Add chat message about account opening
-      newState.messages.push(`💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
+      addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
       // STEP 1: Create local account machine
       if (!newState.accounts.has(entityTx.data.targetEntityId)) {
@@ -282,7 +274,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`   Transactions: [add_delta, set_credit_limit(side=${ourSide}, amount=1M)]`);
 
       // Add success message to chat
-      newState.messages.push(`✅ Account opening request sent to Entity ${formatEntityId(entityTx.data.targetEntityId)}`);
+      addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(entityTx.data.targetEntityId)}`);
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
@@ -324,12 +316,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
               console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
             } else {
               logError("ENTITY_TX", `❌ No route found to ${formatEntityId(targetEntityId)}`);
-              newState.messages.push(`❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
+              addMessage(newState, `❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
               return { newState, outputs: [] };
             }
           } else {
             logError("ENTITY_TX", `❌ Cannot find route: Gossip layer not available`);
-            newState.messages.push(`❌ Payment failed: Network routing unavailable`);
+            addMessage(newState, `❌ Payment failed: Network routing unavailable`);
             return { newState, outputs: [] };
           }
         }
@@ -351,7 +343,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Check if we have an account with next hop
       if (!newState.accounts.has(nextHop)) {
         logError("ENTITY_TX", `❌ No account with next hop: ${nextHop}`);
-        newState.messages.push(`❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
+        addMessage(newState, `❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
         return { newState, outputs: [] };
       }
 
@@ -379,7 +371,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`💸 Is left entity: ${isLeft}, Has pending frame: ${!!accountMachine.pendingFrame}`);
 
         // Message about payment initiation
-        newState.messages.push(
+        addMessage(newState,
           `💸 Sending ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
         );
 
@@ -453,13 +445,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         throw new Error('No jurisdiction configured for this entity');
       }
 
-      // Step 5: Convert diffs to contract format (preserve perspective)
+      // Step 5: Convert diffs to contract format (keep as bigint - ethers handles conversion)
       const contractDiffs = diffs.map(d => ({
         tokenId: d.tokenId,
-        leftDiff: d.leftDiff.toString(),
-        rightDiff: d.rightDiff.toString(),
-        collateralDiff: d.collateralDiff.toString(),
-        ondeltaDiff: d.ondeltaDiff.toString(),
+        leftDiff: d.leftDiff,
+        rightDiff: d.rightDiff,
+        collateralDiff: d.collateralDiff,
+        ondeltaDiff: d.ondeltaDiff || 0n,
       }));
 
       console.log(`🏦 Calling submitSettle with diffs:`, safeStringify(contractDiffs, 2));
@@ -470,12 +462,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`✅ Settlement transaction sent: ${result.txHash}`);
 
         // Add message to chat
-        newState.messages.push(
+        addMessage(newState,
           `🏦 ${description || 'Settlement'} tx: ${result.txHash.slice(0, 10)}... (block ${result.blockNumber})`
         );
       } catch (error) {
         logError("ENTITY_TX", `❌ Settlement transaction failed:`, error);
-        newState.messages.push(`❌ Settlement failed: ${(error as Error).message}`);
+        addMessage(newState, `❌ Settlement failed: ${(error as Error).message}`);
         throw error; // Re-throw to trigger outer catch
       }
 

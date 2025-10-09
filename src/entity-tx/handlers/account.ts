@@ -1,6 +1,6 @@
 import { AccountInput, AccountTx, EntityState, Env, EntityInput } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { cloneEntityState } from '../../state-helpers';
+import { cloneEntityState, addMessage, addMessages } from '../../state-helpers';
 import { getDefaultCreditLimit } from '../../account-utils';
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
@@ -101,7 +101,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     const result = await processAccountInput(env, accountMachine, input);
 
     if (result.success) {
-      newState.messages.push(...result.events);
+      addMessages(newState, result.events);
 
       // CRITICAL: Process multi-hop forwarding (consume pendingForward)
       console.log(`🔍 PENDING-FORWARD-CHECK: Has pendingForward=${!!accountMachine.pendingForward}`);
@@ -143,10 +143,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             nextHopAccount.mempool.push(forwardingTx);
             console.log(`✅ Forwarded payment added to account ${nextHop.slice(-4)} mempool`);
 
-            newState.messages.push(`⚡ Relayed payment to Entity ${nextHop.slice(-4)}`);
+            addMessage(newState, `⚡ Relayed payment to Entity ${nextHop.slice(-4)}`);
           } else {
             console.error(`❌ No account with next hop ${nextHop.slice(-4)} for forwarding`);
-            newState.messages.push(`❌ Payment routing failed: no account with next hop`);
+            addMessage(newState, `❌ Payment routing failed: no account with next hop`);
           }
         }
 
@@ -184,12 +184,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
-      newState.messages.push(`❌ ${result.error}`);
+      addMessage(newState, `❌ ${result.error}`);
     }
   } else {
     // NO individual accountTx handling! Channel.ts sends frames ONLY
     console.error(`❌ Received AccountInput without frames - invalid!`);
-    newState.messages.push(`❌ Invalid AccountInput from ${input.fromEntityId.slice(-4)}`);
+    addMessage(newState, `❌ Invalid AccountInput from ${input.fromEntityId.slice(-4)}`);
   }
 
   return { newState, outputs };

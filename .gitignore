@@ -56,3 +56,27 @@ start-production.sh
 
 # Legacy
 nul
+*.pem
+
+# Development certificates (generated locally)
+*.pem
+
+# macOS junk
+.DS_Store
+**/.DS_Store
+
+# Build artifacts
+frontend/static/server.js
+frontend/static/jurisdictions.json
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Development database
+db/
+
+# Lock files (use bun.lock only)
+package-lock.json
+pnpm-lock.yaml
+yarn.lock

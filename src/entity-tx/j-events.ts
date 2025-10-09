@@ -1,6 +1,6 @@
 import { EntityState } from '../types';
 import { DEBUG } from '../utils';
-import { cloneEntityState } from '../state-helpers';
+import { cloneEntityState, addMessage } from '../state-helpers';
 import { getTokenInfo } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 
@@ -97,8 +97,8 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
 📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
 📋 Data: ${safeStringify(event.data, 2)}`;
   }
-  
-  newEntityState.messages.push(elaborateMessage);
+
+  addMessage(newEntityState, elaborateMessage);
 
   if (event.type === 'ReserveUpdated') {
     const { entity, tokenId, newBalance } = event.data;
@@ -210,7 +210,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
 
     if (DEBUG) console.log(`✅ TransferReserveToCollateral: Created accountInput for token ${tokenId} with counterparty ${counterpartyEntityId.slice(0,10)}...`);
   } else {
-    newEntityState.messages.push(`⚠️ Unhandled j-event type: ${event.type}`);
+    addMessage(newEntityState, `⚠️ Unhandled j-event type: ${event.type}`);
   }
 
   return newEntityState;

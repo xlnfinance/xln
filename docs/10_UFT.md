@@ -19,6 +19,8 @@ Everything else is commentary.
 
 # Abstract
 
+[pairing: Nils Frahm - Fundamental Values](https://www.youtube.com/watch?v=mOh73eWIk4Q)
+
 In this flagship whitepaper we propose a series of incremental upgrades and simplifications to the status-quo mental model of how financial & organizational double-layered networks work and reasoned about. 
 
 Unified Financial Theory (UFT) naturally integrates or solves at its core some of the most popular and long-standing monetary theories, including but not limited to:
@@ -75,9 +77,11 @@ Additional whitepapers that further complement UFT are published separately:
 
 * **3.0 Delta Transformers**: generalized way to Bilateral Unicast DeFi: programmable cascade of hooks `int[] deltas -> Transformer.apply(data, leftArguments, rightArguments) -> int[] deltas` that entities simulate off-J but can routinely enforce with Depository.sol during on-J dispute. Transformers allow Lego-DeFi logic of any complexity but in bilateral 2-party fashion (same as how TradFi worked for centuries).
 
-* **4.0 Cascade Control Model**: a deeper dive into Board/Control/Dividend cascade, a novel hierarchical aggregated Hanko-signature for Entity-machines and Merge&Acquisition, index funds and institutional mechanics of Xln. 
+* **4.0 Entity machine, Hanko signatures & Cascade Control Model**: a deeper dive into Board/Control/Dividend cascade, a novel hierarchical aggregated Hanko-signature for Entity-machines and Merge&Acquisition, index funds and institutional mechanics of Xln. 
 
 * **5.0 BrainVault**: argon2id(username, password, complexityFactor ~5sec...5hours) - in addition to cumbersome randomly generated 16-word seeds users may prefer the longer but easier to handle option. Just like RCPAN accounts are "payment channels done right" we propose a secure evolution of BrainWallet/WarpWallet idea.
 
+
+* **6.0 Hierarchical Replicated State Machines & Cascade Execution Model**: in this paper we do a deep dive into how Xln is actually built as a tri-layer cascade of Server->Entity->Account machines, which provides unprecedented introspection into the system, ease of debug and reasoning about.  
 
 [1.1 Jurisdiction Machine](11_Jurisdiction_Machine.md)

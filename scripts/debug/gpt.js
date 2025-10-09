@@ -59,8 +59,8 @@ const { node: fileTreeDocs, fileContents: fileContentsDocs } = buildFileTree(src
 const srcPathContracts = path.resolve(__dirname, 'contracts/contracts');
 const { node: fileTreeContracts, fileContents: fileContentsContracts } = buildFileTree(srcPathContracts, srcPathContracts);
 
-
-const fullTreeOutput = `${printFileTree(fileTreeContracts)}\n\n${printFileTree(fileTreeSrc)}\n\n${printFileTree(fileTreeDocs)}`;
+//${printFileTree(fileTreeSrc)}
+const fullTreeOutput = `${printFileTree(fileTreeContracts)}\n\n  \n\n${printFileTree(fileTreeDocs)}`;
 const fullOutput = `${fullTreeOutput}\n\n${fileContentsContracts}${fileContentsSrc}`;
 
 const outputPath = path.join(__dirname, 'frontend/static/c.txt');

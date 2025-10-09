@@ -2,7 +2,7 @@
 
 ## 1.1.1 TradFi J-machine
 
-Imagine for now, the year is 2008. Blockchains/cryptocurrencies/DLT never existed. Forget about DAOs, BFT and payment channels, lets focus exclusively on the traditional financial world (TradFi). We are going to apply Occam's Razor and Duck Typing principle to each component of TradFi, to remove the legacy fluff and extract the essence.
+Imagine, the year is 2008. Blockchains/cryptocurrencies/DLT never existed. Forget about DAOs, BFT and payment channels, lets focus exclusively on the traditional financial world (TradFi). We are going to apply Occam's Razor and Duck Typing principle to each component of TradFi, to remove the legacy fluff and extract the essence.
 
 Let's start with our fundamental primitive: a replicated state machine.
 
@@ -25,11 +25,13 @@ Storing fiat token in one ledger and security tokens in another is like keeping 
 
 Applying Occam's Razor, we suggest from now on to conceptually treat all fragmented tradfi central banks/RTGS/depositories as a unified J-machine. 
 
-## 1.1.2 TradFi E-machine
+## 1.1.2 TradFi Entity Machine
 
-Beneath the J-machine there always is a layer of commercial banks, brokers, end users, merchants, companies and non-jurisdictional institutions. 
+Beneath the J-machine there always is a second layer graph-like hub & spoke network, where:
+* **spokes** are end users, merchants, companies, non-profits, institutions
+* **hubs** commercial banks, brokers
 
-We suggest to superset those as an Entity machine. 
+We generalize all layer2 actors bounded to specific J-machine as E-machines. Think of it as your personal state machine that stores your financial history and relationships with others. Each E-machine can interact with J-machine (the broadcast layer) and with other entities through A-machines (unicast account layer).
 
 
 
@@ -38,5 +40,4 @@ We suggest to superset those as an Entity machine.
 
 
 Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
-
-The same Occam's Razor princple 
+ 

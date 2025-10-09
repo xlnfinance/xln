@@ -185,11 +185,6 @@
     border-radius: 6px;
   }
 
-  .empty-icon {
-    font-size: 36px;
-    margin-bottom: 12px;
-  }
-
   .no-accounts p {
     margin: 0 0 8px 0;
     color: #d4d4d4;

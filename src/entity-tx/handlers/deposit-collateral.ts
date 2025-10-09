@@ -13,7 +13,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput } from '../../types';
-import { cloneEntityState } from '../../state-helpers';
+import { cloneEntityState, addMessage } from '../../state-helpers';
 
 export async function handleDepositCollateral(
   entityState: EntityState,
@@ -26,7 +26,7 @@ export async function handleDepositCollateral(
   // Validate: Do we have enough reserve?
   const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
   if (currentReserve < amount) {
-    newState.messages.push(
+    addMessage(newState,
       `❌ Insufficient reserve for collateral deposit: have ${currentReserve}, need ${amount} token ${tokenId}`
     );
     return { newState, outputs };
@@ -34,7 +34,7 @@ export async function handleDepositCollateral(
 
   // Validate: Does account exist?
   if (!entityState.accounts.has(counterpartyId)) {
-    newState.messages.push(
+    addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId.slice(-4)}`
     );
     return { newState, outputs };
@@ -59,7 +59,7 @@ export async function handleDepositCollateral(
     amount
   );
 
-  newState.messages.push(
+  addMessage(newState,
     `📦 Queued R→C: ${amount} token ${tokenId} to account with ${counterpartyId.slice(-4)} (will broadcast in next batch)`
   );
 

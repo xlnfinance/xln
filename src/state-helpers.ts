@@ -10,6 +10,29 @@ import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
 
+// Message size limit for snapshot efficiency
+const MESSAGE_LIMIT = 10;
+
+/**
+ * Add message to EntityState with automatic size limiting
+ * Prevents unbounded message array growth that causes snapshot bloat
+ */
+export function addMessage(state: EntityState, message: string): void {
+  state.messages.push(message);
+  if (state.messages.length > MESSAGE_LIMIT) {
+    state.messages.shift(); // Remove oldest message
+  }
+}
+
+/**
+ * Add multiple messages with size limiting
+ */
+export function addMessages(state: EntityState, messages: string[]): void {
+  for (const msg of messages) {
+    addMessage(state, msg);
+  }
+}
+
 // === CLONING UTILITIES ===
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
@@ -168,11 +191,31 @@ export const captureSnapshot = (
 
   envHistory.push(snapshot);
 
+  // --- SNAPSHOT SIZE MONITORING ---
+  const snapshotBuffer = encode(snapshot);
+  const snapshotSize = snapshotBuffer.length;
+  const sizeMB = (snapshotSize / 1024 / 1024).toFixed(2);
+
+  // Alert if snapshot exceeds 1MB threshold
+  if (snapshotSize > 1_000_000) {
+    console.warn(`📦 LARGE SNAPSHOT: ${sizeMB}MB at height ${snapshot.height}`);
+    console.warn(`   Replicas: ${snapshot.replicas.size}`);
+
+    // Log per-entity diagnostics
+    for (const [key, replica] of snapshot.replicas) {
+      const msgCount = replica.state.messages?.length || 0;
+      const accountCount = replica.state.accounts?.size || 0;
+      if (msgCount > 20 || accountCount > 10) {
+        console.warn(`   ${key.slice(0,25)}...: ${msgCount} msgs, ${accountCount} accounts`);
+      }
+    }
+  }
+
   // --- PERSISTENCE WITH BATCH OPERATIONS ---
   // Try to save, but gracefully handle IndexedDB unavailable (incognito mode, etc)
   try {
     const batch = db.batch();
-    batch.put(Buffer.from(`snapshot:${snapshot.height}`), encode(snapshot));
+    batch.put(Buffer.from(`snapshot:${snapshot.height}`), snapshotBuffer);
     batch.put(Buffer.from('latest_height'), Buffer.from(snapshot.height.toString()));
     batch.write();
   } catch (error) {
@@ -180,7 +223,7 @@ export const captureSnapshot = (
   }
 
   if (DEBUG) {
-    console.log(`📸 Snapshot captured: "${description}" (${envHistory.length} total)`);
+    console.log(`📸 Snapshot ${snapshot.height}: ${sizeMB}MB - "${description}" (total: ${envHistory.length})`);
     if (serverInput.serverTxs.length > 0) {
       console.log(`    🖥️  ServerTxs: ${serverInput.serverTxs.length}`);
       serverInput.serverTxs.forEach((tx, i) => {

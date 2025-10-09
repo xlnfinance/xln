@@ -1,9 +1,7 @@
-xln: a new kind of netting-account network
+# 1.2 RCPAN Invariant 
 
-• ∞ Infinite scalability → per-hop O(1) unicast updates; end-to-end O(k) for k hops (contrasting with broadcast-style O(n) designs such as rollups, sharding, Plasma, and big-block chains).
-• Credit–collateral accounts → no inbound liquidity problem.
-• Bounded risk → counterparty risk is capped at collateral + credit limit.
-• Local state, sovereign exits → no sequencers, no data availability (DA) dependencies.
+[pairing: Pye Corner Audio - The Simplest Equation](https://www.youtube.com/watch?v=Vp0a8tdzJmk) (but yes, technically it's inequality)
+
 
 The core credit–collateral mechanism can be grasped in three minutes. Accounts are bilateral relationships between entities. 
 

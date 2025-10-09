@@ -1,11 +1,49 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import fs from 'fs';
+
+/**
+ * HTTPS CONFIGURATION (DEV-ONLY)
+ *
+ * IMPORTANT: This HTTPS config is ONLY for `vite dev` (development server)
+ *
+ * Production deployment:
+ * - `bun run build` generates static files → frontend/build/
+ * - nginx serves static files with its OWN HTTPS config
+ * - This vite.config.ts is NOT used in production
+ *
+ * Your nginx deployment is safe - it uses its own certificates!
+ */
+
+// Check if HTTPS certs exist (try multiple locations)
+let certPath = './localhost+2.pem';
+let keyPath = './localhost+2-key.pem';
+let hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
+
+// Fallback to LAN IP certs if localhost certs don't exist
+if (!hasCerts) {
+	certPath = '../192.168.1.23+2.pem';
+	keyPath = '../192.168.1.23+2-key.pem';
+	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
+}
+
+if (!hasCerts) {
+	console.warn('⚠️  HTTPS certs not found. Run: ./generate-certs.sh');
+	console.warn('   (Optional - only needed for local HTTPS development)');
+}
 
 export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
 		host: '0.0.0.0',
 		port: 8080,
+		// HTTPS for dev server only (nginx handles production HTTPS)
+		...(hasCerts && {
+			https: {
+				key: fs.readFileSync(keyPath),
+				cert: fs.readFileSync(certPath),
+			}
+		}),
 		// Allow ngrok and other tunnel hosts (for Oculus/mobile access)
 		allowedHosts: ['all'],
 		fs: {
@@ -17,7 +55,8 @@ export default defineConfig({
 			usePolling: false,  // Use native file watching (faster)
 		},
 		hmr: {
-			overlay: false
+			overlay: false,
+			...(hasCerts && { protocol: 'wss' }) // Use WSS for HMR when HTTPS is enabled
 		},
 		// Force no-cache headers for static files
 		headers: {

@@ -345,8 +345,7 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
 export function validateAccountMachine(value: unknown, context = 'AccountMachine'): AccountMachine {
   const obj = validateObject(value, context);
 
-  // This is a complex interface - for now just do basic validation
-  // TODO: Implement full validation of all AccountMachine fields
+  // Basic validation of critical fields
   if (!obj['counterpartyEntityId'] || typeof obj['counterpartyEntityId'] !== 'string') {
     throw new FinancialDataCorruptionError(`${context}.counterpartyEntityId must be a string`);
   }
