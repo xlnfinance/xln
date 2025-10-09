@@ -1,175 +1,414 @@
 <script lang="ts">
-  // Placeholder for documentation view
+  import { onMount } from 'svelte';
+  import { marked } from 'marked';
+
+  let currentDoc = 'README';
+  let docContent = '';
+  let renderedHtml = '';
+  let searchQuery = '';
+
+  interface DocItem {
+    label: string;
+    file: string;
+  }
+
+  interface DocSection {
+    title: string;
+    items: DocItem[];
+  }
+
+  const sections: DocSection[] = [
+    {
+      title: 'Core Documentation',
+      items: [
+        { label: 'Introduction', file: 'README' },
+        { label: 'JEA Model', file: 'JEA' },
+        { label: 'Payment Spec', file: 'payment-spec' },
+        { label: 'Protocol Summary', file: 'summary' },
+        { label: 'FAQ', file: 'faq' }
+      ]
+    },
+    {
+      title: 'Architecture',
+      items: [
+        { label: 'Smart Contracts', file: 'architecture/contracts' },
+        { label: 'Hanko System', file: 'architecture/hanko' },
+        { label: 'Visual Debugger', file: 'architecture/visual-debugger' }
+      ]
+    },
+    {
+      title: 'Deployment',
+      items: [
+        { label: 'Setup Guide', file: 'deployment/README' }
+      ]
+    },
+    {
+      title: 'Frontend Development',
+      items: [
+        { label: 'Network Topology', file: 'frontend-dev/network-topology-integration' },
+        { label: 'Graph 3D Embed', file: 'frontend-dev/graph3d-embed' },
+        { label: 'VR Support', file: 'frontend-dev/vr' },
+        { label: 'Refactor Plan', file: 'frontend-dev/refactor-plan' },
+        { label: 'Design Patterns', file: 'frontend-dev/design-patterns' }
+      ]
+    },
+    {
+      title: 'Comparisons',
+      items: [
+        { label: 'XLN vs Others', file: 'comparisons/README' }
+      ]
+    },
+    {
+      title: 'Strategy',
+      items: [
+        { label: 'Go-to-Market', file: 'strategy/go-to-market' },
+        { label: 'Foundation', file: 'strategy/foundation-governance' }
+      ]
+    },
+    {
+      title: 'Philosophy',
+      items: [
+        { label: 'Programmable Entities', file: 'philosophy/programmable-entities' },
+        { label: 'Data Sovereignty', file: 'philosophy/the-data-sovereignty-manifesto' },
+        { label: 'TradFi + DeFi = XLN', file: 'philosophy/tradfi-plus-defi-equals-xln' }
+      ]
+    },
+    {
+      title: 'Consensus & Debugging',
+      items: [
+        { label: 'Transaction Flow', file: 'consensus/transaction-flow-specification' },
+        { label: 'Debugging Guide', file: 'debugging/consensus-debugging-guide' }
+      ]
+    }
+  ];
+
+  $: filteredSections = searchQuery
+    ? sections.map(section => ({
+        ...section,
+        items: section.items.filter(item =>
+          item.label.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      })).filter(section => section.items.length > 0)
+    : sections;
+
+  async function loadDoc(file: string) {
+    currentDoc = file;
+
+    try {
+      const response = await fetch(`/docs-static/${file}.md`);
+      if (response.ok) {
+        docContent = await response.text();
+        renderedHtml = await marked(docContent);
+      } else {
+        renderedHtml = `<h1>Document Not Found</h1><p>Could not load: ${file}.md</p>`;
+      }
+    } catch (error) {
+      console.error('Failed to load doc:', error);
+      renderedHtml = `<h1>Error</h1><p>Failed to load document: ${error}</p>`;
+    }
+  }
+
+  onMount(() => {
+    loadDoc('README');
+  });
 </script>
 
-<div class="docs-container">
-  <h1>Documentation</h1>
-
-  <div class="docs-content">
-    <div class="doc-section">
-      <h2>Getting Started</h2>
-      <p>XLN (Cross-Local Network) is a cross-jurisdictional off-chain settlement network enabling distributed entities to exchange messages and value instantly off-chain while anchoring final outcomes on-chain.</p>
+<div class="docs-view">
+  <!-- Sidebar -->
+  <aside class="docs-sidebar">
+    <div class="sidebar-header">
+      <h2>XLN Documentation</h2>
     </div>
 
-    <div class="doc-section">
-      <h2>Architecture</h2>
-      <p>The system follows a layered architecture with pure functional state machines:</p>
-      <ul>
-        <li><strong>Entity Layer:</strong> BFT consensus state machine handling ADD_TX → PROPOSE → SIGN → COMMIT flow</li>
-        <li><strong>Server Layer:</strong> Routes inputs every 100ms tick, maintains global state via ServerFrames</li>
-        <li><strong>Runtime Layer:</strong> Side-effectful shell managing cryptography and I/O</li>
-      </ul>
+    <div class="search-box">
+      <input
+        type="text"
+        placeholder="Search docs..."
+        bind:value={searchQuery}
+      />
     </div>
 
-    <div class="doc-section">
-      <h2>Key Concepts</h2>
-      <h3>Reserve-Credit Provable Account Network (RCPAN)</h3>
-      <p>XLN is the first RCPAN combining credit where it scales with collateral where it secures:</p>
-      <div class="invariant-box">
-        <p><strong>FCUAN:</strong> −leftCredit ≤ Δ ≤ rightCredit</p>
-        <p><strong>FRPAP:</strong> 0 ≤ Δ ≤ collateral</p>
-        <p><strong>RCPAN:</strong> −leftCredit ≤ Δ ≤ collateral + rightCredit</p>
-      </div>
-    </div>
+    <nav class="sidebar-nav">
+      {#each filteredSections as section}
+        <div class="nav-section">
+          <h3>{section.title}</h3>
+          {#each section.items as item}
+            <button
+              class="nav-item"
+              class:active={currentDoc === item.file}
+              on:click={() => loadDoc(item.file)}
+            >
+              {item.label}
+            </button>
+          {/each}
+        </div>
+      {/each}
+    </nav>
+  </aside>
 
-    <div class="doc-section">
-      <h2>Development Commands</h2>
-      <pre><code># Install dependencies
-bun install
-
-# Run the demo
-bun run index.ts
-
-# Run tests
-bun test
-
-# Build for production
-bun run build</code></pre>
-    </div>
-
-    <div class="doc-section">
-      <h2>Resources</h2>
-      <ul>
-        <li><a href="https://github.com/anthropics/claude-code" target="_blank">GitHub Repository</a></li>
-        <li><a href="/docs/README.md" target="_blank">Full Documentation</a></li>
-        <li><a href="/docs/JEA.md" target="_blank">Jurisdiction-Entity-Account Model</a></li>
-        <li><a href="/docs/payment-spec.md" target="_blank">Payment Specifications</a></li>
-      </ul>
-    </div>
-  </div>
+  <!-- Main content -->
+  <main class="docs-content">
+    <article class="markdown-body">
+      {@html renderedHtml}
+    </article>
+  </main>
 </div>
 
 <style>
-  .docs-container {
-    max-width: 900px;
-    margin: 60px auto;
-    padding: 40px;
-    background: rgba(30, 30, 30, 0.8);
-    backdrop-filter: blur(10px);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+  .docs-view {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
   }
 
-  h1 {
-    font-size: 32px;
-    font-weight: 700;
-    color: #00d9ff;
-    margin: 0 0 40px 0;
-    text-align: center;
+  /* Sidebar */
+  .docs-sidebar {
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 1.5rem 1rem;
+    background: var(--bg-secondary);
   }
 
-  h2 {
-    font-size: 24px;
-    color: #ffffff;
-    margin: 32px 0 16px 0;
+  .sidebar-header h2 {
+    font-size: 1.25rem;
+    margin: 0 0 1.5rem 0;
+    color: var(--accent);
     font-weight: 600;
   }
 
-  h3 {
-    font-size: 18px;
-    color: #00d9ff;
-    margin: 20px 0 12px 0;
-    font-weight: 600;
+  .search-box {
+    margin-bottom: 1.5rem;
   }
 
-  .docs-content {
+  .search-box input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.875rem;
+  }
+
+  .search-box input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .search-box input::placeholder {
+    color: var(--text-secondary);
+  }
+
+  .sidebar-nav {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 1.25rem;
   }
 
-  .doc-section {
-    background: rgba(20, 20, 20, 0.6);
-    padding: 24px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+  .nav-section h3 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin: 0 0 0.5rem 0;
+    padding: 0 0.75rem;
+    font-weight: 600;
   }
 
-  p {
-    font-size: 16px;
-    line-height: 1.8;
-    color: rgba(255, 255, 255, 0.85);
-    margin: 0 0 16px 0;
-  }
-
-  ul {
-    list-style: none;
-    padding: 0;
-    margin: 16px 0;
-  }
-
-  li {
-    font-size: 16px;
-    line-height: 1.8;
-    color: rgba(255, 255, 255, 0.85);
-    margin: 8px 0;
-    padding-left: 24px;
-    position: relative;
-  }
-
-  li:before {
-    content: '▸';
-    position: absolute;
-    left: 0;
-    color: #00ff88;
-  }
-
-  .invariant-box {
-    background: rgba(0, 122, 204, 0.1);
-    border-left: 3px solid #007acc;
-    padding: 16px 20px;
-    margin: 24px 0;
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
-    line-height: 1.8;
-  }
-
-  .invariant-box p {
-    margin: 8px 0;
-    color: #00d9ff;
-  }
-
-  pre {
-    background: rgba(0, 0, 0, 0.4);
-    padding: 16px;
+  .nav-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    background: none;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
     border-radius: 6px;
-    overflow-x: auto;
+    transition: all 0.2s;
+    font-size: 0.875rem;
   }
 
-  code {
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
-    color: #00ff88;
+  .nav-item:hover {
+    background: var(--bg);
+    color: var(--accent);
   }
 
-  a {
-    color: #00d9ff;
+  .nav-item.active {
+    background: var(--accent);
+    color: white;
+    font-weight: 500;
+  }
+
+  /* Main content */
+  .docs-content {
+    overflow-y: auto;
+    padding: 3rem;
+    background: var(--bg);
+  }
+
+  .markdown-body {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  /* Markdown styling */
+  .markdown-body :global(h1) {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0 0 1.5rem 0;
+    color: var(--text);
+    line-height: 1.2;
+  }
+
+  .markdown-body :global(h2) {
+    font-size: 2rem;
+    font-weight: 600;
+    margin: 3rem 0 1rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .markdown-body :global(h3) {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 2rem 0 0.75rem 0;
+    color: var(--text);
+  }
+
+  .markdown-body :global(h4) {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.75rem 0;
+    color: var(--text);
+  }
+
+  .markdown-body :global(p) {
+    line-height: 1.7;
+    margin-bottom: 1rem;
+    color: var(--text);
+  }
+
+  .markdown-body :global(a) {
+    color: var(--accent);
     text-decoration: none;
-    transition: color 0.2s ease;
   }
 
-  a:hover {
-    color: #00ff88;
+  .markdown-body :global(a:hover) {
     text-decoration: underline;
+    opacity: 0.8;
+  }
+
+  .markdown-body :global(ul),
+  .markdown-body :global(ol) {
+    margin: 1rem 0;
+    padding-left: 2rem;
+  }
+
+  .markdown-body :global(li) {
+    line-height: 1.7;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+  }
+
+  .markdown-body :global(code) {
+    background: var(--bg-secondary);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.9em;
+    color: var(--accent);
+  }
+
+  .markdown-body :global(pre) {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: 1rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 1.5rem 0;
+  }
+
+  .markdown-body :global(pre code) {
+    background: none;
+    padding: 0;
+    color: var(--text);
+    font-size: 0.875rem;
+  }
+
+  .markdown-body :global(blockquote) {
+    border-left: 4px solid var(--accent);
+    padding-left: 1rem;
+    margin: 1.5rem 0;
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+
+  .markdown-body :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5rem 0;
+    font-size: 0.875rem;
+  }
+
+  .markdown-body :global(th),
+  .markdown-body :global(td) {
+    border: 1px solid var(--border);
+    padding: 0.75rem;
+    text-align: left;
+  }
+
+  .markdown-body :global(th) {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .markdown-body :global(td) {
+    color: var(--text);
+  }
+
+  .markdown-body :global(tr:hover) {
+    background: var(--bg-secondary);
+  }
+
+  .markdown-body :global(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 1.5rem 0;
+  }
+
+  .markdown-body :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+  }
+
+  .markdown-body :global(strong) {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .markdown-body :global(em) {
+    font-style: italic;
+  }
+
+  @media (max-width: 1024px) {
+    .docs-view {
+      grid-template-columns: 1fr;
+    }
+
+    .docs-sidebar {
+      display: none;
+    }
+
+    .docs-content {
+      padding: 1.5rem;
+    }
   }
 </style>
