@@ -14,7 +14,9 @@ In 2012, I've stumbled upon a fundamental insecure-by-default pattern in Rails c
 
 I founded [Sakurity](https://sakurity.com), conducted boutique security audits for some of the big names in the startup industry. Things went good. Around 2017 I've decided to retire from audits and focus on **the most critical yet most vulnerable and misdesigned architecture on the planet** – our financial system, including TradFi + DeFi (according to JEA soon you will see why they are two parts of the whole).
 
-The catalyst was reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius wheel primitives (proofs + collateral + delta transformer) but tried to apply it in an obviously delusional "unicycle" (full-reserve account network, has no working incentive model, can't scale). By 2026 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel networks are dead due to inbound capacity problem.
+The catalyst was reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius primitives, **"the wheel"** (proofs + collateral + delta transformer) but then tried to apply it in an obviously delusional way, **"the unicycle"** (full-reserve account network, has no working incentive model, can't scale). By 2026 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel networks are dead due to inbound capacity problem.
+
+![XLN Network Visualization](../frontend/static/img/RCPAN.jpg)
 
 The solution to inbound capacity was painfully obvious: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon. This is why UTF/Xln exists.
 
@@ -94,7 +96,7 @@ Additional whitepapers that further complement UFT are published separately:
 
 finis ⟁ coronat ⟁ opus
 
-[1.1 Jurisdiction Machine](/11_Jurisdiction_Machine.md)
+[1.1 Jurisdiction Machine](11_Jurisdiction_Machine.md)
 
 
 
