@@ -12,6 +12,7 @@
  */
 
 import { safeStringify } from './serialization-utils';
+import type { JurisdictionConfig } from './types';
 
 /**
  * Batch structure matching Depository.sol (lines 203-231)
@@ -60,11 +61,11 @@ export interface JBatch {
     }>;
   }>;
 
-  // Dispute/Cooperative proofs (DEPRECATED in current Depository.sol)
-  cooperativeUpdate: any[];
-  cooperativeDisputeProof: any[];
-  initialDisputeProof: any[];
-  finalDisputeProof: any[];
+  // Dispute/Cooperative proofs (DEPRECATED in current Depository.sol - empty arrays for now)
+  cooperativeUpdate: never[];
+  cooperativeDisputeProof: never[];
+  initialDisputeProof: never[];
+  finalDisputeProof: never[];
 
   // Flashloans (for atomic batch execution)
   flashloans: Array<{
@@ -81,6 +82,7 @@ export interface JBatch {
  */
 export interface JBatchState {
   batch: JBatch;
+  jurisdiction: JurisdictionConfig | null; // Cached jurisdiction for this entity
   lastBroadcast: number; // Timestamp of last broadcast
   broadcastCount: number; // Total broadcasts
   failedAttempts: number; // Failed broadcast attempts (for exponential backoff)
@@ -111,6 +113,7 @@ export function createEmptyBatch(): JBatch {
 export function initJBatch(): JBatchState {
   return {
     batch: createEmptyBatch(),
+    jurisdiction: null, // Will be set when first operation is added
     lastBroadcast: 0,
     broadcastCount: 0,
     failedAttempts: 0,
@@ -307,13 +310,14 @@ export async function broadcastBatch(
       success: true,
       txHash: receipt.transactionHash,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`❌ Batch broadcast failed for ${entityId.slice(-4)}:`, error);
     jBatchState.failedAttempts++;
 
     return {
       success: false,
-      error: error.message,
+      error: errorMessage,
     };
   }
 }

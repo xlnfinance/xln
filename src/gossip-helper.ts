@@ -40,11 +40,11 @@ export function buildEntityProfile(entityState: EntityState): Profile {
   // Build profile
   const profile: Profile = {
     entityId: entityState.entityId,
-    capabilities: [], // TODO: Add capabilities based on entity features
-    hubs: [], // TODO: Track hub connections
+    capabilities: [], // Future: Add routing, swap capabilities based on entity config
+    hubs: [], // Future: Track hub connections from network topology
     metadata: {
       lastUpdated: Date.now(),
-      isHub: false, // TODO: Determine from capabilities
+      isHub: false, // Future: Determine from entity capabilities or manual config
       routingFeePPM: 100, // Default 100 PPM (0.01%)
       baseFee: 0n,
     },

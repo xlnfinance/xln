@@ -214,12 +214,12 @@
         </button>
       </div>
 
-      <textarea></textarea>
+      <textarea
         bind:value={scenarioText}
         class="scenario-textarea"
         placeholder="Scenario script..."
         spellcheck="false"
-      />
+      ></textarea>
 
       <!-- Command Input -->
       <div class="command-input-section">

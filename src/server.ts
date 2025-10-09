@@ -8,16 +8,6 @@
 import { Level } from 'level';
 
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
-// TODO: Re-enable account-tx imports after fixing export issues
-// import {
-//   sendAccountInputMessage,
-//   sendDirectPaymentToEntity, 
-//   sendCreditLimitUpdateToEntity,
-//   sendAccountAcknowledgment,
-//   sendBatchAccountInputs,
-//   getCrossEntityMessagingSummary,
-//   validateAccountInputMessage
-// } from './account-tx/messaging';
 import {
   createLazyEntity,
   createNumberedEntity,
@@ -135,8 +125,6 @@ async function tryOpenDb(): Promise<boolean> {
   }
   return dbOpenPromise;
 }
-
-declare const console: any;
 
 // === ETHEREUM INTEGRATION ===
 
@@ -278,9 +266,11 @@ const applyServerInput = async (
           );
 
         const replicaKey = `${serverTx.entityId}:${serverTx.signerId}`;
-        const replica: any = {
+        const replica: EntityReplica = {
           entityId: serverTx.entityId,
           signerId: serverTx.signerId,
+          mempool: [],
+          isProposer: serverTx.data.isProposer,
           state: {
             entityId: serverTx.entityId, // Store entityId in state
             height: 0,
@@ -302,8 +292,6 @@ const applyServerInput = async (
             // 📦 J-Batch system - will be initialized on first use
             jBatchState: undefined,
           },
-          mempool: [],
-          isProposer: serverTx.data.isProposer,
         };
 
         // Only add position if it exists (exactOptionalPropertyTypes compliance)
@@ -872,15 +860,9 @@ export {
   // Snapshot utilities
   encode,
   decode,
-  
-  // Account messaging functions - TODO: Re-enable after fixing account-tx exports
-  // sendAccountInputMessage,
-  // sendDirectPaymentToEntity,
-  // sendCreditLimitUpdateToEntity,
-  // sendAccountAcknowledgment,
-  // sendBatchAccountInputs,
-  // getCrossEntityMessagingSummary,
-  // validateAccountInputMessage,
+
+  // Account messaging: Using bilateral frame-based consensus instead of direct messaging
+  // (Old direct messaging functions removed - replaced with AccountInput flow)
 };
 
 // The browser-specific auto-execution logic has been removed.
@@ -991,7 +973,7 @@ const demoCompleteHanko = async (): Promise<void> => {
 };
 
 // Create a wrapper for runDemo that provides better browser feedback
-const runDemoWrapper = async (env: any): Promise<any> => {
+const runDemoWrapper = async (env: Env): Promise<Env> => {
   try {
     console.log('🚀 Starting XLN Consensus Demo...');
     console.log('📊 This will demonstrate entity creation, consensus, and message passing');

@@ -49,7 +49,8 @@ export interface Proposal {
   id: string; // hash of the proposal
   proposer: string;
   action: ProposalAction;
-  // TODO: refactor votes to use VoteData
+  // Votes: signerId → vote (string for simple votes, object for commented votes)
+  // Future: Create VoteData interface for type-safe vote objects
   votes: Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string }>;
   status: 'pending' | 'executed' | 'rejected';
   created: number; // entity timestamp when proposal was created (deterministic)

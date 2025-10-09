@@ -5,6 +5,7 @@
 
 import { ethers } from 'ethers';
 import { loadJurisdictions } from './jurisdiction-loader';
+import type { JBatch } from './j-batch';
 
 import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
 import { safeStringify } from './serialization-utils';
@@ -15,18 +16,18 @@ import { logError } from './logger';
 // Global logger for UI-accessible error logging (set by frontend)
 declare global {
   interface Window {
-    xlnErrorLog?: (message: string, source: string, details?: any) => void;
+    xlnErrorLog?: (message: string, source: string, details?: unknown) => void;
   }
 }
 
-const uiLog = (message: string, details?: any) => {
+const uiLog = (message: string, details?: unknown) => {
   console.log(message, details);
   if (isBrowser && window.xlnErrorLog) {
     window.xlnErrorLog(message, 'EVM', details);
   }
 };
 
-const uiError = (message: string, details?: any) => {
+const uiError = (message: string, details?: unknown) => {
   logError("BLOCKCHAIN", message, details);
   if (isBrowser && window.xlnErrorLog) {
     window.xlnErrorLog(message, 'EVM-ERROR', details);
@@ -234,7 +235,7 @@ export const submitPrefundAccount = async (jurisdiction: JurisdictionConfig, ent
   }
 };
 
-export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entityId: string, batch: any) => {
+export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entityId: string, batch: JBatch | any) => {
   try {
     console.log(`💸 Submitting processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
     console.log(`🔍 BATCH DEBUG:`, safeStringify(batch));
@@ -458,7 +459,7 @@ export const registerNumberedEntityOnChain = async (
     // Debug: log all events in receipt
     if (DEBUG) {
       console.log(`   📋 Receipt logs count: ${receipt.logs.length}`);
-      receipt.logs.forEach((log: any, i: number) => {
+      receipt.logs.forEach((log: ethers.Log, i: number) => {
         try {
           const parsed = entityProvider.interface.parseLog(log);
           console.log(`   📝 Log ${i}: ${parsed?.name} - ${safeStringify(parsed?.args)}`);
@@ -469,7 +470,7 @@ export const registerNumberedEntityOnChain = async (
     }
 
     // Extract entity number from event logs
-    const event = receipt.logs.find((log: any) => {
+    const event = receipt.logs.find((log: ethers.Log) => {
       try {
         const parsed = entityProvider.interface.parseLog(log);
         return parsed?.name === 'EntityRegistered';
@@ -530,7 +531,7 @@ export const registerNumberedEntitiesBatchOnChain = async (
 
     // Extract all entity numbers from events
     const entityNumbers: number[] = [];
-    receipt.logs.forEach((log: any) => {
+    receipt.logs.forEach((log: ethers.Log) => {
       try {
         const parsed = entityProvider.interface.parseLog(log);
         if (parsed?.name === 'EntityRegistered') {
@@ -683,7 +684,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
   const jurisdictions = new Map<string, JurisdictionConfig>();
 
   try {
-    let config: any;
+    let config: any; // Complex type - loadJurisdictions returns different shapes in different contexts
 
     if (!isBrowser && typeof process !== 'undefined') {
       // Node.js environment - use centralized loader
@@ -816,7 +817,16 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
   return jurisdictions.get(address);
 };
 
-export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity: string, rightEntity: string, diffs: any[]) => {
+// Settlement diff structure matching contract
+export interface SettlementDiff {
+  tokenId: number;
+  leftDiff: bigint;
+  rightDiff: bigint;
+  collateralDiff: bigint;
+  ondeltaDiff?: bigint; // Optional in some contexts
+}
+
+export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity: string, rightEntity: string, diffs: SettlementDiff[]) => {
   try {
     console.log(`⚖️ Submitting settle transaction between ${leftEntity.slice(0, 10)}... and ${rightEntity.slice(0, 10)}...`);
     console.log(`🔍 DIFFS:`, diffs.map(d => ({

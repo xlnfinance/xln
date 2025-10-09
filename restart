@@ -1,1 +1,8 @@
-killall node; clear; rm -rf db/*; clear; ts-node src/server.ts
+#!/bin/bash
+# Quick restart helper (restored from history)
+killall node 2>/dev/null || true
+clear
+rm -rf db/* 2>/dev/null || true
+clear
+echo "🔄 Restarting XLN..."
+bun run src/server.ts

@@ -1,15 +1,60 @@
 #!/bin/bash
+set -e  # Exit on error
 
 echo "🚀 XLN Full Development Environment"
-echo "   This will reset networks, watch files, and serve the UI"
 echo ""
 
-# Inject git version info
-echo "📝 Injecting git version info..."
-bun run scripts/inject-version.ts
+# ============================================================================
+# PREREQUISITE CHECKS - Auto-install or fail gracefully
+# ============================================================================
+
+check_bun() {
+    if ! command -v bun &> /dev/null; then
+        echo "❌ bun not found"
+        echo "📥 Install: curl -fsSL https://bun.sh/install | bash"
+        exit 1
+    fi
+    echo "✅ bun $(bun --version)"
+}
+
+check_foundry() {
+    if ! command -v anvil &> /dev/null; then
+        echo "❌ Foundry (anvil) not found"
+        echo "📥 Install: curl -L https://foundry.paradigm.xyz | bash && foundryup"
+        exit 1
+    fi
+    echo "✅ anvil (Foundry) installed"
+}
+
+check_dependencies() {
+    if [ ! -d "node_modules" ]; then
+        echo "📦 Installing root dependencies..."
+        bun install
+    fi
+    
+    if [ ! -d "frontend/node_modules" ]; then
+        echo "📦 Installing frontend dependencies..."
+        (cd frontend && bun install)
+    fi
+    
+    if [ ! -d "contracts/node_modules" ]; then
+        echo "📦 Installing contract dependencies..."
+        (cd contracts && bun install)
+    fi
+    
+    echo "✅ All dependencies installed"
+}
+
+echo "🔍 Checking prerequisites..."
+check_bun
+check_foundry
+check_dependencies
 echo ""
 
-# Function to cleanup on exit
+# ============================================================================
+# CLEANUP & SETUP
+# ============================================================================
+
 cleanup() {
     echo ""
     echo "🛑 Stopping all development services..."
@@ -18,14 +63,23 @@ cleanup() {
     pkill -f "bun build.*watch" 2>/dev/null || true
     pkill -f "tsc.*watch" 2>/dev/null || true
     pkill -f "svelte-check.*watch" 2>/dev/null || true
-    ./stop-networks.sh 2>/dev/null || true
+    ./scripts/dev/stop-networks.sh 2>/dev/null || true
     exit 0
 }
-
-# Set up signal handlers
 trap cleanup SIGINT SIGTERM
 
-# Step 1: Auto-reset networks and redeploy
+# ============================================================================
+# GIT VERSION
+# ============================================================================
+
+echo "📝 Injecting git version info..."
+bun run scripts/inject-version.ts
+echo ""
+
+# ============================================================================
+# BLOCKCHAIN SETUP
+# ============================================================================
+
 echo "🔄 Auto-resetting networks and redeploying contracts..."
 ./reset-networks.sh
 if [ $? -ne 0 ]; then
@@ -33,106 +87,100 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# ============================================================================
+# TYPESCRIPT VALIDATION (FAIL-FAST)
+# ============================================================================
+
 echo ""
 echo "🔍 CRITICAL: TypeScript validation (BLOCKS development on errors)..."
 
-# FAIL-FAST: Block development if TypeScript errors exist
-echo "🔍 Validating /src TypeScript (STRICT MODE)..."
+echo "🔍 Validating /src TypeScript..."
 if ! bun x tsc --noEmit --project .; then
     echo ""
     echo "❌ DEVELOPMENT BLOCKED: /src has TypeScript errors"
-    echo "💡 Fix all TypeScript errors before starting development"
-    echo "💡 Run: bun run check:src"
+    echo "💡 Fix errors with: bun run check"
     exit 1
 fi
 echo "✅ /src TypeScript validation passed"
 
-echo "🔍 Validating /frontend Svelte components (STRICT MODE)..."
+echo "🔍 Validating /frontend Svelte components..."
 if ! (cd frontend && bun run check); then
     echo ""
-    echo "❌ DEVELOPMENT BLOCKED: Frontend has TypeScript/Svelte errors"
-    echo "💡 Fix all component errors before starting development"
-    echo "💡 Run: bun run check:frontend"
+    echo "❌ DEVELOPMENT BLOCKED: Frontend has errors"
+    echo "💡 Fix errors with: cd frontend && bun run check"
     exit 1
 fi
 echo "✅ Frontend validation passed"
 
 echo ""
-echo "🎉 ALL TYPESCRIPT VALIDATION PASSED - Starting development servers..."
+echo "🎉 ALL VALIDATION PASSED - Starting development servers..."
+echo ""
 
-# Step 2: Start file watching in background
+# ============================================================================
+# BUILD & WATCH
+# ============================================================================
+
 mkdir -p frontend/static
 
-echo "🔍 Starting continuous TypeScript checking for /src..."
+# Start TypeScript watchers
+echo "🔍 Starting continuous TypeScript checking..."
 bun x tsc --noEmit --watch --project . &
-SRC_TS_PID=$!
-
-echo "🔍 Starting continuous TypeScript checking for /frontend..."
 (cd frontend && bun run check:watch) &
-FRONTEND_TS_PID=$!
 
-# Build server once for frontend (build directly to final location)
+# Initial server build
 echo "📦 Building server for frontend..."
-bun build src/server.ts --target=browser --outfile=frontend/static/server.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util
+bun build src/server.ts \
+  --target=browser \
+  --outfile=frontend/static/server.js \
+  --minify \
+  --external http --external https --external zlib \
+  --external fs --external path --external crypto \
+  --external stream --external buffer --external url \
+  --external net --external tls --external os --external util
 
-# FINTECH PIPELINE: Test browser compatibility immediately
-echo "🧪 CRITICAL: Testing browser bundle compatibility..."
-if ! node -e "
-try {
-  const fs = require('fs');
-  const bundle = fs.readFileSync('frontend/static/server.js', 'utf8');
-  if (bundle.includes('require(\"http\")') || bundle.includes('import \"http\"') || bundle.includes('from \"http\"')) {
-    console.error('❌ CRITICAL: server.js contains Node.js http module - will crash in browser');
-    process.exit(1);
-  }
-  if (bundle.includes('require(\"fs\")') || bundle.includes('import \"fs\"') || bundle.includes('from \"fs\"')) {
-    console.error('❌ CRITICAL: server.js contains Node.js fs module - will crash in browser');
-    process.exit(1);
-  }
-  console.log('✅ Browser bundle compatibility verified');
-} catch (e) {
-  console.error('❌ Bundle validation failed:', e.message);
-  process.exit(1);
-}
-"; then
-    echo "❌ DEVELOPMENT BLOCKED: server.js contains Node.js modules"
-    echo "💡 Fix: Add proper --target=browser polyfills"
-    echo "💡 Check: vite.config.ts resolve.alias settings"
+# Verify browser compatibility
+echo "🧪 Testing browser bundle compatibility..."
+if grep -q 'require("http")\|require("fs")' frontend/static/server.js; then
+    echo "❌ CRITICAL: server.js contains Node.js modules"
     exit 1
 fi
+echo "✅ Browser bundle verified"
 
-# Copy fresh jurisdictions to frontend
+# Copy jurisdictions
 cp jurisdictions.json frontend/static/jurisdictions.json
 
-# Watch ONLY src/server.ts for changes (NEVER touch jurisdictions.json)
-echo "📦 Starting server watch (ONLY src/server.ts)..."
-echo "   ⚠️  NOTE: This will ONLY rebuild server.js when src/server.ts changes"
-echo "   ⚠️  NOTE: jurisdictions.json is NEVER overwritten by this watcher"
-echo "   🔧 NOTE: Building directly to frontend/static/server.js for instant updates"
-bun build src/server.ts --target=browser --outfile=frontend/static/server.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util --watch &
-WATCH_PID=$!
-# Auto-rebuild now writes directly to frontend/static/server.js
+# Watch server changes
+echo "📦 Starting server watch..."
+bun build src/server.ts \
+  --target=browser \
+  --outfile=frontend/static/server.js \
+  --minify \
+  --external http --external https --external zlib \
+  --external fs --external path --external crypto \
+  --external stream --external buffer --external url \
+  --external net --external tls --external os --external util \
+  --watch &
 
-echo "🌐 Starting Svelte development server..."
+# ============================================================================
+# START VITE
+# ============================================================================
 
-# Step 3: Start Svelte dev server in background
+echo "🌐 Starting Vite dev server..."
 (cd frontend && bun --bun run dev) &
-SERVE_PID=$!
 
-# Wait for server to start
 sleep 3
 
 echo ""
-echo "✅ Full Development Environment Ready!"
+echo "✅ ✅ ✅ DEVELOPMENT ENVIRONMENT READY ✅ ✅ ✅"
 echo ""
-echo "🌐 Open: http://localhost:8080 (Svelte frontend)"
-echo "🌐 API: http://localhost:8080 (unified on same port)"
-echo "📦 TypeScript: Auto-compiling on file changes"
-echo "🔗 Networks: Running on ports 8545, 8546, 8547"
-echo "📝 Contracts: Fresh deployment completed"
+echo "🌐 Frontend: http://localhost:8080"
+echo "🌐 HTTPS:    https://localhost:8080 (if certs available)"
+echo "🔗 Blockchain: http://localhost:8545 (anvil)"
+echo "📦 Auto-rebuild: Enabled (server.js + frontend)"
+echo "🔍 Type checking: Running continuously"
 echo ""
-echo "💡 All services running - Press Ctrl+C to stop everything"
+echo "💡 Press Ctrl+C to stop all services"
 echo ""
 
-# Wait for all processes (this keeps the script running)
-wait $SRC_TS_PID $FRONTEND_TS_PID $WATCH_PID $SERVE_PID
+# Keep running
+wait

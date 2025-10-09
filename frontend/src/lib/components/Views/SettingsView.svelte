@@ -520,12 +520,12 @@
         </button>
         <span class="error-count">{$errorLog.length} errors logged</span>
       </div>
-      <textarea></textarea>
+      <textarea
         class="error-log-textarea"
         readonly
         value={errorLogText || 'No errors logged yet'}
         placeholder="Error log will appear here..."
-      />
+      ></textarea>
     </div>
 
     <!-- UI Preferences Section -->

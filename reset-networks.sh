@@ -4,7 +4,7 @@ echo "🔄 Resetting XLN Network (Ethereum only) and Redeploying Contracts..."
 
 # Stop existing networks
 echo "1️⃣ Stopping existing networks..."
-./stop-networks.sh
+./scripts/dev/stop-networks.sh
 
 # Clean up old data
 echo ""
@@ -20,7 +20,7 @@ echo "✅ Cleanup complete (cleared ignition, hardhat cache, artifacts)"
 # Start fresh networks
 echo ""
 echo "3️⃣ Starting fresh networks..."
-./start-networks.sh
+./scripts/dev/start-networks.sh
 
 # Wait for networks to stabilize
 echo ""
