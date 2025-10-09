@@ -16,7 +16,7 @@ I founded [Sakurity](https://sakurity.com), conducted boutique security audits f
 
 The catalyst was reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius primitives, **"the wheel"** (proofs + collateral + delta transformer) but then tried to apply it in an obviously delusional way, **"the unicycle"** (full-reserve account network, has no working incentive model, can't scale). By 2026 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel networks are dead due to inbound capacity problem.
 
-<img src="../frontend/static/img/RCPAN.png" width="400px">
+<img src="../frontend/static/img/RCPAN.png" width="300px">
 
 The solution to inbound capacity was painfully obvious: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but misunderstood Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon.
 
@@ -28,7 +28,7 @@ The UFT (theory) and Xln (practical reference implementation) is my magnum opus 
 
 We believe and double down on the original vision of Bitcoin and Ethereum where every laptop and phone can run fully verifying node. 
 
-Xln achieves that by creating two lousely coupled layers: 
+Xln achieves that by creating two loosely coupled layers: 
 
 * <30-100 tps global settlement Layer1 (Bitcoin and Ethereum are J-machines). Xln is jurisdiction-agnostic and can support any L1, but the lower global tps - the easier it is to run a full node on consumer device. Xln is the first architecture that works just fine with Original Ethereum, even if gaslimit is reduced 10-100x. Unlike rollups, Xln does not require blobspace or data availability committees of any form - the account proofs are sovereign and exits are guaranteed at all times.
 * unbounded scalability Unicast Layer2. Xln is a netting overlay attaching to any EVM L1/EVM-rollup/future EVM-like CBDC J-machines, creating financial Internet of unified liquidity.
@@ -37,7 +37,7 @@ Xln achieves that by creating two lousely coupled layers:
 
 You are absolutely right! You can build & play with your personal home-grown credit-collateral subnet xlnomy at xln.finance in 2D/Graph 3D/VR/Panel/Terminal interface. **It's real fun with Oculus Quest!** Create personal entities, N/M multifactor entities, hierarchical companies and institutions with instant IPO of C/D shares with any hub. Stream dividends and buybacks per-second, do merge&acquisitions, new board election, and of course borrow/lend/payments/swaps and other DeFi primitives of any complexity. 
 
-<img src="../frontend/static/img/preview.png" width="400px">
+<img src="../frontend/static/img/preview.png" width="600px">
 
 Private testnet with cross-subnet networking ETA: Q1 2026.
 
@@ -93,6 +93,22 @@ In third chapter, we introduce our main innovation, the superset invariant **res
 
 `−Lₗ ≤ Δ ≤ C + Lᵣ`
 
+xln is the first RCPAN (Reserve-Credit, Provable Account Network): credit where it scales, collateral where it secures—a principled hybrid of FCUAN and FRPAP.
+
+```
+FCUAN invariant:
+−leftCreditLimit ≤ Δ ≤ rightCreditLimit
+[---.---]
+
+FRPAP invariant:
+0 ≤ Δ ≤ collateral
+[.===]
+
+RCPAN (xln) superset invariant:
+−leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
+[---.===---]
+```
+
 Additional whitepapers that further complement UFT are published separately:
 
 * **2.0 Cascade Security Model**: we extend the credit+collateral RCPAN invariant with "on-jurisdiction reserves" and opt-in Deposit Insurance Schemes forming a waterfall-like security cascade for all fungible value any entity in Xln holds: reserve->collateral->credit->insurance->reinsurance. 
@@ -103,7 +119,6 @@ Additional whitepapers that further complement UFT are published separately:
 
 * **5.0 BrainVault**: argon2id(username, password, complexityFactor ~5sec...5hours) - in addition to cumbersome randomly generated 16-word seeds users may prefer the longer but easier to handle option. Just like RCPAN accounts are "payment channels done right" we propose a secure evolution of BrainWallet/WarpWallet idea.
 
-finis ⟁ coronat ⟁ opus
 
 [1.1 Jurisdiction Machine](11_Jurisdiction_Machine.md)
 
