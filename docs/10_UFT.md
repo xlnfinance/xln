@@ -34,10 +34,6 @@ If you're willing to bend your mental models around the status quo, embrace our 
 
 If you don't have time for 30-60 min deep reading - **spend 5 minutes on understanding core RCPAN invariant** and save the rest of the document for the future. 
 
-The UFT (theory) and Xln (practical reference implementation) is my magnum opus and quintessence of 9 years of research into TradFi/RTGS/DeFi/DAO/AA/institutional governance/payment channels. 
-
-I believe it's a 1000x times more important than all of my infosec research, combined. Call me delusional, but I just happen to be right eventually.
-
 ### How to read it
 
 The documents are a little heavy on technical & financial terminology. This is intentional - instead of making it a tedious long read "for the general crowd", it seemed like a better idea to make it concentrated and to the point, letting readers ask an LLM of their choice to expand on any idea / statement, with targeted prompts like "ELI5?", "I'm a banker, what is it?", "I'm a protocols engineer, what's under the hood?".
