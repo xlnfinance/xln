@@ -1,0 +1,163 @@
+# XLN 2019 Prototype – Functional Specification
+
+## 1. Core Architecture
+- **Engine (`Me` class)** keeps node state: signer, on-chain Depository contract, in-memory channels, shared batch state, websockets, metrics, and RPC handlers.
+- **Channels** are bilateral ledgers keyed by counterparty address. Each channel tracks:
+  - `isLeft` orientation (lexicographic order of addresses).
+  - `status` (`ready`, `sent`, `disputed`, etc.), dispute/counter cooperative nonces, timestamps.
+  - `entries`: per-asset records with `ondelta`, `offdelta`, collateral, own/peer credit limits, pending withdrawal/deposit markers.
+  - `locks`: hash-locked payments (`AddLock*`, `DeleteLock*` lifecycles) and optional swap objects.
+  - Derived view produced by `deriveEntry` (secured/unsecured splits, capacities, credit headroom).
+- **Shared batch state** accumulates on-chain actions (`reserveToChannel`, `channelToReserve`, `cooperativeProof`, etc.) for later broadcast.
+- **Websocket fabric**: internal RPC (wallet/browser), external RPC (peers/hubs), and optional coordinator connections.
+
+## 2. Channel Lifecycle Functions
+### 2.1 `buildChannel(addr)`
+- If a channel does not exist, initializes a new record with orientation (`isLeft`), zeroed counters, empty entries/locks, and marks status `ready`.
+- Prevents self-channel creation.
+
+### 2.2 `deriveEntry(ch, assetId)`
+- Computes per-asset exposure from raw deltas and collateral:
+  - Splits total delta into secured vs unsecured for each side depending on `isLeft`.
+  - Tracks available credit (`their_credit_limit - unsecured`) and mirrored values for the counterparty.
+  - Aggregates active locks into inbound/outbound buckets, hold amounts, and adjusts available capacities (`total_capacity - holds`).
+- Output drives UI, routing, and risk checks (e.g., outbound capacity when sending).
+
+### 2.3 `payChannel(opts)` – Outbound Hashlocked Payment
+- Generates random secret and keccak hash for HTLC.
+- Builds multi-hop onion payloads by encrypting successive instructions (amount, asset, secret, next hop) with recipients’ `boxPubkey`.
+- Validates direct channel existence and outbound capacity via `deriveEntry`; aborts if insufficient.
+- Appends `AddLockNew` entry with hash, amount, expiry, onion unlocker, and destination metadata; then calls `flushChannel` for first hop.
+- Reacts to UI with success/failure string.
+
+### 2.4 `flushChannel(addr, forceAck=false)`
+- Ensures the channel object exists (`buildChannel` if necessary).
+- Prepares `updateChannel` payload for the partner containing:
+  - Current dispute nonce, canonical entries hash/proof, acknowledgement signature (`ackSig`).
+  - List of transitions (`AddEntry*`, `DeleteEntry*`, `AddLock*`, `DeleteLock*`).
+  - Optional final state proof/signature if any transition was sent (sets status `sent`, increments dispute nonce (+2 for left, +1 for right), records timestamp).
+- Processes local entry/lock state machine:
+  - `AddEntryNew` → `AddEntrySent`, `DeleteEntryNew` → `DeleteEntrySent`.
+  - `AddLockNew` validated against outbound capacity. On failure triggers reverse unlock on inbound channel and marks outcome.
+  - `DeleteLockNew` transitions to sent with outcome metadata.
+- Sends payload over external RPC; collects addresses needing subsequent flush (e.g., when inbound counterparties must be updated) but leaves actual recursion to caller.
+
+### 2.5 `updateChannel(addr, json)` – Applying Partner Transitions
+- Ensures local channel exists; builds one for hubs if missing.
+- Verifies acknowledgement signature against canonical dispute proof when `json.dispute_nonce` matches local nonce.
+  - On success, stores partner `ackSig`, clears `ackRequestedAt`, and promotes local states via `ackChannel()` (sent → ack transitions, apply released secrets to deltas).
+- Handles nonce mismatch (partial rollback logic when right-side receives transitions built from previous state).
+- Iterates received transitions:
+  - `AddEntrySent`/`DeleteEntrySent`: apply entry creation/removal.
+  - `AddLockSent`: add inbound/outbound locks; decrypt onion when final hop to reveal next instructions or payment secret.
+  - `DeleteLockSent`: verify hash outcome (`secret`, `outcomeFailure`, etc.), adjust deltas, and cascade confirmations down inbound links.
+- Updates metrics: volume, settlement counts, fee capture from multi-hop routing.
+- Schedules `flushChannel(addr, transitions.length != 0)` to send ACK or opportunistic ack-only flush; flushes any dependent channels recorded earlier (e.g., inbound locks resolved).
+
+### 2.6 `rebalanceChannels()`
+- For each asset:
+  - Scans channels to find receivers (`they_requested_deposit > 0`) and candidates with secured balances reachable over websocket (net senders).
+  - Requests withdrawal signatures via `getWithdrawalSig` RPC, adds successful ones to `sharedState.batch.channelToReserve`.
+  - Aggregates total withdrawn funds and on-chain reserves to determine available liquidity.
+  - For each receiver (prioritized by requested size), schedule `reserveToChannel` entries and reset request counters until liquidity buffer (`safety`) exhausted.
+- Designed for hubs/banks to periodically level collateral vs credit exposure.
+
+## 3. RPC Interfaces
+### 3.1 Internal RPC (`internal_rpc/index.ts`)
+Handles authenticated commands from wallet/admin clients (auth_code gating). Key methods and outcomes:
+- `load` – placeholder hook (refresh UI).
+- `login(username,password|seed)` – derives seed via scrypt, starts engine, exposes wallet.
+- `logout` – tears down external servers, clears config, forces process exit.
+- `payChannel(params)` – calls `payChannel` macro, then notifies UI.
+- `createOrder` – forwards order to coordinator.
+- `startDispute` – appends dispute proof instructions into `sharedState.batch.disputeProof` for named partner.
+- `openChannel(address)` – flushes channel in force-ack mode to initialize, then broadcasts profile.
+- `flushTransition(address, assetId)` – rebuild entry snapshot, flushes channel, broadcasts profile.
+- `setCreditLimit(partner, assetId, credit_limit)` – local update + send RPC message to partner; triggers profile broadcast.
+- `requestCollateral(partner, assetId, collateral)` – remote request set, returns confirmation text.
+- `onchainFaucet` – forwards faucet request to coordinator.
+- `reserveToChannel({receiver,partner,pairs})` – stage deposit instructions in batch.
+- `channelToReserve({partner,pairs})` – synchronous request to partner for withdrawal signature; upon success adds batch entry, else alerts.
+- `cooperativeClose({partner})` – fetch cooperative signature from partner, verify, then queue `sharedState.batch.cooperativeProof`.
+- `broadcastBatch` – executes `broadcastBatch()` and aborts default response loop.
+- `getRoutes({address})` – returns direct or coordinator-assisted path (current stub returns coordinator as first hop) and hub info.
+- `clearBatch` – resets staged batch operations.
+- `getinfo`, `receivedAndFailed` – stubs/legacy.
+
+### 3.2 External RPC (`external_rpc/index.ts`)
+Processes messages from peers/coordinator over websocket:
+- `auth` – register websocket for address.
+- `callback` – dispatch stored callback promises (responses to synchronous requests).
+- `broadcastProfile` – update remote profile record.
+- `cooperativeClose` – produce cooperative proof signature for partner’s request.
+- `createOrder` – append order to orderbook and broadcast to connected websockets.
+- `getWithdrawalSig(pairs)` – verify requested withdrawal against channel state, set `they_pending_withdraw`, respond with signed proof (or error).
+- `getProfiles(addresses)` – return cached profiles.
+- `updateChannel` – wrapped call to `updateChannel(addr, json)` inside `section(addr, async => …)` to serialize channel access.
+- `setCreditLimit` – update `they_credit_limit` locally on received set-limit message.
+- `requestCollateral` – record remote collateral request while checking invariants.
+- `textMessage` – surface text to UI.
+
+### 3.3 `external_rpc/with_channel.js`
+Legacy/alternate handler (per-channel RPC) enabling credit/insurance tweaks, withdrawal exchanges, faucet testnet action. Operates within serialized `section(['use', pubkey], …)` to avoid race conditions.
+
+## 4. Batch & On-chain Integration
+- `sharedState.batch` accumulates arrays for:
+  - `reserveToChannel` (hub deposits collateral to channel partners).
+  - `channelToReserve` (withdrawals from channel back to reserve, requiring partner signatures).
+  - `cooperativeProof`, `disputeProof`, `revealSecrets` (settlement/dispute instructions).
+- `periodical/broadcast` signs and sends the batch via on-chain Depository when ready, caching signed hex for rebroadcast attempts.
+- `rebalance_channels` feeds `reserveToChannel`/`channelToReserve` entries.
+
+## 5. Periodic Tasks (`periodical/index.js`)
+- `syncChanges` – (not detailed here) likely refreshes UI/metrics and ensures remote state stays aligned.
+- `rebalance` – executes `rebalance_channels` at configured cadence.
+- `ensureAck` – watchdog to reflush or dispute if acknowledgements are overdue.
+- `broadcast` – handles batch broadcast.
+- `forceReact` – pushes current state update to connected browsers.
+- `leakData` – optional diagnostic stream of channel metrics via websocket.
+- Uses `schedule(task, timeout)` to maintain repeating timers; bank mode starts external RPC listener and schedules rebalancing every `blocktime * 2`.
+
+## 6. Router (`router/index.js`)
+- Maintains static list of hub routes (`Config.routes`).
+- `addRoute/removeRoute` ensure unique bidirectional entries.
+- `dijkstra(context)` recursively explores paths up to `max_hops`, recording candidate sequences reaching any target (destination hubs).
+- `bestRoutes(address, args)`:
+  - Parses destination address profile to list reachable banks (`addr.banks`).
+  - Filters local banks with sufficient available funds for the requested asset/amount.
+  - Applies Dijkstra from each capable source, computes cumulative fee factor, filters out routes exceeding `max_fee` loss (10%).
+  - Returns sorted array `[total_fee, route]` where fee is expressed as 1 - effective multiplier.
+
+## 7. Payment & Lock Scenarios
+1. **Outbound Payment Initiation**
+   - If sender has direct channel and outbound capacity ≥ amount, `payChannel` adds `AddLockNew` and flushes → partner receives transition.
+   - If no capacity, payment fails and UI alerted.
+2. **Intermediate Hop Handling**
+   - On receiving `AddLockSent`, hop decrypts onion:
+     - If `nextHop` defined: forwards lock to next channel; failure to add due to capacity triggers `DeleteLockNew` with outcome `NoCapacity` and schedules reverse flush.
+     - If final hop: reveals secret to payee; generates `DeleteLockNew` with outcome `secret`. After ack the payee acknowledges success.
+3. **Lock Settlement Cascade**
+   - When payee reveals secret, upstream `DeleteLockSent` transitions apply delta adjustments (`offdelta` +/- amount) before state promotion.
+   - Multi-hop fees captured as inbound `amount - outbound amount` during settlement.
+4. **Ack/Timeout Guard**
+   - After flush with transitions, channel status `sent`; `ackRequestedAt` set. `ensureAck` (periodical) can reopen dispute if partner fails to respond in time.
+5. **Rollback Scenario**
+   - If both sides send transitions simultaneously, right-side node seeing lower partner dispute nonce converts pending transitions back to `*New`, replays partner update, then reflashes its original transitions.
+6. **Collateral Request**
+   - If remote requests deposit via `requestCollateral`, hub verifies available unsecured exposure before queuing `they_requested_deposit`; eventual rebalance converts reserve funds into collateral.
+7. **Withdrawal Flow**
+   - Net sender receives `getWithdrawalSig`, validates they have sufficient insured/unsecured funds, sets `they_pending_withdraw`, responds with signature. Hub adds to `channelToReserve`, then `rebalance` withdraws and redistributes.
+8. **Cooperative Close**
+   - Initiator requests signature via RPC; partner validates cooperative proof, returns signature; closure stored in batch for on-chain settlement.
+9. **Dispute Kickoff**
+   - User triggers `startDispute`; current canonical entries hash/signature appended to batch for on-chain adjudication.
+
+## 8. Metrics & Observability
+- `react(payload)` packages public state (channels, derived metrics, balance summary) and pushes to subscribed browsers/websockets.
+- Metrics tracked: volume settled, failed payments, successful settlements, fees earned, sync durations, bandwidth usage, signature verification counts.
+
+## 9. Outstanding Behaviors / TODOs Observed
+- Lock expiries, disputes, and rollback paths contain commented guidance but require further hardening (e.g., inline TODO on unlocking upon failure, hold management).
+- Security reminders: external messages should be signed, withdraw requests guard against race conditions, partial dispute logic still under refinement.
+
+This specification captures the functional mechanics of the 2019 XLN prototype: bilateral channel setup, payment flows, acknowledgement handling, collateral/credit operations, RPC command set, routing, and periodic maintenance routines. It omits stylistic code details and focuses on observable state transitions (“if X then Y”) that drive the system.
