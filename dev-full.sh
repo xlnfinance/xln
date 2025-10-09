@@ -19,8 +19,20 @@ check_bun() {
 
 check_foundry() {
     if ! command -v anvil &> /dev/null; then
-        echo "❌ Foundry (anvil) not found"
-        echo "📥 Install: curl -L https://foundry.paradigm.xyz | bash && foundryup"
+        echo ""
+        echo "❌ Foundry (anvil) not found - required for local blockchain"
+        echo ""
+        echo "📥 Quick install (takes ~2 minutes):"
+        echo ""
+        echo "   curl -L https://foundry.paradigm.xyz | bash"
+        echo "   source ~/.bashrc  # or ~/.zshrc"
+        echo "   foundryup"
+        echo ""
+        echo "Then run: bun run dev"
+        echo ""
+        echo "💡 Alternative: Run frontend-only (no blockchain):"
+        echo "   cd frontend && bun run dev"
+        echo ""
         exit 1
     fi
     echo "✅ anvil (Foundry) installed"

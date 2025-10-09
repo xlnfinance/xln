@@ -28,14 +28,25 @@ bun run dev
 - [bun](https://bun.sh) - JavaScript runtime
 - [Foundry/anvil](https://getfoundry.sh) - Local blockchain
 
-**Install (if missing):**
+**Install (2 minutes):**
 ```bash
-# bun
+# 1. Install bun
 curl -fsSL https://bun.sh/install | bash
 
-# Foundry
+# 2. Install Foundry (for local blockchain)
 curl -L https://foundry.paradigm.xyz | bash
+source ~/.bashrc  # or ~/.zshrc if you use zsh
 foundryup
+
+# 3. Verify
+bun --version
+anvil --version
+```
+
+**Alternative (UI-only, no blockchain):**
+```bash
+cd frontend && bun run dev
+# Just frontend at localhost:8080, no smart contracts
 ```
 
 ---
