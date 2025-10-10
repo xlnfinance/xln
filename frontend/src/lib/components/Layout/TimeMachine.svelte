@@ -1,581 +1,644 @@
 <script lang="ts">
-  import { timeOperations, timeState } from '../../stores/timeStore';
+  import { onDestroy, onMount } from 'svelte';
+  import { timeOperations, currentTimeIndex, maxTimeIndex, isLive } from '../../stores/timeStore';
   import { history, currentHeight } from '../../stores/xlnStore';
-  import { onDestroy, tick } from 'svelte';
-  import { SkipBack, ChevronLeft, ChevronRight, Play, Pause, Zap, RotateCcw } from 'lucide-svelte';
+  import {
+    SkipBack,
+    ChevronLeft,
+    Play,
+    Pause,
+    ChevronRight,
+    SkipForward,
+    Repeat,
+    Download,
+    Scissors,
+    ChevronDown
+  } from 'lucide-svelte';
 
-  // Player state
-  let isPlaying = false; // Paused by default for investor demos
-  let playbackSpeed = 1; // 0.25x, 0.5x, 1x, 2x, 4x
-  let loopEnabled = true; // Loop by default
+  // Playback state
+  let playing = false;
   let playbackInterval: number | null = null;
+  let speed = 1.0;
+  let loopMode: 'off' | 'all' | 'slice' = 'off';
+  let sliceStart: number | null = null;
+  let sliceEnd: number | null = null;
 
-  // Reactive values
-  $: timeInfo = getTimeInfo($timeState, $history);
-  $: sliderValue = getSliderValue($timeState);
-  $: progressPercent = getProgressPercent($timeState);
+  // FPS tracking
+  let fps = 0;
+  let frameTimestamps: number[] = [];
 
-  function getTimeInfo(state: any, historyArray: any[]) {
-    if (state.isLive) {
-      return {
-        status: '⚡ LIVE',
-        description: 'Current time',
-        frameInfo: `Height: ${$currentHeight}`,
-        totalFrames: `${historyArray.length} snapshots`
-      };
-    } else {
-      const snapshot = timeOperations.getCurrentSnapshot();
-      return {
-        status: `📸 ${state.currentTimeIndex + 1}/${historyArray.length}`,
-        description: snapshot?.description || 'Historical snapshot',
-        frameInfo: `Height: ${snapshot?.height || 0}`,
-        totalFrames: snapshot?.description || ''
-      };
-    }
+  // Dropdowns
+  let showSpeedMenu = false;
+  let showLoopMenu = false;
+  let showExportMenu = false;
+
+  const speedOptions = [
+    { value: 0.1, label: '0.1x' },
+    { value: 0.25, label: '0.25x' },
+    { value: 0.5, label: '0.5x' },
+    { value: 1.0, label: '1x' },
+    { value: 2.0, label: '2x' },
+    { value: 5.0, label: '5x' },
+    { value: 10.0, label: '10x' }
+  ];
+
+  // Calculate FPS from history updates
+  $: if ($history.length > 0) {
+    const now = Date.now();
+    frameTimestamps.push(now);
+    frameTimestamps = frameTimestamps.filter(t => now - t < 60000); // Keep last minute
+    fps = frameTimestamps.length / 60;
   }
 
-  function getSliderValue(state: any) {
-    if (state.isLive) {
-      return state.maxTimeIndex + 1; // Live position
-    }
-    return state.currentTimeIndex;
+  // Format time from frame
+  function formatTime(frameIndex: number): string {
+    const snapshot = $history[frameIndex];
+    if (!snapshot?.timestamp) return '0:00.000';
+
+    const firstTimestamp = $history[0]?.timestamp || 0;
+    const elapsed = snapshot.timestamp - firstTimestamp;
+
+    const minutes = Math.floor(elapsed / 60000);
+    const seconds = Math.floor((elapsed % 60000) / 1000);
+    const ms = elapsed % 1000;
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   }
 
-  function getProgressPercent(state: any) {
-    if (state.isLive) {
-      return 100;
-    }
-    // When at maxTimeIndex, we're at 100% (last historical frame)
-    if (state.currentTimeIndex >= state.maxTimeIndex && state.maxTimeIndex > 0) {
-      return 100;
-    }
-    const sliderMax = state.maxTimeIndex + 1;
-    return sliderMax > 0 ? (state.currentTimeIndex / sliderMax) * 100 : 0;
-  }
-
-  function handleSliderChange(event: Event) {
-    const target = event.target as HTMLInputElement;
-    const value = parseInt(target.value);
-    const maxMeaningfulIndex = $timeState.maxTimeIndex;
-
-    if (value > maxMeaningfulIndex) {
-      timeOperations.goToLive();
-    } else {
-      timeOperations.goToTimeIndex(value);
-    }
-  }
-
-  function handleStepBackward() {
-    timeOperations.stepBackward();
-  }
-
-  function handleStepForward() {
-    timeOperations.stepForward();
-  }
-
-  function handleGoToStart() {
-    timeOperations.goToHistoryStart();
-  }
-
-  function handleGoToLive() {
-    timeOperations.goToLive();
-    stopPlayback(); // Stop playback when going live
-  }
-
-  // Player controls
-  function togglePlayPause() {
-    if (isPlaying) {
+  // Playback
+  function togglePlay() {
+    if (playing) {
       stopPlayback();
     } else {
       startPlayback();
     }
   }
 
-  async function startPlayback() {
-    // If no history, can't play
+  function startPlayback() {
     if ($history.length === 0) return;
 
-    // If we're live or at the end, jump to start before playing
-    if ($timeState.isLive || $timeState.currentTimeIndex >= $timeState.maxTimeIndex) {
+    if ($isLive || $currentTimeIndex >= $maxTimeIndex) {
       timeOperations.goToHistoryStart();
-      // Wait for both DOM and store updates to complete
-      await tick();
-      await new Promise(resolve => setTimeout(resolve, 50)); // Small delay for store propagation
     }
 
-    isPlaying = true;
-    const baseInterval = 1000; // 1 second base interval
-    const interval = baseInterval / playbackSpeed;
+    playing = true;
+    const frameDelay = 1000 / speed;
 
     playbackInterval = window.setInterval(() => {
-      // Allow stepping forward until we're AT maxTimeIndex (inclusive)
-      // This ensures the last frame is shown before stopping
-      if ($timeState.currentTimeIndex < $timeState.maxTimeIndex) {
-        timeOperations.stepForward();
-      } else if ($timeState.currentTimeIndex === $timeState.maxTimeIndex) {
-        // We're at the last historical frame, take one more step to LIVE
-        timeOperations.stepForward(); // This will transition to LIVE
-        // Then handle end-of-playback
-        if (loopEnabled) {
-          timeOperations.goToHistoryStart();
+      const end = sliceEnd ?? $maxTimeIndex;
+
+      if ($currentTimeIndex >= end) {
+        if (loopMode === 'all' || loopMode === 'slice') {
+          timeOperations.goToTimeIndex(sliceStart ?? 0);
         } else {
           stopPlayback();
         }
+      } else {
+        timeOperations.stepForward();
       }
-    }, interval);
+    }, frameDelay);
   }
 
   function stopPlayback() {
-    isPlaying = false;
-    if (playbackInterval !== null) {
+    playing = false;
+    if (playbackInterval) {
       clearInterval(playbackInterval);
       playbackInterval = null;
     }
   }
 
-  function handleSpeedChange(event: Event) {
-    const target = event.target as HTMLInputElement;
-    playbackSpeed = parseFloat(target.value);
-
-    // Restart playback with new speed if currently playing
-    if (isPlaying) {
+  function setSpeed(newSpeed: number) {
+    speed = newSpeed;
+    showSpeedMenu = false;
+    if (playing) {
       stopPlayback();
-      startPlayback();
+      startPlayback(); // Restart with new speed
     }
   }
 
-  function toggleLoop() {
-    loopEnabled = !loopEnabled;
+  function setLoopMode(mode: typeof loopMode) {
+    loopMode = mode;
+    showLoopMenu = false;
   }
 
-  // Cleanup on component destroy
-  onDestroy(() => {
-    stopPlayback();
-  });
+  function markSlicePoint() {
+    if (sliceStart === null) {
+      sliceStart = $currentTimeIndex;
+    } else if (sliceEnd === null) {
+      sliceEnd = $currentTimeIndex;
+      if (sliceEnd < sliceStart) {
+        [sliceStart, sliceEnd] = [sliceEnd, sliceStart];
+      }
+      loopMode = 'slice';
+    } else {
+      // Reset
+      sliceStart = null;
+      sliceEnd = null;
+      loopMode = 'off';
+    }
+  }
+
+  function exportFrames() {
+    const data = JSON.stringify($history, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `xln-frames-${Date.now()}.json`;
+    a.click();
+    showExportMenu = false;
+  }
+
+  // Handle scrubber click
+  function handleScrubberClick(event: MouseEvent) {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const percentage = x / rect.width;
+    const targetIndex = Math.floor(percentage * $maxTimeIndex);
+    timeOperations.goToTimeIndex(targetIndex);
+  }
 
   // Keyboard shortcuts
-  function handleKeydown(event: KeyboardEvent) {
-    // Only activate when not typing in inputs
-    if (event.target && (event.target as HTMLElement).tagName === 'INPUT') return;
-    if (event.target && (event.target as HTMLElement).tagName === 'TEXTAREA') return;
+  function handleKeyboard(event: KeyboardEvent) {
+    if (event.target !== document.body) return;
 
-    switch(event.key) {
+    switch (event.key) {
       case ' ':
-      case 'k':
         event.preventDefault();
-        togglePlayPause();
+        togglePlay();
         break;
       case 'ArrowLeft':
-      case 'j':
-        event.preventDefault();
-        handleStepBackward();
+        timeOperations.stepBackward();
         break;
       case 'ArrowRight':
-      case 'l':
-        event.preventDefault();
-        handleStepForward();
+        timeOperations.stepForward();
         break;
       case 'Home':
-        event.preventDefault();
-        handleGoToStart();
+        timeOperations.goToHistoryStart();
         break;
       case 'End':
-        event.preventDefault();
-        handleGoToLive();
+        timeOperations.goToLive();
         break;
-      case 'L':
-        event.preventDefault();
-        toggleLoop();
+      case '[':
+        markSlicePoint();
         break;
     }
   }
+
+  onMount(() => {
+    window.addEventListener('keydown', handleKeyboard);
+  });
+
+  onDestroy(() => {
+    stopPlayback();
+    window.removeEventListener('keydown', handleKeyboard);
+  });
+
+  $: currentTime = formatTime($currentTimeIndex);
+  $: totalTime = formatTime($maxTimeIndex);
+  $: progressPercent = $maxTimeIndex > 0 ? ($currentTimeIndex / $maxTimeIndex) * 100 : 0;
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
-
 <div class="time-machine">
-  <div class="time-machine-main">
-    <!-- Left: Time info -->
-    <div class="time-info-compact" class:current={$timeState.isLive}>
-      <span>{timeInfo.status}</span>
-      <span>{timeInfo.frameInfo}</span>
-    </div>
-
-    <!-- Center: Navigation controls -->
-    <div class="time-nav-controls">
-      <button class="icon-btn" on:click={handleGoToStart} title="Go to Start (Home)">
-        <SkipBack size={14} />
-      </button>
-      <button class="icon-btn" on:click={handleStepBackward} title="Step Back (← or J)">
-        <ChevronLeft size={14} />
-      </button>
-      <button class="icon-btn" on:click={handleStepForward} title="Step Forward (→ or L)">
-        <ChevronRight size={14} />
-      </button>
-    </div>
-
-    <!-- Timeline slider -->
-    <div class="time-slider-container" style="--progress: {progressPercent}%">
-      <input
-        type="range"
-        id="timeSlider"
-        class="time-slider"
-        min="0"
-        max={$timeState.maxTimeIndex + 1}
-        value={sliderValue}
-        disabled={$history.length === 0}
-        on:input={handleSliderChange}
-      />
-    </div>
-
-    <!-- Right: Playback controls -->
-    <div class="time-playback-controls">
-      <button
-        class="icon-btn play-btn"
-        class:playing={isPlaying}
-        on:click={togglePlayPause}
-        title="Play/Pause (Space or K)"
-        disabled={$history.length === 0}
-      >
-        {#if isPlaying}
-          <Pause size={14} />
-        {:else}
-          <Play size={14} />
-        {/if}
-      </button>
-      <button
-        class="icon-btn loop-btn"
-        class:active={loopEnabled}
-        on:click={toggleLoop}
-        title="Loop Playback (Shift+L)"
-      >
-        <RotateCcw size={13} />
-      </button>
-      <div class="speed-control">
-        <span class="speed-label">{playbackSpeed}x</span>
-        <input
-          type="range"
-          class="speed-slider"
-          min="0.25"
-          max="10"
-          step="0.25"
-          value={playbackSpeed}
-          on:input={handleSpeedChange}
-          title="Playback Speed"
-        />
-      </div>
-    </div>
-
-    <!-- Far right: LIVE button -->
-    <button class="live-btn" on:click={handleGoToLive} title="Go to Live (End)">
-      <Zap size={12} />
-      <span>LIVE</span>
+  <!-- Navigation -->
+  <div class="nav-cluster">
+    <button on:click={timeOperations.goToHistoryStart} title="Go to start (Home)">
+      <SkipBack size={16} />
     </button>
+    <button on:click={timeOperations.stepBackward} title="Step back (←)">
+      <ChevronLeft size={16} />
+    </button>
+    <button on:click={togglePlay} class="play-btn" title="Play/Pause (Space)">
+      {#if playing}
+        <Pause size={18} />
+      {:else}
+        <Play size={18} />
+      {/if}
+    </button>
+    <button on:click={timeOperations.stepForward} title="Step forward (→)">
+      <ChevronRight size={16} />
+    </button>
+    <button on:click={timeOperations.goToLive} title="Go to live (End)">
+      <SkipForward size={16} />
+    </button>
+  </div>
+
+  <!-- Status Display -->
+  <div class="status-display">
+    <div class="timestamp">
+      <span class="label">Time</span>
+      <span class="value">{currentTime} / {totalTime}</span>
+    </div>
+    <div class="frames">
+      <span class="label">Runtime</span>
+      <span class="value">{$currentHeight} / {$history.length - 1}</span>
+    </div>
+    <div class="fps">
+      <span class="label">FPS</span>
+      <span class="value">{fps.toFixed(1)}</span>
+    </div>
+  </div>
+
+  <!-- Progress Scrubber -->
+  <div class="scrubber" on:click={handleScrubberClick} role="progressbar">
+    <div class="scrubber-track">
+      {#if sliceStart !== null && sliceEnd !== null}
+        <div
+          class="slice-region"
+          style="left: {(sliceStart / $maxTimeIndex) * 100}%; width: {((sliceEnd - sliceStart) / $maxTimeIndex) * 100}%;"
+        ></div>
+      {/if}
+      <div class="scrubber-progress" style="width: {progressPercent}%"></div>
+      <div class="scrubber-thumb" style="left: {progressPercent}%"></div>
+    </div>
+  </div>
+
+  <!-- Tools -->
+  <div class="tools-cluster">
+    <!-- Loop -->
+    <div class="dropdown">
+      <button
+        class="tool-btn"
+        class:active={loopMode !== 'off'}
+        on:click={() => (showLoopMenu = !showLoopMenu)}
+        title="Loop mode ([)"
+      >
+        <Repeat size={16} />
+        {#if loopMode === 'slice' && sliceStart !== null && sliceEnd !== null}
+          <span class="badge">{sliceStart}-{sliceEnd}</span>
+        {:else if loopMode === 'all'}
+          <span class="badge">All</span>
+        {/if}
+        <ChevronDown size={12} />
+      </button>
+      {#if showLoopMenu}
+        <div class="menu">
+          <button on:click={() => setLoopMode('off')}>Off</button>
+          <button on:click={() => setLoopMode('all')}>Loop All</button>
+          <button on:click={() => setLoopMode('slice')} disabled={sliceStart === null || sliceEnd === null}>
+            Loop Slice
+          </button>
+        </div>
+      {/if}
+    </div>
+
+    <!-- Slice Marker -->
+    <button
+      class="tool-btn"
+      class:active={sliceStart !== null}
+      on:click={markSlicePoint}
+      title="Mark slice ([)"
+    >
+      <Scissors size={16} />
+      {#if sliceStart !== null && sliceEnd === null}
+        <span class="badge">A</span>
+      {:else if sliceStart !== null && sliceEnd !== null}
+        <span class="badge">A-B</span>
+      {/if}
+    </button>
+
+    <!-- Export -->
+    <div class="dropdown">
+      <button class="tool-btn" on:click={() => (showExportMenu = !showExportMenu)} title="Export">
+        <Download size={16} />
+        <ChevronDown size={12} />
+      </button>
+      {#if showExportMenu}
+        <div class="menu">
+          <button on:click={exportFrames}>Export Frames (JSON)</button>
+          <button on:click={() => {showExportMenu = false;}}>Share URL</button>
+          <button on:click={() => {showExportMenu = false;}}>Download GIF</button>
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <!-- Speed -->
+  <div class="speed-cluster dropdown">
+    <button class="speed-btn" on:click={() => (showSpeedMenu = !showSpeedMenu)}>
+      <span class="speed-value">{speed}x</span>
+      <ChevronDown size={12} />
+    </button>
+    {#if showSpeedMenu}
+      <div class="menu">
+        {#each speedOptions as option}
+          <button
+            on:click={() => setSpeed(option.value)}
+            class:selected={speed === option.value}
+          >
+            {option.label}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  <!-- Mode Badge -->
+  <div class="mode-badge" class:live={$isLive}>
+    {$isLive ? 'LIVE' : 'HISTORY'}
   </div>
 </div>
 
 <style>
   .time-machine {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1.5rem;
+    background: rgba(10, 10, 10, 0.6);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.5);
+    box-shadow:
+      0 -1px 0 0 rgba(255, 255, 255, 0.05),
+      0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    height: 60px;
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    /* Apple liquid glass ribbon - ultra thin */
-    background: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.15) 0%,
-      rgba(255, 255, 255, 0.12) 100%
-    );
-    backdrop-filter: blur(60px) saturate(180%);
-    -webkit-backdrop-filter: blur(60px) saturate(180%);
-    padding: 6px 20px;
-    border-top: 1px solid rgba(255, 255, 255, 0.2);
-    z-index: 1000;
-    box-shadow:
-      0 -8px 32px rgba(0, 0, 0, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.15),
-      0 0 0 0.5px rgba(255, 255, 255, 0.1);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 100;
   }
 
-  .time-machine-main {
+  /* Navigation Cluster */
+  .nav-cluster {
     display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    margin: 0 auto;
-  }
-
-  .time-info-compact {
-    display: flex;
-    align-items: center;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
-    font-size: 0.7em;
-    color: rgba(255, 255, 255, 0.75);
-    gap: 8px;
-    min-width: 140px;
-    font-weight: 500;
-    flex-shrink: 0;
-  }
-
-  .time-info-compact.current {
-    color: #00ff88;
-    font-weight: 600;
-    text-shadow: 0 0 20px rgba(0, 255, 136, 0.6);
-  }
-
-  .time-nav-controls {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    flex-shrink: 0;
-  }
-
-  .time-playback-controls {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-
-  /* Icon button base style - ultra minimal */
-  .icon-btn {
-    background: rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(20px);
-    color: rgba(255, 255, 255, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    gap: 4px;
     padding: 4px;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    width: 24px;
-    height: 24px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+  }
+
+  .nav-cluster button,
+  .tool-btn,
+  .speed-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-  }
-
-  .icon-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.2);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: rgba(255, 255, 255, 1);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  }
-
-  .icon-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
-
-  /* Play button - highlighted */
-  .icon-btn.play-btn {
-    background: linear-gradient(135deg, rgba(0, 122, 255, 0.4), rgba(0, 180, 255, 0.3));
-    border-color: rgba(0, 122, 255, 0.5);
-    color: #ffffff;
-    box-shadow:
-      0 2px 10px rgba(0, 122, 255, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  }
-
-  .icon-btn.play-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(0, 122, 255, 0.5), rgba(0, 180, 255, 0.4));
-    border-color: rgba(0, 122, 255, 0.6);
-    transform: translateY(-1px) scale(1.05);
-    box-shadow:
-      0 4px 16px rgba(0, 122, 255, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.25);
-  }
-
-  .icon-btn.play-btn.playing {
-    background: linear-gradient(135deg, rgba(255, 136, 0, 0.4), rgba(204, 102, 0, 0.3));
-    border-color: rgba(255, 136, 0, 0.5);
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-
-  /* Loop button - active state */
-  .icon-btn.loop-btn.active {
-    background: linear-gradient(135deg, rgba(0, 122, 255, 0.4), rgba(0, 180, 255, 0.3));
-    border-color: rgba(0, 122, 255, 0.5);
-    color: #ffffff;
-    box-shadow:
-      0 2px 10px rgba(0, 122, 255, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  }
-
-  /* LIVE button */
-  .live-btn {
-    background: linear-gradient(135deg, rgba(0, 255, 136, 0.35), rgba(0, 200, 255, 0.25));
-    backdrop-filter: blur(20px);
-    color: #ffffff;
-    border: 1px solid rgba(0, 255, 136, 0.5);
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 0.7em;
-    font-weight: 600;
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
     gap: 4px;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    flex-shrink: 0;
-    box-shadow:
-      0 2px 10px rgba(0, 255, 136, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  }
-
-  .live-btn:hover {
-    background: linear-gradient(135deg, rgba(0, 255, 136, 0.45), rgba(0, 200, 255, 0.35));
-    border-color: rgba(0, 255, 136, 0.6);
-    transform: translateY(-1px);
-    box-shadow:
-      0 4px 16px rgba(0, 255, 136, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.25);
-  }
-
-  /* Timeline slider */
-  .time-slider-container {
-    position: relative;
-    flex: 1 1 auto;
-    min-width: 150px;
-    --progress: 0%;
-  }
-
-  .time-slider {
-    width: 100%;
-    height: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+    width: 32px;
+    height: 32px;
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.18);
-    outline: none;
-    -webkit-appearance: none;
-    appearance: none;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 
-  .time-slider:hover {
-    background: rgba(255, 255, 255, 0.22);
+  .nav-cluster button:hover,
+  .tool-btn:hover,
+  .speed-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(0, 122, 255, 0.5);
+    transform: translateY(-1px);
   }
 
-  .time-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 12px;
-    height: 12px;
+  .play-btn {
+    background: rgba(0, 122, 255, 0.2) !important;
+    border-color: rgba(0, 122, 255, 0.4) !important;
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .play-btn:hover {
+    background: rgba(0, 122, 255, 0.3) !important;
+    box-shadow: 0 0 12px rgba(0, 122, 255, 0.4);
+  }
+
+  .tool-btn.active {
+    background: rgba(0, 255, 136, 0.2);
+    border-color: rgba(0, 255, 136, 0.4);
+  }
+
+  /* Status Display */
+  .status-display {
+    display: flex;
+    gap: 1.5rem;
+    font-family: 'SF Mono', 'Monaco', monospace;
+    font-size: 0.8125rem;
+  }
+
+  .status-display > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .label {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 500;
+  }
+
+  .value {
+    color: rgba(255, 255, 255, 0.95);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Progress Scrubber */
+  .scrubber {
+    flex: 1;
+    min-width: 200px;
+    cursor: pointer;
+    padding: 8px 0;
+  }
+
+  .scrubber-track {
+    position: relative;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: visible;
+  }
+
+  .scrubber:hover .scrubber-track {
+    height: 8px;
+  }
+
+  .slice-region {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(0, 255, 136, 0.15);
+    border-left: 2px solid rgba(0, 255, 136, 0.6);
+    border-right: 2px solid rgba(0, 255, 136, 0.6);
+  }
+
+  .scrubber-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: linear-gradient(90deg, rgba(0, 122, 255, 0.8), rgba(0, 122, 255, 0.6));
+    border-radius: 3px;
+    transition: width 0.1s linear;
+  }
+
+  .scrubber-thumb {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 14px;
+    height: 14px;
+    background: white;
+    border: 2px solid rgba(0, 122, 255, 1);
     border-radius: 50%;
-    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.95) 100%);
-    cursor: pointer;
     box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.3),
-      0 0 0 2px rgba(0, 122, 255, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      0 0 0 4px rgba(0, 122, 255, 0.2),
+      0 2px 8px rgba(0, 0, 0, 0.4);
+    transition: transform 0.2s;
+  }
+
+  .scrubber:hover .scrubber-thumb {
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+
+  /* Tools Cluster */
+  .tools-cluster {
+    display: flex;
+    gap: 4px;
+  }
+
+  .badge {
+    font-size: 0.625rem;
+    font-weight: 600;
+    background: rgba(0, 255, 136, 0.3);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  /* Dropdown */
+  .dropdown {
+    position: relative;
+  }
+
+  .menu {
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 8px;
+    background: rgba(20, 20, 20, 0.95);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 120px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+  }
+
+  .menu button {
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    background: transparent;
     border: none;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .time-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.2);
-    box-shadow:
-      0 4px 10px rgba(0, 0, 0, 0.4),
-      0 0 0 3px rgba(0, 122, 255, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  }
-
-  .time-slider::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.95) 100%);
+    color: rgba(255, 255, 255, 0.9);
+    border-radius: 6px;
     cursor: pointer;
-    border: none;
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.3),
-      0 0 0 2px rgba(0, 122, 255, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.5);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 0.875rem;
+    transition: all 0.15s;
   }
 
-  .time-slider:disabled {
-    opacity: 0.3;
+  .menu button:hover:not(:disabled) {
+    background: rgba(0, 122, 255, 0.2);
+  }
+
+  .menu button.selected {
+    background: rgba(0, 122, 255, 0.3);
+    color: white;
+  }
+
+  .menu button:disabled {
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
-  /* Speed control */
-  .speed-control {
+  /* Speed */
+  .speed-cluster {
     display: flex;
-    align-items: center;
+  }
+
+  .speed-btn {
+    width: auto !important;
+    padding: 0 12px !important;
     gap: 6px;
   }
 
-  .speed-label {
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', monospace;
-    font-size: 0.65em;
-    color: rgba(255, 255, 255, 0.75);
-    min-width: 28px;
-    text-align: right;
+  .speed-value {
+    font-family: 'SF Mono', monospace;
     font-weight: 600;
+    font-size: 0.875rem;
+    min-width: 40px;
+    text-align: right;
   }
 
-  .speed-slider {
-    width: 50px;
-    height: 2px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 4px;
-    outline: none;
-    cursor: pointer;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Mode Badge */
+  .mode-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
+    height: 32px;
+    background: rgba(0, 122, 255, 0.15);
+    border: 1px solid rgba(0, 122, 255, 0.3);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: rgba(0, 122, 255, 1);
+    text-shadow: 0 0 8px rgba(0, 122, 255, 0.5);
   }
 
-  .speed-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
-    cursor: pointer;
-    box-shadow:
-      0 1px 4px rgba(0, 0, 0, 0.3),
-      0 0 0 2px rgba(0, 122, 255, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.5);
-    border: none;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .speed-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.15);
-    box-shadow:
-      0 2px 8px rgba(0, 0, 0, 0.4),
-      0 0 0 2px rgba(0, 122, 255, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  }
-
-  .speed-slider::-moz-range-thumb {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.9) 100%);
-    cursor: pointer;
-    border: none;
-    box-shadow:
-      0 1px 4px rgba(0, 0, 0, 0.3),
-      0 0 0 2px rgba(0, 122, 255, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.5);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  .mode-badge.live {
+    background: rgba(0, 255, 136, 0.15);
+    border-color: rgba(0, 255, 136, 0.3);
+    color: rgba(0, 255, 136, 1);
+    text-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+    animation: pulse 2s ease-in-out infinite;
   }
 
   @keyframes pulse {
-    0%, 100% {
-      box-shadow: 0 0 0 0 rgba(255, 136, 0, 0.4);
+    0%,
+    100% {
+      opacity: 1;
     }
     50% {
-      box-shadow: 0 0 0 4px rgba(255, 136, 0, 0);
+      opacity: 0.7;
+    }
+  }
+
+  /* Responsive */
+  @media (max-width: 1024px) {
+    .status-display {
+      gap: 1rem;
+    }
+
+    .fps {
+      display: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .time-machine {
+      flex-wrap: wrap;
+      height: auto;
+      padding: 0.5rem 1rem;
+    }
+
+    .scrubber {
+      order: -1;
+      width: 100%;
+      margin-bottom: 0.5rem;
+    }
+
+    .status-display .timestamp {
+      display: none;
     }
   }
 </style>

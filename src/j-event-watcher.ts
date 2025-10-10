@@ -53,7 +53,14 @@ export class JEventWatcher {
   ];
 
   constructor(config: WatcherConfig) {
-    this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    // Resolve relative URLs to full URLs for ethers.js (browser compat)
+    let resolvedRpcUrl = config.rpcUrl;
+    if (typeof window !== 'undefined' && config.rpcUrl.startsWith('/')) {
+      resolvedRpcUrl = new URL(config.rpcUrl, window.location.origin).href;
+      console.log(`🔧 J-WATCHER: Resolved ${config.rpcUrl} → ${resolvedRpcUrl}`);
+    }
+
+    this.provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
 
     this.entityProviderContract = new ethers.Contract(
       config.entityProviderAddress,

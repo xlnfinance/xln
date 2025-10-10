@@ -100,15 +100,25 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       uiLog(`   Page Origin: ${window.location.origin}`);
       uiLog(`   Page Protocol: ${window.location.protocol}`);
       uiLog(`   Page Host: ${window.location.hostname}:${window.location.port}`);
-      uiLog(`   RPC Origin: ${new URL(rpcUrl).origin}`);
-      const corsIssue = window.location.origin !== new URL(rpcUrl).origin;
-      uiLog(`   CORS issue? ${corsIssue ? 'YES - Different origins!' : 'No'}`, { corsIssue });
+
+      // Handle relative URLs (like /rpc/ethereum) by providing base
+      const fullRpcUrl = new URL(rpcUrl, window.location.origin);
+      uiLog(`   RPC URL: ${fullRpcUrl.href}`);
+      const corsIssue = window.location.origin !== fullRpcUrl.origin;
+      uiLog(`   CORS issue? ${corsIssue ? 'YES - Different origins!' : 'No (using proxy)'}`, { corsIssue });
       uiLog(`   User Agent: ${navigator.userAgent}`);
     }
     uiLog(`   Contracts: EP=${entityProviderAddress.slice(0,10)}, DEP=${depositoryAddress.slice(0,10)}`);
 
+    // Resolve relative URLs to full URLs for ethers.js
+    let resolvedRpcUrl = rpcUrl;
+    if (isBrowser && rpcUrl.startsWith('/')) {
+      resolvedRpcUrl = new URL(rpcUrl, window.location.origin).href;
+      uiLog(`   Resolved RPC: ${resolvedRpcUrl}`);
+    }
+
     // Connect to specified RPC node
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
     uiLog(`✅ Provider created`);
 
     // Use Hardhat account #0 private key (browser-compatible, no getSigner)

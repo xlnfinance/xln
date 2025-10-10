@@ -8,7 +8,8 @@ let XLN: any = null;
 async function getXLN() {
   if (XLN) return XLN;
 
-  const serverUrl = new URL('/server.js', window.location.origin).href;
+  // Add timestamp to bust cache
+  const serverUrl = new URL(`/server.js?v=${Date.now()}`, window.location.origin).href;
   XLN = await import(/* @vite-ignore */ serverUrl);
 
   // Expose globally for console debugging

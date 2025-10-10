@@ -48,4 +48,15 @@ try {
   }
 }
 
+// Copy docs directory for DocsView
+const docsSrc = resolve('../docs');
+const docsDest = resolve('static/docs-static');
+if (existsSync(docsSrc)) {
+  mkdirSync(docsDest, { recursive: true });
+  cpSync(docsSrc, docsDest, { recursive: true });
+  console.log(`✅ Copied docs/ → static/docs-static/`);
+} else {
+  console.log(`⚠️ Source directory not found: ${docsSrc}`);
+}
+
 console.log('📦 Static files copied for build');

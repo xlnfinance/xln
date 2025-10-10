@@ -4,7 +4,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "node copy-static-files.js && vite dev",
 		"build": "node copy-static-files.js && vite build",
 		"build:static": "node copy-static-files.js && vite build && echo 'Built for GitHub Pages deployment'",
 		"preview": "vite preview",

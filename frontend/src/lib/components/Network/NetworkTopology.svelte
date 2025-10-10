@@ -28,6 +28,7 @@
   export let zenMode: boolean = false;
   export let hideButton: boolean = false;
   export let toggleZenMode: () => void;
+  export let embedded: boolean = false;  // Embedded mode for ScenarioPlayer
 
   // OrbitControls import (will be loaded dynamically)
   let OrbitControls: any;
@@ -3984,7 +3985,7 @@
 
 </script>
 
-<div bind:this={container} class="network-topology-container">
+<div bind:this={container} class="network-topology-container" class:embedded>
   <!-- Toggle button - always visible unless hideButton is true (Z key triggered) -->
   {#if !hideButton}
   <button
@@ -4652,6 +4653,23 @@
     height: 100vh;
     z-index: 10;
     background: #0a0a0a;
+  }
+
+  /* Embedded mode - contained, not fixed */
+  .network-topology-container.embedded {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+  }
+
+  /* Hide all fixed overlays in embedded mode */
+  .network-topology-container.embedded .topology-overlay,
+  .network-topology-container.embedded .panel-toggle-btn,
+  .network-topology-container.embedded .tooltip,
+  .network-topology-container.embedded .dual-tooltip-container,
+  .network-topology-container.embedded .route-modal {
+    display: none !important;
   }
 
   /* Resize handle for sidebar */

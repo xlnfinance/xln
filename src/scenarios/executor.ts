@@ -27,10 +27,10 @@ export async function executeScenario(
   scenario: Scenario,
   options: {
     maxTimestamp?: number;
-    tickInterval?: number; // Milliseconds per tick
+    tickInterval?: number; // Milliseconds per tick (0 = instant for embeds)
   } = {}
 ): Promise<ScenarioExecutionResult> {
-  const { maxTimestamp = 1000 } = options;
+  const { maxTimestamp = 1000, tickInterval = 1000 } = options;
 
   // Merge explicit events + repeat blocks
   const allEvents = mergeAndSortEvents(scenario, maxTimestamp);
@@ -42,6 +42,7 @@ export async function executeScenario(
     elapsedTime: 0,
     entityMapping: new Map(), // scenario entity ID -> actual address
     viewStateHistory: new Map(),
+    tickInterval, // Pass tickInterval through context
   };
 
   const errors: any[] = [];
@@ -748,7 +749,7 @@ async function handleLazyGrid(
  */
 async function handlePayRandom(
   params: any[],
-  _context: ScenarioExecutionContext,
+  context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {
   const named = namedParamsToObject(params);
@@ -822,9 +823,9 @@ async function handlePayRandom(
       }]
     }]);
 
-    // Wait 1 second before next payment
-    if (i < count - 1) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    // Wait before next payment (skip if tickInterval=0 for fast embed mode)
+    if (i < count - 1 && context.tickInterval > 0) {
+      await new Promise(resolve => setTimeout(resolve, context.tickInterval));
     }
   }
 

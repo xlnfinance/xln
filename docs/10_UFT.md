@@ -71,6 +71,9 @@ RCPAN (xln) superset invariant:
 [---.===---]
 ```
 
+
+Last, but not least, we claim that the most important inter-human network, the financial layer, should not be dull and boring. **We see the world as a vibrant dance of colorful state machines.** We aim to develop as many visualizations as possible, with all sorts of mediums: 2D/3D/VR/ASCII/etc to deliver the semantic message of credit-collateral layout. Soon, it will feel natural and simple, just as using cash.
+
 Additional whitepapers that further complement UFT are published separately:
 
 * **2.0 Cascade Security Model**: we extend the credit+collateral RCPAN invariant with "on-jurisdiction reserves" and opt-in Deposit Insurance Schemes forming a waterfall-like security cascade for all fungible value any entity in Xln holds: reserve->collateral->credit->insurance->reinsurance. 
