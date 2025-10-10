@@ -1,5 +1,60 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
+  import { onDestroy } from 'svelte';
   import { viewMode, viewModeOperations, type ViewMode } from '../../stores/viewModeStore';
+
+  const viewToRoute: Record<ViewMode, string> = {
+    home: '',
+    settings: 'settings',
+    docs: 'docs',
+    brainvault: 'wallet',
+    graph3d: 'graph-3d',
+    graph2d: 'graph-2d',
+    panels: 'panels',
+    terminal: 'terminal'
+  };
+
+  const routeToView: Record<string, ViewMode> = {
+    '': 'home',
+    home: 'home',
+    settings: 'settings',
+    docs: 'docs',
+    wallet: 'brainvault',
+    brainvault: 'brainvault',
+    'graph-3d': 'graph3d',
+    'graph3d': 'graph3d',
+    'graph-2d': 'graph2d',
+    'graph2d': 'graph2d',
+    panels: 'panels',
+    terminal: 'terminal'
+  };
+
+  let currentView: ViewMode = 'home';
+  let currentPath = '/';
+  let syncingFromRoute = false;
+
+  const unsubscribeView = viewMode.subscribe((value) => {
+    currentView = value;
+  });
+
+  const unsubscribePage = page.subscribe(($page) => {
+    currentPath = $page.url.pathname;
+    const segment = currentPath.replace(/^\/|\/$/g, '').split('/')[0]?.toLowerCase() ?? '';
+    const nextView = routeToView[segment] ?? 'home';
+
+    if (nextView !== currentView) {
+      syncingFromRoute = true;
+      viewModeOperations.set(nextView);
+      currentView = nextView;
+      syncingFromRoute = false;
+    }
+  });
+
+  onDestroy(() => {
+    unsubscribeView();
+    unsubscribePage();
+  });
 
   const viewTabs: Array<{ mode: ViewMode; icon: string; label: string; title: string }> = [
     { mode: 'home', icon: '🏠', label: 'Home', title: 'XLN Overview' },
@@ -14,9 +69,26 @@
 
   $: activeView = $viewMode;
 
+  function getPathForView(mode: ViewMode): string {
+    const segment = viewToRoute[mode] ?? '';
+    return segment ? `/${segment}` : '/';
+  }
+
   function handleChangeView(mode: ViewMode) {
-    if (activeView !== mode) {
-      viewModeOperations.set(mode);
+    if (activeView === mode) {
+      return;
+    }
+
+    viewModeOperations.set(mode);
+    currentView = mode;
+
+    if (syncingFromRoute) {
+      return;
+    }
+
+    const targetPath = getPathForView(mode);
+    if (currentPath !== targetPath) {
+      goto(targetPath, { noScroll: true });
     }
   }
 </script>
