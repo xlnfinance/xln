@@ -7,7 +7,6 @@
     { mode: 'docs', icon: '📚', label: 'Docs', title: 'Documentation' },
     { mode: 'brainvault', icon: '🧠', label: 'Wallet', title: 'BrainVault Wallet Generator' },
     { mode: 'graph3d', icon: '🗺️', label: 'Graph 3D', title: '3D Network Topology' },
-    { mode: 'graph2d', icon: '🛰️', label: 'Graph 2D', title: '2D Network Topology' },
     { mode: 'panels', icon: '📊', label: 'Panels', title: 'Entity Panels' },
     { mode: 'terminal', icon: '💻', label: 'Terminal', title: 'Console View' }
   ];

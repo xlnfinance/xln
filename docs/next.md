@@ -1,6 +1,6 @@
-# Next Steps & Strategic Context
+# Next Steps & Strategic Focus
 
-**Last Updated:** 2025-10-09
+**Last Updated:** 2025-10-10
 
 ---
 
@@ -42,268 +42,374 @@
 
 ---
 
-## 🔴 Critical TODOs (Block Production)
+## 🔥 PRIMARY FOCUS: Graph 3D/VR + Embeds
 
-### **1. cooperativeClose - Account Lifecycle**
+### **Strategic Decision (2025-10-10)**
 
-**Status:** Missing (2019 had it, current doesn't)
-**Impact:** Can't deploy without graceful account closure
+**Focus ALL energy on:**
+1. **Graph 3D visualization** - The "holy shit" moment
+2. **VR experience** - Unique differentiator
+3. **Embeddable scenarios** - Viral distribution
 
-**Implementation:**
-1. Add AccountTx types: `request_close`, `approve_close`
-2. Create `src/account-tx/handlers/close-account.ts`
-3. Bilateral flow:
-   - Requester → Counterparty: request_close
-   - Counterparty signs approval
-   - Both call cooperativeUpdate with forgiveDebtsInTokenIds
-   - Mark account.status = 'CLOSED'
-4. UI: Close button in AccountPanel.svelte
+**Postpone:**
+- ❌ Graph 2D (removed from codebase)
+- ⏸️ Terminal view (developer tool, not growth lever)
+- ⏸️ Panels view (useful but not hook)
 
-**Contract support:** Already exists (cooperativeUpdate with forgiveDebts)
-**Reference:** `reference/2019src.txt` lines 263-285
-**Estimate:** 4-6 hours
+**Why Graph 3D?**
+- First 30 seconds matter - text doesn't convince
+- "Credit where it scales, collateral where it secures" is abstract
+- **Watching** value flow through 3D grid makes it visceral
+- Embeds = distribution engine (blog posts, docs, Twitter)
+- VR = unique positioning
 
 ---
 
-### **2. Transaction Failure Tracking**
+## ✅ Completed (2025-10-10 Session)
+
+### Documentation System
+- ✅ Consolidated /docs (55→46 files, organized directories)
+- ✅ Integrated DocsView into main app
+- ✅ Markdown rendering with sidebar navigation
+- ✅ Auto-copy docs on dev startup
+- ✅ Search functionality
+
+### Infrastructure
+- ✅ HTTPS dev server (localhost:8080, valid certs until 2028)
+- ✅ RPC proxy (/rpc/ethereum → HTTP Hardhat)
+- ✅ Fixed mixed content issues (HTTPS ↔ HTTP)
+- ✅ J-watcher connected via proxy
+
+### Embeddable Scenarios
+- ✅ IsolatedScenarioPlayer component (fully isolated state)
+- ✅ YouTube-style playback controls
+- ✅ Fast execution mode (tickInterval: 0)
+- ✅ Multiple instances supported
+- ✅ /embed route for external iframes
+- ✅ Embedded in Docs intro page
+
+### Time Machine Redesign
+- ✅ Ultra-compact single-row layout
+- ✅ Separate Time (m:ss.ms) / Runtime (frames) / FPS
+- ✅ Loop modes (off/all/slice)
+- ✅ Slice markers with visual indicators
+- ✅ Speed dropdown (0.1x-10x)
+- ✅ Export menu (JSON/URL/GIF)
+- ✅ Keyboard shortcuts
+- ✅ Apple liquid glass aesthetic
+
+### Codebase Cleanup
+- ✅ Removed Graph 2D from viewMode
+- ✅ Renamed "Server" → "Runtime" in time machine
+- ✅ Fixed time machine positioning (bottom of viewport)
+
+---
+
+## 🔴 Critical TODOs - Graph 3D Polish
+
+### **1. Fix Grid Positioning**
+
+**Status:** IsolatedScenarioPlayer shows circle, not cube
+**Impact:** Main demo broken
+
+**Issue:**
+```typescript
+// Current: Radial layout (wrong)
+const angle = (i / entities.size) * Math.PI * 2;
+position = (cos(angle) * radius, 0, sin(angle) * radius);
+
+// Needed: Use gridPosition from profile
+position = profile.gridPosition || fallback;
+```
+
+**Implementation:**
+1. Verify `grid 2 2 2` command populates `profile.gridPosition`
+2. Update IsolatedScenarioPlayer renderFrame() to use gridPosition
+3. Add fallback: if no gridPosition, use radial
+
+**Estimate:** 1 hour
+**Priority:** CRITICAL (main embed broken)
+
+---
+
+### **2. Build 10 Killer Scenarios**
+
+**Status:** Only 3 scenarios exist (h-network, diamond-dybvig, phantom-grid)
+**Impact:** Limited embed content
+
+**Needed scenarios:**
+1. ✅ Diamond-Dybvig (bank run)
+2. ✅ Phantom Grid (cube demo)
+3. ❌ Lightning Inbound Liquidity Failure
+4. ❌ XLN Credit Extension Solution
+5. ❌ Multi-Hop Routing
+6. ❌ Hub Liquidity Crisis
+7. ❌ Bilateral Settlement
+8. ❌ Credit-Collateral Rebalancing
+9. ❌ Collateral Backstop Demo
+10. ❌ Multi-Jurisdiction Flow
+
+**Each scenario:**
+- ~30 lines DSL
+- Clear narrative (title + description per frame)
+- 10-30 frames
+- Embeddable in docs
+
+**Estimate:** 8 hours (all 10)
+**Priority:** HIGH (needed for docs, blog posts, demos)
+
+---
+
+### **3. Entity Labels & Balance Display**
+
+**Status:** Entities show as unlabeled spheres
+**Impact:** Can't tell what's happening
+
+**Implementation:**
+```typescript
+// Add to IsolatedScenarioPlayer renderFrame()
+const label = createTextSprite(
+  `${profile.name}\n${formatBalance(profile.balance)}`
+);
+label.position.set(mesh.position.x, mesh.position.y + 8, mesh.position.z);
+scene.add(label);
+```
+
+**Show on labels:**
+- Entity number/name
+- Current balance (if >0)
+- Hub indicator (⭐ emoji)
+
+**Estimate:** 2 hours
+**Priority:** HIGH (readability)
+
+---
+
+### **4. Account Connection Bars**
+
+**Status:** No visual connection between entities
+**Impact:** Can't see relationships/flows
+
+**Implementation:**
+- Use AccountManager from network3d/ (already extracted)
+- Show bars with capacity visualization
+- Color-code by delta (green=positive, red=negative)
+- Animate on payment events
+
+**Estimate:** 3 hours
+**Priority:** MEDIUM (polish)
+
+---
+
+### **5. Camera Presets Per Scenario**
+
+**Status:** Fixed camera angle, not optimized per scenario
+**Impact:** Some scenarios show poorly
+
+**Implementation:**
+```typescript
+// In scenario DSL:
+0: Setup
+grid 2 2 2
+VIEW camera=isometric zoom=1.5
+
+1: Payment
+alice pay bob 100
+VIEW camera=follow entity=alice
+```
+
+**Camera modes:**
+- `orbital` - Default orbit around center
+- `isometric` - 45° angle (best for cubes)
+- `follow` - Track specific entity
+- `overview` - Zoom out for full network
+
+**Estimate:** 2 hours
+**Priority:** MEDIUM (UX polish)
+
+---
+
+### **6. Narrative Subtitles**
+
+**Status:** Exists but not used in embeds
+**Impact:** Missing storytelling
+
+**Implementation:**
+- Enable NarrativeSubtitle in IsolatedScenarioPlayer
+- Each scenario frame has `narrative` field
+- Show as caption below 3D view
+
+**Estimate:** 1 hour
+**Priority:** MEDIUM (storytelling)
+
+---
+
+## 🚀 Next Feature: Multi-View Embeddable Player
+
+### **Concept**
+
+Instead of 3D-only, embed FULL xlnomy with view switching:
+
+```
+┌─────────────────────────────────────┐
+│ 3D │ Panels │ Terminal │            │
+├─────────────────────────────────────┤
+│  [Current view synchronized to      │
+│   same timeline]                    │
+├─────────────────────────────────────┤
+│ ⏮ ◀ ▶ ⏭ │ Time Machine │ 1.0x │ LIVE│
+└─────────────────────────────────────┘
+```
+
+**Why:**
+- **3D**: See topology
+- **Panels**: See user's perspective (wallet balance)
+- **Terminal**: See commands that generated this state
+- **Same timeline**: All views sync to same frame
+
+**Use case:**
+Tutorial scenario with narrative:
+- Frame 0 [3D]: "Alice and Hub connect"
+- Frame 1 [Panel]: "Alice's wallet shows 100 USDC"
+- Frame 2 [Terminal]: `alice pay hub 30`
+- Frame 3 [Panel]: "Alice now has 70 USDC"
+
+**Implementation:**
+1. Extract Panel + Terminal views into embeddable components
+2. Add tab switcher to IsolatedScenarioPlayer
+3. All views share same `localEnv` and `localHistory`
+4. Time machine controls all views
+
+**Estimate:** 6 hours
+**Priority:** HIGH (killer feature for interactive docs)
+
+---
+
+## 🟡 Important TODOs (Post-Graph-3D)
+
+### **Backend: cooperativeClose**
+
+**Status:** Still missing (was critical, now lower priority)
+**Impact:** Can't close accounts gracefully
+
+**Why lower priority now:**
+- Graph 3D polish more important for adoption
+- Can launch "Visual Demo" without full functionality
+- Add cooperativeClose before production deployment
+
+**Estimate:** 4-6 hours
+**Priority:** Important, not urgent
+
+---
+
+### **Backend: Transaction Failure Tracking**
 
 **Status:** Failed txs disappear silently
-**Impact:** Poor UX, hard to debug
+**Impact:** Poor UX
 
-**Implementation:**
-```typescript
-// Add to EntityState
-failedTxs: Array<{
-  tx: EntityTx;
-  error: string;
-  timestamp: number;
-  retryCount: number;
-}>;
-
-// In entity-tx/apply.ts
-catch (error) {
-  addFailedTx(state, tx, error.message);
-}
-
-// Helper with 10-tx cap (like messages)
-export function addFailedTx(state: EntityState, tx: EntityTx, error: string) {
-  state.failedTxs.push({ tx, error, timestamp: Date.now(), retryCount: 0 });
-  if (state.failedTxs.length > 10) state.failedTxs.shift();
-}
-```
-
-**UI:** ErrorDisplay component already exists, just wire it
-**Reference:** `reference/2019src.txt` line 337 (receivedAndFailed)
 **Estimate:** 2 hours
+**Priority:** Medium
 
 ---
 
-## 🟡 Important TODOs (Post-Launch)
+### **Backend: Client-Side Dispute System**
 
-### **3. Client-Side Dispute System**
+**Status:** Contract has it, client doesn't
+**Impact:** Can't challenge fraud
 
-**Status:** Contract has full dispute logic, client doesn't use it
-**Impact:** Can't challenge fraud without this
-
-**Implementation:**
-1. EntityTx type: `start_dispute`
-2. Handler: `src/entity-tx/handlers/dispute.ts`
-3. Construct dispute proof from AccountMachine state
-4. Call Depository dispute functions
-5. UI: Dispute panel in AccountPanel
-6. Track dispute timeline (challenge window, evidence submission)
-
-**Contract:** Depository.sol lines 685-755 (cooperativeDisputeProof, etc.)
-**Reference:** `reference/2019src.txt` line 165 (startDispute)
 **Estimate:** 6-8 hours
-**Priority:** Needed before mainnet, can wait for testnet
+**Priority:** Needed before mainnet
 
 ---
 
-### **4. Withdrawal Pre-Approvals** (UX Improvement)
+## 📋 Graph 3D Roadmap
 
-**Status:** Only request_withdrawal flow exists
-**Need:** Pre-sign withdrawal permissions (like 2019)
+### Phase 1: Core Polish (Week 1)
+1. ✅ Embeddable architecture (IsolatedScenarioPlayer)
+2. ✅ Fast execution (tickInterval: 0)
+3. ❌ Fix grid positioning
+4. ❌ Entity labels
+5. ❌ OrbitControls integration
 
-**Implementation:**
-```typescript
-// AccountTx type
-type: 'pre_approve_withdrawal'
-data: {
-  tokenId: number;
-  maxAmount: bigint;
-  expiresAt: number;
-}
+### Phase 2: Visual Quality (Week 2)
+6. ❌ Account connection bars
+7. ❌ Balance animations
+8. ❌ Camera presets
+9. ❌ Narrative subtitles
+10. ❌ Smooth transitions
 
-// Store in AccountMachine
-preApprovals: Map<number, {
-  maxAmount: bigint;
-  expiresAt: number;
-  signature: string;
-}>
+### Phase 3: Content Creation (Week 3)
+11. ❌ Build 10 killer scenarios
+12. ❌ Embed in all comparison docs
+13. ❌ Blog post: "Why Lightning Failed (Interactive)"
+14. ❌ Twitter demos
 
-// Auto-execute when conditions met
-```
-
-**Reference:** `reference/2019src.txt` line 753 (getWithdrawalSig)
-**Estimate:** 4 hours
-**Priority:** Low (nice-to-have UX)
-
----
-
-## 🔵 Optional TODOs (Future)
-
-### **5. Encrypted Messaging** (Privacy)
-
-**Status:** All messages plaintext
-**Need:** E2E encryption for sensitive data
-
-**Implementation:**
-- Install: `bun add tweetnacl tweetnacl-util`
-- Add to AccountMachine: `{ encryptionPubkey, sharedSecret }`
-- Encrypt chat.data before sending
-- Key exchange during account opening
-
-**Reference:** `reference/2019src.txt` line 1999 (encryptJSONBox)
-**Estimate:** 4 hours
-**Priority:** Low (privacy feature, not critical for MVP)
-
----
-
-### **6. Orderbook System** (DEX Features)
-
-**Status:** Not implemented (2019 had it)
-**Need:** Only if XLN becomes DEX platform
-
-**Implementation:**
-- EntityTx types: `create_order`, `cancel_order`
-- OrderbookState in EntityState
-- Matching engine
-- Orderbook UI component
-
-**Reference:** `reference/2019src.txt` lines 159, 739 (createOrder, Orderbook array)
-**Estimate:** 8+ hours
-**Priority:** Very Low (out of current scope?)
+### Phase 4: Multi-View Player (Week 4)
+15. ❌ 3D + Panels + Terminal in one embed
+16. ❌ View switching with shared timeline
+17. ❌ Tutorial scenarios with multi-view narratives
 
 ---
 
 ## 🛠️ Development Tooling
 
-### **Foundry Migration** (Optional High-ROI)
+### Dev Workflow
+- ✅ HTTPS localhost:8080
+- ✅ RPC proxy working
+- ✅ Auto-rebuild with dev-full.sh
+- ✅ Time machine with keyboard shortcuts
 
-**When:** After cooperativeClose (not urgent)
-**Why:** Better debugging, 100x faster tests
-**Effort:** 2-3 hours
-
-**Steps:**
-1. Install: `curl -L https://foundry.paradigm.xyz | bash && foundryup`
-2. Init: `cd contracts && forge init --force`
-3. Update start-networks.sh: `anvil --port 8545`
-4. Convert tests: Hardhat JS → Foundry Solidity tests
-5. Deploy: `forge script` instead of Hardhat Ignition
-
-**Quick win without full migration:**
-```bash
-cd contracts && bun add -d hardhat-tracer
-# Shows internal calls/storage changes
-```
+### Future Improvements
+- ❌ Foundry migration (100x faster tests)
+- ❌ Hardhat tracer (better debugging)
 
 ---
 
-## 📋 Feature Parity Status
+## 🎯 Success Criteria
 
-**Current vs 2019 Reference:** ~85% complete
+### Visual Demo Ready (Next 2-3 weeks)
+- ✅ Docs consolidated and accessible
+- ✅ HTTPS + RPC proxy working
+- ✅ Embeddable scenarios functional
+- ❌ Grid positioning fixed
+- ❌ 10 polished scenarios
+- ❌ All comparison docs have embeds
+- ❌ Multi-view player working
 
-**What's Better in Current:**
-- EVM integration (multi-chain)
-- Gossip layer (P2P networking)
-- Scenario system (automated testing)
-- Type safety (runtime validation)
-- Time machine (historical debugging)
-- Multi-hop routing (pathfinding)
+### Beta Deployment (After Graph 3D)
+- All above +
+- cooperativeClose implemented
+- Transaction failures tracked
+- Basic dispute UI
 
-**What's Missing:**
-- cooperativeClose (critical)
-- Dispute UI (important)
-- Encrypted messages (nice-to-have)
-- Orderbook (questionable fit)
-
----
-
-## 🚀 Deployment Decision
-
-### **Current Status:**
-
-**Code quality:** ✅ Production-ready (type-safe, tested, clean)
-**Feature completeness:** ⚠️ 85% (missing cooperativeClose)
-**Documentation:** ⚠️ Technical only (no user-facing explainer)
-
-### **Options:**
-
-**A) Deploy Now (Technical Preview)**
-- Label as "Developer Preview"
-- Document missing features
-- Get early feedback
-- Risk: Incomplete perception
-
-**B) Complete cooperativeClose First (Recommended)**
-- 4-6 hours to implement
-- Then deploy as "Beta"
-- Feature parity with 2019 for core flows
-- More confident deployment
-
-**C) Full Feature Parity (2-3 weeks)**
-- cooperativeClose + disputes + failure tracking
-- Remove "preview" label entirely
-- Production-ready for institutions
-
-**Recommendation:** **Option B** - cooperativeClose then deploy.
+### Mainnet Ready (Later)
+- All above +
+- Full dispute system
+- Security audit
+- Multi-jurisdiction tested
 
 ---
 
-## 🧠 Context from Development Journey
+## 🧠 Development Philosophy
 
-**Background:**
-- Idea published 2017 (Medium)
-- 8 years of iteration
-- 5 teams hired ($100k+), no results
-- Building solo despite hating npm/TypeScript
-- Only person doing credit-collateral channels globally
-- No competition (still, 8 years later)
+**Current mode:** Not building for timeline - building for quality.
 
-**Why it matters:**
-- Not building for market pressure (there is none)
-- Not building for funding round
-- Building because correct solution needs to exist
-- Standards matter (8 years = high standards)
+**8 years since idea publication.** No rush. Get Graph 3D **perfect** first.
 
-**Implication:** Ship when it feels right, not when timeline says so.
+**Why Graph 3D matters:**
+- Can't explain "organizational layer" with text
+- Can't show "credit+collateral hybrid" in static images
+- Need people to **experience** value flowing through network
+- Embeds = distribution without asking permission
 
----
+**When Graph 3D is polished:**
+- Every blog post has live demo
+- Every comparison doc shows actual topology
+- Every tweet can link to interactive example
+- Docs become living tutorials
 
-## 🎯 Success Criteria (When to Deploy)
-
-**Minimum viable (Technical Preview):**
-- ✅ Account opening works
-- ✅ Payments work (direct + multi-hop)
-- ✅ Reserve ↔ Collateral works
-- ❌ Account closing works (MISSING)
-- ⚠️ Disputes work (contract yes, client no)
-
-**Production ready (Beta):**
-- ✅ All above
-- ✅ cooperativeClose implemented
-- ✅ Transaction failures tracked
-- ⚠️ Dispute UI (can launch without, add later)
-
-**Mainnet ready:**
-- ✅ All above
-- ✅ Dispute system complete
-- ✅ Security audit
-- ✅ Multi-jurisdiction tested
-
-**Current target:** Beta deployment after cooperativeClose.
+Then add backend features (cooperativeClose, disputes).
 
 ---
 
-**Next session: Implement cooperativeClose, then deploy decision.**
+**Next session: Fix grid positioning + add entity labels → make first embed truly beautiful.**

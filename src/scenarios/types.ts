@@ -123,6 +123,7 @@ export interface ScenarioExecutionContext {
   elapsedTime: number; // Seconds
   entityMapping: Map<string, string>; // scenario ID -> actual entity address
   viewStateHistory: Map<number, ViewState>; // frame index -> view state
+  tickInterval: number; // Milliseconds delay between events (0 = instant for embeds)
 }
 
 /**

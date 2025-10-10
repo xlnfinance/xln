@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { marked } from 'marked';
+  import IsolatedScenarioPlayer from '$lib/components/Embed/IsolatedScenarioPlayer.svelte';
 
   let currentDoc = 'README';
   let docContent = '';
@@ -148,6 +149,23 @@
 
   <!-- Main content -->
   <main class="docs-content">
+    <!-- Show scenario player on intro page -->
+    {#if currentDoc === 'README'}
+      <div class="intro-scenario">
+        <h1>🧠 XLN Architecture</h1>
+        <p style="font-size: 1.125rem; margin-bottom: 2rem; color: var(--text-secondary);">
+          Experience the first xlnomy — a 2×2×2 grid cube where value flows through 3D space.
+        </p>
+        <IsolatedScenarioPlayer
+          scenario="phantom-grid"
+          height="500px"
+          autoplay={true}
+          loop={true}
+          slice="0:3"
+        />
+      </div>
+    {/if}
+
     <article class="markdown-body">
       {@html renderedHtml}
     </article>
@@ -248,6 +266,20 @@
     overflow-y: auto;
     padding: 3rem;
     background: var(--bg);
+  }
+
+  .intro-scenario {
+    margin-bottom: 3rem;
+  }
+
+  .intro-scenario h1 {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+    color: var(--text);
+  }
+
+  .intro-scenario p {
+    margin-bottom: 2rem;
   }
 
   .markdown-body {

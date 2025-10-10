@@ -22,3 +22,6 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 *.pem
+
+# Generated docs (copied from /docs)
+static/docs-static/

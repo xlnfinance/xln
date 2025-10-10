@@ -241,7 +241,7 @@
     {:else if $viewMode === 'brainvault'}
       <!-- BrainVault View: Wallet Generator -->
       <BrainVaultView />
-    {:else if $viewMode === 'graph3d' || $viewMode === 'graph2d'}
+    {:else if $viewMode === 'graph3d'}
       <!-- Graph View Mode: Show Network Topology -->
       <NetworkTopology {zenMode} {hideButton} {toggleZenMode} />
     {:else if $viewMode === 'terminal'}
@@ -329,13 +329,13 @@
       </div>
     {/if}
 
-    <!-- Time Machine (hidden in zen mode, home view, docs, terminal, and brainvault view) -->
-    {#if !zenMode && $viewMode !== 'home' && $viewMode !== 'docs' && $viewMode !== 'terminal' && $viewMode !== 'brainvault'}
-      <TimeMachine />
-    {/if}
-
     <!-- Error Popup -->
     <ErrorPopup />
+  {/if}
+
+  <!-- Time Machine (fixed at viewport bottom) -->
+  {#if !zenMode && $viewMode !== 'home' && $viewMode !== 'docs' && $viewMode !== 'terminal' && $viewMode !== 'brainvault'}
+    <TimeMachine />
   {/if}
 </main>
 
