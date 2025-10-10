@@ -731,6 +731,9 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       const isOculusBrowser = isBrowser && /OculusBrowser|Quest/i.test(navigator.userAgent);
 
       const rpcOverride = isBrowser ? localStorage.getItem('xln_rpc_override') : null;
+      const remoteRpcHosts: Record<string, string> = {
+        'xln.noxon.su': 'https://xln.finance:18545'
+      };
 
       uiLog(`🔍 RPC-TRANSFORM-START: key=${key}, rpc=${rpcUrl}`, {
         isOculusBrowser,
@@ -769,15 +772,26 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         // Default behavior: production uses port + 10000 (nginx proxy)
         const port = parseInt(rpcUrl.slice(1));
         const isLocalhost = window.location.hostname.match(/localhost|127\.0\.0\.1/);
-        const actualPort = isLocalhost ? port : port + 10000;
-        rpcUrl = `${window.location.protocol}//${window.location.hostname}:${actualPort}`;
-        uiLog(`🔧 RPC-TRANSFORM-DEFAULT: ${jData['rpc']} → ${rpcUrl}`, {
-          hostname: window.location.hostname,
-          isLocalhost: !!isLocalhost,
-          port,
-          actualPort,
-          portOffset: isLocalhost ? 0 : 10000
-        });
+        const mappedRemote = remoteRpcHosts[window.location.hostname.toLowerCase()] ?? null;
+
+        if (!isLocalhost && mappedRemote) {
+          rpcUrl = mappedRemote;
+          uiLog(`🔧 RPC-TRANSFORM-HOST-MAP: ${jData['rpc']} → ${rpcUrl}`, {
+            hostname: window.location.hostname,
+            mappedRemote,
+            port
+          });
+        } else {
+          const actualPort = isLocalhost ? port : port + 10000;
+          rpcUrl = `${window.location.protocol}//${window.location.hostname}:${actualPort}`;
+          uiLog(`🔧 RPC-TRANSFORM-DEFAULT: ${jData['rpc']} → ${rpcUrl}`, {
+            hostname: window.location.hostname,
+            isLocalhost: !!isLocalhost,
+            port,
+            actualPort,
+            portOffset: isLocalhost ? 0 : 10000
+          });
+        }
       } else if (!isBrowser && rpcUrl.startsWith(':')) {
         // Node.js: Default to localhost
         rpcUrl = `http://localhost${rpcUrl}`;

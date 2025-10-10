@@ -97,6 +97,7 @@ bun run tutorial         # Interactive demo
 
 # Production
 bun run build            # Build static bundle
+pm2 start ecosystem.config.cjs  # Launch local hardhat + bun server (port 3333)
 ```
 
 ---

@@ -36,7 +36,7 @@ export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
 		host: '0.0.0.0',
-		port: 8080,
+		port: 3333,
 		// HTTPS for dev server only (nginx handles production HTTPS)
 		...(hasCerts && {
 			https: {
@@ -45,7 +45,7 @@ export default defineConfig({
 			}
 		}),
 		// Allow ngrok and other tunnel hosts (for Oculus/mobile access)
-		allowedHosts: ['all'],
+		allowedHosts: 'all',
 		fs: {
 			// Allow serving files from the parent directory (to access ../dist/)
 			allow: ['..']
