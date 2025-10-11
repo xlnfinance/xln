@@ -38,9 +38,9 @@ check_dependencies() {
         (cd frontend && bun install)
     fi
     
-    if [ ! -d "contracts/node_modules" ]; then
+    if [ ! -d "jurisdictions/node_modules" ]; then
         echo "📦 Installing contract dependencies..."
-        (cd jurisdiction && bun install)
+        (cd jurisdictions && bun install)
     fi
     
     echo "✅ All dependencies installed"
