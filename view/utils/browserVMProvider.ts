@@ -1,6 +1,9 @@
 /**
  * BrowserVMProvider - In-browser EVM using @ethereumjs/vm
  * Self-contained environment with DepositoryV1.sol
+ *
+ * @license AGPL-3.0
+ * Copyright (C) 2025 XLN Finance
  */
 
 import { createVM, runTx } from '@ethereumjs/vm';
