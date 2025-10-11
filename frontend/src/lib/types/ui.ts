@@ -5,7 +5,7 @@
  * For shared types (EntityState, AccountMachine, etc.), import from $types
  */
 
-import type { EnvSnapshot, EntityInput, ServerTx } from '$types';
+import type { EnvSnapshot, EntityInput, RuntimeTx } from '$types';
 
 // Re-export commonly used backend types for convenience
 export type {
@@ -14,8 +14,8 @@ export type {
   EntityState,
   EntityTx,
   EntityInput,
-  ServerInput,
-  ServerTx,
+  RuntimeInput,
+  RuntimeTx,
   Delta,
   DerivedDelta,
   AccountFrame,
@@ -115,8 +115,8 @@ export interface ServerFrame {
   snapshot: EnvSnapshot;
   inputs: EntityInput[];
   outputs: EntityInput[]; // Backend uses EntityInput for both directions
-  imports: ServerTx[];
-  serverTxs: ServerTx[];
+  imports: RuntimeTx[];
+  runtimeTxs: RuntimeTx[];
   timestamp: number;
   hasActivity: boolean;
 }

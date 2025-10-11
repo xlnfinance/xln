@@ -31,7 +31,7 @@ export const jurisdictionsLoaded = writable(false);
 let loadPromise: Promise<JurisdictionsData> | null = null;
 let cachedData: JurisdictionsData | null = null;
 
-// Load jurisdictions ONCE from server.ts (single source)
+// Load jurisdictions ONCE from runtime.ts (single source)
 export async function loadJurisdictions(): Promise<JurisdictionsData> {
   // Return cached data if already loaded
   if (cachedData) {
@@ -49,7 +49,7 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
     try {
       console.log('🔍 JURISDICTIONS: Loading ONCE from server (single source)');
 
-      // Use server.js getAvailableJurisdictions instead of multiple fetches
+      // Use runtime.js getAvailableJurisdictions instead of multiple fetches
       const { getXLN } = await import('../stores/xlnStore');
       const xln = await getXLN();
       const jurisdictionsList = await xln.getAvailableJurisdictions();

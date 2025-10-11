@@ -56,7 +56,44 @@ export default defineConfig({
 		},
 		hmr: {
 			overlay: false,
-			...(hasCerts && { protocol: 'wss' }) // Use WSS for HMR when HTTPS is enabled
+			...(hasCerts && {
+				protocol: 'wss',
+				host: 'localhost',
+				port: 8080,
+				clientPort: 8080
+			})
+		},
+		// RPC Proxy - HTTPS → HTTP for Anvil connections
+		// Eliminates SSL errors when browser (HTTPS) connects to local blockchains (HTTP)
+		proxy: {
+			'/rpc/arrakis': {
+				target: 'http://localhost:8545',
+				changeOrigin: true,
+				rewrite: (path) => path.replace(/^\/rpc\/arrakis/, ''),
+				ws: true,
+				configure: (proxy, _options) => {
+					proxy.on('error', (err, _req, _res) => {
+						console.log('🔴 RPC Proxy Error (Arrakis):', err.message);
+					});
+					proxy.on('proxyReq', (_proxyReq, req, _res) => {
+						console.log('📡 RPC → Arrakis:', req.method, req.url);
+					});
+				}
+			},
+			'/rpc/wakanda': {
+				target: 'http://localhost:8546',
+				changeOrigin: true,
+				rewrite: (path) => path.replace(/^\/rpc\/wakanda/, ''),
+				ws: true,
+				configure: (proxy, _options) => {
+					proxy.on('error', (err, _req, _res) => {
+						console.log('🔴 RPC Proxy Error (Wakanda):', err.message);
+					});
+					proxy.on('proxyReq', (_proxyReq, req, _res) => {
+						console.log('📡 RPC → Wakanda:', req.method, req.url);
+					});
+				}
+			}
 		},
 		// Force no-cache headers for static files
 		headers: {

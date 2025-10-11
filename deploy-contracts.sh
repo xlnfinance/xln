@@ -55,7 +55,7 @@ deploy_to_network() {
         return 1
     fi
 
-    cd contracts
+    cd jurisdiction
 
     # Ensure logs directory exists
     mkdir -p ../logs
@@ -110,7 +110,7 @@ deploy_to_network() {
     
     # Verify critical functions are in compiled ABI
     echo "   🔍 Verifying critical functions in compiled ABI..."
-    if grep -q "debugBulkFundEntities" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+    if grep -q "debugBulkFundEntities" artifacts/jurisdictions/Depository.sol/Depository.json 2>/dev/null; then
         echo "   ✅ debugBulkFundEntities function found in compiled ABI"
     else
         echo "   ❌ debugBulkFundEntities function missing from compiled ABI"
@@ -118,7 +118,7 @@ deploy_to_network() {
         return 1
     fi
 
-    if grep -q "processBatch" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+    if grep -q "processBatch" artifacts/jurisdictions/Depository.sol/Depository.json 2>/dev/null; then
         echo "   ✅ processBatch function found in compiled ABI"
     else
         echo "   ❌ processBatch function missing from compiled ABI"
@@ -127,7 +127,7 @@ deploy_to_network() {
         return 1
     fi
 
-    if grep -q "settle" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+    if grep -q "settle" artifacts/jurisdictions/Depository.sol/Depository.json 2>/dev/null; then
         echo "   ✅ settle function found in compiled ABI"
     else
         echo "   ❌ settle function missing from compiled ABI"
@@ -251,20 +251,20 @@ deploy_to_network() {
     fi
     echo "   ✅ CRITICAL: R2R smoke test PASSED - Contracts fully functional"
 
-    # Build and update frontend bundle with latest server.js
-    echo "   🔧 Updating frontend bundle with latest server code..."
+    # Build and update frontend bundle with latest runtime.js
+    echo "   🔧 Updating frontend bundle with latest runtime code..."
     cd ..
-    if bun build src/server.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util; then
-        echo "   ✅ Server built successfully"
-        if cp dist/server.js frontend/static/server.js; then
-            echo "   ✅ Frontend bundle updated with latest server.js"
+    if bun build runtime/runtime.ts --target=browser --outdir=dist --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util; then
+        echo "   ✅ Runtime built successfully"
+        if cp dist/runtime.js frontend/static/runtime.js; then
+            echo "   ✅ Frontend bundle updated with latest runtime.js"
         else
-            echo "   ⚠️ Failed to copy server.js to frontend (continuing anyway)"
+            echo "   ⚠️ Failed to copy runtime.js to frontend (continuing anyway)"
         fi
     else
-        echo "   ⚠️ Server build failed (continuing anyway)"
+        echo "   ⚠️ Runtime build failed (continuing anyway)"
     fi
-    cd contracts
+    cd jurisdiction
 
     # Store both addresses in variables for later use
     case $port in
@@ -328,24 +328,38 @@ if [ $success_count -gt 0 ]; then
     echo "   CONTRACT_8545_DEP='$CONTRACT_8545_DEP'"
     echo ""
 
-    # Create fresh jurisdictions.json with actual deployed addresses (NO placeholders!)
-    # CRITICAL: Use :8545 for local dev, code will auto-detect and use proxy for production
+    # Create fresh jurisdictions.json with Arrakis and Wakanda
+    # Use /rpc/* proxy paths for HTTPS → HTTP proxying (eliminates SSL errors)
     cat > jurisdictions.json << EOF
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "lastUpdated": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "jurisdictions": {
-    "ethereum": {
-      "name": "Ethereum",
+    "arrakis": {
+      "name": "Arrakis",
       "chainId": 1337,
-      "rpc": ":8545",
+      "rpc": "/rpc/arrakis",
       "contracts": {
         "entityProvider": "$CONTRACT_8545_EP",
         "depository": "$CONTRACT_8545_DEP"
       },
-      "explorer": ":8545",
-      "currency": "ETH",
-      "status": "active"
+      "explorer": "http://localhost:8545",
+      "currency": "SPICE",
+      "status": "active",
+      "description": "The desert planet - strategic resource hub, high-value trade"
+    },
+    "wakanda": {
+      "name": "Wakanda",
+      "chainId": 1338,
+      "rpc": "/rpc/wakanda",
+      "contracts": {
+        "entityProvider": "$CONTRACT_8545_EP",
+        "depository": "$CONTRACT_8545_DEP"
+      },
+      "explorer": "http://localhost:8546",
+      "currency": "VIBRANIUM",
+      "status": "pending",
+      "description": "Advanced technology, sovereign nation, vibranium-backed reserves (Coming Soon)"
     }
   },
   "defaults": {
@@ -357,8 +371,8 @@ if [ $success_count -gt 0 ]; then
 EOF
 
     echo "   ✅ Created fresh jurisdictions.json with:"
-    echo "     EntityProvider: $CONTRACT_8545_EP"
-    echo "     Depository: $CONTRACT_8545_DEP"
+    echo "     Arrakis (port 8545): EntityProvider=$CONTRACT_8545_EP, Depository=$CONTRACT_8545_DEP"
+    echo "     Wakanda (port 8546): Coming soon (same contracts for now)"
 
 
 

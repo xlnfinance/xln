@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { AccountMachine, Delta } from '$lib/types/ui';
-  // Functions now accessed through $xlnEnvironment.xln from server.ts
-  // Entity functions now accessed through xlnFunctions from server.js
+  // Functions now accessed through $xlnEnvironment.xln from runtime.ts
+  // Entity functions now accessed through xlnFunctions from runtime.js
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
 

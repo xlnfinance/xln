@@ -1,164 +1,233 @@
 # XLN - Cross-Local Network
 
-![XLN Network Visualization](frontend/static/img/preview.png)
+**Instant off-chain settlement with on-chain finality.**
 
-**Unified Layer-2 for EVM jurisdictions.** Reserve-credit network combining full-credit banking with payment channel architectures.
+Byzantine consensus meets Bloomberg Terminal meets VR. Run complete economic simulations in your browser—no backend needed.
 
 ---
 
-## 🚀 **One-Liner Install** (Recommended)
+## 🌐 Directory Structure
 
-```bash
-bunx github:xlnfinance/xln
 ```
+Core:
+  /vibepaper/           Philosophy, architecture, eternal specs
+  /runtime/             Consensus engine (BFT entity + bilateral account state machines)
+  /jurisdictions/       Solidity contracts (Ethereum, Polygon, Arbitrum, ...)
+  /worlds/              Economic simulations (.xln.js scenario files)
+  /view/                Panel UI components (Graph3D, Entities, Depository, Architect)
+  /frontend/            Main xln.finance app (uses /view)
+  /simnet/              BrowserVM genesis configs (offline blockchain)
+  /proofs/              Validation tests (Playwright E2E + smoke tests)
 
-**Or traditional:**
+Dev:
+  bootstrap.sh          One-command setup
+  WORKFLOW.md           Daily commands
+  CLAUDE.md             AI instructions
+  .archive/             Old implementations (never deleted)
+
+---
+
+## 🚀 Quick Start
+
 ```bash
-git clone https://github.com/xlnfinance/xln
-cd xln
+# Install + start everything
 bun run dev
+
+# Open browser
+open http://localhost:8080
 ```
 
-Both auto-install everything (bun, Foundry, dependencies, contracts).
-
-**First run:** ~2-3 minutes (downloads Foundry)  
-**After:** ~10 seconds
-
-**Opens:** http://localhost:8080
+**First run:** ~2-3min (installs Foundry)
+**After:** ~10sec
 
 ---
 
-## What It Does
+## 🎯 What is XLN?
 
-```
-✅ Checks if bun installed (installs if needed)
-✅ Checks if Foundry/anvil installed (auto-installs)
-✅ Installs all dependencies (root, frontend, contracts)
-✅ Starts local blockchain (anvil)
-✅ Deploys smart contracts
-✅ Validates TypeScript (fail-fast on errors)
-✅ Starts dev server with hot reload
-```
+Cross-Local Network enables entities to:
+- Exchange value **instantly off-chain** (BFT consensus)
+- Anchor final state **on-chain** (Ethereum, Polygon, Arbitrum)
+- Run complete **economic simulations in browser** (BrowserVM - no backend!)
+- Visualize in **VR** (Quest/Vision Pro compatible)
 
-**Zero manual steps. Just works.**
+**Think:** Lightning Network + Byzantine consensus + Bloomberg Terminal + Blender.
 
 ---
 
-## Project Structure
+## 🏗️ Architecture (J-E-A Layers)
 
-```
-/src                    # Core TypeScript (runs in browser!)
-  server.ts             # S→E→A coordinator (100ms ticks)
-  entity-consensus.ts   # BFT consensus (E-machine)
-  account-consensus.ts  # Bilateral consensus (A-machine)
-  evm.ts                # Blockchain integration
-  types.ts              # All interfaces
+### J - Jurisdiction Layer (On-Chain)
+- **What:** Solidity contracts managing reserves, collateral, settlements
+- **Where:** `/jurisdictions/contracts/`
+- **Contracts:**
+  - `DepositoryV1.sol` - Implements `IDepository` (future ERC standard)
+  - `EntityProvider.sol` - Entity registration + quorum verification
+- **Deploy:** Ethereum, Polygon, Arbitrum, any EVM chain
 
-/frontend               # Svelte UI
-  src/routes/+page.svelte      # Main app
-  src/lib/components/          # UI components
-  src/lib/stores/xlnStore.ts   # State management
+### E - Entity Layer (Off-Chain BFT Consensus)
+- **What:** Distributed organizations with threshold signatures
+- **Flow:** ADD_TX → PROPOSE → SIGN → COMMIT
+- **Source:** `/runtime/entity-consensus.ts`
+- **Deterministic:** Nonce-based ordering, Merkle state roots
 
-/contracts              # Solidity smart contracts
-  Depository.sol        # Reserve/collateral/batch processing
-  EntityProvider.sol    # Entity registration
-
-/scenarios              # Declarative test scenarios
-  diamond-dybvig.scenario      # Bank run simulation
-  phantom-grid-*.scenario      # Stress tests (100-1000 entities)
-
-/reference              # Original implementations (2019)
-  2019src.txt           # Production-tested patterns
-  2019vue.txt           # Original UI reference
-
-/scripts                # Organized utilities
-  /dev                  # Development helpers
-  /debug                # Debug scripts
-  /deployment           # Server deployment
-```
+### A - Account Layer (Bilateral Channels)
+- **What:** Payment channels between entity pairs
+- **Perspective:** Left/right with canonical ordering (entityA < entityB)
+- **Source:** `/runtime/account-consensus.ts`
+- **Settlement:** Bilateral state verification with Merkle proofs
 
 ---
 
-## Common Commands
+## 💻 Key Commands
 
 ```bash
 # Development
-bun run dev              # Full dev (auto-installs everything)
-bun run check            # Type check + build
+bun run dev              # Full stack (jurisdictions + runtime + frontend)
+bun run check            # TypeScript + Svelte validation
+bun run build            # Build runtime.js for browser
 
-# Testing  
-bun test                 # Unit tests
-bun run test:e2e         # E2E tests
-bun run tutorial         # Interactive demo
+# Jurisdictions (Contracts)
+bun run env:build        # Compile Solidity
+bun run env:deploy       # Deploy to local network
+bun run dev:reset        # Reset all networks + redeploy
 
-# Blockchain
-./reset-networks.sh      # Reset chain + redeploy
-./deploy-contracts.sh    # Redeploy contracts
+# Frontend
+cd frontend && bun run dev      # Vite dev server
+cd frontend && bun run build    # Production build
 
-# Production
-bun run build            # Build static bundle
+# Testing
+bun run proofs                  # Playwright E2E tests
+bun test-ethereumjs-vm.ts       # BrowserVM smoke test
 ```
 
 ---
 
-## Architecture (J/E/A Machines)
+## 🎨 XLNView Panel System
 
-**Three-layer state machine hierarchy:**
+**Bloomberg Terminal-style workspace. Drag, dock, float, tab - full Chrome DevTools UX.**
 
-- **J-machine (Jurisdiction):** Public registry. Anchors state on-chain (Ethereum, etc.)
-- **E-machine (Entity):** BFT consensus for organizations. Quorum-based governance.
-- **A-machine (Account):** Bilateral channels. Frame-based off-chain settlement.
+### Core 4 Panels (Open by Default)
+1. **🌐 Graph3D** - Force-directed network viz (WebGL/WebGPU toggle)
+2. **🏢 Entities** - Live entity list (reserves, accounts, activity)
+3. **💰 Depository** - On-chain J-state viewer (BrowserVM queries)
+4. **🎬 Architect** - God-mode controls (5 modes: Explore/Build/Economy/Governance/Resolve)
 
-**Flow:** Server → Entity → Account (S→E→A)  
-**Paradigm:** Pure functional `(prevState, input) → {nextState, outputs}`
+### Layouts
+- **Default**: 4-panel workspace
+- **Analyst**: Graph3D + Depository + Console (research mode)
+- **Builder**: Architect + Graph3D + Entities (creation mode)
+- **Embed**: Graph3D only (for docs/blog posts)
 
----
+**Tech:** Dockview (2.8k stars), Svelte reactivity, localStorage persistence
 
-## Key Features
-
-✅ **Browser-native:** Core logic runs client-side (no server)  
-✅ **Time machine:** Replay consensus frame-by-frame  
-✅ **Multi-hop routing:** Lightning-style payment paths  
-✅ **BFT consensus:** Byzantine fault tolerant governance  
-✅ **EVM integration:** Deploy to any EVM chain  
-✅ **VR support:** Oculus Quest compatible  
+**Source:** `/view/` + `/vibepaper/xlnview.md`
 
 ---
 
-## Documentation
+## 🧪 Simnet (Offline Blockchain in Browser)
 
-- 📖 **Architecture:** `/docs/JEA.md`
-- 💸 **Payments:** `/docs/payment-spec.md`
-- 🎓 **Philosophy:** `/docs/philosophy/`
-- 🔐 **HTTPS:** `frontend/HTTPS.md`
-- 🥽 **VR:** `OCULUS-SETUP.md`
+**No localhost:8545. No cloud RPC. Pure browser.**
 
----
+- **Engine:** @ethereumjs/vm v10 (official Ethereum Foundation implementation)
+- **Deployed:** DepositoryV1.sol + 500 prefunded entities
+- **Tokens:** USDC (id=1), ETH (id=2)
+- **Reset:** Refresh page = new universe
+- **Persistent:** Optional IndexedDB (resume sessions)
 
-## Troubleshooting
+**Config:** `/simnet/genesis.json`
 
-**Foundry install hangs?**
+**Demo:**
 ```bash
-# Install manually
-curl -L https://foundry.paradigm.xyz | bash
-source ~/.bashrc
-foundryup
-bun run dev
-```
-
-**Port 8545 in use?**
-```bash
-./scripts/dev/stop-networks.sh
-bun run dev
-```
-
-**TypeScript errors?**
-```bash
-bun run check  # Shows errors
-# Fix, then: bun run dev
+bun test-ethereumjs-vm.ts
+# ✅ Deploys contract, funds entities, executes transfers
 ```
 
 ---
 
-**License:** MIT  
+## 🎮 VR/Quest Support
+
+- **WebXR:** Enabled by default (WebGL renderer)
+- **Offline:** Simnet works without network (perfect for VR demos)
+- **Performance:** 72fps in Quest 3
+- **Future:** Hand tracking, voice commands, spatial UI
+
+---
+
+## 📚 Documentation
+
+### Forever (vibepaper/)
+- `xlnview.md` - Panel architecture + BrowserVM integration
+- `JEA.md` - Jurisdiction-Entity-Account model
+- `governance-architecture.md` - Multi-sig voting system
+- `sessions/` - Technical deep-dives
+
+### Disposable (Root .md)
+- `WORKFLOW.md` - Daily dev commands
+- `RESTRUCTURE.md` - Migration notes (Oct 2025 - delete later)
+- `CLAUDE.md` - AI assistant instructions
+
+---
+
+## 🔥 Recent Updates (Oct 2025)
+
+- ✅ **Repository restructure** - Essence-driven naming (vibepaper, runtime, jurisdictions, worlds)
+- ✅ **BrowserVM integration** - Offline simnet with @ethereumjs/vm
+- ✅ **Panel workspace** - Dockview-based Bloomberg Terminal UX
+- ✅ **WebGPU/WebGL switch** - Runtime renderer toggle (future-proof)
+- ✅ **IDepository interface** - Standardizable ERC for reserve management
+- ✅ **DepositoryV1** - 69% smaller, self-contained (6.6KB vs 21KB)
+
+---
+
+## 🛠️ Tech Stack
+
+**Runtime:** TypeScript + Bun
+**Frontend:** Svelte + Vite + Three.js
+**Contracts:** Solidity + Hardhat
+**Blockchain:** @ethereumjs/vm (simnet) → Hardhat (local) → Ethereum/L2s (prod)
+**Panels:** Dockview (2.8k⭐)
+**Tests:** Playwright
+
+---
+
+## 🗺️ Network Roadmap
+
+### Simnet (Now - Oct 2025)
+**Browser-only simulation. Zero infrastructure.**
+- **Engine:** @ethereumjs/vm (in-browser blockchain)
+- **Contracts:** DepositoryV1.sol (6.6KB, implements IDepository)
+- **State:** 500 prefunded entities, USDC + ETH
+- **Reset:** Refresh page = new universe
+- **Use:** Scenario rehearsals, VR demos, tutorials
+
+### Testnet (Q1 2026)
+**Shared PoA network. Multi-user coordination.**
+- **Network:** Arrakis (custom PoA chain)
+- **Contracts:** Full suite (EntityProvider, Depository, SubcontractProvider)
+- **Validators:** 5 trusted nodes
+- **Use:** Integration testing, onboarding flows, load testing
+
+### Mainnet (Q4 2026)
+**Production deployment. Real value.**
+- **Chains:** Ethereum (L1), Polygon/Arbitrum (L2s)
+- **Governance:** Multi-sig + timelock
+- **Audits:** Trail of Bits + OpenZeppelin
+- **Use:** Live settlement network
+
+---
+
+## 📖 Learn More
+
+**Start here:**
+1. `WORKFLOW.md` - Daily dev commands
+2. `/vibepaper/xlnview.md` - Panel architecture + BrowserVM
+3. `/vibepaper/JEA.md` - Jurisdiction-Entity-Account model
+4. `/simnet/README.md` - Offline blockchain setup
+
+**For deep dives:** `/vibepaper/sessions/`
+
+---
+
+**License:** MIT
 **Status:** Active development (2025)
+**Website:** xln.finance (coming soon)

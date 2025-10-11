@@ -38,7 +38,7 @@
       if (scenario.includes('\n') || scenario.startsWith('SEED')) {
         scenarioText = scenario;
       } else {
-        const response = await fetch(`/scenarios/${scenario}.scenario.txt`);
+        const response = await fetch(`/worlds/${scenario}.scenario.txt`);
         if (!response.ok) throw new Error(`Scenario not found: ${scenario}`);
         scenarioText = await response.text();
       }
@@ -51,8 +51,8 @@
       }
 
       // Create ISOLATED environment (no global state)
-      const serverUrl = new URL(`/server.js?v=${Date.now()}`, window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ serverUrl);
+      const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Create fresh environment (NOT from global store)
       localEnv = XLN.createEmptyEnv();
@@ -108,8 +108,9 @@
     const height = container.clientHeight || 600;
 
     camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 10000);
-    camera.position.set(60, 60, 60);
-    camera.lookAt(0, 0, 0);
+    // Position camera for 2x2x2 grid (grid center is at 20,20,20 with 40px spacing)
+    camera.position.set(80, 80, 80);  // Pull back further
+    camera.lookAt(20, 20, 20);  // Look at grid center, not origin
 
     // Create renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -119,8 +120,10 @@
     // Add OrbitControls for dragging
     import('three/examples/jsm/controls/OrbitControls.js').then(module => {
       controls = new module.OrbitControls(camera, renderer.domElement);
+      controls.target.set(20, 20, 20);  // Orbit around grid center
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
+      controls.update();
     });
 
     // Add lights
@@ -147,25 +150,68 @@
     // Render entities from frame state
     if (frameState.replicas) {
       frameState.replicas.forEach((replica: any, key: string) => {
-        const profile = replica.entityState?.profile || replica.profile;
+        const [entityId] = key.split(':');
 
-        // Use grid position if available, otherwise radial
-        const position = profile?.gridPosition || profile?.position;
+        // CRITICAL: Get position from gossip layer (where grid command stores positions)
+        const gossipProfiles = frameState.gossip?.profiles || [];
+        const gossipProfile = gossipProfiles.find((p: any) => p.entityId === entityId);
+
+        // Try multiple position sources (grid scenarios put it in metadata.position)
+        const position = gossipProfile?.metadata?.position
+          || gossipProfile?.position
+          || replica.position
+          || replica.state?.position;
 
         const geometry = new THREE.SphereGeometry(4, 32, 32);
         const material = new THREE.MeshLambertMaterial({
-          color: profile?.isHub ? 0x00ff88 : 0x007acc,
-          emissive: profile?.isHub ? 0x00ff88 : 0x000000,
-          emissiveIntensity: profile?.isHub ? 1.0 : 0
+          color: gossipProfile?.isHub ? 0x00ff88 : 0x007acc,
+          emissive: gossipProfile?.isHub ? 0x00ff88 : 0x000000,
+          emissiveIntensity: gossipProfile?.isHub ? 1.0 : 0
         });
         const mesh = new THREE.Mesh(geometry, material);
 
         if (position) {
           mesh.position.set(position.x, position.y, position.z);
+        } else {
+          // Fallback: radial layout
+          const replicaKeys = Array.from(frameState.replicas.keys());
+          const index = replicaKeys.indexOf(key);
+          const angle = (index / replicaKeys.length) * Math.PI * 2;
+          const radius = 30;
+          mesh.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
         }
 
         scene.add(mesh);
         entities.set(key, mesh);
+      });
+    }
+
+    // Render account connections (lines between entities with accounts)
+    if (frameState.replicas) {
+      frameState.replicas.forEach((replica: any, key: string) => {
+        const entityMesh = entities.get(key);
+        if (!entityMesh) return;
+
+        // Get accounts from this entity
+        const accounts = replica.state?.accounts;
+        if (!accounts) return;
+
+        accounts.forEach((_account: any, counterpartyId: string) => {
+          // Find counterparty mesh
+          const counterpartyKey = (Array.from(frameState.replicas.keys()) as string[]).find(k => k.startsWith(counterpartyId));
+          const counterpartyMesh = counterpartyKey ? entities.get(counterpartyKey) : null;
+
+          if (counterpartyMesh && entityMesh) {
+            // Draw line between entities
+            const geometry = new THREE.BufferGeometry().setFromPoints([
+              entityMesh.position,
+              counterpartyMesh.position
+            ]);
+            const material = new THREE.LineBasicMaterial({ color: 0x444444, opacity: 0.3, transparent: true });
+            const line = new THREE.Line(geometry, material);
+            scene.add(line);
+          }
+        });
       });
     }
   }

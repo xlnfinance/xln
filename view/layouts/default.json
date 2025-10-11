@@ -1,0 +1,80 @@
+{
+  "name": "default",
+  "version": "4.0",
+  "description": "Default 4-panel layout (Graph3D + Entities + Depository + Architect)",
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "views": ["graph3d"],
+                "activeView": "graph3d"
+              },
+              "size": 60
+            },
+            {
+              "type": "branch",
+              "data": [
+                {
+                  "type": "leaf",
+                  "data": {
+                    "views": ["entities"],
+                    "activeView": "entities"
+                  }
+                },
+                {
+                  "type": "branch",
+                  "data": [
+                    {
+                      "type": "leaf",
+                      "data": {
+                        "views": ["depository"],
+                        "activeView": "depository"
+                      }
+                    },
+                    {
+                      "type": "leaf",
+                      "data": {
+                        "views": ["architect"],
+                        "activeView": "architect"
+                      }
+                    }
+                  ],
+                  "size": 50
+                }
+              ]
+            }
+          ],
+          "size": 100
+        }
+      ]
+    },
+    "width": 1920,
+    "height": 1080,
+    "orientation": "HORIZONTAL"
+  },
+  "panels": {
+    "graph3d": {
+      "id": "graph3d",
+      "contentComponent": "graph3d"
+    },
+    "entities": {
+      "id": "entities",
+      "contentComponent": "entities"
+    },
+    "depository": {
+      "id": "depository",
+      "contentComponent": "depository"
+    },
+    "architect": {
+      "id": "architect",
+      "contentComponent": "architect"
+    }
+  },
+  "activeGroup": "graph3d"
+}

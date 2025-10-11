@@ -4,7 +4,7 @@
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import BigIntInput from '../Common/BigIntInput.svelte';
 
-  // All utility functions now come from server.js via xlnFunctions
+  // All utility functions now come from runtime.js via xlnFunctions
 
   // FINTECH-SAFE: Never return "N/A" - fail fast if data is corrupted
   // Handles BigInt by converting to Number first
@@ -189,7 +189,7 @@
         }]
       };
 
-      await xln.processUntilEmpty(env, [paymentInput]);
+      await xln.process(env, [paymentInput]);
       console.log(`✅ Payment sent: ${$xlnFunctions.formatTokenAmount(selectedTokenId, paymentAmountBigInt)}`);
 
       // Reset form
@@ -222,7 +222,7 @@
         }]
       };
 
-      await xln.processUntilEmpty(env, [adjustmentInput]);
+      await xln.process(env, [adjustmentInput]);
       console.log(`✅ Credit adjusted to: ${creditAdjustment}`);
 
       creditAdjustment = 0;

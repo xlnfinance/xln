@@ -1,0 +1,41 @@
+{
+  "name": "analyst",
+  "version": "4.0",
+  "description": "Analyst layout (Graph3D + Depository + Console)",
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["graph3d"],
+            "activeView": "graph3d"
+          },
+          "size": 60
+        },
+        {
+          "type": "branch",
+          "data": [
+            {
+              "type": "leaf",
+              "data": {
+                "views": ["depository"],
+                "activeView": "depository"
+              },
+              "size": 60
+            },
+            {
+              "type": "leaf",
+              "data": {
+                "views": ["console"],
+                "activeView": "console"
+              },
+              "size": 40
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

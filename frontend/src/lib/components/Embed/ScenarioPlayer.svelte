@@ -32,8 +32,8 @@
         // Inline scenario
         scenarioText = scenario;
       } else {
-        // Named scenario - fetch from /scenarios/
-        const response = await fetch(`/scenarios/${scenario}.scenario.txt`);
+        // Named scenario - fetch from /worlds/
+        const response = await fetch(`/worlds/${scenario}.scenario.txt`);
         if (!response.ok) {
           throw new Error(`Scenario not found: ${scenario}`);
         }
@@ -47,9 +47,9 @@
         sliceEnd = parts[1] || -1;
       }
 
-      // Execute scenario via server.js module
-      const serverUrl = new URL('/server.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ serverUrl);
+      // Execute scenario via runtime.js module
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Get environment
       const { getEnv } = await import('$lib/stores/xlnStore');

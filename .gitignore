@@ -13,7 +13,7 @@ logs/*
 
 # Lock files
 bun.lockb
-contracts/bun.lock
+jurisdictions/bun.lock
 
 # Frontend generated files
 frontend/static/server.js
@@ -27,24 +27,31 @@ dist/
 jurisdictions.json
 db/
 
-# Contract artifacts
-contracts/artifacts/
-contracts/cache/
-contracts/typechain-types/
-contracts/ignition/deployments/chain-1337/
+# Contract artifacts (jurisdictions/)
+jurisdictions/artifacts/
+jurisdictions/cache/
+jurisdictions/typechain-types/
+jurisdictions/ignition/deployments/chain-1337/
 
 # Process management
 pids/
 *.pid
 
-# E2E test artifacts
-e2e/test-results/
-e2e/**/test-results/
-e2e/playwright-report/
-e2e/screenshots/
+# E2E test artifacts (proofs/)
+proofs/test-results/
+proofs/**/test-results/
+proofs/playwright-report/
+proofs/screenshots/
 playwright-report/
 test-results/
 .playwright-mcp/
+
+# Archive (old implementations)
+.archive/
+
+# Simnet state
+simnet/state/
+simnet/*.db
 
 # Production/deployment scripts
 PRODUCTION-FIX-LOG.md

@@ -165,7 +165,7 @@
       });
       
       console.log('🔥 Processing entity creation through server...');
-      await xln.processUntilEmpty(env, result.entityOutbox);
+      await xln.process(env, result.entityOutbox);
       console.log('✅ Entity creation complete!');
 
       console.log(`💰 Entity #${$xlnFunctions!.getEntityShortId(entityId)} automatically prefunded by Depository.sol contract during deployment`);

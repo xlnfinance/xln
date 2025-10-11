@@ -9,8 +9,8 @@ async function getXLN() {
   if (XLN) return XLN;
 
   // Add timestamp to bust cache
-  const serverUrl = new URL(`/server.js?v=${Date.now()}`, window.location.origin).href;
-  XLN = await import(/* @vite-ignore */ serverUrl);
+  const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
+  XLN = await import(/* @vite-ignore */ runtimeUrl);
 
   // Expose globally for console debugging
   exposeGlobalDebugObjects();
@@ -35,7 +35,7 @@ function exposeGlobalDebugObjects() {
     };
 
     console.log('🌍 GLOBAL DEBUG: XLN objects exposed');
-    console.log('  window.XLN - All server functions (deriveDelta, isLeft, etc.)');
+    console.log('  window.XLN - All runtime functions (deriveDelta, isLeft, etc.)');
     console.log('  window.xlnEnv - Reactive environment store');
     console.log('  window.xlnErrorLog - Logs to Settings error panel');
     console.log('  Usage: window.XLN.deriveDelta(delta, true).ascii');
@@ -93,7 +93,7 @@ export async function initializeXLN() {
     // Store XLN instance separately for function access
     xlnInstance.set(xln);
 
-    // Register callback for automatic reactivity (fires on every processUntilEmpty)
+    // Register callback for automatic reactivity (fires on every process())
     xln.registerEnvChangeCallback?.((env: any) => {
       xlnEnvironment.set(env);
       history.set(env?.history || []);
@@ -148,11 +148,11 @@ export function getEnv() {
   return get(xlnEnvironment);
 }
 
-// Wrapper for processUntilEmpty that auto-injects serverDelay from settings
+// Wrapper for process() that auto-injects serverDelay from settings
 export async function processWithDelay(env: any, inputs?: any[]) {
   const xln = await getXLN();
   const delay = get(settings).serverDelay;
-  return await xln.processUntilEmpty(env, inputs, delay);
+  return await xln.process(env, inputs, delay);
 }
 
 // === FRONTEND UTILITY FUNCTIONS ===
