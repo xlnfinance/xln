@@ -23,6 +23,7 @@
   import { EntityManager } from '../../network3d/EntityManager';
   import { AccountActivityVisualizer } from '../../network3d/AccountActivityVisualizer';
   import { createAccountBars } from '../../network3d/AccountBarRenderer';
+  import { createRenderer, type RendererMode } from '../../utils/rendererFactory';
 
   // Props
   export let zenMode: boolean = false;
@@ -104,7 +105,7 @@
   let container: HTMLDivElement;
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
-  let renderer: THREE.WebGLRenderer;
+  let renderer: THREE.WebGLRenderer | THREE.WebGPURenderer;
   let controls: any;
   let raycaster: THREE.Raycaster;
   let mouse: THREE.Vector2;
@@ -387,6 +388,7 @@
   let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 = fast)
   let availableTokens: number[] = []; // Will be populated from actual token data
   let showPanel: boolean = true; // Mobile-friendly panel toggle - start visible
+  let rendererMode: RendererMode = 'webgl'; // Renderer mode: 'webgl' | 'webgpu'
   let labelScale: number = 2.0; // Entity label size multiplier (1.0 = 32px font, 2.0 = 64px font)
   let lightningSpeed: number = 100; // Lightning animation speed in ms per hop (default 100ms)
   let sidebarWidth: number = 400; // Sidebar width in pixels (250-600)
@@ -715,10 +717,9 @@
     camera.position.set(0, 0, 100); // Zoom out for better H visibility
 
     // Renderer setup with VR support
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = await createRenderer(rendererMode, { antialias: true, xrEnabled: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.xr.enabled = true; // Enable WebXR
     container.appendChild(renderer.domElement);
 
     // OrbitControls setup

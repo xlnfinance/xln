@@ -1,0 +1,32 @@
+GNU AFFERO GENERAL PUBLIC LICENSE
+Version 3, 19 November 2007
+
+Copyright (C) 2025 XLN Finance
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+ADDITIONAL TERMS UNDER SECTION 7 OF AGPL-3.0:
+
+Network Use: If you run a modified version of this software as a network
+service, you must make the complete source code available to all users
+of that service.
+
+Commercial Use: Companies using this software to provide commercial
+settlement services must either:
+(a) Open-source all modifications under AGPL-3.0, OR
+(b) Obtain a commercial license from XLN Finance
+
+Contact: license@xln.finance for commercial licensing inquiries.

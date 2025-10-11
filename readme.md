@@ -228,6 +228,6 @@ bun test-ethereumjs-vm.ts
 
 ---
 
-**License:** MIT
+**License:** AGPL-3.0
 **Status:** Active development (2025)
 **Website:** xln.finance (coming soon)
