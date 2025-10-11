@@ -1,0 +1,36 @@
+{
+  "name": "builder",
+  "version": "4.0",
+  "description": "Builder layout (Architect + Graph3D + Entities)",
+  "grid": {
+    "root": {
+      "type": "branch",
+      "data": [
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["architect"],
+            "activeView": "architect"
+          },
+          "size": 30
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["graph3d"],
+            "activeView": "graph3d"
+          },
+          "size": 50
+        },
+        {
+          "type": "leaf",
+          "data": {
+            "views": ["entities"],
+            "activeView": "entities"
+          },
+          "size": 20
+        }
+      ]
+    }
+  }
+}

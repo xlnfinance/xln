@@ -1,0 +1,19 @@
+{
+  "name": "embed",
+  "version": "4.0",
+  "description": "Embed layout (Graph3D only, fullscreen)",
+  "grid": {
+    "root": {
+      "type": "leaf",
+      "data": {
+        "views": ["graph3d"],
+        "activeView": "graph3d"
+      }
+    }
+  },
+  "timeMachine": {
+    "docked": false,
+    "position": "bottom",
+    "visible": true
+  }
+}

@@ -9,10 +9,10 @@ echo "1️⃣ Stopping existing networks..."
 # Clean up old data
 echo ""
 echo "2️⃣ Cleaning up old data..."
-rm -rf contracts/ignition/deployments/* 2>/dev/null || true
-rm -rf contracts/cache/ 2>/dev/null || true
-rm -rf contracts/artifacts/ 2>/dev/null || true
-rm -rf contracts/typechain-types/ 2>/dev/null || true
+rm -rf jurisdictions/ignition/deployments/* 2>/dev/null || true
+rm -rf jurisdictions/cache/ 2>/dev/null || true
+rm -rf jurisdictions/artifacts/ 2>/dev/null || true
+rm -rf jurisdictions/typechain-types/ 2>/dev/null || true
 rm -rf logs/*.log 2>/dev/null || true
 rm -rf db 2>/dev/null || true
 echo "✅ Cleanup complete (cleared ignition, hardhat cache, artifacts)"
@@ -40,7 +40,7 @@ if [ $? -eq 0 ]; then
     echo "📋 Contract addresses saved to jurisdictions.json"
     echo ""
     echo "🚀 Next steps:"
-    echo "   • Run: bun run src/server.ts"
+    echo "   • Run: bun run runtime/runtime.ts"
     echo "   • Open: index.html"
     echo "   • Test: Create entities and check Jurisdictions tab"
     echo ""

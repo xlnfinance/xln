@@ -50,7 +50,7 @@
       }
 
       // Fetch the scenario file
-      const response = await fetch(`/scenarios/${scenario.file}`);
+      const response = await fetch(`/worlds/${scenario.file}`);
       if (!response.ok) {
         throw new Error(`Failed to load scenario: ${response.statusText}`);
       }
@@ -93,8 +93,8 @@
       addOutput('', 'info');
 
       // Import XLN server module (contains scenario functions)
-      const serverUrl = new URL('/server.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ serverUrl);
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Get current environment from store
       const { getEnv } = await import('$lib/stores/xlnStore');

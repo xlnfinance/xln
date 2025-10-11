@@ -69,7 +69,7 @@
       }
 
       // Send accountInput transaction
-      await xln.processUntilEmpty(env, [
+      await xln.process(env, [
         {
           entityId: currentEntityId,
           signerId: currentSignerId,

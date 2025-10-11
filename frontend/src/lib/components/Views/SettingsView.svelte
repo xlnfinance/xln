@@ -253,7 +253,7 @@
     try {
       const xln = await getXLN();
       const env = $xlnEnvironment || await xln.main();
-      await xln.prepopulate(env, xln.processUntilEmpty);
+      await xln.prepopulate(env, xln.process);
     } catch (error) {
       console.error('❌ Prepopulation failed:', error);
       alert(`Prepopulation failed: ${(error as Error)?.message || 'Unknown error'}`);

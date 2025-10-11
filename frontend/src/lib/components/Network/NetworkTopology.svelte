@@ -27,8 +27,13 @@
   // Props
   export let zenMode: boolean = false;
   export let hideButton: boolean = false;
-  export let toggleZenMode: () => void;
+  export let toggleZenMode: () => void = () => {}; // Optional in embedded mode
   export let embedded: boolean = false;  // Embedded mode for ScenarioPlayer
+  export let isolatedEnv: any = null;  // If provided, use this env instead of global store
+  export let isolatedHistory: any[] = [];  // History for isolated env
+
+  // Reactive env - use isolated or fall back to global store
+  $: env = isolatedEnv || $xlnEnvironment;
 
   // OrbitControls import (will be loaded dynamically)
   let OrbitControls: any;
@@ -455,13 +460,13 @@
   }
 
   // ===== WATCH FOR J-EVENTS (auto-ripple on settlements) =====
-  $: if ($xlnEnvironment?.lastJEvent) {
-    handleJEventRipple($xlnEnvironment.lastJEvent);
+  $: if (env?.lastJEvent) {
+    handleJEventRipple(env.lastJEvent);
   }
 
   // ===== PROCESS ACCOUNT ACTIVITY LIGHTNING (on new frame) =====
-  $: if (activityVisualizer && $xlnEnvironment?.serverInput && entityMeshMap) {
-    activityVisualizer.processFrame($xlnEnvironment.serverInput, entityMeshMap);
+  $: if (activityVisualizer && env?.runtimeInput && entityMeshMap) {
+    activityVisualizer.processFrame(env.runtimeInput, entityMeshMap);
   }
 
   // ===== UPDATE SPATIAL HASH (when entities move) =====
@@ -474,7 +479,7 @@
 
   async function loadScenarioSteps(filename: string) {
     try {
-      const response = await fetch(`/scenarios/${filename}`);
+      const response = await fetch(`/worlds/${filename}`);
       if (!response.ok) return;
 
       const text = await response.text();
@@ -3211,7 +3216,6 @@
   }
 
   function calculateAvailableRoutes(from: string, to: string) {
-    const env = $xlnEnvironment;
     if (!env) {
       availableRoutes = [];
       return;
@@ -3347,7 +3351,6 @@
         throw new Error('XLN not available');
       }
 
-      const env = $xlnEnvironment;
       if (!env) {
         throw new Error('XLN environment not available');
       }
@@ -3431,7 +3434,7 @@
       triggerEntityActivity(job.to);
 
       // Process the payment (COPY EXACT CALL from PaymentPanel)
-      await xln.processUntilEmpty(env, [paymentInput]);
+      await xln.process(env, [paymentInput]);
 
       // Add to activity ticker AFTER successful processing
       recentActivity = [{
@@ -3524,7 +3527,6 @@
   }
 
   function detectJurisdictionalEvents() {
-    const env = $xlnEnvironment;
     if (!env) return;
 
     // Check the current server frame for jurisdictional events (j-events)
@@ -3556,7 +3558,7 @@
 
     try {
       // Fetch scenario file
-      const response = await fetch(`/scenarios/${selectedScenarioFile}`);
+      const response = await fetch(`/worlds/${selectedScenarioFile}`);
       if (!response.ok) {
         throw new Error(`Failed to load scenario: ${response.statusText}`);
       }
@@ -3565,8 +3567,8 @@
       console.log(`Loaded scenario: ${selectedScenarioFile}`);
 
       // Import XLN server module
-      const serverUrl = new URL('/server.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ serverUrl);
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Parse scenario
       const parsed = XLN.parseScenario(scenarioText);
@@ -3621,8 +3623,8 @@
       // Parse as single-line scenario
       const scenarioText = `SEED live-${Date.now()}\n\n0: Live Command\n${commandText}`;
 
-      const serverUrl = new URL('/server.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ serverUrl);
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       const parsed = XLN.parseScenario(scenarioText);
 
@@ -3783,8 +3785,8 @@
     }
 
     try {
-      const serverUrl = new URL('/server.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ serverUrl);
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       const parsed = XLN.parseScenario(asciiScenario);
 

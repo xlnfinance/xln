@@ -87,7 +87,7 @@
         }]
       };
 
-      await xln.processUntilEmpty(env, [accountRequestInput]);
+      await xln.process(env, [accountRequestInput]);
       console.log(`✅ Account request sent to local e-machine for Entity ${$xlnFunctions!.formatEntityId(targetEntityId)}`);
     } catch (error) {
       console.error('Failed to send account request:', error);

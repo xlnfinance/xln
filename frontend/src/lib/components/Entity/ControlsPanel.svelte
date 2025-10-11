@@ -54,8 +54,8 @@
       const env = $xlnEnvironment;
       if (!env) throw new Error('XLN environment not ready');
 
-      // Direct processUntilEmpty for entityInputs (no serverTxs needed)
-      await xln.processUntilEmpty(env, [{
+      // Direct process() for entityInputs (no runtimeTxs needed)
+      await xln.process(env, [{
         entityId: tab.entityId,
         signerId: tab.signerId,
         entityTxs: [{
@@ -82,8 +82,8 @@
 
       const proposalText = proposalTitle.trim() + (proposalDescription.trim() ? ': ' + proposalDescription.trim() : '');
       
-      // Direct processUntilEmpty for entityInputs (no serverTxs needed)
-      await xln.processUntilEmpty(env, [{
+      // Direct process() for entityInputs (no runtimeTxs needed)
+      await xln.process(env, [{
         entityId: tab.entityId,
         signerId: tab.signerId,
         entityTxs: [{
@@ -145,8 +145,8 @@
         txType: 'vote'
       });
       
-      // Direct processUntilEmpty for entityInputs (no serverTxs needed)
-      await xln.processUntilEmpty(env, [voteInput]);
+      // Direct process() for entityInputs (no runtimeTxs needed)
+      await xln.process(env, [voteInput]);
       
       console.log('✅ Vote submitted and processed successfully');
       selectedProposalId = '';
@@ -184,7 +184,7 @@
 
       console.log('💳 Opening account with entity:', accountCounterparty);
 
-      await xln.processUntilEmpty(env, [accountInput]);
+      await xln.process(env, [accountInput]);
 
       console.log('✅ Account opened successfully');
       accountCounterparty = '';

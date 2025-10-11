@@ -1,4 +1,4 @@
-import type { Snapshot, EntityReplica, ServerFrame, ServerTx, EntityInput } from '$lib/types/ui';
+import type { Snapshot, EntityReplica, ServerFrame, RuntimeTx, EntityInput } from '$lib/types/ui';
 
 export function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp);
@@ -35,16 +35,16 @@ export function getServerFrames(history: Snapshot[], replica: EntityReplica | nu
     history.slice(0, 3).map((s, i) => ({
       frame: i,
       keys: Object.keys(s),
-      serverInput: s.serverInput ? Object.keys(s.serverInput) : 'missing',
-      entityInputsCount: s.serverInput?.entityInputs?.length || 0,
-      serverOutputsCount: s.serverOutputs?.length || 0,
+      runtimeInput: s.runtimeInput ? Object.keys(s.runtimeInput) : 'missing',
+      entityInputsCount: s.runtimeInput?.entityInputs?.length || 0,
+      runtimeOutputsCount: s.runtimeOutputs?.length || 0,
       timestamp: s.timestamp,
     })),
   );
 
   return history.map((snapshot, frameIndex) => {
-    const entityInputs = snapshot.serverInput?.entityInputs || [];
-    const serverOutputs = snapshot.serverOutputs || [];
+    const entityInputs = snapshot.runtimeInput?.entityInputs || [];
+    const runtimeOutputs = snapshot.runtimeOutputs || [];
 
     // Filter inputs TO this specific replica
     const replicaInputs = entityInputs.filter(
@@ -53,23 +53,23 @@ export function getServerFrames(history: Snapshot[], replica: EntityReplica | nu
     );
 
     // Filter outputs FROM this specific replica
-    const replicaOutputs = serverOutputs.filter(
+    const replicaOutputs = runtimeOutputs.filter(
       (output: EntityInput) =>
         output.entityId === replica.entityId && output.signerId === replica.signerId,
     );
 
-    // Filter serverTx imports related to this replica
-    const serverTxs = snapshot.serverInput?.serverTxs || [];
-    const replicaImports = serverTxs.filter((serverTx: ServerTx) => {
-      if (serverTx.type === 'importReplica') {
-        return serverTx.entityId === replica.entityId && serverTx.signerId === replica.signerId;
+    // Filter runtimeTx imports related to this replica
+    const runtimeTxs = snapshot.runtimeInput?.runtimeTxs || [];
+    const replicaImports = runtimeTxs.filter((runtimeTx: RuntimeTx) => {
+      if (runtimeTx.type === 'importReplica') {
+        return runtimeTx.entityId === replica.entityId && runtimeTx.signerId === replica.signerId;
       }
       return false;
     });
 
-    // Also check relevant serverTxs
-    const relevantServerTxs = serverTxs.filter(
-      (tx: ServerTx) =>
+    // Also check relevant runtimeTxs
+    const relevantRuntimeTxs = runtimeTxs.filter(
+      (tx: RuntimeTx) =>
         tx.entityId === replica.entityId || tx.signerId === replica.signerId,
     );
 
@@ -81,7 +81,7 @@ export function getServerFrames(history: Snapshot[], replica: EntityReplica | nu
       inputs: replicaInputs,
       outputs: replicaOutputs,
       imports: replicaImports,
-      serverTxs: relevantServerTxs,
+      runtimeTxs: relevantRuntimeTxs,
       timestamp: snapshot.timestamp || Date.now() - (history.length - frameIndex) * 1000,
       hasActivity,
     };

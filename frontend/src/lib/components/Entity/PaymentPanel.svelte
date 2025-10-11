@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
-  // Functions now accessed through $xlnEnvironment.xln from server.ts
+  // Functions now accessed through $xlnEnvironment.xln from runtime.ts
 
   export let entityId: string;
 

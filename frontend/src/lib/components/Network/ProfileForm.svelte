@@ -121,8 +121,8 @@
         signature: '', // TODO: Add proper signature
       };
 
-      await xln.applyServerInput(env, {
-        serverTxs: [],
+      await xln.applyRuntimeInput(env, {
+        runtimeTxs: [],
         entityInputs: [entityInput],
       });
 

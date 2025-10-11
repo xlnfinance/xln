@@ -1,0 +1,13 @@
+{
+  "name": "@xln/e2e-tests",
+  "version": "1.0.0",
+  "description": "XLN E2E Testing Framework using Playwright MCP",
+  "scripts": {
+    "test": "bun run run-test.ts",
+    "test:smoke": "bun run run-test.ts smoke",
+    "test:entity": "bun run run-test.ts entity-creation",
+    "test:payment": "bun run run-test.ts payment-flow"
+  },
+  "keywords": ["e2e", "playwright", "xln", "testing"],
+  "author": "XLN Team"
+}

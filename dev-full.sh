@@ -18,9 +18,9 @@ check_bun() {
 }
 
 check_hardhat() {
-    # Hardhat is installed as a dev dependency in contracts/
-    # Just verify contracts/node_modules exists - check_dependencies handles install
-    if [ ! -d "contracts/node_modules" ]; then
+    # Hardhat is installed as a dev dependency in jurisdictions/
+    # Just verify jurisdictions/node_modules exists - check_dependencies handles install
+    if [ ! -d "jurisdictions/node_modules" ]; then
         echo "📦 Hardhat will be installed with contract dependencies..."
     else
         echo "✅ Hardhat available (for local blockchain)"
@@ -40,7 +40,7 @@ check_dependencies() {
     
     if [ ! -d "contracts/node_modules" ]; then
         echo "📦 Installing contract dependencies..."
-        (cd contracts && bun install)
+        (cd jurisdiction && bun install)
     fi
     
     echo "✅ All dependencies installed"
@@ -128,11 +128,11 @@ mkdir -p frontend/static
 # bun x tsc --noEmit --watch --project . &
 # (cd frontend && bun run check:watch) &
 
-# Initial server build
-echo "📦 Building server for frontend..."
-bun build src/server.ts \
+# Initial runtime build
+echo "📦 Building runtime for frontend..."
+bun build runtime/runtime.ts \
   --target=browser \
-  --outfile=frontend/static/server.js \
+  --outfile=frontend/static/runtime.js \
   --minify \
   --external http --external https --external zlib \
   --external fs --external path --external crypto \
@@ -141,20 +141,20 @@ bun build src/server.ts \
 
 # Verify browser compatibility
 echo "🧪 Testing browser bundle compatibility..."
-if grep -q 'require("http")\|require("fs")' frontend/static/server.js; then
-    echo "❌ CRITICAL: server.js contains Node.js modules"
+if grep -q 'require("http")\|require("fs")' frontend/static/runtime.js; then
+    echo "❌ CRITICAL: runtime.js contains Node.js modules"
     exit 1
 fi
 echo "✅ Browser bundle verified"
 
-# Copy jurisdictions
-cp jurisdictions.json frontend/static/jurisdictions.json
+# Copy jurisdictions (ignore if identical)
+cp jurisdictions.json frontend/static/jurisdictions.json 2>/dev/null || true
 
-# Watch server changes
-echo "📦 Starting server watch..."
-bun build src/server.ts \
+# Watch runtime changes
+echo "📦 Starting runtime watch..."
+bun build runtime/runtime.ts \
   --target=browser \
-  --outfile=frontend/static/server.js \
+  --outfile=frontend/static/runtime.js \
   --minify \
   --external http --external https --external zlib \
   --external fs --external path --external crypto \
@@ -177,7 +177,7 @@ echo ""
 echo "🌐 Frontend: http://localhost:8080"
 echo "🌐 HTTPS:    https://localhost:8080 (if certs available)"
 echo "🔗 Blockchain: http://localhost:8545 (anvil)"
-echo "📦 Auto-rebuild: Enabled (server.js + frontend)"
+echo "📦 Auto-rebuild: Enabled (runtime.js + frontend)"
 echo "🔍 Type checking: Running continuously"
 echo ""
 echo "💡 Press Ctrl+C to stop all services"
