@@ -4116,6 +4116,34 @@
           </select>
         </div>
 
+        <!-- Renderer Mode (WebGL/WebGPU) -->
+        <div class="control-group">
+          <label>Graphics:</label>
+          <div class="toggle-group">
+            <button
+              class="toggle-btn"
+              class:active={rendererMode === 'webgl'}
+              on:click={() => { rendererMode = 'webgl'; }}
+              title="WebGL (VR-compatible, stable)"
+            >
+              WebGL
+            </button>
+            <button
+              class="toggle-btn"
+              class:active={rendererMode === 'webgpu'}
+              on:click={() => { rendererMode = 'webgpu'; }}
+              title="WebGPU (Faster, experimental)"
+            >
+              WebGPU
+            </button>
+          </div>
+          {#if rendererMode === 'webgpu'}
+            <small style="color: #d29922; font-size: 11px; display: block; margin-top: 4px;">
+              ⚠️ WebXR not supported on Quest yet
+            </small>
+          {/if}
+        </div>
+
         <!-- Bars Mode -->
         <div class="control-group">
           <span class="control-label">Bars:</span>
