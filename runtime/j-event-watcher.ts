@@ -321,7 +321,7 @@ export class JEventWatcher {
   }
 
   /**
-   * Feed event to proposer replica via server entityInputs
+   * Feed event to proposer replica via runtime entityInputs
    */
   private feedEventToProposer(entityId: string, signerId: string, event: any, env: Env): void {
     let entityTx;

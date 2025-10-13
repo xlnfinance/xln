@@ -1,7 +1,7 @@
 /**
  * XLN Scenario Executor
  *
- * Executes parsed scenarios by feeding events to the XLN server
+ * Executes parsed scenarios by feeding events to the XLN runtime
  */
 
 import type { Env, RuntimeTx, ConsensusConfig } from '../types.js';
@@ -20,7 +20,7 @@ import { getAvailableJurisdictions } from '../evm.js';
 import { safeStringify } from '../serialization-utils.js';
 
 /**
- * Execute a scenario and generate server frames
+ * Execute a scenario and generate runtime frames
  */
 export async function executeScenario(
   env: Env,
@@ -190,7 +190,7 @@ async function executeAction(
  * This is the critical function that:
  * 1. Gets current max entity number
  * 2. Creates NEW entities continuing from that number
- * 3. Imports them into EXISTING server state (additive, not replacement)
+ * 3. Imports them into EXISTING runtime state (additive, not replacement)
  * 4. Creates snapshots with narrative metadata
  */
 async function handleImport(
@@ -763,7 +763,7 @@ async function handlePayRandom(
 
   console.log(`  🎲 Executing ${count} random payments (${minHops}-${maxHops} hops, ${minAmount}-${maxAmount} amount)`);
 
-  // Get all entities from server state (not just scenario context)
+  // Get all entities from runtime state (not just scenario context)
   const allEntityIds = Array.from(env.replicas.keys())
     .map(key => key.split(':')[0])
     .filter((id, idx, arr) => arr.indexOf(id) === idx); // unique
