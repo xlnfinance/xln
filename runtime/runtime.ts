@@ -1009,7 +1009,7 @@ export const createEmptyEnv = (): Env => {
 // Global cascade lock to prevent tick interleaving
 let cascading = false;
 
-export const process = async (env: Env, inputs?: EntityInput[], serverDelay = 0) => {
+export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
   // Cascade lock: prevent interleaving when delay > tick interval
   if (cascading) {
     console.warn('⏸️ SKIP-CASCADE: Previous cascade still running');
@@ -1060,9 +1060,9 @@ export const process = async (env: Env, inputs?: EntityInput[], serverDelay = 0)
       }
 
       // Visual delay between cascade iterations (AFTER processing, before next iteration)
-      if (outputs.length > 0 && serverDelay > 0) {
-        console.log(`⏱️ CASCADE-DELAY: Waiting ${serverDelay}ms before next iteration...`);
-        await sleep(serverDelay);
+      if (outputs.length > 0 && runtimeDelay > 0) {
+        console.log(`⏱️ CASCADE-DELAY: Waiting ${runtimeDelay}ms before next iteration...`);
+        await sleep(runtimeDelay);
       }
     }
 
