@@ -561,7 +561,7 @@ export const applyEntityInput = async (
     // Add any outputs generated during proposal to the outbox
     entityOutbox.push(...proposalOutputs);
 
-    // Proposer creates new timestamp for this frame (DETERMINISTIC: use server timestamp)
+    // Proposer creates new timestamp for this frame (DETERMINISTIC: use runtime timestamp)
     const newTimestamp = env.timestamp;
 
     // SECURITY: Validate timestamp

@@ -2,7 +2,7 @@
  * J-Machine Event Watcher
  *
  * First-principles design:
- * 1. Find all proposer replicas in server
+ * 1. Find all proposer replicas in runtime
  * 2. Sync each proposer from their last jBlock (not duplicate events)
  * 3. Feed new j-events to proposer replicas through runtime process()
  * 4. Simple single polling loop - no complex timers or historical sync

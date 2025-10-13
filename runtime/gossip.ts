@@ -1,7 +1,7 @@
 /**
  * Gossip Layer Implementation for XLN
  *
- * This module implements the gossip layer inside the server object.
+ * This module implements the gossip layer inside the runtime object.
  * It manages entity profiles and their capabilities in a distributed network.
  */
 

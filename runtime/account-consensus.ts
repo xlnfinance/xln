@@ -191,7 +191,7 @@ export async function proposeAccountFrame(
   // Create account frame matching the real AccountFrame interface
   const frameData = {
     height: accountMachine.currentHeight + 1,
-    timestamp: env.timestamp, // DETERMINISTIC: Copy from server machine
+    timestamp: env.timestamp, // DETERMINISTIC: Copy from runtime machine
     accountTxs: [...accountMachine.mempool],
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
     prevFrameHash: accountMachine.currentHeight === 0
