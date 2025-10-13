@@ -411,7 +411,7 @@
       class:collapsed={!historyExpanded}
       style="max-height: 50vh;"
     >
-      <TransactionHistory {replica} {tab} serverHistory={$history} currentTimeIndex={$currentTimeIndex} />
+      <TransactionHistory {replica} {tab} runtimeHistory={$history} currentTimeIndex={$currentTimeIndex} />
     </div>
   </div>
 

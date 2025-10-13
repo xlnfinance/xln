@@ -1,4 +1,4 @@
-// for regular use > bun run src/server.ts
+// for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
 // FORCE AUTO-REBUILD: Fixed signerId consistency and fintech type safety
@@ -191,7 +191,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
     }, 100); // Check every 100ms to process j-watcher events quickly
     
   } catch (error) {
-    logError("SERVER_TICK", '❌ Failed to start J-Event Watcher:', error);
+    logError("RUNTIME_TICK", '❌ Failed to start J-Event Watcher:', error);
   }
 };
 
@@ -247,7 +247,7 @@ const applyRuntimeInput = async (
       try {
         validateEntityInput(input);
       } catch (error) {
-        logError("SERVER_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid merged EntityInput[${i}]!`, {
+        logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid merged EntityInput[${i}]!`, {
           error: (error as Error).message,
           input
         });
@@ -324,8 +324,8 @@ const applyRuntimeInput = async (
         }
 
         if (typeof actualJBlock !== 'number') {
-          logError("SERVER_TICK", `💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
-          logError("SERVER_TICK", `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
+          logError("RUNTIME_TICK", `💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
+          logError("RUNTIME_TICK", `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
           // Force fix immediately
           if (createdReplica) {
             createdReplica.state.jBlock = 0;
@@ -350,7 +350,7 @@ const applyRuntimeInput = async (
           if (entityReplicaKeys.length > 0) {
             const firstReplicaKey = entityReplicaKeys[0];
             if (!firstReplicaKey) {
-              logError("SERVER_TICK", `❌ Invalid replica key for entity ${entityInput.entityId}`);
+              logError("RUNTIME_TICK", `❌ Invalid replica key for entity ${entityInput.entityId}`);
               continue;
             }
             const firstReplica = env.replicas.get(firstReplicaKey);
@@ -392,7 +392,7 @@ const applyRuntimeInput = async (
           try {
             validateEntityOutput(output);
           } catch (error) {
-            logError("SERVER_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
+            logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
               error: (error as Error).message,
               output
             });
@@ -461,7 +461,7 @@ const applyRuntimeInput = async (
       const oldReplicaKey = oldEntityKeys[0];
       const newReplicaKey = newEntityKeys[0];
       if (!oldReplicaKey || !newReplicaKey) {
-        logError("SERVER_TICK", `❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
+        logError("RUNTIME_TICK", `❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
         // Continue with empty outbox instead of crashing
       } else {
       // REPLICA-STRUCTURE logs removed - not consensus-critical
@@ -495,14 +495,14 @@ const applyRuntimeInput = async (
     // APPLY-SERVER-INPUT-FINAL-RETURN removed
     return { entityOutbox, mergedInputs };
   } catch (error) {
-    log.error(`❌ Error processing server input:`, error);
+    log.error(`❌ Error processing runtime input:`, error);
     return { entityOutbox: [], mergedInputs: [] };
   }
 };
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
-  console.log('🚀 SERVER.JS VERSION: 2025-10-05-16:45 - GRID POSITIONS + ACTIVITY HIGHLIGHTS');
+  console.log('🚀 RUNTIME.JS VERSION: 2025-10-05-16:45 - GRID POSITIONS + ACTIVITY HIGHLIGHTS');
 
   // Open database before any operations
   const dbReady = await tryOpenDb();
@@ -568,7 +568,7 @@ const main = async (): Promise<Env> => {
         snapshots.push(snapshot);
         console.log(`📦 Snapshot ${i}: loaded ${buffer.length} bytes`);
       } catch (error) {
-        logError("SERVER_TICK", `❌ Failed to load snapshot ${i}:`, error);
+        logError("RUNTIME_TICK", `❌ Failed to load snapshot ${i}:`, error);
         console.warn(`⚠️ Snapshot ${i} missing, continuing with available data...`);
       }
     }
@@ -612,7 +612,7 @@ const main = async (): Promise<Env> => {
           throw new Error('LEVEL_NOT_FOUND');
         }
       } catch (conversionError) {
-        logError("SERVER_TICK", '❌ Failed to convert replicas to Map:', conversionError);
+        logError("RUNTIME_TICK", '❌ Failed to convert replicas to Map:', conversionError);
         console.warn('⚠️ Falling back to fresh environment');
         throw new Error('LEVEL_NOT_FOUND');
       }
@@ -633,7 +633,7 @@ const main = async (): Promise<Env> => {
         history: snapshots, // Include the loaded history
         gossip: gossipLayer, // Use restored gossip layer
       };
-      console.log(`✅ History restored. Server is at height ${env.height} with ${env.history.length} snapshots.`);
+      console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
         height: env.height,
         replicaCount: env.replicas.size,
@@ -687,7 +687,7 @@ const main = async (): Promise<Env> => {
     console.log('🌐 Browser environment: Demos available via UI buttons, not auto-running');
   }
 
-  log.info(`🎯 Server startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
+  log.info(`🎯 Runtime startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
 
   // Debug final state before starting j-watcher
   if (isBrowser) {
@@ -737,12 +737,12 @@ const getCurrentHistoryIndex = () => (env.history || []).length - 1;
 
 // Server-specific clearDatabase that also resets history
 const clearDatabaseAndHistory = async () => {
-  console.log('🗑️ Clearing database and resetting server history...');
+  console.log('🗑️ Clearing database and resetting runtime history...');
 
   // Clear the Level database
   await clearDatabase(db);
 
-  // Reset the server environment to initial state (including history)
+  // Reset the runtime environment to initial state (including history)
   env = {
     replicas: new Map(),
     height: 0,
@@ -898,7 +898,7 @@ if (!isBrowser) {
       }
     })
     .catch(error => {
-      logError("SERVER_TICK", '❌ An error occurred during Node.js auto-execution:', error);
+      logError("RUNTIME_TICK", '❌ An error occurred during Node.js auto-execution:', error);
     });
 }
 
@@ -940,7 +940,7 @@ const verifyJurisdictionRegistrations = async () => {
 
       console.log('');
     } catch (error) {
-      logError("SERVER_TICK", `   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
+      logError("RUNTIME_TICK", `   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
       console.log('');
     }
   }
@@ -967,7 +967,7 @@ const demoCompleteHanko = async (): Promise<void> => {
     // await runCompleteHankoTests();
     console.log('✅ Complete Hanko tests skipped!');
   } catch (error) {
-    logError("SERVER_TICK", '❌ Complete Hanko tests failed:', error);
+    logError("RUNTIME_TICK", '❌ Complete Hanko tests failed:', error);
     throw error;
   }
 };
@@ -988,7 +988,7 @@ const runDemoWrapper = async (env: Env): Promise<Env> => {
 
     return result;
   } catch (error) {
-    logError("SERVER_TICK", '❌ XLN Demo failed:', error);
+    logError("RUNTIME_TICK", '❌ XLN Demo failed:', error);
     throw error;
   }
 };
@@ -1029,7 +1029,7 @@ export const process = async (env: Env, inputs?: EntityInput[], serverDelay = 0)
     try {
       validateEntityInput(o);
     } catch (error) {
-      logError("SERVER_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput detected!`, {
+      logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput detected!`, {
         error: (error as Error).message,
         entityId: o.entityId.slice(0,10),
         signerId: o.signerId,

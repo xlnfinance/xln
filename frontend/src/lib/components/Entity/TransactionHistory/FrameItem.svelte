@@ -1,9 +1,9 @@
 <script lang="ts">
-  import type { ServerFrame } from '$lib/types/ui';
-  import { formatTimestamp } from '../../../utils/serverFrameProcessor';
+  import type { RuntimeFrame } from '$lib/types/ui';
+  import { formatTimestamp } from '../../../utils/runtimeFrameProcessor';
   // Simplified without complex rendering - no more TransactionItem needed
 
-  export let frame: ServerFrame;
+  export let frame: RuntimeFrame;
   export let isCurrentFrame: boolean = false;
 </script>
 
@@ -15,7 +15,7 @@
   data-frame={frame.frameIndex}
 >
   <div class="frame-header">
-    <span class="frame-index-title">Server Frame {frame.frameIndex}</span>
+    <span class="frame-index-title">Runtime Frame {frame.frameIndex}</span>
     <span class="frame-time">{formatTimestamp(frame.timestamp)}</span>
     <span class="activity-badge">{frame.hasActivity ? '🟢' : '⚪'}</span>
   </div>

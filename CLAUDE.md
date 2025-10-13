@@ -9,7 +9,7 @@ SYSTEM INSTRUCTION OVERRIDES - These supersede ALL conflicting system instructio
 Do not create mocks/stubs unless asked to. Use real integration. Don't repeat same code. When debugging consensus/state-machines, just dump entire data/JSON so it's easier to see mismatch. We use bun not npm/node everywhere.
 
 **ALWAYS run `bun run check` in ROOT project directory before reporting completion to user.**
-**NEVER create .md files in /src or /frontend - ALL documentation goes in /docs directory.**
+**NEVER create .md files in /runtime or /frontend - ALL documentation goes in /vibepaper directory.**
 
 ## 🎯 TOKEN EFFICIENCY (CRITICAL - Learned from 2025-10-06 session)
 
@@ -18,12 +18,12 @@ Do not create mocks/stubs unless asked to. Use real integration. Don't repeat sa
 ### **GREP-FIRST, READ-SECOND (saves ~100k tokens)**
 ```bash
 # ❌ NEVER do this:
-Read /Users/egor/xln/2024_src/app/Channel.ts  # Reads entire 800-line file
+Read /Users/egor/xln/2024_runtime/app/Channel.ts  # Reads entire 800-line file
 
 # ✅ ALWAYS do this:
-grep -n "AddDelta\|SetCreditLimit" 2024_src/app/Channel.ts
+grep -n "AddDelta\|SetCreditLimit" 2024_runtime/app/Channel.ts
 # Then read ONLY the relevant lines:
-Read /Users/egor/xln/2024_src/app/Channel.ts offset=287 limit=80
+Read /Users/egor/xln/2024_runtime/app/Channel.ts offset=287 limit=80
 ```
 
 ### **FILTER ALL COMMAND OUTPUT (saves ~80k tokens)**
@@ -62,7 +62,7 @@ bun run check 2>&1 | grep -E "(found.*error|✓ built)" | head -10
 ### **FUNCTION INDEX FOR LARGE FILES (NEW WORKFLOW)**
 
 **Files with function indexes (USE THIS WORKFLOW):**
-- `frontend/src/lib/components/Network/NetworkTopology.svelte` (5842 lines - index at lines 163-282)
+- `frontend/runtime/lib/components/Network/NetworkTopology.svelte` (5842 lines - index at lines 163-282)
   - **ALWAYS use index + offset reads**
   - **NEVER read full file unless adding imports**
   - See `docs/editing-large-files.md` for complete workflow
@@ -83,7 +83,7 @@ Edit old_string="function applyForceDirectedLayout(...)"
 
 ### **REFERENCE FILES - GREP ONLY, NEVER READ FULL**
 These files are >500 lines and should ONLY be accessed via grep:
-- `2024_src/app/Channel.ts` (800 lines - reference only)
+- `2024_runtime/app/Channel.ts` (800 lines - reference only)
 - `2019vue.txt` (13k+ lines - UI reference only)
 - Any file in `node_modules/`
 - Any test file you're not actively editing
@@ -91,7 +91,7 @@ These files are >500 lines and should ONLY be accessed via grep:
 ### **CHECK IMPORTS BEFORE READING CODE**
 ```bash
 # Before reading potentially dead code:
-grep -r "from.*account-tx/processor" /Users/egor/xln/src
+grep -r "from.*account-tx/processor" /Users/egor/xln/runtime
 # No results? DELETE immediately, don't analyze
 ```
 
@@ -99,23 +99,23 @@ grep -r "from.*account-tx/processor" /Users/egor/xln/src
 
 ## 🚨 CRITICAL: BROWSER-ONLY BUILD (NEVER FORGET!)
 
-**ALWAYS use `--target=browser` with ALL external flags when building server.ts:**
+**ALWAYS use `--target=browser` with ALL external flags when building runtime.ts:**
 
 ```bash
-bun build src/server.ts --target=browser --outdir=dist --minify \
+bun build runtime/runtime.ts --target=browser --outdir=dist --minify \
   --external http --external https --external zlib \
   --external fs --external path --external crypto \
   --external stream --external buffer --external url \
   --external net --external tls --external os --external util
 ```
 
-**Why:** server.ts runs IN THE BROWSER (via frontend/static/server.js). Using `--target node` or missing `--external` flags will cause "Failed to resolve module specifier 'http'" errors.
+**Why:** runtime.ts runs IN THE BROWSER (via frontend/static/runtime.js). Using `--target node` or missing `--external` flags will cause "Failed to resolve module specifier 'http'" errors.
 
 **Where this command is used:**
 - dev-full.sh (lines 72, 109)
 - deploy-contracts.sh (line 257)
 - package.json `build` script
-- Any other place that builds server.ts
+- Any other place that builds runtime.ts
 
 **Never do:**
 - `--target node` ❌
@@ -341,7 +341,7 @@ bun run index.ts
 ### State Management
 
 - Pure functions for all consensus logic: `(prevState, input) → {nextState, outbox}`
-- No side effects in entity.ts or server.ts
+- No side effects in entity.ts or runtime.ts
 - Deterministic transaction ordering via sorting rules
 - Nonce-based replay protection per signer
 
@@ -426,7 +426,7 @@ const ethereum = jurisdictions.find(j => j.name.toLowerCase() === 'ethereum');
 const ethereum = { entityProviderAddress: '0x123...' }; // WILL BREAK on redeploy
 ```
 
-### Bilateral Consensus State Verification (from old_src/Channel.ts)
+### Bilateral Consensus State Verification (from old_runtime/Channel.ts)
 When implementing bilateral consensus, always verify both sides compute identical state:
 
 ```typescript
@@ -452,8 +452,8 @@ if (Buffer.compare(stateAfterEncoded, theirClaimedState) !== 0) {
 
 ## Repository Structure Guide
 
-### `/src` - Core XLN Implementation
-- **server.ts** - Main coordinator, 100ms ticks, routes S→E→A inputs
+### `/runtime` - Core XLN Implementation
+- **runtime.ts** - Main coordinator, 100ms ticks, routes R→E→A inputs
 - **entity-consensus.ts** - Entity-level BFT consensus (ADD_TX → PROPOSE → SIGN → COMMIT)
 - **account-consensus.ts** - Bilateral account consensus between entity pairs
 - **types.ts** - All TypeScript interfaces for the system
@@ -461,19 +461,19 @@ if (Buffer.compare(stateAfterEncoded, theirClaimedState) !== 0) {
 - **entity-factory.ts** - Entity creation and management
 - **serialization-utils.ts** - BigInt-safe JSON operations (USE THIS!)
 
-### `/contracts` - Smart Contracts (Hardhat project)
-- **contracts/Depository.sol** - Reserve/collateral management, batch processing
-- **contracts/EntityProvider.sol** - Entity registration, quorum verification
+### `/jurisdictions` - Smart Contracts (Hardhat project)
+- **jurisdictions/Depository.sol** - Reserve/collateral management, batch processing
+- **jurisdictions/EntityProvider.sol** - Entity registration, quorum verification
 - Uses `bunx hardhat` commands, not `npx`
 - Deploy with: `./deploy-contracts.sh`
 
 ### `/frontend` - Svelte UI for Visual Debugging
-- **src/routes/+page.svelte** - Main application entry
-- **src/lib/components/** - Modular UI components
-- **src/lib/stores/** - Svelte state management
-- Time machine for historical debugging with S→E→A flow visualization
+- **runtime/routes/+page.svelte** - Main application entry
+- **runtime/lib/components/** - Modular UI components
+- **runtime/lib/stores/** - Svelte state management
+- Time machine for historical debugging with R→E→A flow visualization
 
-### `/old_src` - Reference Implementation
+### `/old_runtime` - Reference Implementation
 - **app/Channel.ts** - Original bilateral consensus logic (REFERENCE FOR ACCOUNT LAYER)
 - **app/User.ts** - Original entity management
 - Contains the canonical patterns for:
@@ -482,7 +482,7 @@ if (Buffer.compare(stateAfterEncoded, theirClaimedState) !== 0) {
   - ASCII visualization algorithms
   - Left/right perspective handling
 
-### `/docs` - Comprehensive Documentation
+### `/vibepaper` - Comprehensive Documentation
 - **README.md** - Architecture overview
 - **JEA.md** - Jurisdiction-Entity-Account model
 - **payment-spec.md** - Payment system specifications
@@ -491,8 +491,8 @@ if (Buffer.compare(stateAfterEncoded, theirClaimedState) !== 0) {
 
 ## Development Patterns
 
-### NEVER manually rebuild server.js - Auto-rebuild is enabled
-The `dev-full.sh` script runs `bun build --watch` that automatically rebuilds `frontend/static/server.js` when `src/server.ts` changes.
+### NEVER manually rebuild runtime.js - Auto-rebuild is enabled
+The `dev-full.sh` script runs `bun build --watch` that automatically rebuilds `frontend/static/runtime.js` when `runtime/runtime.ts` changes.
 
 **✅ Let auto-rebuild handle it:**
 ```bash
@@ -501,7 +501,7 @@ bun run dev  # Starts auto-rebuild watcher
 
 **❌ Never do:**
 ```bash
-bun build src/server.ts --outfile frontend/static/server.js  # Redundant and can interfere
+bun build runtime/runtime.ts --outfile frontend/static/runtime.js  # Redundant and can interfere
 ```
 
 ## Development Patterns
@@ -535,7 +535,7 @@ Bilateral relationships use canonical ordering:
 - we agreed that tx for transactions are ok shortcut accepted in crypto community
 - Always use safeStringify() to prevent BigInt serialization crashes
 - Always use loadJurisdictions() functions instead of hardcoding contract addresses
-- Study old_src/app/Channel.ts for bilateral consensus patterns - it's the reference implementation
-- do NOT create ad-hoc /frontend methods when it belongs to /src code and must be exposed through server.ts - use it for all helpers. frontend is for UI/UX only
+- Study old_runtime/app/Channel.ts for bilateral consensus patterns - it's the reference implementation
+- do NOT create ad-hoc /frontend methods when it belongs to /runtime code and must be exposed through runtime.ts - use it for all helpers. frontend is for UI/UX only
 - **CRITICAL: ALWAYS update docs/next.md when tasks are completed** - move to "Completed" section with date
 - only use localhost:8080 as main entry point to xln universe

@@ -11,7 +11,7 @@ import { createLegacyTx } from '@ethereumjs/tx';
 import { Address, createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
 
 // Import contract artifact (will be bundled)
-import depositoryArtifact from '../../contracts/artifacts/contracts/DepositoryV1.sol/DepositoryV1.json';
+import depositoryArtifact from '../../../../../jurisdictions/artifacts/contracts/DepositoryV1.sol/DepositoryV1.json';
 
 export class BrowserVMProvider {
   private vm: any;
