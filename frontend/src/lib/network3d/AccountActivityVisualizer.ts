@@ -36,14 +36,14 @@ export class AccountActivityVisualizer {
    * Process server frame and create lightning effects
    */
   processFrame(
-    serverFrame: any,
+    runtimeFrame: any,
     entityMeshMap: Map<string, THREE.Object3D | undefined>
   ) {
     // Clear previous frame effects
     this.clearAll();
 
     // Extract account activity from server frame
-    const activities = this.extractAccountActivity(serverFrame);
+    const activities = this.extractAccountActivity(runtimeFrame);
 
     // Create effects for each active entity
     const now = Date.now();
@@ -88,14 +88,14 @@ export class AccountActivityVisualizer {
   }
 
   /**
-   * Extract account activity from ServerFrame
+   * Extract account activity from RuntimeFrame
    */
-  private extractAccountActivity(serverFrame: any): AccountActivity[] {
+  private extractAccountActivity(runtimeFrame: any): AccountActivity[] {
     const activityMap = new Map<string, AccountActivity>();
 
-    if (!serverFrame?.entityInputs) return [];
+    if (!runtimeFrame?.entityInputs) return [];
 
-    for (const entityInput of serverFrame.entityInputs) {
+    for (const entityInput of runtimeFrame.entityInputs) {
       const { entityTxs } = entityInput;
       if (!entityTxs) continue;
 

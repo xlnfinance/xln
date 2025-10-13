@@ -1,18 +1,18 @@
 <script lang="ts">
   import type { EntityReplica, Tab, Snapshot } from '$lib/types/ui';
-  import { getServerFrames } from '../../../utils/serverFrameProcessor';
+  import { getRuntimeFrames } from '../../../utils/runtimeFrameProcessor';
   import FrameItem from './FrameItem.svelte';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
-  export let serverHistory: Snapshot[] = [];
+  export let runtimeHistory: Snapshot[] = [];
   export let currentTimeIndex: number | undefined = undefined;
 
 
   // Debug reactive statements
   $: {
     console.log(`📊 [TransactionHistory] Props updated:`, {
-      serverHistoryLength: serverHistory?.length || 0,
+      runtimeHistoryLength: runtimeHistory?.length || 0,
       replicaExists: !!replica,
       replicaDetails: replica ? { signerId: replica.signerId, entityId: replica.entityId } : null,
       currentTimeIndex,
@@ -20,17 +20,17 @@
     });
   }
 
-  $: serverFrames = getServerFrames(serverHistory, replica);
+  $: runtimeFrames = getRuntimeFrames(runtimeHistory, replica);
 
   $: {
     console.log(`📊 [TransactionHistory] Server frames computed:`, {
-      totalFrames: serverFrames.length,
-      framesWithActivity: serverFrames.filter((f) => f.hasActivity).length,
-      frameIndexes: serverFrames.map((f) => f.frameIndex),
+      totalFrames: runtimeFrames.length,
+      framesWithActivity: runtimeFrames.filter((f) => f.hasActivity).length,
+      frameIndexes: runtimeFrames.map((f) => f.frameIndex),
     });
   }
 
-  $: activeFrameCount = serverFrames.filter((f) => f.hasActivity).length;
+  $: activeFrameCount = runtimeFrames.filter((f) => f.hasActivity).length;
 
   // REMOVED: Auto-focus functionality to prevent unwanted scrolling/focus jumps
   // Users can manually scroll to see frames they're interested in
@@ -38,16 +38,16 @@
 </script>
 
 <div class="scrollable-component transaction-history">
-  {#if serverFrames.length > 0}
+  {#if runtimeFrames.length > 0}
     <div class="history-summary">
-      Found {activeFrameCount} frames with activity out of {serverFrames.length} total
+      Found {activeFrameCount} frames with activity out of {runtimeFrames.length} total
     </div>
-    {#each serverFrames.slice().reverse() as frame (frame.frameIndex)}
+    {#each runtimeFrames.slice().reverse() as frame (frame.frameIndex)}
       {@const isCurrentFrame = currentTimeIndex !== undefined && frame.frameIndex === currentTimeIndex}
       <FrameItem {frame} {isCurrentFrame} />
     {/each}
   {:else}
-    <div class="empty-state">- no server history available</div>
+    <div class="empty-state">- no runtime history available</div>
   {/if}
 </div>
 

@@ -1,12 +1,12 @@
-import type { Snapshot, EntityReplica, ServerFrame, RuntimeTx, EntityInput } from '$lib/types/ui';
+import type { Snapshot, EntityReplica, RuntimeFrame, RuntimeTx, EntityInput } from '$lib/types/ui';
 
 export function formatTimestamp(timestamp: number): string {
   const date = new Date(timestamp);
   return date.toLocaleTimeString();
 }
 
-export function getServerFrames(history: Snapshot[], replica: EntityReplica | null): ServerFrame[] {
-  console.log(`🔍 [ServerFrameProcessor] getServerFrames called:`, {
+export function getRuntimeFrames(history: Snapshot[], replica: EntityReplica | null): RuntimeFrame[] {
+  console.log(`🔍 [RuntimeFrameProcessor] getRuntimeFrames called:`, {
     historyLength: history?.length || 0,
     historyExists: !!history,
     replicaExists: !!replica,
@@ -14,7 +14,7 @@ export function getServerFrames(history: Snapshot[], replica: EntityReplica | nu
   });
 
   if (!history || history.length === 0) {
-    console.log(`❌ [ServerFrameProcessor] No server history available:`, { 
+    console.log(`❌ [RuntimeFrameProcessor] No server history available:`, { 
       history, 
       historyLength: history?.length 
     });
@@ -22,16 +22,16 @@ export function getServerFrames(history: Snapshot[], replica: EntityReplica | nu
   }
 
   if (!replica) {
-    console.log(`❌ [ServerFrameProcessor] No replica provided`);
+    console.log(`❌ [RuntimeFrameProcessor] No replica provided`);
     return [];
   }
 
   console.log(
-    `🗂️ [ServerFrameProcessor] Processing history for replica ${replica.signerId}:${replica.entityId}, total frames: ${history.length}`,
+    `🗂️ [RuntimeFrameProcessor] Processing history for replica ${replica.signerId}:${replica.entityId}, total frames: ${history.length}`,
   );
   
   console.log(
-    `🗂️ [ServerFrameProcessor] First few snapshots:`,
+    `🗂️ [RuntimeFrameProcessor] First few snapshots:`,
     history.slice(0, 3).map((s, i) => ({
       frame: i,
       keys: Object.keys(s),

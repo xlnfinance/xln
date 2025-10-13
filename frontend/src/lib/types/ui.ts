@@ -110,7 +110,7 @@ export interface EntityInfo {
 }
 
 // Server frame wrapper for transaction history UI
-export interface ServerFrame {
+export interface RuntimeFrame {
   frameIndex: number;
   snapshot: EnvSnapshot;
   inputs: EntityInput[];

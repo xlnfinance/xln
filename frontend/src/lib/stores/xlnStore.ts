@@ -2,7 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 
-// Direct import of XLN server module (no wrapper boilerplate needed)
+// Direct import of XLN runtime module (no wrapper boilerplate needed)
 let XLN: any = null;
 
 async function getXLN() {
@@ -23,13 +23,13 @@ async function getXLN() {
  */
 function exposeGlobalDebugObjects() {
   if (typeof window !== 'undefined' && XLN) {
-    // @ts-ignore - Expose XLN server instance
+    // @ts-ignore - Expose XLN runtime instance
     window.XLN = XLN;
 
     // @ts-ignore - Expose environment directly (avoid naming conflicts)
     window.xlnEnv = xlnEnvironment;
 
-    // @ts-ignore - Expose error logger for server-side logging
+    // @ts-ignore - Expose error logger for runtime logging
     window.xlnErrorLog = (message: string, source: string, details?: any) => {
       errorLog.log(message, source, details);
     };
