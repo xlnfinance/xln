@@ -1,8 +1,8 @@
 /**
  * Deterministic Random Number Generator
  *
- * All random operations inside server frames must be deterministic for consensus.
- * This RNG is seeded from server state (height + timestamp) to ensure all replicas
+ * All random operations inside runtime frames must be deterministic for consensus.
+ * This RNG is seeded from runtime state (height + timestamp) to ensure all replicas
  * generate identical "random" values.
  *
  * Pattern: Seed from brainvault or static seed for reproducibility
@@ -22,10 +22,10 @@ interface RNGState {
 const STATIC_SEED = 'xln-deterministic-seed-2025';
 
 /**
- * Initialize RNG from server state
+ * Initialize RNG from runtime state
  */
 export function initRNG(env: Env): RNGState {
-  // Derive seed from server state (height + timestamp for uniqueness per frame)
+  // Derive seed from runtime state (height + timestamp for uniqueness per frame)
   // In production, this should come from brainvault or entity consensus
   const seedContent = `${STATIC_SEED}-${env.height}-${env.timestamp}`;
 

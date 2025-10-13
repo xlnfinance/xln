@@ -703,14 +703,14 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
       console.log('✅ Loaded jurisdictions from centralized loader (cached)');
     } else {
-      // Browser environment - fetch from server (use relative path for GitHub Pages compatibility)
+      // Browser environment - fetch from runtime (use relative path for GitHub Pages compatibility)
       const response = await fetch('./jurisdictions.json');
       if (!response.ok) {
         throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
       }
       config = await response.json();
       console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
-      console.log('✅ Loaded jurisdictions from server');
+      console.log('✅ Loaded jurisdictions from runtime');
     }
 
     const jurisdictionData = config.jurisdictions;
