@@ -63,7 +63,7 @@ export interface ThemeColors {
 export interface Settings {
   theme: ThemeName;
   dropdownMode: 'signer-first' | 'entity-first';
-  serverDelay: number;
+  runtimeDelay: number;
   portfolioScale: number;
   componentStates: ComponentState;
 }

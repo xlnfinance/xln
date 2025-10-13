@@ -148,10 +148,10 @@ export function getEnv() {
   return get(xlnEnvironment);
 }
 
-// Wrapper for process() that auto-injects serverDelay from settings
+// Wrapper for process() that auto-injects runtimeDelay from settings
 export async function processWithDelay(env: any, inputs?: any[]) {
   const xln = await getXLN();
-  const delay = get(settings).serverDelay;
+  const delay = get(settings).runtimeDelay;
   return await xln.process(env, inputs, delay);
 }
 

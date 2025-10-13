@@ -585,14 +585,14 @@
       <h2>Developer Tools</h2>
 
       <div class="preference-item">
-        <label for="serverDelaySlider">Server Processing Delay: {$settings.serverDelay}ms</label>
+        <label for="runtimeDelaySlider">Server Processing Delay: {$settings.runtimeDelay}ms</label>
         <input
           type="range"
-          id="serverDelaySlider"
+          id="runtimeDelaySlider"
           min="0"
           max="1000"
           step="50"
-          value={$settings.serverDelay}
+          value={$settings.runtimeDelay}
           on:input={handleServerDelayChange}
           class="settings-slider"
         />
