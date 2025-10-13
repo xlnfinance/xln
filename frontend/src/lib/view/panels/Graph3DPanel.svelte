@@ -33,8 +33,8 @@
   export let isolatedEnv: any = null;  // If provided, use this env instead of global store
   export let isolatedHistory: any[] = [];  // History for isolated env
 
-  // Reactive env - use isolated or fall back to global store
-  $: env = isolatedEnv || $xlnEnvironment;
+  // Reactive env - use isolated (if provided) or fall back to global store
+  $: env = (isolatedEnv ? $isolatedEnv : null) || $xlnEnvironment;
 
   // OrbitControls import (will be loaded dynamically)
   let OrbitControls: any;
@@ -105,7 +105,7 @@
   let container: HTMLDivElement;
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
-  let renderer: THREE.WebGLRenderer | THREE.WebGPURenderer;
+  let renderer: THREE.WebGLRenderer;
   let controls: any;
   let raycaster: THREE.Raycaster;
   let mouse: THREE.Vector2;
@@ -638,8 +638,9 @@
       throw new Error(`FINTECH-SAFETY: Failed to initialize 3D topology: ${error.message}`);
     });
 
-    // Listen for data changes (both live and time machine)
-    const unsubscribe1 = xlnEnvironment.subscribe(updateNetworkData);
+    // Listen for data changes (isolated env if provided, otherwise global)
+    const envStore = isolatedEnv || xlnEnvironment;
+    const unsubscribe1 = envStore.subscribe(updateNetworkData);
     const unsubscribe2 = visibleReplicas.subscribe(updateNetworkData);
     const unsubscribe3 = visibleGossip.subscribe(updateNetworkData);
 
@@ -1023,16 +1024,22 @@
 
     const timeIndex = $currentTimeIndex;
 
-
     // Update available tokens
     updateAvailableTokens();
 
-    // Use time-aware data sources
+    // Use time-aware data sources (isolated env if provided, otherwise global)
     let entityData: any[] = [];
-    let currentReplicas = $visibleReplicas;
+    let currentReplicas = $isolatedEnv?.replicas || $visibleReplicas;
+
+    console.log('[Graph3D] Replicas check:', {
+      hasIsolatedEnv: !!isolatedEnv,
+      isolatedEnvValue: $isolatedEnv,
+      replicasSize: currentReplicas?.size || 0,
+      source: currentReplicas === $visibleReplicas ? 'global' : 'isolated'
+    });
 
     // Always use replicas (ground truth)
-    if (currentReplicas.size > 0) {
+    if (currentReplicas && currentReplicas.size > 0) {
       const replicaEntries = Array.from(currentReplicas.entries());
 
       // Extract unique entity IDs from replica keys with fail-fast validation

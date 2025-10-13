@@ -68,10 +68,18 @@ export function createGossipLayer(): GossipLayer {
     return Array.from(profiles.values());
   };
 
+  const getNetworkGraph = (): Map<string, Set<string>> => {
+    // Build adjacency graph from gossip profiles
+    // For lazy mode: return empty graph (all entities are islands)
+    // For full mode: would parse accounts from replicas
+    return new Map();
+  };
+
   return {
     profiles,
     announce,
     getProfiles,
+    getNetworkGraph,
   };
 }
 

@@ -21,8 +21,8 @@ Core:
 
 Dev:
   bootstrap.sh          One-command setup
-  WORKFLOW.md           Daily commands
-  CLAUDE.md             AI instructions
+  workflow.md           Daily commands
+  claude.md             AI instructions
   .archive/             Old implementations (never deleted)
 
 ---
@@ -157,14 +157,14 @@ bun test-ethereumjs-vm.ts
 
 ### Forever (vibepaper/)
 - `xlnview.md` - Panel architecture + BrowserVM integration
-- `JEA.md` - Jurisdiction-Entity-Account model
+- `jea.md` - Jurisdiction-Entity-Account model
 - `governance-architecture.md` - Multi-sig voting system
 - `sessions/` - Technical deep-dives
 
 ### Disposable (Root .md)
-- `WORKFLOW.md` - Daily dev commands
-- `RESTRUCTURE.md` - Migration notes (Oct 2025 - delete later)
-- `CLAUDE.md` - AI assistant instructions
+- `workflow.md` - Daily dev commands
+- `restructure.md` - Migration notes (Oct 2025 - delete later)
+- `claude.md` - AI assistant instructions
 
 ---
 
@@ -219,10 +219,10 @@ bun test-ethereumjs-vm.ts
 ## 📖 Learn More
 
 **Start here:**
-1. `WORKFLOW.md` - Daily dev commands
+1. `workflow.md` - Daily dev commands
 2. `/vibepaper/xlnview.md` - Panel architecture + BrowserVM
-3. `/vibepaper/JEA.md` - Jurisdiction-Entity-Account model
-4. `/simnet/README.md` - Offline blockchain setup
+3. `/vibepaper/jea.md` - Jurisdiction-Entity-Account model
+4. `/simnet/readme.md` - Offline blockchain setup
 
 **For deep dives:** `/vibepaper/sessions/`
 

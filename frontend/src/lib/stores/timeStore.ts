@@ -139,100 +139,72 @@ const timeOperations = {
   },
 
   // Go to specific time index
-  goToTimeIndex(index: number) {
+  goToTimeIndex: (index: number) => {
     const $timeState = get(timeState);
     const clampedIndex = Math.max(-1, Math.min(index, $timeState.maxTimeIndex));
-    
+
     const newState = {
       currentTimeIndex: clampedIndex,
       maxTimeIndex: $timeState.maxTimeIndex,
       isLive: clampedIndex === -1
     };
-    
+
     timeState.set(newState);
-    
+
     // Persist to localStorage
-    this.saveTimeState(newState);
-    
+    timeOperations.saveTimeState(newState);
+
     console.log('🕰️ Time machine moved to index:', clampedIndex);
-    
+
     // Trigger entity panel updates like old index.html
-    this.triggerEntityPanelUpdates();
+    timeOperations.triggerEntityPanelUpdates();
   },
 
   // Go to live (current time)
-  goToLive() {
-    this.goToTimeIndex(-1);
+  goToLive: () => {
+    timeOperations.goToTimeIndex(-1);
   },
 
   // Go to history start
-  goToHistoryStart() {
-    this.goToTimeIndex(0);
+  goToHistoryStart: () => {
+    timeOperations.goToTimeIndex(0);
   },
 
   // Go to history end (most recent snapshot)
-  goToHistoryEnd() {
+  goToHistoryEnd: () => {
     const $timeState = get(timeState);
-    this.goToTimeIndex($timeState.maxTimeIndex);
+    timeOperations.goToTimeIndex($timeState.maxTimeIndex);
   },
 
   // Step backward in time
-  stepBackward() {
+  stepBackward: () => {
     const $timeState = get(timeState);
     const $history = get(history);
 
-    // Calculate the current actual maxTimeIndex from history length
     const actualMaxIndex = Math.max(0, $history.length - 1);
 
-    console.log('🕰️ stepBackward() called:', {
-      isLive: $timeState.isLive,
-      currentTimeIndex: $timeState.currentTimeIndex,
-      storedMaxTimeIndex: $timeState.maxTimeIndex,
-      actualMaxIndex: actualMaxIndex,
-      historyLength: $history.length
-    });
-
     if ($timeState.isLive) {
-      // Currently at live, go to most recent snapshot using ACTUAL max index
-      console.log('🕰️ Going from LIVE to most recent snapshot:', actualMaxIndex);
-      this.goToTimeIndex(actualMaxIndex);
+      timeOperations.goToTimeIndex(actualMaxIndex);
     } else {
-      // Go one step back, but not below 0
       const targetIndex = Math.max(0, $timeState.currentTimeIndex - 1);
-      console.log('🕰️ Going one step back to:', targetIndex);
-      this.goToTimeIndex(targetIndex);
+      timeOperations.goToTimeIndex(targetIndex);
     }
   },
 
   // Step forward in time
-  stepForward() {
+  stepForward: () => {
     const $timeState = get(timeState);
     const $history = get(history);
 
-    // Calculate the current actual maxTimeIndex from history length
     const actualMaxIndex = Math.max(0, $history.length - 1);
 
-    console.log('🕰️ stepForward() called:', {
-      isLive: $timeState.isLive,
-      currentTimeIndex: $timeState.currentTimeIndex,
-      storedMaxTimeIndex: $timeState.maxTimeIndex,
-      actualMaxIndex: actualMaxIndex,
-      historyLength: $history.length
-    });
-
     if ($timeState.isLive) {
-      // Already at live, can't go further
-      console.log('🕰️ Already at LIVE, cannot step forward');
       return;
     } else if ($timeState.currentTimeIndex < actualMaxIndex) {
-      // Normal forward step using actual max index
       const targetIndex = $timeState.currentTimeIndex + 1;
-      console.log('🕰️ Going one step forward to:', targetIndex);
-      this.goToTimeIndex(targetIndex);
+      timeOperations.goToTimeIndex(targetIndex);
     } else {
-      // At last snapshot, go to live
-      console.log('🕰️ At last snapshot, going to LIVE');
-      this.goToLive();
+      timeOperations.goToLive();
     }
   },
 
@@ -265,7 +237,7 @@ const timeOperations = {
         totalFrames: $history.length
       };
     } else {
-      const snapshot = this.getCurrentSnapshot();
+      const snapshot = timeOperations.getCurrentSnapshot();
       return {
         status: 'HISTORICAL',
         description: snapshot?.description || 'Historical snapshot',
@@ -298,13 +270,13 @@ const timeOperations = {
       if (!hasInitialized && $history.length > 0) {
         console.log('🕰️ SEQUENTIAL-LOAD: First-time initialization with populated history');
         hasInitialized = true;
-        this.updateMaxTimeIndex();
+        timeOperations.updateMaxTimeIndex();
       } else if (hasInitialized) {
         // Normal operation after initialization
         const currentState = get(timeState);
         if (currentState.isLive) {
           // Only update max index when in live mode to prevent time machine corruption
-          this.updateMaxTimeIndex();
+          timeOperations.updateMaxTimeIndex();
         } else {
           console.log(`🕰️ TIME-MACHINE: Ignoring history update while in historical mode (index: ${currentState.currentTimeIndex})`);
         }

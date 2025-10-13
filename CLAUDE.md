@@ -1,4 +1,4 @@
-# CLAUDE.md
+# claude.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -483,8 +483,8 @@ if (Buffer.compare(stateAfterEncoded, theirClaimedState) !== 0) {
   - Left/right perspective handling
 
 ### `/vibepaper` - Comprehensive Documentation
-- **README.md** - Architecture overview
-- **JEA.md** - Jurisdiction-Entity-Account model
+- **readme.md** - Architecture overview
+- **jea.md** - Jurisdiction-Entity-Account model
 - **payment-spec.md** - Payment system specifications
 - **sessions/** - Detailed technical discussions
 - **philosophy/** - Core paradigm explanations
@@ -537,5 +537,7 @@ Bilateral relationships use canonical ordering:
 - Always use loadJurisdictions() functions instead of hardcoding contract addresses
 - Study old_runtime/app/Channel.ts for bilateral consensus patterns - it's the reference implementation
 - do NOT create ad-hoc /frontend methods when it belongs to /runtime code and must be exposed through runtime.ts - use it for all helpers. frontend is for UI/UX only
-- **CRITICAL: ALWAYS update docs/next.md when tasks are completed** - move to "Completed" section with date
+- **CRITICAL: ALWAYS update next.md when tasks are completed** - move to "Completed" section with date
 - only use localhost:8080 as main entry point to xln universe
+- **ALL .md files use lowercase** - no capitals (next.md, readme.md, changelog.md, etc.)
+- **ALWAYS verify with Playwright + console errors before reporting completion** - never ask user to test

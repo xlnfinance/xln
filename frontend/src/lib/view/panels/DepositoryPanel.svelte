@@ -17,11 +17,12 @@
   let loading = true;
   let error: string | null = null;
 
-  // Sample entities to query (in production, get from xlnStore)
+  // Grid-2 entities (matches ArchitectPanel scenario)
   const ENTITIES = [
     '0x0000000000000000000000000000000000000000000000000000000000000001',
     '0x0000000000000000000000000000000000000000000000000000000000000002',
     '0x0000000000000000000000000000000000000000000000000000000000000003',
+    '0x0000000000000000000000000000000000000000000000000000000000000004',
     '0x0000000000000000000000000000000000000000000000000000000000000005',
   ];
 
@@ -40,11 +41,18 @@
     try {
       const tokensLength = await browserVMProvider.getTokensLength();
 
+      // Clear old data
+      reserves.clear();
+
       for (const entityId of ENTITIES) {
         const entityReserves = new Map();
 
-        for (let tokenId = 1; tokenId < tokensLength; tokenId++) {
+        // Check token 1-2 (USDC, ETH)
+        const maxTokenId = Math.max(tokensLength, 2);
+
+        for (let tokenId = 1; tokenId <= maxTokenId; tokenId++) {
           const balance = await browserVMProvider.getReserves(entityId, tokenId);
+
           if (balance > 0n) {
             entityReserves.set(tokenId, balance);
           }
@@ -57,17 +65,24 @@
 
       reserves = reserves; // Trigger reactivity
     } catch (err: any) {
+      console.error('[Depository] Refresh failed:', err);
       error = `Query failed: ${err.message}`;
     }
   }
 
   // Listen for entity selection from other panels
-  const unsubscribe = panelBridge.on('entity:selected', ({ entityId }) => {
+  const unsubscribeSelection = panelBridge.on('entity:selected', ({ entityId }) => {
     selectedEntityId = entityId;
   });
 
+  // Listen for reserve updates from Architect panel
+  const unsubscribeReserves = panelBridge.on('reserves:updated', () => {
+    refreshReserves();
+  });
+
   onDestroy(() => {
-    unsubscribe();
+    unsubscribeSelection();
+    unsubscribeReserves();
   });
 
   function formatBalance(balance: bigint): string {

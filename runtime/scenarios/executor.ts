@@ -180,7 +180,7 @@ async function executeAction(
       break;
 
     default:
-      console.warn(`⚠️  Unknown action type: ${type}`);
+      throw new Error(`❌ SCENARIO ERROR: Unknown action type "${type}" - check scenario syntax`);
   }
 }
 

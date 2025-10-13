@@ -26,7 +26,10 @@
 	},
 	"dependencies": {
 		"@types/three": "^0.180.0",
+		"dockview": "^4.9.0",
 		"lucide-svelte": "^0.544.0",
+		"react": "^19.2.0",
+		"react-dom": "^19.2.0",
 		"three": "^0.180.0"
 	}
 }

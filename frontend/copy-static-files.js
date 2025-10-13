@@ -5,7 +5,8 @@ import { join, resolve } from 'path';
 // Copy necessary files to static folder before build
 // Note: server.js is built directly to static/ now (no copy needed)
 const files = [
-  { src: '../jurisdictions.json', dest: 'static/jurisdictions.json' }
+  { src: '../jurisdictions.json', dest: 'static/jurisdictions.json' },
+  { src: '../jurisdictions/artifacts/contracts/DepositoryV1.sol/DepositoryV1.json', dest: 'static/contracts/DepositoryV1.json' }
 ];
 
 for (const file of files) {
@@ -13,6 +14,10 @@ for (const file of files) {
   const destPath = resolve(file.dest);
 
   if (existsSync(srcPath)) {
+    // Create directory if needed
+    const destDir = destPath.substring(0, destPath.lastIndexOf('/'));
+    mkdirSync(destDir, { recursive: true });
+
     copyFileSync(srcPath, destPath);
     console.log(`✅ Copied ${file.src} → ${file.dest}`);
   } else {
