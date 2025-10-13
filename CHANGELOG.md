@@ -55,11 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests: All smoke tests passing
 
 ### Documentation
-- README.md - Updated with new structure + roadmap
+- readme.md - Updated with new structure + roadmap
 - /vibepaper/xlnview.md - Panel architecture spec
-- /simnet/README.md - BrowserVM setup guide
-- /proofs/README.md - Test strategy
-- RESTRUCTURE.md - Migration notes
+- /simnet/readme.md - BrowserVM setup guide
+- /proofs/readme.md - Test strategy
+- restructure.md - Migration notes
 
 ---
 

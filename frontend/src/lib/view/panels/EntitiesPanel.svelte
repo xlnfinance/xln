@@ -7,7 +7,9 @@
    */
 
   import { panelBridge } from '../utils/panelBridge';
-  import { xlnEnvironment } from '$lib/stores/xlnStore';
+
+  // Receive isolated env as prop (passed from View.svelte)
+  export let isolatedEnv: any;
 
   let selectedEntityId: string | null = null;
 
@@ -16,7 +18,7 @@
     selectedEntityId = entityId;
   });
 
-  $: entities = $xlnEnvironment?.entities || [];
+  $: entities = $isolatedEnv?.entities || [];
 </script>
 
 <div class="entities-panel">

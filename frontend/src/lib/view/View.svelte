@@ -7,12 +7,14 @@
    * Copyright (C) 2025 XLN Finance
    */
 
-  import { onMount } from 'svelte';
+  import { onMount, mount } from 'svelte';
+  import { writable } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
   import EntitiesPanel from './panels/EntitiesPanel.svelte';
   import DepositoryPanel from './panels/DepositoryPanel.svelte';
   import ArchitectPanel from './panels/ArchitectPanel.svelte';
+  import TimeMachine from './core/TimeMachine.svelte';
   import 'dockview/dist/styles/dockview.css';
 
   export let layout: string = 'default';
@@ -21,7 +23,34 @@
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
 
-  onMount(() => {
+  // TimeMachine draggable state
+  let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
+  let collapsed = false;
+
+  // Isolated XLN environment for this View instance (passed to panels as props)
+  const localEnvStore = writable<any>(null);
+  const localHistoryStore = writable<any[]>([]);
+
+  onMount(async () => {
+    console.log('[View] onMount started - initializing isolated XLN');
+
+    // Initialize isolated XLN runtime (simnet - no jurisdictions needed)
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Create empty environment (simnet mode - no blockchain)
+      const env = XLN.createEmptyEnv();
+
+      // Set to store
+      localEnvStore.set(env);
+      localHistoryStore.set([env]); // Initial snapshot
+
+      console.log('[View] ✅ Isolated simnet environment ready');
+    } catch (err) {
+      console.error('[View] ❌ Failed to initialize XLN:', err);
+    }
+
     // Create Dockview
     dockview = new DockviewComponent(container, {
       className: 'dockview-theme-dark',
@@ -30,18 +59,28 @@
         div.style.width = '100%';
         div.style.height = '100%';
 
-        // Mount Svelte component
+        let component: any;
+
+        // Mount Svelte 5 components - pass store VALUES as props (will be reactive)
         if (options.name === 'graph3d') {
-          new Graph3DPanel({ target: div });
+          // Graph3D expects isolatedEnv as object, not store - pass value directly
+          component = mount(Graph3DPanel, { target: div, props: { isolatedEnv: localEnvStore, isolatedHistory: localHistoryStore } });
         } else if (options.name === 'entities') {
-          new EntitiesPanel({ target: div });
+          component = mount(EntitiesPanel, { target: div, props: { isolatedEnv: localEnvStore } });
         } else if (options.name === 'depository') {
-          new DepositoryPanel({ target: div });
+          component = mount(DepositoryPanel, { target: div });
         } else if (options.name === 'architect') {
-          new ArchitectPanel({ target: div });
+          component = mount(ArchitectPanel, { target: div, props: { isolatedEnv: localEnvStore, isolatedHistory: localHistoryStore } });
         }
 
-        return { element: div };
+        // Return Dockview-compatible API
+        return {
+          element: div,
+          init: () => {}, // Svelte components self-initialize
+          dispose: () => {
+            if (component?.$destroy) component.$destroy();
+          }
+        };
       },
     });
 
@@ -75,13 +114,36 @@
   });
 </script>
 
-<div class="view-container" bind:this={container}></div>
+<div class="view-wrapper">
+  <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
+
+  <!-- TimeMachine - Fixed bottom bar, draggable -->
+  <div class="time-machine-bar" class:collapsed data-position={timeMachinePosition}>
+    <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
+    <TimeMachine />
+    <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
+      {collapsed ? '▲' : '▼'}
+    </button>
+  </div>
+</div>
 
 <style>
-  .view-container {
+  .view-wrapper {
     width: 100%;
     height: 100vh;
     background: #1e1e1e;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .view-container {
+    flex: 1;
+    width: 100%;
+    min-height: 0; /* Allow flex shrink */
+  }
+
+  .view-container.with-timemachine {
+    height: calc(100vh - 80px); /* Leave room for TimeMachine */
   }
 
   :global(.dockview-theme-dark .dockview-tab) {
@@ -96,5 +158,63 @@
 
   :global(.dockview-theme-dark .dockview-separator) {
     background: #007acc;
+  }
+
+  /* TimeMachine Bar */
+  .time-machine-bar {
+    position: relative;
+    height: 80px;
+    background: #252526;
+    border-top: 2px solid #007acc;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    transition: height 0.2s ease;
+    z-index: 1000;
+  }
+
+  .time-machine-bar.collapsed {
+    height: 32px;
+  }
+
+  .time-machine-bar[data-position="top"] {
+    order: -1;
+    border-top: none;
+    border-bottom: 2px solid #007acc;
+  }
+
+  .drag-handle {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: move;
+    color: #6e7681;
+    font-size: 18px;
+    user-select: none;
+    padding: 4px 8px;
+  }
+
+  .drag-handle:hover {
+    color: #007acc;
+  }
+
+  .collapse-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #2d2d30;
+    border: 1px solid #3e3e3e;
+    color: #ccc;
+    padding: 4px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .collapse-btn:hover {
+    background: #37373d;
+    border-color: #007acc;
   }
 </style>

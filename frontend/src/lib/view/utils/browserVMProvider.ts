@@ -10,9 +10,6 @@ import { createVM, runTx } from '@ethereumjs/vm';
 import { createLegacyTx } from '@ethereumjs/tx';
 import { Address, createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
 
-// Import contract artifact (will be bundled)
-import depositoryArtifact from '../../../../../jurisdictions/artifacts/contracts/DepositoryV1.sol/DepositoryV1.json';
-
 export class BrowserVMProvider {
   private vm: any;
   private common: any;
@@ -20,6 +17,8 @@ export class BrowserVMProvider {
   private deployerPrivKey: Uint8Array;
   private deployerAddress: Address;
   private nonce = 0n;
+  private depositoryArtifact: any = null;
+  private initialized = false;
 
   constructor() {
     // Hardhat default account #0
@@ -29,6 +28,17 @@ export class BrowserVMProvider {
 
   /** Initialize VM and deploy contracts */
   async init(): Promise<void> {
+    if (this.initialized) {
+      console.log('[BrowserVM] Already initialized, skipping');
+      return;
+    }
+
+    // Load artifact from static/ (can't import JSON from /public in vite)
+    const response = await fetch('/contracts/DepositoryV1.json');
+    if (!response.ok) {
+      throw new Error(`Failed to load DepositoryV1 artifact: ${response.status}`);
+    }
+    this.depositoryArtifact = await response.json();
     console.log('[BrowserVM] Initializing...');
 
     // Create VM
@@ -47,6 +57,7 @@ export class BrowserVMProvider {
     // Deploy DepositoryV1
     await this.deployDepository();
 
+    this.initialized = true;
     console.log('[BrowserVM] Initialization complete');
   }
 
@@ -54,11 +65,14 @@ export class BrowserVMProvider {
   private async deployDepository(): Promise<void> {
     console.log('[BrowserVM] Deploying DepositoryV1...');
 
+    // Query nonce from VM state
+    const currentNonce = await this.getCurrentNonce();
+
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: depositoryArtifact.bytecode,
-      nonce: this.nonce++,
+      data: this.depositoryArtifact.bytecode,
+      nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
@@ -85,7 +99,7 @@ export class BrowserVMProvider {
     }
 
     // Encode function call: _reserves(bytes32,uint256)
-    const selector = '0xacd6f208'; // keccak256("_reserves(bytes32,uint256)")[:4]
+    const selector = '0xacd6f208';
     const paddedEntity = entityId.startsWith('0x') ? entityId.slice(2).padStart(64, '0') : entityId.padStart(64, '0');
     const paddedTokenId = tokenId.toString(16).padStart(64, '0');
     const callData = selector + paddedEntity + paddedTokenId;
@@ -93,7 +107,7 @@ export class BrowserVMProvider {
     const result = await this.vm.evm.runCall({
       to: this.depositoryAddress,
       caller: this.deployerAddress,
-      data: hexToBytes(callData),
+      data: hexToBytes(callData as `0x${string}`),
       gasLimit: 100000n,
     });
 
@@ -102,11 +116,10 @@ export class BrowserVMProvider {
       return 0n;
     }
 
-    // Decode uint256 return value
     const returnData = result.execResult.returnValue;
-    if (returnData.length === 0) return 0n;
+    if (!returnData || returnData.length === 0) return 0n;
 
-    return BigInt('0x' + bytesToHex(returnData));
+    return BigInt(bytesToHex(returnData));
   }
 
   /** Get total number of tokens */
@@ -133,7 +146,13 @@ export class BrowserVMProvider {
     const returnData = result.execResult.returnValue;
     if (returnData.length === 0) return 0;
 
-    return Number(BigInt('0x' + bytesToHex(returnData)));
+    return Number(BigInt(bytesToHex(returnData)));
+  }
+
+  /** Get current nonce from VM state */
+  private async getCurrentNonce(): Promise<bigint> {
+    const account = await this.vm.stateManager.getAccount(this.deployerAddress);
+    return account?.nonce || 0n;
   }
 
   /** Debug: Fund entity reserves */
@@ -149,12 +168,15 @@ export class BrowserVMProvider {
     const paddedAmount = amount.toString(16).padStart(64, '0');
     const callData = selector + paddedEntity + paddedTokenId + paddedAmount;
 
+    // Always query nonce from VM (don't trust local counter)
+    const currentNonce = await this.getCurrentNonce();
+
     const tx = createLegacyTx({
       to: this.depositoryAddress,
       gasLimit: 1000000n,
       gasPrice: 10n,
-      data: callData,
-      nonce: this.nonce++,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
@@ -180,12 +202,15 @@ export class BrowserVMProvider {
     const paddedAmount = amount.toString(16).padStart(64, '0');
     const callData = selector + paddedFrom + paddedTo + paddedTokenId + paddedAmount;
 
+    // Always query nonce from VM
+    const currentNonce = await this.getCurrentNonce();
+
     const tx = createLegacyTx({
       to: this.depositoryAddress,
       gasLimit: 1000000n,
       gasPrice: 10n,
-      data: callData,
-      nonce: this.nonce++,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
