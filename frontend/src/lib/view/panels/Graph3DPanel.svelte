@@ -34,8 +34,20 @@
   export let isolatedHistory: Writable<any[]> | any[] = [];  // History store or array
   export let isolatedTimeIndex: Writable<number> | null = null;  // Time index for panels
 
-  // Reactive env - use isolated (if provided) or fall back to global store
-  $: env = (isolatedEnv ? $isolatedEnv : null) || $xlnEnvironment;
+  // Reactive env - TIME-TRAVEL AWARE (reads from history[timeIndex] or live)
+  $: env = (() => {
+    // Time travel mode: read historical frame at timeIndex
+    if (isolatedTimeIndex && isolatedHistory) {
+      const timeIdx = $isolatedTimeIndex;
+      const hist = $isolatedHistory;
+      if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
+        const idx = Math.min(timeIdx, hist.length - 1);
+        return hist[idx];
+      }
+    }
+    // Live mode: read current state
+    return (isolatedEnv ? $isolatedEnv : null) || $xlnEnvironment;
+  })();
 
   // OrbitControls import (will be loaded dynamically)
   let OrbitControls: any;
