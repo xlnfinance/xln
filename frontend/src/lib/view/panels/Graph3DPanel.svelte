@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { get } from 'svelte/store';
+  import { get, type Writable } from 'svelte/store';
   // import NarrativeSubtitle from './NarrativeSubtitle.svelte'; // TODO: Move to /view
   import * as THREE from 'three';
   import { xlnEnvironment, getXLN, xlnFunctions, history } from '$lib/stores/xlnStore';
@@ -30,8 +30,9 @@
   export let hideButton: boolean = false;
   export let toggleZenMode: () => void = () => {}; // Optional in embedded mode
   export let embedded: boolean = false;  // Embedded mode for ScenarioPlayer
-  export let isolatedEnv: any = null;  // If provided, use this env instead of global store
-  export let isolatedHistory: any[] = [];  // History for isolated env
+  export let isolatedEnv: Writable<any> | any = null;  // Env store or object
+  export let isolatedHistory: Writable<any[]> | any[] = [];  // History store or array
+  export let isolatedTimeIndex: Writable<number> | null = null;  // Time index for panels
 
   // Reactive env - use isolated (if provided) or fall back to global store
   $: env = (isolatedEnv ? $isolatedEnv : null) || $xlnEnvironment;

@@ -2,17 +2,18 @@
   /**
    * Embed Route - Full XLN Graph 3D View (Embeddable)
    *
-   * Reuses NetworkTopology.svelte (6159 lines) - don't reinvent
+   * Reuses Graph3DPanel.svelte (6159 lines) - don't reinvent
    * Just hides nav bar for iframe embedding
    */
 
   import { page } from '$app/stores';
+  import { writable } from 'svelte/store';
   import { onMount } from 'svelte';
-  import NetworkTopology from '$lib/components/Network/NetworkTopology.svelte';
+  import Graph3DPanel from '$lib/view/panels/Graph3DPanel.svelte';
 
   let scenario = 'phantom-grid';
-  let isolatedEnv: any = null;
-  let isolatedHistory: any[] = [];
+  const isolatedEnv = writable<any>(null);
+  const isolatedHistory = writable<any[]>([]);
 
   onMount(async () => {
     scenario = $page.url.searchParams.get('s') || $page.url.searchParams.get('scenario') || 'phantom-grid';
@@ -21,7 +22,8 @@
     const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
     const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-    isolatedEnv = XLN.createEmptyEnv();
+    const env = XLN.createEmptyEnv();
+    isolatedEnv.set(env);
 
     // Load scenario
     const scenarioText = await fetch(`/scenarios/${scenario}.scenario.txt`).then(r => r.text());
@@ -29,18 +31,18 @@
 
     // Execute to populate env
     const context = { entityMapping: new Map() };
-    await XLN.executeScenario(parsed, isolatedEnv, context);
+    await XLN.executeScenario(parsed, env, context);
 
-    isolatedHistory = [...isolatedEnv.history];
+    isolatedHistory.set([...env.history]);
   });
 </script>
 
-<!-- Full NetworkTopology with isolated env -->
+<!-- Full Graph3DPanel with isolated env -->
 <div class="embed-page">
-  {#if isolatedEnv}
-    <NetworkTopology
-      {isolatedEnv}
-      {isolatedHistory}
+  {#if $isolatedEnv}
+    <Graph3DPanel
+      isolatedEnv={isolatedEnv}
+      isolatedHistory={isolatedHistory}
       embedded={true}
     />
   {:else}

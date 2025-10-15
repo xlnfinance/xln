@@ -13,17 +13,17 @@ sleep 1
 
 # Start three hardhat nodes in background
 echo "📡 Starting Ethereum Network (port 8545)..."
-cd contracts && npx hardhat node --port 8545 --hostname 127.0.0.1 > ../logs/ethereum-8545.log 2>&1 &
-echo "$!" > ../pids/ethereum.pid
+cd jurisdictions && bunx hardhat node --port 8545 --hostname 127.0.0.1 > ../logs/ethereum-8545.log 2>&1 &
+echo "$!" > pids/ethereum.pid
 
 # COMMENTED OUT: Focus on Ethereum only
 # echo "📡 Starting Polygon Network (port 8546)..."
-# cd contracts && npx hardhat node --port 8546 --hostname 127.0.0.1 > ../logs/polygon-8546.log 2>&1 &
-# echo "$!" > ../pids/polygon.pid
+# cd jurisdictions && bunx hardhat node --port 8546 --hostname 127.0.0.1 > ../logs/polygon-8546.log 2>&1 &
+# echo "$!" > pids/polygon.pid
 
 # echo "📡 Starting Arbitrum Network (port 8547)..."
-# cd contracts && npx hardhat node --port 8547 --hostname 127.0.0.1 > ../logs/arbitrum-8547.log 2>&1 &
-# echo "$!" > ../pids/arbitrum.pid
+# cd jurisdictions && bunx hardhat node --port 8547 --hostname 127.0.0.1 > ../logs/arbitrum-8547.log 2>&1 &
+# echo "$!" > pids/arbitrum.pid
 
 cd ..
 

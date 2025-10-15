@@ -24,6 +24,9 @@ const config = {
 		// Set base path - empty for server deployment
 		paths: {
 			base: ''
+		},
+		alias: {
+			$types: '../runtime/types.ts'
 		}
 	}
 };

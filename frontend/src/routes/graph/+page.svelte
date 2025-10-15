@@ -1,5 +1,5 @@
 <script lang="ts">
-  import NetworkTopology from '../../lib/components/Network/NetworkTopology.svelte';
+  import Graph3DPanel from '../../lib/view/panels/Graph3DPanel.svelte';
 
   let zenMode = false;
 
@@ -9,7 +9,7 @@
 </script>
 
 <div class="graph-page">
-  <NetworkTopology {zenMode} hideButton={false} {toggleZenMode} />
+  <Graph3DPanel {zenMode} hideButton={false} {toggleZenMode} />
 </div>
 
 <style>

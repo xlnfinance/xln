@@ -7,13 +7,15 @@
    * Copyright (C) 2025 XLN Finance
    */
 
+  import type { Writable } from 'svelte/store';
   import { timeOperations } from '$lib/stores/timeStore';
   import { xlnEnvironment, history } from '$lib/stores/xlnStore';
   import { panelBridge } from '../utils/panelBridge';
 
   // Receive isolated env as props (passed from View.svelte)
-  export let isolatedEnv: any;
-  export let isolatedHistory: any;
+  export let isolatedEnv: Writable<any>;
+  export let isolatedHistory: Writable<any[]>;
+  export let isolatedTimeIndex: Writable<number> | null = null;
 
   type Mode = 'explore' | 'build' | 'economy' | 'governance' | 'resolve';
   let currentMode: Mode = 'economy';
@@ -60,6 +62,17 @@
         throw new Error('View environment not initialized');
       }
 
+      // Capture BEFORE state (clean slate) for frame 0
+      const emptyFrame = {
+        height: 0,
+        timestamp: Date.now(),
+        replicas: new Map(),
+        runtimeInput: { runtimeTxs: [], entityInputs: [] },
+        runtimeOutputs: [],
+        description: 'Frame 0: Clean slate (before scenario)',
+        title: 'Initial State'
+      };
+
       console.log('[Architect] Executing on env:', currentEnv);
 
       // Execute scenario on isolated env
@@ -69,18 +82,25 @@
         lastAction = `✅ Success! ${result.framesGenerated} frames generated.`;
         console.log(`[Architect] ${filename}: ${result.framesGenerated} frames`);
 
+        // Prepend frame 0 (clean slate) to show progression from empty
+        const historyWithCleanSlate = [emptyFrame, ...(currentEnv.history || [])];
+
         // Env is mutated in-place by executeScenario - trigger reactivity
         isolatedEnv.set(currentEnv);
-        isolatedHistory.set(currentEnv.history || [currentEnv]);
+        isolatedHistory.set(historyWithCleanSlate);
 
         // TEMP: Mirror to global stores so TimeMachine sees changes
         xlnEnvironment.set(currentEnv);
-        history.set(currentEnv.history || [currentEnv]);
+        history.set(historyWithCleanSlate);
 
-        console.log('[Architect] Updated env, history length:', currentEnv.history?.length || 0);
+        console.log('[Architect] History: Frame 0 (empty) + Frames 1-' + currentEnv.history.length + ' (scenario)');
 
-        // Reset timeline to start
-        timeOperations.goToTimeIndex(0);
+        // Start at frame 0 to show clean slate
+        if (isolatedTimeIndex) {
+          isolatedTimeIndex.set(0);
+        } else {
+          timeOperations.goToTimeIndex(0);
+        }
 
         // Notify panels
         panelBridge.emit('entity:created', { entityId: 'scenario', type: 'grid' });
@@ -95,71 +115,6 @@
     }
   }
 
-  /** Create 2x2x2 grid (batched, lazy mode) */
-  async function runSimnetGrid() {
-    loading = true;
-    lastAction = 'Creating grid...';
-
-    try {
-      const env = $isolatedEnv;
-      if (!env) throw new Error('Env not ready');
-
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      const spacing = 40;
-      const runtimeTxs: any[] = [];
-
-      // Create 8 entities (lazy mode pattern from executor.ts)
-      for (let z = 0; z < 2; z++) {
-        for (let y = 0; y < 2; y++) {
-          for (let x = 0; x < 2; x++) {
-            const coord = `${x}_${y}_${z}`;
-            const entityId = await XLN.cryptoHash(`grid-${coord}-${Date.now()}`);
-            const signerId = `grid_${coord}`;
-            const pos = { x: x * spacing, y: y * spacing, z: z * spacing };
-
-            // Announce for visualization
-            env.gossip?.announce({
-              entityId,
-              capabilities: [],
-              hubs: [],
-              metadata: { name: coord, avatar: '', position: pos }
-            });
-
-            // Import replica
-            runtimeTxs.push({
-              type: 'importReplica',
-              entityId,
-              signerId,
-              data: {
-                config: { validators: [signerId], threshold: 1n, mode: 'proposer-based' },
-                accounts: new Map(),
-                snapshot: { height: 0n, stateHash: new Uint8Array(32), timestamp: BigInt(Date.now()) }
-              }
-            });
-          }
-        }
-      }
-
-      // Process all in ONE batch
-      const newEnv = await XLN.process(env, [], 0, runtimeTxs);
-
-      isolatedEnv.set(newEnv);
-      isolatedHistory.update(h => [...h, newEnv]);
-
-      lastAction = `✅ 8 entities (1 frame)!`;
-      timeOperations.goToTimeIndex(0);
-
-      panelBridge.emit('entity:created', { entityId: 'grid', type: 'grid' });
-
-    } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
-      console.error('[Architect] Error:', err);
-    } finally {
-      loading = false;
-    }
-  }
 </script>
 
 <div class="architect-panel">
@@ -215,6 +170,14 @@
             🎲 Simnet Grid (2x2x2)
           </button>
           <p class="help-text">8 entities, lazy mode (no blockchain)</p>
+        </div>
+
+        <div class="action-section">
+          <h5>VR Mode</h5>
+          <button class="action-btn" on:click={() => panelBridge.emit('vr:toggle', {})}>
+            🥽 Enter VR
+          </button>
+          <p class="help-text">Quest 3 / WebXR headsets</p>
         </div>
 
         {#if lastAction}

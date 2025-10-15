@@ -27,9 +27,11 @@
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
 
-  // Isolated XLN environment for this View instance (passed to panels as props)
+  // Isolated XLN environment for this View instance (passed to ALL panels + TimeMachine)
   const localEnvStore = writable<any>(null);
   const localHistoryStore = writable<any[]>([]);
+  const localTimeIndex = writable<number>(-1);  // -1 = live mode
+  const localIsLive = writable<boolean>(true);
 
   onMount(async () => {
     console.log('[View] onMount started - initializing isolated XLN');
@@ -39,10 +41,15 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
+      // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
+      // Graph3DPanel needs xlnFunctions even when using isolated stores
+      const { xlnInstance } = await import('$lib/stores/xlnStore');
+      xlnInstance.set(XLN);
+
       // Create empty environment (simnet mode - no blockchain)
       const env = XLN.createEmptyEnv();
 
-      // Set to store
+      // Set to isolated stores
       localEnvStore.set(env);
       localHistoryStore.set([env]); // Initial snapshot
 
@@ -61,16 +68,36 @@
 
         let component: any;
 
-        // Mount Svelte 5 components - pass store VALUES as props (will be reactive)
+        // Mount Svelte 5 components - pass SAME shared stores to ALL panels
         if (options.name === 'graph3d') {
-          // Graph3D expects isolatedEnv as object, not store - pass value directly
-          component = mount(Graph3DPanel, { target: div, props: { isolatedEnv: localEnvStore, isolatedHistory: localHistoryStore } });
+          component = mount(Graph3DPanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         } else if (options.name === 'entities') {
-          component = mount(EntitiesPanel, { target: div, props: { isolatedEnv: localEnvStore } });
+          component = mount(EntitiesPanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         } else if (options.name === 'depository') {
           component = mount(DepositoryPanel, { target: div });
         } else if (options.name === 'architect') {
-          component = mount(ArchitectPanel, { target: div, props: { isolatedEnv: localEnvStore, isolatedHistory: localHistoryStore } });
+          component = mount(ArchitectPanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         }
 
         // Return Dockview-compatible API
@@ -120,7 +147,11 @@
   <!-- TimeMachine - Fixed bottom bar, draggable -->
   <div class="time-machine-bar" class:collapsed data-position={timeMachinePosition}>
     <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
-    <TimeMachine />
+    <TimeMachine
+      history={localHistoryStore}
+      timeIndex={localTimeIndex}
+      isLive={localIsLive}
+    />
     <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
       {collapsed ? '▲' : '▼'}
     </button>

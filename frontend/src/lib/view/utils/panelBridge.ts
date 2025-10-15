@@ -11,6 +11,7 @@ type EventMap = {
   'time:changed': { frame: number; block: number };
   'layout:changed': { layout: any };
   'transfer:executed': { from: string; to: string; tokenId: number; amount: bigint };
+  'vr:toggle': {};
 };
 
 class PanelBridge {

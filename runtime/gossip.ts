@@ -79,7 +79,7 @@ export function createGossipLayer(): GossipLayer {
     profiles,
     announce,
     getProfiles,
-    getNetworkGraph,
+    // getNetworkGraph, // TODO: implement
   };
 }
 

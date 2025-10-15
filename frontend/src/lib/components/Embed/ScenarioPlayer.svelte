@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import NetworkTopology from '$lib/components/Network/NetworkTopology.svelte';
+  import Graph3DPanel from '$lib/view/panels/Graph3DPanel.svelte';
   import { timeOperations, currentTimeIndex, maxTimeIndex } from '$lib/stores/timeStore';
 
   export let scenario: string = 'phantom-grid';  // Scenario name or inline
@@ -150,7 +150,7 @@
     <div class="player-container">
       <!-- 3D Visualization -->
       <div class="viewport">
-        <NetworkTopology
+        <Graph3DPanel
           zenMode={false}
           hideButton={true}
           toggleZenMode={() => {}}
@@ -224,7 +224,7 @@
     overflow: hidden;
   }
 
-  /* Force NetworkTopology to stay contained */
+  /* Force Graph3DPanel to stay contained */
   .viewport :global(canvas) {
     position: absolute !important;
     top: 0 !important;

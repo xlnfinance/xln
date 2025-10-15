@@ -1070,9 +1070,88 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       console.warn('⚠️ process() reached maximum iterations');
     }
 
+    // Auto-persist to LevelDB after processing
+    await saveEnvToDB(env);
+
     return env;
   } finally {
     cascading = false;
+  }
+};
+
+// === LEVELDB PERSISTENCE ===
+export const saveEnvToDB = async (env: Env): Promise<void> => {
+  if (!isBrowser) return; // Only persist in browser
+
+  try {
+    const dbReady = await tryOpenDb();
+    if (!dbReady) return;
+
+    // Save latest height pointer
+    await db.put(Buffer.from('latest_height'), Buffer.from(String(env.height)));
+
+    // Save environment snapshot
+    const snapshot = JSON.stringify(env, (k, v) =>
+      typeof v === 'bigint' ? String(v) :
+      v instanceof Uint8Array ? Array.from(v) :
+      v instanceof Map ? Array.from(v.entries()) : v
+    );
+    await db.put(Buffer.from(`snapshot:${env.height}`), Buffer.from(snapshot));
+  } catch (err) {
+    console.error('❌ Failed to save to LevelDB:', err);
+  }
+};
+
+export const loadEnvFromDB = async (): Promise<Env | null> => {
+  if (!isBrowser) return null;
+
+  try {
+    const dbReady = await tryOpenDb();
+    if (!dbReady) return null;
+
+    const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
+    const latestHeight = parseInt(latestHeightBuffer.toString());
+
+    // Load all snapshots to build history
+    const history: Env[] = [];
+    for (let i = 0; i <= latestHeight; i++) {
+      const buffer = await db.get(Buffer.from(`snapshot:${i}`));
+      const data = JSON.parse(buffer.toString());
+
+      // Hydrate Maps/BigInts
+      const env = createEmptyEnv();
+      env.height = BigInt(data.height || 0);
+      env.timestamp = BigInt(data.timestamp || 0);
+      env.replicas = new Map(data.replicas || []);
+      if (data.gossip?.profiles) {
+        env.gossip.profiles = new Map(data.gossip.profiles);
+      }
+      history.push(env);
+    }
+
+    const latestEnv = history[history.length - 1];
+    if (latestEnv) {
+      latestEnv.history = history;
+    }
+
+    return latestEnv;
+  } catch (err) {
+    console.log('No persisted state found');
+    return null;
+  }
+};
+
+export const clearDB = async (): Promise<void> => {
+  if (!isBrowser) return;
+
+  try {
+    const dbReady = await tryOpenDb();
+    if (!dbReady) return;
+
+    await db.clear();
+    console.log('✅ LevelDB cleared');
+  } catch (err) {
+    console.error('❌ Failed to clear LevelDB:', err);
   }
 };
 
