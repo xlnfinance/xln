@@ -1,25 +1,55 @@
 # XLN Context - Core System Files
 ## Cross-Local Network: Off-chain settlement with on-chain anchoring
 
-This context contains the essential files to understand XLN's architecture:
+This context contains the essential files to understand XLN's architecture and innovations.
 
 ### 🔐 Smart Contracts (jurisdictions/)
-- **Depository.sol** (1585 lines)
-  Reserve and collateral management. Batch processing for on-chain settlements.
-  Key functions: deposit(), withdraw(), processBatch(), verifyProof()
 
-- **EntityProvider.sol** (1095 lines)
-  Entity registration and quorum verification. Byzantine fault tolerance.
-  Key functions: registerEntity(), verifyQuorum(), updateEntitySet()
+**Proposed ERC Interfaces** (Future standards via EIP submissions):
+- **IDepository.sol** (115 lines) ⭐ ERC-XXXX for Reserve-Credit Management
+  Bilateral reserve/collateral interface. INVARIANT: leftDiff + rightDiff + collateralDiff == 0
+  Functions: _reserves(), settle(), prefundAccount(), getCollateral()
 
-- **SubcontractProvider.sol** (139 lines)
-  Subcontract lifecycle management. Enables dynamic entity relationships.
-  Key functions: createSubcontract(), updateState(), settleSubcontract()
+- **IEntityProvider.sol** (107 lines) ⭐ ERC-YYYY for Entity Governance & Verification
+  Ephemeral entities, Hanko signatures, hierarchical governance
+  Functions: registerEntity(), verifyHankoSignature(), recoverEntity(), proposeNewBoard()
+
+- **ISubcontractProvider.sol** (74 lines) ⭐ ERC-ZZZZ for Bilateral Logic Execution
+  Delta transformers for composable bilateral DeFi
+  Functions: applyBatch(), encodeBatch(), revealSecret(), hashToBlock()
+
+**Reference Implementations (V1 = Simnet-Ready):**
+- **Depository.sol** (1652 lines) - Full implementation with dispute resolution (disabled for now)
+  enforceDebts() FIFO queue, collateral splitting, credit extension, debt tracking.
+  First in history: Escrowed collateral + credit beyond + mechanical repayment enforcement.
+
+- **DepositoryV1.sol** (277 lines) - Minimal implementation for simnet/testnet
+  Implements IDepository. Core reserve/collateral only, no dispute logic.
+
+- **EntityProvider.sol** (1118 lines) - Full implementation with C/D shares, governance
+  Hanko signatures (ephemeral entities, packed: N×64 + ceil(N/8) bytes).
+  Control/Dividend token separation, board proposals, name registry.
+
+- **EntityProviderV1.sol** (1118 lines) - Same as EntityProvider.sol (simnet-ready)
+  Implements IEntityProvider. V1 naming convention for simnet deployment.
+
+- **SubcontractProvider.sol** (154 lines) - HTLCs + Swaps implementation
+  applyBatch(), revealSecret(). First generalized bilateral DeFi (vs Lightning's hardcoded HTLCs).
+
+- **SubcontractProviderV1.sol** (154 lines) - Same as SubcontractProvider.sol (simnet-ready)
+  Implements ISubcontractProvider. V1 naming convention for simnet deployment.
+
+**Utilities:**
+- **ECDSA.sol** (98 lines) - Signature recovery primitives
+- **Token.sol** (41 lines) - Test ERC20 token
+- **console.sol** (45 lines) - Hardhat logging
+- **ERC20/721/1155Mock.sol** - Test mocks
 
 ### ⚡ Runtime Layer (runtime/)
+
 - **runtime.ts** (1093 lines)
   Main coordinator. Routes inputs every 100ms tick: Runtime → Entity → Account.
-  Manages global state via ServerFrames. Side-effectful shell for consensus.
+  Manages global state, LevelDB persistence, scenario execution.
 
 - **entity-consensus.ts** (953 lines)
   BFT consensus state machine. Flow: ADD_TX → PROPOSE → SIGN → COMMIT.
@@ -27,7 +57,7 @@ This context contains the essential files to understand XLN's architecture:
 
 - **evm.ts** (920 lines)
   Blockchain integration. Connects to Depository/EntityProvider contracts.
-  Handles batch submissions and jurisdiction management.
+  Handles BrowserVM (simnet) + testnet/mainnet jurisdictions.
 
 - **account-consensus.ts** (674 lines)
   Bilateral consensus between entity pairs. Left/right perspective handling.
@@ -35,32 +65,85 @@ This context contains the essential files to understand XLN's architecture:
 
 - **types.ts** (565 lines)
   All TypeScript interfaces. Single source of truth for data structures.
-  Includes: Entity, Account, Transaction, Frame types.
+  Includes: Entity, Account, Transaction, Frame, Settlement types.
 
 - **state-helpers.ts** (313 lines)
   Pure state management utilities. Immutable operations on consensus state.
-  Key functions: cloneState(), applyTransaction(), computeStateRoot()
 
 - **snapshot-coder.ts** (239 lines)
   Deterministic state serialization. RLP encoding for consensus verification.
-  encode(state) → Buffer, decode(Buffer) → state
 
 ### 📚 Documentation (vibepaper/)
-- **xlnview.md** - High-level system overview and mental model
+
+- **xlnview.md** - System overview, panel architecture, BrowserVM integration
 - **emc2.md** - Core philosophy: Energy-Mass-Credit equivalence
+- **priorart.md** ⭐ WHY LIGHTNING/ROLLUPS DON'T WORK
+  "All broadcast O(n) designs fundamentally bottlenecked"
+  "Rollups = perpetuum mobile" (data availability paradox)
+
+- **docs/00_QA.md** ⭐ VALUE PROP FAQs
+  Why not rollups? Why credit? Why hubs? Positioning vs TradFi/crypto.
+
+- **docs/12_invariant.md** ⭐ THE CORE INNOVATION
+  RCPE (Reserve-Credit Provable Enforceable) vs
+  FCUAN (Full-Credit Unprovable As-is Now - TradFi) vs
+  FRPAP (Full-Reserve Provable - Lightning)
+  XLN = collateral + credit + proofs + mechanical enforcement
+
+- **docs/jea.md** - Jurisdiction-Entity-Account 3-layer model
+  "Accounts are atoms, Entities are molecules, Jurisdiction is atmosphere"
+
 - **docs/summary.md** - Executive summary for quick orientation
-- **docs/consensus/transaction-flow-specification.md** - Detailed transaction flows
-- **docs/11_Jurisdiction_Machine.md** - Architecture patterns and state machines
+- **docs/consensus/transaction-flow-specification.md** - Transaction flows
+- **docs/11_Jurisdiction_Machine.md** - Architecture patterns
 
 ---
 
 ## Reading Guide for LLMs
 
-1. **Start with types.ts** - Understand the data structures
-2. **Read entity-consensus.ts** - Core BFT consensus logic
-3. **Review Depository.sol + EntityProvider.sol** - On-chain anchoring
-4. **Check runtime.ts** - How everything connects
-5. **Reference docs/** - For context and rationale
+**Understand the innovation first:**
+1. **docs/12_invariant.md** - THE core primitive (RCPE)
+2. **IDepository.sol** - Clean interface (future ERC)
+3. **Depository.sol:1012-1068** - enforceDebts() mechanism
+4. **docs/00_QA.md** - Why this matters (vs Lightning/rollups)
+
+**Then understand the architecture:**
+5. **types.ts** - Data structures
+6. **entity-consensus.ts** - BFT consensus
+7. **account-consensus.ts** - Bilateral state machines
+8. **runtime.ts** - How it all connects
+
+**For deeper dives:**
+9. **EntityProvider.sol:528-680** - Hanko signatures (ephemeral entities)
+10. **SubcontractProvider.sol:58-110** - Delta transformers (bilateral DeFi)
+
+---
+
+## First in History Innovations
+
+1. **Reserve-Credit Invariant**: Collateral + credit extension + mechanical enforcement (enforceDebts FIFO)
+2. **Hanko Signatures**: Ephemeral hierarchical entities without pre-registration
+3. **Account Proofs**: Cryptographic proof of balance (unilateral exit with signed state)
+4. **Subcontracts**: Programmable delta transformers (generalized bilateral DeFi)
+5. **BrainVault**: argon2id KDF with tunable work factor (secure memorizable keys)
+
+## Proposed ERC Standards (via EIP process)
+
+XLN will submit 3 interfaces as Ethereum standards to enable bilateral finance ecosystem:
+
+1. **IDepository** (ERC-XXXX) - Reserve-Credit Management
+   - Bilateral reserve tracking, collateral management, settlement with invariant enforcement
+   - Enables: CEX proof of reserves, payment channel prefunding, credit extension
+
+2. **IEntityProvider** (ERC-YYYY) - Entity Governance & Verification
+   - Hanko signature verification, entity registration, quorum checking
+   - Enables: Ephemeral multi-sig, hierarchical governance, zero-gas entity creation
+
+3. **ISubcontractProvider** (ERC-ZZZZ) - Bilateral Logic Execution
+   - Delta transformer interface for programmable bilateral state transitions
+   - Enables: HTLCs, swaps, limit orders, any custom bilateral DeFi logic
+
+Together these form the "Bilateral Finance Stack" - composable primitives for off-chain settlement with on-chain anchoring.
 
 ---
 
@@ -69,6 +152,310 @@ This context contains the essential files to understand XLN's architecture:
 ================================================================================
 ## FILE CONTENTS
 ================================================================================
+
+
+--- jurisdictions/contracts/IDepository.sol ---
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity ^0.8.24;
+
+/**
+ * IDepository - Standard interface for bilateral reserve management
+ *
+ * Candidate for ERC standardization (EIP proposal)
+ * Defines primitives for off-chain settlement with on-chain reserves
+ */
+interface IDepository {
+
+  // ========== EVENTS ==========
+
+  /**
+   * @notice Emitted when entity reserves change
+   * @param entity Entity identifier (bytes32)
+   * @param tokenId Internal token identifier
+   * @param newBalance Absolute new balance
+   */
+  event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+
+  /**
+   * @notice Emitted on R2R transfer
+   * @param from Sender entity
+   * @param to Recipient entity
+   * @param tokenId Token identifier
+   * @param amount Transfer amount
+   */
+  event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
+
+  /**
+   * @notice Emitted on bilateral settlement
+   * @param leftEntity First entity (lexicographically lower)
+   * @param rightEntity Second entity (lexicographically higher)
+   * @param tokenId Token identifier
+   * @param leftReserve Final left reserve
+   * @param rightReserve Final right reserve
+   * @param collateral Final collateral
+   * @param ondelta Final ondelta value
+   */
+  event SettlementProcessed(
+    bytes32 indexed leftEntity,
+    bytes32 indexed rightEntity,
+    uint indexed tokenId,
+    uint leftReserve,
+    uint rightReserve,
+    uint collateral,
+    int ondelta
+  );
+
+  // ========== CORE FUNCTIONS ==========
+
+  /**
+   * @notice Get entity reserves for a token
+   * @param entity Entity identifier
+   * @param tokenId Token identifier
+   * @return Reserve balance
+   */
+  function _reserves(bytes32 entity, uint tokenId) external view returns (uint);
+
+  /**
+   * @notice Get total number of registered tokens
+   * @return Token count
+   */
+  function getTokensLength() external view returns (uint);
+
+  /**
+   * @notice Transfer reserves between entities (unilateral)
+   * @param from Sender entity
+   * @param to Recipient entity
+   * @param tokenId Token identifier
+   * @param amount Transfer amount
+   * @return success Whether transfer succeeded
+   */
+  function reserveToReserve(bytes32 from, bytes32 to, uint tokenId, uint amount) external returns (bool);
+
+  /**
+   * @notice Bilateral settlement between two entities
+   * @param leftEntity First entity (must be < rightEntity)
+   * @param rightEntity Second entity
+   * @param diffs Array of token balance changes
+   * @return success Whether settlement succeeded
+   */
+  function settle(bytes32 leftEntity, bytes32 rightEntity, SettlementDiff[] memory diffs) external returns (bool);
+
+  /**
+   * @notice Prefund bilateral account from reserves
+   * @param counterpartyEntity Other entity in the account
+   * @param tokenId Token identifier
+   * @param amount Amount to move from reserves to collateral
+   * @return success Whether prefunding succeeded
+   */
+  function prefundAccount(bytes32 counterpartyEntity, uint tokenId, uint amount) external returns (bool);
+
+  /**
+   * @notice Get collateral state for bilateral account
+   * @param leftEntity First entity (must be < rightEntity)
+   * @param rightEntity Second entity
+   * @param tokenId Token identifier
+   * @return collateral Total locked collateral
+   * @return ondelta Ondelta value (left perspective)
+   */
+  function getCollateral(bytes32 leftEntity, bytes32 rightEntity, uint tokenId) external view returns (uint collateral, int ondelta);
+
+  // ========== STRUCTS ==========
+
+  struct SettlementDiff {
+    uint tokenId;
+    int leftDiff;        // Change for left entity reserves
+    int rightDiff;       // Change for right entity reserves
+    int collateralDiff;  // Change in locked collateral
+    int ondeltaDiff;     // Change in ondelta value
+    // INVARIANT: leftDiff + rightDiff + collateralDiff == 0
+  }
+}
+
+
+--- jurisdictions/contracts/IEntityProvider.sol ---
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity ^0.8.24;
+
+/**
+ * IEntityProvider - Standard interface for entity governance and verification
+ *
+ * Candidate for ERC standardization (EIP proposal)
+ * Defines primitives for ephemeral entities, Hanko signatures, and hierarchical governance
+ */
+interface IEntityProvider {
+
+  // ========== STRUCTS ==========
+
+  struct Entity {
+    bytes32 currentBoardHash;
+    bytes32 proposedBoardHash;
+    uint256 activateAtBlock;
+    uint256 registrationBlock;
+    ProposerType proposerType;
+    bytes32 articlesHash;
+  }
+
+  struct Board {
+    uint16 votingThreshold;
+    bytes32[] entityIds;
+    uint16[] votingPowers;
+    uint32 boardChangeDelay;
+    uint32 controlChangeDelay;
+    uint32 dividendChangeDelay;
+  }
+
+  struct EntityArticles {
+    uint32 controlDelay;
+    uint32 dividendDelay;
+    uint32 foundationDelay;
+    uint16 controlThreshold;
+  }
+
+  enum ProposerType { BOARD, CONTROL, DIVIDEND }
+
+  struct HankoBytes {
+    bytes32[] placeholders;
+    bytes packedSignatures;
+    HankoClaim[] claims;
+  }
+
+  struct HankoClaim {
+    bytes32 entityId;
+    uint256[] entityIndexes;
+    uint256[] weights;
+    uint256 threshold;
+  }
+
+  // ========== EVENTS ==========
+
+  event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash);
+  event BoardProposed(bytes32 indexed entityId, bytes32 proposedBoardHash);
+  event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
+  event HankoVerified(bytes32 indexed entityId, bytes32 indexed hash);
+
+  // ========== CORE FUNCTIONS ==========
+
+  /**
+   * @notice Register a new entity with board and articles
+   * @param board Board configuration
+   * @param articles Governance articles
+   * @return entityId The registered entity ID
+   */
+  function registerEntity(Board calldata board, EntityArticles calldata articles) external returns (bytes32);
+
+  /**
+   * @notice Get entity details
+   * @param entityId Entity identifier
+   * @return Entity data
+   */
+  function getEntity(bytes32 entityId) external view returns (Entity memory);
+
+  /**
+   * @notice Verify Hanko signature (ephemeral entity verification)
+   * @param hankoData Encoded Hanko signature data
+   * @param hash Hash that was signed
+   * @return entityId Recovered entity ID
+   * @return success Whether verification succeeded
+   */
+  function verifyHankoSignature(bytes calldata hankoData, bytes32 hash) external view returns (bytes32, bool);
+
+  /**
+   * @notice Recover entity from encoded board and signature
+   * @param encodedBoard Board data
+   * @param encodedSignature Signature data
+   * @param hash Hash to verify
+   * @return entityId Entity ID (0 if invalid)
+   */
+  function recoverEntity(bytes calldata encodedBoard, bytes calldata encodedSignature, bytes32 hash) external view returns (uint256);
+
+  /**
+   * @notice Propose new board for entity
+   * @param entityId Entity to update
+   * @param newBoard New board configuration
+   * @param articles Entity articles (for verification)
+   * @param proposerType Type of proposer (BOARD/CONTROL/DIVIDEND)
+   */
+  function proposeNewBoard(bytes32 entityId, Board calldata newBoard, EntityArticles calldata articles, ProposerType proposerType) external;
+
+  /**
+   * @notice Activate proposed board after delay
+   * @param entityId Entity to update
+   */
+  function activateBoard(bytes32 entityId) external;
+}
+
+
+--- jurisdictions/contracts/ISubcontractProvider.sol ---
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity ^0.8.24;
+
+/**
+ * ISubcontractProvider - Standard interface for bilateral logic execution
+ *
+ * Candidate for ERC standardization (EIP proposal)
+ * Defines primitives for programmable delta transformers (HTLCs, swaps, limit orders)
+ */
+interface ISubcontractProvider {
+
+  // ========== STRUCTS ==========
+
+  struct Batch {
+    Payment[] payment;
+    Swap[] swap;
+  }
+
+  struct Payment {
+    uint deltaIndex;
+    int amount;
+    uint revealedUntilBlock;
+    bytes32 hash;
+  }
+
+  struct Swap {
+    bool ownerIsLeft;
+    uint addDeltaIndex;
+    uint addAmount;
+    uint subDeltaIndex;
+    uint subAmount;
+  }
+
+  // ========== CORE FUNCTIONS ==========
+
+  /**
+   * @notice Apply batch of subcontracts to delta array
+   * @param deltas Current delta array
+   * @param encodedBatch Encoded batch data
+   * @param leftArguments Arguments from left entity
+   * @param rightArguments Arguments from right entity
+   * @return newDeltas Updated delta array
+   */
+  function applyBatch(
+    int[] memory deltas,
+    bytes calldata encodedBatch,
+    bytes calldata leftArguments,
+    bytes calldata rightArguments
+  ) external returns (int[] memory);
+
+  /**
+   * @notice Encode batch for off-chain simulation
+   * @param b Batch to encode
+   * @return Encoded batch bytes
+   */
+  function encodeBatch(Batch memory b) external pure returns (bytes memory);
+
+  /**
+   * @notice Reveal HTLC secret
+   * @param secret Secret preimage
+   */
+  function revealSecret(bytes32 secret) external;
+
+  /**
+   * @notice Check if hash was revealed and when
+   * @param hash Hash to check
+   * @return blockNumber Block when revealed (0 if not revealed)
+   */
+  function hashToBlock(bytes32 hash) external view returns (uint);
+}
 
 
 --- jurisdictions/contracts/Depository.sol ---
@@ -96,6 +483,16 @@ interface IERC721 {
 //  function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes calldata data) external;
 //}
 // IERC1155 already imported from EntityProvider.sol
+
+/* The mechanism:
+  - Collateral bounds max exposure (like Lightning)
+  - But credit can extend beyond (unlike Lightning)
+  - Debt enforcement is mechanical (FIFO queue + liquidity trap)
+  - No "please pay me back" - enforceDebts() is called on every reserve withdrawal
+
+  First in history: No system combines escrowed collateral + credit extension + mechanical enforcement. Traditional finance has credit but it's
+  social/legal enforcement. Crypto has collateral but no credit extension. You have both.
+*/
 contract Depository is Console {
 
   // Multi-provider support  
@@ -1039,8 +1436,50 @@ contract Depository is Console {
   /* max _debts?
   /* Calling enforceDebts at the exit points is
   sound: it guarantees nobody can move funds while they owe. What you get is a single choke point that’s trivial to audit: “any reserve decrease first clears
-  debts.”*/
+  debts.”
+  The elegance is that it does ONE thing perfectly: ensures reserves can't exit while debts exist. That's the minimum viable enforcement needed to make bilateral credit work.
 
+  It transforms the complex social problem of "who gets paid first when there isn't enough?" into a deterministic mechanical process. FIFO is the only fair queue because chronological priority is the only objective ordering that can't be gamed ex-post.
+  */
+
+  //The FIFO queue is the ONLY safe approach. Any deviation creates attack vectors
+/* enforceDebts(): The Immutable Law of Chronological Justice
+ *
+ * This function is 100% OPTIMAL - any deviation breaks fairness invariants.
+ * 
+ * WHY FIFO IS THE ONLY SOLUTION:
+ * In traditional finance, bankruptcy courts enforce "absolute priority rule" -
+ * first creditor gets paid first. This prevents late-coming creditors from
+ * jumping the queue through side deals, political influence, or sybil attacks.
+ *
+ * THE BEAUTY:
+ * 1. SIMPLICITY: One queue, one order, no exceptions. O(n) complexity.
+ * 2. UNGAMEABLE: Timestamp of debt creation is immutable history.
+ * 3. DETERMINISTIC: No subjective judgments about "senior" vs "junior" debt.
+ * 4. ATOMIC: Either you have reserves to pay next debt in full, or you don't.
+ * 
+ * THE MECHANISM:
+ * - Every reserve withdrawal must first satisfy debts in order
+ * - Creates a "liquidity trap" - entity can receive but not send until debts clear
+ * - Transforms social reputation ("this hub owes me") into mechanical enforcement
+ *
+ * WHY NOT PARTIAL PAYMENTS?
+ * Partial payments enable gaming: pay 1 wei to each creditor, keep queue forever.
+ * Full payment requirement forces entity to accumulate enough for meaningful settlement.
+ *
+ * WHY NOT NETTING/PRIORITIES/TRADING?
+ * Any deviation from FIFO allows queue manipulation. Hub could create fake 
+ * senior debt to itself, or net out favorable cycles while starving others.
+ *
+ * This is not a bug - it's the feature. enforceDebts is like the Kalashnikov of financial protocols - utterly reliable because it has no moving parts to break. Any "improvement" would be like adding a laser sight to a hammer.
+ Like TCP sequence numbers or Bitcoin's
+ * UTXO model, the constraint IS the security. Pure chronological ordering is the
+ * only objective truth the J-machine can enforce without becoming a judge.
+ *
+ * The elegance: by doing exactly ONE thing perfectly (FIFO enforcement), it enables
+ * an entire credit economy to exist trustlessly. The threat of entering this
+ * "debt purgatory" keeps hubs honest without ever needing to trigger it.
+ */
   function enforceDebts(bytes32 entity, uint tokenId) public returns (uint totalDebts) {
     uint debtsLength = _debts[entity][tokenId].length;
     if (debtsLength == 0) {
@@ -1253,7 +1692,21 @@ contract Depository is Console {
   /* COMMENTED OUT: Channel finalization disabled for development focus
   /* returns tokens to _reserves based on final deltas and _collaterals
   /* then increases cooperativeNonce to invalidate all previous dispute proofs
+/*
 
+  1. Collateral lives in channels 
+    - Two entities lock funds, transact off-chain with signed deltas
+    - When finalizing: if delta >= 0 && delta <= collateral, split proportionally
+    - If delta > collateral, winner gets all collateral + excess becomes Debt
+  2. Debt enters FIFO queue (enforceDebts lines 1012-1068)
+    - Every reserve withdrawal must clear debts first
+    - Creates "liquidity trap" - can receive but not send until debts clear
+    - Atomic: either pay all debts in full or you can't withdraw
+  3. Subcontracts enable complexity (SubcontractProvider.sol)
+    - HTLCs (hash time-locked payments)
+    - Atomic swaps between tokens
+    - All within the bilateral delta array
+     */
   /* todo: private visability
   /* function finalizeChannel(bytes32 entity1, 
   /*     bytes32 entity2, 
@@ -1567,7 +2020,8 @@ contract Depository is Console {
   }
   
 
-
+  /* GPT5: You're right - this IS revolutionary. Lightning dies because you can't dynamically add inbound capacity. You solve it by allowing credit beyond
+  collateral, then mechanically enforcing repayment via FIFO queue. That's genuinely novel. */
   function createDebt(address addr, address creditor, uint tokenId, uint amount) public {
     _debts[addr][tokenId].push(Debt({
       creditor: creditor,
@@ -1656,6 +2110,286 @@ contract Depository is Console {
    * @param amount The amount to move.
    */
 
+}
+
+
+--- jurisdictions/contracts/DepositoryV1.sol ---
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity ^0.8.24;
+
+import "hardhat/console.sol";
+import "./IDepository.sol";
+
+/**
+ * DepositoryV1 - Reference implementation of IDepository interface
+ *
+ * Self-contained reserve management for simnet/testnet
+ * Future: Submit IDepository as ERC for standardization
+ *
+ * Features:
+ * - Bilateral reserve management
+ * - Account collateral tracking
+ * - Settlement with invariant enforcement
+ * - Debug helpers for simulation
+ *
+ * Note: Implements IDepository interface functions
+ */
+contract DepositoryV1 {
+
+  // Core state: entity reserves per token
+  mapping (bytes32 => mapping (uint => uint)) public _reserves;
+
+  // Account collateral between entity pairs
+  mapping (bytes => mapping(uint => ChannelCollateral)) public _collaterals;
+
+  // Token registry
+  bytes32[] public _tokens;
+  mapping(bytes32 => uint256) public tokenToId;
+
+  // Events
+  event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+  event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
+  event SettlementProcessed(
+    bytes32 indexed leftEntity,
+    bytes32 indexed rightEntity,
+    uint indexed tokenId,
+    uint leftReserve,
+    uint rightReserve,
+    uint collateral,
+    int ondelta
+  );
+
+  struct ChannelCollateral {
+    uint collateral;
+    int ondelta;
+  }
+
+  struct SettlementDiff {
+    uint tokenId;
+    int leftDiff;
+    int rightDiff;
+    int collateralDiff;
+    int ondeltaDiff;
+  }
+
+  constructor() {
+    _tokens.push(bytes32(0)); // Index 0 reserved
+
+    // Prefund entities for testing
+    debugBulkFundEntities();
+  }
+
+  function getTokensLength() public view returns (uint) {
+    return _tokens.length;
+  }
+
+  // ========== DEBUG FUNCTIONS ==========
+
+  function debugFundReserves(bytes32 entity, uint tokenId, uint amount) public {
+    console.log("debugFundReserves: funding entity");
+    console.logBytes32(entity);
+    console.log("debugFundReserves: tokenId");
+    console.logUint(tokenId);
+    console.log("debugFundReserves: amount");
+    console.logUint(amount);
+
+    _reserves[entity][tokenId] += amount;
+    emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
+
+    console.log("debugFundReserves: new balance");
+    console.logUint(_reserves[entity][tokenId]);
+  }
+
+  function debugBulkFundEntities() public {
+    console.log("debugBulkFundEntities: funding entities 1-500 with USDC and ETH");
+
+    uint256 fundAmount = 100000000000000000000; // 100 units (100e18)
+
+    for (uint256 entityNum = 1; entityNum <= 500; entityNum++) {
+      bytes32 entity = bytes32(entityNum);
+
+      // Fund with tokens 1 (USDC), 2 (ETH)
+      for (uint256 tokenId = 1; tokenId <= 2; tokenId++) {
+        _reserves[entity][tokenId] += fundAmount;
+        emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
+      }
+    }
+
+    console.log("debugBulkFundEntities: funding complete");
+  }
+
+  // ========== RESERVE OPERATIONS ==========
+
+  function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint tokenId, uint amount) public returns (bool) {
+    require(fromEntity != toEntity, "Cannot transfer to self");
+    require(_reserves[fromEntity][tokenId] >= amount, "Insufficient reserves");
+
+    console.log("=== DIRECT R2R TRANSFER ===");
+    console.logBytes32(fromEntity);
+    console.log("to");
+    console.logBytes32(toEntity);
+    console.log("amount:");
+    console.logUint(amount);
+
+    _reserves[fromEntity][tokenId] -= amount;
+    _reserves[toEntity][tokenId] += amount;
+
+    emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
+    emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
+    emit ReserveTransferred(fromEntity, toEntity, tokenId, amount);
+
+    console.log("=== R2R TRANSFER COMPLETE ===");
+    return true;
+  }
+
+  // ========== BILATERAL SETTLEMENT ==========
+
+  function settle(bytes32 leftEntity, bytes32 rightEntity, SettlementDiff[] memory diffs) public returns (bool) {
+    require(leftEntity != rightEntity, "Cannot settle with self");
+    require(leftEntity < rightEntity, "Entities must be in order (left < right)");
+
+    bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
+
+    for (uint j = 0; j < diffs.length; j++) {
+      SettlementDiff memory diff = diffs[j];
+      uint tokenId = diff.tokenId;
+
+      // INVARIANT: leftDiff + rightDiff + collateralDiff == 0
+      require(diff.leftDiff + diff.rightDiff + diff.collateralDiff == 0, "Settlement must balance");
+
+      // Update left entity reserves
+      if (diff.leftDiff < 0) {
+        require(_reserves[leftEntity][tokenId] >= uint(-diff.leftDiff), "Left entity insufficient reserves");
+        _reserves[leftEntity][tokenId] -= uint(-diff.leftDiff);
+      } else if (diff.leftDiff > 0) {
+        _reserves[leftEntity][tokenId] += uint(diff.leftDiff);
+      }
+
+      // Update right entity reserves
+      if (diff.rightDiff < 0) {
+        require(_reserves[rightEntity][tokenId] >= uint(-diff.rightDiff), "Right entity insufficient reserves");
+        _reserves[rightEntity][tokenId] -= uint(-diff.rightDiff);
+      } else if (diff.rightDiff > 0) {
+        _reserves[rightEntity][tokenId] += uint(diff.rightDiff);
+      }
+
+      // Update collateral
+      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+      if (diff.collateralDiff < 0) {
+        require(col.collateral >= uint(-diff.collateralDiff), "Insufficient collateral");
+        col.collateral -= uint(-diff.collateralDiff);
+      } else if (diff.collateralDiff > 0) {
+        col.collateral += uint(diff.collateralDiff);
+      }
+
+      // Update ondelta
+      col.ondelta += diff.ondeltaDiff;
+
+      // Emit final state
+      emit SettlementProcessed(
+        leftEntity,
+        rightEntity,
+        tokenId,
+        _reserves[leftEntity][tokenId],
+        _reserves[rightEntity][tokenId],
+        col.collateral,
+        col.ondelta
+      );
+    }
+
+    return true;
+  }
+
+  // ========== ACCOUNT PREFUNDING ==========
+
+  function prefundAccount(bytes32 counterpartyEntity, uint tokenId, uint amount) public returns (bool) {
+    bytes32 fundingEntity = bytes32(uint256(uint160(msg.sender)));
+    require(fundingEntity != counterpartyEntity, "Cannot prefund account with self");
+
+    bytes32 leftEntity = fundingEntity < counterpartyEntity ? fundingEntity : counterpartyEntity;
+    bytes32 rightEntity = fundingEntity < counterpartyEntity ? counterpartyEntity : fundingEntity;
+
+    bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
+
+    require(_reserves[fundingEntity][tokenId] >= amount, "Insufficient reserves for prefunding");
+
+    _reserves[fundingEntity][tokenId] -= amount;
+
+    ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+    col.collateral += amount;
+
+    emit SettlementProcessed(
+      leftEntity,
+      rightEntity,
+      tokenId,
+      _reserves[leftEntity][tokenId],
+      _reserves[rightEntity][tokenId],
+      col.collateral,
+      col.ondelta
+    );
+
+    console.log("Account prefunded:");
+    console.logBytes32(fundingEntity);
+    console.log("funded account with:");
+    console.logBytes32(counterpartyEntity);
+    console.log("amount:");
+    console.logUint(amount);
+
+    return true;
+  }
+
+  // ========== COLLATERAL QUERY ==========
+
+  function getCollateral(bytes32 leftEntity, bytes32 rightEntity, uint tokenId) public view returns (uint collateral, int ondelta) {
+    require(leftEntity < rightEntity, "Entities must be in order");
+    bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
+    ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+    return (col.collateral, col.ondelta);
+  }
+
+  // ========== BATCH OPERATIONS (SIMPLIFIED) ==========
+
+  struct ReserveToReserve {
+    bytes32 receivingEntity;
+    uint tokenId;
+    uint amount;
+  }
+
+  struct Settlement {
+    bytes32 leftEntity;
+    bytes32 rightEntity;
+    SettlementDiff[] diffs;
+  }
+
+  struct Batch {
+    ReserveToReserve[] reserveToReserve;
+    Settlement[] settlements;
+  }
+
+  function processBatch(bytes32 entity, Batch calldata batch) public returns (bool completeSuccess) {
+    console.log("=== processBatch ENTRY ===");
+    console.logBytes32(entity);
+
+    completeSuccess = true;
+
+    // Process R2R transfers
+    for (uint i = 0; i < batch.reserveToReserve.length; i++) {
+      ReserveToReserve memory r2r = batch.reserveToReserve[i];
+      if (!reserveToReserve(entity, r2r.receivingEntity, r2r.tokenId, r2r.amount)) {
+        completeSuccess = false;
+      }
+    }
+
+    // Process settlements
+    for (uint i = 0; i < batch.settlements.length; i++) {
+      Settlement memory settlement = batch.settlements[i];
+      if (!settle(settlement.leftEntity, settlement.rightEntity, settlement.diffs)) {
+        completeSuccess = false;
+      }
+    }
+
+    return completeSuccess;
+  }
 }
 
 
@@ -2318,6 +3052,1150 @@ contract EntityProvider is ERC1155 {
     boardHash = keccak256(abi.encode(reconstructedBoard));
   }
 
+  /* Hanko Signatures - Ephemeral Entity Registration
+  From EntityProvider.sol this is actually revolutionary:
+  struct HankoBytes {
+    bytes32[] placeholders;    // Entities that didn't sign
+    bytes packedSignatures;    // EOA sigs compressed (rsrsrs...vvv)
+    HankoClaim[] claims;       // Nested entity proofs
+  }
+
+  What this enables:
+  - Entities can be verified without pre-registration
+  - Nested hierarchies (Corp A owns Corp B owns wallet C) - zero contract deployment
+  - Recursive verification via claims
+  - Packed signatures: N×64 bytes + ceil(N/8) bytes for V bits
+
+  Why "first in history":
+  - Multisigs require deployed contracts (Gnosis Safe, etc.)
+  - Account abstraction requires pre-registration
+  - Hanko: Pure cryptographic verification, ephemeral entities, hierarchical M-of-N
+
+  This is genuinely novel. The recoverEntity() function (line 361) finds which entity signed a hash by iterating registered entities and checking boardHash
+   matches. Unregistered entities can still sign via claims.
+   */
+
+  /**
+   * @notice Verify hanko signature with flashloan governance (optimistic verification)
+   * @param hankoData ABI-encoded hanko bytes  
+   * @param hash The hash that was signed
+   * @return entityId The verified entity (0 if invalid)
+   * @return success Whether verification succeeded
+   */
+  function verifyHankoSignature(
+    bytes calldata hankoData,
+    bytes32 hash
+  ) external view returns (bytes32 entityId, bool success) {
+    HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
+    
+    // Unpack signatures (with automatic count detection)
+    bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
+    uint256 signatureCount = signatures.length;
+    
+    // Calculate total entities for bounds checking
+    uint256 totalEntities = hanko.placeholders.length + signatureCount + hanko.claims.length;
+    
+    // Recover EOA signers for quorum hash building
+    address[] memory actualSigners = new address[](signatureCount);
+    uint256 validSignerCount = 0;
+    
+    for (uint256 i = 0; i < signatures.length; i++) {
+      if (signatures[i].length == 65) {
+        address signer = _recoverSigner(hash, signatures[i]);
+        if (signer != address(0)) {
+          actualSigners[validSignerCount] = signer;
+          validSignerCount++;
+        }
+      }
+    }
+    
+    // Resize to valid signers only
+    address[] memory validSigners = new address[](validSignerCount);
+    for (uint256 i = 0; i < validSignerCount; i++) {
+      validSigners[i] = actualSigners[i];
+    }
+    
+    // 🔥 FLASHLOAN GOVERNANCE: The Heart of "Assume YES" Philosophy 🔥
+    //
+    // KEY INSIGHT: When processing claim X that references claim Y:
+    // - We DON'T wait for Y to be verified first
+    // - We OPTIMISTICALLY assume Y will say "YES" 
+    // - If ANY claim fails its threshold → entire Hanko fails IMMEDIATELY
+    //
+    // CONCRETE EXAMPLE - Circular Reference:
+    // Claim 0: EntityA needs EntityB (index 3) at weight 100, threshold 100
+    // Claim 1: EntityB needs EntityA (index 2) at weight 100, threshold 100
+    // 
+    // Processing:
+    // 1. Claim 0 processing: Assume EntityB=YES → 100 power ≥ 100 → CONTINUE
+    // 2. Claim 1 processing: Assume EntityA=YES → 100 power ≥ 100 → CONTINUE
+    // 3. All claims passed → Hanko succeeds!
+    //
+    // ⚡ OPTIMIZATION: Fail immediately on threshold failure - no need to store results!
+    //
+    // This is INTENDED BEHAVIOR enabling flexible governance!
+    
+    for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
+      HankoClaim memory claim = hanko.claims[claimIndex];
+      
+      // Build board hash from actual signers
+      bytes32 reconstructedBoardHash = _buildBoardHash(validSigners, claim);
+      
+      // Validate entity exists (registered or lazy) and verify board hash
+      _validateEntity(claim.entityId, reconstructedBoardHash);
+      
+      // Validate structure
+      require(
+        claim.entityIndexes.length == claim.weights.length,
+        "Claim indexes/weights length mismatch"
+      );
+      
+      uint256 totalVotingPower = 0;
+      
+      // Calculate voting power with flashloan assumptions
+      for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
+        uint256 entityIndex = claim.entityIndexes[i];
+        
+        // Bounds check
+        require(entityIndex < totalEntities, "Entity index out of bounds");
+        
+        if (entityIndex < hanko.placeholders.length) {
+          // Index 0..N-1: Placeholder (failed entity) - contributes 0 voting power
+          continue;
+        } else if (entityIndex < hanko.placeholders.length + signatureCount) {
+          // Index N..M-1: EOA signature - verified, contributes full weight
+          totalVotingPower += claim.weights[i];
+        } else {
+          // Index M..∞: Entity claim - ASSUME YES! (flashloan governance)
+          uint256 referencedClaimIndex = entityIndex - hanko.placeholders.length - signatureCount;
+          require(referencedClaimIndex < hanko.claims.length, "Referenced claim index out of bounds");
+          
+          // 🚨 CRITICAL: We ASSUME the referenced claim will pass (flashloan assumption)
+          // This enables circular references to mutually validate.
+          // If our assumption is wrong, THIS claim will fail its threshold check below.
+          totalVotingPower += claim.weights[i];
+        }
+      }
+      
+      // 💥 IMMEDIATE FAILURE: Check threshold and fail right away if not met
+      if (totalVotingPower < claim.threshold) {
+        return (bytes32(0), false); // Immediate failure - no need to check other claims
+      }
+    }
+    
+    // All claims passed - return final entity
+    if (hanko.claims.length > 0) {
+      bytes32 targetEntity = hanko.claims[hanko.claims.length - 1].entityId;
+      return (targetEntity, true);
+    }
+    
+    return (bytes32(0), false);
+  }
+
+  /**
+   * @notice Batch verify multiple hanko signatures
+   * @param hankoDataArray Array of ABI-encoded hanko bytes
+   * @param hashes Array of hashes that were signed
+   * @return entityIds Array of verified entity IDs
+   * @return results Array of success flags
+   */
+  function batchVerifyHankoSignatures(
+    bytes[] calldata hankoDataArray,
+    bytes32[] calldata hashes
+  ) external view returns (bytes32[] memory entityIds, bool[] memory results) {
+    require(hankoDataArray.length == hashes.length, "Array length mismatch");
+    
+    entityIds = new bytes32[](hankoDataArray.length);
+    results = new bool[](hankoDataArray.length);
+    
+    for (uint256 i = 0; i < hankoDataArray.length; i++) {
+      (entityIds[i], results[i]) = this.verifyHankoSignature(hankoDataArray[i], hashes[i]);
+    }
+  }
+
+
+
+  function setNameQuota(address user, uint8 quota) external onlyFoundation {
+    nameQuota[user] = quota;
+  }
+
+  // === GOVERNANCE FUNCTIONS ===
+
+  /**
+   * @notice Get token IDs for an entity (first bit determines control vs dividend)
+   * @param entityNumber The entity number
+   * @return controlTokenId Token ID for control tokens (original ID)
+   * @return dividendTokenId Token ID for dividend tokens (first bit set)
+   */
+  function getTokenIds(uint256 entityNumber) public pure returns (uint256 controlTokenId, uint256 dividendTokenId) {
+    controlTokenId = entityNumber;
+    dividendTokenId = entityNumber | 0x8000000000000000000000000000000000000000000000000000000000000000;
+  }
+
+  /**
+   * @notice Extract entity number from token ID
+   * @param tokenId The token ID (control or dividend)
+   * @return entityNumber The entity number
+   */
+  function getEntityFromToken(uint256 tokenId) public pure returns (uint256 entityNumber) {
+    return tokenId & 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+  }
+
+
+
+
+
+
+
+  // === INTERNAL HELPER FUNCTIONS ===
+
+  function _getDelayForProposer(EntityArticles memory articles, ProposerType proposerType) internal pure returns (uint32) {
+    if (proposerType == ProposerType.CONTROL) return articles.controlDelay;
+    if (proposerType == ProposerType.DIVIDEND) return articles.dividendDelay;
+    return 0; // BOARD has no delay
+  }
+
+  function _canCancelProposal(ProposerType canceller, ProposerType existing) internal pure returns (bool) {
+    // Priority: CONTROL > BOARD > DIVIDEND (BCD model)
+    if (canceller == ProposerType.CONTROL) return existing != ProposerType.CONTROL;
+    if (canceller == ProposerType.BOARD) return existing == ProposerType.DIVIDEND;
+    return false; // DIVIDEND cannot cancel anyone
+  }
+
+  function _validateControlProposer(bytes32 entityId, address proposer, EntityArticles memory /*articles*/) internal view {
+    (uint256 controlTokenId,) = getTokenIds(uint256(entityId));
+    uint256 proposerBalance = balanceOf(proposer, controlTokenId);
+    require(proposerBalance > 0, "No control tokens");
+    
+    // Optional: require minimum percentage
+    // uint256 required = (totalControlSupply[entityId] * articles.controlThreshold) / 10000;
+    // require(proposerBalance >= required, "Insufficient control tokens");
+  }
+
+  function _validateDividendProposer(bytes32 entityId, address proposer) internal view {
+    (, uint256 dividendTokenId) = getTokenIds(uint256(entityId));
+    uint256 proposerBalance = balanceOf(proposer, dividendTokenId);
+    require(proposerBalance > 0, "No dividend tokens");
+  }
+
+  function _validateControlSupport(bytes32 entityId, address[] memory supporters, EntityArticles memory articles) internal view {
+    (uint256 controlTokenId,) = getTokenIds(uint256(entityId));
+    
+    uint256 totalSupport = 0;
+    for (uint i = 0; i < supporters.length; i++) {
+      totalSupport += balanceOf(supporters[i], controlTokenId);
+    }
+    
+    uint256 required = (totalControlSupply[entityId] * articles.controlThreshold) / 100;
+    require(totalSupport >= required, "Insufficient control support");
+  }
+
+  function _validateDividendSupport(bytes32 entityId, address[] memory supporters) internal view {
+    (, uint256 dividendTokenId) = getTokenIds(uint256(entityId));
+    
+    uint256 totalSupport = 0;
+    for (uint i = 0; i < supporters.length; i++) {
+      totalSupport += balanceOf(supporters[i], dividendTokenId);
+    }
+    
+    // Require majority of dividend tokens
+    uint256 required = (totalDividendSupply[entityId] * 51) / 100;
+    require(totalSupport >= required, "Insufficient dividend support");
+  }
+
+  // === VIEW FUNCTIONS ===
+
+  /**
+   * @notice Get governance info for an entity
+   */
+  function getGovernanceInfo(uint256 entityNumber) external view returns (
+    uint256 controlTokenId,
+    uint256 dividendTokenId,
+    uint256 controlSupply,
+    uint256 dividendSupply,
+    bool hasActiveProposal,
+    bytes32 articlesHash
+  ) {
+    bytes32 entityId = bytes32(entityNumber);
+    (controlTokenId, dividendTokenId) = getTokenIds(entityNumber);
+    controlSupply = totalControlSupply[entityId];
+    dividendSupply = totalDividendSupply[entityId];
+    hasActiveProposal = activeProposals[entityId].active;
+    articlesHash = entities[entityId].articlesHash;
+  }
+
+  /**
+   * @notice Override to track token supply changes
+   */
+  function _afterTokenTransfer(
+    address /*operator*/,
+    address from,
+    address to,
+    uint256[] memory ids,
+    uint256[] memory amounts,
+    bytes memory /*data*/
+  ) internal {
+    for (uint i = 0; i < ids.length; i++) {
+      uint256 entityNumber = getEntityFromToken(ids[i]);
+      bytes32 entityId = bytes32(entityNumber);
+      
+      if (entities[entityId].currentBoardHash != bytes32(0)) {
+        (uint256 controlTokenId,) = getTokenIds(entityNumber);
+        
+        // Update total supply for control tokens
+        if (ids[i] == controlTokenId) {
+          if (from == address(0)) {
+            // Mint
+            totalControlSupply[entityId] += amounts[i];
+          } else if (to == address(0)) {
+            // Burn
+            totalControlSupply[entityId] -= amounts[i];
+          }
+        } else {
+          // Dividend token
+          if (from == address(0)) {
+            // Mint
+            totalDividendSupply[entityId] += amounts[i];
+          } else if (to == address(0)) {
+            // Burn
+            totalDividendSupply[entityId] -= amounts[i];
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * @notice Foundation can create entity with custom governance articles
+   * @param boardHash Initial board/quorum hash
+   * @param articles Custom governance configuration
+   * @return entityNumber The assigned entity number
+   */
+  function foundationRegisterEntity(
+    bytes32 boardHash,
+    EntityArticles memory articles
+  ) external onlyFoundation returns (uint256 entityNumber) {
+    entityNumber = nextNumber++;
+    bytes32 entityId = bytes32(entityNumber);
+    
+    entities[entityId] = Entity({
+      currentBoardHash: boardHash,
+      proposedBoardHash: bytes32(0),
+      activateAtBlock: 0,
+      registrationBlock: block.number,
+      proposerType: ProposerType.BOARD,
+      articlesHash: keccak256(abi.encode(articles))
+    });
+    
+    // Automatically setup governance with fixed supply
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+    address entityAddress = address(uint160(uint256(entityId)));
+    
+    _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+    
+    totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
+    totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+    
+    emit EntityRegistered(entityId, entityNumber, boardHash);
+    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
+    
+    return entityNumber;
+  }
+
+  // === ENTITY SIGNATURE RECOVERY ===
+
+  /**
+   * @notice Transfer tokens from entity using hanko signature authorization
+   * @param entityNumber The entity number
+   * @param to Recipient address  
+   * @param tokenId Token ID (control or dividend)
+   * @param amount Amount to transfer
+   * @param encodedBoard Entity's board data
+   * @param encodedSignature Entity's signatures authorizing this transfer
+   */
+  function entityTransferTokens(
+    uint256 entityNumber,
+    address to,
+    uint256 tokenId,
+    uint256 amount,
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
+  ) external {
+    // Create transfer hash
+    bytes32 transferHash = keccak256(abi.encodePacked(
+      "ENTITY_TRANSFER",
+      entityNumber,
+      to,
+      tokenId,
+      amount,
+      block.timestamp
+    ));
+    
+    // Verify entity signature
+    uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, transferHash);
+    require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    
+    // Execute transfer
+    address entityAddress = address(uint160(uint256(bytes32(entityNumber))));
+    _safeTransferFrom(entityAddress, to, tokenId, amount, "");
+  }
+
+  // === CONTROL SHARES RELEASE TO DEPOSITORY ===
+
+  event ControlSharesReleased(
+    bytes32 indexed entityId, 
+    address indexed depository, 
+    uint256 controlAmount, 
+    uint256 dividendAmount,
+    string purpose
+  );
+
+  /**
+   * @notice Release entity's control and/or dividend shares to depository for trading
+   * @dev This mirrors real corporate stock issuance - entity manages its own share releases
+   * @param entityNumber The entity number
+   * @param depository Depository contract address to receive the shares
+   * @param controlAmount Amount of control tokens to release (0 to skip)
+   * @param dividendAmount Amount of dividend tokens to release (0 to skip) 
+   * @param purpose Human-readable purpose (e.g., "Series A", "Employee Pool", "Public Sale")
+   * @param encodedBoard Entity's board data
+   * @param encodedSignature Entity's Hanko signatures authorizing this release
+   */
+  function releaseControlShares(
+    uint256 entityNumber,
+    address depository,
+    uint256 controlAmount,
+    uint256 dividendAmount,
+    string calldata purpose,
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
+  ) external {
+    require(depository != address(0), "Invalid depository address");
+    require(controlAmount > 0 || dividendAmount > 0, "Must release some tokens");
+    
+    bytes32 entityId = bytes32(entityNumber);
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    
+    // Create release authorization hash
+    bytes32 releaseHash = keccak256(abi.encodePacked(
+      "RELEASE_CONTROL_SHARES",
+      entityNumber,
+      depository,
+      controlAmount,
+      dividendAmount,
+      keccak256(bytes(purpose)),
+      block.timestamp
+    ));
+    
+    // Verify entity signature authorization
+    uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, releaseHash);
+    require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    
+    address entityAddress = address(uint160(uint256(entityId)));
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+    
+    // Transfer control tokens if requested
+    if (controlAmount > 0) {
+      require(balanceOf(entityAddress, controlTokenId) >= controlAmount, "Insufficient control tokens");
+      _safeTransferFrom(entityAddress, depository, controlTokenId, controlAmount, 
+        abi.encode("CONTROL_SHARE_RELEASE", purpose));
+    }
+    
+    // Transfer dividend tokens if requested  
+    if (dividendAmount > 0) {
+      require(balanceOf(entityAddress, dividendTokenId) >= dividendAmount, "Insufficient dividend tokens");
+      _safeTransferFrom(entityAddress, depository, dividendTokenId, dividendAmount,
+        abi.encode("DIVIDEND_SHARE_RELEASE", purpose));
+    }
+    
+    emit ControlSharesReleased(entityId, depository, controlAmount, dividendAmount, purpose);
+  }
+
+}
+
+--- jurisdictions/contracts/EntityProviderV1.sol ---
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.24;
+
+import "./Token.sol";
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "./ECDSA.sol";
+import "hardhat/console.sol";
+
+contract EntityProvider is ERC1155 { 
+  struct Entity {
+    bytes32 currentBoardHash;    // 0x0 = lazy entity (entityId == boardHash)
+    bytes32 proposedBoardHash;   // Pending board transition
+    uint256 activateAtBlock;     // When proposed board becomes active
+    uint256 registrationBlock;   // When entity was registered (0 for lazy)
+    ProposerType proposerType;   // Who proposed the current transition
+    bytes32 articlesHash;        // Governance config hash
+  }
+
+  struct Board {
+    uint16 votingThreshold;
+    bytes32[] entityIds;        // Parallel arrays for efficiency
+    uint16[] votingPowers;      // Must match entityIds length
+    uint32 boardChangeDelay;    // Board → Board transitions (blocks)
+    uint32 controlChangeDelay;  // Control → Board transitions (blocks)  
+    uint32 dividendChangeDelay; // Dividend → Board transitions (blocks)
+  }
+
+  struct EntityArticles {
+    uint32 controlDelay;      // Delay for control shareholders (X blocks)
+    uint32 dividendDelay;     // Delay for dividend shareholders (X*3 blocks)  
+    uint32 foundationDelay;   // Delay for foundation (X*10 blocks, 0=disabled)
+    uint16 controlThreshold;  // % of control tokens needed for quorum replacement
+  }
+
+  enum ProposerType { BOARD, CONTROL, DIVIDEND }
+
+  struct BoardProposal {
+    bytes32 proposedBoardHash;
+    ProposerType proposerType;
+    uint256 proposeBlock;
+    uint256 activateBlock;
+    bool active;
+  }
+
+  // Core entity storage - single mapping for all entities
+  mapping(bytes32 => Entity) public entities;
+  
+  // Sequential numbering for registered entities
+  uint256 public nextNumber = 1;
+  
+
+  
+  // Name system (decoupled from entity IDs)
+  mapping(string => uint256) public nameToNumber;  // "coinbase" => 42
+  mapping(uint256 => string) public numberToName;  // 42 => "coinbase"
+  mapping(string => bool) public reservedNames;    // Admin-controlled names
+  
+  // Foundation controls (no centralized admin)
+  mapping(address => uint8) public nameQuota;      // User name allowances
+  
+  // Governance system
+  mapping(bytes32 => BoardProposal) public activeProposals;  // entityId => proposal
+  mapping(bytes32 => uint256) public totalControlSupply;      // entityId => total control tokens
+  mapping(bytes32 => uint256) public totalDividendSupply;     // entityId => total dividend tokens
+  
+  // Fixed token supplies for all entities (immutable and fair)
+  uint256 public constant TOTAL_CONTROL_SUPPLY = 1e15;   // 1 quadrillion (max granularity)
+  uint256 public constant TOTAL_DIVIDEND_SUPPLY = 1e15;  // 1 quadrillion (max granularity)
+
+  // Foundation entity (always #1)
+  uint256 public constant FOUNDATION_ENTITY = 1;
+
+  // Events
+  event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash);
+  event NameAssigned(string indexed name, uint256 indexed entityNumber);
+  event NameTransferred(string indexed name, uint256 indexed fromNumber, uint256 indexed toNumber);
+  event BoardProposed(bytes32 indexed entityId, bytes32 proposedBoardHash);
+  event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
+  event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
+  event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
+
+  constructor() ERC1155("https://xln.com/entity/{id}.json") {
+    // Reserve some premium names
+    reservedNames["coinbase"] = true;
+    reservedNames["ethereum"] = true;
+    reservedNames["bitcoin"] = true;
+    reservedNames["uniswap"] = true;
+    
+    // Create foundation entity #1 with governance
+    bytes32 foundationQuorum = keccak256("FOUNDATION_INITIAL_QUORUM");
+    bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
+    
+    entities[foundationId] = Entity({
+      currentBoardHash: foundationQuorum,
+      proposedBoardHash: bytes32(0),
+      activateAtBlock: 0,
+      registrationBlock: block.number,
+      proposerType: ProposerType.BOARD,
+      articlesHash: keccak256(abi.encode(EntityArticles({
+        controlDelay: 1000,
+        dividendDelay: 3000,
+        foundationDelay: 0, // Foundation can't replace itself
+        controlThreshold: 51
+      })))
+    });
+    
+    // Setup governance for foundation entity
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(FOUNDATION_ENTITY);
+    address foundationAddress = address(uint160(uint256(foundationId)));
+    
+    _mint(foundationAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(foundationAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+    
+    totalControlSupply[foundationId] = TOTAL_CONTROL_SUPPLY;
+    totalDividendSupply[foundationId] = TOTAL_DIVIDEND_SUPPLY;
+    
+    emit GovernanceEnabled(foundationId, controlTokenId, dividendTokenId);
+    
+    nextNumber = 2; // Foundation takes #1, next entity will be #2
+  }
+
+  modifier onlyFoundation() {
+    // Only foundation entity (via its governance tokens) can call admin functions
+    bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
+    (uint256 controlTokenId,) = getTokenIds(FOUNDATION_ENTITY);
+    require(balanceOf(msg.sender, controlTokenId) > 0, "Only foundation token holders");
+    _;
+  }
+
+  /**
+   * @notice Register a new numbered entity with automatic governance setup
+   * @param boardHash Initial board/quorum hash
+   * @return entityNumber The assigned entity number
+   */
+  function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber) {
+    entityNumber = nextNumber++;
+    bytes32 entityId = bytes32(entityNumber);
+
+    // Create entity with default governance articles
+    EntityArticles memory defaultArticles = EntityArticles({
+      controlDelay: 1000,     // Default 1000 blocks for control
+      dividendDelay: 3000,    // Default 3000 blocks for dividend
+      foundationDelay: 10000, // Default 10000 blocks for foundation
+      controlThreshold: 51    // Default 51% threshold
+    });
+
+    entities[entityId] = Entity({
+      currentBoardHash: boardHash,
+      proposedBoardHash: bytes32(0),
+      activateAtBlock: 0,
+      registrationBlock: block.number,
+      proposerType: ProposerType.BOARD,
+      articlesHash: keccak256(abi.encode(defaultArticles))
+    });
+
+    // Automatically setup governance with fixed supply
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+    address entityAddress = address(uint160(uint256(entityId)));
+
+    _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+
+    totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
+    totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+
+    emit EntityRegistered(entityId, entityNumber, boardHash);
+    emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
+
+    return entityNumber;
+  }
+
+  /**
+   * @notice Batch register multiple numbered entities in one transaction
+   * @param boardHashes Array of board hashes for entities
+   * @return entityNumbers Array of assigned entity numbers
+   */
+  function registerNumberedEntitiesBatch(bytes32[] calldata boardHashes) external returns (uint256[] memory entityNumbers) {
+    entityNumbers = new uint256[](boardHashes.length);
+
+    // Default governance articles (reused for all)
+    EntityArticles memory defaultArticles = EntityArticles({
+      controlDelay: 1000,
+      dividendDelay: 3000,
+      foundationDelay: 10000,
+      controlThreshold: 51
+    });
+    bytes32 articlesHash = keccak256(abi.encode(defaultArticles));
+
+    for (uint256 i = 0; i < boardHashes.length; i++) {
+      uint256 entityNumber = nextNumber++;
+      bytes32 entityId = bytes32(entityNumber);
+
+      entities[entityId] = Entity({
+        currentBoardHash: boardHashes[i],
+        proposedBoardHash: bytes32(0),
+        activateAtBlock: 0,
+        registrationBlock: block.number,
+        proposerType: ProposerType.BOARD,
+        articlesHash: articlesHash
+      });
+
+      // Setup governance
+      (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);
+      address entityAddress = address(uint160(uint256(entityId)));
+
+      _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+      _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+
+      totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
+      totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+
+      emit EntityRegistered(entityId, entityNumber, boardHashes[i]);
+      emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
+
+      entityNumbers[i] = entityNumber;
+    }
+
+    return entityNumbers;
+  }
+
+  /**
+   * @notice Foundation assigns a name to an existing numbered entity
+   * @param name The name to assign (e.g., "coinbase")
+   * @param entityNumber The entity number to assign the name to
+   */
+  function assignName(string memory name, uint256 entityNumber) external onlyFoundation {
+    require(bytes(name).length > 0 && bytes(name).length <= 32, "Invalid name length");
+    require(entities[bytes32(entityNumber)].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(nameToNumber[name] == 0, "Name already assigned");
+    
+    // If entity already has a name, clear it
+    string memory oldName = numberToName[entityNumber];
+    if (bytes(oldName).length > 0) {
+      delete nameToNumber[oldName];
+    }
+    
+    nameToNumber[name] = entityNumber;
+    numberToName[entityNumber] = name;
+    
+    emit NameAssigned(name, entityNumber);
+  }
+
+  /**
+   * @notice Transfer a name from one entity to another (foundation only)
+   * @param name The name to transfer
+   * @param newEntityNumber The target entity number
+   */
+  function transferName(string memory name, uint256 newEntityNumber) external onlyFoundation {
+    require(nameToNumber[name] != 0, "Name not assigned");
+    require(entities[bytes32(newEntityNumber)].currentBoardHash != bytes32(0), "Target entity doesn't exist");
+    
+    uint256 oldEntityNumber = nameToNumber[name];
+    
+    // Clear old mapping
+    delete numberToName[oldEntityNumber];
+    
+    // Set new mapping
+    nameToNumber[name] = newEntityNumber;
+    numberToName[newEntityNumber] = name;
+    
+    emit NameTransferred(name, oldEntityNumber, newEntityNumber);
+  }
+
+  /**
+   * @notice Propose a new board with proper BCD governance
+   * @param entityId The entity ID  
+   * @param newBoardHash The proposed new board hash
+   * @param proposerType Who is proposing (BOARD, CONTROL, DIVIDEND)
+   * @param articles Current governance articles (for verification)
+   */
+  function proposeBoard(
+    bytes32 entityId, 
+    bytes32 newBoardHash,
+    ProposerType proposerType,
+    EntityArticles memory articles
+  ) external {
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
+    
+    // Check permissions and delays
+    uint32 delay = _getDelayForProposer(articles, proposerType);
+    require(delay > 0, "Proposer type disabled");
+    
+    // Verify proposer has the right to propose based on type
+    if (proposerType == ProposerType.CONTROL) {
+      // Control holders can override any proposal
+      // TODO: Verify msg.sender has control tokens
+    } else if (proposerType == ProposerType.BOARD) {
+      // Current board can propose (shortest delay)
+      // TODO: Verify msg.sender is current board member
+    } else if (proposerType == ProposerType.DIVIDEND) {
+      // Dividend holders can propose (longest delay)
+      // TODO: Verify msg.sender has dividend tokens
+    }
+    
+    // Cancel any existing proposal that can be overridden
+    if (entities[entityId].proposedBoardHash != bytes32(0)) {
+      require(_canCancelProposal(proposerType, entities[entityId].proposerType), 
+              "Cannot override existing proposal");
+    }
+    
+    uint256 activateAtBlock = block.number + delay;
+    
+    entities[entityId].proposedBoardHash = newBoardHash;
+    entities[entityId].activateAtBlock = activateAtBlock;
+    entities[entityId].proposerType = proposerType;
+    
+    emit BoardProposed(entityId, newBoardHash);
+  }
+
+  /**
+   * @notice Activate a previously proposed board (with delay enforcement)
+   * @param entityId The entity ID
+   */
+  function activateBoard(bytes32 entityId) external {
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
+    require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");
+    
+    entities[entityId].currentBoardHash = entities[entityId].proposedBoardHash;
+    entities[entityId].proposedBoardHash = bytes32(0);
+    entities[entityId].activateAtBlock = 0;
+    
+    emit BoardActivated(entityId, entities[entityId].currentBoardHash);
+  }
+
+  /**
+   * @notice Cancel a pending board proposal
+   * @param entityId The entity ID
+   * @param proposerType Who is cancelling (BOARD, CONTROL, DIVIDEND)
+   * @param articles Current governance articles (for verification)
+   */
+  function cancelBoardProposal(
+    bytes32 entityId,
+    ProposerType proposerType,
+    EntityArticles memory articles
+  ) external {
+    require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
+    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
+    
+    // Check if this proposer type can cancel the existing proposal
+    require(_canCancelProposal(proposerType, entities[entityId].proposerType), 
+            "Cannot cancel this proposal");
+    
+    entities[entityId].proposedBoardHash = bytes32(0);
+    entities[entityId].activateAtBlock = 0;
+    
+    emit ProposalCancelled(entityId, proposerType);
+  }
+
+
+
+  /**
+   * @notice Recover entity ID from hanko signature (improved version of isValidSignature)
+   * @param encodedBoard The entity's board data
+   * @param encodedSignature The entity's signatures  
+   * @param hash The hash that was signed
+   * @return entityId The entity ID that signed this hash (0 if invalid)
+   */
+  function recoverEntity(
+    bytes calldata encodedBoard, 
+    bytes calldata encodedSignature, 
+    bytes32 hash
+  ) public view returns (uint256 entityId) {
+    bytes32 boardHash = keccak256(encodedBoard);
+    
+    // First try to find registered entity with this board hash
+    for (uint256 i = 1; i < nextNumber; i++) {
+      bytes32 candidateEntityId = bytes32(i);
+      if (entities[candidateEntityId].currentBoardHash != bytes32(0) && entities[candidateEntityId].currentBoardHash == boardHash) {
+        // Verify signature for this registered entity
+        uint16 boardResult = _verifyBoard(hash, encodedBoard, encodedSignature);
+        if (boardResult > 0) {
+          return i; // Return entity number
+        }
+      }
+    }
+    
+    // If no registered entity found, try as lazy entity
+    uint16 lazyResult = _verifyBoard(hash, encodedBoard, encodedSignature);
+    if (lazyResult > 0) {
+      return uint256(boardHash); // Return board hash as entity ID for lazy entities
+    }
+    
+    return 0; // Invalid signature
+  }
+
+  /**
+   * @notice Simplified board verification (calldata version)
+   */
+  function _verifyBoard(
+    bytes32 _hash,
+    bytes calldata encodedBoard,
+    bytes calldata encodedSignature
+  ) internal pure returns (uint16) {
+    Board memory board = abi.decode(encodedBoard, (Board));
+    bytes[] memory signatures = abi.decode(encodedSignature, (bytes[]));
+    
+    require(board.entityIds.length == board.votingPowers.length, "Board arrays length mismatch");
+    
+    uint16 voteYes = 0;
+    uint16 totalVotes = 0;
+    
+    for (uint i = 0; i < board.entityIds.length && i < signatures.length; i++) {
+      bytes32 entityId = board.entityIds[i];
+      uint16 votingPower = board.votingPowers[i];
+      
+      // Check if this is an EOA (20 bytes when cast to address)
+      if (uint256(entityId) <= type(uint160).max) {
+        // Simple EOA verification
+        address signer = address(uint160(uint256(entityId)));
+        if (signer == _recoverSigner(_hash, signatures[i])) {
+          voteYes += votingPower;
+        }
+        totalVotes += votingPower;
+      }
+      // Note: Nested entity verification handled by Hanko system
+    }
+    
+    if (totalVotes == 0) return 0;
+    if (voteYes < board.votingThreshold) return 0;
+    
+    return (voteYes * 100) / totalVotes;
+  }
+
+
+
+  /**
+   * @notice Recover signer from signature
+   */
+  function _recoverSigner(bytes32 _hash, bytes memory _signature) internal pure returns (address) {
+    if (_signature.length != 65) return address(0);
+    
+    bytes32 r;
+    bytes32 s;
+    uint8 v;
+    
+    assembly {
+      r := mload(add(_signature, 32))
+      s := mload(add(_signature, 64))
+      v := byte(0, mload(add(_signature, 96)))
+    }
+    
+    if (v < 27) v += 27;
+    if (v != 27 && v != 28) return address(0);
+    
+    return ecrecover(_hash, v, r, s);
+  }
+
+  /**
+   * @notice Validate entity exists (registered or lazy)
+   * @param entityId The entity ID to validate
+   * @param boardHash The board hash for validation
+   * @return isLazy Whether this is a lazy entity
+   */
+  function _validateEntity(bytes32 entityId, bytes32 boardHash) internal view returns (bool isLazy) {
+    if (entities[entityId].currentBoardHash == bytes32(0)) {
+      // Lazy entity: entityId must equal boardHash
+      require(entityId == boardHash, "Lazy entity: ID must equal board hash");
+      return true;
+    } else {
+      // Registered entity: use stored boardHash
+      require(boardHash == entities[entityId].currentBoardHash, "Board hash mismatch");
+      return false;
+    }
+  }
+
+
+
+  // Utility functions
+  function resolveEntityId(string memory identifier) external view returns (bytes32) {
+    // Try to resolve as name first
+    uint256 number = nameToNumber[identifier];
+    if (number > 0) {
+      return bytes32(number);
+    }
+    
+    // Try to parse as number
+    // Note: This would need a string-to-uint parser in practice
+    return bytes32(0);
+  }
+
+  function getEntityInfo(bytes32 entityId) external view returns (
+    bool exists,
+    bytes32 currentBoardHash,
+    bytes32 proposedBoardHash,
+    uint256 registrationBlock,
+    string memory name
+  ) {
+    Entity memory entity = entities[entityId];
+    exists = entity.currentBoardHash != bytes32(0);
+    currentBoardHash = entity.currentBoardHash;
+    proposedBoardHash = entity.proposedBoardHash;
+    registrationBlock = entity.registrationBlock;
+    
+    // Get name if it's a numbered entity
+    if (uint256(entityId) > 0 && uint256(entityId) < nextNumber) {
+      name = numberToName[uint256(entityId)];
+    }
+  }
+
+  // Admin functions
+  function setReservedName(string memory name, bool reserved) external onlyFoundation {
+    reservedNames[name] = reserved;
+  }
+
+  // === HANKO SIGNATURE VERIFICATION ===
+  //
+  // 🚨 CRITICAL DESIGN PHILOSOPHY: "ASSUME YES" FLASHLOAN GOVERNANCE 🚨
+  //
+  // This system INTENTIONALLY allows entities to mutually validate without EOA signatures.
+  // This is NOT a bug - it's a feature that enables flexible governance structures.
+  //
+  // EXAMPLE OF INTENTIONAL "LOOPHOLE":
+  // EntityA (threshold: 1) references EntityB at weight 100
+  // EntityB (threshold: 1) references EntityA at weight 100
+  // → Both pass validation with ZERO EOA signatures!
+  //
+  // WHY THIS IS INTENDED:
+  // 1. UI/Application layer enforces policies (e.g., "require at least 1 EOA")
+  // 2. Protocol stays flexible for exotic governance structures
+  // 3. Real entities will naturally include EOAs for practical control
+  // 4. Alternative would require complex graph analysis → expensive + still gameable
+  //
+  // POLICY ENFORCEMENT BELONGS IN UI, NOT PROTOCOL!
+
+  struct HankoBytes {
+    bytes32[] placeholders;    // Entity IDs that failed to sign (index 0..N-1)  
+    bytes packedSignatures;    // EOA signatures → yesEntities (index N..M-1)
+    HankoClaim[] claims;       // Entity claims to verify (index M..∞)
+  }
+
+  struct HankoClaim {
+    bytes32 entityId;          // Entity being verified
+    uint256[] entityIndexes;   // Indexes into placeholders + yesEntities + claims arrays
+    uint256[] weights;         // Voting weights for each entity  
+    uint256 threshold;         // Required voting power
+  }
+  
+  // Events
+  event HankoVerified(bytes32 indexed entityId, bytes32 indexed hash);
+  event HankoClaimProcessed(bytes32 indexed entityId, bool success, uint256 votingPower);
+
+  /**
+   * @notice Detect signature count from packed signatures length
+   * @dev DESIGN CHOICE: Signature count embedded in byte length, not explicit field
+   *      This eliminates potential attack vectors where count != actual signatures
+   * 
+   * @param packedSignatures Packed rsrsrs...vvv format
+   * @return signatureCount Number of signatures in the packed data
+   * 
+   * EXAMPLES:
+   * - 1 sig: 64 bytes (RS) + 1 byte (V) = 65 bytes total
+   * - 2 sigs: 128 bytes (RS) + 1 byte (VV in bits) = 129 bytes total  
+   * - 8 sigs: 512 bytes (RS) + 1 byte (8 V bits) = 513 bytes total
+   * - 9 sigs: 576 bytes (RS) + 2 bytes (9 V bits) = 578 bytes total
+   */
+  function _detectSignatureCount(bytes memory packedSignatures) internal pure returns (uint256 signatureCount) {
+    if (packedSignatures.length == 0) return 0;
+    
+    // Try different signature counts until we find the right one
+    // Formula: length = count * 64 + ceil(count / 8)
+    for (uint256 count = 1; count <= 16000; count++) {
+      uint256 expectedRSBytes = count * 64;
+      uint256 expectedVBytes = (count + 7) / 8; // Ceiling division
+      uint256 expectedTotal = expectedRSBytes + expectedVBytes;
+      
+      if (packedSignatures.length == expectedTotal) {
+        return count;
+      }
+      
+      // Early exit if we've exceeded possible length
+      if (expectedTotal > packedSignatures.length) {
+        break;
+      }
+    }
+    
+    revert("Invalid packed signature length - cannot detect count");
+  }
+
+  /**
+   * @notice Unpack signatures from packed format
+   * @param packedSignatures Packed rsrsrs...vvv format
+   * @return signatures Array of 65-byte signatures
+   */
+  function _unpackSignatures(
+    bytes memory packedSignatures
+  ) internal pure returns (bytes[] memory signatures) {
+    uint256 signatureCount = _detectSignatureCount(packedSignatures);
+    
+    if (signatureCount == 0) {
+      return new bytes[](0);
+    }
+    
+    uint256 expectedRSBytes = signatureCount * 64;
+    // uint256 expectedVBytes = (signatureCount + 7) / 8; // Ceiling division - unused
+    
+    signatures = new bytes[](signatureCount);
+    
+    for (uint256 i = 0; i < signatureCount; i++) {
+      // Extract R and S (64 bytes)
+      bytes memory rs = new bytes(64);
+      for (uint256 j = 0; j < 64; j++) {
+        rs[j] = packedSignatures[i * 64 + j];
+      }
+      
+      // Extract V bit
+      uint256 vByteIndex = expectedRSBytes + i / 8;
+      uint256 vBitIndex = i % 8;
+      uint8 vByte = uint8(packedSignatures[vByteIndex]);
+      uint8 v = ((vByte >> vBitIndex) & 1) == 0 ? 27 : 28;
+      
+      // Combine into 65-byte signature
+      signatures[i] = new bytes(65);
+      for (uint256 j = 0; j < 64; j++) {
+        signatures[i][j] = rs[j];
+      }
+      signatures[i][64] = bytes1(v);
+    }
+  }
+
+  /**
+   * @notice Build and hash a board from actual signers and claim data
+   * @param actualSigners Array of recovered signer addresses
+   * @param claim The hanko claim with weights and threshold
+   * @return boardHash The keccak256 hash of the reconstructed board
+   */
+  function _buildBoardHash(
+    address[] memory actualSigners,
+    HankoClaim memory claim
+  ) internal pure returns (bytes32 boardHash) {
+    require(actualSigners.length == claim.weights.length, "Signers/weights length mismatch");
+    
+    // Build parallel arrays for Board struct
+    bytes32[] memory entityIds = new bytes32[](actualSigners.length);
+    uint16[] memory votingPowers = new uint16[](actualSigners.length);
+    
+    // Populate arrays with actual signers and their weights
+    for (uint256 i = 0; i < actualSigners.length; i++) {
+      entityIds[i] = bytes32(uint256(uint160(actualSigners[i]))); // Convert address to bytes32
+      votingPowers[i] = uint16(claim.weights[i]);
+    }
+    
+    // Build Board struct with parallel arrays (transition delays set to 0 for compatibility)
+    Board memory reconstructedBoard = Board({
+      votingThreshold: uint16(claim.threshold),
+      entityIds: entityIds,
+      votingPowers: votingPowers,
+      boardChangeDelay: 0,      // Default delays for hanko verification
+      controlChangeDelay: 0,
+      dividendChangeDelay: 0
+    });
+    
+    // Hash the reconstructed board (same as entity registration)
+    boardHash = keccak256(abi.encode(reconstructedBoard));
+  }
+
+  /* Hanko Signatures - Ephemeral Entity Registration
+  From EntityProvider.sol this is actually revolutionary:
+  struct HankoBytes {
+    bytes32[] placeholders;    // Entities that didn't sign
+    bytes packedSignatures;    // EOA sigs compressed (rsrsrs...vvv)
+    HankoClaim[] claims;       // Nested entity proofs
+  }
+
+  What this enables:
+  - Entities can be verified without pre-registration
+  - Nested hierarchies (Corp A owns Corp B owns wallet C) - zero contract deployment
+  - Recursive verification via claims
+  - Packed signatures: N×64 bytes + ceil(N/8) bytes for V bits
+
+  Why "first in history":
+  - Multisigs require deployed contracts (Gnosis Safe, etc.)
+  - Account abstraction requires pre-registration
+  - Hanko: Pure cryptographic verification, ephemeral entities, hierarchical M-of-N
+
+  This is genuinely novel. The recoverEntity() function (line 361) finds which entity signed a hash by iterating registered entities and checking boardHash
+   matches. Unregistered entities can still sign via claims.
+   */
+
   /**
    * @notice Verify hanko signature with flashloan governance (optimistic verification)
    * @param hankoData ABI-encoded hanko bytes  
@@ -2767,7 +4645,22 @@ import "./Token.sol";
 import "./ECDSA.sol";
 import "./console.sol";
 import "hardhat/console.sol";
+/* 
+Subcontracts - Programmable Delta Transformers
+  function applyBatch(int[] memory deltas, bytes calldata encodedBatch,
+                      bytes calldata leftArguments, bytes calldata rightArguments)
+    → int[] memory newDeltas
 
+  What you can do:
+  - HTLCs (conditional payments based on secret reveal)
+  - Atomic swaps (exchange token A for token B, all-or-nothing)
+  - Any programmable state transition within bilateral account
+
+  First in history: Lightning only has HTLCs hardcoded. You're generalizing it - arbitrary logic can transform delta arrays. The applySwap() function (line
+   105) shows fillRatio execution (0-100% fill of limit order).
+
+  This is DeFi within bilateral channels. Genuinely new.
+  */
 contract SubcontractProvider is Console {
   mapping(bytes32 => uint) public hashToBlock;
   uint MAXUINT32 = type(uint32).max;
@@ -2897,6 +4790,398 @@ contract SubcontractProvider is Console {
 
 
 
+}
+
+--- jurisdictions/contracts/SubcontractProviderV1.sol ---
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+pragma experimental ABIEncoderV2;
+
+import "./Token.sol";
+
+import "./ECDSA.sol";
+import "./console.sol";
+import "hardhat/console.sol";
+/* 
+Subcontracts - Programmable Delta Transformers
+  function applyBatch(int[] memory deltas, bytes calldata encodedBatch,
+                      bytes calldata leftArguments, bytes calldata rightArguments)
+    → int[] memory newDeltas
+
+  What you can do:
+  - HTLCs (conditional payments based on secret reveal)
+  - Atomic swaps (exchange token A for token B, all-or-nothing)
+  - Any programmable state transition within bilateral account
+
+  First in history: Lightning only has HTLCs hardcoded. You're generalizing it - arbitrary logic can transform delta arrays. The applySwap() function (line
+   105) shows fillRatio execution (0-100% fill of limit order).
+
+  This is DeFi within bilateral channels. Genuinely new.
+  */
+contract SubcontractProvider is Console {
+  mapping(bytes32 => uint) public hashToBlock;
+  uint MAXUINT32 = type(uint32).max;
+
+  constructor() {
+    revealSecret(bytes32(0));
+  }
+  
+  struct Batch {
+    Payment[] payment;
+    Swap[] swap;
+  }
+
+  // actual subcontract structs
+  struct Payment {
+    uint deltaIndex;
+    int amount;
+    uint revealedUntilBlock;
+    bytes32 hash;
+  }
+
+  struct Swap {
+    bool ownerIsLeft;
+
+    uint addDeltaIndex;
+    uint addAmount;
+
+    uint subDeltaIndex;
+    uint subAmount;
+  }
+
+  // https://en.wikipedia.org/wiki/Credit_default_swap
+  struct CreditDefaultSwap {
+    uint deltaIndex;
+    int amount;
+    address referenceEntity;
+    uint tokenId;
+    uint exerciseUntilBlock;
+  }
+
+  function encodeBatch (Batch memory b) public pure returns (bytes memory) {
+    return abi.encode(b);
+  }
+
+
+
+  // applies arbitrary changes to deltas
+  function applyBatch(
+    int[] memory deltas,
+    bytes calldata encodedBatch,
+    bytes calldata leftArguments,
+    bytes calldata rightArguments
+  ) public returns (int[] memory) {
+
+    Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
+
+    uint[] memory lArgs = abi.decode(leftArguments, (uint[]));
+    uint[] memory rArgs = abi.decode(rightArguments, (uint[]));
+    
+    for (uint i = 0; i < decodedBatch.payment.length; i++) {
+      applyPayment(deltas, decodedBatch.payment[i]);
+    }
+
+    uint leftSwaps = 0;
+    for (uint i = 0; i < decodedBatch.swap.length; i++) {
+      Swap memory swap = decodedBatch.swap[i];
+
+      uint32 fillRatio = uint32(swap.ownerIsLeft ? lArgs[leftSwaps] : rArgs[i  - leftSwaps]);
+
+      applySwap(deltas, swap, fillRatio);
+      //logDeltas("Deltas after swap", deltas);
+
+      if (swap.ownerIsLeft) {
+        leftSwaps++;
+      }
+    }
+
+    return deltas;
+  }
+
+  function applyPayment(int[] memory deltas, Payment memory payment) private {
+    // apply amount to delta if revealed on time
+    // this is "sprites" approach (https://arxiv.org/pdf/1702.05812) 
+    // the opposite is "blitz" (https://www.usenix.org/system/files/sec21fall-aumayr.pdf)
+    uint revealedAt = hashToBlock[payment.hash];
+    if (revealedAt == 0 || revealedAt > payment.revealedUntilBlock) {
+      return;
+    }
+
+    logDeltas("Before payment", deltas);
+    deltas[payment.deltaIndex] += payment.amount;
+    logDeltas("After payment", deltas);
+  }
+
+  function applySwap(int[] memory deltas, Swap memory swap, uint32 fillRatio) private {
+    logDeltas("Before swap", deltas);
+    deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAXUINT32);
+    deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAXUINT32);
+    logDeltas("After swap", deltas);
+  }
+
+
+
+
+
+  function revealSecret(bytes32 secret) public {
+    console.log("Revealing HTLC secret:");
+    console.logBytes32(secret);
+    console.logBytes32(keccak256(abi.encode(secret)));
+    hashToBlock[keccak256(abi.encode(secret))] = block.number;
+  }
+  
+  // anyone can get gas refund by deleting very old revealed secrets
+  function cleanSecret(bytes32 hash) public {
+    if (hashToBlock[hash] != 0 && hashToBlock[hash] < block.number - 100000){
+      delete hashToBlock[hash];
+    }
+  }
+
+  function logDeltas(string memory _msg, int[] memory deltas) public pure {
+    console.log(_msg);
+    for (uint i = 0; i < deltas.length; i++) {
+      console.logInt(deltas[i]);
+    }
+    console.log('====================');
+  }
+
+
+
+}
+
+--- jurisdictions/contracts/ECDSA.sol ---
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+/**
+ * @dev Elliptic Curve Digital Signature Algorithm (ECDSA) operations.
+ *
+ * These functions can be used to verify that a message was signed by the holder
+ * of the private keys of a given address.
+ */
+library ECDSA {
+    /**
+     * @dev Returns the address that signed a hashed message (`hash`) with
+     * `signature`. This address can then be used for verification purposes.
+     *
+     * The `ecrecover` EVM opcode allows for malleable (non-unique) signatures:
+     * this function rejects them by requiring the `s` value to be in the lower
+     * half order, and the `v` value to be either 27 or 28.
+     *
+     * IMPORTANT: `hash` _must_ be the result of a hash operation for the
+     * verification to be secure: it is possible to craft signatures that
+     * recover to arbitrary addresses for non-hashed data. A safe way to ensure
+     * this is by receiving a hash of the original message (which may otherwise
+     * be too long), and then calling {toEthSignedMessageHash} on it.
+     */
+    function recover(bytes32 hash, bytes memory signature) internal pure returns (address) {
+        // Check the signature length
+        if (signature.length != 65) {
+            revert("ECDSA: invalid signature length");
+        }
+
+        // Divide the signature in r, s and v variables
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+
+        // ecrecover takes the signature parameters, and the only way to get them
+        // currently is to use assembly.
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            r := mload(add(signature, 0x20))
+            s := mload(add(signature, 0x40))
+            v := byte(0, mload(add(signature, 0x60)))
+        }
+
+        return recover(hash, v, r, s);
+    }
+
+    /**
+     * @dev Overload of {ECDSA-recover} that receives the `v`,
+     * `r` and `s` signature fields separately.
+     */
+    function recover(bytes32 hash, uint8 v, bytes32 r, bytes32 s) internal pure returns (address) {
+        // EIP-2 still allows signature malleability for ecrecover(). Remove this possibility and make the signature
+        // unique. Appendix F in the Ethereum Yellow paper (https://ethereum.github.io/yellowpaper/paper.pdf), defines
+        // the valid range for s in (281): 0 < s < secp256k1n ÷ 2 + 1, and for v in (282): v ∈ {27, 28}. Most
+        // signatures from current libraries generate a unique signature with an s-value in the lower half order.
+        //
+        // If your library generates malleable signatures, such as s-values in the upper range, calculate a new s-value
+        // with 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 - s1 and flip v from 27 to 28 or
+        // vice versa. If your library also generates signatures with 0/1 for v instead 27/28, add 27 to v to accept
+        // these malleable signatures as well.
+        require(uint256(s) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "ECDSA: invalid signature 's' value");
+        require(v == 27 || v == 28, "ECDSA: invalid signature 'v' value");
+
+        // If the signature is valid (and not malleable), return the signer address
+        address signer = ecrecover(hash, v, r, s);
+        require(signer != address(0), "ECDSA: invalid signature");
+
+        return signer;
+    }
+
+    /**
+     * @dev Returns an Ethereum Signed Message, created from a `hash`. This
+     * produces hash corresponding to the one signed with the
+     * https://eth.wiki/json-rpc/API#eth_sign[`eth_sign`]
+     * JSON-RPC method as part of EIP-191.
+     *
+     * See {recover}.
+     */
+    function toEthSignedMessageHash(bytes32 hash) internal pure returns (bytes32) {
+        // 32 is the length in bytes of hash,
+        // enforced by the type signature above
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
+    }
+
+    /**
+     * @dev Returns an Ethereum Signed Typed Data, created from a
+     * `domainSeparator` and a `structHash`. This produces hash corresponding
+     * to the one signed with the
+     * https://eips.ethereum.org/EIPS/eip-712[`eth_signTypedData`]
+     * JSON-RPC method as part of EIP-712.
+     *
+     * See {recover}.
+     */
+    function toTypedDataHash(bytes32 domainSeparator, bytes32 structHash) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+    }
+}
+
+
+--- jurisdictions/contracts/Token.sol ---
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+interface Token {
+    /// @return supply total amount of tokens
+    function totalSupply() external view returns (uint256 supply);
+
+    /// @param _owner The address from which the balance will be retrieved
+    /// @return balance The balance
+    function balanceOf(address _owner) external view returns (uint256 balance);
+
+    /// @notice send `_value` token to `_to` from `msg.sender`
+    /// @param _to The address of the recipient
+    /// @param _value The amount of token to be transferred
+    /// @return success Whether the transfer was successful or not
+    function transfer(address _to, uint256 _value) external returns (bool success);
+
+    /// @notice send `_value` token to `_to` from `_from` on the condition it is approved by `_from`
+    /// @param _from The address of the sender
+    /// @param _to The address of the recipient
+    /// @param _value The amount of token to be transferred
+    /// @return success Whether the transfer was successful or not
+    function transferFrom(address _from, address _to, uint256 _value) external returns (bool success);
+
+    /// @notice `msg.sender` approves `_spender` to spend `_value` tokens
+    /// @param _spender The address of the account able to transfer the tokens
+    /// @param _value The amount of wei to be approved for transfer
+    /// @return success Whether the approval was successful or not
+    function approve(address _spender, uint256 _value) external returns (bool success);
+
+    /// @param _owner The address of the account owning tokens
+    /// @param _spender The address of the account able to transfer the tokens
+    /// @return remaining Amount of remaining tokens allowed to spent
+    function allowance(address _owner, address _spender) external view returns (uint256 remaining);
+
+    event Transfer(address indexed _from, address indexed _to, uint256 _value);
+    event Approval(address indexed _owner, address indexed _spender, uint256 _value);
+
+    // Optionally implemented function to show the number of decimals for the token
+    function decimals() external view returns (uint8 dec);
+}
+
+
+--- jurisdictions/contracts/console.sol ---
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+contract Console {
+  event LogString(string, string);
+  function log(string  memory s , string memory x) public {
+    emit LogString(s, x);
+  }
+
+  event LogUint(string, uint);
+  function log(string  memory s , uint  x) public {
+    emit LogUint(s, x);
+  }
+
+  event LogInt(string, int);
+  function log(string  memory s , int  x) public  {
+    emit LogInt(s, x);
+  }
+  
+  event LogBytes(string, bytes);
+  function log(string  memory s , bytes  memory x) public  {
+    emit LogBytes(s, x);
+  }
+  
+  event LogBytes32(string, bytes32);
+  function log(string  memory s , bytes32  x)  public {
+    emit LogBytes32(s, x);
+  }
+
+  event LogAddress(string, address);
+  function log(string  memory s , address  x) public  {
+    emit LogAddress(s, x);
+  }
+
+  event LogBool(string, bool);
+  function log(string  memory s , bool  x)  public {
+    emit LogBool(s, x);
+  }
+
+
+
+
+
+
+
+
+}
+
+--- jurisdictions/contracts/ERC20Mock.sol ---
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+contract ERC20Mock is ERC20 {
+    constructor(string memory name, string memory symbol, uint256 initialSupply) ERC20(name, symbol) {
+        _mint(msg.sender, initialSupply);
+    }
+}
+
+--- jurisdictions/contracts/ERC721Mock.sol ---
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+
+contract ERC721Mock is ERC721 {
+    uint256 private _currentTokenId = 0;
+
+    constructor(string memory name, string memory symbol) ERC721(name, symbol) {}
+
+    function mint(address to, uint256 tokenId) public {
+        _mint(to, tokenId);
+    }
+}
+
+--- jurisdictions/contracts/ERC1155Mock.sol ---
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+
+contract ERC1155Mock is ERC1155 {
+    constructor() ERC1155("") {}
+
+    function mint(address to, uint256 id, uint256 amount, bytes memory data) public {
+        _mint(to, id, amount, data);
+    }
 }
 
 --- runtime/runtime.ts ---
@@ -3972,9 +6257,88 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       console.warn('⚠️ process() reached maximum iterations');
     }
 
+    // Auto-persist to LevelDB after processing
+    await saveEnvToDB(env);
+
     return env;
   } finally {
     cascading = false;
+  }
+};
+
+// === LEVELDB PERSISTENCE ===
+export const saveEnvToDB = async (env: Env): Promise<void> => {
+  if (!isBrowser) return; // Only persist in browser
+
+  try {
+    const dbReady = await tryOpenDb();
+    if (!dbReady) return;
+
+    // Save latest height pointer
+    await db.put(Buffer.from('latest_height'), Buffer.from(String(env.height)));
+
+    // Save environment snapshot
+    const snapshot = JSON.stringify(env, (k, v) =>
+      typeof v === 'bigint' ? String(v) :
+      v instanceof Uint8Array ? Array.from(v) :
+      v instanceof Map ? Array.from(v.entries()) : v
+    );
+    await db.put(Buffer.from(`snapshot:${env.height}`), Buffer.from(snapshot));
+  } catch (err) {
+    console.error('❌ Failed to save to LevelDB:', err);
+  }
+};
+
+export const loadEnvFromDB = async (): Promise<Env | null> => {
+  if (!isBrowser) return null;
+
+  try {
+    const dbReady = await tryOpenDb();
+    if (!dbReady) return null;
+
+    const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
+    const latestHeight = parseInt(latestHeightBuffer.toString());
+
+    // Load all snapshots to build history
+    const history: Env[] = [];
+    for (let i = 0; i <= latestHeight; i++) {
+      const buffer = await db.get(Buffer.from(`snapshot:${i}`));
+      const data = JSON.parse(buffer.toString());
+
+      // Hydrate Maps/BigInts
+      const env = createEmptyEnv();
+      env.height = BigInt(data.height || 0);
+      env.timestamp = BigInt(data.timestamp || 0);
+      env.replicas = new Map(data.replicas || []);
+      if (data.gossip?.profiles) {
+        env.gossip.profiles = new Map(data.gossip.profiles);
+      }
+      history.push(env);
+    }
+
+    const latestEnv = history[history.length - 1];
+    if (latestEnv) {
+      latestEnv.history = history;
+    }
+
+    return latestEnv;
+  } catch (err) {
+    console.log('No persisted state found');
+    return null;
+  }
+};
+
+export const clearDB = async (): Promise<void> => {
+  if (!isBrowser) return;
+
+  try {
+    const dbReady = await tryOpenDb();
+    if (!dbReady) return;
+
+    await db.clear();
+    console.log('✅ LevelDB cleared');
+  } catch (err) {
+    console.error('❌ Failed to clear LevelDB:', err);
   }
 };
 
@@ -5781,6 +8145,25 @@ export const getJurisdictions = async (): Promise<Map<string, JurisdictionConfig
 export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]> => {
   const jurisdictions = await getJurisdictions();
   return Array.from(jurisdictions.values());
+};
+
+/**
+ * Set BrowserVM jurisdiction (for isolated /view environments)
+ * This overrides DEFAULT_JURISDICTIONS with a single BrowserVM-backed jurisdiction
+ */
+export const setBrowserVMJurisdiction = (entityProviderAddress: string, depositoryAddress: string) => {
+  console.log('[BrowserVM] Setting jurisdiction override:', { entityProviderAddress, depositoryAddress });
+
+  DEFAULT_JURISDICTIONS = new Map();
+  DEFAULT_JURISDICTIONS.set('arrakis', {
+    name: 'Arrakis',
+    chainId: 1337,
+    rpc: 'http://localhost:8545', // Not used by BrowserVM but required for type
+    entityProviderAddress,
+    depositoryAddress,
+  });
+
+  console.log('✅ BrowserVM jurisdiction active - numbered entities will register here');
 };
 
 export const getJurisdictionByAddress = async (address: string): Promise<JurisdictionConfig | undefined> => {
@@ -8672,6 +11055,41 @@ flexible credit-collateral security model
 banking-like UX
 
 
+--- vibepaper/priorart.md ---
+# Prior Art
+
+Xln is built on shoulders of giants.
+
+## Bitcoin
+
+Satoshi Nakamoto is genius for creating the replicated state machine (RSM) movement. For making people even ask and wonder why do we keep our entire net-worth in hands of unprovable custodial state machines. 
+
+## Ethereum
+
+Vitalik Buterin is genius for inventing Turing-complete programmable RSM: EVM (Ethereum Virtual Machine). EVM is our reference adapter Jurisdiction machine in J-REA stack. Its yellowpaper alone changed the course of human history forever. 
+Unfortunatelly, we believe his & EF team narrative about plasma, rollups, DAC/DAS are not an endgame. It feels like a costly detour and dead-end research trap. **All broadcast O(n) designs are fundamentally bottlenecked in scalability and mathematically flawed with data availability paradox.**
+
+Their goals are noble: trustless exitable layer2. But their means are mathematically handicapped. Broadcast-J-shared-state just cannot have planetary scale. Neither directly (big blockers) nor through blob-checkpointing surrogates. There is nothing you can do about it. 
+
+The unicast bilateral state approach completely side-steps this problem.
+
+No amount of DAC/DAS/erasure coding assumption cascades can solve that. **Those are very intellectually interesting problems to work on, but they are perpetuum mobile in a nutshell.**
+
+## Lightning Network
+
+
+
+## Ronald Coase
+
+##  Douglas Diamond, Philip H. Dybvig, Ben Bernanke
+
+
+
+
+
+We are turn existing RSM into J-REA two-layered stack. 
+
+
 --- vibepaper/docs/summary.md ---
 # XLN Protocol
 
@@ -8824,6 +11242,339 @@ Using the final Δ:
 - **Programmable subcontracts** — HTLCs, swaps, derivatives.  
 - **Simple as banking** — user balances are derived from `(collateral, ondelta, offdelta)`.
 
+
+--- vibepaper/docs/00_QA.md ---
+# 0.0 Questions & Answers
+
+[pairing: Apashe, Worakls & Wasiu - Rome Is Burning](https://www.youtube.com/watch?v=dpn5Rff4gUk)
+
+## whoami
+
+I am Egor Homakov, security researcher and architect of UFT/Xln. Lets briefly elaborate my **intrinsic motivation and passion** to creating this protocol. 
+
+I started my career in Ruby on Rails/JavaScript software engineering circa 2007. In 2012, I've stumbled upon a fundamental insecure-by-default pattern in Rails called mass assignment and inappropriately hacked Github to [make my point](https://github.com/rails/rails/commit/b83965785db1eec019edf1fc272b1aa393e6dc57). Ever since I've been obsessed with finding not just one-off bugs, but systemic flaws in protocols and improving software layers as a whole: further hardening Ruby-ecosystem, client side security, OAuth2, proposed [SecureLogin](https://github.com/sakurity/securelogin/) (would be way more convenient than passkeys if adopted by big tech).
+
+Then I founded [Sakurity](https://sakurity.com), conducted boutique security audits and pentests for some of the big names in the startup industry. Things went good. Around 2017 I've retired from consulting and focused on **the most critical yet most vulnerable and misdesigned architecture on the planet** – our financial system, as a whole. This includes both TradFi + DeFi, as per JEA mental model soon you will see they are the same.
+
+The catalyst was reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius primitives, **"the wheel"** (proofs + collateral + delta transformer) but then tried to apply it in a delusional way, **"the unicycle"** (full-reserve account network, has no working incentive model, can't scale). Yes, unicycle can work under rare conditions, but do you see people using it on the street?
+
+I voiced my concerns in 2017 and it was discared as FUD. In 2025 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel designs are dead due to inbound capacity problem.
+
+<img src="../frontend/static/img/RCPAN.png" width="200px">
+
+The solution to inbound capacity was painfully obvious to me: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but unusable Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 24, 2017. This is the core formula, around of which further layers are built upon.
+
+The Unified Financial Theory and Xln (practical reference implementation) is my magnum opus and quintessence of 9 years of research into TradFi/RTGS/DeFi/DAO/AA/institutional governance/state channels. I believe UFT/Xln is 100x more important than all of my infosec research combined. Call me delusional, but I just happen to be right, eventually.
+
+## Another Bitcoin/Ethereum Killer?
+
+**No, quite the opposite! Xln is not a "blockchain" at all or as we call it, Jurisdiction machine. 
+
+Simply put, Xln is a unified netting Layer2 for all jurisdictional gross layers (J-machines) out there. Including Bitcoin and Ethereum. Including Fedwire and ECB and other central banks, once they realize the inevitability of what's coming.**
+
+I love Bitcoin for its legacy. I love Ethereum for bringing generalized programmability to J-machines. But currently they are trying to solve the wrong problem.
+
+J-machine **is not what should be scaled**. Leave it alone - it's doing perfectly fine at 30-100 tps globally. It's not meant for coffee-payments. The organisational & transactional entity-account layer2, is what needs to be expanded, same as commercial banking layer operates underneath central banks/RTGS (e.g Fed+Fedwire = TradFi J-machine).
+
+I am the most maxi full-node-on-every-device you can think of. Unfortunatelly, up until creation of Xln no blockchain could survive with ultra-lightweight L1 J-machine alone.
+
+I religiously believe and double down on the original vision of Bitcoin and Ethereum where every laptop and phone can run fully verifying node. Xln is the first architecture that actually delivers that vision. 
+
+Xln achieves that by creating two loosely coupled layers: J-REA 
+
+* **Gross-J-Layer1 for >$1M transfers**: <30-100 tps global settlement  (Bitcoin and Ethereum are J-machines). Xln is jurisdiction-agnostic and can support any L1, but the lower global tps - the easier it is to run a full node on consumer device. Xln is the first architecture that works just fine with Original Ethereum, even if gaslimit is reduced 10-100x. Unlike rollups, Xln does not require blobspace or data availability committees of any form - the account proofs are sovereign and exits are guaranteed at all times.
+
+* **Net-REA-Layer2 for <$1M transfers>**: unbounded scalability Unicast O(1). Xln is a netting overlay attaching to any EVM L1/EVM-rollup/future EVM-like CBDC J-machines, creating financial Internet of unified liquidity.
+
+## The system uses credit. Credit = bad. #DontTrustVerify #BitcoinMAXI
+
+I hate to break it to you, but every financial system under the sun uses some form of credit one way or another. It's just named differently. It's a different cascade of trust assumptions, projected over different threat models.
+
+Take a single 1 BTC UTXO on-chain for example. **As of now, this is the safest way to store value on the planet.** 
+
+Yet, even BTC can fall apart overnight. Several G7 security agencies can cooperate to attack mining pools. Deposit few Billions to thousands of warm KYC-d accounts in popular centralized exchanges around the world, swap it to any other non-BTC or fiat, then cancel (double-spend) their original BTC deposits to the exchanges. Whoops, $4T crypto economy would vanish overnight. 
+
+Mission: Very-Much-Possible I must say. Luckily, most government officials are well invested into BTC and other neo J-machines. This is what keeps us safe, for now.
+
+BTC-UTXO is golden standard and benchmark security, yes. Everything else is significantly worse that. 
+
+Everyone else is trying to scale Broadcast O(n) J-machine but inevitably ends up with credit and counterparty risk one way or another.
+
+## Big-blockers don't have credit. Solana/Tron/etc is the next big thing.
+
+Solana is a Broadcast O(n) big-blocker, like almost everyone else. They have fantastic marketing and PR. They did a politically right thing to do. But it is not "scaling". 
+
+**Big-blocker** is a catch-all term for anything that you cannot realistically run on a laptop or a phone, simple as that.
+
+Yes, Solana uses fancy Proof-of-History (basically a streaming hashonion), but it has no impact on actual security assumtions. It runs in parallel, but that's a 10x improvement, not 1Mx one we need for planetery scalability. It requires unicast second layer.
+
+## Rollups don't use credit
+
+No, they all do. First, in form of preconfirmations - it's a fractional reserve-style promise given by sequenceer only covered by shared-pot bond. Second, in form of verifier dilemma and data availability paradox. Both are unsolvable.
+
+## Payment channels don't use credit
+
+Yes, and full-reserve channels don't work. And when they work, turns out custodial service or 0-conf/JIT on receive channel was used. Both are just weaker form of Xln's enforceable credit.
+
+## You hate rollups? You hate payment channels?
+
+No. I admire dedication. And that's why I admire both rollups and traditional full-reserve payment channels in their pursuit. 
+
+But sometimes a simpler solution is out there, in front of your nose. It's not giving up, it's getting real.
+
+## You are re-creating banks. Satoshi said we must get rid of those?
+
+<img src="../frontend/static/img/bailout.png" width="600px">
+
+Hubs (banks+brokers entities) were never the problem per se. Bailouts are. 
+
+Hubs in tradfi lack 1) proofs for security-of-communication 2) collateral for security-from-counterparty-risk 3) delta transformers for security-in-motion.
+
+Xlnomy is a bailout free. You never have a too-big-to-fail player, systemic contagion is bounded by per-link credit limits and escrowed collateral. 
+
+## Show, don't tell!
+
+You can build & play with your personal home-grown xlnomy at [xln.finance](https://xln.finance) in 2D/Graph 3D/VR/Panel/Terminal interface. **It's real fun with Oculus Quest!** Create personal entities, N/M multifactor entities, hierarchical companies and institutions with instant IPO of C/D shares with any hub. Stream dividends and buybacks per-second, do merge&acquisitions, new board election, and of course borrow/lend/payments/swaps and other DeFi primitives of any complexity. 
+
+<img src="../frontend/static/img/preview.png" width="600px">
+
+Private testnet with cross-subnet networking ETA: Q1 2026.
+
+## Should I read it? What's the target audience?
+
+Anyone, really. Especially if you're into fintech/crypto/complex systems. If you're willing to bend your mental models around the status quo, embrace our contrarian yet factually correct rhetoric, ready to research into unknown and question the dogmas from first principles - yes.
+
+If you don't have time for 30-60 min deep reading - **spend 5 minutes on understanding core RCPAN invariant** and save the rest of the document for the future. 
+
+## How to read it
+
+The documents are a little heavy on technical & financial terminology. This is intentional - instead of making it a tedious long read "for the general crowd", it seemed like a better idea to make it concentrated and to the point, letting readers ask an LLM of their choice to re-hydrate and expand on any paragraph, with targeted prompts like "ELI5?", "I'm a banker, what is it?", "I'm a protocols engineer, what's under the hood?".
+
+There will be more approachable and elaborated versions of it soon. You're welcome to create your own adaptaion, though!
+
+**Start with "context: https://xln.finance/c.txt should I learn it and why?" with any frontier language model.** GPT-5/Claude/Grok/Gemini/Qwen/GLM – all have phenomenal grasp on UFT/Xln once you attach the whitepapers/contracts/src as the context.s
+
+Feel free to reach out directly if after 3-5 prompts the answers still seem cryptic to you. 
+
+
+
+--- vibepaper/docs/12_invariant.md ---
+# 1.2 RCPAN Invariant 
+
+[pairing: Pye Corner Audio - The Simplest Equation](https://www.youtube.com/watch?v=Vp0a8tdzJmk) (but yes, technically it's inequality)
+
+
+The core credit–collateral mechanism can be grasped in three minutes. Accounts are bilateral relationships between entities. 
+
+For centuries, the world has run on FCUAN (full-credit, unprovable account networks—i.e., traditional banking credit rails): bilateral, uncollateralized limits between end-users (“spokes”) and banks/brokers (“hubs”). Any CEX (e.g., Binance, Coinbase) is also FCUAN. 
+
+FCUAN scales phenomenally but offers weak user security. Any spoke can be censored, and assets seized at any moment. Hubs can default, even without malice (Diamond–Dybvig–style hub runs). 
+
+Deposit insurance is typically small relative to broad money (≪ M2), which systematically externalizes tail risk and invites moral hazard.
+
+Two entities start a financial relationship (per-asset Δ balances). Their xln wallets compare their hex IDs; the lower becomes L (left), the other R (right). Imagine an x-axis where:
+
+. is zero (0)
+Δ delta is the signed balance (saldo) between counterparties
+[ ] are invariant boundaries—how far Δ can move given mutual credit and shared collateral
+
+Clean slate (all zeros):
+
+(L)eft entity   [.Δ]   (R)ight entity
+
+Either party can extend a credit limit to the other:
+- unused, uncollateralized credit line (credit)
+* used credit
+
+Example (leftCreditLimit = 3, rightCreditLimit = 3):
+
+[---.Δ---]
+
+Payments pull Δ toward the payer’s side (away from the receiver) while the receiver’s allocation increases.
+L pays 2 to R → Δ = −2:
+
+[-Δ**.---]
+
+R pays back 3 → Δ = +1:
+
+[---.*∆--]
+
+This is what 99.99% of the world economy runs on. Today, every bank, broker, CEX, and payment intermediary is pure FCUAN.
+
+A different approach, FRPAP (full-reserve, provable account primitives), often called “payment/state channels,” was popularized by the 2017 Lightning Network paper. FRPAP/Payment channels are full-reserve bilateral accounts with proofs—not a network architecture.
+
+Every full-reserve design (e.g., Raiden on Ethereum, Hydra on Cardano) inherits the inbound-capacity constraint—an architectural limit, not an implementation bug. It’s more precise to treat this as a family of three account primitives—proofs, collateral, and delta transformers—rather than a scalable network.
+
+In diagrams:
+= collateral (fully escrowed). Think of it as a dedicated 2-of-2 escrow with cryptographic guarantees.
+
+We draw collateral to the right of zero. R posts 3 units of collateral:
+
+[.Δ===]
+
+R pays 2 (Δ moves right):
+
+[.==Δ=]
+
+xln is the first RCPAN (Reserve-Credit, Provable Account Network): credit where it scales, collateral where it secures—a principled hybrid of FCUAN and FRPAP.
+
+FCUAN invariant:
+−leftCreditLimit ≤ Δ ≤ rightCreditLimit
+[---.---]
+
+FRPAP invariant:
+0 ≤ Δ ≤ collateral
+[.===]
+
+RCPAN (xln) superset invariant:
+−leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
+[---.===---]
+
+xln can mimic both: ignore collateral functionality and it works like banking with enforceable proofs; ignore credit lines and it works like Lightning/full-reserve payment-channel networks. 
+
+Using both is where the real synergy emerges.
+
+Practical consequences: no inbound liquidity wall and no unbounded hub risk—losses are link-capped; throughput scales with links, not global broadcasts.
+
+Follow for news, analysis, and a verification-first roadmap (proof sketch, benchmarks, economic spec, security playbook). xln is layer-2 done right.
+
+🔗 https://github.com/xlnfinance/xln
+
+--- vibepaper/docs/jea.md ---
+🏛️ JEA: Jurisdiction-Entity-Account Model
+
+“JEA is not just a technical pattern — it’s a legal operating system for programmable institutions.”
+
+The JEA architecture underpins XLN’s modular trust and execution model. It separates concerns cleanly across three layers:
+	•	Jurisdictions: Public, often on-chain arbitration and registry zones
+	•	Entities: Sovereign programmable machines (like DAOs or firms)
+	•	Accounts (Channels): Bilateral trust relationships or financial instruments
+
+This document outlines the JEA structure in detail, its purpose, flow, and how it replaces traditional consensus-heavy architectures.
+
+⸻
+
+⚖️ 1. Jurisdiction: Public Arbitration Layer
+
+A Jurisdiction is a public smart contract or observable registry that acts as:
+	•	Dispute settlement ground
+	•	Reserve registry
+	•	Oracle of record for shared events
+
+Key Concepts
+	•	Jurisdiction is opt-in: Entities choose when to interact
+	•	Jurisdiction has no access to internal state
+	•	Jurisdiction observes receipts: Signed proofs of action
+
+Contracts
+	•	EntityProvider.sol — stores quorum hash (Merkle root of signer structure)
+	•	Depository.sol — stores reserve/collateral data
+	•	Custom registries — e.g., insurance claims, auctions, licenses
+
+Use Cases
+
+Case	Jurisdiction Role
+Reserve deposit	Holds tokens, emits event
+Credit collateralization	Verifies locked assets and releases collateral
+Token mint claim	Accepts signed receipt from Entity and emits asset
+
+“Jurisdictions are like courts that accept signed, notarized paperwork — but never interfere in private life unless called.”
+
+⸻
+
+🏛️ 2. Entity: Sovereign Organization
+
+An Entity is a self-contained state-time machine with its own quorum, storage, and block history.
+
+Key Properties
+	•	Maintains internal logic via deterministic actions
+	•	Requires quorum threshold for any state change
+	•	Can spawn accounts, tokens, and internal machines
+	•	Interacts with Jurisdiction via signed receipts
+
+On Jurisdiction Access
+	•	Entity creates a Proposal to mint/reserve/interact externally
+	•	Once quorum signs and the state commits, the signed receipt is emitted
+	•	Receipt may be submitted to Jurisdiction by any party (watchers)
+
+Security Guarantees
+	•	Jurisdiction verifies Merkle proof of quorum hash
+	•	Jurisdiction does not need to replay Entity logic — trust is cryptographic
+
+“An Entity is like a company with its own bylaws and board. The state doesn’t care what happens inside — until you file a public claim.”
+
+⸻
+
+💳 3. Account: Channels and Financial Instruments
+
+Accounts represent:
+	•	Channels (credit lines, bilateral payments)
+	•	Subcontracts (vesting, options, loans)
+	•	Internal balances or positions
+
+Structure
+	•	Always nested inside an Entity
+	•	Follows AccountProof → Subcontract model
+	•	Each has its own logic, deltas, and Merkle proof
+
+Execution
+	•	Account emits proof of state change (e.g. balance update)
+	•	Entity collects and commits proof into its block
+	•	Optionally, Jurisdiction may act on this (e.g. insurance trigger)
+
+“Accounts are the atoms. Entities are the molecules. Jurisdiction is the surrounding legal atmosphere.”
+
+⸻
+
+🔁 Flow Summary: Bottom-Up
+
+1. Account: emits change (e.g., collateral unlocked)
+2. Entity: signs and commits block containing proof
+3. Jurisdiction: optionally accepts receipt, verifies hash chain
+
+
+⸻
+
+🛡 Why JEA Is Superior
+
+Feature	Traditional Stack	JEA Architecture
+Shared State	Global / Bottleneck	Local / Modular
+Dispute Resolution	Forks / Governance	Receipt + Quorum
+Composability	High coupling	Strong separation
+State Integrity	L1-dependent	Self-contained with proofs
+Credit / Receivability	Impossible	Native via Accounts
+
+“Rollups try to be courts, states, and wallets all at once. JEA says: split the roles, keep the contracts clean, and let each layer focus on what it’s best at.”
+
+⸻
+
+🧬 Design Ethos
+	•	Modularity over Monolith: Each layer is clean, testable, swappable
+	•	Paper trail over gossip: All actions leave verifiable receipts
+	•	State sufficiency: If your Entity vanishes, your counterparty still has proof
+	•	Quorum ≠ Token ownership: Governance and execution are separate vectors
+
+⸻
+
+🧭 Future Directions
+	•	Jurisdictions as regulated custodians
+	•	Inter-Jurisdiction arbitration via Entity-controlled registries
+	•	Reputation-weighted quorum systems
+	•	Federated DAOs across multiple Entities
+
+⸻
+
+📌 In Practice
+	•	EntityProvider.sol: sets Merkle hash of quorum
+	•	Depository.sol: verifies and tracks reserves
+	•	Entity: commits actions, emits receipts
+	•	Account: executes financial logic, tracks deltas
+
+⸻
+
+JEA is to blockchain what OSI was to networking — a layered abstraction that makes sovereign computation composable, trustable, and legible.
+
+“You don’t need one chain to rule them all. You just need a structure where trust can be scoped, verified, and proven.”
 
 --- vibepaper/docs/consensus/transaction-flow-specification.md ---
 # XLN Transaction Flow Specification
@@ -9151,3 +11902,335 @@ We generalize all layer2 actors bounded to specific J-machine as E-machines. Thi
 
 Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
  
+
+
+================================================================================
+## META: HOW THIS CONTEXT WAS GENERATED
+================================================================================
+
+The context file you are reading was generated by gpt.cjs.
+This script selects core files from the XLN repository and combines them
+into a single LLM-friendly context file with semantic annotations.
+
+
+--- scripts/debug/gpt.cjs ---
+// XLN Context Generator - Creates ultra-compact LLM-friendly context
+// Output: frontend/static/c.txt (accessible at xln.finance/c.txt)
+const fs = require('fs');
+const path = require('path');
+
+// ⭐ CORE FILES ONLY - Everything an LLM needs to understand XLN
+const CORE_FILES = {
+  contracts: [
+    // Future ERC interfaces (to be standardized)
+    'IDepository.sol',       // ERC interface for reserve-credit management
+    'IEntityProvider.sol',   // ERC interface for entity governance & Hanko verification
+    'ISubcontractProvider.sol', // ERC interface for bilateral logic execution
+
+    // Reference implementations
+    'Depository.sol',        // Full Depository with enforceDebts, collateral, credit
+    'DepositoryV1.sol',      // Simplified Depository for simnet/testnet
+    'EntityProvider.sol',    // Full EntityProvider with Hanko, governance, C/D shares
+    'EntityProviderV1.sol',  // Simplified EntityProvider for simnet/testnet
+    'SubcontractProvider.sol', // Delta transformers: HTLCs, swaps, limit orders
+    'SubcontractProviderV1.sol', // Simplified SubcontractProvider for simnet/testnet
+
+    // Primitives and utilities
+    'ECDSA.sol',             // Signature recovery (cryptographic primitives)
+    'Token.sol',             // Test ERC20 token
+    'console.sol',           // Hardhat console logging
+
+    // Test mocks
+    'ERC20Mock.sol',
+    'ERC721Mock.sol',
+    'ERC1155Mock.sol'
+  ],
+  runtime: [
+    'runtime.ts',            // Main coordinator, 100ms ticks, R→E→A routing
+    'entity-consensus.ts',   // BFT consensus (ADD_TX → PROPOSE → SIGN → COMMIT)
+    'evm.ts',                // Blockchain integration layer
+    'account-consensus.ts',  // Bilateral account consensus between entities
+    'types.ts',              // All TypeScript interfaces
+    'state-helpers.ts',      // Pure state management functions
+    'snapshot-coder.ts'      // Deterministic state serialization
+  ],
+  docs: [
+    'xlnview.md',            // System overview
+    'emc2.md',               // Core philosophy: E=mc² → Energy-Mass-Credit
+    'priorart.md',           // Why Lightning/rollups don't work
+    'docs/summary.md',       // Executive summary
+    'docs/00_QA.md',         // FAQs: value prop, positioning, architecture
+    'docs/12_invariant.md',  // RCPE vs FCUAN vs FRPAP (THE core innovation)
+    'docs/jea.md',           // Jurisdiction-Entity-Account 3-layer model
+    'docs/consensus/transaction-flow-specification.md', // Transaction flows
+    'docs/11_Jurisdiction_Machine.md' // Architecture deep-dive
+  ]
+};
+
+function generateSemanticOverview() {
+  return `# XLN Context - Core System Files
+## Cross-Local Network: Off-chain settlement with on-chain anchoring
+
+This context contains the essential files to understand XLN's architecture and innovations.
+
+### 🔐 Smart Contracts (jurisdictions/)
+
+**Proposed ERC Interfaces** (Future standards via EIP submissions):
+- **IDepository.sol** (115 lines) ⭐ ERC-XXXX for Reserve-Credit Management
+  Bilateral reserve/collateral interface. INVARIANT: leftDiff + rightDiff + collateralDiff == 0
+  Functions: _reserves(), settle(), prefundAccount(), getCollateral()
+
+- **IEntityProvider.sol** (107 lines) ⭐ ERC-YYYY for Entity Governance & Verification
+  Ephemeral entities, Hanko signatures, hierarchical governance
+  Functions: registerEntity(), verifyHankoSignature(), recoverEntity(), proposeNewBoard()
+
+- **ISubcontractProvider.sol** (74 lines) ⭐ ERC-ZZZZ for Bilateral Logic Execution
+  Delta transformers for composable bilateral DeFi
+  Functions: applyBatch(), encodeBatch(), revealSecret(), hashToBlock()
+
+**Reference Implementations (V1 = Simnet-Ready):**
+- **Depository.sol** (1652 lines) - Full implementation with dispute resolution (disabled for now)
+  enforceDebts() FIFO queue, collateral splitting, credit extension, debt tracking.
+  First in history: Escrowed collateral + credit beyond + mechanical repayment enforcement.
+
+- **DepositoryV1.sol** (277 lines) - Minimal implementation for simnet/testnet
+  Implements IDepository. Core reserve/collateral only, no dispute logic.
+
+- **EntityProvider.sol** (1118 lines) - Full implementation with C/D shares, governance
+  Hanko signatures (ephemeral entities, packed: N×64 + ceil(N/8) bytes).
+  Control/Dividend token separation, board proposals, name registry.
+
+- **EntityProviderV1.sol** (1118 lines) - Same as EntityProvider.sol (simnet-ready)
+  Implements IEntityProvider. V1 naming convention for simnet deployment.
+
+- **SubcontractProvider.sol** (154 lines) - HTLCs + Swaps implementation
+  applyBatch(), revealSecret(). First generalized bilateral DeFi (vs Lightning's hardcoded HTLCs).
+
+- **SubcontractProviderV1.sol** (154 lines) - Same as SubcontractProvider.sol (simnet-ready)
+  Implements ISubcontractProvider. V1 naming convention for simnet deployment.
+
+**Utilities:**
+- **ECDSA.sol** (98 lines) - Signature recovery primitives
+- **Token.sol** (41 lines) - Test ERC20 token
+- **console.sol** (45 lines) - Hardhat logging
+- **ERC20/721/1155Mock.sol** - Test mocks
+
+### ⚡ Runtime Layer (runtime/)
+
+- **runtime.ts** (1093 lines)
+  Main coordinator. Routes inputs every 100ms tick: Runtime → Entity → Account.
+  Manages global state, LevelDB persistence, scenario execution.
+
+- **entity-consensus.ts** (953 lines)
+  BFT consensus state machine. Flow: ADD_TX → PROPOSE → SIGN → COMMIT.
+  Pure functional: (prevState, input) → {nextState, outbox}
+
+- **evm.ts** (920 lines)
+  Blockchain integration. Connects to Depository/EntityProvider contracts.
+  Handles BrowserVM (simnet) + testnet/mainnet jurisdictions.
+
+- **account-consensus.ts** (674 lines)
+  Bilateral consensus between entity pairs. Left/right perspective handling.
+  Deterministic state verification via snapshot-coder.
+
+- **types.ts** (565 lines)
+  All TypeScript interfaces. Single source of truth for data structures.
+  Includes: Entity, Account, Transaction, Frame, Settlement types.
+
+- **state-helpers.ts** (313 lines)
+  Pure state management utilities. Immutable operations on consensus state.
+
+- **snapshot-coder.ts** (239 lines)
+  Deterministic state serialization. RLP encoding for consensus verification.
+
+### 📚 Documentation (vibepaper/)
+
+- **xlnview.md** - System overview, panel architecture, BrowserVM integration
+- **emc2.md** - Core philosophy: Energy-Mass-Credit equivalence
+- **priorart.md** ⭐ WHY LIGHTNING/ROLLUPS DON'T WORK
+  "All broadcast O(n) designs fundamentally bottlenecked"
+  "Rollups = perpetuum mobile" (data availability paradox)
+
+- **docs/00_QA.md** ⭐ VALUE PROP FAQs
+  Why not rollups? Why credit? Why hubs? Positioning vs TradFi/crypto.
+
+- **docs/12_invariant.md** ⭐ THE CORE INNOVATION
+  RCPE (Reserve-Credit Provable Enforceable) vs
+  FCUAN (Full-Credit Unprovable As-is Now - TradFi) vs
+  FRPAP (Full-Reserve Provable - Lightning)
+  XLN = collateral + credit + proofs + mechanical enforcement
+
+- **docs/jea.md** - Jurisdiction-Entity-Account 3-layer model
+  "Accounts are atoms, Entities are molecules, Jurisdiction is atmosphere"
+
+- **docs/summary.md** - Executive summary for quick orientation
+- **docs/consensus/transaction-flow-specification.md** - Transaction flows
+- **docs/11_Jurisdiction_Machine.md** - Architecture patterns
+
+---
+
+## Reading Guide for LLMs
+
+**Understand the innovation first:**
+1. **docs/12_invariant.md** - THE core primitive (RCPE)
+2. **IDepository.sol** - Clean interface (future ERC)
+3. **Depository.sol:1012-1068** - enforceDebts() mechanism
+4. **docs/00_QA.md** - Why this matters (vs Lightning/rollups)
+
+**Then understand the architecture:**
+5. **types.ts** - Data structures
+6. **entity-consensus.ts** - BFT consensus
+7. **account-consensus.ts** - Bilateral state machines
+8. **runtime.ts** - How it all connects
+
+**For deeper dives:**
+9. **EntityProvider.sol:528-680** - Hanko signatures (ephemeral entities)
+10. **SubcontractProvider.sol:58-110** - Delta transformers (bilateral DeFi)
+
+---
+
+## First in History Innovations
+
+1. **Reserve-Credit Invariant**: Collateral + credit extension + mechanical enforcement (enforceDebts FIFO)
+2. **Hanko Signatures**: Ephemeral hierarchical entities without pre-registration
+3. **Account Proofs**: Cryptographic proof of balance (unilateral exit with signed state)
+4. **Subcontracts**: Programmable delta transformers (generalized bilateral DeFi)
+5. **BrainVault**: argon2id KDF with tunable work factor (secure memorizable keys)
+
+## Proposed ERC Standards (via EIP process)
+
+XLN will submit 3 interfaces as Ethereum standards to enable bilateral finance ecosystem:
+
+1. **IDepository** (ERC-XXXX) - Reserve-Credit Management
+   - Bilateral reserve tracking, collateral management, settlement with invariant enforcement
+   - Enables: CEX proof of reserves, payment channel prefunding, credit extension
+
+2. **IEntityProvider** (ERC-YYYY) - Entity Governance & Verification
+   - Hanko signature verification, entity registration, quorum checking
+   - Enables: Ephemeral multi-sig, hierarchical governance, zero-gas entity creation
+
+3. **ISubcontractProvider** (ERC-ZZZZ) - Bilateral Logic Execution
+   - Delta transformer interface for programmable bilateral state transitions
+   - Enables: HTLCs, swaps, limit orders, any custom bilateral DeFi logic
+
+Together these form the "Bilateral Finance Stack" - composable primitives for off-chain settlement with on-chain anchoring.
+
+---
+
+`;
+}
+
+function readFileContent(baseDir, relativePath) {
+  const fullPath = path.join(baseDir, relativePath);
+  try {
+    const content = fs.readFileSync(fullPath, 'utf8');
+    return content;
+  } catch (error) {
+    console.warn(`⚠️  Could not read ${relativePath}: ${error.message}`);
+    return null;
+  }
+}
+
+function generateContext() {
+  const projectRoot = path.resolve(__dirname, '../../');
+  let output = generateSemanticOverview();
+
+  output += '\n\n' + '='.repeat(80) + '\n';
+  output += '## FILE CONTENTS\n';
+  output += '='.repeat(80) + '\n\n';
+
+  // Process contracts
+  const contractsDir = path.join(projectRoot, 'jurisdictions/contracts');
+  CORE_FILES.contracts.forEach(file => {
+    const content = readFileContent(contractsDir, file);
+    if (content) {
+      output += `\n--- jurisdictions/contracts/${file} ---\n`;
+      output += content + '\n';
+    }
+  });
+
+  // Process runtime files
+  const runtimeDir = path.join(projectRoot, 'runtime');
+  CORE_FILES.runtime.forEach(file => {
+    const content = readFileContent(runtimeDir, file);
+    if (content) {
+      output += `\n--- runtime/${file} ---\n`;
+      output += content + '\n';
+    }
+  });
+
+  // Process documentation
+  const docsDir = path.join(projectRoot, 'vibepaper');
+  CORE_FILES.docs.forEach(file => {
+    const content = readFileContent(docsDir, file);
+    if (content) {
+      output += `\n--- vibepaper/${file} ---\n`;
+      output += content + '\n';
+    }
+  });
+
+  // Meta: Include this script itself at the very end
+  output += '\n\n' + '='.repeat(80) + '\n';
+  output += '## META: HOW THIS CONTEXT WAS GENERATED\n';
+  output += '='.repeat(80) + '\n\n';
+  output += 'The context file you are reading was generated by gpt.cjs.\n';
+  output += 'This script selects core files from the XLN repository and combines them\n';
+  output += 'into a single LLM-friendly context file with semantic annotations.\n\n';
+
+  const scriptPath = path.join(projectRoot, 'scripts/debug/gpt.cjs');
+  const scriptContent = readFileContent(projectRoot, 'scripts/debug/gpt.cjs');
+  if (scriptContent) {
+    output += `\n--- scripts/debug/gpt.cjs ---\n`;
+    output += scriptContent + '\n';
+  }
+
+  return output;
+}
+
+// Generate and write
+const context = generateContext();
+const outputPath = path.join(__dirname, '../../frontend/static/c.txt');
+
+// Ensure directory exists
+const outputDir = path.dirname(outputPath);
+if (!fs.existsSync(outputDir)) {
+  fs.mkdirSync(outputDir, { recursive: true });
+}
+
+fs.writeFileSync(outputPath, context);
+
+// Stats
+const lines = context.split('\n').length;
+const bytes = Buffer.byteLength(context, 'utf8');
+const kb = (bytes / 1024).toFixed(1);
+const words = context.split(/\s+/).length;
+
+// Token estimates (different methods for accuracy range)
+const tokensConservative = Math.round(words * 0.75);  // Text-heavy estimate
+const tokensRealistic = Math.round(bytes / 3.5);      // Mixed code+docs (GPT-4 rule)
+const tokensCodeHeavy = Math.round(bytes / 3.0);      // Code-heavy upper bound
+
+console.log('✅ XLN context generated successfully!');
+console.log(`📄 Output: ${outputPath}`);
+console.log(`📊 Stats: ${lines.toLocaleString()} lines, ${kb} KB, ${words.toLocaleString()} words`);
+console.log(`🤖 Tokens (approx): ${tokensRealistic.toLocaleString()} (~${tokensConservative.toLocaleString()}-${tokensCodeHeavy.toLocaleString()} range)`);
+console.log(`🌐 URL: xln.finance/c.txt`);
+console.log('');
+console.log('Core files included:');
+console.log(`  🔐 Contracts: ${CORE_FILES.contracts.length} (ALL .sol files)`);
+console.log(`  ⚡ Runtime: ${CORE_FILES.runtime.length}`);
+console.log(`  📚 Docs: ${CORE_FILES.docs.length} (includes 12_invariant - core innovation)`);
+console.log(`  🔧 Meta: 1 (gpt.cjs itself)`);
+console.log('');
+console.log('Proposed ERC Standards (Bilateral Finance Stack):');
+console.log('  1. IDepository (ERC-XXXX) - Reserve-Credit Management');
+console.log('  2. IEntityProvider (ERC-YYYY) - Entity Governance & Verification');
+console.log('  3. ISubcontractProvider (ERC-ZZZZ) - Bilateral Logic Execution');
+console.log('');
+console.log('Innovations documented:');
+console.log('  1. Reserve-Credit Invariant (enforceDebts + collateral)');
+console.log('  2. Hanko Signatures (ephemeral entities)');
+console.log('  3. Account Proofs (cryptographic balance verification)');
+console.log('  4. Subcontracts (programmable delta transformers)');
+console.log('  5. BrainVault (secure memorizable keys)');
+
