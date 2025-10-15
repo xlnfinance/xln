@@ -136,6 +136,32 @@ bun build runtime/runtime.ts --target=browser --outdir=dist --minify \
 - Avoid full-page screenshots unless necessary
 - Playwright responses can exceed 25k token limit - be selective
 
+## 🐛 BUG PATTERNS TO AVOID (Learned from 2025-10-15 session)
+
+### **DON'T "clean up" working naming**
+❌ Renaming `isolatedEnv` → `env` caused collisions with existing `history` import
+✅ If naming is consistent and working, LEAVE IT ALONE
+
+### **DON'T assume APIs exist**
+❌ Used `controls.azimuthAngle`, `controls.pan()` without checking - they don't exist
+✅ Grep for actual method names first: `grep -n "\.azimuthAngle\|\.pan(" node_modules/three/`
+
+### **DON'T use sed for bulk replacements**
+❌ `sed 's/$visibleReplicas/env.replicas/g'` - risky, no verification
+✅ Use Edit tool on ONE occurrence, verify, then repeat (or use replace_all if certain)
+
+### **DON'T reinvent when user says KISS**
+❌ Created 200+ lines of canvas-based VR HUD when user said "show panels as-is"
+✅ When user says "don't reinvent", use existing components (DOM overlay for panels)
+
+### **DON'T fix without understanding coordinate system**
+❌ Changed account bar rotation 3 times (billboard → setFromUnitVectors → back to setFromUnitVectors)
+✅ Read AccountBarRenderer.ts FIRST to understand bars are Y-axis cylinders, THEN fix
+
+### **ALWAYS test one change before bulk operations**
+❌ Sed replace all instances → broke build with 198 errors
+✅ Edit one file, verify it works, then apply pattern to others
+
 Everywhere in code fail-fast and loud (with full stop of actions and throw a popup)
   1. "VERIFY FIRST" Protocol
 
