@@ -30,23 +30,21 @@
   export let hideButton: boolean = false;
   export let toggleZenMode: () => void = () => {}; // Optional in embedded mode
   export let embedded: boolean = false;  // Embedded mode for ScenarioPlayer
-  export let isolatedEnv: Writable<any> | any = null;  // Env store or object
-  export let isolatedHistory: Writable<any[]> | any[] = [];  // History store or array
-  export let isolatedTimeIndex: Writable<number> | null = null;  // Time index for panels
+  export let isolatedEnv: Writable<any> | null = null;
+  export let isolatedHistory: Writable<any[]> | null = null;
+  export let isolatedTimeIndex: Writable<number> | null = null;
 
-  // Reactive env - TIME-TRAVEL AWARE (reads from history[timeIndex] or live)
+  // Time-travel aware: Read from history[timeIndex] when scrubbing, else live state
   $: env = (() => {
-    // Time travel mode: read historical frame at timeIndex
     if (isolatedTimeIndex && isolatedHistory) {
       const timeIdx = $isolatedTimeIndex;
       const hist = $isolatedHistory;
       if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
         const idx = Math.min(timeIdx, hist.length - 1);
-        return hist[idx];
+        return hist[idx];  // Historical frame
       }
     }
-    // Live mode: read current state
-    return (isolatedEnv ? $isolatedEnv : null) || $xlnEnvironment;
+    return isolatedEnv ? $isolatedEnv : $xlnEnvironment;  // Live state
   })();
 
   // OrbitControls import (will be loaded dynamically)
