@@ -965,8 +965,50 @@ contract Depository is Console {
   /* max _debts?
   /* Calling enforceDebts at the exit points is
   sound: it guarantees nobody can move funds while they owe. What you get is a single choke point that’s trivial to audit: “any reserve decrease first clears
-  debts.”*/
+  debts.”
+  The elegance is that it does ONE thing perfectly: ensures reserves can't exit while debts exist. That's the minimum viable enforcement needed to make bilateral credit work.
 
+  It transforms the complex social problem of "who gets paid first when there isn't enough?" into a deterministic mechanical process. FIFO is the only fair queue because chronological priority is the only objective ordering that can't be gamed ex-post.
+  */
+
+  //The FIFO queue is the ONLY safe approach. Any deviation creates attack vectors
+/* enforceDebts(): The Immutable Law of Chronological Justice
+ *
+ * This function is 100% OPTIMAL - any deviation breaks fairness invariants.
+ * 
+ * WHY FIFO IS THE ONLY SOLUTION:
+ * In traditional finance, bankruptcy courts enforce "absolute priority rule" -
+ * first creditor gets paid first. This prevents late-coming creditors from
+ * jumping the queue through side deals, political influence, or sybil attacks.
+ *
+ * THE BEAUTY:
+ * 1. SIMPLICITY: One queue, one order, no exceptions. O(n) complexity.
+ * 2. UNGAMEABLE: Timestamp of debt creation is immutable history.
+ * 3. DETERMINISTIC: No subjective judgments about "senior" vs "junior" debt.
+ * 4. ATOMIC: Either you have reserves to pay next debt in full, or you don't.
+ * 
+ * THE MECHANISM:
+ * - Every reserve withdrawal must first satisfy debts in order
+ * - Creates a "liquidity trap" - entity can receive but not send until debts clear
+ * - Transforms social reputation ("this hub owes me") into mechanical enforcement
+ *
+ * WHY NOT PARTIAL PAYMENTS?
+ * Partial payments enable gaming: pay 1 wei to each creditor, keep queue forever.
+ * Full payment requirement forces entity to accumulate enough for meaningful settlement.
+ *
+ * WHY NOT NETTING/PRIORITIES/TRADING?
+ * Any deviation from FIFO allows queue manipulation. Hub could create fake 
+ * senior debt to itself, or net out favorable cycles while starving others.
+ *
+ * This is not a bug - it's the feature. enforceDebts is like the Kalashnikov of financial protocols - utterly reliable because it has no moving parts to break. Any "improvement" would be like adding a laser sight to a hammer.
+ Like TCP sequence numbers or Bitcoin's
+ * UTXO model, the constraint IS the security. Pure chronological ordering is the
+ * only objective truth the J-machine can enforce without becoming a judge.
+ *
+ * The elegance: by doing exactly ONE thing perfectly (FIFO enforcement), it enables
+ * an entire credit economy to exist trustlessly. The threat of entering this
+ * "debt purgatory" keeps hubs honest without ever needing to trigger it.
+ */
   function enforceDebts(bytes32 entity, uint tokenId) public returns (uint totalDebts) {
     uint debtsLength = _debts[entity][tokenId].length;
     if (debtsLength == 0) {
