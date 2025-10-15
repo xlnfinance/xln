@@ -1,7 +1,58 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { timeOperations, currentTimeIndex, maxTimeIndex, isLive } from '../../stores/timeStore';
-  import { history, currentHeight } from '../../stores/xlnStore';
+  import { derived, type Writable } from 'svelte/store';
+  import {
+    timeOperations as globalTimeOperations,
+    currentTimeIndex as globalTimeIndex,
+    maxTimeIndex as globalMaxTimeIndex,
+    isLive as globalIsLive
+  } from '../../stores/timeStore';
+  import { history as globalHistory, currentHeight as globalHeight } from '../../stores/xlnStore';
+
+  // Props: Accept isolated stores (for /view), fall back to global (for standalone routes)
+  export let history: Writable<any[]> | null = null;
+  export let timeIndex: Writable<number> | null = null;
+  export let isLive: Writable<boolean> | null = null;
+
+  // Reactive fallback: use isolated stores if provided, otherwise global
+  $: effectiveHistory = (history || globalHistory) as Writable<any[]>;
+  $: effectiveTimeIndex = (timeIndex || globalTimeIndex) as Writable<number>;
+  $: effectiveIsLive = (isLive || globalIsLive) as Writable<boolean>;
+  $: effectiveMaxTimeIndex = Math.max(0, $effectiveHistory.length - 1);
+
+  // Time operations that work with isolated stores
+  let localTimeOperations: any;
+  $: localTimeOperations = {
+    goToTimeIndex: (index: number) => {
+      const max = effectiveMaxTimeIndex;
+      effectiveTimeIndex.set(Math.max(0, Math.min(index, max)));
+      effectiveIsLive.set(false);  // Exit live mode when scrubbing
+    },
+    stepForward: () => {
+      const current = $effectiveTimeIndex;
+      const max = effectiveMaxTimeIndex;
+      if (current < max) {
+        effectiveTimeIndex.set(current + 1);
+        effectiveIsLive.set(false);
+      }
+    },
+    stepBackward: () => {
+      const current = $effectiveTimeIndex;
+      if (current > 0) {
+        effectiveTimeIndex.set(current - 1);
+      }
+      effectiveIsLive.set(false);
+    },
+    goToHistoryStart: () => {
+      effectiveTimeIndex.set(0);
+      effectiveIsLive.set(false);
+    },
+    goToLive: () => {
+      effectiveTimeIndex.set(-1);
+      effectiveIsLive.set(true);
+    }
+  };
+
   import {
     SkipBack,
     ChevronLeft,
@@ -43,7 +94,7 @@
   ];
 
   // Calculate FPS from history updates
-  $: if ($history.length > 0) {
+  $: if ($effectiveHistory.length > 0) {
     const now = Date.now();
     frameTimestamps.push(now);
     frameTimestamps = frameTimestamps.filter(t => now - t < 60000); // Keep last minute
@@ -52,10 +103,10 @@
 
   // Format time from frame
   function formatTime(frameIndex: number): string {
-    const snapshot = $history[frameIndex];
+    const snapshot = $effectiveHistory[frameIndex];
     if (!snapshot?.timestamp) return '0:00.000';
 
-    const firstTimestamp = $history[0]?.timestamp || 0;
+    const firstTimestamp = $effectiveHistory[0]?.timestamp || 0;
     const elapsed = snapshot.timestamp - firstTimestamp;
 
     const minutes = Math.floor(elapsed / 60000);
@@ -75,26 +126,26 @@
   }
 
   function startPlayback() {
-    if ($history.length === 0) return;
+    if ($effectiveHistory.length === 0) return;
 
-    if ($isLive || $currentTimeIndex >= $maxTimeIndex) {
-      timeOperations.goToHistoryStart();
+    if ($effectiveIsLive || $effectiveTimeIndex >= effectiveMaxTimeIndex) {
+      localTimeOperations.goToHistoryStart();
     }
 
     playing = true;
     const frameDelay = 1000 / speed;
 
     playbackInterval = window.setInterval(() => {
-      const end = sliceEnd ?? $maxTimeIndex;
+      const end = sliceEnd ?? effectiveMaxTimeIndex;
 
-      if ($currentTimeIndex >= end) {
+      if ($effectiveTimeIndex >= end) {
         if (loopMode === 'all' || loopMode === 'slice') {
-          timeOperations.goToTimeIndex(sliceStart ?? 0);
+          localTimeOperations.goToTimeIndex(sliceStart ?? 0);
         } else {
           stopPlayback();
         }
       } else {
-        timeOperations.stepForward();
+        localTimeOperations.stepForward();
       }
     }, frameDelay);
   }
@@ -123,9 +174,9 @@
 
   function markSlicePoint() {
     if (sliceStart === null) {
-      sliceStart = $currentTimeIndex;
+      sliceStart = $effectiveTimeIndex;
     } else if (sliceEnd === null) {
-      sliceEnd = $currentTimeIndex;
+      sliceEnd = $effectiveTimeIndex;
       if (sliceEnd < sliceStart) {
         [sliceStart, sliceEnd] = [sliceEnd, sliceStart];
       }
@@ -139,7 +190,7 @@
   }
 
   function exportFrames() {
-    const data = JSON.stringify($history, null, 2);
+    const data = JSON.stringify($effectiveHistory, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -149,13 +200,11 @@
     showExportMenu = false;
   }
 
-  // Handle scrubber click
-  function handleScrubberClick(event: MouseEvent) {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const percentage = x / rect.width;
-    const targetIndex = Math.floor(percentage * $maxTimeIndex);
-    timeOperations.goToTimeIndex(targetIndex);
+  // Handle slider drag/input
+  function handleSliderInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const index = parseInt(target.value);
+    localTimeOperations.goToTimeIndex(index);
   }
 
   // Keyboard shortcuts
@@ -168,16 +217,16 @@
         togglePlay();
         break;
       case 'ArrowLeft':
-        timeOperations.stepBackward();
+        localTimeOperations.stepBackward();
         break;
       case 'ArrowRight':
-        timeOperations.stepForward();
+        localTimeOperations.stepForward();
         break;
       case 'Home':
-        timeOperations.goToHistoryStart();
+        localTimeOperations.goToHistoryStart();
         break;
       case 'End':
-        timeOperations.goToLive();
+        localTimeOperations.goToLive();
         break;
       case '[':
         markSlicePoint();
@@ -194,18 +243,18 @@
     window.removeEventListener('keydown', handleKeyboard);
   });
 
-  $: currentTime = formatTime($currentTimeIndex);
-  $: totalTime = formatTime($maxTimeIndex);
-  $: progressPercent = $maxTimeIndex > 0 ? ($currentTimeIndex / $maxTimeIndex) * 100 : 0;
+  $: currentTime = formatTime($effectiveTimeIndex);
+  $: totalTime = formatTime(effectiveMaxTimeIndex);
+  $: progressPercent = effectiveMaxTimeIndex > 0 ? ($effectiveTimeIndex / effectiveMaxTimeIndex) * 100 : 0;
 </script>
 
 <div class="time-machine">
   <!-- Navigation -->
   <div class="nav-cluster">
-    <button on:click={timeOperations.goToHistoryStart} title="Go to start (Home)">
+    <button on:click={localTimeOperations.goToHistoryStart} title="Go to start (Home)">
       <SkipBack size={16} />
     </button>
-    <button on:click={timeOperations.stepBackward} title="Step back (←)">
+    <button on:click={localTimeOperations.stepBackward} title="Step back (←)">
       <ChevronLeft size={16} />
     </button>
     <button on:click={togglePlay} class="play-btn" title="Play/Pause (Space)">
@@ -215,10 +264,10 @@
         <Play size={18} />
       {/if}
     </button>
-    <button on:click={timeOperations.stepForward} title="Step forward (→)">
+    <button on:click={localTimeOperations.stepForward} title="Step forward (→)">
       <ChevronRight size={16} />
     </button>
-    <button on:click={timeOperations.goToLive} title="Go to live (End)">
+    <button on:click={localTimeOperations.goToLive} title="Go to live (End)">
       <SkipForward size={16} />
     </button>
   </div>
@@ -231,7 +280,7 @@
     </div>
     <div class="frames">
       <span class="label">Runtime</span>
-      <span class="value">{$currentHeight} / {Math.max(0, $history.length - 1)}</span>
+      <span class="value">{$effectiveTimeIndex >= 0 ? $effectiveTimeIndex + 1 : $effectiveHistory.length} / {$effectiveHistory.length}</span>
     </div>
     <div class="fps">
       <span class="label">FPS</span>
@@ -239,19 +288,17 @@
     </div>
   </div>
 
-  <!-- Progress Scrubber -->
-  <div class="scrubber" on:click={handleScrubberClick} role="progressbar">
-    <div class="scrubber-track">
-      {#if sliceStart !== null && sliceEnd !== null}
-        <div
-          class="slice-region"
-          style="left: {(sliceStart / $maxTimeIndex) * 100}%; width: {((sliceEnd - sliceStart) / $maxTimeIndex) * 100}%;"
-        ></div>
-      {/if}
-      <div class="scrubber-progress" style="width: {progressPercent}%"></div>
-      <div class="scrubber-thumb" style="left: {progressPercent}%"></div>
-    </div>
-  </div>
+  <!-- Progress Scrubber (Native HTML Range) -->
+  <input
+    type="range"
+    class="scrubber"
+    min="0"
+    max={effectiveMaxTimeIndex}
+    value={$effectiveTimeIndex >= 0 ? $effectiveTimeIndex : effectiveMaxTimeIndex}
+    on:input={handleSliderInput}
+    disabled={effectiveMaxTimeIndex === 0}
+    style="--progress: {progressPercent}%"
+  />
 
   <!-- Tools -->
   <div class="tools-cluster">
@@ -334,8 +381,8 @@
   </div>
 
   <!-- Mode Badge -->
-  <div class="mode-badge" class:live={$isLive}>
-    {$isLive ? 'LIVE' : 'HISTORY'}
+  <div class="mode-badge" class:live={$effectiveIsLive}>
+    {$effectiveIsLive ? 'LIVE' : 'HISTORY'}
   </div>
 </div>
 
@@ -440,62 +487,81 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Progress Scrubber */
+  /* Progress Scrubber (Native Range Input) */
   .scrubber {
     flex: 1;
     min-width: 200px;
-    cursor: pointer;
-    padding: 8px 0;
-  }
-
-  .scrubber-track {
-    position: relative;
     height: 6px;
-    background: rgba(255, 255, 255, 0.1);
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    outline: none;
+  }
+
+  /* WebKit (Chrome/Safari) */
+  .scrubber::-webkit-slider-track {
+    width: 100%;
+    height: 6px;
+    background: linear-gradient(
+      to right,
+      rgba(0, 122, 255, 0.8) 0%,
+      rgba(0, 122, 255, 0.8) var(--progress),
+      rgba(255, 255, 255, 0.1) var(--progress),
+      rgba(255, 255, 255, 0.1) 100%
+    );
     border-radius: 3px;
-    overflow: visible;
   }
 
-  .scrubber:hover .scrubber-track {
-    height: 8px;
-  }
-
-  .slice-region {
-    position: absolute;
-    top: 0;
-    height: 100%;
-    background: rgba(0, 255, 136, 0.15);
-    border-left: 2px solid rgba(0, 255, 136, 0.6);
-    border-right: 2px solid rgba(0, 255, 136, 0.6);
-  }
-
-  .scrubber-progress {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background: linear-gradient(90deg, rgba(0, 122, 255, 0.8), rgba(0, 122, 255, 0.6));
-    border-radius: 3px;
-    transition: width 0.1s linear;
-  }
-
-  .scrubber-thumb {
-    position: absolute;
-    top: 50%;
-    transform: translate(-50%, -50%);
+  .scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
     width: 14px;
     height: 14px;
+    margin-top: -4px;  /* Center on track */
+    border-radius: 50%;
     background: white;
     border: 2px solid rgba(0, 122, 255, 1);
-    border-radius: 50%;
-    box-shadow:
-      0 0 0 4px rgba(0, 122, 255, 0.2),
-      0 2px 8px rgba(0, 0, 0, 0.4);
+    cursor: grab;
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.2), 0 2px 8px rgba(0, 0, 0, 0.4);
     transition: transform 0.2s;
   }
 
-  .scrubber:hover .scrubber-thumb {
-    transform: translate(-50%, -50%) scale(1.2);
+  .scrubber:active::-webkit-slider-thumb {
+    cursor: grabbing;
+    transform: scale(1.2);
+  }
+
+  /* Firefox */
+  .scrubber::-moz-range-track {
+    width: 100%;
+    height: 6px;
+    background: linear-gradient(
+      to right,
+      rgba(0, 122, 255, 0.8) 0%,
+      rgba(0, 122, 255, 0.8) var(--progress),
+      rgba(255, 255, 255, 0.1) var(--progress),
+      rgba(255, 255, 255, 0.1) 100%
+    );
+    border-radius: 3px;
+  }
+
+  .scrubber::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(0, 122, 255, 1);
+    border-radius: 50%;
+    background: white;
+    cursor: grab;
+  }
+
+  .scrubber:active::-moz-range-thumb {
+    cursor: grabbing;
+  }
+
+  .scrubber:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Tools Cluster */

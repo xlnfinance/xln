@@ -1,5 +1,6 @@
 # XLN - Cross-Local Network
 
+
 **Instant off-chain settlement with on-chain finality.**
 
 Byzantine consensus meets Bloomberg Terminal meets VR. Run complete economic simulations in your browser—no backend needed.
@@ -51,6 +52,8 @@ Cross-Local Network enables entities to:
 - Visualize in **VR** (Quest/Vision Pro compatible)
 
 **Think:** Lightning Network + Byzantine consensus + Bloomberg Terminal + Blender.
+
+### Finance is physics of trust
 
 ---
 

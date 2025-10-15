@@ -6,10 +6,13 @@
    * Copyright (C) 2025 XLN Finance
    */
 
+  import type { Writable } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
 
   // Receive isolated env as prop (passed from View.svelte)
-  export let isolatedEnv: any;
+  export let isolatedEnv: Writable<any>;
+  export let isolatedHistory: Writable<any[]> | null = null;
+  export let isolatedTimeIndex: Writable<number> | null = null;
 
   let selectedEntityId: string | null = null;
 
@@ -18,7 +21,34 @@
     selectedEntityId = entityId;
   });
 
-  $: entities = $isolatedEnv?.entities || [];
+  // Time-travel aware: read from history[timeIndex] or live state
+  $: entities = (() => {
+    let replicas;
+
+    // Time travel mode: show historical frame
+    if (isolatedTimeIndex && isolatedHistory) {
+      const timeIdx = $isolatedTimeIndex;
+      const hist = $isolatedHistory;
+      if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
+        const idx = Math.min(timeIdx, hist.length - 1);
+        const frame = hist[idx];
+        replicas = frame?.replicas;
+      }
+    }
+
+    if (!replicas) {
+      // Live mode: read from current env
+      replicas = $isolatedEnv?.replicas;
+    }
+
+    if (replicas) {
+      return Array.from(replicas.entries() as any).map((entry: any) => ({
+        id: entry[0],
+        accounts: entry[1]?.state?.accounts
+      }));
+    }
+    return [];
+  })();
 </script>
 
 <div class="entities-panel">

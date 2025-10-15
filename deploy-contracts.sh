@@ -55,7 +55,7 @@ deploy_to_network() {
         return 1
     fi
 
-    cd jurisdiction
+    cd jurisdictions
 
     # Ensure logs directory exists
     mkdir -p ../logs
@@ -110,7 +110,7 @@ deploy_to_network() {
     
     # Verify critical functions are in compiled ABI
     echo "   🔍 Verifying critical functions in compiled ABI..."
-    if grep -q "debugBulkFundEntities" artifacts/jurisdictions/Depository.sol/Depository.json 2>/dev/null; then
+    if grep -q "debugBulkFundEntities" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
         echo "   ✅ debugBulkFundEntities function found in compiled ABI"
     else
         echo "   ❌ debugBulkFundEntities function missing from compiled ABI"
@@ -118,7 +118,7 @@ deploy_to_network() {
         return 1
     fi
 
-    if grep -q "processBatch" artifacts/jurisdictions/Depository.sol/Depository.json 2>/dev/null; then
+    if grep -q "processBatch" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
         echo "   ✅ processBatch function found in compiled ABI"
     else
         echo "   ❌ processBatch function missing from compiled ABI"
@@ -127,7 +127,7 @@ deploy_to_network() {
         return 1
     fi
 
-    if grep -q "settle" artifacts/jurisdictions/Depository.sol/Depository.json 2>/dev/null; then
+    if grep -q "settle" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
         echo "   ✅ settle function found in compiled ABI"
     else
         echo "   ❌ settle function missing from compiled ABI"
@@ -264,7 +264,7 @@ deploy_to_network() {
     else
         echo "   ⚠️ Runtime build failed (continuing anyway)"
     fi
-    cd jurisdiction
+    cd jurisdictions
 
     # Store both addresses in variables for later use
     case $port in

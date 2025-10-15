@@ -829,6 +829,25 @@ export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]>
   return Array.from(jurisdictions.values());
 };
 
+/**
+ * Set BrowserVM jurisdiction (for isolated /view environments)
+ * This overrides DEFAULT_JURISDICTIONS with a single BrowserVM-backed jurisdiction
+ */
+export const setBrowserVMJurisdiction = (entityProviderAddress: string, depositoryAddress: string) => {
+  console.log('[BrowserVM] Setting jurisdiction override:', { entityProviderAddress, depositoryAddress });
+
+  DEFAULT_JURISDICTIONS = new Map();
+  DEFAULT_JURISDICTIONS.set('arrakis', {
+    name: 'Arrakis',
+    chainId: 1337,
+    rpc: 'http://localhost:8545', // Not used by BrowserVM but required for type
+    entityProviderAddress,
+    depositoryAddress,
+  });
+
+  console.log('✅ BrowserVM jurisdiction active - numbered entities will register here');
+};
+
 export const getJurisdictionByAddress = async (address: string): Promise<JurisdictionConfig | undefined> => {
   const jurisdictions = await getJurisdictions();
   return jurisdictions.get(address);

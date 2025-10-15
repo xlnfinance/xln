@@ -131,6 +131,11 @@ bun build runtime/runtime.ts --target=browser --outdir=dist --minify \
 - If browser shows about:blank or errors, STOP and report to user
 - This prevents accumulating multiple stuck browser tabs
 
+**SURGICAL SCREENSHOTS:**
+- Use `browser_take_screenshot` with element selector when possible (smaller, targeted)
+- Avoid full-page screenshots unless necessary
+- Playwright responses can exceed 25k token limit - be selective
+
 Everywhere in code fail-fast and loud (with full stop of actions and throw a popup)
   1. "VERIFY FIRST" Protocol
 
@@ -426,7 +431,7 @@ const ethereum = jurisdictions.find(j => j.name.toLowerCase() === 'ethereum');
 const ethereum = { entityProviderAddress: '0x123...' }; // WILL BREAK on redeploy
 ```
 
-### Bilateral Consensus State Verification (from old_runtime/Channel.ts)
+### Bilateral Consensus State Verification (from .archive/2024_src/Channel.ts)
 When implementing bilateral consensus, always verify both sides compute identical state:
 
 ```typescript
@@ -473,7 +478,7 @@ if (Buffer.compare(stateAfterEncoded, theirClaimedState) !== 0) {
 - **runtime/lib/stores/** - Svelte state management
 - Time machine for historical debugging with R→E→A flow visualization
 
-### `/old_runtime` - Reference Implementation
+### `/.archive/2024_src` - Reference Implementation
 - **app/Channel.ts** - Original bilateral consensus logic (REFERENCE FOR ACCOUNT LAYER)
 - **app/User.ts** - Original entity management
 - Contains the canonical patterns for:
@@ -535,7 +540,7 @@ Bilateral relationships use canonical ordering:
 - we agreed that tx for transactions are ok shortcut accepted in crypto community
 - Always use safeStringify() to prevent BigInt serialization crashes
 - Always use loadJurisdictions() functions instead of hardcoding contract addresses
-- Study old_runtime/app/Channel.ts for bilateral consensus patterns - it's the reference implementation
+- Study .archive/2024_src/app/Channel.ts for bilateral consensus patterns - it's the reference implementation
 - do NOT create ad-hoc /frontend methods when it belongs to /runtime code and must be exposed through runtime.ts - use it for all helpers. frontend is for UI/UX only
 - **CRITICAL: ALWAYS update next.md when tasks are completed** - move to "Completed" section with date
 - only use localhost:8080 as main entry point to xln universe

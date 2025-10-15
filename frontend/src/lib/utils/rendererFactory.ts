@@ -19,7 +19,7 @@ export interface RendererOptions {
 export async function createRenderer(
   mode: RendererMode = 'webgl',
   options: RendererOptions = {}
-): Promise<THREE.WebGLRenderer | THREE.WebGPURenderer> {
+): Promise<THREE.WebGLRenderer | any> {
   const { antialias = true, xrEnabled = true } = options;
 
   if (mode === 'webgpu') {
@@ -68,7 +68,7 @@ function createWebGLRenderer(antialias: boolean, xrEnabled: boolean): THREE.WebG
 /**
  * Get current renderer capabilities
  */
-export function getRendererInfo(renderer: THREE.WebGLRenderer | THREE.WebGPURenderer): {
+export function getRendererInfo(renderer: THREE.WebGLRenderer | any): {
   mode: RendererMode;
   webgpuAvailable: boolean;
   webxrAvailable: boolean;
@@ -86,10 +86,10 @@ export function getRendererInfo(renderer: THREE.WebGLRenderer | THREE.WebGPURend
  * Switch renderer at runtime (requires scene rebuild)
  */
 export async function switchRenderer(
-  currentRenderer: THREE.WebGLRenderer | THREE.WebGPURenderer,
+  currentRenderer: THREE.WebGLRenderer | any,
   newMode: RendererMode,
   options: RendererOptions = {}
-): Promise<THREE.WebGLRenderer | THREE.WebGPURenderer> {
+): Promise<THREE.WebGLRenderer | any> {
   // Dispose old renderer
   currentRenderer.dispose();
   currentRenderer.domElement.remove();

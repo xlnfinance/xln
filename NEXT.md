@@ -2,26 +2,29 @@
 
 **Disposable scratchpad. For long-term vision, see /vibepaper/roadmap.md**
 
-**Last Updated:** 2025-10-11
+**Last Updated:** 2025-10-15
 
 ---
 
 ## 🚨 Current Blockers (Fix First)
 
-### 1. /view Route Broken
-**Problem:** https://localhost:8080/view throws 500 errors
+*No current blockers*
 
-**Root cause:**
-- Graph3DPanel imports missing components (AdminPanel, VisualDemoPanel, VRScenarioBuilder)
-- Dockview 504 cache errors
-- BrowserVM artifact path (can't bundle jurisdictions/artifacts from frontend)
+---
 
-**Solutions:**
-- Option A: Use existing NetworkTopology at /view (it works)
-- Option B: Strip Graph3DPanel to minimal (just canvas + EntityManager)
-- Option C: Fix all imports (move AdminPanel etc to /view)
+## 🎯 Quick Wins (Next Session)
 
-**Status:** Main route (/) works perfectly, /view needs fixing
+### 1. Frame 0 Empty State (10 min)
+Use frame 0 as clean slate (empty env), frames 1+ are actual snapshots. Cleaner initial UX.
+
+### 2. Delete Dead Sidebar Code (2 min)
+Lines 406-407 in Graph3DPanel: `sidebarWidth`, `isResizingSidebar` - unused, safe to delete
+
+### 3. Test VR on Quest (5 min)
+Verify DOM overlay works, thumbstick controls responsive, panels visible
+
+### 4. ASCII Formation Tool (20 min)
+Extract from Graph3DPanel (lines 3829-3943) to Architect panel "Build" mode
 
 ---
 
@@ -55,16 +58,24 @@
 2. **Graph3D isolated env** - Changed line 1032 to read from `$isolatedEnv.replicas`
 3. **Runtime rebuilt** - gossip.ts changes compiled to frontend/static/runtime.js
 
-**❌ Remaining (test next session):**
-- Verify entities now visible in Graph3D after scenario runs
-- Check if 8 entities render as 3D cube
-- Confirm TimeMachine scrubbing updates visualization
-- Test Entities panel shows list
+**✅ COMPLETED THIS SESSION (2025-10-14):**
+- Fixed all path issues (`contracts/` → `jurisdictions/` in scripts)
+- Fixed TypeScript errors (WebGPURenderer, imports, tsconfig)
+- Isolated architecture working (localEnvStore, localHistoryStore, localTimeIndex)
+- LevelDB persistence in runtime.ts (`saveEnvToDB`, `loadEnvFromDB`, `clearDB`)
+- TimeMachine isolation (effectiveHistory, effectiveTimeIndex, effectiveIsLive)
+- Graph3DPanel purged of global stores (`$visibleReplicas` → `env?.replicas`)
+- BrowserVM deploys EntityProvider + DepositoryV1 in-browser
+- Console noise eliminated (verbose logs removed)
+- Clear Database button added
+- Build passes (`bun run check` clean)
 
-**Next Session Priority:**
-- Open /view → Click Simnet Grid → Verify 8 entities appear
-- If still broken: Check console logs for new errors
-- Add gossip → entities connection if needed
+**⚠️ DISCOVERED: DUPLICATE CODE PROBLEM**
+- NetworkTopology (5842 lines) and Graph3DPanel (3900 lines) are redundant
+- Both have `isolatedEnv` support but Graph3DPanel is broken partial copy
+- Need unification (see blocker #1 above)
+
+**📋 NEXT SESSION: Complete unification, then test VR**
 
 **Learnings:**
 - Dockview panels mount outside Svelte tree → setContext() doesn't work → use props
@@ -87,6 +98,19 @@
 
 ## ✅ Completed This Session
 
+- ✅ **View unification (2025-10-14):** Moved NetworkTopology → /view/panels/Graph3DPanel (6190 lines), proper `Writable<T>` types, shared stores, time-travel working
+- ✅ **TimeMachine isolation (2025-10-14):** Accepts isolated stores as props, all panels sync to shared env/history/timeIndex, verified 1/5→5/5 navigation
+- ✅ **Graph3D time-travel fix (2025-10-14):** Replaced `$visibleReplicas` with `env.replicas`, credit lines now appear/disappear correctly during time travel
+- ✅ **VR button (2025-10-14):** Added to Architect panel, wired via panelBridge to Graph3DPanel's enterVR()
+- ✅ **VR essential locomotion (2025-10-14):**
+  - Credit lines update in real-time when dragging (position + rotation)
+  - Camera starts at (40, 60, 250) to see whole grid
+  - Left thumbstick: Movement (forward/back/strafe, camera-relative)
+  - Right thumbstick ←→: Snap turn (30° increments, anti-motion-sickness)
+  - Right thumbstick ↑↓: Zoom (scale world)
+  - Huge intro sign (10m×5m) with all controls, auto-hides after 10s
+  - VR HUD panel showing entities/accounts/time status
+  - Access: https://192.168.0.197:8080/view from Quest 3
 - ✅ Repository restructure (vibepaper, runtime, jurisdictions, worlds, proofs)
 - ✅ BrowserVM prototype (DepositoryV1 deploys + executes in <3s)
 - ✅ AGPL-3.0 license applied everywhere

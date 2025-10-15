@@ -55,14 +55,14 @@ mkdir -p logs
 mkdir -p pids
 
 # echo "🔧 Building contracts..."
-# cd contracts
+# cd jurisdictions
 # bun install --silent || echo "⚠️  Warning: bun install had warnings (continuing...)"
 # bunx hardhat compile --quiet
 # cd ..
 
 echo "🚀 Starting networks..."
 # Start networks in background with logging
-(cd contracts && bunx hardhat node --port 8545 --hostname 0.0.0.0) > logs/ethereum-8545.log 2>&1 &
+(cd jurisdictions && bunx hardhat node --port 8545 --hostname 0.0.0.0) > logs/ethereum-8545.log 2>&1 &
 ETHEREUM_PID=$!
 echo $ETHEREUM_PID > pids/ethereum.pid
 

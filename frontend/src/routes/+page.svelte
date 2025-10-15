@@ -7,7 +7,7 @@
   import EntityFormation from '../lib/components/Formation/EntityFormation.svelte';
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
   import NetworkDirectory from '../lib/components/Network/NetworkDirectory.svelte';
-  import NetworkTopology from '../lib/components/Network/NetworkTopology.svelte';
+  import Graph3DPanel from '../lib/view/panels/Graph3DPanel.svelte';
   import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
   import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
   import ScenarioPanel from '../lib/components/Scenario/ScenarioPanel.svelte';
@@ -243,7 +243,7 @@
       <BrainVaultView />
     {:else if $viewMode === 'graph3d'}
       <!-- Graph View Mode: Show Network Topology -->
-      <NetworkTopology {zenMode} {hideButton} {toggleZenMode} />
+      <Graph3DPanel {zenMode} {hideButton} {toggleZenMode} />
     {:else if $viewMode === 'terminal'}
       <!-- Terminal View: Command Interface -->
       <TerminalView />
