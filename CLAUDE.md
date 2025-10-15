@@ -146,9 +146,10 @@ bun build runtime/runtime.ts --target=browser --outdir=dist --minify \
 ❌ Used `controls.azimuthAngle`, `controls.pan()` without checking - they don't exist
 ✅ Grep for actual method names first: `grep -n "\.azimuthAngle\|\.pan(" node_modules/three/`
 
-### **DON'T use sed for bulk replacements**
-❌ `sed 's/$visibleReplicas/env.replicas/g'` - risky, no verification
-✅ Use Edit tool on ONE occurrence, verify, then repeat (or use replace_all if certain)
+### **WHEN using sed, verify the pattern is correct first**
+✅ `sed 's/$visibleReplicas/env.replicas/g'` - This was CORRECT (time-travel fix)
+❌ But I then tried renaming isolated* → env which caused naming collisions
+✅ Sed is fine for mechanical replacements IF you understand what you're replacing
 
 ### **DON'T reinvent when user says KISS**
 ❌ Created 200+ lines of canvas-based VR HUD when user said "show panels as-is"
@@ -159,8 +160,20 @@ bun build runtime/runtime.ts --target=browser --outdir=dist --minify \
 ✅ Read AccountBarRenderer.ts FIRST to understand bars are Y-axis cylinders, THEN fix
 
 ### **ALWAYS test one change before bulk operations**
-❌ Sed replace all instances → broke build with 198 errors
+✅ Understand the data flow: time-travel requires ALL reads from `env` (not global stores)
+❌ The isolated* → env renaming broke due to naming collisions, not sed itself
 ✅ Edit one file, verify it works, then apply pattern to others
+
+### **CRITICAL: Time-travel architecture pattern**
+```typescript
+// ✅ CORRECT: Read from time-travel aware env
+$: env = history[timeIndex] || liveState;
+const replicas = env.replicas;  // Time-aware
+
+// ❌ WRONG: Read from global live stores directly
+const replicas = $visibleReplicas;  // Always live, ignores time machine
+```
+All panels must read from the shared `env` variable that respects `timeIndex`.
 
 Everywhere in code fail-fast and loud (with full stop of actions and throw a popup)
   1. "VERIFY FIRST" Protocol
