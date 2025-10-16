@@ -28,22 +28,11 @@ check_hardhat() {
 }
 
 check_dependencies() {
-    if [ ! -d "node_modules" ]; then
-        echo "📦 Installing root dependencies..."
-        bun install
-    fi
-    
-    if [ ! -d "frontend/node_modules" ]; then
-        echo "📦 Installing frontend dependencies..."
-        (cd frontend && bun install)
-    fi
-    
-    if [ ! -d "jurisdictions/node_modules" ]; then
-        echo "📦 Installing contract dependencies..."
-        (cd jurisdictions && bun install)
-    fi
-    
-    echo "✅ All dependencies installed"
+    echo "📦 Checking dependencies (auto-installs new packages)..."
+    bun install
+    (cd frontend && bun install)
+    (cd jurisdictions && bun install)
+    echo "✅ All dependencies up to date"
 }
 
 echo "🔍 Checking prerequisites..."
