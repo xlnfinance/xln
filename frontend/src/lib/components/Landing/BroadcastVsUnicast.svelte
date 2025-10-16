@@ -23,16 +23,21 @@
     status: 'building' | 'finalized';
   }
 
+  const viewWidth = 600;
+  const viewHeight = 600;
+  const centerX = viewWidth / 2;
+  const centerY = viewHeight / 2;
+
+  const BLOCK_SIZE = 10;
+  const CONSENSUS_BLOCK_X = viewWidth - 100;
+  const CONSENSUS_BLOCK_Y = 50;
+
   let consensusBlock: Block = { number: 0, txs: [], status: 'building' };
   let finalizedBlocks: Block[] = [];
   let flyingTxs: Transaction[] = [];
   let raycastingBlock: number | null = null; // Block number being synced
   let txCounter = 0;
   let txAccumulator = 0;
-
-  const BLOCK_SIZE = 10;
-  const CONSENSUS_BLOCK_X = viewWidth - 100;
-  const CONSENSUS_BLOCK_Y = 50;
 
   // Device health tracking with positions
   interface DeviceState {
@@ -47,11 +52,6 @@
 
   let broadcastDevices: DeviceState[] = [];
   let unicastDevices: DeviceState[] = [];
-
-  const viewWidth = 600;
-  const viewHeight = 600;
-  const centerX = viewWidth / 2;
-  const centerY = viewHeight / 2;
 
   function randomInZone(minRadius: number, maxRadius: number): {x: number, y: number} {
     const angle = Math.random() * 2 * Math.PI;
