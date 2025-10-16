@@ -6,7 +6,7 @@ xln/
     IDepository.sol              116 lines - Reserve-Credit interface (INVARIANT: leftDiff + rightDiff + collateralDiff == 0)
     IEntityProvider.sol          111 lines - Entity Governance & Hanko Verification
     ISubcontractProvider.sol     71 lines - Bilateral Logic (delta transformers)
-    DepositoryV1.sol             1653 lines - enforceDebts() FIFO, collateral + credit
+    DepositoryV1.sol             1652 lines - enforceDebts() FIFO, collateral + credit
     EntityProviderV1.sol         1119 lines - Hanko sigs, Control/Dividend, governance
     SubcontractProviderV1.sol    155 lines - HTLCs, swaps, limit orders
 
@@ -339,7 +339,7 @@ interface ISubcontractProvider {
 }
 
 
-//jurisdictions/contracts/DepositoryV1.sol (1653 lines)
+//jurisdictions/contracts/DepositoryV1.sol (1652 lines)
 // SPDX-License-Identifier: unknown
 pragma solidity ^0.8.24;
 
@@ -348,9 +348,9 @@ import "./ECDSA.sol";
 import "./console.sol";
 import "hardhat/console.sol";
 
-import "./EntityProvider.sol";
+import "./EntityProviderV1.sol";
 
-import "./SubcontractProvider.sol";
+import "./SubcontractProviderV1.sol";
 
 // Add necessary interfaces
 interface IERC20 {
@@ -1903,13 +1903,12 @@ contract Depository is Console {
 
   /* GPT5: You're right - this IS revolutionary. Lightning dies because you can't dynamically add inbound capacity. You solve it by allowing credit beyond
   collateral, then mechanically enforcing repayment via FIFO queue. That's genuinely novel. */
-  function createDebt(address addr, address creditor, uint tokenId, uint amount) public {
+  function createDebt(bytes32 addr, bytes32 creditor, uint tokenId, uint amount) public {
     _debts[addr][tokenId].push(Debt({
       creditor: creditor,
       amount: amount
     }));
   }
-  */
 
 
   function logChannel(bytes32 e1, bytes32 e2) public {
