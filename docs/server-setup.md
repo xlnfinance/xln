@@ -7,13 +7,32 @@ Location: `/etc/nginx/sites-enabled/xln`
 This is the ACTUAL production nginx config used on xln.finance server.
 
 ```nginx
-# HTTP - redirect to HTTPS
+# HTTP - serve /c and /c.txt directly (LLMs don't follow redirects), redirect everything else
 server {
     listen 80;
     server_name xln.finance app.xln.finance;
 
     location /.well-known/acme-challenge/ {
         root /var/www/html;
+    }
+
+    # /c - Plain text display (for LLMs that don't follow HTTPS redirects)
+    location = /c {
+        alias /root/xln/frontend/build/c.txt;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+        add_header Content-Type "text/plain; charset=utf-8" always;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    }
+
+    # /c.txt - Force download
+    location = /c.txt {
+        alias /root/xln/frontend/build/c.txt;
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+        add_header Content-Type "text/plain; charset=utf-8" always;
+        add_header Content-Disposition "attachment; filename=xln-context.txt" always;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
     }
 
     location / {

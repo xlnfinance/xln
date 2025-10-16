@@ -130,8 +130,23 @@
 </script>
 
 <svelte:head>
-  <title>XLN Consensus Visual Debug</title>
-  <meta name="description" content="XLN Visual Debugger - Real-time consensus monitoring and debugging interface" />
+  <title>xln - cross-local network</title>
+  <meta name="description" content="The first credible alternative to TradFi/CEX custody. Credit-extended payment channels with mechanical enforcement. Δ ≤ R + C" />
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://xln.finance/" />
+  <meta property="og:title" content="xln - cross-local network" />
+  <meta property="og:description" content="The first credible alternative to TradFi/CEX custody. The only architecture that scales to $100T without sacrificing decentralization." />
+  <meta property="og:image" content="https://xln.finance/img/preview.png" />
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image" />
+  <meta property="twitter:url" content="https://xln.finance/" />
+  <meta property="twitter:title" content="xln - cross-local network" />
+  <meta property="twitter:description" content="The first credible alternative to TradFi/CEX custody. Δ ≤ R + C — Credit-extended payment channels with mechanical enforcement." />
+  <meta property="twitter:image" content="https://xln.finance/img/preview.png" />
+  <meta property="twitter:site" content="@xlnfinance" />
 </svelte:head>
 
 {#if showLanding}

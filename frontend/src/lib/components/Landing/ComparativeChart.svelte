@@ -83,7 +83,7 @@
   $: maxScore = Math.max(...aggregatedScores.map(s => s.avg), 1);
 
   function solutionColor(solution: string): string {
-    return solution.toLowerCase().includes('xln') ? '#4fd18b' : 'rgba(255, 255, 255, 0.4)';
+    return solution.toLowerCase() === 'xln' ? '#4fd18b' : 'rgba(255, 255, 255, 0.4)';
   }
 </script>
 

@@ -4,15 +4,15 @@ You are a distributed systems researcher with expertise in payment systems, cons
 
 Your task: COMPARATIVE ANALYSIS of all major payment/settlement solutions.
 
-Compare XLN against these 8 alternatives:
-1. TradFi/CEX (Coinbase, Binance) - Custodial exchanges
-2. Lightning Network - Full-reserve payment channels
-3. Raiden Network - Ethereum payment channels
-4. Plasma - Early L2 with exit games
-5. Optimistic Rollups (Arbitrum, Optimism) - Fraud proofs
-6. ZK Rollups (zkSync, StarkNet) - Validity proofs
-7. Sharding (Eth 2.0 roadmap) - Horizontal scaling
-8. Big Blocks (Bitcoin Cash, BSV) - Increased block size
+Compare xln against these 8 alternatives (ordered by real-world market size/adoption):
+1. TradFi/CEX (banks, Binance, Coinbase) - $100T+ economy, $10T daily volume
+2. Big Blockers (Solana, Tron, BSV) - $80B market cap, high TPS centralization
+3. Optimistic Rollups (Arbitrum, Optimism) - $10B+ TVL, fraud proofs
+4. ZK Rollups (zkSync, StarkNet, Polygon) - $5B+ TVL, validity proofs
+5. Sharding (Ethereum roadmap) - Theoretical horizontal scaling
+6. Plasma - Early L2 with exit games (mostly abandoned)
+7. Lightning Network - Full-reserve payment channels (~$500M liquidity)
+8. Raiden Network - Ethereum payment channels (inactive)
 
 Evaluate each solution on 6 dimensions (0-1000 scale):
 • Innovation: Novel mechanisms, first-in-class features
@@ -30,8 +30,8 @@ EVALUATOR: [optional-name]
 
 | Solution           | Innovation | Scalability | Security | Decentral | UX  | CapEff | Total |
 |--------------------|------------|-------------|----------|-----------|-----|--------|-------|
-| XLN                | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
-| CEX                | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| xln                | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| TradFi/CEX         | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
 | Lightning          | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
 | Raiden             | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
 | Plasma             | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
@@ -41,9 +41,9 @@ EVALUATOR: [optional-name]
 | Big Blocks         | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
 
 KEY INSIGHTS:
-1. [One sentence on XLN's unique position]
-2. [One sentence on biggest competitor weakness XLN solves]
-3. [One sentence on remaining XLN challenges]
+1. [One sentence on xln's unique position]
+2. [One sentence on biggest competitor weakness xln solves]
+3. [One sentence on remaining xln challenges]
 
 SHARE URL: [if available]
 

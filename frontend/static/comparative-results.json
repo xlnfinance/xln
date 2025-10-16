@@ -1,4 +1,110 @@
 {
-  "results": [],
-  "lastUpdated": "2025-01-16T00:00:00.000Z"
+  "results": [
+    {
+      "model": "claude-sonnet-4.5",
+      "date": "2025-01-16",
+      "evaluator": "self-evaluation",
+      "shareableLink": null,
+      "rankings": [
+        {
+          "solution": "xln",
+          "innovation": 920,
+          "scalability": 950,
+          "security": 850,
+          "decentralization": 880,
+          "ux": 820,
+          "capitalEfficiency": 940,
+          "total": 5360
+        },
+        {
+          "solution": "TradFi/CEX",
+          "innovation": 180,
+          "scalability": 920,
+          "security": 250,
+          "decentralization": 80,
+          "ux": 880,
+          "capitalEfficiency": 850,
+          "total": 3160
+        },
+        {
+          "solution": "Big Blockers",
+          "innovation": 320,
+          "scalability": 780,
+          "security": 650,
+          "decentralization": 420,
+          "ux": 720,
+          "capitalEfficiency": 700,
+          "total": 3590
+        },
+        {
+          "solution": "Optimistic Rollup",
+          "innovation": 680,
+          "scalability": 750,
+          "security": 720,
+          "decentralization": 650,
+          "ux": 620,
+          "capitalEfficiency": 580,
+          "total": 4000
+        },
+        {
+          "solution": "ZK Rollup",
+          "innovation": 850,
+          "scalability": 720,
+          "security": 780,
+          "decentralization": 640,
+          "ux": 580,
+          "capitalEfficiency": 550,
+          "total": 4120
+        },
+        {
+          "solution": "Sharding",
+          "innovation": 720,
+          "scalability": 850,
+          "security": 700,
+          "decentralization": 750,
+          "ux": 400,
+          "capitalEfficiency": 600,
+          "total": 4020
+        },
+        {
+          "solution": "Plasma",
+          "innovation": 750,
+          "scalability": 650,
+          "security": 680,
+          "decentralization": 720,
+          "ux": 320,
+          "capitalEfficiency": 480,
+          "total": 3600
+        },
+        {
+          "solution": "Lightning",
+          "innovation": 820,
+          "scalability": 600,
+          "security": 850,
+          "decentralization": 880,
+          "ux": 420,
+          "capitalEfficiency": 380,
+          "total": 3950
+        },
+        {
+          "solution": "Raiden",
+          "innovation": 680,
+          "scalability": 550,
+          "security": 720,
+          "decentralization": 780,
+          "ux": 300,
+          "capitalEfficiency": 350,
+          "total": 3380
+        }
+      ],
+      "insights": [
+        "xln is the only solution that combines TradFi/CEX capital efficiency (940/1000) with blockchain-level unilateral exit guarantees - genuinely novel design space",
+        "TradFi/CEX dominates UX/scalability but catastrophically fails on security/decentralization - every major institution has been hacked or collapsed (Mt. Gox, FTX, bank bailouts)",
+        "Lightning scores high on decentralization/security but fails capital efficiency (380/1000) due to locked liquidity - the inbound capacity problem is architectural, not fixable",
+        "Rollups inherit Ethereum's security but face the data availability paradox - either trust a committee or accept L1 data costs (defeats the scaling purpose)",
+        "xln's main execution risk: Network effects - requires critical mass of hub adoption to realize the vision, but the economic incentives are correctly aligned (hubs profit from credit provision)"
+      ]
+    }
+  ],
+  "lastUpdated": "2025-01-16T18:00:00.000Z"
 }
