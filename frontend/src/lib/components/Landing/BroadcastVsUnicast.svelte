@@ -12,6 +12,9 @@
   interface Transaction {
     id: number;
     fromNode: number;
+    toNode: number;
+    type: 'r2r' | 'r2c' | 'c2r' | 'batch';
+    amount?: number;
     x: number;
     y: number;
     progress: number; // 0-1
@@ -182,9 +185,20 @@
 
     const { device, index } = selected;
 
+    // Random destination node
+    const toIndex = Math.floor(Math.random() * broadcastDevices.length);
+
+    // Random tx type (broadcast: mostly r2r)
+    const rand = Math.random();
+    const type = rand < 0.8 ? 'r2r' : rand < 0.9 ? 'r2c' : 'c2r';
+    const amount = Math.floor(Math.random() * 100) + 1;
+
     flyingTxs.push({
       id: txCounter++,
       fromNode: index,
+      toNode: toIndex,
+      type,
+      amount,
       x: device.x,
       y: device.y,
       progress: 0
@@ -200,14 +214,22 @@
 
     finalizedBlocks = [finalized, ...finalizedBlocks].slice(0, 10);
 
-    // Trigger raycast animation
+    // Trigger raycast animation (ALL nodes sync this block)
     raycastingBlock = finalized.number;
     setTimeout(() => {
       raycastingBlock = null;
-    }, 1000); // 1 second raycast duration
+    }, 1500); // 1.5 second raycast duration
 
     // Start new block
     consensusBlock = { number: consensusBlock.number + 1, txs: [], status: 'building' };
+  }
+
+  // Auto-finalize every 3 seconds if block has any txs
+  let blockTimer = 0;
+  $: {
+    if (consensusBlock.txs.length > 0) {
+      // Block will finalize in animate() when full, or after 3 seconds
+    }
   }
 
   onMount(() => {
@@ -341,13 +363,28 @@
 
           <!-- Flying transactions -->
           {#each flyingTxs as tx}
-            <circle
-              cx={tx.x} cy={tx.y}
-              r="4"
-              fill="#00d1ff"
-              opacity="0.8"
-              style="filter: drop-shadow(0 0 4px #00d1ff)"
-            />
+            <g transform="translate({tx.x}, {tx.y})">
+              <rect
+                x="-25" y="-10"
+                width="50" height="20"
+                rx="3"
+                fill={tx.type === 'r2r' ? '#1a8cff' : tx.type === 'r2c' ? '#ff8c1a' : '#1aff8c'}
+                opacity="0.9"
+                stroke="#fff"
+                stroke-width="0.5"
+              />
+              <text
+                x="0" y="0"
+                text-anchor="middle"
+                dominant-baseline="middle"
+                font-size="8"
+                font-family="JetBrains Mono, monospace"
+                fill="#fff"
+                font-weight="600"
+              >
+                {tx.type} {tx.fromNode % 100}-{tx.toNode % 100}
+              </text>
+            </g>
           {/each}
 
           <!-- Devices -->
