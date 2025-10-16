@@ -1,9 +1,10 @@
 name: Deploy XLN to GitHub Pages
 
+# DISABLED - Using nginx deployment on xln.finance server
 on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+  workflow_dispatch: # Manual trigger only
+  # push:
+  #   branches: [ "main" ]
 
 permissions:
   contents: read
