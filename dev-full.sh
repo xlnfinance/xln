@@ -78,15 +78,16 @@ bun run scripts/inject-version.ts
 echo ""
 
 # ============================================================================
-# BLOCKCHAIN SETUP
+# BLOCKCHAIN SETUP (DISABLED - Using BrowserVM/simnet now)
 # ============================================================================
 
-echo "🔄 Auto-resetting networks and redeploying contracts..."
-./reset-networks.sh
-if [ $? -ne 0 ]; then
-    echo "❌ Network reset failed!"
-    exit 1
-fi
+# echo "🔄 Auto-resetting networks and redeploying contracts..."
+# ./reset-networks.sh
+# if [ $? -ne 0 ]; then
+#     echo "❌ Network reset failed!"
+#     exit 1
+# fi
+echo "✅ Using BrowserVM (simnet) - no external blockchain needed"
 
 # ============================================================================
 # TYPESCRIPT VALIDATION (FAIL-FAST)
@@ -176,11 +177,13 @@ echo "✅ ✅ ✅ DEVELOPMENT ENVIRONMENT READY ✅ ✅ ✅"
 echo ""
 echo "🌐 Frontend: http://localhost:8080"
 echo "🌐 HTTPS:    https://localhost:8080 (if certs available)"
-echo "🔗 Blockchain: http://localhost:8545 (anvil)"
+echo "🧪 Blockchain: BrowserVM (in-browser simnet, no external chain)"
 echo "📦 Auto-rebuild: Enabled (runtime.js + frontend)"
 echo "🔍 Type checking: Running continuously"
 echo ""
 echo "💡 Press Ctrl+C to stop all services"
+echo ""
+echo "ℹ️  To use external blockchains: Uncomment reset-networks.sh in dev-full.sh"
 echo ""
 
 # Keep running
