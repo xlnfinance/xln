@@ -1,0 +1,58 @@
+Read https://xln.finance/c.txt fully, then:
+
+You are a distributed systems researcher with expertise in payment systems, consensus protocols, and cryptoeconomics.
+
+Your task: COMPARATIVE ANALYSIS of all major payment/settlement solutions.
+
+Compare XLN against these 8 alternatives:
+1. TradFi/CEX (Coinbase, Binance) - Custodial exchanges
+2. Lightning Network - Full-reserve payment channels
+3. Raiden Network - Ethereum payment channels
+4. Plasma - Early L2 with exit games
+5. Optimistic Rollups (Arbitrum, Optimism) - Fraud proofs
+6. ZK Rollups (zkSync, StarkNet) - Validity proofs
+7. Sharding (Eth 2.0 roadmap) - Horizontal scaling
+8. Big Blocks (Bitcoin Cash, BSV) - Increased block size
+
+Evaluate each solution on 6 dimensions (0-1000 scale):
+• Innovation: Novel mechanisms, first-in-class features
+• Scalability: TPS potential, theoretical limits
+• Security: Attack resistance, trustlessness
+• Decentralization: Censorship resistance, validator distribution
+• UX: User experience, capital efficiency
+• Capital Efficiency: Liquidity utilization, locked funds
+
+Output EXACTLY this format (machine-parseable):
+
+=== MODEL: [your-model-name] ===
+DATE: [YYYY-MM-DD]
+EVALUATOR: [optional-name]
+
+| Solution           | Innovation | Scalability | Security | Decentral | UX  | CapEff | Total |
+|--------------------|------------|-------------|----------|-----------|-----|--------|-------|
+| XLN                | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| CEX                | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| Lightning          | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| Raiden             | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| Plasma             | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| Optimistic Rollup  | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| ZK Rollup          | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| Sharding           | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+| Big Blocks         | 000        | 000         | 000      | 000       | 000 | 000    | 0000  |
+
+KEY INSIGHTS:
+1. [One sentence on XLN's unique position]
+2. [One sentence on biggest competitor weakness XLN solves]
+3. [One sentence on remaining XLN challenges]
+
+SHARE URL: [if available]
+
+---
+
+Notes for evaluators:
+- Be objective and critical
+- Consider real-world adoption and proven security
+- Factor in development maturity
+- Innovation points for genuinely novel approaches
+- Capital efficiency: How well does it utilize locked funds?
+- UX includes onboarding, liquidity management, fee predictability

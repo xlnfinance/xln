@@ -17,13 +17,33 @@ const CORE_FILES = {
     'SubcontractProviderV1.sol', // Implements ISubcontractProvider - HTLCs, swaps, limit orders
   ],
   runtime: [
+    // Core types and data structures (read this first)
+    'types.ts',              // All TypeScript interfaces - START HERE
+
+    // Main coordinators (how the system works)
     'runtime.ts',            // Main coordinator, 100ms ticks, R→E→A routing
     'entity-consensus.ts',   // BFT consensus (ADD_TX → PROPOSE → SIGN → COMMIT)
-    'evm.ts',                // Blockchain integration layer
     'account-consensus.ts',  // Bilateral account consensus between entities
-    'types.ts',              // All TypeScript interfaces
+
+    // Transaction processing (how txs are applied)
+    'entity-tx/index.ts',    // Entity transaction types
+    'entity-tx/apply.ts',    // Entity transaction dispatcher
+    'entity-tx/validation.ts', // Transaction validation
+    'entity-tx/financial.ts', // Financial accounting (addToReserves, etc)
+    'entity-tx/proposals.ts', // Proposal logic
+    'entity-tx/j-events.ts',  // Jurisdiction event handling
+
+    'account-tx/index.ts',   // Account transaction types
+    'account-tx/apply.ts',   // Account transaction dispatcher
+
+    // Routing (multi-hop payments)
+    'routing/graph.ts',      // Network graph representation
+    'routing/pathfinding.ts', // Dijkstra routing algorithm
+
+    // Utilities (support functions)
     'state-helpers.ts',      // Pure state management functions
-    'snapshot-coder.ts'      // Deterministic state serialization
+    'snapshot-coder.ts',     // Deterministic state serialization
+    'evm.ts',                // Blockchain integration layer
   ],
   docs: [
     'xlnview.md',            // System overview
@@ -35,6 +55,9 @@ const CORE_FILES = {
     'docs/jea.md',           // Jurisdiction-Entity-Account 3-layer model
     'docs/consensus/transaction-flow-specification.md', // Transaction flows
     'docs/11_Jurisdiction_Machine.md' // Architecture deep-dive
+  ],
+  worlds: [
+    'architecture.md'        // Scenario architecture, EntityInput primitives
   ]
 };
 
@@ -42,7 +65,7 @@ function countLines(content) {
   return content.split('\n').length;
 }
 
-function generateSemanticOverview(contractsDir, runtimeDir, docsDir) {
+function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir) {
   // Count lines for each file
   const fileSizes = {};
 
@@ -61,6 +84,11 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir) {
     if (content) fileSizes[`vibepaper/${file}`] = countLines(content);
   });
 
+  CORE_FILES.worlds.forEach(file => {
+    const content = readFileContent(worldsDir, file);
+    if (content) fileSizes[`worlds/${file}`] = countLines(content);
+  });
+
   return `# XLN Context - Core System Files
 ## Cross-Local Network: Off-chain settlement with on-chain anchoring
 
@@ -74,13 +102,30 @@ xln/
     SubcontractProviderV1.sol    ${fileSizes['contracts/SubcontractProviderV1.sol'] || '?'} lines - HTLCs, swaps, limit orders
 
   runtime/
+    types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces (START HERE)
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
     entity-consensus.ts          ${fileSizes['runtime/entity-consensus.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration, BrowserVM + testnet
     account-consensus.ts         ${fileSizes['runtime/account-consensus.ts'] || '?'} lines - Bilateral consensus, left/right perspective
-    types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces
+
+    entity-tx/
+      index.ts                   ${fileSizes['runtime/entity-tx/index.ts'] || '?'} lines - Entity transaction types
+      apply.ts                   ${fileSizes['runtime/entity-tx/apply.ts'] || '?'} lines - Entity tx dispatcher
+      validation.ts              ${fileSizes['runtime/entity-tx/validation.ts'] || '?'} lines - Transaction validation
+      financial.ts               ${fileSizes['runtime/entity-tx/financial.ts'] || '?'} lines - Financial accounting
+      proposals.ts               ${fileSizes['runtime/entity-tx/proposals.ts'] || '?'} lines - Proposal logic
+      j-events.ts                ${fileSizes['runtime/entity-tx/j-events.ts'] || '?'} lines - Jurisdiction events
+
+    account-tx/
+      index.ts                   ${fileSizes['runtime/account-tx/index.ts'] || '?'} lines - Account transaction types
+      apply.ts                   ${fileSizes['runtime/account-tx/apply.ts'] || '?'} lines - Account tx dispatcher
+
+    routing/
+      graph.ts                   ${fileSizes['runtime/routing/graph.ts'] || '?'} lines - Network graph
+      pathfinding.ts             ${fileSizes['runtime/routing/pathfinding.ts'] || '?'} lines - Dijkstra routing
+
     state-helpers.ts             ${fileSizes['runtime/state-helpers.ts'] || '?'} lines - Pure state management
     snapshot-coder.ts            ${fileSizes['runtime/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
+    evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration
 
   vibepaper/
     xlnview.md                   ${fileSizes['vibepaper/xlnview.md'] || '?'} lines - System overview, panel architecture
@@ -93,7 +138,10 @@ xln/
     docs/consensus/transaction-flow-specification.md  ${fileSizes['vibepaper/docs/consensus/transaction-flow-specification.md'] || '?'} lines
     docs/11_Jurisdiction_Machine.md  ${fileSizes['vibepaper/docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture
 
-Reading Guide: 1) docs/12_invariant.md (RCPE), 2) IDepository.sol, 3) types.ts, 4) entity-consensus.ts + account-consensus.ts, 5) runtime.ts
+  worlds/
+    architecture.md              ${fileSizes['worlds/architecture.md'] || '?'} lines - Scenario architecture, EntityInput primitives
+
+Reading Guide: 1) types.ts (data structures), 2) docs/12_invariant.md (RCPE), 3) IDepository.sol, 4) entity-consensus.ts + account-consensus.ts, 5) entity-tx/apply.ts + account-tx/apply.ts (how txs work), 6) runtime.ts
 
 Note: ECDSA.sol = OpenZeppelin, Token.sol = test ERC20, console.sol = Hardhat logging (not included - boilerplate)
 
@@ -116,8 +164,9 @@ function generateContext() {
   const contractsDir = path.join(projectRoot, 'jurisdictions/contracts');
   const runtimeDir = path.join(projectRoot, 'runtime');
   const docsDir = path.join(projectRoot, 'vibepaper');
+  const worldsDir = path.join(projectRoot, 'worlds');
 
-  let output = generateSemanticOverview(contractsDir, runtimeDir, docsDir);
+  let output = generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir);
 
   // Process contracts
   CORE_FILES.contracts.forEach(file => {
@@ -145,6 +194,16 @@ function generateContext() {
     if (content) {
       const lines = countLines(content);
       output += `\n//vibepaper/${file} (${lines} lines)\n`;
+      output += content + '\n';
+    }
+  });
+
+  // Process worlds
+  CORE_FILES.worlds.forEach(file => {
+    const content = readFileContent(worldsDir, file);
+    if (content) {
+      const lines = countLines(content);
+      output += `\n//worlds/${file} (${lines} lines)\n`;
       output += content + '\n';
     }
   });
@@ -186,4 +245,4 @@ const tokensCodeHeavy = Math.round(bytes / 3.0);      // Code-heavy upper bound
 console.log('✅ c.txt generated');
 console.log(`📊 ${lines.toLocaleString()} lines, ${kb} KB, ~${tokensRealistic.toLocaleString()} tokens`);
 console.log(`🌐 xln.finance/c.txt`);
-console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length}`);
+console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length} | Worlds: ${CORE_FILES.worlds.length}`);

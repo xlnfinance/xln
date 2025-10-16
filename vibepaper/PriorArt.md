@@ -40,3 +40,23 @@ Conclusion: Base layer TPS is IRRELEVANT for XLN.
 
 
 We are turn existing RSM into J-REA two-layered stack. 
+Banking: "Trust us with your money"
+XLN: "Same UX, but you can exit anytime with cryptographic proof"
+
+Binance: "We're totally not fractional reserve"
+XLN: "Here's the on-chain collateral, verify yourself"
+
+SWIFT: "$30 fee, 3 days"
+XLN: "$0.00001 fee, 3 seconds"
+```
+
+## Against Rollups
+```
+Rollups: "We'll decentralize the sequencer someday™"
+XLN: "No sequencer needed"
+
+Rollups: "Trust our data availability committee"
+XLN: "Your counterparty IS your data availability"
+
+Rollups: "Pay $0.10 per tx for blob space"
+XLN: "Pay $0 until you need to rebalance (rare)"
