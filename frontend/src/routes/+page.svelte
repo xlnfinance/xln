@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
+  import LandingPage from '../lib/components/Landing/LandingPage.svelte';
   import AdminTopBar from '../lib/components/Layout/AdminTopBar.svelte';
   import TimeMachine from '../lib/components/Layout/TimeMachine.svelte';
   import EntityPanel from '../lib/components/Entity/EntityPanel.svelte';
@@ -27,6 +29,18 @@
   let activeTab = 'formation';
   let zenMode = false; // Zen mode: hide UI chrome
   let hideButton = false; // Full zen: also hide the toggle button
+  let showLanding = true;
+
+  // Check if user has unlocked
+  onMount(() => {
+    if (browser) {
+      showLanding = localStorage.getItem('open') !== 'true';
+    }
+  });
+
+  function handleUnlock() {
+    showLanding = false;
+  }
 
   // Keyboard shortcut for zen mode
   function handleKeyboard(event: KeyboardEvent) {
@@ -120,6 +134,9 @@
   <meta name="description" content="XLN Visual Debugger - Real-time consensus monitoring and debugging interface" />
 </svelte:head>
 
+{#if showLanding}
+  <LandingPage onUnlock={handleUnlock} />
+{:else}
 <main class="app" class:zen-mode={zenMode}>
   {#if !zenMode}
     <AdminTopBar />
@@ -338,6 +355,7 @@
     <TimeMachine />
   {/if}
 </main>
+{/if}
 
 <style>
   :global(body) {
