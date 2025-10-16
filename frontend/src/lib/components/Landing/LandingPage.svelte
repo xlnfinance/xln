@@ -14,6 +14,8 @@
   let submissionText = '';
   let shareUrl = '';
   let submissionStatus = '';
+  let superpromptText = '';
+  let showInvite = true;
 
   const SUPERPROMPT = {
     persona: "ULTIMATE COMPARATIVE ANALYSIS",
@@ -91,22 +93,38 @@
     }
   }
 
-  async function copyPrompt(index: number) {
+  async function copyPrompt(index: number, event?: Event) {
     const promptData = PROMPTS[index];
     if (!promptData) return;
     const prompt = formatPrompt(promptData);
     if (browser) {
       await navigator.clipboard.writeText(prompt);
       copiedCard = index;
+
+      // Trigger animation
+      const btn = event?.target as HTMLElement;
+      if (btn) {
+        btn.style.animation = 'pulse 0.3s ease';
+        setTimeout(() => btn.style.animation = '', 300);
+      }
+
       setTimeout(() => copiedCard = null, 2000);
     }
   }
 
-  async function copyAllPrompts() {
+  async function copyAllPrompts(event?: Event) {
     const allPrompts = PROMPTS.map((p, i) => `# Prompt ${i + 1}: ${p.persona}\n\n${formatPrompt(p)}`).join('\n\n---\n\n');
     if (browser) {
       await navigator.clipboard.writeText(allPrompts);
       copiedCard = -1; // Special value for "all"
+
+      // Trigger animation
+      const btn = event?.target as HTMLElement;
+      if (btn) {
+        btn.style.animation = 'pulse 0.3s ease';
+        setTimeout(() => btn.style.animation = '', 300);
+      }
+
       setTimeout(() => copiedCard = null, 2000);
     }
   }
@@ -119,11 +137,38 @@
     if (browser) {
       const response = await fetch('/superprompt.txt');
       const text = await response.text();
+      superpromptText = text; // Store for preview
       await navigator.clipboard.writeText(text);
       copiedCard = -2; // Special value for superprompt
+
+      // Trigger animation
+      const btn = event?.target as HTMLElement;
+      if (btn) {
+        btn.style.animation = 'pulse 0.3s ease';
+        setTimeout(() => btn.style.animation = '', 300);
+      }
+
       setTimeout(() => copiedCard = null, 2000);
     }
   }
+
+  // Load superprompt on mount for preview
+  onMount(async () => {
+    if (browser) {
+      try {
+        const response = await fetch('/superprompt.txt');
+        superpromptText = await response.text();
+      } catch (error) {
+        console.error('Failed to load superprompt:', error);
+      }
+
+      // Check for #MML hash
+      if (window.location.hash === '#MML') {
+        localStorage.setItem('open', 'true');
+        onUnlock();
+      }
+    }
+  });
 
   async function submitEvaluation() {
     if (!submissionText || submissionText.length < 100) {
@@ -167,85 +212,78 @@
   <div class="content">
     <img src="/img/logo.png" alt="XLN" class="logo" />
 
-    <div class="invite-form">
-      <input
-        type="text"
-        bind:value={inviteCode}
-        placeholder="Invite Code"
-        on:keydown={(e) => e.key === 'Enter' && handleSubmit()}
-        class="invite-input"
-      />
-      <button on:click={handleSubmit} class="enter-btn">
-        Enter Testnet
-      </button>
-      {#if error}
-        <div class="error">{error}</div>
-      {/if}
+    <div class="skip-link-container">
+      <a href="/#MML" class="skip-link" on:click|preventDefault={() => { localStorage.setItem('open', 'true'); onUnlock(); }}>
+        Skip to testnet →
+      </a>
     </div>
 
     <div class="problem-solution">
       <div class="section">
-        <h2>The Problem</h2>
-        <p class="intro">Current solutions force impossible tradeoffs:</p>
+        <h2>The $100 Trillion Question</h2>
+        <p class="intro">How do we scale finance without custodians?</p>
+        <p class="vision-text">Every existing answer fails at planetary scale:</p>
         <ul>
-          <li><strong>Lightning/Raiden:</strong> Full-reserve channels — inbound capacity problem (dead by 2025)</li>
-          <li><strong>Rollups:</strong> Verifier dilemma + data availability paradox (unsolvable)</li>
-          <li><strong>Big blockers:</strong> Can't run on consumer devices, not truly decentralized</li>
-          <li><strong>CEXs:</strong> Custodial, bailouts, too-big-to-fail systemic risk</li>
+          <li><strong>TradFi/CEX (traditional banks, Binance, Coinbase):</strong> $100T economy, $10T daily volume, but custodial — bank bailouts, FTX collapse, Mt. Gox</li>
+          <li><strong>Big Blockers (Solana, Tron):</strong> $80B market cap, but can't run full nodes — centralized by design</li>
+          <li><strong>Rollups (Arbitrum, zkSync):</strong> $10B+ TVL, but data availability paradox — trust committees or die</li>
+          <li><strong>Sharding (Eth roadmap):</strong> Still broadcast O(n) — doesn't solve the fundamental bottleneck</li>
         </ul>
+        <p class="footnote">Historical footnotes: Lightning/Raiden/Plasma (all dead due to full-reserve constraints)</p>
       </div>
 
       <div class="section">
-        <h2>The Solution</h2>
+        <h2>The First Credible Alternative</h2>
         <p class="formula">Δ ≤ R + C</p>
         <p class="formula-explain">(Delta ≤ Reserves + Credit)</p>
-        <p class="intro">Credit-extended payment channels with mechanical enforcement</p>
-        <p>The RCPAN invariant: Molding together unicast full-credit architecture (banking/CEX) with the most secure Layer 2 technology (payment channels). <strong>Credit is all you need.</strong></p>
+        <p class="intro">What if TradFi/CEX was cryptographically provable?</p>
+        <p class="vision-text">The RCPAN invariant: Unicast architecture (O(1) like banking) + cryptographic proofs (like blockchain) + mechanical enforcement (no bailouts).</p>
+        <p class="vision-text"><strong>xln: The only architecture that scales to $100T without sacrificing decentralization.</strong></p>
       </div>
 
       <div class="section">
-        <h2>Key Properties</h2>
+        <h2>What This Unlocks</h2>
         <div class="properties-grid">
           <div class="property">
-            <span class="prop-icon">⚡</span>
+            <span class="prop-icon">🌍</span>
             <div>
-              <strong>Instant finality</strong>
-              <span>Like Lightning, no block confirmations</span>
+              <strong>Planetary scale</strong>
+              <span>Unbounded TPS via unicast O(1), not broadcast O(n)</span>
             </div>
           </div>
           <div class="property">
-            <span class="prop-icon">💳</span>
+            <span class="prop-icon">💰</span>
             <div>
-              <strong>Credit extension</strong>
-              <span>Unlike Lightning, solves inbound liquidity</span>
+              <strong>Credit + Reserves</strong>
+              <span>Capital efficiency of TradFi/CEX, security of blockchain</span>
             </div>
           </div>
           <div class="property">
             <span class="prop-icon">⚖️</span>
             <div>
-              <strong>Mechanical enforcement</strong>
-              <span>enforceDebts() FIFO queue, no bailouts</span>
+              <strong>Bailout-free</strong>
+              <span>enforceDebts() FIFO queue, mechanical liquidation</span>
             </div>
           </div>
           <div class="property">
             <span class="prop-icon">🔐</span>
             <div>
-              <strong>Unilateral exit</strong>
-              <span>Cryptographic account proofs, always</span>
-            </div>
-          </div>
-          <div class="property">
-            <span class="prop-icon">🌐</span>
-            <div>
-              <strong>No DA assumptions</strong>
-              <span>Unlike rollups, no data availability committees</span>
+              <strong>Cryptographic proofs</strong>
+              <span>Account proofs enable unilateral exit anytime</span>
             </div>
           </div>
           <div class="property">
             <span class="prop-icon">📱</span>
             <div>
               <strong>Consumer hardware</strong>
-              <span>Run full node on laptop/phone</span>
+              <span>Full node on laptop/phone — no 1TB SSD requirements</span>
+            </div>
+          </div>
+          <div class="property">
+            <span class="prop-icon">⚡</span>
+            <div>
+              <strong>Instant settlement</strong>
+              <span>Sub-second finality, not 12-second blocks</span>
             </div>
           </div>
         </div>
@@ -258,7 +296,7 @@
         <div class="superprompt-header">
           <div>
             <h2>Ultimate Comparative Analysis</h2>
-            <p>Compare XLN against ALL major payment solutions (CEX, Lightning, Rollups, etc.)</p>
+            <p>Compare xln against the entire $100T finance stack — from TradFi/CEX to rollups</p>
           </div>
           <div class="superprompt-actions">
             <button on:click={copySuperprompt} class="copy-super-btn">
@@ -269,6 +307,13 @@
             </button>
           </div>
         </div>
+
+        {#if superpromptText}
+          <div class="superprompt-preview">
+            <div class="preview-label">Superprompt Preview:</div>
+            <textarea readonly rows="10" class="preview-text" value={superpromptText}></textarea>
+          </div>
+        {/if}
 
         {#if showSubmitForm}
           <div class="submit-form">
@@ -311,11 +356,11 @@
         <div class="prompt-label">
           <div class="label-title">10 Expert Perspectives</div>
           <div class="label-subtitle">
-            Prompt template: Read <a href="/c.txt" target="_blank" class="context-inline">https://xln.finance/c.txt</a> (~120k tokens of architecture + contracts + runtime)
+            Prompt template: Read <a href="/c.txt" target="_blank" class="context-inline">https://xln.finance/c.txt</a> (~120k tokens of xln architecture + contracts + runtime)
             <br/>Then evaluate as [persona] using the scoring rubric below.
           </div>
         </div>
-        <button on:click={copyAllPrompts} class="copy-all-btn">
+        <button on:click={(e) => copyAllPrompts(e)} class="copy-all-btn">
           {copiedCard === -1 ? '✓ Copied All' : 'Copy All 10'}
         </button>
       </div>
@@ -330,7 +375,7 @@
             {#if expandedCard === i}
               <div class="card-content">
                 <pre class="prompt-text">{formatPrompt(prompt)}</pre>
-                <button on:click|stopPropagation={() => copyPrompt(i)} class="copy-btn">
+                <button on:click|stopPropagation={(e) => copyPrompt(i, e)} class="copy-btn">
                   {copiedCard === i ? '✓ Copied' : 'Copy Prompt'}
                 </button>
               </div>
@@ -339,6 +384,25 @@
         {/each}
       </div>
     </div>
+
+    {#if showInvite}
+      <div class="invite-form">
+        <div class="invite-label">Early Access</div>
+        <input
+          type="text"
+          bind:value={inviteCode}
+          placeholder="Invite Code"
+          on:keydown={(e) => e.key === 'Enter' && handleSubmit()}
+          class="invite-input"
+        />
+        <button on:click={handleSubmit} class="enter-btn">
+          Enter Testnet
+        </button>
+        {#if error}
+          <div class="error">{error}</div>
+        {/if}
+      </div>
+    {/if}
 
     <div class="footer">
       <div class="footer-links">
@@ -384,6 +448,23 @@
     filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
   }
 
+  .skip-link-container {
+    margin-bottom: 3rem;
+  }
+
+  .skip-link {
+    color: rgba(255, 255, 255, 0.5);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+    border-bottom: 1px solid transparent;
+  }
+
+  .skip-link:hover {
+    color: rgba(255, 255, 255, 0.9);
+    border-bottom-color: rgba(255, 255, 255, 0.5);
+  }
+
   .invite-form {
     display: flex;
     flex-direction: column;
@@ -391,6 +472,16 @@
     gap: 1rem;
     width: 100%;
     max-width: 400px;
+    margin-top: 4rem;
+    padding-top: 3rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .invite-label {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
 
   .invite-input {
@@ -463,12 +554,20 @@
     color: rgba(255, 255, 255, 0.8);
   }
 
+  .vision-text {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.8);
+    margin-bottom: 1rem;
+  }
+
   .section ul {
     list-style: none;
     padding: 0;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    margin-top: 1rem;
   }
 
   .section li {
@@ -480,14 +579,22 @@
   }
 
   .section li::before {
-    content: "✗";
+    content: "•";
     position: absolute;
     left: 0;
-    color: #ff6b6b;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: bold;
   }
 
   .section li strong {
     color: rgba(255, 255, 255, 0.9);
+  }
+
+  .footnote {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 1.5rem;
+    font-style: italic;
   }
 
   .formula {
@@ -685,6 +792,38 @@
     margin: 0;
   }
 
+  .superprompt-preview {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .preview-label {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+  }
+
+  .preview-text {
+    width: 100%;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.8);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    resize: vertical;
+    cursor: text;
+  }
+
+  .preview-text:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
   .divider {
     width: 100%;
     height: 1px;
@@ -879,6 +1018,12 @@
     color: rgba(255, 255, 255, 0.4);
   }
 
+  @keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); box-shadow: 0 0 20px rgba(79, 209, 139, 0.5); }
+    100% { transform: scale(1); }
+  }
+
   @media (max-width: 768px) {
     .logo {
       width: 300px;
@@ -908,6 +1053,10 @@
 
     .label-subtitle {
       font-size: 0.85rem;
+    }
+
+    .properties-grid {
+      grid-template-columns: 1fr;
     }
   }
 </style>
