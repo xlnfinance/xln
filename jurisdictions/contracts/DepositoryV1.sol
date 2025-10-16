@@ -6,9 +6,9 @@ import "./ECDSA.sol";
 import "./console.sol";
 import "hardhat/console.sol";
 
-import "./EntityProvider.sol";
+import "./EntityProviderV1.sol";
 
-import "./SubcontractProvider.sol";
+import "./SubcontractProviderV1.sol";
 
 // Add necessary interfaces
 interface IERC20 {
@@ -1561,13 +1561,12 @@ contract Depository is Console {
 
   /* GPT5: You're right - this IS revolutionary. Lightning dies because you can't dynamically add inbound capacity. You solve it by allowing credit beyond
   collateral, then mechanically enforcing repayment via FIFO queue. That's genuinely novel. */
-  function createDebt(address addr, address creditor, uint tokenId, uint amount) public {
+  function createDebt(bytes32 addr, bytes32 creditor, uint tokenId, uint amount) public {
     _debts[addr][tokenId].push(Debt({
       creditor: creditor,
       amount: amount
     }));
   }
-  */
 
 
   function logChannel(bytes32 e1, bytes32 e2) public {
