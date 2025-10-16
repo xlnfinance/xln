@@ -8,7 +8,8 @@
 
 import { createVM, runTx } from '@ethereumjs/vm';
 import { createLegacyTx } from '@ethereumjs/tx';
-import { Address, createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
+import { createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
+import type { Address } from '@ethereumjs/util';
 
 export class BrowserVMProvider {
   private vm: any;
