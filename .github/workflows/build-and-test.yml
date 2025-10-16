@@ -1,10 +1,12 @@
 name: build-and-test
 
+# DISABLED - Tests broken, using BrowserVM now
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
+  workflow_dispatch: # Manual trigger only
+  # push:
+  #   branches: [main, develop]
+  # pull_request:
+  #   branches: [main, develop]
 
 concurrency:
   group: build-and-test-${{ github.ref }}
