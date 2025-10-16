@@ -1,0 +1,32 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Server rack (3 units stacked) -->
+  <g id="server-units">
+    <!-- Unit 1 -->
+    <rect x="20" y="25" width="60" height="15" rx="2"
+          fill="none" stroke="currentColor" stroke-width="2"/>
+    <circle cx="28" cy="32.5" r="2" fill="currentColor" opacity="0.5"/>
+    <circle cx="36" cy="32.5" r="2" fill="currentColor" opacity="0.5"/>
+    <rect x="45" y="28" width="30" height="9" fill="rgba(255,255,255,0.05)"/>
+
+    <!-- Unit 2 (with EVM) -->
+    <rect x="20" y="42" width="60" height="15" rx="2"
+          fill="none" stroke="currentColor" stroke-width="2"/>
+    <circle cx="28" cy="49.5" r="2" fill="currentColor" opacity="0.5"/>
+    <circle cx="36" cy="49.5" r="2" fill="currentColor" opacity="0.5"/>
+    <!-- EVM embedded here -->
+    <g transform="translate(60, 49.5) scale(0.015)">
+      <path d="M0 -200v369.743l-267.095 83.14L0 -200zM0 -200v369.743l267.095 83.14L0 -200zM0 495V237.725L-267.095 90.43 0 495zM0 495V237.725l267.095-147.295L0 495z" fill="currentColor" />
+      <path d="M-267.095 52.33L0 -71.79v255.311L-267.095 52.33zM267.095 52.33L0 -71.79v255.311l267.095-131.191z" fill="currentColor" />
+    </g>
+
+    <!-- Unit 3 -->
+    <rect x="20" y="59" width="60" height="15" rx="2"
+          fill="none" stroke="currentColor" stroke-width="2"/>
+    <circle cx="28" cy="66.5" r="2" fill="currentColor" opacity="0.5"/>
+    <circle cx="36" cy="66.5" r="2" fill="currentColor" opacity="0.5"/>
+    <rect x="45" y="62" width="30" height="9" fill="rgba(255,255,255,0.05)"/>
+  </g>
+
+  <!-- Capacity label -->
+  <text x="50" y="85" text-anchor="middle" font-size="8" fill="currentColor" opacity="0.7">~1K TPS</text>
+</svg>
