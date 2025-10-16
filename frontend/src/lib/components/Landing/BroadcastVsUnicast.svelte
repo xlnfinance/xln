@@ -177,7 +177,10 @@
 
     if (aliveNodes.length === 0) return;
 
-    const { device, index } = aliveNodes[Math.floor(Math.random() * aliveNodes.length)];
+    const selected = aliveNodes[Math.floor(Math.random() * aliveNodes.length)];
+    if (!selected) return;
+
+    const { device, index } = selected;
 
     flyingTxs.push({
       id: txCounter++,
@@ -297,7 +300,7 @@
         <!-- Current consensus block (building on right) -->
         <div class="consensus-block {consensusBlock.status}">
           <div class="block-label">Consensus</div>
-          <div class="tx-count">{consensusBlock.txCount}/{BLOCK_SIZE}</div>
+          <div class="tx-count">{consensusBlock.txs.length}/{BLOCK_SIZE}</div>
         </div>
       </div>
 
