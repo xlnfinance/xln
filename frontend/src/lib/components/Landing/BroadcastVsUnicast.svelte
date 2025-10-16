@@ -1,0 +1,550 @@
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import NetworkLegend from './NetworkLegend.svelte';
+
+  let currentTPS = 1;
+  let blockNumber = 0;
+  let isPlaying = true;
+  let animationFrame: number | null = null;
+
+  const tpsStages = [1, 10, 100, 1000, 10000, 100000, 1000000];
+  let stageIndex = 0;
+  let stageProgress = 0;
+  const STAGE_DURATION = 8000; // 8 seconds per stage
+
+  // Device health tracking with positions
+  interface DeviceState {
+    type: 'phone' | 'laptop' | 'server' | 'datacenter';
+    health: number; // 0-100
+    maxTPS: number;
+    status: 'ok' | 'struggling' | 'critical' | 'offline' | 'pruned';
+    x: number;
+    y: number;
+    icon: string;
+  }
+
+  let broadcastDevices: DeviceState[] = [];
+  let unicastDevices: DeviceState[] = [];
+
+  const viewWidth = 600;
+  const viewHeight = 600;
+  const centerX = viewWidth / 2;
+  const centerY = viewHeight / 2;
+
+  function randomInZone(minRadius: number, maxRadius: number): {x: number, y: number} {
+    const angle = Math.random() * 2 * Math.PI;
+    const radius = minRadius + Math.random() * (maxRadius - minRadius);
+    return {
+      x: centerX + radius * Math.cos(angle),
+      y: centerY + radius * Math.sin(angle)
+    };
+  }
+
+  function initializeDevices() {
+    broadcastDevices = [];
+    unicastDevices = [];
+
+    // Zone definitions - spread across entire canvas
+    const configs = [
+      { type: 'datacenter', count: 4, minR: 0, maxR: 60, maxTPS: 100000, icon: '/img/primitives/datacenter.svg' },
+      { type: 'server', count: 10, minR: 90, maxR: 160, maxTPS: 1000, icon: '/img/primitives/server.svg' },
+      { type: 'laptop', count: 15, minR: 180, maxR: 240, maxTPS: 100, icon: '/img/primitives/laptop.svg' },
+      { type: 'phone', count: 20, minR: 250, maxR: 290, maxTPS: 10, icon: '/img/primitives/phone.svg' },
+    ] as const;
+
+    configs.forEach(config => {
+      for (let i = 0; i < config.count; i++) {
+        const pos = randomInZone(config.minR, config.maxR);
+
+        const device: DeviceState = {
+          type: config.type,
+          health: 100,
+          maxTPS: config.maxTPS,
+          status: 'ok',
+          x: pos.x,
+          y: pos.y,
+          icon: config.icon
+        };
+
+        // Mirror positions on both sides
+        broadcastDevices.push({ ...device });
+        unicastDevices.push({ ...device });
+      }
+    });
+  }
+
+  function updateDeviceHealth() {
+    // BROADCAST: Devices suffer under load
+    broadcastDevices.forEach(device => {
+      if (currentTPS > device.maxTPS) {
+        const overload = (currentTPS - device.maxTPS) / device.maxTPS;
+        device.health = Math.max(0, device.health - overload * 2);
+
+        if (device.health > 60) device.status = 'struggling';
+        else if (device.health > 30) device.status = 'critical';
+        else if (device.health > 0) device.status = 'offline';
+        else {
+          // Phones/laptops give up (pruned), servers/datacenters try to sync
+          device.status = (device.type === 'phone' || device.type === 'laptop') ? 'pruned' : 'offline';
+        }
+      } else {
+        // Recover slowly if TPS drops
+        device.health = Math.min(100, device.health + 1);
+        if (device.health > 80) device.status = 'ok';
+      }
+    });
+
+    // UNICAST: All devices always healthy (L1 constant at 1 TPS)
+    unicastDevices.forEach(device => {
+      device.health = 100;
+      device.status = 'ok';
+    });
+  }
+
+  function animate(timestamp: number) {
+    if (!isPlaying) {
+      animationFrame = requestAnimationFrame(animate);
+      return;
+    }
+
+    stageProgress += 16; // Assume ~60fps
+    if (stageProgress >= STAGE_DURATION) {
+      stageProgress = 0;
+      stageIndex = (stageIndex + 1) % tpsStages.length;
+      currentTPS = tpsStages[stageIndex] ?? 1;
+
+      // New block every stage change
+      blockNumber++;
+    }
+
+    updateDeviceHealth();
+
+    animationFrame = requestAnimationFrame(animate);
+  }
+
+  onMount(() => {
+    initializeDevices();
+    animationFrame = requestAnimationFrame(animate);
+  });
+
+  onDestroy(() => {
+    if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+  });
+
+  function togglePlay() {
+    isPlaying = !isPlaying;
+  }
+
+  function formatTPS(tps: number): string {
+    if (tps >= 1000000) return `${(tps / 1000000).toFixed(1)}M`;
+    if (tps >= 1000) return `${(tps / 1000).toFixed(0)}K`;
+    return tps.toString();
+  }
+
+  function deviceColor(status: string): string {
+    switch(status) {
+      case 'ok': return '#4fd18b';
+      case 'struggling': return '#ffd700';
+      case 'critical': return '#ff8c00';
+      case 'offline': return '#ff6b6b';
+      case 'pruned': return '#888888';
+      default: return '#ffffff';
+    }
+  }
+
+  function deviceGlow(status: string): string {
+    switch(status) {
+      case 'ok': return 'drop-shadow(0 0 8px #4fd18b)';
+      case 'struggling': return 'drop-shadow(0 0 8px #ffd700)';
+      case 'critical': return 'drop-shadow(0 0 12px #ff8c00)';
+      case 'offline': return 'drop-shadow(0 0 6px #ff6b6b)';
+      case 'pruned': return 'none';
+      default: return 'none';
+    }
+  }
+
+  $: broadcastAlive = broadcastDevices.filter(d => d.status === 'ok' || d.status === 'struggling').length;
+  $: broadcastDead = broadcastDevices.filter(d => d.status === 'pruned' || d.status === 'offline').length;
+  $: unicastAlive = unicastDevices.length; // Always all alive
+</script>
+
+<div class="comparison-container">
+  <div class="comparison-header">
+    <h2>Why Broadcast Dies at Scale (Visual Proof)</h2>
+    <div class="controls">
+      <div class="tps-display">
+        L2 Throughput: <span class="tps-value">{formatTPS(currentTPS)} TPS</span>
+      </div>
+      <button on:click={togglePlay} class="play-btn">
+        {isPlaying ? '⏸ Pause' : '▶ Play'}
+      </button>
+    </div>
+  </div>
+
+  <NetworkLegend />
+
+  <div class="split-screen">
+    <!-- LEFT: Broadcast O(n) -->
+    <div class="side broadcast">
+      <h3>Broadcast O(n)</h3>
+      <p class="subtitle">Bitcoin, Ethereum, Solana, Rollups</p>
+
+      <div class="j-layer">
+        <div class="j-label">J-Machine (Global Consensus)</div>
+        <div class="block-display">Block #{blockNumber}</div>
+        <div class="l1-rate">L1 Required: {formatTPS(currentTPS)}</div>
+      </div>
+
+      <div class="devices-layer">
+        <div class="status-bar">
+          <span style="color: {deviceColor('ok')}">✓ {broadcastAlive} alive</span>
+          <span style="color: {deviceColor('pruned')}">✗ {broadcastDead} dead/pruned</span>
+        </div>
+        <svg class="device-scene" viewBox="0 0 {viewWidth} {viewHeight}" xmlns="http://www.w3.org/2000/svg">
+          {#each broadcastDevices as device, i}
+            {#if device.status === 'pruned' || device.status === 'offline'}
+              <!-- RPC zombie line to center (drawn first, behind devices) -->
+              <line
+                x1={device.x} y1={device.y}
+                x2={centerX} y2={centerY}
+                stroke="rgba(255,255,255,0.1)"
+                stroke-dasharray="4 4"
+                stroke-width="1"
+              />
+            {/if}
+          {/each}
+
+          {#each broadcastDevices as device, i}
+            <g transform="translate({device.x}, {device.y})">
+              <image
+                href={device.icon}
+                x="-35" y="-35"
+                width="70" height="70"
+                opacity={device.status === 'pruned' ? 0.3 : device.status === 'offline' ? 0.5 : 1}
+                style="filter: {deviceGlow(device.status)}; color: {deviceColor(device.status)}"
+              />
+            </g>
+          {/each}
+
+          <!-- Jail bars over datacenter region at 10K+ TPS -->
+          {#if currentTPS >= 10000}
+            <defs>
+              <pattern id="jail-bars" width="12" height="40" patternUnits="userSpaceOnUse">
+                <rect width="4" height="40" fill="#888"/>
+              </pattern>
+            </defs>
+            <rect x={centerX - 80} y={centerY - 80} width="160" height="160"
+                  fill="url(#jail-bars)" opacity="0.7" rx="8"/>
+          {/if}
+        </svg>
+      </div>
+    </div>
+
+    <!-- DIVIDER -->
+    <div class="vertical-divider"></div>
+
+    <!-- RIGHT: Unicast O(1) -->
+    <div class="side unicast">
+      <h3>Unicast O(1)</h3>
+      <p class="subtitle">xln (netting layer)</p>
+
+      <div class="netting-layer">
+        <div class="netting-label">Hub-Spoke Netting (L2)</div>
+        <div class="netting-visual">
+          <div class="hub">HUB</div>
+          <div class="spokes">
+            {#each Array(8) as _, i}
+              <div class="spoke" style="transform: rotate({i * 45}deg)"></div>
+            {/each}
+          </div>
+        </div>
+      </div>
+
+      <div class="j-layer">
+        <div class="j-label">J-Machine (Settlement Only)</div>
+        <div class="block-display">Block #{blockNumber}</div>
+        <div class="l1-rate constant">L1 Required: 1 TPS (constant)</div>
+      </div>
+
+      <div class="devices-layer">
+        <div class="status-bar">
+          <span style="color: {deviceColor('ok')}">✓ {unicastAlive} alive</span>
+        </div>
+        <svg class="device-scene" viewBox="0 0 {viewWidth} {viewHeight}" xmlns="http://www.w3.org/2000/svg">
+          {#each unicastDevices as device, i}
+            <g transform="translate({device.x}, {device.y})">
+              <image
+                href={device.icon}
+                x="-35" y="-35"
+                width="70" height="70"
+                style="filter: {deviceGlow(device.status)}; color: {deviceColor(device.status)}"
+              />
+            </g>
+          {/each}
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="insight">
+    {#if currentTPS <= 10}
+      <p>✓ At low TPS, both architectures work fine</p>
+    {:else if currentTPS <= 100}
+      <p>⚠ Broadcast: Phones struggling. Unicast: Still perfect.</p>
+    {:else if currentTPS <= 1000}
+      <p>❌ Broadcast: Only servers survive. Unicast: All devices fine (L1 still 1 TPS)</p>
+    {:else if currentTPS <= 100000}
+      <p>💥 Broadcast: Datacenter-only (centralization). Unicast: Everyone fine.</p>
+    {:else}
+      <p>☠️ Broadcast: Complete failure. Unicast: Infinite scalability — L1 never changes.</p>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .comparison-container {
+    width: 100%;
+    max-width: 1400px;
+    margin: 3rem 0;
+  }
+
+  .comparison-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .comparison-header h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin: 0;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .tps-display {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .tps-value {
+    font-weight: 600;
+    color: #4fd18b;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .play-btn {
+    padding: 0.5rem 1rem;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    color: #fff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .play-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .split-screen {
+    display: grid;
+    grid-template-columns: 1fr 2px 1fr;
+    gap: 2rem;
+    min-height: 500px;
+  }
+
+  .vertical-divider {
+    background: linear-gradient(to bottom,
+      transparent,
+      rgba(255, 255, 255, 0.3) 20%,
+      rgba(255, 255, 255, 0.3) 80%,
+      transparent
+    );
+  }
+
+  .side {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .side h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.95);
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.5);
+    margin: -1rem 0 0;
+  }
+
+  .j-layer {
+    background: rgba(100, 100, 255, 0.1);
+    border: 2px solid rgba(100, 100, 255, 0.3);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .j-label {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .block-display {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .l1-rate {
+    font-size: 0.85rem;
+    color: #ff8c00;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .l1-rate.constant {
+    color: #4fd18b;
+  }
+
+  .netting-layer {
+    background: rgba(79, 209, 139, 0.1);
+    border: 2px solid rgba(79, 209, 139, 0.3);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+  }
+
+  .netting-label {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .netting-visual {
+    position: relative;
+    width: 120px;
+    height: 120px;
+  }
+
+  .hub {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    background: #4fd18b;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #000;
+    z-index: 2;
+  }
+
+  .spokes {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .spoke {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 60px;
+    height: 2px;
+    background: rgba(79, 209, 139, 0.4);
+    transform-origin: 0 center;
+  }
+
+  .spoke::after {
+    content: '';
+    position: absolute;
+    right: -6px;
+    top: -4px;
+    width: 8px;
+    height: 8px;
+    background: rgba(79, 209, 139, 0.6);
+    border-radius: 50%;
+  }
+
+  .devices-layer {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .device-scene {
+    width: 100%;
+    height: 600px;
+    background: rgba(10, 10, 15, 0.8);
+    border-radius: 8px;
+    border: 1px solid rgba(79, 209, 139, 0.2);
+  }
+
+  .device-scene image {
+    transition: opacity 0.5s ease;
+    filter: brightness(1.3) contrast(1.2);
+  }
+
+  .insight {
+    margin-top: 2rem;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 3px solid #4fd18b;
+    border-radius: 4px;
+  }
+
+  .insight p {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  @media (max-width: 1024px) {
+    .split-screen {
+      grid-template-columns: 1fr;
+      gap: 3rem;
+    }
+
+    .vertical-divider {
+      display: none;
+    }
+  }
+</style>

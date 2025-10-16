@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import ComparativeChart from './ComparativeChart.svelte';
+  import BroadcastVsUnicast from './BroadcastVsUnicast.svelte';
+  import InvariantTicker from '../Home/InvariantTicker.svelte';
 
   export let onUnlock: () => void;
 
@@ -212,12 +214,6 @@
   <div class="content">
     <img src="/img/logo.png" alt="XLN" class="logo" />
 
-    <div class="skip-link-container">
-      <a href="/#MML" class="skip-link" on:click|preventDefault={() => { localStorage.setItem('open', 'true'); onUnlock(); }}>
-        Skip to testnet →
-      </a>
-    </div>
-
     <div class="problem-solution">
       <div class="section">
         <h2>The $100 Trillion Question</h2>
@@ -230,65 +226,68 @@
           <li><strong>Sharding (Eth roadmap):</strong> Still broadcast O(n) — doesn't solve the fundamental bottleneck</li>
         </ul>
         <p class="footnote">Historical footnotes: Lightning/Raiden/Plasma (all dead due to full-reserve constraints)</p>
-      </div>
 
-      <div class="section">
-        <h2>The First Credible Alternative</h2>
-        <p class="formula">Δ ≤ R + C</p>
-        <p class="formula-explain">(Delta ≤ Reserves + Credit)</p>
-        <p class="intro">What if TradFi/CEX was cryptographically provable?</p>
-        <p class="vision-text">The RCPAN invariant: Unicast architecture (O(1) like banking) + cryptographic proofs (like blockchain) + mechanical enforcement (no bailouts).</p>
-        <p class="vision-text"><strong>xln: The only architecture that scales to $100T without sacrificing decentralization.</strong></p>
-      </div>
+        <div class="technical-context">
+          <p class="vision-text">For centuries, finance ran on <strong>FCUAN</strong> (Full-Credit Unprovable Account Networks): traditional banking, CEXs, brokers. Pure credit scales phenomenally but offers weak security—assets can be seized, hubs can default.</p>
 
-      <div class="section">
-        <h2>What This Unlocks</h2>
-        <div class="properties-grid">
-          <div class="property">
-            <span class="prop-icon">🌍</span>
-            <div>
-              <strong>Planetary scale</strong>
-              <span>Unbounded TPS via unicast O(1), not broadcast O(n)</span>
-            </div>
-          </div>
-          <div class="property">
-            <span class="prop-icon">💰</span>
-            <div>
-              <strong>Credit + Reserves</strong>
-              <span>Capital efficiency of TradFi/CEX, security of blockchain</span>
-            </div>
-          </div>
-          <div class="property">
-            <span class="prop-icon">⚖️</span>
-            <div>
-              <strong>Bailout-free</strong>
-              <span>enforceDebts() FIFO queue, mechanical liquidation</span>
-            </div>
-          </div>
-          <div class="property">
-            <span class="prop-icon">🔐</span>
-            <div>
-              <strong>Cryptographic proofs</strong>
-              <span>Account proofs enable unilateral exit anytime</span>
-            </div>
-          </div>
-          <div class="property">
-            <span class="prop-icon">📱</span>
-            <div>
-              <strong>Consumer hardware</strong>
-              <span>Full node on laptop/phone — no 1TB SSD requirements</span>
-            </div>
-          </div>
-          <div class="property">
-            <span class="prop-icon">⚡</span>
-            <div>
-              <strong>Instant settlement</strong>
-              <span>Sub-second finality, not 12-second blocks</span>
-            </div>
-          </div>
+          <p class="vision-text">In 2017, Lightning introduced <strong>FRPAP</strong> (Full-Reserve Provable Account Primitives): payment channels with cryptographic proofs. Full security but hits the <em>inbound liquidity wall</em>—an architectural limit, not a bug.</p>
         </div>
       </div>
+
+      <div class="section">
+        <h2>The Solution</h2>
+        <p class="intro"><strong>xln</strong> is the first <strong>RCPAN</strong> (Reserve-Credit Provable Account Network): credit where it scales, collateral where it secures. A principled hybrid.</p>
+
+        <div class="invariant-box">
+          <InvariantTicker
+            label="FCUAN"
+            description="−leftCredit ≤ Δ ≤ rightCredit"
+            pattern="[---.---]"
+          />
+          <InvariantTicker
+            label="FRPAP"
+            description="0 ≤ Δ ≤ collateral"
+            pattern="[.===]"
+          />
+          <InvariantTicker
+            label="RCPAN"
+            description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
+            pattern="[---.===---]"
+          />
+        </div>
+
+        <div class="formula-variants">
+          <div class="formula-box">
+            <div class="formula-label">Bilateral Invariant</div>
+            <div class="formula-math">−Cₗ ≤ Δ ≤ R + Cᵣ</div>
+            <div class="formula-desc">Left credit · Delta · Reserves + Right credit</div>
+          </div>
+
+          <div class="formula-divider">≡</div>
+
+          <div class="formula-box">
+            <div class="formula-label">Set Theory</div>
+            <div class="formula-math">Δ ∈ [−Cₗ, R + Cᵣ]</div>
+            <div class="formula-desc">Delta in closed interval</div>
+          </div>
+        </div>
+
+        <p class="formula-note">Both forms are mathematically equivalent — express the same reserve-credit constraint</p>
+      </div>
+
+      <div class="section">
+        <h2>Key Properties</h2>
+        <ul class="properties-list">
+          <li>Infinite scalability: O(1) per-hop updates vs O(n) broadcast</li>
+          <li>No inbound liquidity problem: credit + collateral hybrid</li>
+          <li>Bounded risk: counterparty loss capped at collateral + credit</li>
+          <li><strong>Local state: no sequencers, no data availability dependencies</strong></li>
+        </ul>
+      </div>
     </div>
+
+    <!-- Broadcast vs Unicast Visual Proof -->
+    <BroadcastVsUnicast />
 
     <div class="prompt-container">
       <!-- SUPERPROMPT -->
@@ -448,23 +447,6 @@
     filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
   }
 
-  .skip-link-container {
-    margin-bottom: 3rem;
-  }
-
-  .skip-link {
-    color: rgba(255, 255, 255, 0.5);
-    text-decoration: none;
-    font-size: 0.9rem;
-    transition: all 0.2s;
-    border-bottom: 1px solid transparent;
-  }
-
-  .skip-link:hover {
-    color: rgba(255, 255, 255, 0.9);
-    border-bottom-color: rgba(255, 255, 255, 0.5);
-  }
-
   .invite-form {
     display: flex;
     flex-direction: column;
@@ -597,65 +579,102 @@
     font-style: italic;
   }
 
-  .formula {
-    font-size: 2rem;
+  .technical-context {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .formula-variants {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 2rem;
+    margin: 2rem 0;
+    flex-wrap: wrap;
+  }
+
+  .formula-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem 2rem;
+    background: rgba(79, 209, 139, 0.05);
+    border: 1px solid rgba(79, 209, 139, 0.3);
+    border-radius: 8px;
+    min-width: 280px;
+  }
+
+  .formula-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .formula-math {
+    font-size: 1.8rem;
     font-weight: 600;
-    text-align: center;
-    margin: 1rem 0 0.5rem;
     color: #4fd18b;
+    font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.05em;
   }
 
-  .formula-explain {
+  .formula-desc {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
     text-align: center;
-    font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.5);
-    margin-bottom: 1.5rem;
   }
 
-  .properties-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1rem;
+  .formula-divider {
+    font-size: 2rem;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 300;
+  }
+
+  .formula-note {
+    text-align: center;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.5);
+    margin: -1rem 0 1.5rem;
+    font-style: italic;
+  }
+
+  .properties-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
     margin-top: 1rem;
   }
 
-  .property {
-    display: flex;
-    gap: 1rem;
-    align-items: flex-start;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    transition: all 0.2s;
+  .properties-list li {
+    padding-left: 1.5rem;
+    position: relative;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.85);
   }
 
-  .property:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.2);
+  .properties-list li::before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #4fd18b;
+    font-weight: bold;
   }
 
-  .prop-icon {
-    font-size: 1.5rem;
-    flex-shrink: 0;
-  }
-
-  .property div {
+  .invariant-box {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .property strong {
-    font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.95);
-  }
-
-  .property span {
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
-    line-height: 1.4;
+    gap: 1.5rem;
+    margin: 2rem 0;
+    padding: 1.5rem;
+    background: rgba(79, 209, 139, 0.05);
+    border: 1px solid rgba(79, 209, 139, 0.2);
+    border-radius: 8px;
   }
 
   .prompt-container {

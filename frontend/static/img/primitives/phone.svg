@@ -1,0 +1,19 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Phone outline -->
+  <rect x="30" y="10" width="40" height="75" rx="5"
+        fill="none" stroke="currentColor" stroke-width="2"/>
+  <!-- Screen -->
+  <rect x="33" y="15" width="34" height="55" rx="2"
+        fill="rgba(255,255,255,0.05)" stroke="currentColor" stroke-width="1"/>
+  <!-- Home button -->
+  <circle cx="50" cy="77" r="3" fill="currentColor" opacity="0.6"/>
+
+  <!-- EVM logo embedded (scaled down, centered in screen) -->
+  <g transform="translate(50, 42.5) scale(0.025)">
+    <path d="M0 -300v369.743l-267.095 83.14L0 -300zM0 -300v369.743l267.095 83.14L0 -300zM0 595.554V338.279L-267.095 190.984 0 595.554zM0 595.554V338.279l267.095-147.295L0 595.554z" fill="currentColor" />
+    <path d="M-267.095 152.883L0 28.763v255.311L-267.095 152.883zM267.095 152.883L0 28.763v255.311l267.095-131.191z" fill="currentColor" />
+  </g>
+
+  <!-- Capacity label -->
+  <text x="50" y="95" text-anchor="middle" font-size="8" fill="currentColor" opacity="0.7">~10 TPS</text>
+</svg>
