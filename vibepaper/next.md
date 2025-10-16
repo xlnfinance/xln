@@ -242,8 +242,51 @@ rings.forEach(ring => {
 3. **Ghost vs disappear:** Keep dead nodes visible (educational) or remove them (cleaner)?
 4. **Mobile layout:** Stack broadcast/unicast vertically or make single view switchable?
 
-### Current Status:
-- ✅ Basic split-screen structure built
-- ✅ Device primitives with embedded EVM logos
-- ✅ Auto-ramping TPS logic
-- ⏳ Need to implement: Radial layout, RPC zombie lines, jail grid, radius contraction
+### Current Status (After Session):
+- ✅ 100 nodes (70% phones, 24% laptops, 5% servers, 1% datacenter)
+- ✅ TPS slider (manual 1-1000 + auto-ramp mode)
+- ✅ Blockchain visualization (consensus block fills 0/10 → 10/10, then finalizes)
+- ✅ Finalized blocks move to historical chain (left side)
+- ✅ Device health degradation on broadcast side
+- ✅ Jail bars pattern for datacenter censorship (at 10K+ TPS)
+- ✅ RPC zombie lines (dead nodes → datacenter)
+- ✅ Mirrored layout (broadcast/unicast identical starting positions)
+
+### Low-Hanging Fruit (Next Session):
+
+**Critical Missing Features:**
+1. **Raycast O(n) animation** (15 min) - When block finalizes, ALL alive nodes raycast to it
+   - Draw lines from each node to finalized block
+   - Animate sequentially (show it's O(n) operations)
+   - This PROVES the broadcast bottleneck visually
+
+2. **Random tx submission** (10 min) - Nodes randomly send tx to consensus block
+   - Small dots flying from random nodes → consensus block
+   - Rate based on current TPS
+   - Shows network activity
+
+3. **Random uptime (16/5 vs 24/7)** (20 min)
+   - Phones/laptops: Randomly go offline even at low TPS
+   - Show "offline" → "syncing..." → back online (if can catch up)
+   - Datacenters: Always online
+   - This shows uptime is also a centralizing force
+
+**Polish:**
+4. **Remove netting visual from broadcast side** (2 min) - It's xln-only, confusing on broadcast
+5. **Better jail bars** (5 min) - Only show when ONLY datacenters remain alive
+6. **Consensus block position** (5 min) - Move to top-right (like sketch shows)
+7. **Finalized chain scrolls** (5 min) - Horizontal scroll showing historical blocks
+
+**Visual Improvements:**
+8. **Device death animation** (10 min) - Fade out + shake when dying
+9. **Health bars** (10 min) - Show device health as small bar below icon
+10. **TPS impact zones** (5 min) - Color-code zones (green <10, yellow <100, red >100)
+
+**Total Low-Hanging:** ~90 minutes for full polish
+
+### Priority Order:
+1. **Raycast animation** - This is THE killer feature (proves O(n) visually)
+2. **Random tx submission** - Makes it feel alive
+3. **Random uptime** - Shows second dimension of centralization
+4. Remove netting from broadcast
+5. Everything else is polish
