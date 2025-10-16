@@ -9,11 +9,30 @@
   let lastTimestamp = 0;
 
   // Blockchain state
-  let consensusBlock: { txCount: number; status: 'building' | 'finalizing' } = { txCount: 0, status: 'building' };
-  let finalizedBlocks: number[] = []; // Just block numbers
-  let txAccumulator = 0; // Tracks partial transactions
+  interface Transaction {
+    id: number;
+    fromNode: number;
+    x: number;
+    y: number;
+    progress: number; // 0-1
+  }
 
-  const BLOCK_SIZE = 10; // 10 tx per block
+  interface Block {
+    number: number;
+    txs: number[]; // Just tx IDs
+    status: 'building' | 'finalized';
+  }
+
+  let consensusBlock: Block = { number: 0, txs: [], status: 'building' };
+  let finalizedBlocks: Block[] = [];
+  let flyingTxs: Transaction[] = [];
+  let raycastingBlock: number | null = null; // Block number being synced
+  let txCounter = 0;
+  let txAccumulator = 0;
+
+  const BLOCK_SIZE = 10;
+  const CONSENSUS_BLOCK_X = viewWidth - 100;
+  const CONSENSUS_BLOCK_Y = 50;
 
   // Device health tracking with positions
   interface DeviceState {
@@ -117,31 +136,75 @@
     // Accumulate transactions based on current TPS
     txAccumulator += currentTPS * deltaTime;
 
-    // When enough tx accumulated, add to consensus block
-    while (txAccumulator >= 1) {
+    // Spawn new transactions
+    while (txAccumulator >= 1 && consensusBlock.txs.length < BLOCK_SIZE) {
       txAccumulator -= 1;
-      consensusBlock.txCount++;
-
-      // Block full? Finalize it
-      if (consensusBlock.txCount >= BLOCK_SIZE) {
-        consensusBlock.status = 'finalizing';
-        setTimeout(() => {
-          finalizeBlock();
-        }, 500); // 0.5s finalization delay
-      }
+      spawnTransaction();
     }
+
+    // Update flying transactions
+    flyingTxs.forEach(tx => {
+      tx.progress += deltaTime * 2; // 0.5 second flight time
+      if (tx.progress >= 1) {
+        // Arrived at consensus block
+        consensusBlock.txs.push(tx.id);
+        flyingTxs = flyingTxs.filter(t => t.id !== tx.id);
+
+        // Block full? Finalize it
+        if (consensusBlock.txs.length >= BLOCK_SIZE) {
+          finalizeBlock();
+        }
+      } else {
+        // Update position (lerp from node to consensus block)
+        const node = broadcastDevices[tx.fromNode];
+        if (node) {
+          tx.x = node.x + (CONSENSUS_BLOCK_X - node.x) * tx.progress;
+          tx.y = node.y + (CONSENSUS_BLOCK_Y - node.y) * tx.progress;
+        }
+      }
+    });
 
     updateDeviceHealth();
 
     animationFrame = requestAnimationFrame(animate);
   }
 
-  function finalizeBlock() {
-    finalizedBlocks = [blockNumber, ...finalizedBlocks].slice(0, 10); // Keep last 10 blocks
-    blockNumber++;
-    consensusBlock = { txCount: 0, status: 'building' };
+  function spawnTransaction() {
+    // Pick random alive node
+    const aliveNodes = broadcastDevices
+      .map((d, i) => ({ device: d, index: i }))
+      .filter(n => n.device.status === 'ok' || n.device.status === 'struggling');
 
-    // TODO: Trigger raycast animation to all alive nodes
+    if (aliveNodes.length === 0) return;
+
+    const { device, index } = aliveNodes[Math.floor(Math.random() * aliveNodes.length)];
+
+    flyingTxs.push({
+      id: txCounter++,
+      fromNode: index,
+      x: device.x,
+      y: device.y,
+      progress: 0
+    });
+  }
+
+  function finalizeBlock() {
+    const finalized: Block = {
+      number: consensusBlock.number,
+      txs: [...consensusBlock.txs],
+      status: 'finalized'
+    };
+
+    finalizedBlocks = [finalized, ...finalizedBlocks].slice(0, 10);
+
+    // Trigger raycast animation
+    raycastingBlock = finalized.number;
+    setTimeout(() => {
+      raycastingBlock = null;
+    }, 1000); // 1 second raycast duration
+
+    // Start new block
+    consensusBlock = { number: consensusBlock.number + 1, txs: [], status: 'building' };
   }
 
   onMount(() => {
@@ -244,9 +307,25 @@
           <span style="color: {deviceColor('pruned')}">✗ {broadcastDead} dead/pruned</span>
         </div>
         <svg class="device-scene" viewBox="0 0 {viewWidth} {viewHeight}" xmlns="http://www.w3.org/2000/svg">
+          <!-- Raycast lines (when block finalizes, ALL nodes download) -->
+          {#if raycastingBlock !== null}
+            {#each broadcastDevices as device, i}
+              {#if device.status === 'ok' || device.status === 'struggling'}
+                <line
+                  x1={device.x} y1={device.y}
+                  x2={CONSENSUS_BLOCK_X} y2={CONSENSUS_BLOCK_Y}
+                  stroke="#4fd18b"
+                  stroke-width="1"
+                  opacity="0.6"
+                  class="raycast-line"
+                />
+              {/if}
+            {/each}
+          {/if}
+
+          <!-- RPC zombie lines (dead nodes trust datacenters) -->
           {#each broadcastDevices as device, i}
             {#if device.status === 'pruned' || device.status === 'offline'}
-              <!-- RPC zombie line to center (drawn first, behind devices) -->
               <line
                 x1={device.x} y1={device.y}
                 x2={centerX} y2={centerY}
@@ -257,8 +336,21 @@
             {/if}
           {/each}
 
+          <!-- Flying transactions -->
+          {#each flyingTxs as tx}
+            <circle
+              cx={tx.x} cy={tx.y}
+              r="4"
+              fill="#00d1ff"
+              opacity="0.8"
+              style="filter: drop-shadow(0 0 4px #00d1ff)"
+            />
+          {/each}
+
+          <!-- Devices -->
           {#each broadcastDevices as device, i}
             <g transform="translate({device.x}, {device.y})">
+              <!-- Device icon -->
               <image
                 href={device.icon}
                 x="-35" y="-35"
@@ -266,11 +358,20 @@
                 opacity={device.status === 'pruned' ? 0.3 : device.status === 'offline' ? 0.5 : 1}
                 style="filter: {deviceGlow(device.status)}; color: {deviceColor(device.status)}"
               />
+              <!-- EVM logo (syncing indicator) -->
+              <image
+                href="/img/evm.svg"
+                x="-8" y="-8"
+                width="16" height="16"
+                opacity={raycastingBlock !== null && (device.status === 'ok' || device.status === 'struggling') ? 1 : 0.3}
+                class:syncing={raycastingBlock !== null}
+                style="color: {deviceColor(device.status)}"
+              />
             </g>
           {/each}
 
-          <!-- Jail bars over datacenter region at 10K+ TPS -->
-          {#if currentTPS >= 10000}
+          <!-- Jail bars over datacenter region at high TPS -->
+          {#if currentTPS >= 10000 && broadcastAlive <= 5}
             <defs>
               <pattern id="jail-bars" width="12" height="40" patternUnits="userSpaceOnUse">
                 <rect width="4" height="40" fill="#888"/>
@@ -667,6 +768,25 @@
   .device-scene image {
     transition: opacity 0.5s ease;
     filter: brightness(1.3) contrast(1.2);
+  }
+
+  .device-scene image.syncing {
+    animation: sync-pulse 0.5s ease-in-out;
+  }
+
+  @keyframes sync-pulse {
+    0%, 100% { opacity: 0.3; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.3); }
+  }
+
+  .raycast-line {
+    animation: raycast-fade 1s ease-out;
+  }
+
+  @keyframes raycast-fade {
+    0% { opacity: 0; stroke-width: 2; }
+    20% { opacity: 0.8; }
+    100% { opacity: 0; stroke-width: 0.5; }
   }
 
   .insight {
