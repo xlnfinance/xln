@@ -17,6 +17,16 @@ The unicast bilateral state approach completely side-steps this problem.
 
 No amount of DAC/DAS/erasure coding assumption cascades can solve that. **Those are very intellectually interesting problems to work on, but they are perpetuum mobile in a nutshell.**
 
+
+Ethereum: 15 TPS global
+XLN on Ethereum: Millions of TPS bilateral (O(1) per entity pair)
+
+Solana: 3000 TPS global  
+XLN on Solana: Still millions of TPS bilateral
+
+Conclusion: Base layer TPS is IRRELEVANT for XLN.
+
+
 ## Lightning Network
 
 
