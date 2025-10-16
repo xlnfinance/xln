@@ -4,13 +4,16 @@
 
   let currentTPS = 1;
   let blockNumber = 0;
-  let isPlaying = true;
+  let isPlaying = false; // Start paused so user can control
   let animationFrame: number | null = null;
+  let lastTimestamp = 0;
 
-  const tpsStages = [1, 10, 100, 1000, 10000, 100000, 1000000];
-  let stageIndex = 0;
-  let stageProgress = 0;
-  const STAGE_DURATION = 8000; // 8 seconds per stage
+  // Blockchain state
+  let consensusBlock: { txCount: number; status: 'building' | 'finalizing' } = { txCount: 0, status: 'building' };
+  let finalizedBlocks: number[] = []; // Just block numbers
+  let txAccumulator = 0; // Tracks partial transactions
+
+  const BLOCK_SIZE = 10; // 10 tx per block
 
   // Device health tracking with positions
   interface DeviceState {
@@ -44,12 +47,12 @@
     broadcastDevices = [];
     unicastDevices = [];
 
-    // Zone definitions - spread across entire canvas
+    // 100 nodes total - realistic distribution
     const configs = [
-      { type: 'datacenter', count: 4, minR: 0, maxR: 60, maxTPS: 100000, icon: '/img/primitives/datacenter.svg' },
-      { type: 'server', count: 10, minR: 90, maxR: 160, maxTPS: 1000, icon: '/img/primitives/server.svg' },
-      { type: 'laptop', count: 15, minR: 180, maxR: 240, maxTPS: 100, icon: '/img/primitives/laptop.svg' },
-      { type: 'phone', count: 20, minR: 250, maxR: 290, maxTPS: 10, icon: '/img/primitives/phone.svg' },
+      { type: 'datacenter', count: 1, minR: 20, maxR: 40, maxTPS: 100000, icon: '/img/primitives/datacenter.svg' },
+      { type: 'server', count: 5, minR: 80, maxR: 120, maxTPS: 1000, icon: '/img/primitives/server.svg' },
+      { type: 'laptop', count: 24, minR: 140, maxR: 200, maxTPS: 100, icon: '/img/primitives/laptop.svg' },
+      { type: 'phone', count: 70, minR: 210, maxR: 290, maxTPS: 10, icon: '/img/primitives/phone.svg' },
     ] as const;
 
     configs.forEach(config => {
@@ -102,24 +105,43 @@
   }
 
   function animate(timestamp: number) {
-    if (!isPlaying) {
-      animationFrame = requestAnimationFrame(animate);
-      return;
+    if (!lastTimestamp) lastTimestamp = timestamp;
+    const deltaTime = (timestamp - lastTimestamp) / 1000; // seconds
+    lastTimestamp = timestamp;
+
+    if (isPlaying) {
+      // Auto-increment TPS (1 to 1000 over 60 seconds)
+      currentTPS = Math.min(1000, currentTPS + (1000 / 60) * deltaTime);
     }
 
-    stageProgress += 16; // Assume ~60fps
-    if (stageProgress >= STAGE_DURATION) {
-      stageProgress = 0;
-      stageIndex = (stageIndex + 1) % tpsStages.length;
-      currentTPS = tpsStages[stageIndex] ?? 1;
+    // Accumulate transactions based on current TPS
+    txAccumulator += currentTPS * deltaTime;
 
-      // New block every stage change
-      blockNumber++;
+    // When enough tx accumulated, add to consensus block
+    while (txAccumulator >= 1) {
+      txAccumulator -= 1;
+      consensusBlock.txCount++;
+
+      // Block full? Finalize it
+      if (consensusBlock.txCount >= BLOCK_SIZE) {
+        consensusBlock.status = 'finalizing';
+        setTimeout(() => {
+          finalizeBlock();
+        }, 500); // 0.5s finalization delay
+      }
     }
 
     updateDeviceHealth();
 
     animationFrame = requestAnimationFrame(animate);
+  }
+
+  function finalizeBlock() {
+    finalizedBlocks = [blockNumber, ...finalizedBlocks].slice(0, 10); // Keep last 10 blocks
+    blockNumber++;
+    consensusBlock = { txCount: 0, status: 'building' };
+
+    // TODO: Trigger raycast animation to all alive nodes
   }
 
   onMount(() => {
@@ -172,11 +194,21 @@
   <div class="comparison-header">
     <h2>Why Broadcast Dies at Scale (Visual Proof)</h2>
     <div class="controls">
-      <div class="tps-display">
-        L2 Throughput: <span class="tps-value">{formatTPS(currentTPS)} TPS</span>
+      <div class="tps-control">
+        <label>
+          Network TPS: <span class="tps-value">{Math.round(currentTPS)}</span>
+          <input
+            type="range"
+            min="1"
+            max="1000"
+            step="1"
+            bind:value={currentTPS}
+            class="tps-slider"
+          />
+        </label>
       </div>
       <button on:click={togglePlay} class="play-btn">
-        {isPlaying ? '⏸ Pause' : '▶ Play'}
+        {isPlaying ? '⏸ Stop Auto' : '▶ Auto Ramp'}
       </button>
     </div>
   </div>
@@ -189,10 +221,21 @@
       <h3>Broadcast O(n)</h3>
       <p class="subtitle">Bitcoin, Ethereum, Solana, Rollups</p>
 
-      <div class="j-layer">
-        <div class="j-label">J-Machine (Global Consensus)</div>
-        <div class="block-display">Block #{blockNumber}</div>
-        <div class="l1-rate">L1 Required: {formatTPS(currentTPS)}</div>
+      <div class="blockchain-layer">
+        <!-- Finalized blocks (historical chain on left) -->
+        <div class="finalized-blocks">
+          {#each finalizedBlocks as blockNum}
+            <div class="block finalized" title="Block #{blockNum}">
+              #{blockNum}
+            </div>
+          {/each}
+        </div>
+
+        <!-- Current consensus block (building on right) -->
+        <div class="consensus-block {consensusBlock.status}">
+          <div class="block-label">Consensus</div>
+          <div class="tx-count">{consensusBlock.txCount}/{BLOCK_SIZE}</div>
+        </div>
       </div>
 
       <div class="devices-layer">
@@ -327,10 +370,19 @@
   .controls {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 2rem;
+    flex-wrap: wrap;
   }
 
-  .tps-display {
+  .tps-control {
+    flex: 1;
+    min-width: 300px;
+  }
+
+  .tps-control label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
     font-size: 0.9rem;
     color: rgba(255, 255, 255, 0.7);
   }
@@ -339,6 +391,32 @@
     font-weight: 600;
     color: #4fd18b;
     font-family: 'JetBrains Mono', monospace;
+  }
+
+  .tps-slider {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    outline: none;
+    cursor: pointer;
+  }
+
+  .tps-slider::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #4fd18b;
+    cursor: pointer;
+  }
+
+  .tps-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #4fd18b;
+    cursor: pointer;
+    border: none;
   }
 
   .play-btn {
@@ -390,6 +468,75 @@
     font-size: 0.85rem;
     color: rgba(255, 255, 255, 0.5);
     margin: -1rem 0 0;
+  }
+
+  .blockchain-layer {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: rgba(20, 20, 30, 0.6);
+    border-radius: 8px;
+    min-height: 80px;
+    overflow-x: auto;
+  }
+
+  .finalized-blocks {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .block {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  .block.finalized {
+    background: rgba(79, 209, 139, 0.1);
+    border: 2px solid #4fd18b;
+    color: #4fd18b;
+  }
+
+  .consensus-block {
+    padding: 1rem;
+    border-radius: 6px;
+    border: 2px solid #ff8c00;
+    background: rgba(255, 140, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 100px;
+  }
+
+  .consensus-block.finalizing {
+    border-color: #4fd18b;
+    background: rgba(79, 209, 139, 0.15);
+    animation: finalize-pulse 0.5s ease;
+  }
+
+  @keyframes finalize-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+  }
+
+  .block-label {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+  }
+
+  .tx-count {
+    font-size: 1.2rem;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    color: rgba(255, 255, 255, 0.9);
   }
 
   .j-layer {
