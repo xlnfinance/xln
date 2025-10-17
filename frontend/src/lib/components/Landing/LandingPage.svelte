@@ -226,16 +226,15 @@
         <p class="vision-text">Every existing answer fails at planetary scale:</p>
         <ul>
           <li><strong>TradFi/CEX (traditional banks, Binance, Coinbase):</strong> $100T economy, $10T daily volume, but custodial — bank bailouts, FTX collapse, Mt. Gox</li>
-          <li><strong>Big Blockers (Solana, Tron):</strong> $80B market cap, but can't run full nodes — centralized by design</li>
-          <li><strong>Rollups (Arbitrum, zkSync):</strong> $10B+ TVL, but data availability paradox — trust committees or die</li>
-          <li><strong>Sharding (Eth roadmap):</strong> Still broadcast O(n) — doesn't solve the fundamental bottleneck</li>
+          <li><strong>All big blockers (Solana, Tron, BSC):</strong> $80B+ market cap, but can't run full nodes — centralized by design</li>
+          <li><strong>All rollups (Arbitrum, Optimism, zkSync, StarkNet):</strong> $10B+ TVL, but data availability paradox — trust third-party committees, ephemeral calldata, or expensive blobspace</li>
+          <li><strong>Sharding chains (NEAR, TON, Zilliqa, MultiversX):</strong> Still broadcast O(n) within shards — doesn't solve the fundamental bottleneck</li>
         </ul>
-        <p class="footnote">Historical footnotes: Lightning/Raiden/Plasma (all dead due to full-reserve constraints)</p>
 
         <div class="technical-context">
           <p class="vision-text">For centuries, finance ran on <strong>FCUAN</strong> (Full-Credit Unprovable Account Networks): traditional banking, CEXs, brokers. Pure credit scales phenomenally but offers weak security—assets can be seized, hubs can default.</p>
 
-          <p class="vision-text">In 2017, Lightning introduced <strong>FRPAP</strong> (Full-Reserve Provable Account Primitives): payment channels with cryptographic proofs. Full security but hits the <em>inbound liquidity wall</em>—an architectural limit, not a bug.</p>
+          <p class="vision-text">In 2015, Lightning introduced <strong>FRPAP</strong> (Full-Reserve Provable Account Primitives): payment channels with cryptographic proofs. Full security but hits the <em>inbound liquidity wall</em>—an architectural limit, not a bug. Lightning, Raiden, Connext, Celer — all payment channel projects are now dead or pivoted due to full-reserve constraints.</p>
         </div>
       </div>
 
@@ -283,8 +282,6 @@
             <div class="formula-desc">Delta in closed interval</div>
           </div>
         </div>
-
-        <p class="formula-note">Both forms are mathematically equivalent — express the same reserve-credit constraint</p>
       </div>
 
       <div class="section">
@@ -293,6 +290,7 @@
           <li>Infinite scalability: O(1) per-hop updates vs O(n) broadcast</li>
           <li>No inbound liquidity problem: credit + collateral hybrid</li>
           <li>Bounded risk: counterparty loss capped at collateral + credit</li>
+          <li>Perfect privacy: onion-routing (payment sender/receiver anonymous to routing hubs, like Tor for money)</li>
           <li><strong>Local state: no sequencers, no data availability dependencies</strong></li>
         </ul>
       </div>
@@ -303,8 +301,21 @@
         <p class="intro">xln isn't just "better payment channels" — it's the ultimate financial substrate.</p>
 
         <div class="cbdc-stat">
-          <div class="stat-number">137 countries</div>
-          <div class="stat-label">representing <strong>98% of global GDP</strong> are building programmable ledgers (<a href="https://www.atlanticcouncil.org/cbdctracker/" target="_blank" rel="noopener noreferrer" class="stat-link">CBDCs</a>)</div>
+          <div class="stat-stack">
+            <div class="stat-number-large">137</div>
+            <div class="stat-sublabel">countries</div>
+          </div>
+          <div class="stat-stack">
+            <div class="stat-number-medium">72</div>
+            <div class="stat-sublabel">in pilot phase</div>
+          </div>
+          <div class="stat-stack">
+            <div class="stat-number-large">98%</div>
+            <div class="stat-sublabel">of global GDP</div>
+          </div>
+          <div class="stat-description">
+            building programmable ledgers (<a href="https://www.atlanticcouncil.org/cbdctracker/" target="_blank" rel="noopener noreferrer" class="stat-link">CBDCs</a>)
+          </div>
         </div>
 
         <p class="vision-text">Most will be EVM-compatible or similar smart contract platforms. xln naturally attaches to <strong>any</strong> programmable ledger by simply deploying <code>Depository.sol</code>.</p>
@@ -313,75 +324,12 @@
           <p class="endgame-text"><strong>The endgame:</strong> Every digital asset — CBDCs, stablecoins, tokenized securities, RWAs — gets instant off-chain settlement with bounded risk and infinite scale.</p>
           <p class="endgame-text">One protocol. Every jurisdiction. Zero broadcast overhead.</p>
         </div>
-
-        <!-- Contract Display -->
-        <details class="contract-viewer">
-          <summary class="contract-summary">
-            <span class="contract-label">View DepositoryV1.sol (deployed on Ethereum Sepolia)</span>
-            <span class="expand-arrow">▼</span>
-          </summary>
-          <div class="contract-content">
-            <div class="contract-header">
-              <span class="contract-title">DepositoryV1.sol</span>
-              <span class="contract-loc">~1650 lines · Multi-asset reserve management</span>
-            </div>
-            <pre class="contract-code">// Core functions that make xln universal:
-
-function settle(
-  bytes32 leftEntity,
-  bytes32 rightEntity,
-  SettlementDiff[] memory diffs
-) public returns (bool) {{
-  // ✅ INVARIANT: leftDiff + rightDiff + collateralDiff == 0
-  // No value created or destroyed, only moved
-
-  // Update reserves for both entities + collateral
-  // Emit SettlementProcessed event for j-watchers
-}}
-
-function processBatch(
-  bytes32 entity,
-  Batch calldata batch
-) public returns (bool) {{
-  // Process reserve-to-reserve transfers
-  // Process settlements between entities
-  // Atomic batch execution
-}}
-
-function enforceDebts(
-  bytes32 entity,
-  uint tokenId
-) public returns (uint totalDebts) {{
-  // FIFO debt queue enforcement
-  // Creates "liquidity trap" - can receive but not send
-  // Mechanical repayment: either pay in full or can't withdraw
-}}
-
-// Multi-asset support: ERC20, ERC721, ERC1155
-// Multi-jurisdiction: Works with any EVM chain
-// Just deploy this contract → instant xln compatibility</pre>
-            <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/DepositoryV1.sol" target="_blank" rel="noopener noreferrer" class="view-full-link">
-              View full contract on GitHub →
-            </a>
-          </div>
-        </details>
       </div>
     </div>
 
-    <!-- Link to dedicated visualization -->
-    <div class="visualization-link-section">
-      <a href="/unicast" class="viz-link-card">
-        <div class="viz-link-header">
-          <h3>Why Broadcast Dies at Scale</h3>
-          <span class="arrow">→</span>
-        </div>
-        <p class="viz-link-desc">Visual proof: O(n) broadcast bottleneck vs O(1) unicast routing</p>
-      </a>
-    </div>
-
     <div class="prompt-container">
-      <!-- SUPERPROMPT -->
-      <Collapsible title="Ultimate Comparative Analysis" bind:collapsed={comparativeCollapsed}>
+      <!-- AI SUPERPROMPT -->
+      <Collapsible title="AI Superprompt" bind:collapsed={comparativeCollapsed}>
         <div class="superprompt-section">
           <div class="superprompt-actions">
             <button on:click={copySuperprompt} class="copy-super-btn">
@@ -523,9 +471,17 @@ function enforceDebts(
     {/if}
 
     <div class="footer">
+      <div class="context-highlight">
+        <a href="/c.txt" target="_blank" class="context-link">
+          <div class="context-header">
+            <span class="context-icon">📄</span>
+            <span class="context-title">xln.finance/c.txt</span>
+          </div>
+          <div class="context-desc">Complete source: All Solidity contracts + TypeScript runtime + Architecture docs (~120k tokens) — Context for AI analysis</div>
+        </a>
+      </div>
+
       <div class="footer-links">
-        <a href="/c.txt" target="_blank" class="footer-link">xln.finance/c.txt</a>
-        <span class="separator">·</span>
         <a href="https://x.com/xlnfinance" target="_blank" rel="noopener noreferrer" class="footer-link">x.com/xlnfinance</a>
         <span class="separator">·</span>
         <a href="https://t.me/xlnomist" target="_blank" rel="noopener noreferrer" class="footer-link">t.me/xlnomist</a>
@@ -895,27 +851,51 @@ function enforceDebts(
 
   .cbdc-stat {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    justify-content: center;
     align-items: center;
-    gap: 0.5rem;
+    flex-wrap: wrap;
+    gap: 3rem;
     margin: 2rem 0;
     padding: 2rem;
     background: rgba(0, 209, 255, 0.05);
     border-radius: 8px;
   }
 
-  .stat-number {
-    font-size: 3rem;
+  .stat-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .stat-number-large {
+    font-size: 3.5rem;
     font-weight: 700;
     color: #00d1ff;
     line-height: 1;
   }
 
-  .stat-label {
-    font-size: 1rem;
+  .stat-number-medium {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: rgba(0, 209, 255, 0.8);
+    line-height: 1;
+  }
+
+  .stat-sublabel {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .stat-description {
+    width: 100%;
+    font-size: 0.95rem;
     color: rgba(255, 255, 255, 0.8);
     text-align: center;
-    line-height: 1.6;
+    margin-top: 1rem;
   }
 
   .stat-link {
@@ -957,100 +937,6 @@ function enforceDebts(
     margin-bottom: 0;
     font-style: italic;
     color: #00d1ff;
-  }
-
-  .contract-viewer {
-    margin-top: 2rem;
-    border: 1px solid rgba(0, 209, 255, 0.3);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .contract-summary {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1.25rem 1.5rem;
-    background: rgba(0, 0, 0, 0.3);
-    cursor: pointer;
-    user-select: none;
-    transition: all 0.2s;
-    list-style: none;
-  }
-
-  .contract-summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .contract-summary:hover {
-    background: rgba(0, 0, 0, 0.4);
-  }
-
-  .contract-label {
-    font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.9);
-    font-weight: 500;
-  }
-
-  .expand-arrow {
-    color: rgba(0, 209, 255, 0.6);
-    transition: transform 0.3s;
-  }
-
-  .contract-viewer[open] .expand-arrow {
-    transform: rotate(180deg);
-  }
-
-  .contract-content {
-    padding: 1.5rem;
-    background: rgba(0, 0, 0, 0.2);
-  }
-
-  .contract-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 1rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid rgba(0, 209, 255, 0.2);
-  }
-
-  .contract-title {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #00d1ff;
-  }
-
-  .contract-loc {
-    font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .contract-code {
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(0, 209, 255, 0.2);
-    border-radius: 6px;
-    padding: 1.25rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.8rem;
-    line-height: 1.7;
-    color: rgba(255, 255, 255, 0.85);
-    overflow-x: auto;
-    margin: 0 0 1rem;
-  }
-
-  .view-full-link {
-    display: inline-block;
-    color: #00d1ff;
-    text-decoration: none;
-    font-size: 0.9rem;
-    padding: 0.5rem 0;
-    transition: all 0.2s;
-  }
-
-  .view-full-link:hover {
-    color: #5fe1ff;
-    text-decoration: underline;
   }
 
   .invariant-box {
@@ -1496,8 +1382,56 @@ function enforceDebts(
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
+    gap: 1.5rem;
     font-size: 0.85rem;
+    margin-top: 4rem;
+  }
+
+  .context-highlight {
+    width: 100%;
+    max-width: 700px;
+  }
+
+  .context-link {
+    display: block;
+    padding: 1.5rem 2rem;
+    background: rgba(79, 209, 139, 0.08);
+    border: 2px solid rgba(79, 209, 139, 0.3);
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.3s ease;
+  }
+
+  .context-link:hover {
+    background: rgba(79, 209, 139, 0.12);
+    border-color: rgba(79, 209, 139, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(79, 209, 139, 0.2);
+  }
+
+  .context-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .context-icon {
+    font-size: 1.5rem;
+  }
+
+  .context-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #4fd18b;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .context-desc {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.6;
+    margin: 0;
   }
 
   .footer-links {
