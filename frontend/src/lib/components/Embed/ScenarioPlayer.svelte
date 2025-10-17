@@ -150,12 +150,8 @@
     <div class="player-container">
       <!-- 3D Visualization -->
       <div class="viewport">
-        <Graph3DPanel
-          zenMode={false}
-          hideButton={true}
-          toggleZenMode={() => {}}
-          embedded={true}
-        />
+        <!-- OLD ROUTE DISABLED: Graph3DPanel removed - use /view instead -->
+        <div class="disabled-message">Visit /view for panel workspace</div>
       </div>
 
       <!-- YouTube-style controls -->

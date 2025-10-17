@@ -19,10 +19,10 @@
   import DocsView from '../lib/components/Views/DocsView.svelte';
   import TerminalView from '../lib/components/Views/TerminalView.svelte';
   import InvariantTicker from '../lib/components/Home/InvariantTicker.svelte';
-  import { initializeXLN, isLoading, error, replicas } from '../lib/stores/xlnStore';
+  import { initializeXLN, isLoading, error, replicas, xlnEnvironment, history } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
-  import { timeOperations } from '../lib/stores/timeStore';
+  import { timeOperations, currentTimeIndex } from '../lib/stores/timeStore';
   import { viewMode } from '../lib/stores/viewModeStore';
   import { get } from 'svelte/store';
 
@@ -274,8 +274,12 @@
       <!-- BrainVault View: Wallet Generator -->
       <BrainVaultView />
     {:else if $viewMode === 'graph3d'}
-      <!-- Graph View Mode: Show Network Topology -->
-      <Graph3DPanel {zenMode} {hideButton} {toggleZenMode} />
+      <!-- Graph View Mode: DISABLED - Use /view route instead -->
+      <div class="disabled-message">
+        <h2>Graph3D has moved to /view</h2>
+        <p>Visit <a href="/view">/view</a> for the new isolated panel workspace.</p>
+      </div>
+      <!-- <Graph3DPanel {zenMode} {hideButton} {toggleZenMode} /> -->
     {:else if $viewMode === 'terminal'}
       <!-- Terminal View: Command Interface -->
       <TerminalView />

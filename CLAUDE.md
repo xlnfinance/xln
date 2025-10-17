@@ -585,3 +585,4 @@ Bilateral relationships use canonical ordering:
 - only use localhost:8080 as main entry point to xln universe
 - **ALL .md files use lowercase** - no capitals (next.md, readme.md, changelog.md, etc.)
 - **ALWAYS verify with Playwright + console errors before reporting completion** - never ask user to test
+- save as very first: always "xln" low cap. never "XLN".

@@ -8,14 +8,12 @@
    */
 
   import type { Writable } from 'svelte/store';
-  import { timeOperations } from '$lib/stores/timeStore';
-  import { xlnEnvironment, history } from '$lib/stores/xlnStore';
   import { panelBridge } from '../utils/panelBridge';
 
-  // Receive isolated env as props (passed from View.svelte)
+  // Receive isolated env as props (passed from View.svelte) - REQUIRED
   export let isolatedEnv: Writable<any>;
   export let isolatedHistory: Writable<any[]>;
-  export let isolatedTimeIndex: Writable<number> | null = null;
+  export let isolatedTimeIndex: Writable<number>;
 
   type Mode = 'explore' | 'build' | 'economy' | 'governance' | 'resolve';
   let currentMode: Mode = 'economy';
@@ -89,18 +87,10 @@
         isolatedEnv.set(currentEnv);
         isolatedHistory.set(historyWithCleanSlate);
 
-        // TEMP: Mirror to global stores so TimeMachine sees changes
-        xlnEnvironment.set(currentEnv);
-        history.set(historyWithCleanSlate);
-
         console.log('[Architect] History: Frame 0 (empty) + Frames 1-' + currentEnv.history.length + ' (scenario)');
 
         // Start at frame 0 to show clean slate
-        if (isolatedTimeIndex) {
-          isolatedTimeIndex.set(0);
-        } else {
-          timeOperations.goToTimeIndex(0);
-        }
+        isolatedTimeIndex.set(0);
 
         // Notify panels
         panelBridge.emit('entity:created', { entityId: 'scenario', type: 'grid' });

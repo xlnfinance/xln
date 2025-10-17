@@ -702,12 +702,12 @@ const main = async (): Promise<Env> => {
     }
   }
 
-  // Start j-watcher after snapshots are fully loaded (prevent multiple instances)
-  // CRITICAL: Non-blocking with timeout - don't hang page load if blockchain unavailable
+  // DISABLED: J-watcher temporarily disabled (external RPC not needed for demo)
+  // Re-enable by uncommenting this block when blockchain integration is needed
+  /*
   if (!jWatcherStarted) {
     console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher (non-blocking)...');
 
-    // Start j-watcher in background with 3s timeout
     Promise.race([
       startJEventWatcher(env),
       new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
@@ -723,6 +723,8 @@ const main = async (): Promise<Env> => {
   } else {
     console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
   }
+  */
+  console.log('🔭 J-WATCHER: Disabled (external RPC not needed for simnet demo)');
 
   return env;
 };

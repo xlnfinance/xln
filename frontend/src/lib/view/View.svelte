@@ -95,7 +95,7 @@
             props: {
               isolatedEnv: localEnvStore,
               isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex
+              isolatedTimeIndex: localTimeIndex  // Required
             }
           });
         }

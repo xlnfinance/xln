@@ -1,55 +1,45 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { derived, type Writable } from 'svelte/store';
-  import {
-    timeOperations as globalTimeOperations,
-    currentTimeIndex as globalTimeIndex,
-    maxTimeIndex as globalMaxTimeIndex,
-    isLive as globalIsLive
-  } from '../../stores/timeStore';
-  import { history as globalHistory, currentHeight as globalHeight } from '../../stores/xlnStore';
+  import { type Writable } from 'svelte/store';
 
-  // Props: Accept isolated stores (for /view), fall back to global (for standalone routes)
-  export let history: Writable<any[]> | null = null;
-  export let timeIndex: Writable<number> | null = null;
-  export let isLive: Writable<boolean> | null = null;
+  // Props: REQUIRED isolated stores (no fallbacks)
+  export let history: Writable<any[]>;
+  export let timeIndex: Writable<number>;
+  export let isLive: Writable<boolean>;
 
-  // Reactive fallback: use isolated stores if provided, otherwise global
-  $: effectiveHistory = (history || globalHistory) as Writable<any[]>;
-  $: effectiveTimeIndex = (timeIndex || globalTimeIndex) as Writable<number>;
-  $: effectiveIsLive = (isLive || globalIsLive) as Writable<boolean>;
-  $: effectiveMaxTimeIndex = Math.max(0, $effectiveHistory.length - 1);
+  // Direct store usage - no fallback logic
+  $: maxTimeIndex = Math.max(0, $history.length - 1);
 
   // Time operations that work with isolated stores
   let localTimeOperations: any;
   $: localTimeOperations = {
     goToTimeIndex: (index: number) => {
-      const max = effectiveMaxTimeIndex;
-      effectiveTimeIndex.set(Math.max(0, Math.min(index, max)));
-      effectiveIsLive.set(false);  // Exit live mode when scrubbing
+      const max = maxTimeIndex;
+      timeIndex.set(Math.max(0, Math.min(index, max)));
+      isLive.set(false);  // Exit live mode when scrubbing
     },
     stepForward: () => {
-      const current = $effectiveTimeIndex;
-      const max = effectiveMaxTimeIndex;
+      const current = $timeIndex;
+      const max = maxTimeIndex;
       if (current < max) {
-        effectiveTimeIndex.set(current + 1);
-        effectiveIsLive.set(false);
+        timeIndex.set(current + 1);
+        isLive.set(false);
       }
     },
     stepBackward: () => {
-      const current = $effectiveTimeIndex;
+      const current = $timeIndex;
       if (current > 0) {
-        effectiveTimeIndex.set(current - 1);
+        timeIndex.set(current - 1);
       }
-      effectiveIsLive.set(false);
+      isLive.set(false);
     },
     goToHistoryStart: () => {
-      effectiveTimeIndex.set(0);
-      effectiveIsLive.set(false);
+      timeIndex.set(0);
+      isLive.set(false);
     },
     goToLive: () => {
-      effectiveTimeIndex.set(-1);
-      effectiveIsLive.set(true);
+      timeIndex.set(-1);
+      isLive.set(true);
     }
   };
 
@@ -94,7 +84,7 @@
   ];
 
   // Calculate FPS from history updates
-  $: if ($effectiveHistory.length > 0) {
+  $: if ($history.length > 0) {
     const now = Date.now();
     frameTimestamps.push(now);
     frameTimestamps = frameTimestamps.filter(t => now - t < 60000); // Keep last minute
@@ -103,10 +93,10 @@
 
   // Format time from frame
   function formatTime(frameIndex: number): string {
-    const snapshot = $effectiveHistory[frameIndex];
+    const snapshot = $history[frameIndex];
     if (!snapshot?.timestamp) return '0:00.000';
 
-    const firstTimestamp = $effectiveHistory[0]?.timestamp || 0;
+    const firstTimestamp = $history[0]?.timestamp || 0;
     const elapsed = snapshot.timestamp - firstTimestamp;
 
     const minutes = Math.floor(elapsed / 60000);
@@ -126,9 +116,9 @@
   }
 
   function startPlayback() {
-    if ($effectiveHistory.length === 0) return;
+    if ($history.length === 0) return;
 
-    if ($effectiveIsLive || $effectiveTimeIndex >= effectiveMaxTimeIndex) {
+    if ($isLive || $timeIndex >= maxTimeIndex) {
       localTimeOperations.goToHistoryStart();
     }
 
@@ -136,9 +126,9 @@
     const frameDelay = 1000 / speed;
 
     playbackInterval = window.setInterval(() => {
-      const end = sliceEnd ?? effectiveMaxTimeIndex;
+      const end = sliceEnd ?? maxTimeIndex;
 
-      if ($effectiveTimeIndex >= end) {
+      if ($timeIndex >= end) {
         if (loopMode === 'all' || loopMode === 'slice') {
           localTimeOperations.goToTimeIndex(sliceStart ?? 0);
         } else {
@@ -174,9 +164,9 @@
 
   function markSlicePoint() {
     if (sliceStart === null) {
-      sliceStart = $effectiveTimeIndex;
+      sliceStart = $timeIndex;
     } else if (sliceEnd === null) {
-      sliceEnd = $effectiveTimeIndex;
+      sliceEnd = $timeIndex;
       if (sliceEnd < sliceStart) {
         [sliceStart, sliceEnd] = [sliceEnd, sliceStart];
       }
@@ -190,7 +180,7 @@
   }
 
   function exportFrames() {
-    const data = JSON.stringify($effectiveHistory, null, 2);
+    const data = JSON.stringify($history, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -243,9 +233,9 @@
     window.removeEventListener('keydown', handleKeyboard);
   });
 
-  $: currentTime = formatTime($effectiveTimeIndex);
-  $: totalTime = formatTime(effectiveMaxTimeIndex);
-  $: progressPercent = effectiveMaxTimeIndex > 0 ? ($effectiveTimeIndex / effectiveMaxTimeIndex) * 100 : 0;
+  $: currentTime = formatTime($timeIndex);
+  $: totalTime = formatTime(maxTimeIndex);
+  $: progressPercent = maxTimeIndex > 0 ? ($timeIndex / maxTimeIndex) * 100 : 0;
 </script>
 
 <div class="time-machine">
@@ -280,7 +270,7 @@
     </div>
     <div class="frames">
       <span class="label">Runtime</span>
-      <span class="value">{$effectiveTimeIndex >= 0 ? $effectiveTimeIndex + 1 : $effectiveHistory.length} / {$effectiveHistory.length}</span>
+      <span class="value">{$timeIndex >= 0 ? $timeIndex + 1 : $history.length} / {$history.length}</span>
     </div>
     <div class="fps">
       <span class="label">FPS</span>
@@ -293,10 +283,10 @@
     type="range"
     class="scrubber"
     min="0"
-    max={effectiveMaxTimeIndex}
-    value={$effectiveTimeIndex >= 0 ? $effectiveTimeIndex : effectiveMaxTimeIndex}
+    max={maxTimeIndex}
+    value={$timeIndex >= 0 ? $timeIndex : maxTimeIndex}
     on:input={handleSliderInput}
-    disabled={effectiveMaxTimeIndex === 0}
+    disabled={maxTimeIndex === 0}
     style="--progress: {progressPercent}%"
   />
 
@@ -381,8 +371,8 @@
   </div>
 
   <!-- Mode Badge -->
-  <div class="mode-badge" class:live={$effectiveIsLive}>
-    {$effectiveIsLive ? 'LIVE' : 'HISTORY'}
+  <div class="mode-badge" class:live={$isLive}>
+    {$isLive ? 'LIVE' : 'HISTORY'}
   </div>
 </div>
 

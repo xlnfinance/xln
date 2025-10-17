@@ -1,54 +1,111 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { get, type Writable } from 'svelte/store';
-  // import NarrativeSubtitle from './NarrativeSubtitle.svelte'; // TODO: Move to /view
   import * as THREE from 'three';
-  import { xlnEnvironment, getXLN, xlnFunctions, history } from '$lib/stores/xlnStore';
-  import { visibleReplicas, visibleGossip, currentTimeIndex, isLive } from '$lib/stores/timeStore';
-  import { timeOperations } from '$lib/stores/timeStore';
-  import { settings } from '$lib/stores/settingsStore';
-  import { debug } from '$lib/utils/debug';
-  import { getThemeColors } from '$lib/utils/themes';
+  import type { OrbitControls as OrbitControlsType } from 'three/examples/jsm/controls/OrbitControls.js';
 
   // Visual effects system
-  import { effectOperations } from '$lib/stores/visualEffects';
-  import { SpatialHash, RippleEffect } from '$lib/vr/EffectsManager';
-  import { GestureManager } from '$lib/vr/GestureDetector';
   // import VisualDemoPanel from '../Views/VisualDemoPanel.svelte'; // TODO: Move to view/
   // import AdminPanel from '../Admin/AdminPanel.svelte'; // TODO: Move to view/
   // import VRScenarioBuilder from '../VR/VRScenarioBuilder.svelte'; // TODO: Move to view/
-  import { VRHammer } from '$lib/vr/VRHammer';
 
   // Network3D managers
   import { EntityManager } from '$lib/network3d/EntityManager';
   import { AccountActivityVisualizer } from '$lib/network3d/AccountActivityVisualizer';
   import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
-  import { createRenderer, type RendererMode } from '$lib/utils/rendererFactory';
 
-  // Props
-  export let zenMode: boolean = false;
-  export let hideButton: boolean = false;
-  export let toggleZenMode: () => void = () => {}; // Optional in embedded mode
-  export let embedded: boolean = false;  // Embedded mode for ScenarioPlayer
-  export let isolatedEnv: Writable<any> | null = null;
-  export let isolatedHistory: Writable<any[]> | null = null;
-  export let isolatedTimeIndex: Writable<number> | null = null;
+  // Props - REQUIRED for /view isolation (dead props removed)
+  export let isolatedEnv: Writable<any>;
+  export let isolatedHistory: Writable<any[]>;
+  export let isolatedTimeIndex: Writable<number>;
 
   // Time-travel aware: Read from history[timeIndex] when scrubbing, else live state
   $: env = (() => {
-    if (isolatedTimeIndex && isolatedHistory) {
-      const timeIdx = $isolatedTimeIndex;
-      const hist = $isolatedHistory;
-      if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
-        const idx = Math.min(timeIdx, hist.length - 1);
-        return hist[idx];  // Historical frame
-      }
+    const timeIdx = $isolatedTimeIndex;
+    const hist = $isolatedHistory;
+    if (timeIdx >= 0 && hist && hist.length > 0) {
+      const idx = Math.min(timeIdx, hist.length - 1);
+      return hist[idx];  // Historical frame
     }
-    return isolatedEnv ? $isolatedEnv : $xlnEnvironment;  // Live state
+    return $isolatedEnv;  // Live state
   })();
 
-  // OrbitControls import (will be loaded dynamically)
-  let OrbitControls: any;
+  // Extract replicas from env (replaces $replicas)
+  $: replicas = env?.replicas || new Map();
+
+  // XLN runtime interface
+  interface XLNRuntime {
+    deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => DerivedAccountData;
+    getTokenInfo: (tokenId: number) => { symbol: string; decimals: number } | undefined;
+    getEntityShortId: (entityId: string) => string;
+    executeScenario: (env: unknown, scenario: unknown) => Promise<{ success: boolean; framesGenerated: number; errors?: string[] }>;
+    process: (env: unknown, inputs: unknown[]) => Promise<void>;
+    parseScenario: (text: string) => { errors: unknown[]; scenario: unknown };
+  }
+
+  // XLN runtime functions (loaded dynamically, no global store)
+  let XLN: XLNRuntime | null = null;
+
+  // Mock functions for features we're not using in /view
+  const debug = {
+    warn: (...args: unknown[]) => console.warn('[Graph3D]', ...args),
+    error: (...args: unknown[]) => console.error('[Graph3D]', ...args)
+  };
+  const getThemeColors = (theme: string) => ({
+    background: 0x0a0a0a,
+    entity: 0x007acc,
+    connection: 0x444444,
+    entityColor: '#007acc',
+    entityEmissive: '#003366',
+    connectionColor: '#444444'
+  });
+  const settings = { theme: 'dark', portfolioScale: 5000 };
+  const effectOperations = {
+    clear: () => {},
+    enqueue: (...args: unknown[]) => {},
+    process: (...args: unknown[]) => {}
+  };
+  const createRenderer = async (mode: string, options: THREE.WebGLRendererParameters) => {
+    const renderer = new THREE.WebGLRenderer(options);
+    return renderer;
+  };
+  type RendererMode = 'webgl' | 'webgpu';
+
+  // VR/Effects stubs (not used in /view isolated mode)
+  class RippleEffect {
+    constructor(...args: unknown[]) {}
+  }
+  class SpatialHash {
+    cellSize: number;
+    constructor(cellSize: number) {
+      this.cellSize = cellSize;
+    }
+    clear() {}
+    update(entityIdOrEntities: string | EntityData[], position?: THREE.Vector3) {}
+  }
+  class GestureManager {
+    private callbacks: ((event: { type: string; entityId: string }) => void)[] = [];
+    on(callback: (event: { type: string; entityId: string }) => void) {
+      this.callbacks.push(callback);
+    }
+    clear() {
+      this.callbacks = [];
+    }
+    updateEntity(entityId: string, position: THREE.Vector3, timestamp: number) {}
+  }
+  interface VRHammerEvent {
+    fromEntityId: string;
+    toEntityId: string;
+  }
+  class VRHammer {
+    constructor() {}
+    attachToController(controller: THREE.XRTargetRaySpace) {}
+    onAccountHit(callback: (event: VRHammerEvent) => void) {}
+    update(connections: ConnectionData[]) {}
+  }
+
+  // OrbitControls class (loaded dynamically in onMount)
+  let OrbitControls: typeof OrbitControlsType;
 
   // TypeScript interfaces for type safety
   interface EntityData {
@@ -77,7 +134,7 @@
     from: string;
     to: string;
     line: THREE.Line;
-    progressBars?: THREE.Group;
+    progressBars?: THREE.Group | undefined;
   }
 
   interface DerivedAccountData {
@@ -126,9 +183,9 @@
   let activityVisualizer: AccountActivityVisualizer;
 
   // Visual effects system
-  let spatialHash: SpatialHash;
-  let gestureManager: GestureManager;
-  let vrHammer: VRHammer | null = null;
+let spatialHash: SpatialHash;
+let gestureManager: GestureManager;
+let vrHammer: VRHammer | null = null;
   let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
   let lastJEventId: string | null = null;
 
@@ -408,7 +465,7 @@
 
   // Helper to get token symbol using xlnFunctions
   function getTokenSymbol(tokenId: number): string {
-    const tokenInfo = $xlnFunctions?.getTokenInfo?.(tokenId);
+    const tokenInfo = XLN?.getTokenInfo?.(tokenId);
     return tokenInfo?.symbol || `TKN${tokenId}`;
   }
 
@@ -444,8 +501,8 @@
   }
 
   // Update 3D scene background when theme changes
-  $: if (scene && $settings.theme) {
-    const themeColors = getThemeColors($settings.theme);
+  $: if (scene && settings.theme) {
+    const themeColors = getThemeColors(settings.theme);
     scene.background = new THREE.Color(themeColors.background);
   }
 
@@ -608,6 +665,15 @@
 
   onMount(() => {
     const initAndSetup = async () => {
+      // Load XLN runtime functions
+      try {
+        const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+        XLN = await import(/* @vite-ignore */ runtimeUrl);
+        console.log('[Graph3D] XLN runtime loaded');
+      } catch (err) {
+        console.error('[Graph3D] Failed to load XLN runtime:', err);
+      }
+
       // Check VR support (WebXR API for Quest 3/Oculus)
       // CRITICAL: Must check BOTH xr existence AND isSessionSupported
       // WebXR requires HTTPS in production (works on localhost HTTP for dev)
@@ -650,15 +716,15 @@
     });
 
     // Listen for data changes (isolated env if provided, otherwise global)
-    const envStore = isolatedEnv || xlnEnvironment;
-    const unsubscribe1 = envStore.subscribe(updateNetworkData);
-    const unsubscribe2 = visibleReplicas.subscribe(updateNetworkData);
-    const unsubscribe3 = visibleGossip.subscribe(updateNetworkData);
+    // Use isolated env directly
+    const unsubscribe1 = isolatedEnv.subscribe(updateNetworkData);
+    const unsubscribe2 = replicas.subscribe(updateNetworkData);
+    // visibleGossip removed - not needed in isolated view
 
     return () => {
       unsubscribe1();
-      unsubscribe2();
-      unsubscribe3();
+      // unsubscribe2();
+      // unsubscribe3();
     };
   });
 
@@ -706,7 +772,7 @@
     scene = new THREE.Scene();
 
     // Set background from theme
-    const themeColors = getThemeColors($settings.theme);
+    const themeColors = getThemeColors(settings.theme);
     scene.background = new THREE.Color(themeColors.background);
 
     // Matrix-style 3D grid floor (always visible, subtle depth)
@@ -729,7 +795,8 @@
     camera.position.set(0, 0, 100); // Zoom out for better H visibility
 
     // Renderer setup with VR support
-    renderer = await createRenderer(rendererMode, { antialias: true, xrEnabled: true });
+    renderer = await createRenderer(rendererMode, { antialias: true });
+    renderer.xr.enabled = true;  // Enable XR separately
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
@@ -807,7 +874,7 @@
     vrHammer = new VRHammer();
 
     // Register shake-to-rebalance callback
-    gestureManager.on((event) => {
+    gestureManager.on((event: { type: string; entityId: string }) => {
       if (event.type === 'shake-rebalance') {
         console.log('🤝 SHAKE REBALANCE TRIGGERED:', event.entityId);
         handleRebalanceGesture(event.entityId);
@@ -847,7 +914,7 @@
           // Remove bars to show "broken" state
           if (conn.progressBars) {
             scene.remove(conn.progressBars);
-            (conn as any).progressBars = undefined;
+            conn.progressBars = undefined;
           }
         }
       });
@@ -1033,20 +1100,20 @@
   function updateNetworkData() {
     if (!scene) return;
 
-    const timeIndex = $currentTimeIndex;
+    const timeIndex = $isolatedTimeIndex;
 
     // Update available tokens
     updateAvailableTokens();
 
     // Use time-aware data sources (isolated env if provided, otherwise global)
     let entityData: any[] = [];
-    let currentReplicas = $isolatedEnv?.replicas || $visibleReplicas;
+    let currentReplicas = $isolatedEnv?.replicas || replicas;
 
     console.log('[Graph3D] Replicas check:', {
       hasIsolatedEnv: !!isolatedEnv,
       isolatedEnvValue: $isolatedEnv,
       replicasSize: currentReplicas?.size || 0,
-      source: currentReplicas === $visibleReplicas ? 'global' : 'isolated'
+      source: currentReplicas === replicas ? 'global' : 'isolated'
     });
 
     // Always use replicas (ground truth)
@@ -1110,9 +1177,10 @@
             // Calculate total capacity for this connection
             const accountTokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
             if (accountTokenDelta) {
-              const derived = $xlnFunctions.deriveDelta(accountTokenDelta, entityId < counterpartyId);
+              const derived = XLN?.deriveDelta(accountTokenDelta, entityId < counterpartyId);
+              if (!derived) continue;
               const capacityKey = [entityId, counterpartyId].sort().join('-');
-              capacityMap.set(capacityKey, derived.totalCapacity);
+              capacityMap.set(capacityKey, Number(derived.totalCapacity));
             }
           }
         }
@@ -1394,7 +1462,7 @@
     let x: number, y: number, z: number;
 
     // Priority 1: Check replica position (from importReplica serverTx)
-    const currentReplicas = $visibleReplicas;
+    const currentReplicas = replicas;
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(profile.entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -1439,7 +1507,7 @@
     const geometry = new THREE.SphereGeometry(entitySize, 32, 32);
 
     // Get theme colors
-    const themeColors = getThemeColors($settings.theme);
+    const themeColors = getThemeColors(settings.theme);
     const baseColor = parseInt(themeColors.entityColor.replace('#', '0x'));
     const emissiveColor = parseInt(themeColors.entityEmissive.replace('#', '0x'));
     const emissiveIntensity = isHub ? 1.5 : 0.1; // Much brighter for hubs
@@ -1487,7 +1555,7 @@
 
   function createConnections() {
     const processedConnections = new Set<string>();
-    const currentReplicas = $visibleReplicas;
+    const currentReplicas = replicas;
 
 
     // Method 1: Real connections from time-aware replicas
@@ -1558,10 +1626,10 @@
       outgoingFlows: new Map()
     };
 
-    const timeIndex = $currentTimeIndex;
+    const timeIndex = $isolatedTimeIndex;
 
-    if (!$isLive && $xlnEnvironment?.history && timeIndex >= 0) {
-      const currentFrame = $xlnEnvironment.history[timeIndex];
+    if (!($isolatedTimeIndex === -1) && $isolatedEnv?.history && timeIndex >= 0) {
+      const currentFrame = $isolatedEnv.history[timeIndex];
 
       if (currentFrame?.serverInput?.entityInputs) {
         currentFrame.serverInput.entityInputs.forEach((entityInput: any) => {
@@ -1597,9 +1665,9 @@
           }
         });
       }
-    } else if ($isLive && $xlnEnvironment?.serverInput?.entityInputs) {
+    } else if (($isolatedTimeIndex === -1) && $isolatedEnv?.serverInput?.entityInputs) {
       // Live mode - same logic
-      $xlnEnvironment.serverInput.entityInputs.forEach((entityInput: any) => {
+      $isolatedEnv.serverInput.entityInputs.forEach((entityInput: any) => {
         const processingEntityId = entityInput.entityId;
         currentFrameActivity.activeEntities.add(processingEntityId);
 
@@ -1814,7 +1882,7 @@
     ]);
 
     // Create dotted line material with theme color
-    const themeColors = getThemeColors($settings.theme);
+    const themeColors = getThemeColors(settings.theme);
     const connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
 
     const material = new THREE.LineDashedMaterial({
@@ -1843,7 +1911,7 @@
 
   function createAccountBarsForConnection(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
     // Get current replicas to find the account
-    const currentReplicas = $visibleReplicas;
+    const currentReplicas = replicas;
 
     // Find the replica that actually contains this account
     let accountData: any = null;
@@ -1917,7 +1985,7 @@
       derived,
       {
         barsMode,
-        portfolioScale: $settings.portfolioScale || 5000,
+        portfolioScale: settings.portfolioScale || 5000,
         selectedTokenId: displayTokenId
       },
       getEntitySizeForToken
@@ -1938,7 +2006,7 @@
 
   function deriveEntry(tokenDelta: any, isLeft: boolean): DerivedAccountData {
     // Use REAL deriveDelta function from xlnFunctions - NO MANUAL CALCULATION!
-    if (!$xlnFunctions?.deriveDelta) {
+    if (!XLN?.deriveDelta) {
       throw new Error('FINTECH-SAFETY: xlnFunctions.deriveDelta not available');
     }
 
@@ -1948,12 +2016,14 @@
 
 
     // Use the SAME deriveDelta function as AccountPanel
-    const derived = $xlnFunctions.deriveDelta(tokenDelta, isLeft);
-
+    const derived = XLN?.deriveDelta(tokenDelta, isLeft);
+    if (!derived) {
+      return { delta: 0, totalCapacity: 0, ownCreditLimit: 0, peerCreditLimit: 0, inCapacity: 0, outCapacity: 0, collateral: 0, outOwnCredit: 0, inCollateral: 0, outPeerCredit: 0, inOwnCredit: 0, outCollateral: 0, inPeerCredit: 0 };
+    }
 
     // Convert BigInt to numbers for 3D visualization - USE REAL FIELD NAMES!
     const result: DerivedAccountData = {
-      delta: Number(derived.delta || 0n),
+      delta: Number(derived.delta),
       totalCapacity: Number(derived.totalCapacity || 0n),
       ownCreditLimit: Number(derived.ownCreditLimit || 0n),
       peerCreditLimit: Number(derived.peerCreditLimit || 0n),
@@ -2598,7 +2668,7 @@
         const entityBSizeData = getEntitySizeForToken(entityB.id, selectedTokenId);
 
         // Get account data to calculate bar length
-        const currentReplicas = $visibleReplicas;
+        const currentReplicas = replicas;
         let totalBarsLength = 0;
 
         const fromReplica = Array.from(currentReplicas.entries() as [string, any][])
@@ -2609,13 +2679,15 @@
           if (accountData) {
             const tokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
             if (tokenDelta) {
-              const derived = $xlnFunctions.deriveDelta(tokenDelta, entityA.id < entityB.id);
-              const globalScale = $settings.portfolioScale || 5000;
+              const derived = XLN?.deriveDelta(tokenDelta, entityA.id < entityB.id);
+              if (!derived) continue;
+
+              const globalScale = settings.portfolioScale || 5000;
               const decimals = 18;
               const tokensToVisualUnits = 0.00001;
               const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
 
-              totalBarsLength = (Number(derived.peerCreditLimit || 0n) + Number(derived.collateral || 0n) + Number(derived.ownCreditLimit || 0n)) * barScale;
+              totalBarsLength = (Number(derived.peerCreditLimit) + Number(derived.collateral) + Number(derived.ownCreditLimit)) * barScale;
             }
           }
         }
@@ -3111,7 +3183,7 @@
   }
 
   function clearRouteHighlight() {
-    const themeColors = getThemeColors($settings.theme);
+    const themeColors = getThemeColors(settings.theme);
     const connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
 
     connections.forEach(connection => {
@@ -3159,7 +3231,7 @@
   }
 
   function updateAvailableTokens() {
-    const currentReplicas = $visibleReplicas;
+    const currentReplicas = replicas;
     const tokenSet = new Set<number>();
 
     // Collect all available token IDs from reserves
@@ -3187,7 +3259,7 @@
     if (availableTokens.length === 0) {
       availableTokens = [1];
       selectedTokenId = 1;
-    } else if (!availableTokens.includes(selectedTokenId) && $isLive) {
+    } else if (!availableTokens.includes(selectedTokenId) && ($isolatedTimeIndex === -1)) {
       // Only auto-switch in LIVE mode - during playback, keep user's selection
       // Always prefer USDC (token 1)
       selectedTokenId = availableTokens.includes(1) ? 1 : availableTokens[0]!;
@@ -3202,7 +3274,7 @@
       return entitySizeCache.get(cacheKey)!;
     }
 
-    const currentReplicas = $visibleReplicas;
+    const currentReplicas = replicas;
     let replica: any = null;
 
     // PERF: Direct iteration instead of Array.from + find
@@ -3230,7 +3302,7 @@
   }
 
   // PERF: Clear cache when replicas change
-  $: if ($visibleReplicas) {
+  $: if (replicas) {
     entitySizeCache.clear();
   }
 
@@ -3324,8 +3396,8 @@
 
 
       // Ensure we're in LIVE mode for payments
-      if (!$isLive) {
-        timeOperations.goToLive();
+      if (!($isolatedTimeIndex === -1)) {
+        isolatedTimeIndex.set(-1)  // Go to live;
         await new Promise(resolve => setTimeout(resolve, 100)); // Wait for mode switch
       }
 
@@ -3364,10 +3436,9 @@
 
   async function executeSinglePayment(job: PaymentJob) {
     try {
-      // COPY EXACT PATTERN FROM PaymentPanel.svelte
-      const xln = await getXLN();
-      if (!xln) {
-        throw new Error('XLN not available');
+      // XLN already loaded in onMount
+      if (!XLN) {
+        throw new Error('XLN runtime not loaded');
       }
 
       if (!env) {
@@ -3453,7 +3524,7 @@
       triggerEntityActivity(job.to);
 
       // Process the payment (COPY EXACT CALL from PaymentPanel)
-      await xln.process(env, [paymentInput]);
+      await XLN.process(env, [paymentInput]);
 
       // Add to activity ticker AFTER successful processing
       recentActivity = [{
@@ -3590,7 +3661,7 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Parse scenario
-      const parsed = XLN.parseScenario(scenarioText);
+      const parsed = XLN?.parseScenario(scenarioText);
 
       if (parsed.errors.length > 0) {
         console.error('Scenario parse errors:', parsed.errors);
@@ -3601,13 +3672,13 @@
       console.log(`Executing scenario with ${parsed.scenario.events.length} events`);
 
       // Execute scenario
-      const result = await XLN.executeScenario($xlnEnvironment, parsed.scenario);
+      const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
 
       if (result.success) {
         console.log(`Scenario executed: ${result.framesGenerated} frames generated`);
 
         // Go to start of new frames to watch scenario unfold
-        timeOperations.goToTimeIndex(0);
+        // timeOperations removed 0);
       } else {
         console.error('Scenario execution errors:', result.errors);
         debug.error('Scenario execution failed - check console');
@@ -3628,8 +3699,8 @@
 
     try {
       // Ensure LIVE mode
-      if (!$isLive) {
-        timeOperations.goToLive();
+      if (!($isolatedTimeIndex === -1)) {
+        isolatedTimeIndex.set(-1)  // Go to live;
       }
 
       console.log(`🎬 Executing live command: ${commandText}`);
@@ -3645,7 +3716,7 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      const parsed = XLN.parseScenario(scenarioText);
+      const parsed = XLN?.parseScenario(scenarioText);
 
       if (parsed.errors.length > 0) {
         console.error('Command parse errors:', parsed.errors);
@@ -3654,7 +3725,7 @@
       }
 
       // Execute command
-      const result = await XLN.executeScenario($xlnEnvironment, parsed.scenario);
+      const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
 
       if (result.success) {
         console.log(`✅ Live command executed`);
@@ -3669,7 +3740,7 @@
   }
 
   function generateSliceURL() {
-    const currentHistory = get(history);
+    const currentHistory = get(isolatedHistory);
     const start = Math.max(0, sliceStart);
     const end = Math.min(currentHistory.length - 1, sliceEnd);
 
@@ -3807,7 +3878,7 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      const parsed = XLN.parseScenario(asciiScenario);
+      const parsed = XLN?.parseScenario(asciiScenario);
 
       if (parsed.errors.length > 0) {
         console.error('ASCII scenario parse errors:', parsed.errors);
@@ -3815,11 +3886,11 @@
         return;
       }
 
-      const result = await XLN.executeScenario($xlnEnvironment, parsed.scenario);
+      const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
 
       if (result.success) {
         console.log(`✅ ASCII formation executed: ${result.framesGenerated} frames`);
-        timeOperations.goToTimeIndex(0);
+        // timeOperations removed 0);
         asciiText = ''; // Clear input
         asciiScenario = ''; // Clear output
       } else {
@@ -3832,7 +3903,7 @@
   }
 
   function getEntityBalanceInfo(entityId: string): string {
-    const currentReplicas = $visibleReplicas;
+    const currentReplicas = replicas;
     const replica = Array.from(currentReplicas.entries() as [string, any][])
       .find(([key]) => key.startsWith(entityId + ':'));
 
@@ -3889,9 +3960,9 @@
    * Get entity short name (just ID, clean - no prefix)
    */
   function getEntityShortName(entityId: string): string {
-    if (!$xlnFunctions?.getEntityShortId) return entityId.slice(-4);
+    if (!XLN?.getEntityShortId) return entityId.slice(-4);
     try {
-      return $xlnFunctions.getEntityShortId(entityId); // Just ID, clean - no "#" or "Entity" prefix
+      return XLN?.getEntityShortId(entityId); // Just ID, clean - no "#" or "Entity" prefix
     } catch {
       return entityId.slice(-4);
     }
@@ -3902,7 +3973,7 @@
    * Shows both left and right entity's view of the same account
    */
   function getDualConnectionAccountInfo(entityA: string, entityB: string): { left: string, right: string, leftEntity: string, rightEntity: string } {
-    const currentReplicas = $visibleReplicas;
+    const currentReplicas = replicas;
 
     // Determine canonical ordering (left is always smaller ID)
     const isALeft = entityA < entityB;

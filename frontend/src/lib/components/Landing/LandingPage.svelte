@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import ComparativeChart from './ComparativeChart.svelte';
-  import BroadcastVsUnicast from './BroadcastVsUnicast.svelte';
   import InvariantTicker from '../Home/InvariantTicker.svelte';
+  import Collapsible from './Collapsible.svelte';
 
   export let onUnlock: () => void;
 
@@ -11,6 +11,11 @@
   let error = '';
   let expandedCard: number | null = null;
   let copiedCard: number | null = null;
+
+  // Collapsible section state (collapsed by default for lighter UX)
+  let broadcastCollapsed = true;
+  let comparativeCollapsed = true;
+  let promptsCollapsed = true;
 
   let showSubmitForm = false;
   let submissionText = '';
@@ -21,7 +26,7 @@
 
   const SUPERPROMPT = {
     persona: "ULTIMATE COMPARATIVE ANALYSIS",
-    task: "Compare XLN against all major payment solutions (CEX, Lightning, Raiden, Plasma, Optimistic/ZK Rollups, Sharding, Big Blocks) across 6 dimensions. Output machine-parseable table with rankings.",
+    task: "Compare xln against all major payment solutions (CEX, Lightning, Raiden, Plasma, Optimistic/ZK Rollups, Sharding, Big Blocks) across 6 dimensions. Output machine-parseable table with rankings.",
     metrics: ["Innovation", "Scalability", "Security", "Decentralization", "UX", "Capital Efficiency"]
   };
 
@@ -212,7 +217,7 @@
 
 <div class="landing">
   <div class="content">
-    <img src="/img/logo.png" alt="XLN" class="logo" />
+    <img src="/img/logo.png" alt="xln" class="logo" />
 
     <div class="problem-solution">
       <div class="section">
@@ -239,21 +244,28 @@
         <p class="intro"><strong>xln</strong> is the first <strong>RCPAN</strong> (Reserve-Credit Provable Account Network): credit where it scales, collateral where it secures. A principled hybrid.</p>
 
         <div class="invariant-box">
-          <InvariantTicker
-            label="FCUAN"
-            description="−leftCredit ≤ Δ ≤ rightCredit"
-            pattern="[---.---]"
-          />
-          <InvariantTicker
-            label="FRPAP"
-            description="0 ≤ Δ ≤ collateral"
-            pattern="[.===]"
-          />
-          <InvariantTicker
-            label="RCPAN"
-            description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
-            pattern="[---.===---]"
-          />
+          <div class="tickers-grid">
+            <div class="tickers-column">
+              <InvariantTicker
+                label="FCUAN"
+                description="−leftCredit ≤ Δ ≤ rightCredit"
+                pattern="[---.---]"
+              />
+              <InvariantTicker
+                label="FRPAP"
+                description="0 ≤ Δ ≤ collateral"
+                pattern="[.===]"
+              />
+              <InvariantTicker
+                label="RCPAN"
+                description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
+                pattern="[---.===---]"
+              />
+            </div>
+            <div class="visual-column">
+              <img src="/img/RCPAN.png" alt="RCPAN Visual Metaphor" class="rcpan-visual" />
+            </div>
+          </div>
         </div>
 
         <div class="formula-variants">
@@ -284,19 +296,93 @@
           <li><strong>Local state: no sequencers, no data availability dependencies</strong></li>
         </ul>
       </div>
+
+      <!-- Plot Twist -->
+      <div class="section plot-twist">
+        <h2>The Unicast Endgame</h2>
+        <p class="intro">xln isn't just "better payment channels" — it's the ultimate financial substrate.</p>
+
+        <div class="cbdc-stat">
+          <div class="stat-number">137 countries</div>
+          <div class="stat-label">representing <strong>98% of global GDP</strong> are building programmable ledgers (<a href="https://www.atlanticcouncil.org/cbdctracker/" target="_blank" rel="noopener noreferrer" class="stat-link">CBDCs</a>)</div>
+        </div>
+
+        <p class="vision-text">Most will be EVM-compatible or similar smart contract platforms. xln naturally attaches to <strong>any</strong> programmable ledger by simply deploying <code>Depository.sol</code>.</p>
+
+        <div class="endgame-box">
+          <p class="endgame-text"><strong>The endgame:</strong> Every digital asset — CBDCs, stablecoins, tokenized securities, RWAs — gets instant off-chain settlement with bounded risk and infinite scale.</p>
+          <p class="endgame-text">One protocol. Every jurisdiction. Zero broadcast overhead.</p>
+        </div>
+
+        <!-- Contract Display -->
+        <details class="contract-viewer">
+          <summary class="contract-summary">
+            <span class="contract-label">View DepositoryV1.sol (deployed on Ethereum Sepolia)</span>
+            <span class="expand-arrow">▼</span>
+          </summary>
+          <div class="contract-content">
+            <div class="contract-header">
+              <span class="contract-title">DepositoryV1.sol</span>
+              <span class="contract-loc">~1650 lines · Multi-asset reserve management</span>
+            </div>
+            <pre class="contract-code">// Core functions that make xln universal:
+
+function settle(
+  bytes32 leftEntity,
+  bytes32 rightEntity,
+  SettlementDiff[] memory diffs
+) public returns (bool) {{
+  // ✅ INVARIANT: leftDiff + rightDiff + collateralDiff == 0
+  // No value created or destroyed, only moved
+
+  // Update reserves for both entities + collateral
+  // Emit SettlementProcessed event for j-watchers
+}}
+
+function processBatch(
+  bytes32 entity,
+  Batch calldata batch
+) public returns (bool) {{
+  // Process reserve-to-reserve transfers
+  // Process settlements between entities
+  // Atomic batch execution
+}}
+
+function enforceDebts(
+  bytes32 entity,
+  uint tokenId
+) public returns (uint totalDebts) {{
+  // FIFO debt queue enforcement
+  // Creates "liquidity trap" - can receive but not send
+  // Mechanical repayment: either pay in full or can't withdraw
+}}
+
+// Multi-asset support: ERC20, ERC721, ERC1155
+// Multi-jurisdiction: Works with any EVM chain
+// Just deploy this contract → instant xln compatibility</pre>
+            <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/DepositoryV1.sol" target="_blank" rel="noopener noreferrer" class="view-full-link">
+              View full contract on GitHub →
+            </a>
+          </div>
+        </details>
+      </div>
     </div>
 
-    <!-- Broadcast vs Unicast Visual Proof -->
-    <BroadcastVsUnicast />
+    <!-- Link to dedicated visualization -->
+    <div class="visualization-link-section">
+      <a href="/unicast" class="viz-link-card">
+        <div class="viz-link-header">
+          <h3>Why Broadcast Dies at Scale</h3>
+          <span class="arrow">→</span>
+        </div>
+        <p class="viz-link-desc">Visual proof: O(n) broadcast bottleneck vs O(1) unicast routing</p>
+      </a>
+    </div>
 
     <div class="prompt-container">
       <!-- SUPERPROMPT -->
-      <div class="superprompt-section">
-        <div class="superprompt-header">
-          <div>
-            <h2>Ultimate Comparative Analysis</h2>
-            <p>Compare xln against the entire $100T finance stack — from TradFi/CEX to rollups</p>
-          </div>
+      <Collapsible title="Ultimate Comparative Analysis" bind:collapsed={comparativeCollapsed}>
+        <div class="superprompt-section">
           <div class="superprompt-actions">
             <button on:click={copySuperprompt} class="copy-super-btn">
               {copiedCard === -2 ? '✓ Copied' : 'Copy Superprompt'}
@@ -305,88 +391,121 @@
               {showSubmitForm ? 'Hide Form' : 'Submit Results'}
             </button>
           </div>
+
+          <p class="section-desc">Compare xln against the entire $100T finance stack — from TradFi/CEX to rollups</p>
+
+          {#if superpromptText}
+            <div class="superprompt-preview">
+              <div class="preview-label">Superprompt Preview:</div>
+              <textarea readonly rows="10" class="preview-text" value={superpromptText}></textarea>
+            </div>
+          {/if}
+
+          {#if showSubmitForm}
+            <div class="submit-form">
+              <div class="form-row">
+                <input
+                  type="url"
+                  bind:value={shareUrl}
+                  placeholder="Shareable link (optional): https://chatgpt.com/share/xyz"
+                  class="form-input"
+                />
+              </div>
+              <div class="form-row">
+                <textarea
+                  bind:value={submissionText}
+                  placeholder="Paste the full model response here (must include the table)"
+                  rows="12"
+                  class="form-textarea"
+                />
+              </div>
+              {#if submissionStatus}
+                <div class="submission-status">{submissionStatus}</div>
+              {/if}
+              <button on:click={submitEvaluation} class="submit-btn">
+                Submit Evaluation
+              </button>
+              <p class="submit-note">
+                Submissions go to moderation queue. Admin will review and approve valid results.
+              </p>
+            </div>
+          {/if}
+
+          <!-- Results Visualization -->
+          <ComparativeChart />
         </div>
-
-        {#if superpromptText}
-          <div class="superprompt-preview">
-            <div class="preview-label">Superprompt Preview:</div>
-            <textarea readonly rows="10" class="preview-text" value={superpromptText}></textarea>
-          </div>
-        {/if}
-
-        {#if showSubmitForm}
-          <div class="submit-form">
-            <div class="form-row">
-              <input
-                type="url"
-                bind:value={shareUrl}
-                placeholder="Shareable link (optional): https://chatgpt.com/share/xyz"
-                class="form-input"
-              />
-            </div>
-            <div class="form-row">
-              <textarea
-                bind:value={submissionText}
-                placeholder="Paste the full model response here (must include the table)"
-                rows="12"
-                class="form-textarea"
-              />
-            </div>
-            {#if submissionStatus}
-              <div class="submission-status">{submissionStatus}</div>
-            {/if}
-            <button on:click={submitEvaluation} class="submit-btn">
-              Submit Evaluation
-            </button>
-            <p class="submit-note">
-              Submissions go to moderation queue. Admin will review and approve valid results.
-            </p>
-          </div>
-        {/if}
-
-        <!-- Results Visualization -->
-        <ComparativeChart />
-      </div>
+      </Collapsible>
 
       <div class="divider"></div>
 
       <!-- 10 EXPERT PROMPTS -->
-      <div class="prompt-header">
-        <div class="prompt-label">
-          <div class="label-title">10 Expert Perspectives</div>
-          <div class="label-subtitle">
-            Prompt template: Read <a href="/c.txt" target="_blank" class="context-inline">https://xln.finance/c.txt</a> (~120k tokens of xln architecture + contracts + runtime)
-            <br/>Then evaluate as [persona] using the scoring rubric below.
+      <Collapsible title="10 Expert Perspectives" bind:collapsed={promptsCollapsed}>
+        <div class="prompt-section">
+          <div class="prompt-header">
+            <div class="prompt-label">
+              <div class="label-subtitle">
+                Prompt template: Read <a href="/c.txt" target="_blank" class="context-inline">https://xln.finance/c.txt</a> (~120k tokens of xln architecture + contracts + runtime)
+                <br/>Then evaluate as [persona] using the scoring rubric below.
+              </div>
+            </div>
+            <button on:click={(e) => copyAllPrompts(e)} class="copy-all-btn">
+              {copiedCard === -1 ? '✓ Copied All' : 'Copy All 10'}
+            </button>
+          </div>
+
+          <div class="prompt-grid">
+            {#each PROMPTS as prompt, i}
+              <div class="prompt-card" class:expanded={expandedCard === i}>
+                <div class="card-header" on:click={() => toggleCard(i)}>
+                  <div class="persona-name">{prompt.persona}</div>
+                  <div class="expand-icon">{expandedCard === i ? '−' : '+'}</div>
+                </div>
+                {#if expandedCard === i}
+                  <div class="card-content">
+                    <pre class="prompt-text">{formatPrompt(prompt)}</pre>
+                    <button on:click|stopPropagation={(e) => copyPrompt(i, e)} class="copy-btn">
+                      {copiedCard === i ? '✓ Copied' : 'Copy Prompt'}
+                    </button>
+                  </div>
+                {/if}
+              </div>
+            {/each}
           </div>
         </div>
-        <button on:click={(e) => copyAllPrompts(e)} class="copy-all-btn">
-          {copiedCard === -1 ? '✓ Copied All' : 'Copy All 10'}
-        </button>
-      </div>
-
-      <div class="prompt-grid">
-        {#each PROMPTS as prompt, i}
-          <div class="prompt-card" class:expanded={expandedCard === i}>
-            <div class="card-header" on:click={() => toggleCard(i)}>
-              <div class="persona-name">{prompt.persona}</div>
-              <div class="expand-icon">{expandedCard === i ? '−' : '+'}</div>
-            </div>
-            {#if expandedCard === i}
-              <div class="card-content">
-                <pre class="prompt-text">{formatPrompt(prompt)}</pre>
-                <button on:click|stopPropagation={(e) => copyPrompt(i, e)} class="copy-btn">
-                  {copiedCard === i ? '✓ Copied' : 'Copy Prompt'}
-                </button>
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
+      </Collapsible>
     </div>
+
+    <!-- Newsletter Signup - DISABLED (re-enable when Buttondown account is verified) -->
+    <!--
+    <div class="newsletter-section">
+      <div class="newsletter-header">
+        <h3>Stay Updated</h3>
+        <p>Get notified about mainnet launch, technical deep-dives, and protocol updates</p>
+      </div>
+      <form
+        action="https://buttondown.email/api/emails/embed-subscribe/xln"
+        method="post"
+        target="popupwindow"
+        class="newsletter-form"
+      >
+        <input
+          type="email"
+          name="email"
+          placeholder="your@email.com"
+          required
+          class="newsletter-input"
+        />
+        <button type="submit" class="newsletter-btn">
+          Subscribe
+        </button>
+      </form>
+      <p class="newsletter-note">No spam. Unsubscribe anytime. Privacy-first via Buttondown.</p>
+    </div>
+    -->
 
     {#if showInvite}
       <div class="invite-form">
-        <div class="invite-label">Early Access</div>
+        <div class="invite-label">Private Testnet Access</div>
         <input
           type="text"
           bind:value={inviteCode}
@@ -409,7 +528,11 @@
         <span class="separator">·</span>
         <a href="https://x.com/xlnfinance" target="_blank" rel="noopener noreferrer" class="footer-link">x.com/xlnfinance</a>
         <span class="separator">·</span>
+        <a href="https://t.me/xlnomist" target="_blank" rel="noopener noreferrer" class="footer-link">t.me/xlnomist</a>
+        <span class="separator">·</span>
         <a href="https://github.com/xlnfinance/xln" target="_blank" rel="noopener noreferrer" class="footer-link">github.com/xlnfinance/xln</a>
+        <span class="separator">·</span>
+        <a href="mailto:h@xln.finance" class="footer-link">h@xln.finance</a>
       </div>
       <div class="tagline">Cross-Local Network · Off-chain settlement with on-chain anchoring</div>
     </div>
@@ -447,6 +570,89 @@
     filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
   }
 
+  .newsletter-section {
+    width: 100%;
+    max-width: 600px;
+    margin: 3rem 0;
+    padding: 2rem;
+    background: rgba(79, 209, 139, 0.05);
+    border: 1px solid rgba(79, 209, 139, 0.2);
+    border-radius: 8px;
+  }
+
+  .newsletter-header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+  }
+
+  .newsletter-header h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #4fd18b;
+  }
+
+  .newsletter-header p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.5;
+  }
+
+  .newsletter-form {
+    display: flex;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .newsletter-input {
+    flex: 1;
+    padding: 0.875rem 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #fff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+  }
+
+  .newsletter-input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .newsletter-input:focus {
+    outline: none;
+    border-color: rgba(79, 209, 139, 0.5);
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .newsletter-btn {
+    padding: 0.875rem 2rem;
+    background: #4fd18b;
+    border: none;
+    border-radius: 4px;
+    color: #000;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .newsletter-btn:hover {
+    background: #5fe19b;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(79, 209, 139, 0.3);
+  }
+
+  .newsletter-note {
+    margin: 1rem 0 0;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+  }
+
   .invite-form {
     display: flex;
     flex-direction: column;
@@ -454,8 +660,8 @@
     gap: 1rem;
     width: 100%;
     max-width: 400px;
-    margin-top: 4rem;
-    padding-top: 3rem;
+    margin-top: 2rem;
+    padding-top: 2rem;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 
@@ -604,6 +810,14 @@
     border: 1px solid rgba(79, 209, 139, 0.3);
     border-radius: 8px;
     min-width: 280px;
+    transition: all 0.3s ease;
+  }
+
+  .formula-box:hover {
+    background: rgba(79, 209, 139, 0.08);
+    border-color: rgba(79, 209, 139, 0.5);
+    box-shadow: 0 0 20px rgba(79, 209, 139, 0.2);
+    transform: translateY(-2px);
   }
 
   .formula-label {
@@ -666,15 +880,283 @@
     font-weight: bold;
   }
 
-  .invariant-box {
+  .plot-twist {
+    margin-top: 4rem;
+    padding: 2rem;
+    background: rgba(0, 209, 255, 0.03);
+    border: 1px solid rgba(0, 209, 255, 0.2);
+    border-radius: 8px;
+  }
+
+  .plot-twist h2 {
+    color: #00d1ff;
+    margin-bottom: 1rem;
+  }
+
+  .cbdc-stat {
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 2rem 0;
+    padding: 2rem;
+    background: rgba(0, 209, 255, 0.05);
+    border-radius: 8px;
+  }
+
+  .stat-number {
+    font-size: 3rem;
+    font-weight: 700;
+    color: #00d1ff;
+    line-height: 1;
+  }
+
+  .stat-label {
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.8);
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  .stat-link {
+    color: #00d1ff;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(0, 209, 255, 0.4);
+    transition: all 0.2s;
+  }
+
+  .stat-link:hover {
+    border-bottom-color: #00d1ff;
+  }
+
+  .plot-twist code {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 0.2em 0.5em;
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #4fd18b;
+    font-size: 0.95em;
+  }
+
+  .endgame-box {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-left: 3px solid #00d1ff;
+    border-radius: 4px;
+  }
+
+  .endgame-text {
+    margin: 0 0 1rem;
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .endgame-text:last-child {
+    margin-bottom: 0;
+    font-style: italic;
+    color: #00d1ff;
+  }
+
+  .contract-viewer {
+    margin-top: 2rem;
+    border: 1px solid rgba(0, 209, 255, 0.3);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .contract-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.25rem 1.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s;
+    list-style: none;
+  }
+
+  .contract-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .contract-summary:hover {
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .contract-label {
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+  }
+
+  .expand-arrow {
+    color: rgba(0, 209, 255, 0.6);
+    transition: transform 0.3s;
+  }
+
+  .contract-viewer[open] .expand-arrow {
+    transform: rotate(180deg);
+  }
+
+  .contract-content {
+    padding: 1.5rem;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .contract-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(0, 209, 255, 0.2);
+  }
+
+  .contract-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #00d1ff;
+  }
+
+  .contract-loc {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .contract-code {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(0, 209, 255, 0.2);
+    border-radius: 6px;
+    padding: 1.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.85);
+    overflow-x: auto;
+    margin: 0 0 1rem;
+  }
+
+  .view-full-link {
+    display: inline-block;
+    color: #00d1ff;
+    text-decoration: none;
+    font-size: 0.9rem;
+    padding: 0.5rem 0;
+    transition: all 0.2s;
+  }
+
+  .view-full-link:hover {
+    color: #5fe1ff;
+    text-decoration: underline;
+  }
+
+  .invariant-box {
     margin: 2rem 0;
     padding: 1.5rem;
     background: rgba(79, 209, 139, 0.05);
     border: 1px solid rgba(79, 209, 139, 0.2);
     border-radius: 8px;
+  }
+
+  .tickers-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2rem;
+    align-items: center;
+  }
+
+  .tickers-column {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .visual-column {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 300px;
+  }
+
+  .rcpan-visual {
+    width: 85%;
+    max-width: 340px;
+    height: auto;
+    display: block;
+    filter: drop-shadow(0 0 20px rgba(79, 209, 139, 0.3));
+    transition: filter 0.3s ease;
+  }
+
+  .rcpan-visual:hover {
+    filter: drop-shadow(0 0 30px rgba(79, 209, 139, 0.5));
+  }
+
+  .visualization-link-section {
+    width: 100%;
+    max-width: 800px;
+    margin: 2rem 0;
+  }
+
+  .viz-link-card {
+    display: block;
+    padding: 2rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.3s ease;
+  }
+
+  .viz-link-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(79, 209, 139, 0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(79, 209, 139, 0.15);
+  }
+
+  .viz-link-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
+  .viz-link-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .arrow {
+    font-size: 1.5rem;
+    color: rgba(79, 209, 139, 0.6);
+    transition: transform 0.3s ease;
+  }
+
+  .viz-link-card:hover .arrow {
+    transform: translateX(5px);
+    color: rgba(79, 209, 139, 1);
+  }
+
+  .viz-link-desc {
+    margin: 0;
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.6);
+    line-height: 1.6;
+  }
+
+  @media (max-width: 1024px) {
+    .tickers-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .visual-column {
+      margin-top: 1rem;
+    }
   }
 
   .prompt-container {
@@ -686,10 +1168,18 @@
   }
 
   .superprompt-section {
-    background: rgba(255, 255, 255, 0.05);
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-radius: 12px;
-    padding: 2rem;
+    padding: 2rem 0;
+  }
+
+  .prompt-section {
+    padding: 2rem 0;
+  }
+
+  .section-desc {
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0 0 1.5rem;
+    line-height: 1.6;
   }
 
   .superprompt-header {
