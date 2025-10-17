@@ -16,7 +16,7 @@ bun.lockb
 jurisdictions/bun.lock
 
 # Frontend generated files
-frontend/static/server.js
+frontend/static/runtime.js
 frontend/static/jurisdictions.json
 frontend/build/
 frontend/src/lib/generated/version.ts
@@ -71,10 +71,6 @@ nul
 # macOS junk
 .DS_Store
 **/.DS_Store
-
-# Build artifacts
-frontend/static/server.js
-frontend/static/jurisdictions.json
 
 # Test artifacts
 playwright-report/
