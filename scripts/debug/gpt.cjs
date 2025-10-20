@@ -6,15 +6,9 @@ const path = require('path');
 // ⭐ CORE FILES ONLY - Everything an LLM needs to understand XLN
 const CORE_FILES = {
   contracts: [
-    // Future ERC interfaces (to be standardized)
-    'IDepository.sol',       // ERC interface for reserve-credit management
-    'IEntityProvider.sol',   // ERC interface for entity governance & Hanko verification
-    'ISubcontractProvider.sol', // ERC interface for bilateral logic execution
-
-    // V1 implementations (simnet/testnet ready)
-    'DepositoryV1.sol',      // Implements IDepository - reserve/collateral management
-    'EntityProviderV1.sol',  // Implements IEntityProvider - Hanko, governance, C/D shares
-    'SubcontractProviderV1.sol', // Implements ISubcontractProvider - HTLCs, swaps, limit orders
+    'Depository.sol',      // Reserve/collateral management, enforceDebts FIFO
+    'EntityProvider.sol',  // Hanko verification, governance, C/D shares
+    'SubcontractProvider.sol', // HTLCs, swaps, limit orders
   ],
   runtime: [
     // Core types and data structures (read this first)
@@ -46,7 +40,6 @@ const CORE_FILES = {
     'evm.ts',                // Blockchain integration layer
   ],
   docs: [
-    'xlnview.md',            // System overview
     'emc2.md',               // Core philosophy: E=mc² → Energy-Mass-Credit
     'priorart.md',           // Why Lightning/rollups don't work
     'docs/summary.md',       // Executive summary
@@ -65,7 +58,7 @@ function countLines(content) {
   return content.split('\n').length;
 }
 
-function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir) {
+function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, totalTokens) {
   // Count lines for each file
   const fileSizes = {};
 
@@ -89,17 +82,14 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir) 
     if (content) fileSizes[`worlds/${file}`] = countLines(content);
   });
 
-  return `# XLN Context - Core System Files
+  return `# XLN Context - Core System Files (~${Math.round(totalTokens / 1000)}k tokens)
 ## Cross-Local Network: Off-chain settlement with on-chain anchoring
 
 xln/
   jurisdictions/contracts/
-    IDepository.sol              ${fileSizes['contracts/IDepository.sol'] || '?'} lines - Reserve-Credit interface (INVARIANT: leftDiff + rightDiff + collateralDiff == 0)
-    IEntityProvider.sol          ${fileSizes['contracts/IEntityProvider.sol'] || '?'} lines - Entity Governance & Hanko Verification
-    ISubcontractProvider.sol     ${fileSizes['contracts/ISubcontractProvider.sol'] || '?'} lines - Bilateral Logic (delta transformers)
-    DepositoryV1.sol             ${fileSizes['contracts/DepositoryV1.sol'] || '?'} lines - enforceDebts() FIFO, collateral + credit
-    EntityProviderV1.sol         ${fileSizes['contracts/EntityProviderV1.sol'] || '?'} lines - Hanko sigs, Control/Dividend, governance
-    SubcontractProviderV1.sol    ${fileSizes['contracts/SubcontractProviderV1.sol'] || '?'} lines - HTLCs, swaps, limit orders
+    Depository.sol             ${fileSizes['contracts/Depository.sol'] || '?'} lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
+    EntityProvider.sol         ${fileSizes['contracts/EntityProvider.sol'] || '?'} lines - Hanko sigs, Control/Dividend, governance
+    SubcontractProvider.sol    ${fileSizes['contracts/SubcontractProvider.sol'] || '?'} lines - HTLCs, swaps, limit orders
 
   runtime/
     types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces (START HERE)
@@ -128,7 +118,6 @@ xln/
     evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration
 
   vibepaper/
-    xlnview.md                   ${fileSizes['vibepaper/xlnview.md'] || '?'} lines - System overview, panel architecture
     emc2.md                      ${fileSizes['vibepaper/emc2.md'] || '?'} lines - Energy-Mass-Credit equivalence
     priorart.md                  ${fileSizes['vibepaper/priorart.md'] || '?'} lines - * WHY LIGHTNING/ROLLUPS DON'T WORK
     docs/00_QA.md                ${fileSizes['vibepaper/docs/00_QA.md'] || '?'} lines - Value prop FAQs
@@ -141,9 +130,7 @@ xln/
   worlds/
     architecture.md              ${fileSizes['worlds/architecture.md'] || '?'} lines - Scenario architecture, EntityInput primitives
 
-Reading Guide: 1) types.ts (data structures), 2) docs/12_invariant.md (RCPE), 3) IDepository.sol, 4) entity-consensus.ts + account-consensus.ts, 5) entity-tx/apply.ts + account-tx/apply.ts (how txs work), 6) runtime.ts
-
-Note: ECDSA.sol = OpenZeppelin, Token.sol = test ERC20, console.sol = Hardhat logging (not included - boilerplate)
+Reading Guide: 1) types.ts (data structures), 2) docs/12_invariant.md (RCPE), 3) Depository.sol (enforceDebts), 4) entity-consensus.ts + account-consensus.ts, 5) entity-tx/apply.ts + account-tx/apply.ts, 6) runtime.ts
 
 `;
 }
@@ -166,61 +153,70 @@ function generateContext() {
   const docsDir = path.join(projectRoot, 'vibepaper');
   const worldsDir = path.join(projectRoot, 'worlds');
 
-  let output = generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir);
+  // Track file sizes for token breakdown
+  const fileStats = [];
 
-  // Process contracts
+  // Collect all files first to calculate total tokens
+  const allFiles = [];
+
   CORE_FILES.contracts.forEach(file => {
     const content = readFileContent(contractsDir, file);
     if (content) {
       const lines = countLines(content);
-      output += `\n//jurisdictions/contracts/${file} (${lines} lines)\n`;
-      output += content + '\n';
+      const bytes = Buffer.byteLength(content, 'utf8');
+      fileStats.push({ file: `contracts/${file}`, lines, bytes });
+      allFiles.push({ path: `jurisdictions/contracts/${file}`, content, lines });
     }
   });
 
-  // Process runtime files
   CORE_FILES.runtime.forEach(file => {
     const content = readFileContent(runtimeDir, file);
     if (content) {
       const lines = countLines(content);
-      output += `\n//runtime/${file} (${lines} lines)\n`;
-      output += content + '\n';
+      const bytes = Buffer.byteLength(content, 'utf8');
+      fileStats.push({ file: `runtime/${file}`, lines, bytes });
+      allFiles.push({ path: `runtime/${file}`, content, lines });
     }
   });
 
-  // Process documentation
   CORE_FILES.docs.forEach(file => {
     const content = readFileContent(docsDir, file);
     if (content) {
       const lines = countLines(content);
-      output += `\n//vibepaper/${file} (${lines} lines)\n`;
-      output += content + '\n';
+      const bytes = Buffer.byteLength(content, 'utf8');
+      fileStats.push({ file: `vibepaper/${file}`, lines, bytes });
+      allFiles.push({ path: `vibepaper/${file}`, content, lines });
     }
   });
 
-  // Process worlds
   CORE_FILES.worlds.forEach(file => {
     const content = readFileContent(worldsDir, file);
     if (content) {
       const lines = countLines(content);
-      output += `\n//worlds/${file} (${lines} lines)\n`;
-      output += content + '\n';
+      const bytes = Buffer.byteLength(content, 'utf8');
+      fileStats.push({ file: `worlds/${file}`, lines, bytes });
+      allFiles.push({ path: `worlds/${file}`, content, lines });
     }
   });
 
-  // Meta: Include this script itself at the very end
-  output += '\n//META: Generated by scripts/debug/gpt.cjs\n';
-  const scriptContent = readFileContent(projectRoot, 'scripts/debug/gpt.cjs');
-  if (scriptContent) {
-    output += `\n//scripts/debug/gpt.cjs\n`;
-    output += scriptContent + '\n';
-  }
+  // Calculate total bytes for all content
+  const totalBytes = fileStats.reduce((sum, f) => sum + f.bytes, 0);
+  const totalTokens = Math.round(totalBytes / 3.5);
 
-  return output;
+  // Generate overview with token count
+  let output = generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, totalTokens);
+
+  // Append all file contents
+  allFiles.forEach(({ path, content, lines }) => {
+    output += `\n//${path} (${lines} lines)\n`;
+    output += content + '\n';
+  });
+
+  return { output, fileStats };
 }
 
 // Generate and write
-const context = generateContext();
+const { output: context, fileStats } = generateContext();
 const outputPath = path.join(__dirname, '../../frontend/static/c.txt');
 
 // Ensure directory exists
@@ -235,14 +231,23 @@ fs.writeFileSync(outputPath, context);
 const lines = context.split('\n').length;
 const bytes = Buffer.byteLength(context, 'utf8');
 const kb = (bytes / 1024).toFixed(1);
-const words = context.split(/\s+/).length;
-
-// Token estimates (different methods for accuracy range)
-const tokensConservative = Math.round(words * 0.75);  // Text-heavy estimate
-const tokensRealistic = Math.round(bytes / 3.5);      // Mixed code+docs (GPT-4 rule)
-const tokensCodeHeavy = Math.round(bytes / 3.0);      // Code-heavy upper bound
+const tokensTotal = Math.round(bytes / 3.5);
 
 console.log('✅ c.txt generated');
-console.log(`📊 ${lines.toLocaleString()} lines, ${kb} KB, ~${tokensRealistic.toLocaleString()} tokens`);
+console.log(`📊 ${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
 console.log(`🌐 xln.finance/c.txt`);
 console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length} | Worlds: ${CORE_FILES.worlds.length}`);
+
+// Token breakdown by file (top 15)
+console.log('\n📈 Token Breakdown (top 15):');
+const fileTokens = fileStats.map(f => ({
+  ...f,
+  tokens: Math.round(f.bytes / 3.5),
+  pct: (f.bytes / bytes * 100).toFixed(1)
+})).sort((a, b) => b.tokens - a.tokens);
+
+fileTokens.slice(0, 15).forEach(f => {
+  const tokStr = f.tokens.toLocaleString().padStart(7);
+  const pctStr = f.pct.padStart(4);
+  console.log(`  ${tokStr} tok (${pctStr}%) - ${f.file}`);
+});

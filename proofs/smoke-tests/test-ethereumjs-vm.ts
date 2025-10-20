@@ -10,15 +10,15 @@ import { createLegacyTx } from '@ethereumjs/tx';
 import { Address, createAddressFromPrivateKey, hexToBytes, createAccount } from '@ethereumjs/util';
 import { readFileSync } from 'fs';
 
-// Load contract artifact (DepositoryV1 - self-contained)
+// Load contract artifact (Depository - self-contained)
 const depositoryArtifact = JSON.parse(
-  readFileSync('./jurisdictions/artifacts/contracts/DepositoryV1.sol/DepositoryV1.json', 'utf-8')
+  readFileSync('./jurisdictions/artifacts/contracts/Depository.sol/Depository.json', 'utf-8')
 );
 
 const bytecode = depositoryArtifact.bytecode;
 const abi = depositoryArtifact.abi;
 
-console.log('📦 Loaded DepositoryV1.sol artifact (IDepository implementation)');
+console.log('📦 Loaded Depository.sol artifact (IDepository implementation)');
 console.log(`   Bytecode size: ${bytecode.length / 2} bytes`);
 
 // Create EthereumJS VM

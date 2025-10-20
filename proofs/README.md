@@ -10,7 +10,7 @@
 /proofs/
 ├── README.md                           # This file
 ├── smoke-tests/                        # Fast sanity checks (<5s each)
-│   ├── test-ethereumjs-vm.ts          # BrowserVM: Deploy + call DepositoryV1
+│   ├── test-ethereumjs-vm.ts          # BrowserVM: Deploy + call Depository
 │   ├── test-browser-evm.html          # Browser integration test
 │   └── check-browser-errors.ts        # Console error detector
 │
@@ -33,7 +33,7 @@
 **BrowserVM Smoke Test**
 ```bash
 bun proofs/smoke-tests/test-ethereumjs-vm.ts
-# ✅ Deploys DepositoryV1.sol
+# ✅ Deploys Depository.sol
 # ✅ Calls debugFundReserves()
 # ✅ Verifies logs emitted
 # Time: ~3s

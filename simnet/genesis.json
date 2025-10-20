@@ -12,8 +12,8 @@
   },
 
   "contracts": {
-    "DepositoryV1": {
-      "artifact": "../jurisdictions/artifacts/contracts/DepositoryV1.sol/DepositoryV1.json",
+    "Depository": {
+      "artifact": "../jurisdictions/artifacts/contracts/Depository.sol/Depository.json",
       "autoFund": true
     }
   },

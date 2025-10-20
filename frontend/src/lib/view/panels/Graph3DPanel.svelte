@@ -14,6 +14,9 @@
   import { AccountActivityVisualizer } from '$lib/network3d/AccountActivityVisualizer';
   import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 
+  // Panel communication
+  import { panelBridge } from '../utils/panelBridge';
+
   // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
   export let isolatedHistory: Writable<any[]>;
@@ -715,18 +718,27 @@ let vrHammer: VRHammer | null = null;
       throw new Error(`FINTECH-SAFETY: Failed to initialize 3D topology: ${error.message}`);
     });
 
-    // Listen for data changes (isolated env if provided, otherwise global)
-    // Use isolated env directly
-    const unsubscribe1 = isolatedEnv.subscribe(updateNetworkData);
-    const unsubscribe2 = replicas.subscribe(updateNetworkData);
-    // visibleGossip removed - not needed in isolated view
+    // Listen for VR toggle events from ArchitectPanel
+    const handleVRToggle = () => {
+      if (isVRActive) {
+        exitVR();
+      } else {
+        enterVR();
+      }
+    };
+    panelBridge.on('vr:toggle', handleVRToggle);
 
+    const unsubscribe1 = isolatedEnv.subscribe(updateNetworkData);
     return () => {
       unsubscribe1();
-      // unsubscribe2();
-      // unsubscribe3();
+      panelBridge.off('vr:toggle', handleVRToggle);
     };
   });
+
+  // Reactive update when replicas change
+  $: if (replicas && scene) {
+    updateNetworkData();
+  }
 
   onDestroy(() => {
     if (animationId) {

@@ -6,9 +6,9 @@ import "./ECDSA.sol";
 import "./console.sol";
 import "hardhat/console.sol";
 
-import "./EntityProviderV1.sol";
+import "./EntityProvider.sol";
 
-import "./SubcontractProviderV1.sol";
+import "./SubcontractProvider.sol";
 
 // Add necessary interfaces
 interface IERC20 {
