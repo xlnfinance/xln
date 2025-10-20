@@ -14,6 +14,7 @@
   import EntitiesPanel from './panels/EntitiesPanel.svelte';
   import DepositoryPanel from './panels/DepositoryPanel.svelte';
   import ArchitectPanel from './panels/ArchitectPanel.svelte';
+  import ConsolePanel from './panels/ConsolePanel.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import 'dockview/dist/styles/dockview.css';
 
@@ -95,7 +96,14 @@
             props: {
               isolatedEnv: localEnvStore,
               isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex  // Required
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
+        } else if (options.name === 'console') {
+          component = mount(ConsolePanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore
             }
           });
         }
@@ -136,6 +144,13 @@
       id: 'architect',
       component: 'architect',
       title: '🎬 Architect',
+      position: { direction: 'within', referencePanel: 'depository' },
+    });
+
+    const consolePanel = dockview.addPanel({
+      id: 'console',
+      component: 'console',
+      title: '📋 Console',
       position: { direction: 'within', referencePanel: 'depository' },
     });
   });

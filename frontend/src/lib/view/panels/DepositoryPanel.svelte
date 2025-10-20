@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Depository Panel - Live J-state viewer
-   * Queries DepositoryV1.sol via BrowserVM
+   * Queries Depository.sol via BrowserVM
    *
    * @license AGPL-3.0
    * Copyright (C) 2025 XLN Finance

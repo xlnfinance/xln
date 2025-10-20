@@ -6,7 +6,7 @@ import { join, resolve } from 'path';
 // Note: server.js is built directly to static/ now (no copy needed)
 const files = [
   { src: '../jurisdictions.json', dest: 'static/jurisdictions.json' },
-  { src: '../jurisdictions/artifacts/contracts/DepositoryV1.sol/DepositoryV1.json', dest: 'static/contracts/DepositoryV1.json' }
+  { src: '../jurisdictions/artifacts/contracts/Depository.sol/Depository.json', dest: 'static/contracts/Depository.json' }
 ];
 
 for (const file of files) {

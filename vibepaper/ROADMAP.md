@@ -11,7 +11,7 @@
 
 **Tech:**
 - @ethereumjs/vm (in-browser blockchain)
-- DepositoryV1.sol (6.6KB, implements IDepository)
+- Depository.sol (6.6KB, implements IDepository)
 - 500 prefunded entities (USDC + ETH)
 - Zero infrastructure (no servers, no RPC)
 
@@ -132,7 +132,7 @@
 **Path:**
 1. Draft EIP (Ethereum Improvement Proposal)
 2. Community review (Ethereum Magicians forum)
-3. Reference implementation (DepositoryV1)
+3. Reference implementation (Depository)
 4. Audit + formalize
 5. ERC number assigned
 

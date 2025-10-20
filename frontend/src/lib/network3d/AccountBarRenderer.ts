@@ -140,10 +140,9 @@ function renderSpreadMode(
     leftOffset += length;
   });
 
-  // Right-side bars extend from gap rightward (same visual order as left)
-  const leftBarsLength = segments.outOwnCredit + segments.inCollateral + segments.outPeerCredit;
-  const gapStart = fromEntity.position.clone().add(
-    direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap + leftBarsLength + minGapSpread)
+  // Right-side bars extend from right entity LEFTWARD toward gap
+  const rightStartPos = _toEntity.position.clone().sub(
+    direction.clone().normalize().multiplyScalar(_toEntitySize + barRadius + safeGap)
   );
 
   let rightOffset = 0;
@@ -157,7 +156,8 @@ function renderSpreadMode(
     const length = segments[barSpec.key];
     if (length > 0.01) {
       const bar = createBarCylinder(barRadius, length, BAR_COLORS[barSpec.colorType], barSpec.colorType);
-      const barCenter = gapStart.clone().add(direction.clone().normalize().multiplyScalar(rightOffset + length/2));
+      // Position bars going LEFTWARD from right entity toward gap
+      const barCenter = rightStartPos.clone().sub(direction.clone().normalize().multiplyScalar(rightOffset + length/2));
       bar.position.copy(barCenter);
 
       // Rotate cylinder to align with connection direction

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **BrowserVM Integration** - Offline blockchain with @ethereumjs/vm v10
-  - DepositoryV1.sol (6.6KB, self-contained)
+  - Depository.sol (6.6KB, self-contained)
   - IDepository interface (future ERC standard)
   - Genesis configs in /simnet/
   - Smoke test: deploys contract + executes transactions in <3s

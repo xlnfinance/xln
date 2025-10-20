@@ -63,7 +63,7 @@ Cross-Local Network enables entities to:
 - **What:** Solidity contracts managing reserves, collateral, settlements
 - **Where:** `/jurisdictions/contracts/`
 - **Contracts:**
-  - `DepositoryV1.sol` - Implements `IDepository` (future ERC standard)
+  - `Depository.sol` - Implements `IDepository` (future ERC standard)
   - `EntityProvider.sol` - Entity registration + quorum verification
 - **Deploy:** Ethereum, Polygon, Arbitrum, any EVM chain
 
@@ -132,7 +132,7 @@ bun test-ethereumjs-vm.ts       # BrowserVM smoke test
 **No localhost:8545. No cloud RPC. Pure browser.**
 
 - **Engine:** @ethereumjs/vm v10 (official Ethereum Foundation implementation)
-- **Deployed:** DepositoryV1.sol + 500 prefunded entities
+- **Deployed:** Depository.sol + 500 prefunded entities
 - **Tokens:** USDC (id=1), ETH (id=2)
 - **Reset:** Refresh page = new universe
 - **Persistent:** Optional IndexedDB (resume sessions)
@@ -178,7 +178,7 @@ bun test-ethereumjs-vm.ts
 - ✅ **Panel workspace** - Dockview-based Bloomberg Terminal UX
 - ✅ **WebGPU/WebGL switch** - Runtime renderer toggle (future-proof)
 - ✅ **IDepository interface** - Standardizable ERC for reserve management
-- ✅ **DepositoryV1** - 69% smaller, self-contained (6.6KB vs 21KB)
+- ✅ **Depository** - 69% smaller, self-contained (6.6KB vs 21KB)
 
 ---
 
@@ -198,7 +198,7 @@ bun test-ethereumjs-vm.ts
 ### Simnet (Now - Oct 2025)
 **Browser-only simulation. Zero infrastructure.**
 - **Engine:** @ethereumjs/vm (in-browser blockchain)
-- **Contracts:** DepositoryV1.sol (6.6KB, implements IDepository)
+- **Contracts:** Depository.sol (6.6KB, implements IDepository)
 - **State:** 500 prefunded entities, USDC + ETH
 - **Reset:** Refresh page = new universe
 - **Use:** Scenario rehearsals, VR demos, tutorials

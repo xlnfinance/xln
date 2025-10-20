@@ -1,6 +1,6 @@
 /**
  * BrowserVMProvider - In-browser EVM using @ethereumjs/vm
- * Self-contained environment with DepositoryV1.sol
+ * Self-contained environment with Depository.sol
  *
  * @license AGPL-3.0
  * Copyright (C) 2025 XLN Finance
@@ -35,9 +35,9 @@ export class BrowserVMProvider {
     }
 
     // Load artifact from static/ (can't import JSON from /public in vite)
-    const response = await fetch('/contracts/DepositoryV1.json');
+    const response = await fetch('/contracts/Depository.json');
     if (!response.ok) {
-      throw new Error(`Failed to load DepositoryV1 artifact: ${response.status}`);
+      throw new Error(`Failed to load Depository artifact: ${response.status}`);
     }
     this.depositoryArtifact = await response.json();
     console.log('[BrowserVM] Initializing...');
@@ -55,16 +55,16 @@ export class BrowserVMProvider {
 
     console.log(`[BrowserVM] Deployer funded: ${this.deployerAddress.toString()}`);
 
-    // Deploy DepositoryV1
+    // Deploy Depository
     await this.deployDepository();
 
     this.initialized = true;
     console.log('[BrowserVM] Initialization complete');
   }
 
-  /** Deploy DepositoryV1 contract */
+  /** Deploy Depository contract */
   private async deployDepository(): Promise<void> {
-    console.log('[BrowserVM] Deploying DepositoryV1...');
+    console.log('[BrowserVM] Deploying Depository...');
 
     // Query nonce from VM state
     const currentNonce = await this.getCurrentNonce();

@@ -47,7 +47,7 @@ Extract from Graph3DPanel (lines 3829-3943) to Architect panel "Build" mode
 
 **✅ Working:**
 - Dockview tiling (4 panels: Graph3D, Entities, Depository, Architect)
-- BrowserVM deploys real DepositoryV1.sol (verified 100 USDC balances)
+- BrowserVM deploys real Depository.sol (verified 100 USDC balances)
 - TimeMachine bottom bar (scrubbing, play/pause, 0/0 when empty)
 - Isolated env architecture (each View instance independent)
 - Simnet grid scenario creates 8 entities successfully
@@ -65,7 +65,7 @@ Extract from Graph3DPanel (lines 3829-3943) to Architect panel "Build" mode
 - LevelDB persistence in runtime.ts (`saveEnvToDB`, `loadEnvFromDB`, `clearDB`)
 - TimeMachine isolation (effectiveHistory, effectiveTimeIndex, effectiveIsLive)
 - Graph3DPanel purged of global stores (`$visibleReplicas` → `env?.replicas`)
-- BrowserVM deploys EntityProvider + DepositoryV1 in-browser
+- BrowserVM deploys EntityProvider + Depository in-browser
 - Console noise eliminated (verbose logs removed)
 - Clear Database button added
 - Build passes (`bun run check` clean)
@@ -112,7 +112,7 @@ Extract from Graph3DPanel (lines 3829-3943) to Architect panel "Build" mode
   - VR HUD panel showing entities/accounts/time status
   - Access: https://192.168.0.197:8080/view from Quest 3
 - ✅ Repository restructure (vibepaper, runtime, jurisdictions, worlds, proofs)
-- ✅ BrowserVM prototype (DepositoryV1 deploys + executes in <3s)
+- ✅ BrowserVM prototype (Depository deploys + executes in <3s)
 - ✅ AGPL-3.0 license applied everywhere
 - ✅ WebGPU/WebGL toggle in NetworkTopology
 - ✅ Panel system foundation (4 panels created, utils built)
@@ -125,7 +125,7 @@ Extract from Graph3DPanel (lines 3829-3943) to Architect panel "Build" mode
 - ✅ /view route fixed (2025-10-13: Dockview + React deps, dual HTTP/HTTPS)
 - ✅ /view Bloomberg Terminal 90% (2025-10-13):
   - Dockview tiling system (VSCode-quality, framework-agnostic)
-  - BrowserVM deploys real DepositoryV1.sol (25M gas, verified balances)
+  - BrowserVM deploys real Depository.sol (25M gas, verified balances)
   - TimeMachine bottom bar (scrubbing works, fixed 0/-1 → 0/0)
   - Isolated env per View (multiple instances on same page)
   - Providence pyramid primitive (N-sided, M-steps geometric)
