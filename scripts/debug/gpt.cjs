@@ -179,24 +179,6 @@ nettedDelta = {A: -100, D: +100}  // B and C netting canceled
 
 Every subcontract is just a **delta transformer** that respects RCPAN invariant.
 
-## Honest Tradeoffs
-
-**What XLN is NOT:**
-- ❌ **Not a retail payment network** - Target: institutions managing $1M-$1B positions, not $10 coffee payments
-- ❌ **Not permissionless bootstrapping** - Requires bilateral trust establishment (like banks opening correspondent accounts)
-- ❌ **Not private by default** - Bilateral partners see each other's transactions (like bank statements)
-- ❌ **Not resistant to legal coercion** - Entities can be compelled to freeze accounts (unlike Bitcoin)
-
-**What XLN achieves:**
-- ✅ **Instant settlement with partial collateral** (RCPAN invariant)
-- ✅ **Programmable bilateral credit** (first-class primitive)
-- ✅ **O(k) local state per entity** (total network is O(n²) relationships, same as banks/Lightning)
-- ✅ **BFT consensus within entities** (survives ⅓ malicious replicas)
-- ✅ **On-chain anchoring for disputes** (Depository.sol enforceDebts FIFO queue)
-
-**Target use case:**
-Corporate treasuries, exchanges, payment processors managing high-value positions where instant netting provides massive capital efficiency gains.
-
 ## Proof & Verification
 
 **How to verify XLN's core claims:**
