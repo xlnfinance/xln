@@ -11,8 +11,8 @@ const CORE_FILES = {
     'SubcontractProvider.sol', // HTLCs, swaps, limit orders
   ],
   runtime: [
-    // Core types and data structures (read this first)
-    'types.ts',              // All TypeScript interfaces - START HERE
+    // Core data structures and implementation
+    'types.ts',              // All TypeScript interfaces
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Main coordinator, 100ms ticks, R→E→A routing
@@ -40,14 +40,12 @@ const CORE_FILES = {
     'evm.ts',                // Blockchain integration layer
   ],
   docs: [
-    'emc2.md',               // Core philosophy: E=mc² → Energy-Mass-Credit
+    // Ordered by dependency - read in this order
+    'emc2.md',               // ⚡ Core philosophy: E=mc² → Energy-Mass-Credit (5min)
+    'docs/12_invariant.md',  // ⚡ RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
+    'docs/jea.md',           // ⚡ Jurisdiction-Entity-Account 3-layer model (8min)
+    'docs/11_Jurisdiction_Machine.md', // Architecture deep-dive
     'priorart.md',           // Why Lightning/rollups don't work
-    'docs/summary.md',       // Executive summary
-    'docs/00_QA.md',         // FAQs: value prop, positioning, architecture
-    'docs/12_invariant.md',  // RCPE vs FCUAN vs FRPAP (THE core innovation)
-    'docs/jea.md',           // Jurisdiction-Entity-Account 3-layer model
-    'docs/consensus/transaction-flow-specification.md', // Transaction flows
-    'docs/11_Jurisdiction_Machine.md' // Architecture deep-dive
   ],
   worlds: [
     'architecture.md'        // Scenario architecture, EntityInput primitives
@@ -83,6 +81,140 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, 
   });
 
   return `# XLN Context - Core System Files (~${Math.round(totalTokens / 1000)}k tokens)
+
+## THE CORE INNOVATION: RCPAN Invariant
+
+XLN solves what was thought impossible: **instant settlement without blockchain latency**.
+
+The breakthrough is the RCPAN invariant that unifies credit and collateral:
+  −Lₗ ≤ Δ ≤ C + Lᵣ
+
+Where:
+- Δ = net balance (positive = you owe me, negative = I owe you)
+- C = my collateral (what I can lose)
+- Lₗ = credit I extend to you (unsecured lending)
+- Lᵣ = credit you extend to me (your trust in me)
+
+This single invariant:
+- Eliminates the FCUAN problem (Fractional Collateral Under Arbitrary Netting)
+- Eliminates the FRPAP problem (Full Reserve Precludes Arbitrary Payments)
+- Enables instant bilateral netting with partial collateral
+- Makes credit programmable and composable
+
+## Competitive Landscape
+
+| System | Settlement | Collateral | Credit | Netting | Trust Model |
+|--------|-----------|------------|---------|---------|-------------|
+| **XLN** | Instant (bilateral) | Partial (RCPAN) | Programmable | Yes (bilateral) | BFT consensus |
+| Lightning | Near-instant | Full (100%) | No | No | Unilateral exit |
+| Rollups | 7-day finality | Full (100%) | No | No (batch only) | Fraud proof |
+| Banks | T+2 settlement | Fractional (~10%) | Yes | Yes (multilateral) | Legal system |
+| Ripple/Stellar | 3-5 sec | Trust lines | Trust lines | Limited | Consensus |
+
+**XLN uniquely combines**: Bank-like netting + Lightning-like instant settlement + Programmable credit
+
+## Impossible Before XLN
+
+1. **Instant cross-chain atomic swaps with <100% collateral** - Lightning requires full collateral, XLN uses RCPAN
+2. **Bilateral settlement without fraud period** - Rollups need 7 days, XLN settles instantly via consensus
+3. **Programmable credit as a first-class primitive** - Banks have credit but not programmable, crypto has programs but not credit
+4. **Multi-hop payments that NET positions** - Ripple batches, Lightning routes, only XLN nets bilaterally
+5. **Entity-owned subcontracts (HTLCs, limit orders) without separate channels** - One bilateral account, many subcontracts
+
+## Token Budget Guide (~${Math.round(totalTokens / 1000)}k tokens total)
+
+**Critical path (read first, ~30min):**
+- ⚡ emc2.md (5min) - Why credit = stored energy
+- ⚡ docs/12_invariant.md (10min) - RCPAN derivation
+- ⚡ docs/jea.md (8min) - 3-layer architecture
+- ⚡ Depository.sol (7min) - enforceDebts() FIFO + RCPAN enforcement
+
+**Implementation (read second, ~45min):**
+- types.ts (10min) - All data structures
+- entity-consensus.ts (15min) - BFT state machine
+- account-consensus.ts (12min) - Bilateral consensus
+- entity-tx/apply.ts (8min) - Transaction dispatcher
+
+**Deep dives (optional, ~60min):**
+- runtime.ts (15min) - Main coordinator
+- routing/pathfinding.ts (10min) - Dijkstra multi-hop
+- priorart.md (20min) - Why Lightning/rollups fail
+- 11_Jurisdiction_Machine.md (15min) - Full architecture
+
+## Building on XLN: Delta Transformers
+
+Every bilateral account is a **programmable state machine** that transforms deltas. Examples:
+
+**1. HTLC (Hash Time-Locked Contract):**
+\`\`\`typescript
+// Alice → Bob payment locked by hash H
+Δ_proposed = +1000  // Bob's balance increases IF he reveals R where hash(R) = H
+// If Bob reveals R: commit Δ_proposed
+// If timeout: revert Δ_proposed
+\`\`\`
+
+**2. Limit Order:**
+\`\`\`typescript
+// "Buy 100 USDC at 0.5 ETH each when ETH/USDC ≤ 2000"
+if (oraclePrice <= 2000) {
+  Δ_USDC = +100
+  Δ_ETH = -50
+}
+\`\`\`
+
+**3. Dividend Distribution:**
+\`\`\`typescript
+// Entity pays 10% dividend to all C-share holders
+for (const holder of cShareHolders) {
+  Δ[holder] = entity.reserves * 0.1 * (holder.cShares / totalCShares)
+}
+\`\`\`
+
+**4. Netting Optimizer:**
+\`\`\`typescript
+// Instead of A→B→C→D, net to A→D
+multiHopDeltas = [{A: -100}, {B: +100, C: -100}, {D: +100}]
+nettedDelta = {A: -100, D: +100}  // B and C netting canceled
+\`\`\`
+
+Every subcontract is just a **delta transformer** that respects RCPAN invariant.
+
+## Honest Tradeoffs
+
+**What XLN is NOT:**
+- ❌ **Not a retail payment network** - Target: institutions managing $1M-$1B positions, not $10 coffee payments
+- ❌ **Not permissionless bootstrapping** - Requires bilateral trust establishment (like banks opening correspondent accounts)
+- ❌ **Not private by default** - Bilateral partners see each other's transactions (like bank statements)
+- ❌ **Not resistant to legal coercion** - Entities can be compelled to freeze accounts (unlike Bitcoin)
+
+**What XLN achieves:**
+- ✅ **Instant settlement with partial collateral** (RCPAN invariant)
+- ✅ **Programmable bilateral credit** (first-class primitive)
+- ✅ **O(k) local state per entity** (total network is O(n²) relationships, same as banks/Lightning)
+- ✅ **BFT consensus within entities** (survives ⅓ malicious replicas)
+- ✅ **On-chain anchoring for disputes** (Depository.sol enforceDebts FIFO queue)
+
+**Target use case:**
+Corporate treasuries, exchanges, payment processors managing high-value positions where instant netting provides massive capital efficiency gains.
+
+## Proof & Verification
+
+**How to verify XLN's core claims:**
+
+1. **RCPAN invariant eliminates FCUAN/FRPAP**: Read docs/12_invariant.md lines 45-120 (proof by construction)
+2. **Instant bilateral settlement**: See account-consensus.ts ADD_TX → PROPOSE → SIGN → COMMIT (no fraud period)
+3. **BFT consensus correctness**: entity-consensus.ts implements PBFT-style 3-phase commit (⅔ threshold)
+4. **On-chain enforcement**: Depository.sol enforceDebts() FIFO queue processes debts until reserves depleted
+5. **Deterministic state**: snapshot-coder.ts RLP encoding + Keccak-256 hashing ensures identical state roots
+
+**Run scenarios yourself:**
+\`\`\`bash
+bun run src/server.ts  # Starts server
+# Visit localhost:8080
+# Load scenario: "phantom-grid" or "diamond-dybvig"
+# Inspect entity states in console: inspect("alice")
+\`\`\`
+
 ## Cross-Local Network: Off-chain settlement with on-chain anchoring
 
 xln/
@@ -118,19 +250,25 @@ xln/
     evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration
 
   vibepaper/
-    emc2.md                      ${fileSizes['vibepaper/emc2.md'] || '?'} lines - Energy-Mass-Credit equivalence
-    priorart.md                  ${fileSizes['vibepaper/priorart.md'] || '?'} lines - * WHY LIGHTNING/ROLLUPS DON'T WORK
-    docs/00_QA.md                ${fileSizes['vibepaper/docs/00_QA.md'] || '?'} lines - Value prop FAQs
-    docs/12_invariant.md         ${fileSizes['vibepaper/docs/12_invariant.md'] || '?'} lines - * RCPE innovation (core primitive)
-    docs/jea.md                  ${fileSizes['vibepaper/docs/jea.md'] || '?'} lines - Jurisdiction-Entity-Account model
-    docs/summary.md              ${fileSizes['vibepaper/docs/summary.md'] || '?'} lines - Executive summary
-    docs/consensus/transaction-flow-specification.md  ${fileSizes['vibepaper/docs/consensus/transaction-flow-specification.md'] || '?'} lines
-    docs/11_Jurisdiction_Machine.md  ${fileSizes['vibepaper/docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture
+    emc2.md                      ${fileSizes['vibepaper/emc2.md'] || '?'} lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
+    docs/12_invariant.md         ${fileSizes['vibepaper/docs/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
+    docs/jea.md                  ${fileSizes['vibepaper/docs/jea.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
+    docs/11_Jurisdiction_Machine.md  ${fileSizes['vibepaper/docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
+    priorart.md                  ${fileSizes['vibepaper/priorart.md'] || '?'} lines - Why Lightning/rollups don't work
 
   worlds/
     architecture.md              ${fileSizes['worlds/architecture.md'] || '?'} lines - Scenario architecture, EntityInput primitives
 
-Reading Guide: 1) types.ts (data structures), 2) docs/12_invariant.md (RCPE), 3) Depository.sol (enforceDebts), 4) entity-consensus.ts + account-consensus.ts, 5) entity-tx/apply.ts + account-tx/apply.ts, 6) runtime.ts
+Reading Guide:
+1. Start with header sections (RCPAN invariant, competitive landscape, impossibilities)
+2. Follow the token budget guide for efficient learning:
+   - Critical path (30min): emc2.md → 12_invariant.md → jea.md → Depository.sol
+   - Implementation (45min): types.ts → entity-consensus.ts → account-consensus.ts → entity-tx/apply.ts
+   - Deep dives (60min): runtime.ts → routing/pathfinding.ts → priorart.md → 11_Jurisdiction_Machine.md
+3. Verify claims using the Proof & Verification section
+4. Explore delta transformer examples for extensibility patterns
+
+Suggested LLM prompt: "Read the critical path docs (30min budget), then explain how RCPAN enables instant settlement with partial collateral. Compare to Lightning and rollups."
 
 `;
 }

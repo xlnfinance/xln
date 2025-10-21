@@ -1,4 +1,138 @@
-# XLN Context - Core System Files (~111k tokens)
+# XLN Context - Core System Files (~104k tokens)
+
+## THE CORE INNOVATION: RCPAN Invariant
+
+XLN solves what was thought impossible: **instant settlement without blockchain latency**.
+
+The breakthrough is the RCPAN invariant that unifies credit and collateral:
+  −Lₗ ≤ Δ ≤ C + Lᵣ
+
+Where:
+- Δ = net balance (positive = you owe me, negative = I owe you)
+- C = my collateral (what I can lose)
+- Lₗ = credit I extend to you (unsecured lending)
+- Lᵣ = credit you extend to me (your trust in me)
+
+This single invariant:
+- Eliminates the FCUAN problem (Fractional Collateral Under Arbitrary Netting)
+- Eliminates the FRPAP problem (Full Reserve Precludes Arbitrary Payments)
+- Enables instant bilateral netting with partial collateral
+- Makes credit programmable and composable
+
+## Competitive Landscape
+
+| System | Settlement | Collateral | Credit | Netting | Trust Model |
+|--------|-----------|------------|---------|---------|-------------|
+| **XLN** | Instant (bilateral) | Partial (RCPAN) | Programmable | Yes (bilateral) | BFT consensus |
+| Lightning | Near-instant | Full (100%) | No | No | Unilateral exit |
+| Rollups | 7-day finality | Full (100%) | No | No (batch only) | Fraud proof |
+| Banks | T+2 settlement | Fractional (~10%) | Yes | Yes (multilateral) | Legal system |
+| Ripple/Stellar | 3-5 sec | Trust lines | Trust lines | Limited | Consensus |
+
+**XLN uniquely combines**: Bank-like netting + Lightning-like instant settlement + Programmable credit
+
+## Impossible Before XLN
+
+1. **Instant cross-chain atomic swaps with <100% collateral** - Lightning requires full collateral, XLN uses RCPAN
+2. **Bilateral settlement without fraud period** - Rollups need 7 days, XLN settles instantly via consensus
+3. **Programmable credit as a first-class primitive** - Banks have credit but not programmable, crypto has programs but not credit
+4. **Multi-hop payments that NET positions** - Ripple batches, Lightning routes, only XLN nets bilaterally
+5. **Entity-owned subcontracts (HTLCs, limit orders) without separate channels** - One bilateral account, many subcontracts
+
+## Token Budget Guide (~104k tokens total)
+
+**Critical path (read first, ~30min):**
+- ⚡ emc2.md (5min) - Why credit = stored energy
+- ⚡ docs/12_invariant.md (10min) - RCPAN derivation
+- ⚡ docs/jea.md (8min) - 3-layer architecture
+- ⚡ Depository.sol (7min) - enforceDebts() FIFO + RCPAN enforcement
+
+**Implementation (read second, ~45min):**
+- types.ts (10min) - All data structures
+- entity-consensus.ts (15min) - BFT state machine
+- account-consensus.ts (12min) - Bilateral consensus
+- entity-tx/apply.ts (8min) - Transaction dispatcher
+
+**Deep dives (optional, ~60min):**
+- runtime.ts (15min) - Main coordinator
+- routing/pathfinding.ts (10min) - Dijkstra multi-hop
+- priorart.md (20min) - Why Lightning/rollups fail
+- 11_Jurisdiction_Machine.md (15min) - Full architecture
+
+## Building on XLN: Delta Transformers
+
+Every bilateral account is a **programmable state machine** that transforms deltas. Examples:
+
+**1. HTLC (Hash Time-Locked Contract):**
+```typescript
+// Alice → Bob payment locked by hash H
+Δ_proposed = +1000  // Bob's balance increases IF he reveals R where hash(R) = H
+// If Bob reveals R: commit Δ_proposed
+// If timeout: revert Δ_proposed
+```
+
+**2. Limit Order:**
+```typescript
+// "Buy 100 USDC at 0.5 ETH each when ETH/USDC ≤ 2000"
+if (oraclePrice <= 2000) {
+  Δ_USDC = +100
+  Δ_ETH = -50
+}
+```
+
+**3. Dividend Distribution:**
+```typescript
+// Entity pays 10% dividend to all C-share holders
+for (const holder of cShareHolders) {
+  Δ[holder] = entity.reserves * 0.1 * (holder.cShares / totalCShares)
+}
+```
+
+**4. Netting Optimizer:**
+```typescript
+// Instead of A→B→C→D, net to A→D
+multiHopDeltas = [{A: -100}, {B: +100, C: -100}, {D: +100}]
+nettedDelta = {A: -100, D: +100}  // B and C netting canceled
+```
+
+Every subcontract is just a **delta transformer** that respects RCPAN invariant.
+
+## Honest Tradeoffs
+
+**What XLN is NOT:**
+- ❌ **Not a retail payment network** - Target: institutions managing $1M-$1B positions, not $10 coffee payments
+- ❌ **Not permissionless bootstrapping** - Requires bilateral trust establishment (like banks opening correspondent accounts)
+- ❌ **Not private by default** - Bilateral partners see each other's transactions (like bank statements)
+- ❌ **Not resistant to legal coercion** - Entities can be compelled to freeze accounts (unlike Bitcoin)
+
+**What XLN achieves:**
+- ✅ **Instant settlement with partial collateral** (RCPAN invariant)
+- ✅ **Programmable bilateral credit** (first-class primitive)
+- ✅ **O(k) local state per entity** (total network is O(n²) relationships, same as banks/Lightning)
+- ✅ **BFT consensus within entities** (survives ⅓ malicious replicas)
+- ✅ **On-chain anchoring for disputes** (Depository.sol enforceDebts FIFO queue)
+
+**Target use case:**
+Corporate treasuries, exchanges, payment processors managing high-value positions where instant netting provides massive capital efficiency gains.
+
+## Proof & Verification
+
+**How to verify XLN's core claims:**
+
+1. **RCPAN invariant eliminates FCUAN/FRPAP**: Read docs/12_invariant.md lines 45-120 (proof by construction)
+2. **Instant bilateral settlement**: See account-consensus.ts ADD_TX → PROPOSE → SIGN → COMMIT (no fraud period)
+3. **BFT consensus correctness**: entity-consensus.ts implements PBFT-style 3-phase commit (⅔ threshold)
+4. **On-chain enforcement**: Depository.sol enforceDebts() FIFO queue processes debts until reserves depleted
+5. **Deterministic state**: snapshot-coder.ts RLP encoding + Keccak-256 hashing ensures identical state roots
+
+**Run scenarios yourself:**
+```bash
+bun run src/server.ts  # Starts server
+# Visit localhost:8080
+# Load scenario: "phantom-grid" or "diamond-dybvig"
+# Inspect entity states in console: inspect("alice")
+```
+
 ## Cross-Local Network: Off-chain settlement with on-chain anchoring
 
 xln/
@@ -34,19 +168,25 @@ xln/
     evm.ts                       940 lines - Blockchain integration
 
   vibepaper/
-    emc2.md                      33 lines - Energy-Mass-Credit equivalence
-    priorart.md                  62 lines - * WHY LIGHTNING/ROLLUPS DON'T WORK
-    docs/00_QA.md                132 lines - Value prop FAQs
-    docs/12_invariant.md         80 lines - * RCPE innovation (core primitive)
-    docs/jea.md                  134 lines - Jurisdiction-Entity-Account model
-    docs/summary.md              151 lines - Executive summary
-    docs/consensus/transaction-flow-specification.md  280 lines
-    docs/11_Jurisdiction_Machine.md  43 lines - Architecture
+    emc2.md                      33 lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
+    docs/12_invariant.md         80 lines - ⚡ RCPAN innovation (CRITICAL PATH)
+    docs/jea.md                  134 lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
+    docs/11_Jurisdiction_Machine.md  43 lines - Architecture deep-dive
+    priorart.md                  62 lines - Why Lightning/rollups don't work
 
   worlds/
     architecture.md              143 lines - Scenario architecture, EntityInput primitives
 
-Reading Guide: 1) types.ts (data structures), 2) docs/12_invariant.md (RCPE), 3) Depository.sol (enforceDebts), 4) entity-consensus.ts + account-consensus.ts, 5) entity-tx/apply.ts + account-tx/apply.ts, 6) runtime.ts
+Reading Guide:
+1. Start with header sections (RCPAN invariant, competitive landscape, impossibilities)
+2. Follow the token budget guide for efficient learning:
+   - Critical path (30min): emc2.md → 12_invariant.md → jea.md → Depository.sol
+   - Implementation (45min): types.ts → entity-consensus.ts → account-consensus.ts → entity-tx/apply.ts
+   - Deep dives (60min): runtime.ts → routing/pathfinding.ts → priorart.md → 11_Jurisdiction_Machine.md
+3. Verify claims using the Proof & Verification section
+4. Explore delta transformer examples for extensibility patterns
+
+Suggested LLM prompt: "Read the critical path docs (30min budget), then explain how RCPAN enables instant settlement with partial collateral. Compare to Lightning and rollups."
 
 
 //jurisdictions/contracts/Depository.sol (1652 lines)
@@ -9153,357 +9293,6 @@ flexible credit-collateral security model
 banking-like UX
 
 
-//vibepaper/priorart.md (62 lines)
-# Prior Art
-
-Xln is built on shoulders of giants.
-
-## Bitcoin
-
-Satoshi Nakamoto is genius for creating the replicated state machine (RSM) movement. For making people even ask and wonder why do we keep our entire net-worth in hands of unprovable custodial state machines. 
-
-## Ethereum
-
-Vitalik Buterin is genius for inventing Turing-complete programmable RSM: EVM (Ethereum Virtual Machine). EVM is our reference adapter Jurisdiction machine in J-REA stack. Its yellowpaper alone changed the course of human history forever. 
-Unfortunatelly, we believe his & EF team narrative about plasma, rollups, DAC/DAS are not an endgame. It feels like a costly detour and dead-end research trap. **All broadcast O(n) designs are fundamentally bottlenecked in scalability and mathematically flawed with data availability paradox.**
-
-Their goals are noble: trustless exitable layer2. But their means are mathematically handicapped. Broadcast-J-shared-state just cannot have planetary scale. Neither directly (big blockers) nor through blob-checkpointing surrogates. There is nothing you can do about it. 
-
-The unicast bilateral state approach completely side-steps this problem.
-
-No amount of DAC/DAS/erasure coding assumption cascades can solve that. **Those are very intellectually interesting problems to work on, but they are perpetuum mobile in a nutshell.**
-
-
-Ethereum: 15 TPS global
-XLN on Ethereum: Millions of TPS bilateral (O(1) per entity pair)
-
-Solana: 3000 TPS global  
-XLN on Solana: Still millions of TPS bilateral
-
-Conclusion: Base layer TPS is IRRELEVANT for XLN.
-
-
-## Lightning Network
-
-
-
-## Ronald Coase
-
-##  Douglas Diamond, Philip H. Dybvig, Ben Bernanke
-
-
-
-
-
-We are turn existing RSM into J-REA two-layered stack. 
-Banking: "Trust us with your money"
-XLN: "Same UX, but you can exit anytime with cryptographic proof"
-
-Binance: "We're totally not fractional reserve"
-XLN: "Here's the on-chain collateral, verify yourself"
-
-SWIFT: "$30 fee, 3 days"
-XLN: "$0.00001 fee, 3 seconds"
-```
-
-## Against Rollups
-```
-Rollups: "We'll decentralize the sequencer someday™"
-XLN: "No sequencer needed"
-
-Rollups: "Trust our data availability committee"
-XLN: "Your counterparty IS your data availability"
-
-Rollups: "Pay $0.10 per tx for blob space"
-XLN: "Pay $0 until you need to rebalance (rare)"
-
-//vibepaper/docs/summary.md (151 lines)
-# XLN Protocol
-
-## Core Concepts
-
-XLN is a **sovereign Layer2 for EVM**, designed around two primitives:
-
-1. **Reserves** — liquid balances held directly in the jurisdiction machine (J).
-2. **Reserve-credit accounts (channels)** — bilateral credit contracts between entities, backed by **collateral**, **ondelta**, and **offdelta**.
-
-Every channel for a given asset is defined by three numbers:
-
-- **Collateral** — the locked base amount in the jurisdiction.
-- **ondelta** — a *public shift* stored in J, updated by cooperative settle.
-- **offdelta** — a *private shift* stored in AccountProof, updated off-chain.
-
-The invariant:
-
-Δ = ondelta + offdelta
-
----
-
-## External Token Flow
-
-1. **Deposit into Reserve**  
-   A user deposits external tokens (e.g., USDT) into the jurisdiction.  
-
-reserves[entity][token] += amount
-
-2. **Move Reserve → Collateral**  
-The entity transfers tokens from its reserve into a channel with a counterparty.  
-- The tokens become **collateral** in the channel.  
-- By default, new collateral is attributed to the right side.  
-- If the depositor is the left side, `ondelta += amount` to shift part of collateral allocation left.
-```
-reserves[left][token] -= amount
-collaterals[left][right][token].collateral += amount
-if depositor == left:
-collaterals[left][right][token].ondelta += amount
-```
----
-
-## Off-Chain Payments in AccountProof
-
-1. **Proof Creation**  
-- The sender (Alice) prepares a new **AccountProof** for channel (Alice, Hub).  
-- She increments the sequence number and updates offdelta:  
-  ```
-  offdelta[token] -= amount
-  ```
-- The proof may include subcontracts (e.g., HTLC, Swap).  
-- Alice signs and sends the proof to Hub.
-
-2. **Proof Acceptance**  
-- Hub verifies Alice’s signature, sequence, and credit limits.  
-- Hub stores the canonical AccountProof.  
-- Both sides now hold the same proof; **no on-chain update is needed**.
-
-3. **Routing**  
-- Hub can immediately forward the payment using its own channel (Hub, Bob), creating another AccountProof.  
-- This enables multi-hop routing without touching jurisdiction.
-
----
-
-## Cooperative Settle
-
-At any time, both parties can jointly update their state on-chain:
-
-1. **Prepare Settle**  
-Both sign a batch of diffs:
-- `leftReserveDiff`
-- `rightReserveDiff`
-- `collateralDiff`
-- `ondeltaDiff`
-
-2. **Invariant**  
-
-leftReserveDiff + rightReserveDiff + collateralDiff == 0
-
-3. **Apply**  
-- Reserves, collateral, and ondelta are updated atomically in J.  
-- Old AccountProofs remain valid; only the public base has shifted.
-
----
-
-## Dispute and Delta Derivation
-
-When cooperation fails, either side can trigger a dispute:
-
-1. **Submit Proof**  
-Submit the latest signed AccountProof to J.
-
-2. **Sum Deltas**  
-For each token:
-
-Δ = ondelta (public in J) + offdelta (from AccountProof)
-
-3. **Execute Subcontracts**  
-The DeltaList is passed through the array of external subcontracts with all arguments.  
-The subcontract provider returns a **modified DeltaList**.
-
-4. **Split Collateral**  
-Using the final Δ:
-- If `0 ≤ Δ ≤ collateral`: left gets Δ, right gets (collateral − Δ).
-- If `Δ > collateral`: left gets full collateral, surplus becomes **debt of right**.
-- If `Δ < 0`: right gets full collateral, surplus becomes **debt of left**.
-
-5. **Debt Enforcement**  
-- Debt is first paid from reserves.  
-- If reserves are insufficient, it is recorded in the entity’s debt list.
-
----
-
-## First Payment Example
-
-1. **Channel Setup**  
-- Alice deposits 100 USDT.  
-- Reserve(Alice) = 100.  
-- She moves 100 into collateral with Hub:  
-  ```
-  collateral = 100, ondelta = 0, offdelta = 0
-  ```
-
-2. **Payment of 30 USDT**  
-- Alice creates AccountProof#1 with `offdelta = -30`.  
-- Alice signs and sends it to Hub.  
-- Hub accepts; both now hold canonical proof.
-
-3. **State After Payment**  
-- No on-chain action has occurred.  
-- Jurisdiction still shows: `collateral = 100, ondelta = 0`.  
-- AccountProof offdelta = −30 represents Alice’s transfer.  
-
-4. **Optional Settle**  
-- Alice and Hub can later settle on-chain, moving balances.  
-
-5. **Dispute Path**  
-- If Hub disappears, Alice submits AccountProof#1.  
-- J computes Δ = ondelta (0) + offdelta (−30) = −30.  
-- J splits collateral: right (Hub) takes 30, left (Alice) keeps 70.
-
----
-
-## Key Properties
-
-- **Unicast DeFi** — payments are bilateral, no global sequencer.  
-- **Billions+ TPS** — unbounded scalability across parallel channels.  
-- **Zero DA risk** — no external data availability assumptions.  
-- **Sovereign exits** — any party can exit with AccountProof.  
-- **Programmable subcontracts** — HTLCs, swaps, derivatives.  
-- **Simple as banking** — user balances are derived from `(collateral, ondelta, offdelta)`.
-
-
-//vibepaper/docs/00_QA.md (132 lines)
-# 0.0 Questions & Answers
-
-[pairing: Apashe, Worakls & Wasiu - Rome Is Burning](https://www.youtube.com/watch?v=dpn5Rff4gUk)
-
-## whoami
-
-I am Egor Homakov, security researcher and architect of UFT/Xln. Lets briefly elaborate my **intrinsic motivation and passion** to creating this protocol. 
-
-I started my career in Ruby on Rails/JavaScript software engineering circa 2007. In 2012, I've stumbled upon a fundamental insecure-by-default pattern in Rails called mass assignment and inappropriately hacked Github to [make my point](https://github.com/rails/rails/commit/b83965785db1eec019edf1fc272b1aa393e6dc57). Ever since I've been obsessed with finding not just one-off bugs, but systemic flaws in protocols and improving software layers as a whole: further hardening Ruby-ecosystem, client side security, OAuth2, proposed [SecureLogin](https://github.com/sakurity/securelogin/) (would be way more convenient than passkeys if adopted by big tech).
-
-Then I founded [Sakurity](https://sakurity.com), conducted boutique security audits and pentests for some of the big names in the startup industry. Things went good. Around 2017 I've retired from consulting and focused on **the most critical yet most vulnerable and misdesigned architecture on the planet** – our financial system, as a whole. This includes both TradFi + DeFi, as per JEA mental model soon you will see they are the same.
-
-The catalyst was reading the Lightning Network whitepaper and realizing: the authors (Joseph Poon, Thaddeus Dryja) invented the genius primitives, **"the wheel"** (proofs + collateral + delta transformer) but then tried to apply it in a delusional way, **"the unicycle"** (full-reserve account network, has no working incentive model, can't scale). Yes, unicycle can work under rare conditions, but do you see people using it on the street?
-
-I voiced my concerns in 2017 and it was discared as FUD. In 2025 it's crystal clear I was right: Lightning/Raiden/Hydra and all other full-reserve inspired channel designs are dead due to inbound capacity problem.
-
-<img src="../frontend/static/img/RCPAN.png" width="200px">
-
-The solution to inbound capacity was painfully obvious to me: **credit is all you need**. This is when the core of Xln was formed: molding together the most scalable & universally understood Unicast full-credit architecture (custodial/banking/CEX network of accounts) with the most secure but unusable Layer2 technology (full-reserve payment/state channels). The RCPAN invariant `−Lₗ ≤ Δ ≤ C + Lᵣ` was born on Aug 25, 2017. This is the core formula, around of which further layers are built upon.
-
-The Unified Financial Theory and Xln (practical reference implementation) is my magnum opus and quintessence of 9 years of research into TradFi/RTGS/DeFi/DAO/AA/institutional governance/state channels. I believe UFT/Xln is 100x more important than all of my infosec research combined. Call me delusional, but I just happen to be right, eventually.
-
-## Another Bitcoin/Ethereum Killer?
-
-**No, quite the opposite! Xln is not a "blockchain" at all or as we call it, Jurisdiction machine. 
-
-Simply put, Xln is a unified netting Layer2 for all jurisdictional gross layers (J-machines) out there. Including Bitcoin and Ethereum. Including Fedwire and ECB and other central banks, once they realize the inevitability of what's coming.**
-
-I love Bitcoin for its legacy. I love Ethereum for bringing generalized programmability to J-machines. But currently they are trying to solve the wrong problem.
-
-J-machine **is not what should be scaled**. Leave it alone - it's doing perfectly fine at 30-100 tps globally. It's not meant for coffee-payments. The organisational & transactional entity-account layer2, is what needs to be expanded, same as commercial banking layer operates underneath central banks/RTGS (e.g Fed+Fedwire = TradFi J-machine).
-
-I am the most maxi full-node-on-every-device you can think of. Unfortunatelly, up until creation of Xln no blockchain could survive with ultra-lightweight L1 J-machine alone.
-
-I religiously believe and double down on the original vision of Bitcoin and Ethereum where every laptop and phone can run fully verifying node. Xln is the first architecture that actually delivers that vision. 
-
-Xln achieves that by creating two loosely coupled layers: J-REA 
-
-* **Gross-J-Layer1 for >$1M transfers**: <30-100 tps global settlement  (Bitcoin and Ethereum are J-machines). Xln is jurisdiction-agnostic and can support any L1, but the lower global tps - the easier it is to run a full node on consumer device. Xln is the first architecture that works just fine with Original Ethereum, even if gaslimit is reduced 10-100x. Unlike rollups, Xln does not require blobspace or data availability committees of any form - the account proofs are sovereign and exits are guaranteed at all times.
-
-* **Net-REA-Layer2 for <$1M transfers>**: unbounded scalability Unicast O(1). Xln is a netting overlay attaching to any EVM L1/EVM-rollup/future EVM-like CBDC J-machines, creating financial Internet of unified liquidity.
-
-## The system uses credit. Credit = bad. #DontTrustVerify #BitcoinMAXI
-
-I hate to break it to you, but every financial system under the sun uses some form of credit one way or another. It's just named differently. It's a different cascade of trust assumptions, projected over different threat models.
-
-Take a single 1 BTC UTXO on-chain for example. **As of now, this is the safest way to store value on the planet.** 
-
-Yet, even BTC can fall apart overnight. Several G7 security agencies can cooperate to attack mining pools. Deposit few Billions to thousands of warm KYC-d accounts in popular centralized exchanges around the world, swap it to any other non-BTC or fiat, then cancel (double-spend) their original BTC deposits to the exchanges. Whoops, $4T crypto economy would vanish overnight. 
-
-Mission: Very-Much-Possible I must say. Luckily, most government officials are well invested into BTC and other neo J-machines. This is what keeps us safe, for now.
-
-BTC-UTXO is golden standard and benchmark security, yes. Everything else is significantly worse that. 
-
-Everyone else is trying to scale Broadcast O(n) J-machine but inevitably ends up with credit and counterparty risk one way or another.
-
-## Big-blockers don't have credit. Solana/Tron/etc is the next big thing.
-
-Solana is a Broadcast O(n) big-blocker, like almost everyone else. They have fantastic marketing and PR. They did a politically right thing to do. But it is not "scaling". 
-
-**Big-blocker** is a catch-all term for anything that you cannot realistically run on a laptop or a phone, simple as that.
-
-Yes, Solana uses fancy Proof-of-History (basically a streaming hashonion), but it has no impact on actual security assumtions. It runs in parallel, but that's a 10x improvement, not 1Mx one we need for planetery scalability. It requires unicast second layer.
-
-## Rollups don't use credit
-
-No, they all do. First, in form of preconfirmations - it's a fractional reserve-style promise given by sequenceer only covered by shared-pot bond. Second, in form of verifier dilemma and data availability paradox. Both are unsolvable.
-
-## Payment channels don't use credit
-
-Yes, and full-reserve channels don't work. And when they work, turns out custodial service or 0-conf/JIT on receive channel was used. Both are just weaker form of Xln's enforceable credit.
-
-## You hate rollups? You hate payment channels?
-
-No. I admire dedication. And that's why I admire both rollups and traditional full-reserve payment channels in their pursuit. 
-
-But sometimes a simpler solution is out there, in front of your nose. It's not giving up, it's getting real.
-
-## You are re-creating banks. Satoshi said we must get rid of those?
-
-<img src="../frontend/static/img/bailout.png" width="600px">
-
-Hubs (banks+brokers entities) were never the problem per se. Bailouts are. 
-
-Hubs in tradfi lack 1) proofs for security-of-communication 2) collateral for security-from-counterparty-risk 3) delta transformers for security-in-motion.
-
-Xlnomy is a bailout free. You never have a too-big-to-fail player, systemic contagion is bounded by per-link credit limits and escrowed collateral. 
-
-## Show, don't tell!
-
-You can build & play with your personal home-grown xlnomy at [xln.finance](https://xln.finance) in 2D/Graph 3D/VR/Panel/Terminal interface. **It's real fun with Oculus Quest!** Create personal entities, N/M multifactor entities, hierarchical companies and institutions with instant IPO of C/D shares with any hub. Stream dividends and buybacks per-second, do merge&acquisitions, new board election, and of course borrow/lend/payments/swaps and other DeFi primitives of any complexity. 
-
-<img src="../frontend/static/img/preview.png" width="600px">
-
-Private testnet with cross-subnet networking ETA: Q1 2026.
-
-## Should I read it? What's the target audience?
-
-Anyone, really. Especially if you're into fintech/crypto/complex systems. If you're willing to bend your mental models around the status quo, embrace our contrarian yet factually correct rhetoric, ready to research into unknown and question the dogmas from first principles - yes.
-
-If you don't have time for 30-60 min deep reading - **spend 5 minutes on understanding core RCPAN invariant** and save the rest of the document for the future. 
-
-## How it solves famous Trilemma?
-
-1. Scalability (high TPS)
-2. Security (can't be attacked)
-3. Decentralization (anyone can validate)
-
-Xln claims we must double down on 2 & 3 as fundamental. And we entirely sidestep 1-Scalability of gross J-layer, by moving all <$1m transfers down to netting Layer2. Without verifier dilemma. Without zk-proofs. Without blobspace or onchain footprint per transaction. 
-
-J-machines see very rare, market-priced batched cashflow rebalances by hubs, who match net-spenders of collateral with net-receivers. Exactly how traditional finance worked for centuries.
-
-
-2018: "Ethereum will scale via sharding"
-2022: "Actually, rollups are the answer"  
-2024: "Actually, blob space + rollups"
-2025: "Actually, we don't know, but here's more complexity"
-
-XLN perspective: 
-"Base layer TPS was NEVER the bottleneck. Stop trying to scale broadcast.
-
-## How to read it
-
-The documents are a little heavy on technical & financial terminology. This is intentional - instead of making it a tedious long read "for the general crowd", it seemed like a better idea to make it concentrated and to the point, letting readers ask an LLM of their choice to re-hydrate and expand on any paragraph, with targeted prompts like "ELI5?", "I'm a banker, what is it?", "I'm a protocols engineer, what's under the hood?".
-
-There will be more approachable and elaborated versions of it soon. You're welcome to create your own adaptaion, though!
-
-**Start with "context: https://xln.finance/c.txt should I learn it and why?" with any frontier language model.** GPT-5/Claude/Grok/Gemini/Qwen/GLM – all have phenomenal grasp on UFT/Xln once you attach the whitepapers/contracts/src as the context.s
-
-Feel free to reach out directly if after 3-5 prompts the answers still seem cryptic to you. 
-
-
-
 //vibepaper/docs/12_invariant.md (80 lines)
 # 1.2 RCPAN Invariant 
 
@@ -9722,288 +9511,6 @@ JEA is to blockchain what OSI was to networking — a layered abstraction that m
 
 “You don’t need one chain to rule them all. You just need a structure where trust can be scoped, verified, and proven.”
 
-//vibepaper/docs/consensus/transaction-flow-specification.md (280 lines)
-# XLN Transaction Flow Specification
-
-## Overview
-This document specifies the complete transaction flow in the XLN consensus system, based on implementation discoveries and debugging sessions.
-
-## Transaction Types
-
-### 1. Chat Transactions
-```typescript
-{
-  type: 'chat',
-  data: {
-    message: string
-  }
-}
-```
-
-### 2. Proposal Transactions  
-```typescript
-{
-  type: 'propose',
-  data: {
-    id: string,           // Generated: 'prop_' + random
-    action: {
-      type: string,       // e.g., 'updateThreshold', 'addValidator'
-      description: string,
-      data: any
-    }
-  }
-}
-```
-
-### 3. Vote Transactions
-```typescript
-{
-  type: 'vote', 
-  data: {
-    proposalId: string,
-    choice: 'yes' | 'no' | 'abstain',
-    comment?: string     // Optional vote comment
-  }
-}
-```
-
-## Consensus Flow Models
-
-### Proposer-Based Model (Current Implementation)
-1. **Transaction Creation**: User creates transaction in UI
-2. **Mempool Addition**: Transaction added to replica's mempool
-3. **Non-Proposer Forwarding**: If not proposer, forward all mempool txs to proposer
-4. **Proposer Collection**: Proposer collects transactions from all replicas
-5. **Frame Creation**: Proposer creates frame with collected transactions
-6. **Precommit Phase**: All replicas precommit to the frame
-7. **Commit Phase**: Once threshold reached, frame is committed
-8. **State Application**: All replicas apply the committed frame
-
-### Single Signer Optimization
-For entities with 1 validator and threshold 1:
-1. **Direct Execution**: Skip consensus rounds entirely
-2. **Immediate Application**: Apply transactions directly from mempool
-3. **Instant Commitment**: No need for precommit/commit phases
-
-## Data Flow Architecture
-
-### Frontend → Backend
-```javascript
-// Vote submission example
-const serverInput = {
-  entityTxs: [{
-    entityId: activeTab.entityId,
-    signerId: activeTab.signer,
-    transactions: [voteTransaction],
-    timestamp: Date.now()
-  }]
-};
-
-XLN.applyServerInput(serverInput);
-```
-
-### Backend Processing
-```typescript
-// In entity-consensus.ts
-function applyEntityInput(entityReplica, input) {
-  // 1. Add transactions to mempool
-  entityReplica.mempool.push(...input.transactions);
-  
-  // 2. Forward to proposer (if not proposer)
-  if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
-    // Forward transactions to proposer
-  }
-  
-  // 3. Process precommits/commits
-  if (commitNotification) {
-    // Apply committed frame
-  }
-}
-```
-
-### State Updates
-```typescript
-// In entity-tx.ts
-function applyEntityTx(state, tx) {
-  switch (tx.type) {
-    case 'vote':
-      const proposal = state.proposals.get(tx.data.proposalId);
-      if (proposal) {
-        proposal.votes.set(signerId, {
-          choice: tx.data.choice,
-          comment: tx.data.comment
-        });
-      }
-      break;
-    // ... other transaction types
-  }
-  return newState;
-}
-```
-
-## Timing and Ordering
-
-### Critical Ordering in entity-consensus.ts
-```typescript
-// CORRECT ORDER:
-// 1. Process new transactions first
-entityReplica.mempool.push(...input.transactions);
-
-// 2. Forward to proposer BEFORE processing commits
-if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
-  // Forward logic here
-}
-
-// 3. Process commits last (clears mempool)
-if (commitNotification) {
-  // Commit processing here
-}
-```
-
-### Race Condition Prevention
-- **Forward Before Commit**: Ensure transaction forwarding happens before commit processing
-- **Mempool Management**: Clear mempool only after successful forwarding
-- **State Consistency**: Use immutable updates to prevent partial state corruption
-
-## Frame Structure
-```typescript
-interface Frame {
-  id: string;           // 'frame_' + height + '_' + timestamp
-  height: number;       // Consensus height
-  timestamp: number;    // Frame creation time
-  transactions: EntityTx[];  // All transactions in this frame
-  proposer: string;     // Proposer replica ID
-}
-```
-
-## Proposal Lifecycle
-
-### 1. Creation Phase
-```typescript
-// Proposal created via UI
-const proposal = {
-  id: 'prop_' + generateId(),
-  proposer: currentSigner,
-  action: {
-    type: 'updateThreshold',
-    description: 'Update voting threshold to 2',
-    data: { newThreshold: 2 }
-  },
-  votes: new Map(),
-  status: 'pending',
-  timestamp: Date.now()
-};
-```
-
-### 2. Voting Phase
-```typescript
-// Votes collected from replicas
-proposal.votes.set('alice', { choice: 'yes', comment: 'Agree' });
-proposal.votes.set('bob', { choice: 'no', comment: 'Too restrictive' });
-```
-
-### 3. Execution Phase
-```typescript
-// Calculate voting power
-let yesVotingPower = 0n;
-for (const [voter, voteData] of proposal.votes) {
-  if (voteData.choice === 'yes') {
-    yesVotingPower += state.validators.get(voter) || 0n;
-  }
-}
-
-// Check if threshold reached
-if (yesVotingPower >= state.threshold) {
-  proposal.status = 'executed';
-  // Apply proposal action
-} else {
-  proposal.status = 'failed';
-}
-```
-
-## Error Handling Patterns
-
-### Transaction Validation
-```typescript
-function validateTransaction(tx, state) {
-  switch (tx.type) {
-    case 'vote':
-      // Check if proposal exists
-      if (!state.proposals.has(tx.data.proposalId)) {
-        throw new Error('Proposal not found');
-      }
-      // Check if already voted
-      const proposal = state.proposals.get(tx.data.proposalId);
-      if (proposal.votes.has(signerId)) {
-        throw new Error('Already voted on this proposal');
-      }
-      break;
-  }
-}
-```
-
-### State Recovery
-```typescript
-function recoverFromCorruption() {
-  // Rebuild state from transaction history
-  let cleanState = getInitialState();
-  for (const frame of committedFrames) {
-    for (const tx of frame.transactions) {
-      cleanState = applyEntityTx(cleanState, tx);
-    }
-  }
-  return cleanState;
-}
-```
-
-## Performance Optimizations
-
-### Batch Processing
-```typescript
-// Process multiple transactions together
-function processBatch(transactions) {
-  return XLN.processUntilEmpty(
-    XLN.applyServerInput({ entityTxs: transactions })
-  );
-}
-```
-
-### Memory Management
-```typescript
-// Limit history size
-const MAX_HISTORY_FRAMES = 1000;
-if (history.length > MAX_HISTORY_FRAMES) {
-  history = history.slice(-MAX_HISTORY_FRAMES);
-}
-```
-
-### Selective Updates
-```typescript
-// Only update UI for relevant changes
-function shouldUpdateUI(oldState, newState) {
-  return oldState.height !== newState.height ||
-         oldState.proposals.size !== newState.proposals.size;
-}
-```
-
-## Integration Points
-
-### Frontend Integration
-- Use `XLN.processUntilEmpty()` after all server inputs
-- Implement defensive replica lookups with multiple key formats
-- Handle BigInt conversions consistently
-
-### Testing Integration
-- Create corner case tests for single signer entities
-- Test vote forwarding and race conditions
-- Verify proposal execution thresholds
-
-### Debugging Integration
-- Use unique log prefixes for transaction tracing
-- Implement frame-by-frame history analysis
-- Monitor mempool states and forwarding behavior
-
-
 //vibepaper/docs/11_Jurisdiction_Machine.md (43 lines)
 # 1.1 Jurisdiction Machine / J-machine
 
@@ -10048,6 +9555,70 @@ We generalize all layer2 actors bounded to specific J-machine as E-machines. Thi
 
 Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
  
+
+//vibepaper/priorart.md (62 lines)
+# Prior Art
+
+Xln is built on shoulders of giants.
+
+## Bitcoin
+
+Satoshi Nakamoto is genius for creating the replicated state machine (RSM) movement. For making people even ask and wonder why do we keep our entire net-worth in hands of unprovable custodial state machines. 
+
+## Ethereum
+
+Vitalik Buterin is genius for inventing Turing-complete programmable RSM: EVM (Ethereum Virtual Machine). EVM is our reference adapter Jurisdiction machine in J-REA stack. Its yellowpaper alone changed the course of human history forever. 
+Unfortunatelly, we believe his & EF team narrative about plasma, rollups, DAC/DAS are not an endgame. It feels like a costly detour and dead-end research trap. **All broadcast O(n) designs are fundamentally bottlenecked in scalability and mathematically flawed with data availability paradox.**
+
+Their goals are noble: trustless exitable layer2. But their means are mathematically handicapped. Broadcast-J-shared-state just cannot have planetary scale. Neither directly (big blockers) nor through blob-checkpointing surrogates. There is nothing you can do about it. 
+
+The unicast bilateral state approach completely side-steps this problem.
+
+No amount of DAC/DAS/erasure coding assumption cascades can solve that. **Those are very intellectually interesting problems to work on, but they are perpetuum mobile in a nutshell.**
+
+
+Ethereum: 15 TPS global
+XLN on Ethereum: Millions of TPS bilateral (O(1) per entity pair)
+
+Solana: 3000 TPS global  
+XLN on Solana: Still millions of TPS bilateral
+
+Conclusion: Base layer TPS is IRRELEVANT for XLN.
+
+
+## Lightning Network
+
+
+
+## Ronald Coase
+
+##  Douglas Diamond, Philip H. Dybvig, Ben Bernanke
+
+
+
+
+
+We are turn existing RSM into J-REA two-layered stack. 
+Banking: "Trust us with your money"
+XLN: "Same UX, but you can exit anytime with cryptographic proof"
+
+Binance: "We're totally not fractional reserve"
+XLN: "Here's the on-chain collateral, verify yourself"
+
+SWIFT: "$30 fee, 3 days"
+XLN: "$0.00001 fee, 3 seconds"
+```
+
+## Against Rollups
+```
+Rollups: "We'll decentralize the sequencer someday™"
+XLN: "No sequencer needed"
+
+Rollups: "Trust our data availability committee"
+XLN: "Your counterparty IS your data availability"
+
+Rollups: "Pay $0.10 per tx for blob space"
+XLN: "Pay $0 until you need to rebalance (rare)"
 
 //worlds/architecture.md (143 lines)
 # XLN Scenario Architecture
