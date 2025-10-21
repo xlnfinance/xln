@@ -190,16 +190,13 @@ contract Depository is Console {
 
   constructor() {
     _tokens.push(bytes32(0));
-    
+
     // empty record, hub_id==0 means not a hub
     _hubs.push(Hub({
       entityId: bytes32(0),
       uri: '',
       gasused: 0
     }));
-    
-    // DEBUG: Prefund top 1000 entities for testing
-    debugBulkFundEntities();
   }
   
   function getTokensLength() public view returns (uint) {
@@ -445,12 +442,17 @@ contract Depository is Console {
   function settle(bytes32 leftEntity, bytes32 rightEntity, SettlementDiff[] memory diffs) public returns (bool) {
     require(leftEntity != rightEntity, "Cannot settle with self");
     require(leftEntity < rightEntity, "Entities must be in order (left < right)");
-    
+
+    // Access control: Only the entities involved can settle (or processBatch calling internally)
+    bytes32 msgSenderEntity = bytes32(uint256(uint160(msg.sender)));
+    bool isInternalCall = msg.sender == address(this);
+    require(
+      isInternalCall || msgSenderEntity == leftEntity || msgSenderEntity == rightEntity,
+      "Only involved entities can settle"
+    );
+
     // Simple channel key: hash of left and right entities converted to bytes
     bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
-    
-    // Comment out signature verification for development
-    // TODO: Re-enable signature verification in production
     
     for (uint j = 0; j < diffs.length; j++) {
       SettlementDiff memory diff = diffs[j];
@@ -852,7 +854,7 @@ contract Depository is Console {
     uint amount;
   }
   function reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
-    // enforceDebts(entity, params.tokenId); // DISABLED
+    enforceDebts(entity, params.tokenId);
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
     //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
@@ -888,8 +890,8 @@ contract Depository is Console {
     console.logUint(params.amount);
     console.log("reserveToReserve: sender balance");
     console.logUint(_reserves[entity][params.tokenId]);
-    
-    // enforceDebts(entity, params.tokenId); // DISABLED
+
+    enforceDebts(entity, params.tokenId);
 
     console.log("=== BALANCE CHECK ===");
     if (_reserves[entity][params.tokenId] >= params.amount) {
@@ -934,7 +936,7 @@ contract Depository is Console {
     uint256 amount,
     string calldata /* purpose */
   ) internal {
-    // enforceDebts(entity, internalTokenId); // DISABLED
+    enforceDebts(entity, internalTokenId);
 
     require(_reserves[entity][internalTokenId] >= amount, "Insufficient control shares");
     require(to != bytes32(0), "Invalid recipient");
