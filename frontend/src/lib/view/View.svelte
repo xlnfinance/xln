@@ -15,6 +15,7 @@
   import DepositoryPanel from './panels/DepositoryPanel.svelte';
   import ArchitectPanel from './panels/ArchitectPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
+  import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import 'dockview/dist/styles/dockview.css';
 
@@ -37,17 +38,30 @@
   onMount(async () => {
     console.log('[View] onMount started - initializing isolated XLN');
 
-    // Initialize isolated XLN runtime (simnet - no jurisdictions needed)
+    // Initialize isolated XLN runtime (simnet - BrowserVM mode)
     try {
+      // Step 1: Initialize BrowserVM (deploy EntityProvider + Depository in-browser)
+      const { browserVMProvider } = await import('./utils/browserVMProvider');
+      await browserVMProvider.init();
+      const entityProviderAddress = browserVMProvider.getEntityProviderAddress();
+      const depositoryAddress = browserVMProvider.getDepositoryAddress();
+
+      console.log('[View] BrowserVM ready:', { entityProviderAddress, depositoryAddress });
+
+      // Step 2: Load XLN runtime
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Step 3: Register BrowserVM jurisdiction (overrides DEFAULT_JURISDICTIONS)
+      XLN.setBrowserVMJurisdiction(entityProviderAddress, depositoryAddress, browserVMProvider);
+      console.log('[View] ✅ BrowserVM jurisdiction registered with browserVM instance');
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores
       const { xlnInstance } = await import('$lib/stores/xlnStore');
       xlnInstance.set(XLN);
 
-      // Create empty environment (simnet mode - no blockchain)
+      // Step 4: Create empty environment (simnet mode)
       const env = XLN.createEmptyEnv();
 
       // Set to isolated stores
@@ -55,6 +69,60 @@
       localHistoryStore.set([env]); // Initial snapshot
 
       console.log('[View] ✅ Isolated simnet environment ready');
+
+      // Auto-execute demo scenario after 2 seconds
+      setTimeout(async () => {
+        try {
+          console.log('[View] 🎬 Auto-executing demo scenario...');
+
+          const response = await fetch('/scenarios/auto-demo.scenario.txt');
+          if (!response.ok) {
+            console.warn('[View] Auto-demo scenario not found');
+            return;
+          }
+
+          let scenarioText = await response.text();
+
+          // Force numbered entities (on-chain registration)
+          scenarioText = scenarioText.replace(
+            /^(grid\s+\d+(?:\s+\d+)?(?:\s+\d+)?)(\s+.*)?$/gm,
+            (match, gridCmd, rest) => {
+              const cleanRest = rest ? rest.replace(/\s+type=\w+/, '') : '';
+              return `${gridCmd}${cleanRest} type=numbered`;
+            }
+          );
+
+          const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+          const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+          const parsed = XLN.parseScenario(scenarioText);
+
+          if (parsed.errors.length > 0) {
+            console.error('[View] Scenario parse errors:', parsed.errors);
+            return;
+          }
+
+          console.log('[View] Executing scenario with', parsed.scenario.events.length, 'events');
+
+          const result = await XLN.executeScenario(env, parsed.scenario);
+
+          if (result.success) {
+            console.log('[View] ✅ Auto-demo completed successfully');
+
+            // Update isolated stores with new state
+            localEnvStore.set(env);
+            const history = env.history || [];
+            localHistoryStore.set(history);
+            localTimeIndex.set(history.length - 1); // Jump to latest frame
+            localIsLive.set(true);
+          } else {
+            console.error('[View] Auto-demo failed:', result.error);
+          }
+        } catch (err) {
+          console.error('[View] ❌ Auto-demo execution failed:', err);
+        }
+      }, 2000);
+
     } catch (err) {
       console.error('[View] ❌ Failed to initialize XLN:', err);
     }
@@ -106,6 +174,15 @@
               isolatedEnv: localEnvStore
             }
           });
+        } else if (options.name === 'runtime-io') {
+          component = mount(RuntimeIOPanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         }
 
         // Return Dockview-compatible API
@@ -151,6 +228,13 @@
       id: 'console',
       component: 'console',
       title: '📋 Console',
+      position: { direction: 'within', referencePanel: 'depository' },
+    });
+
+    const runtimeIOPanel = dockview.addPanel({
+      id: 'runtime-io',
+      component: 'runtime-io',
+      title: '🔄 Runtime I/O',
       position: { direction: 'within', referencePanel: 'depository' },
     });
   });

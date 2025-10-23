@@ -250,7 +250,7 @@ function parseActionLine(
   }
 
   // Special actions without entity ID (keywords)
-  const KEYWORDS = ['VIEW', 'import', 'PAUSE', 'ASSERT', 'grid', 'payRandom'];
+  const KEYWORDS = ['VIEW', 'import', 'PAUSE', 'ASSERT', 'grid', 'payRandom', 'r2r'];
 
   // Check if this looks like an action:
   // 1. Starts with keyword (VIEW, import, etc.)
@@ -402,6 +402,59 @@ function parseActionLine(
       action: {
         type: 'payRandom',
         params,
+        sourceLineNumber: lineNumber,
+      },
+    };
+  }
+
+  // R2R command (reserve-to-reserve transfer)
+  // Format: r2r <fromEntityIndex> <toEntityIndex> <amount>
+  if (firstToken === 'r2r') {
+    const fromEntity = tokens[1];
+    const toEntity = tokens[2];
+    const amount = tokens[3];
+
+    if (!fromEntity || !toEntity || !amount) {
+      return {
+        isAction: false,
+        error: {
+          lineNumber,
+          message: 'r2r requires 3 parameters: fromEntity toEntity amount',
+        },
+      };
+    }
+
+    return {
+      isAction: true,
+      action: {
+        type: 'r2r',
+        params: [fromEntity, toEntity, amount],
+        sourceLineNumber: lineNumber,
+      },
+    };
+  }
+
+  // Fund command (add reserves to entity)
+  // Format: fund <entityIndex> <amount>
+  if (firstToken === 'fund') {
+    const entityIndex = tokens[1];
+    const amount = tokens[2];
+
+    if (!entityIndex || !amount) {
+      return {
+        isAction: false,
+        error: {
+          lineNumber,
+          message: 'fund requires 2 parameters: entityIndex amount',
+        },
+      };
+    }
+
+    return {
+      isAction: true,
+      action: {
+        type: 'fund',
+        params: [entityIndex, amount],
         sourceLineNumber: lineNumber,
       },
     };

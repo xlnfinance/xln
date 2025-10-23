@@ -125,6 +125,7 @@
     isDragging?: boolean; // Currently being dragged
     activityRing?: THREE.Mesh | null; // Activity indicator ring
     hubConnectedIds?: Set<string>; // PERF: Cache of connected entity IDs for hubs
+    baseScale?: number; // Base scale from reserves (before pulse animation)
   }
 
   interface FrameActivity {
@@ -191,6 +192,14 @@ let gestureManager: GestureManager;
 let vrHammer: VRHammer | null = null;
   let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
   let lastJEventId: string | null = null;
+
+  // J-Machine octahedron (broadcast visualization)
+  let jMachine: THREE.Group | null = null;
+  let jMachineTxBoxes: THREE.Mesh[] = []; // Yellow tx cubes inside octahedron
+  let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
+  let broadcastEnabled = true;
+  let broadcastStyle: 'raycast' | 'wave' | 'particles' = 'raycast';
+  let broadcastAnimations: THREE.Object3D[] = []; // Active broadcast visuals
 
   // Network data with proper typing (legacy - will migrate to managers)
   let entities: EntityData[] = [];
@@ -542,6 +551,30 @@ let vrHammer: VRHammer | null = null;
     activityVisualizer.processFrame(env.runtimeInput, entityMeshMap);
   }
 
+  // ===== ADD TXS TO J-MACHINE (broadcast simulation) + R2R ANIMATION =====
+  $: if (jMachine && env?.runtimeInput?.entityInputs) {
+    // For each entity input, check for reserve-to-reserve transactions
+    env.runtimeInput.entityInputs.forEach((entityInput: any) => {
+      const txs = entityInput?.input?.txs || [];
+      txs.forEach((tx: any) => {
+        // Check if it's a reserve-related transaction (R2R)
+        if (tx.kind === 'payFromReserve' || tx.kind === 'payToReserve' || tx.kind === 'settleToReserve') {
+          console.log(`[J-Machine] Adding tx ${tx.kind} from ${entityInput.entityId?.slice(0, 8)}...`);
+
+          // Shoot ray from entity → J-Machine (incoming tx)
+          shootRayToJMachine(entityInput.entityId);
+
+          addTxToJMachine(entityInput.entityId);
+
+          // R2R animation: particle flies from source to target
+          if (tx.kind === 'payFromReserve' && tx.targetEntityId) {
+            animateR2RTransfer(entityInput.entityId, tx.targetEntityId, tx.amount);
+          }
+        }
+      });
+    });
+  }
+
   // ===== UPDATE SPATIAL HASH (when entities move) =====
   $: if (spatialHash && entities.length > 0) {
     entities.forEach(entity => {
@@ -728,10 +761,24 @@ let vrHammer: VRHammer | null = null;
     };
     panelBridge.on('vr:toggle', handleVRToggle);
 
+    // Broadcast controls from Architect panel
+    const handleBroadcastToggle = (event: any) => {
+      broadcastEnabled = event.enabled;
+      console.log('[Broadcast] Enabled:', broadcastEnabled);
+    };
+    const handleBroadcastStyle = (event: any) => {
+      broadcastStyle = event.style;
+      console.log('[Broadcast] Style changed to:', broadcastStyle);
+    };
+    panelBridge.on('broadcast:toggle', handleBroadcastToggle);
+    panelBridge.on('broadcast:style', handleBroadcastStyle);
+
     const unsubscribe1 = isolatedEnv.subscribe(updateNetworkData);
     return () => {
       unsubscribe1();
       panelBridge.off('vr:toggle', handleVRToggle);
+      panelBridge.off('broadcast:toggle', handleBroadcastToggle);
+      panelBridge.off('broadcast:style', handleBroadcastStyle);
     };
   });
 
@@ -770,6 +817,357 @@ let vrHammer: VRHammer | null = null;
     window.removeEventListener('mousemove', handleResizeMove);
     window.removeEventListener('mouseup', handleResizeEnd);
   });
+
+  /**
+   * Create J-Machine octahedron at (0, 100, 0) - elevated above entity grid (L1 layer)
+   * Visual: EVM/Ethereum-style diamond with purple/blue gradient, vertically stretched 1.6x
+   */
+  function createJMachine(size: number = 25): THREE.Group {
+    const group = new THREE.Group();
+    group.position.set(0, 100, 0); // Elevated high above entity network (L1 vs L2)
+
+    // Octahedron geometry (8 faces) - Ethereum diamond shape
+    const octahedronGeometry = new THREE.OctahedronGeometry(size, 0);
+
+    // EVM-style purple/blue gradient material
+    const octahedronMaterial = new THREE.MeshPhongMaterial({
+      color: 0x8b7fb8, // Ethereum purple
+      emissive: 0x4a3a6b, // Purple glow
+      transparent: true,
+      opacity: 0.4,
+      wireframe: false,
+      side: THREE.DoubleSide,
+      shininess: 100
+    });
+
+    const octahedron = new THREE.Mesh(octahedronGeometry, octahedronMaterial);
+    // Vertically stretch to match Ethereum logo proportions (diamond is taller than wide)
+    octahedron.scale.set(1, 1.6, 1);
+    group.add(octahedron);
+
+    // Wireframe edges for Ethereum diamond aesthetic
+    const edgesGeometry = new THREE.EdgesGeometry(octahedronGeometry);
+    const edgesMaterial = new THREE.LineBasicMaterial({
+      color: 0xb8a4d9, // Lighter purple for edges
+      linewidth: 3
+    });
+    const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+    group.add(edges);
+
+    // Inner glow effect (smaller octahedron)
+    const innerGeometry = new THREE.OctahedronGeometry(size * 0.7, 0);
+    const innerMaterial = new THREE.MeshBasicMaterial({
+      color: 0x6255a4,
+      transparent: true,
+      opacity: 0.2,
+      wireframe: true
+    });
+    const innerGlow = new THREE.Mesh(innerGeometry, innerMaterial);
+    innerGlow.scale.set(1, 1.6, 1); // Match outer octahedron stretch
+    group.add(innerGlow);
+
+    // Add label: "J-MACHINE (L1)"
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (context) {
+      canvas.width = 256;
+      canvas.height = 64;
+      context.fillStyle = '#b8a4d9';
+      context.font = 'bold 32px monospace';
+      context.textAlign = 'center';
+      context.fillText('J-MACHINE', 128, 40);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const labelMaterial = new THREE.SpriteMaterial({ map: texture });
+    const label = new THREE.Sprite(labelMaterial);
+    label.scale.set(25, 6, 1);
+    label.position.set(0, size * 1.6 + 15, 0); // Above vertically-stretched octahedron (accounting for 1.6x stretch)
+    group.add(label);
+
+    return group;
+  }
+
+  /**
+   * Add a yellow transaction cube to J-Machine
+   * Returns the mesh so we can animate it flying from entity → J-Machine
+   */
+  function addTxToJMachine(fromEntityId: string): THREE.Mesh | null {
+    if (!jMachine || !scene) return null;
+
+    // Create yellow cube (transaction)
+    const txGeometry = new THREE.BoxGeometry(2, 2, 2);
+    const txMaterial = new THREE.MeshPhongMaterial({
+      color: 0xffff00, // Yellow
+      emissive: 0x888800,
+      transparent: true,
+      opacity: 0.9
+    });
+    const txCube = new THREE.Mesh(txGeometry, txMaterial);
+
+    // Position randomly inside octahedron (sphere packing)
+    const radius = 8; // Inside the 15-unit octahedron
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI;
+    txCube.position.set(
+      radius * Math.sin(phi) * Math.cos(theta),
+      radius * Math.sin(phi) * Math.sin(theta),
+      radius * Math.cos(phi)
+    );
+
+    jMachine.add(txCube);
+    jMachineTxBoxes.push(txCube);
+
+    // Check capacity - broadcast when full
+    if (jMachineTxBoxes.length >= jMachineCapacity) {
+      triggerBroadcast();
+    }
+
+    return txCube;
+  }
+
+  /**
+   * Shoot green ray from entity → J-Machine (incoming transaction)
+   * Fast, bright green beam showing value flowing into L1
+   */
+  function shootRayToJMachine(entityId: string) {
+    if (!jMachine || !scene) return;
+
+    // Find entity position
+    const entity = entities.find(e => e.id === entityId);
+    if (!entity) return;
+
+    // Create green ray from entity → J-Machine
+    const points = [
+      entity.position.clone(),
+      new THREE.Vector3(0, 100, 0) // J-Machine center (elevated L1 layer)
+    ];
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+      color: 0x00ff88, // Bright green (incoming money)
+      linewidth: 3,
+      transparent: true,
+      opacity: 1.0
+    });
+    const ray = new THREE.Line(geometry, material);
+    scene.add(ray);
+
+    // Quick fade out (300ms - fast transaction submission)
+    const fadeStart = Date.now();
+    const fadeInterval = setInterval(() => {
+      const elapsed = Date.now() - fadeStart;
+      const progress = elapsed / 300;
+
+      if (progress >= 1) {
+        scene.remove(ray);
+        clearInterval(fadeInterval);
+      } else {
+        material.opacity = 1.0 - progress;
+      }
+    }, 16); // 60fps
+  }
+
+  /**
+   * Trigger broadcast animation when J-Machine is full
+   * Clears txs and sends rays/waves to all entities
+   */
+  function triggerBroadcast() {
+    if (!broadcastEnabled || !jMachine || !scene) return;
+
+    console.log(`[Broadcast] J-Machine full, broadcasting (${broadcastStyle}) to ${entities.length} entities...`);
+
+    // Clear all tx cubes
+    jMachineTxBoxes.forEach(txCube => {
+      if (jMachine) jMachine.remove(txCube);
+    });
+    jMachineTxBoxes = [];
+
+    // Trigger broadcast animation based on style
+    if (broadcastStyle === 'raycast') {
+      broadcastRaycast();
+    } else if (broadcastStyle === 'wave') {
+      broadcastWave();
+    } else if (broadcastStyle === 'particles') {
+      broadcastParticles();
+    }
+  }
+
+  /**
+   * Ray-cast broadcast: Thick bright rays shoot from J-Machine to all entities (O(n) distribution)
+   * VC-MODE: Dramatic visualization showing J-Machine broadcasting to entire network
+   */
+  function broadcastRaycast() {
+    if (!jMachine || !scene) return;
+
+    console.log(`[Broadcast] Shooting rays to ${entities.length} entities (O(n) broadcast)...`);
+
+    entities.forEach((entity, i) => {
+      // Create thick bright ray from J-Machine → entity
+      const points = [
+        new THREE.Vector3(0, 100, 0), // J-Machine center (elevated L1 layer)
+        entity.position.clone()
+      ];
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const material = new THREE.LineBasicMaterial({
+        color: 0xff00ff, // Bright magenta (broadcast = expensive O(n))
+        linewidth: 5, // Thicker for VC visibility
+        transparent: true,
+        opacity: 1.0
+      });
+      const line = new THREE.Line(geometry, material);
+      scene.add(line);
+      broadcastAnimations.push(line);
+
+      // Slow fade out (1500ms) to emphasize O(n) cost
+      const fadeStart = Date.now();
+      const fadeInterval = setInterval(() => {
+        const elapsed = Date.now() - fadeStart;
+        const progress = elapsed / 1500;
+
+        if (progress >= 1) {
+          scene.remove(line);
+          broadcastAnimations = broadcastAnimations.filter(a => a !== line);
+          clearInterval(fadeInterval);
+        } else {
+          material.opacity = 1.0 - progress;
+        }
+      }, 16); // 60fps
+    });
+  }
+
+  /**
+   * Wave broadcast: Expanding sphere from J-Machine
+   */
+  function broadcastWave() {
+    if (!jMachine || !scene) return;
+
+    const sphereGeometry = new THREE.SphereGeometry(1, 16, 16);
+    const sphereMaterial = new THREE.MeshBasicMaterial({
+      color: 0xb8a4d9, // Purple to match EVM theme
+      transparent: true,
+      opacity: 0.3,
+      wireframe: true
+    });
+    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    sphere.position.set(0, 100, 0); // Elevated J-Machine L1 layer position
+    scene.add(sphere);
+    broadcastAnimations.push(sphere);
+
+    // Animate expansion
+    let startTime = Date.now();
+    const animateWave = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / 2000, 1);
+
+      const scale = 1 + progress * 100;
+      sphere.scale.set(scale, scale, scale);
+      sphereMaterial.opacity = 0.3 * (1 - progress);
+
+      if (progress < 1) {
+        requestAnimationFrame(animateWave);
+      } else {
+        scene.remove(sphere);
+        broadcastAnimations = broadcastAnimations.filter(a => a !== sphere);
+      }
+    };
+    animateWave();
+  }
+
+  /**
+   * Particle broadcast: Particles fly from J-Machine to each entity
+   */
+  function broadcastParticles() {
+    if (!jMachine || !scene) return;
+
+    entities.forEach((entity) => {
+      // Create particle (small sphere)
+      const particleGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+      const particleMaterial = new THREE.MeshBasicMaterial({
+        color: 0xb8a4d9, // Purple to match EVM theme
+        transparent: true,
+        opacity: 0.8
+      });
+      const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+      particle.position.set(0, 100, 0); // Start at elevated J-Machine L1 layer
+      scene.add(particle);
+      broadcastAnimations.push(particle);
+
+      // Animate flight to entity
+      const startTime = Date.now();
+      const duration = 1500;
+      const jMachinePos = new THREE.Vector3(0, 100, 0);
+      const animateParticle = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+
+        // Lerp from (0, 100, 0) to entity position
+        particle.position.lerpVectors(jMachinePos, entity.position, progress);
+
+        if (progress < 1) {
+          requestAnimationFrame(animateParticle);
+        } else {
+          scene.remove(particle);
+          broadcastAnimations = broadcastAnimations.filter(a => a !== particle);
+        }
+      };
+      animateParticle();
+    });
+  }
+
+  /**
+   * Animate R2R transfer: particle flies from source to target entity
+   */
+  function animateR2RTransfer(fromEntityId: string, toEntityId: string, amount: bigint) {
+    if (!scene) return;
+
+    // Find source and target entities
+    const fromEntity = entities.find(e => e.id === fromEntityId);
+    const toEntity = entities.find(e => e.id === toEntityId);
+
+    if (!fromEntity || !toEntity) {
+      console.warn(`[R2R Animation] Entities not found: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
+      return;
+    }
+
+    // Create gold particle (represents reserves moving)
+    const particleGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+    const particleMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffd700, // Gold
+      transparent: true,
+      opacity: 0.9
+    });
+    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+    particle.position.copy(fromEntity.position);
+    scene.add(particle);
+
+    console.log(`[R2R Animation] ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}: ${amount} tokens`);
+
+    // Animate particle movement
+    const startTime = Date.now();
+    const duration = 1000; // 1 second flight time
+
+    const animateParticle = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Lerp from source to target
+      particle.position.lerpVectors(fromEntity.position, toEntity.position, progress);
+
+      // Pulsing effect
+      const pulse = 1 + 0.3 * Math.sin(progress * Math.PI * 4);
+      particle.scale.setScalar(pulse);
+
+      if (progress < 1) {
+        requestAnimationFrame(animateParticle);
+      } else {
+        // Reached target - remove particle
+        scene.remove(particle);
+        particleGeometry.dispose();
+        particleMaterial.dispose();
+      }
+    };
+    animateParticle();
+  }
 
   async function initThreeJS() {
     // Load OrbitControls dynamically
@@ -852,6 +1250,10 @@ let vrHammer: VRHammer | null = null;
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(10, 10, 5);
     scene.add(directionalLight);
+
+    // Create J-Machine octahedron elevated at (0, 40, 0) - L1 layer
+    jMachine = createJMachine(); // Uses default size=25
+    scene.add(jMachine);
 
     // Mouse events
     renderer.domElement.addEventListener('mousedown', onMouseDown);
@@ -2558,6 +2960,10 @@ let vrHammer: VRHammer | null = null;
         throw new Error('FINTECH-SAFETY: Entity material missing emissive property');
       }
 
+      // Calculate base size from reserves (planet size = reserve balance)
+      const baseSize = getEntitySizeForToken(entityId, selectedTokenId);
+      entity.baseScale = baseSize; // Store for reference
+
       if (isActive) {
         // Check activity direction
         const hasIncoming = currentFrameActivity.incomingFlows.has(entityId);
@@ -2566,7 +2972,8 @@ let vrHammer: VRHammer | null = null;
         entity.pulsePhase = (entity.pulsePhase || 0) + 0.12;
         const pulseIntensity = Math.max(0, 1 - timeSinceActivity / 2000);
         const pulseFactor = 1 + pulseIntensity * 0.5 * Math.sin(entity.pulsePhase);
-        entity.mesh.scale.setScalar(pulseFactor);
+        // Apply pulse on top of base size from reserves
+        entity.mesh.scale.setScalar(baseSize * pulseFactor);
 
         // Color-coded glow based on direction
         let glowR = 0, glowG = 0, glowB = 0;
@@ -2627,8 +3034,8 @@ let vrHammer: VRHammer | null = null;
         entity.activityRing.scale.setScalar(ringPulse);
         ringMaterial.opacity = 0.6 * pulseIntensity;
       } else {
-        // Inactive: reset to normal
-        entity.mesh.scale.setScalar(1);
+        // Inactive: use base size from reserves (no pulse)
+        entity.mesh.scale.setScalar(baseSize);
         material.emissive.setRGB(0, 0.1, 0);
 
         // Remove activity ring (use property deletion for optional type)
@@ -3305,8 +3712,11 @@ let vrHammer: VRHammer | null = null;
 
     const reserves = replica.state.reserves;
     const tokenAmount = reserves.get(String(tokenId)) || 0n;
-    const normalizedAmount = Number(tokenAmount / 10000n);
-    const size = Math.max(0.3, Math.min(1.5, 0.5 + normalizedAmount * 0.001));
+
+    // VC-MODE: Dramatic scaling - reserve changes must be visually obvious
+    // 1M reserves → size 3.0, 500k → 1.75, 0 → 0.5 (58% size change for 50% reserve change)
+    const scaleFactor = Number(tokenAmount) / 1_000_000; // 1.0 for 1M, 0.5 for 500k
+    const size = Math.max(0.5, Math.min(4.0, 0.5 + scaleFactor * 2.5));
 
     // Cache the result
     entitySizeCache.set(cacheKey, size);
