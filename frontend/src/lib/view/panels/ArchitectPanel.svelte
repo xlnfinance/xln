@@ -9,6 +9,7 @@
 
   import type { Writable } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
+  import { shortAddress } from '$lib/utils/format';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
   export let isolatedEnv: Writable<any>;
@@ -20,10 +21,140 @@
   let loading = false;
   let lastAction = '';
 
+  // Reserve operations state
+  let selectedEntityForMint = '';
+  let mintAmount = '1000000'; // 1M units
+  let r2rFromEntity = '';
+  let r2rToEntity = '';
+  let r2rAmount = '500000'; // 500K units
+
+  // Entity registration mode
+  let numberedEntities = false; // Default: lazy (in-memory only, no blockchain needed)
+
   // Check if env is ready
   $: envReady = $isolatedEnv !== null && $isolatedEnv !== undefined;
   $: if (envReady) {
     console.log('[ArchitectPanel] Env ready with', $isolatedEnv.entities?.length || 0, 'entities');
+  }
+
+  // Get entity IDs for dropdowns (extract entityId from replica keys)
+  let entityIds: string[] = [];
+  $: entityIds = $isolatedEnv?.replicas
+    ? Array.from($isolatedEnv.replicas.keys() as Iterable<string>).map((key: string) => key.split(':')[0] || key).filter((id: string, idx: number, arr: string[]) => arr.indexOf(id) === idx)
+    : [];
+
+  /** Mint reserves to selected entity */
+  async function mintReservesToEntity() {
+    if (!selectedEntityForMint || !$isolatedEnv) {
+      lastAction = '❌ Select an entity first';
+      return;
+    }
+
+    loading = true;
+    lastAction = `Minting ${mintAmount} to ${shortAddress(selectedEntityForMint)}...`;
+
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Get the replica to find the signerId
+      const replicaKeys = Array.from($isolatedEnv.replicas.keys()) as string[];
+      const replicaKey = replicaKeys.find(k => k.startsWith(selectedEntityForMint + ':'));
+      const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+
+      if (!replica) {
+        throw new Error(`No replica found for entity ${shortAddress(selectedEntityForMint)}`);
+      }
+
+      // Mint via payToReserve entity transaction (creates runtime frame)
+      await XLN.process($isolatedEnv, [{
+        entityId: selectedEntityForMint,
+        signerId: replica.signerId,
+        entityTxs: [{
+          type: 'payToReserve',
+          data: {
+            tokenId: 0, // Default token
+            amount: BigInt(mintAmount)
+          }
+        }]
+      }]);
+
+      lastAction = `✅ Minted ${mintAmount} to entity`;
+
+      // Update stores to trigger reactivity
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+
+      // Advance to latest frame
+      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+
+      console.log('[Architect] Mint complete, new frame created');
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+      console.error('[Architect] Mint error:', err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  /** Send R2R (Reserve-to-Reserve) transaction */
+  async function sendR2RTransaction() {
+    if (!r2rFromEntity || !r2rToEntity || r2rFromEntity === r2rToEntity) {
+      lastAction = '❌ Select different FROM and TO entities';
+      return;
+    }
+
+    if (!$isolatedEnv) {
+      lastAction = '❌ Environment not ready';
+      return;
+    }
+
+    loading = true;
+    lastAction = `Sending R2R: ${shortAddress(r2rFromEntity)} → ${shortAddress(r2rToEntity)}...`;
+
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Get the replica to find the signerId
+      const replicaKeys = Array.from($isolatedEnv.replicas.keys()) as string[];
+      const replicaKey = replicaKeys.find(k => k.startsWith(r2rFromEntity + ':'));
+      const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+
+      if (!replica) {
+        throw new Error(`No replica found for entity ${shortAddress(r2rFromEntity)}`);
+      }
+
+      // R2R transaction via process() - creates runtime frame
+      await XLN.process($isolatedEnv, [{
+        entityId: r2rFromEntity,
+        signerId: replica.signerId,
+        entityTxs: [{
+          type: 'payFromReserve',
+          data: {
+            targetEntityId: r2rToEntity,
+            tokenId: 0,
+            amount: BigInt(r2rAmount)
+          }
+        }]
+      }]);
+
+      lastAction = `✅ R2R sent: ${r2rAmount} units`;
+
+      // Update stores to trigger reactivity
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+
+      // Advance to latest frame
+      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+
+      console.log('[Architect] R2R complete, new frame created');
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+      console.error('[Architect] R2R error:', err);
+    } finally {
+      loading = false;
+    }
   }
 
   /** Execute .scenario.txt file (text-based DSL) */
@@ -38,8 +169,21 @@
         throw new Error(`Failed to load: ${response.statusText}`);
       }
 
-      const scenarioText = await response.text();
+      let scenarioText = await response.text();
       console.log(`[Architect] Loaded: ${filename}`);
+
+      // Inject entity registration type (numbered or lazy) into grid commands
+      const entityType = numberedEntities ? 'numbered' : 'lazy';
+      scenarioText = scenarioText.replace(
+        /^(grid\s+\d+(?:\s+\d+)?(?:\s+\d+)?)(\s+.*)?$/gm,
+        (match, gridCmd, rest) => {
+          // Remove existing type= parameter
+          const cleanRest = rest ? rest.replace(/\s+type=\w+/, '') : '';
+          return `${gridCmd}${cleanRest} type=${entityType}`;
+        }
+      );
+
+      console.log(`[Architect] Entity registration mode: ${entityType}`);
 
       // Import runtime.js
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
@@ -155,11 +299,90 @@
         </div>
       {:else}
         <div class="action-section">
+          <h5>Entity Registration</h5>
+          <label class="checkbox-label">
+            <input type="checkbox" bind:checked={numberedEntities} />
+            <span>Numbered Entities (on-chain via EntityProvider.sol)</span>
+          </label>
+          <p class="help-text">
+            {#if numberedEntities}
+              ⚙️ Numbered: Entities registered on blockchain (slower, sequential numbers)
+            {:else}
+              ⚡ Lazy: In-browser only entities (faster, hash-based IDs, no gas)
+            {/if}
+          </p>
+        </div>
+
+        <div class="action-section">
           <h5>Quick Scenarios</h5>
+          <button class="action-btn" on:click={() => {numberedEntities = true; executeScenarioFile('auto-demo.scenario.txt');}} disabled={loading}>
+            🚀 Auto Demo (Numbered Grid + $1M + R2R)
+          </button>
+          <p class="help-text">
+            Full demo: Register 8 entities, fund $1M each, 13 random R2R transfers
+          </p>
+
           <button class="action-btn" on:click={() => executeScenarioFile('simnet-grid.scenario.txt')} disabled={loading}>
             🎲 Simnet Grid (2x2x2)
           </button>
-          <p class="help-text">8 entities, lazy mode (no blockchain)</p>
+          <p class="help-text">
+            {#if numberedEntities}
+              8 numbered entities (on-chain registration)
+            {:else}
+              8 lazy entities (instant, no blockchain)
+            {/if}
+          </p>
+        </div>
+
+        <div class="action-section">
+          <h5>💸 Mint Reserves</h5>
+          <div class="form-group">
+            <label for="mint-entity">Entity:</label>
+            <select id="mint-entity" bind:value={selectedEntityForMint} disabled={entityIds.length === 0}>
+              <option value="">-- Select Entity --</option>
+              {#each entityIds as entityId}
+                <option value={entityId}>{shortAddress(entityId)}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="mint-amount">Amount:</label>
+            <input id="mint-amount" type="text" bind:value={mintAmount} placeholder="1000000" />
+          </div>
+          <button class="action-btn" on:click={mintReservesToEntity} disabled={loading || !selectedEntityForMint}>
+            💸 Mint to Reserve
+          </button>
+          <p class="help-text">Deposit tokens to entity reserve (triggers J-Machine)</p>
+        </div>
+
+        <div class="action-section">
+          <h5>🔄 Reserve-to-Reserve (R2R)</h5>
+          <div class="form-group">
+            <label for="r2r-from">From Entity:</label>
+            <select id="r2r-from" bind:value={r2rFromEntity} disabled={entityIds.length === 0}>
+              <option value="">-- Select Entity --</option>
+              {#each entityIds as entityId}
+                <option value={entityId}>{shortAddress(entityId)}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="r2r-to">To Entity:</label>
+            <select id="r2r-to" bind:value={r2rToEntity} disabled={entityIds.length === 0}>
+              <option value="">-- Select Entity --</option>
+              {#each entityIds as entityId}
+                <option value={entityId}>{shortAddress(entityId)}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="r2r-amount">Amount:</label>
+            <input id="r2r-amount" type="text" bind:value={r2rAmount} placeholder="500000" />
+          </div>
+          <button class="action-btn" on:click={sendR2RTransaction} disabled={loading || !r2rFromEntity || !r2rToEntity}>
+            🔄 Send R2R Transaction
+          </button>
+          <p class="help-text">Send reserve-to-reserve payment (shows broadcast ripple)</p>
         </div>
 
         <div class="action-section">
@@ -168,6 +391,29 @@
             🥽 Enter VR
           </button>
           <p class="help-text">Quest 3 / WebXR headsets</p>
+        </div>
+
+        <div class="action-section">
+          <h5>Broadcast Visualization</h5>
+          <label class="checkbox-label">
+            <input type="checkbox" checked on:change={(e) => panelBridge.emit('broadcast:toggle', { enabled: e.currentTarget.checked })} />
+            Enable J-Machine Broadcast
+          </label>
+          <p class="help-text">Show O(n) broadcast from J-Machine to all entities</p>
+
+          <h5 style="margin-top: 16px;">Broadcast Style</h5>
+          <label class="radio-label">
+            <input type="radio" name="broadcast-style" value="raycast" checked on:change={() => panelBridge.emit('broadcast:style', { style: 'raycast' })} />
+            Ray-Cast (shows each individual broadcast)
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="broadcast-style" value="wave" on:change={() => panelBridge.emit('broadcast:style', { style: 'wave' })} />
+            Expanding Wave (organic propagation)
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="broadcast-style" value="particles" on:change={() => panelBridge.emit('broadcast:style', { style: 'particles' })} />
+            Particle Swarm (flies to each entity)
+          </label>
         </div>
 
         {#if lastAction}
@@ -329,5 +575,65 @@
     background: #1a2a3a;
     border-left-color: #007acc;
     color: #79c0ff;
+  }
+
+  .checkbox-label, .radio-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+    font-size: 12px;
+    color: #ccc;
+    cursor: pointer;
+  }
+
+  .checkbox-label:hover, .radio-label:hover {
+    color: #fff;
+  }
+
+  .checkbox-label input[type="checkbox"],
+  .radio-label input[type="radio"] {
+    cursor: pointer;
+  }
+
+  .form-group {
+    margin-bottom: 12px;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .form-group select,
+  .form-group input[type="text"] {
+    width: 100%;
+    padding: 8px 12px;
+    background: #1e1e1e;
+    border: 1px solid #3e3e3e;
+    color: #ccc;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+  }
+
+  .form-group select:focus,
+  .form-group input[type="text"]:focus {
+    outline: none;
+    border-color: #007acc;
+  }
+
+  .form-group select:disabled,
+  .form-group input[type="text"]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .checkbox-label span {
+    font-weight: 500;
   }
 </style>

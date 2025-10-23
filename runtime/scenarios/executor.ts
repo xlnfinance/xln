@@ -155,6 +155,14 @@ async function executeAction(
       await handlePayRandom(params, context, env);
       break;
 
+    case 'r2r':
+      await handleR2R(params, context, env);
+      break;
+
+    case 'fund':
+      await handleFund(params, context, env);
+      break;
+
     case 'openAccount':
       await handleOpenAccount(entityId!, params, context, env);
       break;
@@ -830,6 +838,103 @@ async function handlePayRandom(
   }
 
   console.log(`  ✅ ${count} random payments complete`);
+}
+
+/**
+ * Execute Reserve-to-Reserve transfer
+ * Syntax: r2r <fromEntityIndex> <toEntityIndex> <amount>
+ */
+async function handleR2R(
+  params: any[],
+  context: ScenarioExecutionContext,
+  env: Env
+): Promise<void> {
+  const fromIndex = String(params[0]);
+  const toIndex = String(params[1]);
+  const amount = BigInt(params[2] || '0');
+
+  // Resolve entity IDs from grid coordinates
+  const fromEntityId = context.entityMapping.get(fromIndex);
+  const toEntityId = context.entityMapping.get(toIndex);
+
+  if (!fromEntityId || !toEntityId) {
+    throw new Error(`R2R: Entity mapping not found for ${fromIndex} or ${toIndex}`);
+  }
+
+  // Get signer from replica
+  const replicaKeys = Array.from(env.replicas.keys());
+  const fromReplicaKey = replicaKeys.find(k => k.startsWith(fromEntityId + ':'));
+  const fromReplica = fromReplicaKey ? env.replicas.get(fromReplicaKey) : null;
+
+  if (!fromReplica) {
+    throw new Error(`R2R: No replica found for entity ${fromEntityId.slice(0, 10)}`);
+  }
+
+  console.log(`  💸 R2R: ${fromIndex} → ${toIndex} (${amount} tokens)`);
+
+  const { process } = await import('../runtime.js');
+
+  await process(env, [{
+    entityId: fromEntityId,
+    signerId: fromReplica.signerId,
+    entityTxs: [{
+      type: 'payFromReserve',
+      data: {
+        targetEntityId: toEntityId,
+        tokenId: 0, // Default token
+        amount: amount
+      }
+    }]
+  }]);
+
+  console.log(`  ✅ R2R complete: ${fromIndex} → ${toIndex}`);
+}
+
+/**
+ * Fund entity reserves (mint tokens to entity)
+ * Syntax: fund <entityIndex> <amount>
+ */
+async function handleFund(
+  params: any[],
+  context: ScenarioExecutionContext,
+  env: Env
+): Promise<void> {
+  const entityIndex = String(params[0]);
+  const amount = BigInt(params[1] || '0');
+
+  // Resolve entity ID from grid coordinates
+  const entityId = context.entityMapping.get(entityIndex);
+
+  if (!entityId) {
+    throw new Error(`Fund: Entity mapping not found for ${entityIndex}`);
+  }
+
+  // Get signer from replica
+  const replicaKeys = Array.from(env.replicas.keys());
+  const replicaKey = replicaKeys.find(k => k.startsWith(entityId + ':'));
+  const replica = replicaKey ? env.replicas.get(replicaKey) : null;
+
+  if (!replica) {
+    throw new Error(`Fund: No replica found for entity ${entityId.slice(0, 10)}`);
+  }
+
+  console.log(`  💸 Fund: ${entityIndex} receives ${amount} tokens`);
+
+  const { process } = await import('../runtime.js');
+
+  await process(env, [{
+    entityId: entityId,
+    signerId: replica.signerId,
+    entityTxs: [{
+      type: 'payToReserve',
+      data: {
+        tokenId: 0, // Default token
+        amount: amount
+      }
+    }]
+  }]);
+
+  console.log(`  ✅ Fund complete: ${entityIndex} +${amount}`);
 }
 
 /**
