@@ -49,20 +49,47 @@
   function createUnicastPath() {
     if (!animationEnabled) return;
 
-    // 4-6 points = 3-5 hops (always alice-hub-bob minimum, never direct alice-bob)
-    const numPoints = 4 + Math.floor(Math.random() * 3);
+    // 2-10 zig-zags = 3-11 total points
+    const numPoints = 3 + Math.floor(Math.random() * 9);
     const hops: Point[] = [];
 
-    // Generate path points across the screen
-    for (let i = 0; i < numPoints; i++) {
-      hops.push(randomPoint());
+    // Start and end points
+    const start = randomPoint();
+    const end = randomPoint();
+
+    hops.push(start);
+
+    // Generate zig-zag waypoints between start and end
+    for (let i = 1; i < numPoints - 1; i++) {
+      const t = i / (numPoints - 1); // Progress from 0 to 1
+
+      // Interpolate between start and end
+      const baseX = start.x + (end.x - start.x) * t;
+      const baseY = start.y + (end.y - start.y) * t;
+
+      // Add random offset for zig-zag (perpendicular to main direction)
+      const maxOffset = Math.min(
+        canvas?.width || window.innerWidth,
+        canvas?.height || window.innerHeight
+      ) * 0.2; // 20% of screen size
+
+      const offsetX = (Math.random() - 0.5) * maxOffset;
+      const offsetY = (Math.random() - 0.5) * maxOffset;
+
+      hops.push({
+        x: Math.max(0, Math.min((canvas?.width || window.innerWidth), baseX + offsetX)),
+        y: Math.max(0, Math.min((canvas?.height || window.innerHeight), baseY + offsetY))
+      });
     }
+
+    hops.push(end);
+
 
     unicastPaths.push({
       hops,
       currentHop: 0,
       progress: 0,
-      speed: 0.02 + Math.random() * 0.03 // Vary speed slightly
+      speed: 0.01 + Math.random() * 0.06 // More dramatic speed variation (slow to fast)
     });
   }
 
@@ -79,7 +106,7 @@
       y: center.y,
       radius: 0,
       maxRadius: screenDiagonal * 0.8, // Cover 80% of screen diagonal
-      speed: 3
+      speed: 2 // Slower to emphasize heaviness
     });
   }
 
@@ -89,11 +116,24 @@
     const currentX = from.x + (to.x - from.x) * progress;
     const currentY = from.y + (to.y - from.y) * progress;
 
-    const color = blackAndWhiteMode ? '#ffffff' : '#007acc';
     const opacity = (blackAndWhiteMode ? 0.4 : 0.3) * fadeMultiplier;
 
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = opacity;
+    // Create gradient from blue to cyan (or white in B&W mode)
+    const gradient = ctx.createLinearGradient(from.x, from.y, currentX, currentY);
+    if (blackAndWhiteMode) {
+      gradient.addColorStop(0, 'rgba(255, 255, 255, ' + opacity + ')');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, ' + (opacity * 1.5) + ')');
+    } else {
+      gradient.addColorStop(0, 'rgba(0, 122, 204, ' + opacity + ')'); // Blue
+      gradient.addColorStop(1, 'rgba(0, 255, 255, ' + (opacity * 1.5) + ')'); // Cyan
+    }
+
+    // Glow effect
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = blackAndWhiteMode ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 200, 255, 0.6)';
+
+    ctx.strokeStyle = gradient;
+    ctx.globalAlpha = 1; // Let gradient handle opacity
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
 
@@ -102,28 +142,55 @@
     ctx.lineTo(currentX, currentY);
     ctx.stroke();
 
-    // Draw small dot at current position
-    ctx.fillStyle = color;
-    ctx.globalAlpha = opacity * 1.5;
+    // Draw glowing dot at current position with particle trail
+    const dotColor = blackAndWhiteMode ? '#ffffff' : '#00ffff';
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = dotColor;
+
+    ctx.fillStyle = dotColor;
+    ctx.globalAlpha = opacity * 1.8;
     ctx.beginPath();
-    ctx.arc(currentX, currentY, 2, 0, Math.PI * 2);
+    ctx.arc(currentX, currentY, 3, 0, Math.PI * 2);
     ctx.fill();
+
+    // Particle trail (3 small fading dots behind)
+    for (let i = 1; i <= 3; i++) {
+      const trailProgress = Math.max(0, progress - (i * 0.05));
+      const trailX = from.x + (to.x - from.x) * trailProgress;
+      const trailY = from.y + (to.y - from.y) * trailProgress;
+      const trailOpacity = opacity * (1 - i * 0.3);
+
+      ctx.globalAlpha = trailOpacity;
+      ctx.beginPath();
+      ctx.arc(trailX, trailY, 2 - i * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Reset shadow
+    ctx.shadowBlur = 0;
   }
 
   function drawRipple(ripple: BroadcastRipple) {
     if (!ctx) return;
 
-    const color = blackAndWhiteMode ? '#ffffff' : '#ffcccc';
-    const baseOpacity = blackAndWhiteMode ? 0.3 : 0.2;
+    const color = blackAndWhiteMode ? '#ffffff' : '#ff8888';
+    const baseOpacity = blackAndWhiteMode ? 0.4 : 0.3;
     const opacity = baseOpacity * (1 - ripple.radius / ripple.maxRadius);
+
+    // Heavy glow to emphasize expense
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color;
 
     ctx.strokeStyle = color;
     ctx.globalAlpha = opacity;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 4; // Thicker to emphasize heaviness
 
     ctx.beginPath();
     ctx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2);
     ctx.stroke();
+
+    // Reset shadow for other drawings
+    ctx.shadowBlur = 0;
   }
 
   function animate() {
