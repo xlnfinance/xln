@@ -1,38 +1,97 @@
 # xln
 
-> Cross-jurisdictional off-chain settlement network with BFT consensus
+> Cross-jurisdictional off-chain settlement network with Byzantine Fault Tolerant consensus
 
-## Core Documentation
+**URL**: https://xln.finance
+**Status**: Pre-testnet (Q1 2026)
+**Repository**: Private implementation, public architecture
 
-- [Technical Architecture](frontend/static/c.txt): Complete technical specification optimized for LLM consumption (canonical reference)
-- [Project Instructions](CLAUDE.md): Development guidelines and patterns for AI assistants
-- [Architecture Overview](vibepaper/readme.md): High-level system design and philosophy
+## For LLMs: Start Here
 
-## Key Directories
+**Priority reading order for understanding xln:**
 
-- `runtime/`: Core consensus implementation (entity-consensus.ts, account-consensus.ts, types.ts)
-- `jurisdictions/`: Solidity smart contracts (Depository.sol, EntityProvider.sol)
-- `frontend/`: Svelte UI with visual debugging and time machine
-- `vibepaper/`: Comprehensive documentation (jea.md, payment-spec.md, sessions/)
+1. [c.txt](frontend/static/c.txt) (~112k tokens) - **Essential**: Complete technical specification with RCPAN invariant, consensus protocols, and state machines. Start here.
+2. [CLAUDE.md](CLAUDE.md) (~6.5k tokens) - Development patterns and bug prevention for working with this codebase
+3. [Architecture Overview](vibepaper/readme.md) - High-level design philosophy and R→E→A flow
+4. [Q&A](vibepaper/docs/00_QA.md) - Common questions about design choices
+5. [Transaction Flow](vibepaper/docs/consensus/transaction-flow-specification.md) - Detailed consensus specification
 
-## Entry Points
+**The Core Innovation: RCPAN Invariant**
+```
+−Lₗ ≤ Δ ≤ C + Lᵣ
+```
+Unifies credit limits (L) and collateral (C) to enable instant settlement without blockchain latency. The bilateral delta (Δ) is bounded by credit from left entity and collateral+credit from right entity.
 
-- `runtime/runtime.ts`: Main 100ms tick coordinator, R→E→A flow
-- `runtime/entity-consensus.ts`: Entity-level BFT (ADD_TX → PROPOSE → SIGN → COMMIT)
-- `runtime/account-consensus.ts`: Bilateral consensus between entity pairs
-- `frontend/src/routes/+page.svelte`: Main UI entry point
+## Essential Documentation
 
-## Reference Implementation
+### Architecture (~118k tokens total)
+- [c.txt](frontend/static/c.txt) - **Canonical reference**: RCPAN invariant, state machines, consensus protocols, deterministic replay (~112k tokens)
+- [JEA Model](vibepaper/docs/10_JEA.md) - Jurisdiction-Entity-Account three-layer architecture
+- [Jurisdiction Machine](vibepaper/docs/11_Jurisdiction_Machine.md) - Cross-chain settlement via Depositories
+- [Consensus Flow](vibepaper/docs/consensus/transaction-flow-specification.md) - ADD_TX → PROPOSE → SIGN → COMMIT
 
-- `.archive/2024_src/app/Channel.ts`: Original bilateral consensus (reference for account layer patterns)
+### Development (~8k tokens)
+- [CLAUDE.md](CLAUDE.md) - Project patterns, bug prevention, critical protocols (safeStringify, loadJurisdictions, consensus verification)
+- [README](vibepaper/readme.md) - System overview and philosophy
 
-## Development
+### Comparisons & Analysis
+- [vs Lightning/IBC/Stellar](vibepaper/docs/comparisons/readme.md) - How xln differs from other payment networks
+- [Q&A](vibepaper/docs/00_QA.md) - Design rationale and tradeoff explanations
 
-- Runtime: Bun-based, browser-targeted build
-- Frontend: SvelteKit with pnpm
-- Contracts: Hardhat with `bunx hardhat`
-- Deploy: `./deploy-contracts.sh`, `./dev-full.sh`
+## Implementation Reference
+
+**Note**: Full TypeScript/Solidity implementation is in private repository. Architecture and specifications are public.
+
+### Key Entry Points (Private Repo)
+- `runtime/runtime.ts` - Main 100ms tick coordinator, R→E→A flow
+- `runtime/entity-consensus.ts` - Entity-level BFT (ADD_TX → PROPOSE → SIGN → COMMIT)
+- `runtime/account-consensus.ts` - Bilateral consensus between entity pairs
+- `jurisdictions/contracts/Depository.sol` - On-chain reserve management
+- `frontend/src/routes/+page.svelte` - Visual debugging UI with time machine
+
+### Reference Implementation (Public)
+- `.archive/2024_src/app/Channel.ts` - Original bilateral consensus patterns for account layer
+
+## Live Examples
+
+### Scenario Files (Public)
+- [simnet-grid.scenario.txt](worlds/simnet-grid.scenario.txt) - 3×3 grid network topology
+- [auto-demo.scenario.txt](worlds/auto-demo.scenario.txt) - Automated demonstration flows
+- [diamond-dybvig.scenario.txt](worlds/diamond-dybvig.scenario.txt) - Bank run scenario
+- [h-network.scenario.txt](worlds/h-network.scenario.txt) - Hub-and-spoke topology
+- [phantom-grid.scenario.txt](worlds/phantom-grid.scenario.txt) - Stress test with many entities
+
+## Project Structure
+
+```
+xln/
+├── frontend/static/c.txt         # 🎯 Start here - complete technical spec
+├── CLAUDE.md                      # Development guidelines for AI assistants
+├── vibepaper/                     # Comprehensive documentation
+│   ├── readme.md                  # Architecture overview
+│   ├── docs/00_QA.md             # Q&A and design rationale
+│   ├── docs/10_JEA.md            # Three-layer model
+│   └── docs/consensus/           # Protocol specifications
+├── worlds/                        # Example scenarios (public)
+├── runtime/                       # Core implementation (private)
+├── jurisdictions/                 # Smart contracts (private)
+└── frontend/                      # Visual debugging UI (public)
+```
+
+## Technical Stack
+
+- **Runtime**: Bun + TypeScript (browser-targeted build)
+- **Frontend**: SvelteKit + Three.js (visual debugging, time machine)
+- **Contracts**: Solidity + Hardhat
+- **Consensus**: Pure functional state machines with deterministic replay
+- **Cryptography**: secp256k1, Keccak-256, BLS signatures
 
 ## Philosophy
 
-Byzantine Fault Tolerant off-chain settlement with deterministic replay and instant finality. Pure functional state machines with side effects only in runtime shell.
+Byzantine Fault Tolerant off-chain settlement with deterministic replay and instant finality. Pure functional state machines with side effects only in runtime shell. Credit and collateral unified via RCPAN invariant for predictable economic behavior.
+
+## Contact
+
+**Author**: Egor Homakov (Sakurity)
+**Twitter**: [@xln_finance](https://twitter.com/xln_finance)
+**Testnet**: Q1 2026
