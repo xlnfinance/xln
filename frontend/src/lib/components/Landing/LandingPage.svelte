@@ -230,69 +230,14 @@
       <p class="hero-subtitle">The universal CBDC substrate for planetary-scale settlement</p>
     </div>
 
-    <!-- Founder Context - STYLE PREVIEW (choose one, delete others) -->
-
-    <div style="display: flex; flex-direction: column; gap: 2rem; margin: 2rem 0;">
-
-      <!-- Option 1: Classic Quote Bar -->
-      <div>
-        <div style="font-size: 0.75rem; color: #00d1ff; margin-bottom: 0.5rem;">OPTION 1: Classic Quote Bar</div>
-        <div class="founder-note founder-note-option1">
-          <p>
-            By Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>).
-            After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed.
-          </p>
-        </div>
-      </div>
-
-      <!-- Option 2: Subtle Background Box -->
-      <div>
-        <div style="font-size: 0.75rem; color: #00d1ff; margin-bottom: 0.5rem;">OPTION 2: Subtle Background Box</div>
-        <div class="founder-note founder-note-option2">
-          <p>
-            By Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>).
-            After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed.
-          </p>
-        </div>
-      </div>
-
-      <!-- Option 3: Large Opening Quote -->
-      <div>
-        <div style="font-size: 0.75rem; color: #00d1ff; margin-bottom: 0.5rem;">OPTION 3: Large Opening Quote</div>
-        <div class="founder-note founder-note-option3">
-          <p>
-            <span class="quote-mark">"</span>After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed."
-            <br/>
-            <span style="font-size: 0.9rem; opacity: 0.7;">— Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>)</span>
-          </p>
-        </div>
-      </div>
-
-      <!-- Option 4: Centered Minimal -->
-      <div>
-        <div style="font-size: 0.75rem; color: #00d1ff; margin-bottom: 0.5rem;">OPTION 4: Centered Minimal</div>
-        <div class="founder-note founder-note-option4">
-          <p>
-            By Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>).
-            After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed.
-          </p>
-        </div>
-      </div>
-
-      <!-- Option 5: Personal Signature -->
-      <div>
-        <div style="font-size: 0.75rem; color: #00d1ff; margin-bottom: 0.5rem;">OPTION 5: Personal Signature</div>
-        <div class="founder-note founder-note-option5">
-          <p>
-            After 13 years auditing payment systems and blockchains,
-            I built the protocol I kept wishing existed.
-          </p>
-          <p style="margin-top: 0.5rem;">
-            — Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>)
-          </p>
-        </div>
-      </div>
-
+    <!-- Founder Context -->
+    <div class="founder-note founder-note-quote">
+      <p>
+        <span class="quote-mark">"</span>After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed."
+      </p>
+      <p class="signature">
+        — Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>)
+      </p>
     </div>
 
     <div class="problem-solution">
@@ -792,34 +737,13 @@
     color: rgba(0, 0, 0, 0.6);
   }
 
-  /* Option 1: Classic Quote Bar */
-  .founder-note-option1 {
-    border-left: 3px solid #4fd18b;
-    padding-left: 1.5rem;
-    font-style: italic;
-    text-align: left;
-  }
-
-  /* Option 2: Subtle Background Box */
-  .founder-note-option2 {
-    background: rgba(79, 209, 139, 0.05);
-    border-radius: 8px;
-    padding: 1.2rem 1.5rem;
-    border-left: 2px solid #4fd18b;
-    text-align: left;
-  }
-
-  :global(.light-mode) .founder-note-option2 {
-    background: rgba(79, 209, 139, 0.08);
-  }
-
-  /* Option 3: Large Opening Quote */
-  .founder-note-option3 {
+  /* Large Opening Quote Style */
+  .founder-note-quote {
     text-align: left;
     font-style: italic;
   }
 
-  .founder-note-option3 .quote-mark {
+  .founder-note-quote .quote-mark {
     font-size: 3rem;
     line-height: 0;
     vertical-align: -0.4em;
@@ -828,26 +752,11 @@
     margin-right: 0.1em;
   }
 
-  /* Option 4: Centered Minimal */
-  .founder-note-option4 {
-    text-align: center;
-    font-style: italic;
-  }
-
-  .founder-note-option4 p {
-    font-size: 0.9rem;
-    opacity: 0.75;
-  }
-
-  /* Option 5: Personal Signature */
-  .founder-note-option5 {
-    text-align: left;
-  }
-
-  .founder-note-option5 p:last-child {
+  .founder-note-quote .signature {
     font-style: italic;
     font-size: 0.9rem;
-    opacity: 0.75;
+    opacity: 0.7;
+    margin-top: 0.5rem;
   }
 
   :global(.light-mode) .founder-link {
