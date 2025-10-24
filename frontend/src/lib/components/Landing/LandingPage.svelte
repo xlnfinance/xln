@@ -222,6 +222,8 @@
 
 <div class="landing" class:light-mode={!darkMode}>
   <div class="content">
+    <img src="/img/logo.png" alt="xln" class="logo" />
+
     <!-- Main Tagline -->
     <div class="hero-tagline">
       <h1>One protocol. Every jurisdiction. Every programmable ledger.</h1>
