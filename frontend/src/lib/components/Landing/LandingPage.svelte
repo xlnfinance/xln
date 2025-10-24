@@ -4,6 +4,7 @@
   import ComparativeChart from './ComparativeChart.svelte';
   import InvariantTicker from '../Home/InvariantTicker.svelte';
   import Collapsible from './Collapsible.svelte';
+  import NetworkAnimation from './NetworkAnimation.svelte';
 
   export let onUnlock: () => void;
 
@@ -215,6 +216,8 @@
     }
   }
 </script>
+
+<NetworkAnimation />
 
 <div class="landing">
   <div class="content">
