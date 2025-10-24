@@ -230,13 +230,12 @@
       <p class="hero-subtitle">The universal CBDC substrate for planetary-scale settlement</p>
     </div>
 
-    <!-- Sakurity Credibility -->
+    <!-- Credibility -->
     <div class="credibility-badge">
-      <img src="/img/sakurity-logo.png" alt="Sakurity" class="sakurity-logo" />
-      <div class="credibility-text">
-        <div class="credibility-main">Built by Egor Homakov (Sakurity)</div>
-        <div class="credibility-sub">Sakurity-grade security • Open source • MIT license</div>
+      <div class="credibility-main">
+        Built by <a href="https://sakurity.com" target="_blank" rel="noopener noreferrer" class="sakurity-link">Egor Homakov</a> (<a href="https://sakurity.com" target="_blank" rel="noopener noreferrer" class="sakurity-link">Sakurity</a>)
       </div>
+      <div class="credibility-sub">Sakurity-grade architecture • Open source • MIT license</div>
     </div>
 
     <div class="problem-solution">
@@ -618,36 +617,57 @@
     color: rgba(0, 0, 0, 0.7);
   }
 
-  /* Sakurity Credibility Badge */
+  /* Credibility Badge */
   .credibility-badge {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1rem;
+    gap: 0.5rem;
     padding: 1rem 1.5rem;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
     margin-bottom: 2rem;
     max-width: 600px;
-  }
-
-  .sakurity-logo {
-    width: 48px;
-    height: 48px;
-    object-fit: contain;
-  }
-
-  .credibility-text {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+    text-align: center;
   }
 
   .credibility-main {
     font-size: 0.95rem;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.9);
+  }
+
+  .sakurity-link {
+    color: #4fd18b;
+    text-decoration: none;
+    position: relative;
+    font-weight: 600;
+    transition: color 0.2s ease;
+  }
+
+  .sakurity-link::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 100%;
+    height: 1px;
+    background: #4fd18b;
+    opacity: 0.4;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  .sakurity-link:hover {
+    color: #5fe19b;
+  }
+
+  .sakurity-link:hover::after {
+    opacity: 1;
+    transform: scaleX(1);
   }
 
   .credibility-sub {
@@ -662,6 +682,18 @@
 
   .landing.light-mode .credibility-main {
     color: rgba(0, 0, 0, 0.9);
+  }
+
+  .landing.light-mode .sakurity-link {
+    color: #2a9d5f;
+  }
+
+  .landing.light-mode .sakurity-link::after {
+    background: #2a9d5f;
+  }
+
+  .landing.light-mode .sakurity-link:hover {
+    color: #1f8a50;
   }
 
   .landing.light-mode .credibility-sub {
