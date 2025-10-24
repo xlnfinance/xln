@@ -24,6 +24,7 @@
   let submissionStatus = '';
   let superpromptText = '';
   let showInvite = true;
+  let darkMode = true; // Default to dark mode (black background)
 
   const SUPERPROMPT = {
     persona: "ULTIMATE COMPARATIVE ANALYSIS",
@@ -217,9 +218,9 @@
   }
 </script>
 
-<NetworkAnimation />
+<NetworkAnimation {darkMode} onToggleDarkMode={() => darkMode = !darkMode} />
 
-<div class="landing">
+<div class="landing" class:light-mode={!darkMode}>
   <div class="content">
     <img src="/img/logo.png" alt="xln" class="logo" />
 
@@ -302,6 +303,7 @@
             <div class="principle-icon">🔒</div>
             <h3>Secure</h3>
             <p><strong>Every phone and laptop will be a full node by default.</strong> Non-negotiable.</p>
+            <p class="principle-detail">L1 blockchains handle only final netting — not every coffee purchase. This ultra-low settlement load means even phones can verify the entire chain. No pruning, no light clients, no trust assumptions.</p>
             <p class="principle-detail">This implements the original vision of Satoshi and Vitalik: self-sovereign verification without trusted intermediaries. Your keys, your node, your rules.</p>
           </div>
           <div class="principle-card">
@@ -552,6 +554,11 @@
     max-width: 80%;
     height: auto;
     filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
+    transition: filter 0.3s ease;
+  }
+
+  .landing.light-mode .logo {
+    filter: invert(1) drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
   }
 
   .newsletter-section {
@@ -1569,6 +1576,346 @@
   .tagline {
     text-align: center;
     color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* Light mode overrides - comprehensive */
+  .landing.light-mode {
+    background: #fff;
+    color: #000;
+  }
+
+  .landing.light-mode *:not(.control-btn) {
+    color: inherit;
+  }
+
+  .landing.light-mode h2,
+  .landing.light-mode .intro,
+  .landing.light-mode .vision-text,
+  .landing.light-mode li,
+  .landing.light-mode .section li,
+  .landing.light-mode .properties-list li {
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  .landing.light-mode .section li::before {
+    color: rgba(0, 0, 0, 0.4);
+  }
+
+  .landing.light-mode .properties-list li::before {
+    color: #2a9d5f;
+  }
+
+  .landing.light-mode .formula-box {
+    background: rgba(79, 209, 139, 0.1);
+    border-color: rgba(79, 209, 139, 0.4);
+  }
+
+  .landing.light-mode .formula-math {
+    color: #2a9d5f;
+  }
+
+  .landing.light-mode .newsletter-section {
+    background: rgba(79, 209, 139, 0.08);
+    border-color: rgba(79, 209, 139, 0.3);
+  }
+
+  .landing.light-mode .newsletter-input {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+    color: #000;
+  }
+
+  .landing.light-mode .newsletter-input::placeholder {
+    color: rgba(0, 0, 0, 0.4);
+  }
+
+  .landing.light-mode .invite-input {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+    color: #000;
+  }
+
+  .landing.light-mode .invite-input::placeholder {
+    color: rgba(0, 0, 0, 0.3);
+  }
+
+  .landing.light-mode .enter-btn {
+    background: rgba(0, 0, 0, 0.1);
+    border-color: rgba(0, 0, 0, 0.3);
+    color: #000;
+  }
+
+  .landing.light-mode .enter-btn:hover {
+    background: rgba(0, 0, 0, 0.15);
+    border-color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing.light-mode .principle-card {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(79, 209, 139, 0.3);
+  }
+
+  .landing.light-mode .principle-card:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  .landing.light-mode .principle-card h3 {
+    color: #2a9d5f;
+  }
+
+  .landing.light-mode .principle-card p {
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  .landing.light-mode .principle-detail {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  .landing.light-mode .endgame-box {
+    background: rgba(0, 0, 0, 0.05);
+    border-left-color: #007acc;
+  }
+
+  .landing.light-mode .endgame-text {
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  .landing.light-mode .endgame-text:last-child {
+    color: #007acc;
+  }
+
+  .landing.light-mode .plot-twist {
+    background: rgba(0, 122, 204, 0.05);
+    border-color: rgba(0, 122, 204, 0.3);
+  }
+
+  .landing.light-mode .plot-twist h2 {
+    color: #007acc;
+  }
+
+  .landing.light-mode .cbdc-stat {
+    background: rgba(0, 122, 204, 0.08);
+  }
+
+  .landing.light-mode .stat-number-large {
+    color: #007acc;
+  }
+
+  .landing.light-mode .stat-number-medium {
+    color: rgba(0, 122, 204, 0.8);
+  }
+
+  .landing.light-mode .stat-sublabel,
+  .landing.light-mode .stat-description {
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  .landing.light-mode .stat-link {
+    color: #007acc;
+    border-bottom-color: rgba(0, 122, 204, 0.4);
+  }
+
+  .landing.light-mode .stat-link:hover {
+    border-bottom-color: #007acc;
+  }
+
+  .landing.light-mode code {
+    background: rgba(0, 0, 0, 0.08);
+    color: #2a9d5f;
+  }
+
+  .landing.light-mode .context-link {
+    background: rgba(79, 209, 139, 0.12);
+    border-color: rgba(79, 209, 139, 0.4);
+  }
+
+  .landing.light-mode .context-link:hover {
+    background: rgba(79, 209, 139, 0.18);
+    border-color: rgba(79, 209, 139, 0.6);
+  }
+
+  .landing.light-mode .context-title {
+    color: #2a9d5f;
+  }
+
+  .landing.light-mode .context-desc {
+    color: rgba(0, 0, 0, 0.75);
+  }
+
+  .landing.light-mode .footer-link {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  .landing.light-mode .footer-link:hover {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  .landing.light-mode .separator {
+    color: rgba(0, 0, 0, 0.2);
+  }
+
+  .landing.light-mode .tagline {
+    color: rgba(0, 0, 0, 0.4);
+  }
+
+  .landing.light-mode .prompt-card {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.15);
+  }
+
+  .landing.light-mode .prompt-card:hover {
+    border-color: rgba(0, 0, 0, 0.25);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .landing.light-mode .prompt-card.expanded {
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+
+  .landing.light-mode .card-header:hover {
+    background: rgba(0, 0, 0, 0.02);
+  }
+
+  .landing.light-mode .persona-name {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  .landing.light-mode .expand-icon {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing.light-mode .prompt-text {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.15);
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  .landing.light-mode .copy-btn,
+  .landing.light-mode .copy-all-btn,
+  .landing.light-mode .copy-super-btn,
+  .landing.light-mode .submit-toggle-btn {
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.2);
+    color: #000;
+  }
+
+  .landing.light-mode .copy-btn:hover,
+  .landing.light-mode .copy-all-btn:hover,
+  .landing.light-mode .copy-super-btn:hover,
+  .landing.light-mode .submit-toggle-btn:hover {
+    background: rgba(0, 0, 0, 0.12);
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+
+  .landing.light-mode .label-subtitle,
+  .landing.light-mode .section-desc {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  .landing.light-mode .context-inline {
+    color: rgba(0, 0, 0, 0.8);
+    border-bottom-color: rgba(0, 0, 0, 0.3);
+  }
+
+  .landing.light-mode .context-inline:hover {
+    color: rgba(0, 0, 0, 1);
+    border-bottom-color: rgba(0, 0, 0, 0.8);
+  }
+
+  .landing.light-mode .form-input,
+  .landing.light-mode .form-textarea {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+    color: #000;
+  }
+
+  .landing.light-mode .form-input::placeholder,
+  .landing.light-mode .form-textarea::placeholder {
+    color: rgba(0, 0, 0, 0.3);
+  }
+
+  .landing.light-mode .form-input:focus,
+  .landing.light-mode .form-textarea:focus {
+    border-color: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .landing.light-mode .preview-text {
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.15);
+    color: rgba(0, 0, 0, 0.8);
+  }
+
+  .landing.light-mode .preview-text:focus {
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+
+  .landing.light-mode .preview-label {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  .landing.light-mode .submit-note {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing.light-mode .divider {
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  .landing.light-mode .invite-label {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing.light-mode .invite-note {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing.light-mode .error {
+    color: #cc0000;
+  }
+
+  .landing.light-mode .newsletter-header h3 {
+    color: #2a9d5f;
+  }
+
+  .landing.light-mode .newsletter-header p {
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  .landing.light-mode .newsletter-note {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing.light-mode .technical-context {
+    border-top-color: rgba(0, 0, 0, 0.1);
+  }
+
+  .landing.light-mode .triple-s {
+    background: linear-gradient(135deg, rgba(79, 209, 139, 0.08) 0%, rgba(0, 122, 204, 0.08) 100%);
+  }
+
+  .landing.light-mode .triple-s h2 {
+    background: linear-gradient(135deg, #2a9d5f 0%, #007acc 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .landing.light-mode .invariant-box {
+    background: rgba(79, 209, 139, 0.08);
+    border-color: rgba(79, 209, 139, 0.3);
+  }
+
+  .landing.light-mode .formula-divider {
+    color: rgba(0, 0, 0, 0.4);
+  }
+
+  .landing.light-mode .formula-label {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  .landing.light-mode .formula-desc {
+    color: rgba(0, 0, 0, 0.6);
   }
 
   @keyframes pulse {
