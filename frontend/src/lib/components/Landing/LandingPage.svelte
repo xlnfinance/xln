@@ -461,7 +461,7 @@
             Subscribe
           </button>
         </form>
-        <p class="newsletter-note">No spam. Unsubscribe anytime. Privacy-first via Buttondown.</p>
+        <p class="newsletter-note">No spam. Unsubscribe anytime.</p>
       </div>
 
       <!-- Plot Twist -->
@@ -492,110 +492,10 @@
           </div>
         </div>
 
-        <p class="vision-text">Most will be EVM-compatible or similar smart contract platforms. xln naturally attaches to <strong>any</strong> programmable ledger by simply deploying <code>Depository.sol</code>.</p>
-
-        <div class="endgame-box">
-          <p class="endgame-text"><strong>The endgame:</strong> xln becomes the universal CBDC substrate — every digital asset (CBDCs, stablecoins, tokenized securities, RWAs) gets instant off-chain settlement with bounded risk and infinite scale.</p>
-          <p class="endgame-text">Zero broadcast overhead. Zero custody risk. Infinite horizontal scale.</p>
-        </div>
+        <p class="vision-text">Most will be EVM-compatible. xln attaches to <strong>any</strong> programmable ledger by deploying <code>Depository.sol</code>.</p>
       </div>
     </div>
 
-    <div class="prompt-container">
-      <!-- AI SUPERPROMPT -->
-      <Collapsible title="AI Superprompt" bind:collapsed={comparativeCollapsed}>
-        <div class="superprompt-section">
-          <div class="superprompt-actions">
-            <button on:click={copySuperprompt} class="copy-super-btn">
-              {copiedCard === -2 ? '✓ Copied' : 'Copy Superprompt'}
-            </button>
-            <button on:click={() => showSubmitForm = !showSubmitForm} class="submit-toggle-btn">
-              {showSubmitForm ? 'Hide Form' : 'Submit Results'}
-            </button>
-          </div>
-
-          <p class="section-desc">Compare xln against the entire $100T finance stack — from TradFi/CEX to rollups</p>
-
-          {#if superpromptText}
-            <div class="superprompt-preview">
-              <div class="preview-label">Superprompt Preview:</div>
-              <textarea readonly rows="10" class="preview-text" value={superpromptText}></textarea>
-            </div>
-          {/if}
-
-          {#if showSubmitForm}
-            <div class="submit-form">
-              <div class="form-row">
-                <input
-                  type="url"
-                  bind:value={shareUrl}
-                  placeholder="Shareable link (optional): https://chatgpt.com/share/xyz"
-                  class="form-input"
-                />
-              </div>
-              <div class="form-row">
-                <textarea
-                  bind:value={submissionText}
-                  placeholder="Paste the full model response here (must include the table)"
-                  rows="12"
-                  class="form-textarea"
-                />
-              </div>
-              {#if submissionStatus}
-                <div class="submission-status">{submissionStatus}</div>
-              {/if}
-              <button on:click={submitEvaluation} class="submit-btn">
-                Submit Evaluation
-              </button>
-              <p class="submit-note">
-                Submissions go to moderation queue. Admin will review and approve valid results.
-              </p>
-            </div>
-          {/if}
-
-          <!-- Results Visualization -->
-          <ComparativeChart {darkMode} />
-        </div>
-      </Collapsible>
-
-      <div class="divider"></div>
-
-      <!-- 10 EXPERT PROMPTS -->
-      <Collapsible title="10 Expert Perspectives" bind:collapsed={promptsCollapsed}>
-        <div class="prompt-section">
-          <div class="prompt-header">
-            <div class="prompt-label">
-              <div class="label-subtitle">
-                Prompt template: Read <a href="/llms.txt" target="_blank" class="context-inline">https://xln.finance/llms.txt</a> (~120k tokens of xln architecture + contracts + runtime)
-                <br/>Then evaluate as [persona] using the scoring rubric below.
-              </div>
-            </div>
-            <button on:click={(e) => copyAllPrompts(e)} class="copy-all-btn">
-              {copiedCard === -1 ? '✓ Copied All' : 'Copy All 10'}
-            </button>
-          </div>
-
-          <div class="prompt-grid">
-            {#each PROMPTS as prompt, i}
-              <div class="prompt-card" class:expanded={expandedCard === i}>
-                <div class="card-header" on:click={() => toggleCard(i)}>
-                  <div class="persona-name">{prompt.persona}</div>
-                  <div class="expand-icon">{expandedCard === i ? '−' : '+'}</div>
-                </div>
-                {#if expandedCard === i}
-                  <div class="card-content">
-                    <pre class="prompt-text">{formatPrompt(prompt)}</pre>
-                    <button on:click|stopPropagation={(e) => copyPrompt(i, e)} class="copy-btn">
-                      {copiedCard === i ? '✓ Copied' : 'Copy Prompt'}
-                    </button>
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        </div>
-      </Collapsible>
-    </div>
 
     {#if showInvite}
       <div class="invite-form">
