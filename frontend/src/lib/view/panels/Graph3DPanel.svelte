@@ -867,9 +867,9 @@ let vrHammer: VRHammer | null = null;
     // EVM-style purple/blue gradient material
     const octahedronMaterial = new THREE.MeshPhongMaterial({
       color: 0x8b7fb8, // Ethereum purple
-      emissive: 0x4a3a6b, // Purple glow
+      emissive: 0x6a5a8b, // Brighter purple glow
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.8, // More visible (was 0.4)
       wireframe: false,
       side: THREE.DoubleSide,
       shininess: 100
@@ -892,9 +892,9 @@ let vrHammer: VRHammer | null = null;
     // Inner glow effect (smaller octahedron)
     const innerGeometry = new THREE.OctahedronGeometry(size * 0.7, 0);
     const innerMaterial = new THREE.MeshBasicMaterial({
-      color: 0x6255a4,
+      color: 0x9a8ac4, // Brighter purple
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.5, // More visible (was 0.2)
       wireframe: true
     });
     const innerGlow = new THREE.Mesh(innerGeometry, innerMaterial);

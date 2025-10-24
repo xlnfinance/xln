@@ -72,4 +72,23 @@
     margin-top: 1rem;
     overflow: hidden;
   }
+
+  /* Light mode overrides */
+  :global(.light-mode) .collapsible-header {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.light-mode) .collapsible-header:hover {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+  }
+
+  :global(.light-mode) .collapsible-header h2 {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  :global(.light-mode) .toggle-icon {
+    color: rgba(0, 0, 0, 0.5);
+  }
 </style>

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
+  export let darkMode = true;
+
   interface RankingRow {
     solution: string;
     innovation: number;
@@ -83,7 +85,10 @@
   $: maxScore = Math.max(...aggregatedScores.map(s => s.avg), 1);
 
   function solutionColor(solution: string): string {
-    return solution.toLowerCase() === 'xln' ? '#4fd18b' : 'rgba(255, 255, 255, 0.4)';
+    if (solution.toLowerCase() === 'xln') {
+      return '#4fd18b';
+    }
+    return darkMode ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)';
   }
 </script>
 
@@ -377,5 +382,77 @@
     .model-cards {
       grid-template-columns: 1fr;
     }
+  }
+
+  /* Light mode overrides */
+  :global(.light-mode) .loading,
+  :global(.light-mode) .empty {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .chart-header h3 {
+    color: rgba(0, 0, 0, 0.95);
+  }
+
+  :global(.light-mode) .chart-meta {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .category-btn {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.15);
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  :global(.light-mode) .category-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.3);
+  }
+
+  :global(.light-mode) .category-btn.active {
+    background: rgba(77, 209, 139, 0.15);
+    border-color: #4fd18b;
+    color: #2a8a5f;
+  }
+
+  :global(.light-mode) .ranking-row {
+    background: rgba(0, 0, 0, 0.02);
+  }
+
+  :global(.light-mode) .ranking-row:hover {
+    background: rgba(0, 0, 0, 0.04);
+  }
+
+  :global(.light-mode) .rank-number {
+    color: rgba(0, 0, 0, 0.4);
+  }
+
+  :global(.light-mode) .bar-variance {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .model-count {
+    color: rgba(0, 0, 0, 0.4);
+  }
+
+  :global(.light-mode) .model-list h4 {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  :global(.light-mode) .model-card {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.light-mode) .model-header strong {
+    color: rgba(0, 0, 0, 0.95);
+  }
+
+  :global(.light-mode) .model-date {
+    color: rgba(0, 0, 0, 0.4);
+  }
+
+  :global(.light-mode) .insights p {
+    color: rgba(0, 0, 0, 0.7);
   }
 </style>

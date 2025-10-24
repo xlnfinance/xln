@@ -159,4 +159,13 @@
     box-shadow: 0 0 8px rgba(0, 209, 255, 0.5);
     pointer-events: none;
   }
+
+  /* Light mode overrides */
+  :global(.light-mode) .header span {
+    color: #5a6570;
+  }
+
+  :global(.light-mode) .char.zero {
+    color: #6a7580;
+  }
 </style>
