@@ -94,4 +94,26 @@
       grid-template-columns: repeat(2, 1fr);
     }
   }
+
+  /* Light mode overrides */
+  :global(.light-mode) .legend {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.15);
+  }
+
+  :global(.light-mode) .legend-title {
+    color: rgba(0, 0, 0, 0.8);
+  }
+
+  :global(.light-mode) .legend-item {
+    background: rgba(0, 0, 0, 0.02);
+  }
+
+  :global(.light-mode) .device-name {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  :global(.light-mode) .device-capacity {
+    color: rgba(0, 0, 0, 0.5);
+  }
 </style>

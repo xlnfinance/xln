@@ -230,6 +230,14 @@
       <p class="hero-subtitle">The universal CBDC substrate for planetary-scale settlement</p>
     </div>
 
+    <!-- Founder Context -->
+    <div class="founder-note">
+      <p>
+        By <a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Egor Homakov</a> (Sakurity).
+        After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed.
+      </p>
+    </div>
+
     <div class="problem-solution">
       <div class="section">
         <h2>137 Countries Are Building Programmable Money</h2>
@@ -272,10 +280,6 @@
                 pattern="[---.===---]"
               />
             </div>
-            <div class="visual-column">
-              <img src="/img/RCPAN.png" alt="RCPAN Visual Metaphor" class="rcpan-visual" />
-              <div class="visual-caption">Credit (left) + Reserves (center) + Credit (right) = Bounded risk at infinite scale</div>
-            </div>
           </div>
         </div>
 
@@ -300,7 +304,7 @@
       <div class="section urgency-section">
         <h2 style="color: #00d1ff;">Why Now?</h2>
         <ul class="properties-list">
-          <li><strong>2025:</strong> 72 CBDCs in pilot phase (Russia, China, EU actively testing)</li>
+          <li><strong>2025:</strong> 72 CBDCs in pilot phase</li>
           <li><strong>2026:</strong> Cross-border CBDC interop becomes political imperative</li>
           <li><strong>Legacy rails incompatible:</strong> SWIFT and correspondent banking can't handle programmable money</li>
           <li><strong>Window closing:</strong> Each CBDC building incompatible scaling solution creates permanent fragmentation</li>
@@ -347,6 +351,91 @@
         </div>
       </div>
 
+      <!-- Roadmap -->
+      <div class="section roadmap-section">
+        <h2 style="color: #00d1ff;">Roadmap</h2>
+
+        <div class="roadmap-timeline">
+          <div class="roadmap-item completed">
+            <div class="roadmap-marker">✓</div>
+            <div class="roadmap-content">
+              <div class="roadmap-quarter">Q4 2025</div>
+              <div class="roadmap-title">Protocol Design Complete</div>
+              <div class="roadmap-details">
+                <span class="detail-item">Runtime architecture finalized</span>
+                <span class="detail-item">Bilateral consensus spec</span>
+                <span class="detail-item">Smart contract design</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="roadmap-item active">
+            <div class="roadmap-marker">⟳</div>
+            <div class="roadmap-content">
+              <div class="roadmap-quarter">Q1 2026</div>
+              <div class="roadmap-title">Testnet Launch</div>
+              <div class="roadmap-details">
+                <span class="detail-item">Deploy on Ethereum Sepolia</span>
+                <span class="detail-item">Developer sandbox with demo entities</span>
+                <span class="detail-item">Public API documentation</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="roadmap-item">
+            <div class="roadmap-marker">○</div>
+            <div class="roadmap-content">
+              <div class="roadmap-quarter">Q2 2026</div>
+              <div class="roadmap-title">Multi-Chain Expansion</div>
+              <div class="roadmap-details">
+                <span class="detail-item">Arbitrum, Optimism, Base support</span>
+                <span class="detail-item">Cross-chain settlement demos</span>
+                <span class="detail-item">Performance benchmarks published</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="roadmap-item">
+            <div class="roadmap-marker">○</div>
+            <div class="roadmap-content">
+              <div class="roadmap-quarter">Q3 2026</div>
+              <div class="roadmap-title">Security Audits & Mainnet Beta</div>
+              <div class="roadmap-details">
+                <span class="detail-item">Third-party security audits</span>
+                <span class="detail-item">Bug bounty program launch</span>
+                <span class="detail-item">Mainnet beta with whitelisted entities</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="roadmap-item">
+            <div class="roadmap-marker">○</div>
+            <div class="roadmap-content">
+              <div class="roadmap-quarter">Q4 2026</div>
+              <div class="roadmap-title">Public Mainnet</div>
+              <div class="roadmap-details">
+                <span class="detail-item">Open entity registration</span>
+                <span class="detail-item">Production-grade SDKs (TypeScript, Python)</span>
+                <span class="detail-item">Governance framework activation</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="roadmap-item">
+            <div class="roadmap-marker">◇</div>
+            <div class="roadmap-content">
+              <div class="roadmap-quarter">2027+</div>
+              <div class="roadmap-title">CBDC Integration Layer</div>
+              <div class="roadmap-details">
+                <span class="detail-item">Partnerships with central banks</span>
+                <span class="detail-item">Programmable CBDC substrate</span>
+                <span class="detail-item">Universal interop protocol</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Newsletter Signup -->
       <div class="newsletter-section">
         <div class="newsletter-header">
@@ -377,6 +466,11 @@
       <div class="section plot-twist">
         <h2>The Universal CBDC Substrate</h2>
         <p class="intro">xln isn't just "better payment channels" — it's the settlement layer for programmable money at planetary scale.</p>
+
+        <div class="roadmap-box">
+          <p class="roadmap-text"><strong>Today:</strong> EVM substrate — instant settlement between Ethereum L1, rollups, and alt-L1s (Polygon, Arbitrum, Base, etc.)</p>
+          <p class="roadmap-text"><strong>Tomorrow:</strong> CBDC substrate — when central banks launch programmable money, xln becomes the universal interop layer</p>
+        </div>
 
         <div class="cbdc-stat">
           <div class="stat-stack">
@@ -458,7 +552,7 @@
           {/if}
 
           <!-- Results Visualization -->
-          <ComparativeChart />
+          <ComparativeChart {darkMode} />
         </div>
       </Collapsible>
 
@@ -547,7 +641,7 @@
 </div>
 
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
   .landing {
     min-height: 100vh;
@@ -558,11 +652,13 @@
     align-items: center;
     justify-content: center;
     padding: 2rem;
-    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
   }
 
   .content {
-    max-width: 900px;
+    max-width: 1200px;
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -571,7 +667,7 @@
   }
 
   .logo {
-    width: 400px;
+    width: 500px;
     max-width: 80%;
     height: auto;
     filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
@@ -589,7 +685,7 @@
   }
 
   .hero-tagline h1 {
-    font-size: 1.8rem;
+    font-size: 2.2rem;
     font-weight: 600;
     margin: 0 0 0.75rem;
     line-height: 1.3;
@@ -600,13 +696,53 @@
   }
 
   .hero-subtitle {
-    font-size: 1rem;
+    font-size: 1.1rem;
     color: rgba(255, 255, 255, 0.7);
     margin: 0;
   }
 
   .landing.light-mode .hero-subtitle {
     color: rgba(0, 0, 0, 0.7);
+  }
+
+  /* Founder Note */
+  .founder-note {
+    text-align: center;
+    margin: 0 0 2rem;
+    max-width: 600px;
+  }
+
+  .founder-note p {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0;
+  }
+
+  .founder-link {
+    color: rgba(255, 255, 255, 0.85);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.2s;
+  }
+
+  .founder-link:hover {
+    color: #4fd18b;
+    border-bottom-color: #4fd18b;
+  }
+
+  :global(.light-mode) .founder-note p {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  :global(.light-mode) .founder-link {
+    color: rgba(0, 0, 0, 0.85);
+    border-bottom-color: rgba(0, 0, 0, 0.3);
+  }
+
+  :global(.light-mode) .founder-link:hover {
+    color: #2a8a5f;
+    border-bottom-color: #2a8a5f;
   }
 
   /* Credibility Badge */
@@ -664,7 +800,7 @@
 
   .credibility-sub {
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .landing.light-mode .credibility-badge {
@@ -706,9 +842,206 @@
     border-color: rgba(0, 122, 204, 0.3);
   }
 
+  /* Roadmap */
+  .roadmap-section {
+    margin: 4rem 0;
+  }
+
+  .roadmap-timeline {
+    position: relative;
+    padding: 2rem 0;
+    max-width: 1000px;
+    margin: 0 auto;
+  }
+
+  .roadmap-timeline::before {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom,
+      #4fd18b 0%,
+      #4fd18b 20%,
+      rgba(79, 209, 139, 0.5) 40%,
+      rgba(79, 209, 139, 0.2) 100%
+    );
+  }
+
+  .roadmap-item {
+    position: relative;
+    padding-left: 60px;
+    margin-bottom: 3rem;
+  }
+
+  .roadmap-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .roadmap-marker {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    z-index: 1;
+  }
+
+  .roadmap-item.completed .roadmap-marker {
+    background: rgba(79, 209, 139, 0.2);
+    border-color: #4fd18b;
+    color: #4fd18b;
+  }
+
+  .roadmap-item.active .roadmap-marker {
+    background: rgba(0, 209, 255, 0.2);
+    border-color: #00d1ff;
+    color: #00d1ff;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(0, 209, 255, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(0, 209, 255, 0);
+    }
+  }
+
+  .roadmap-content {
+    padding: 1.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    transition: all 0.3s ease;
+  }
+
+  .roadmap-item:hover .roadmap-content {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateX(4px);
+  }
+
+  .roadmap-item.active .roadmap-content {
+    border-color: rgba(0, 209, 255, 0.3);
+  }
+
+  .roadmap-quarter {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #4fd18b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+  }
+
+  .roadmap-item.active .roadmap-quarter {
+    color: #00d1ff;
+  }
+
+  .roadmap-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 0.75rem;
+  }
+
+  .roadmap-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .detail-item {
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.7);
+    padding-left: 1.25rem;
+    position: relative;
+  }
+
+  .detail-item::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: rgba(79, 209, 139, 0.6);
+  }
+
+  /* Light mode roadmap */
+  :global(.light-mode) .roadmap-timeline::before {
+    background: linear-gradient(to bottom,
+      #4fd18b 0%,
+      #4fd18b 20%,
+      rgba(79, 209, 139, 0.5) 40%,
+      rgba(79, 209, 139, 0.2) 100%
+    );
+  }
+
+  :global(.light-mode) .roadmap-marker {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .roadmap-item.completed .roadmap-marker {
+    background: rgba(79, 209, 139, 0.15);
+    border-color: #4fd18b;
+    color: #2a8a5f;
+  }
+
+  :global(.light-mode) .roadmap-item.active .roadmap-marker {
+    background: rgba(0, 122, 204, 0.15);
+    border-color: #007acc;
+    color: #007acc;
+  }
+
+  :global(.light-mode) .roadmap-content {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.light-mode) .roadmap-item:hover .roadmap-content {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+  }
+
+  :global(.light-mode) .roadmap-item.active .roadmap-content {
+    border-color: rgba(0, 122, 204, 0.3);
+  }
+
+  :global(.light-mode) .roadmap-quarter {
+    color: #2a8a5f;
+  }
+
+  :global(.light-mode) .roadmap-item.active .roadmap-quarter {
+    color: #007acc;
+  }
+
+  :global(.light-mode) .roadmap-title {
+    color: rgba(0, 0, 0, 0.95);
+  }
+
+  :global(.light-mode) .detail-item {
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  :global(.light-mode) .detail-item::before {
+    color: rgba(79, 209, 139, 0.8);
+  }
+
   .newsletter-section {
     width: 100%;
-    max-width: 800px;
+    max-width: 1000px;
     margin: 3rem auto;
     padding: 2.5rem;
     background: rgba(79, 209, 139, 0.05);
@@ -757,7 +1090,7 @@
   }
 
   .newsletter-input::placeholder {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.7);
   }
 
   .newsletter-input:focus {
@@ -794,7 +1127,7 @@
   .newsletter-note {
     margin: 1rem 0 0;
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.8);
     text-align: center;
   }
 
@@ -812,7 +1145,7 @@
 
   .invite-label {
     font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.8);
     text-transform: uppercase;
     letter-spacing: 0.1em;
   }
@@ -837,7 +1170,7 @@
 
   .invite-input:focus {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.8);
     background: rgba(255, 255, 255, 0.08);
   }
 
@@ -856,7 +1189,7 @@
 
   .enter-btn:hover {
     background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.8);
   }
 
   .error {
@@ -889,15 +1222,15 @@
   }
 
   .section .intro {
-    font-size: 1rem;
+    font-size: 1.05rem;
     margin-bottom: 1rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.88);
   }
 
   .vision-text {
-    font-size: 1rem;
+    font-size: 1.05rem;
     line-height: 1.7;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.88);
     margin-bottom: 1rem;
   }
 
@@ -913,16 +1246,16 @@
   .section li {
     padding-left: 1.5rem;
     position: relative;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.75);
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .section li::before {
     content: "•";
     position: absolute;
     left: 0;
-    color: rgba(255, 255, 255, 0.4);
+    color: #4fd18b;
     font-weight: bold;
   }
 
@@ -932,7 +1265,7 @@
 
   .footnote {
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.7);
     margin-top: 1.5rem;
     font-style: italic;
   }
@@ -976,7 +1309,7 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.8);
   }
 
   .formula-math {
@@ -989,20 +1322,20 @@
 
   .formula-desc {
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
     text-align: center;
   }
 
   .formula-divider {
     font-size: 2rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.7);
     font-weight: 300;
   }
 
   .formula-note {
     text-align: center;
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.8);
     margin: -1rem 0 1.5rem;
     font-style: italic;
   }
@@ -1062,10 +1395,10 @@
   }
 
   .principle-card p {
-    color: rgba(255, 255, 255, 0.85);
+    color: rgba(255, 255, 255, 0.88);
     line-height: 1.7;
     margin-bottom: 1rem;
-    font-size: 0.95rem;
+    font-size: 1.05rem;
   }
 
   .principle-card p:last-child {
@@ -1073,7 +1406,7 @@
   }
 
   .principle-detail {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
     font-size: 0.9rem;
     line-height: 1.6;
   }
@@ -1090,9 +1423,9 @@
   .properties-list li {
     padding-left: 1.5rem;
     position: relative;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.85);
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.88);
   }
 
   .properties-list li::before {
@@ -1152,7 +1485,7 @@
 
   .stat-sublabel {
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -1183,6 +1516,29 @@
     font-family: 'JetBrains Mono', monospace;
     color: #4fd18b;
     font-size: 0.95em;
+  }
+
+  .roadmap-box {
+    margin: 1.5rem 0 2rem;
+    padding: 1.5rem;
+    background: rgba(79, 209, 139, 0.08);
+    border-left: 3px solid #4fd18b;
+    border-radius: 4px;
+  }
+
+  .roadmap-text {
+    margin: 0 0 1rem;
+    font-size: 1rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .roadmap-text:last-child {
+    margin-bottom: 0;
+  }
+
+  .roadmap-text strong {
+    color: #4fd18b;
   }
 
   .endgame-box {
@@ -1251,7 +1607,7 @@
 
   .visual-caption {
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
     text-align: center;
     font-style: italic;
     max-width: 340px;
@@ -1308,7 +1664,7 @@
   .viz-link-desc {
     margin: 0;
     font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
     line-height: 1.6;
   }
 
@@ -1392,7 +1748,7 @@
 
   .copy-super-btn:hover, .submit-toggle-btn:hover {
     background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.8);
   }
 
   .submit-form {
@@ -1426,7 +1782,7 @@
 
   .form-input:focus, .form-textarea:focus {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.4);
+    border-color: rgba(255, 255, 255, 0.7);
     background: rgba(0, 0, 0, 0.4);
   }
 
@@ -1464,7 +1820,7 @@
 
   .submit-note {
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.8);
     margin: 0;
   }
 
@@ -1477,7 +1833,7 @@
 
   .preview-label {
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
     font-weight: 500;
   }
 
@@ -1538,7 +1894,7 @@
   .label-subtitle {
     font-size: 0.9rem;
     line-height: 1.7;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .context-inline {
@@ -1568,7 +1924,7 @@
 
   .copy-all-btn:hover {
     background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.8);
   }
 
   .prompt-grid {
@@ -1616,7 +1972,7 @@
 
   .expand-icon {
     font-size: 1.2rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.8);
     font-weight: 300;
   }
 
@@ -1724,7 +2080,7 @@
   }
 
   .footer-link {
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.85);
     text-decoration: none;
     transition: color 0.2s;
   }
@@ -1739,17 +2095,13 @@
 
   .tagline {
     text-align: center;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.7);
   }
 
   /* Light mode overrides - comprehensive */
   .landing.light-mode {
     background: #fff;
     color: #000;
-  }
-
-  .landing.light-mode *:not(.control-btn) {
-    color: inherit;
   }
 
   .landing.light-mode h2,
@@ -2024,6 +2376,10 @@
 
   .landing.light-mode .divider {
     background: rgba(0, 0, 0, 0.1);
+  }
+
+  .landing.light-mode .invite-form {
+    border-top-color: rgba(0, 0, 0, 0.1);
   }
 
   .landing.light-mode .invite-label {

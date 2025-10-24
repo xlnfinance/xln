@@ -854,4 +854,72 @@
       display: none;
     }
   }
+
+  /* Light mode overrides */
+  :global(.light-mode) .comparison-header h2 {
+    color: rgba(0, 0, 0, 0.95);
+  }
+
+  :global(.light-mode) .tps-control label {
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  :global(.light-mode) .tps-slider {
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.light-mode) .play-btn {
+    background: rgba(0, 0, 0, 0.1);
+    border-color: rgba(0, 0, 0, 0.3);
+    color: #000;
+  }
+
+  :global(.light-mode) .play-btn:hover {
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  :global(.light-mode) .side h3 {
+    color: rgba(0, 0, 0, 0.95);
+  }
+
+  :global(.light-mode) .subtitle {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .blockchain-layer {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  :global(.light-mode) .block-label {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .tx-count {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  :global(.light-mode) .j-label {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  :global(.light-mode) .block-display {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  :global(.light-mode) .netting-label {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  :global(.light-mode) .device-scene {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(79, 209, 139, 0.3);
+  }
+
+  :global(.light-mode) .insight {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  :global(.light-mode) .insight p {
+    color: rgba(0, 0, 0, 0.85);
+  }
 </style>

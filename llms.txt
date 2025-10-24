@@ -1,0 +1,38 @@
+# xln
+
+> Cross-jurisdictional off-chain settlement network with BFT consensus
+
+## Core Documentation
+
+- [Technical Architecture](frontend/static/c.txt): Complete technical specification optimized for LLM consumption (canonical reference)
+- [Project Instructions](CLAUDE.md): Development guidelines and patterns for AI assistants
+- [Architecture Overview](vibepaper/readme.md): High-level system design and philosophy
+
+## Key Directories
+
+- `runtime/`: Core consensus implementation (entity-consensus.ts, account-consensus.ts, types.ts)
+- `jurisdictions/`: Solidity smart contracts (Depository.sol, EntityProvider.sol)
+- `frontend/`: Svelte UI with visual debugging and time machine
+- `vibepaper/`: Comprehensive documentation (jea.md, payment-spec.md, sessions/)
+
+## Entry Points
+
+- `runtime/runtime.ts`: Main 100ms tick coordinator, R→E→A flow
+- `runtime/entity-consensus.ts`: Entity-level BFT (ADD_TX → PROPOSE → SIGN → COMMIT)
+- `runtime/account-consensus.ts`: Bilateral consensus between entity pairs
+- `frontend/src/routes/+page.svelte`: Main UI entry point
+
+## Reference Implementation
+
+- `.archive/2024_src/app/Channel.ts`: Original bilateral consensus (reference for account layer patterns)
+
+## Development
+
+- Runtime: Bun-based, browser-targeted build
+- Frontend: SvelteKit with pnpm
+- Contracts: Hardhat with `bunx hardhat`
+- Deploy: `./deploy-contracts.sh`, `./dev-full.sh`
+
+## Philosophy
+
+Byzantine Fault Tolerant off-chain settlement with deterministic replay and instant finality. Pure functional state machines with side effects only in runtime shell.
