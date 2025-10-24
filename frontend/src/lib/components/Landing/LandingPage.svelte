@@ -222,20 +222,10 @@
 
 <div class="landing" class:light-mode={!darkMode}>
   <div class="content">
-    <img src="/img/logo.png" alt="xln" class="logo" />
-
     <!-- Main Tagline -->
     <div class="hero-tagline">
       <h1>One protocol. Every jurisdiction. Every programmable ledger.</h1>
       <p class="hero-subtitle">The universal CBDC substrate for planetary-scale settlement</p>
-    </div>
-
-    <!-- Credibility -->
-    <div class="credibility-badge">
-      <div class="credibility-main">
-        Built by <a href="https://sakurity.com" target="_blank" rel="noopener noreferrer" class="sakurity-link">Egor Homakov</a> (<a href="https://sakurity.com" target="_blank" rel="noopener noreferrer" class="sakurity-link">Sakurity</a>)
-      </div>
-      <div class="credibility-sub">Sakurity-grade architecture • Open source • MIT license</div>
     </div>
 
     <div class="problem-solution">
